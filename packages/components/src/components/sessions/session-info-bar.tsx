@@ -321,10 +321,12 @@ export function SessionInfoBar({
   queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
-  const syncProgress = useSyncExternalStore(
+  // Only whether progress exists shapes the bar; the indicator subscribes to
+  // the counts itself so each step does not re-render the whole bar.
+  const hasSyncProgress = useSyncExternalStore(
     sessionSyncProgress.subscribe,
-    sessionSyncProgress.getSnapshot,
-    emptySessionSyncProgress.getSnapshot
+    () => sessionSyncProgress.getSnapshot() !== null,
+    () => false
   );
   const hasDiff = hasWorkspaceChanges(diffStat);
   const hasContext = !!pr || !!projectName || !!branch || hasDiff || !!contextActions?.length;
@@ -411,7 +413,7 @@ export function SessionInfoBar({
     onOpenIosSimulator ||
     onOpenAndroidEmulator ||
     ambientSync ||
-    syncProgress ||
+    hasSyncProgress ||
     privateAccessStatus
   );
   if (!hasSurfaceContent && !hasMachine) {
@@ -633,11 +635,11 @@ export function SessionInfoBar({
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {ambientSync || syncProgress ? (
+          {ambientSync || hasSyncProgress ? (
             <div {...stylex.props(styles.ambientSync)}>
               <SessionSyncingIndicator
                 variant={ambientSync ?? undefined}
-                syncProgress={syncProgress}
+                syncProgress={sessionSyncProgress}
                 labelClassName={stylex.props(styles.ambientSyncLabel).className}
               />
             </div>

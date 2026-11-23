@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createSessionSyncProgressStore,
   SESSION_GOAL_COMMANDS,
   type SessionGoalMessage,
   type SessionSyncProgress,
@@ -126,17 +127,9 @@ describe('SessionInfoBar ambient information', () => {
   });
 
   it('shows the exact history count through application and then hides the readout', () => {
-    let snapshot: SessionSyncProgress | null = null;
-    let notify = () => {};
-    const sessionSyncProgress = {
-      getSnapshot: () => snapshot,
-      subscribe(listener: () => void) {
-        notify = listener;
-        return () => {
-          notify = () => {};
-        };
-      },
-    };
+    const progress = createSessionSyncProgressStore('test progress observer');
+    const sessionSyncProgress = progress.view;
+    const show = (snapshot: SessionSyncProgress | null) => act(() => progress.publish(snapshot));
     act(() =>
       root.render(
         withTestI18n(
@@ -147,49 +140,31 @@ describe('SessionInfoBar ambient information', () => {
     );
     expect(container.querySelector('[role="progressbar"]')).toBeNull();
 
-    act(() => {
-      snapshot = { kind: 'history', received: 500, total: 1240 };
-      notify();
-    });
+    show({ kind: 'history', received: 500, total: 1240 });
     const bar = container.querySelector('[role="progressbar"]');
     expect(bar?.textContent).toContain('History 500 / 1,240');
     expect(bar?.getAttribute('aria-valuenow')).toBe('500');
     expect(bar?.getAttribute('aria-valuemax')).toBe('1240');
 
-    act(() => {
-      snapshot = { kind: 'history', received: 1240, total: 1240 };
-      notify();
-    });
+    show({ kind: 'history', received: 1240, total: 1240 });
     expect(bar?.textContent).toContain('Applying 1,240 / 1,240');
-    act(() => {
-      snapshot = { kind: 'bootstrap', received: 512 };
-      notify();
-    });
+    show({ kind: 'bootstrap', received: 512 });
     expect(container.querySelector('[role="progressbar"]')?.textContent).toContain('Syncing 512 B');
     expect(
       container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')
     ).toBeNull();
-    act(() => {
-      snapshot = { kind: 'updates', received: 512, total: 1024 };
-      notify();
-    });
+    show({ kind: 'updates', received: 512, total: 1024 });
     expect(container.querySelector('[role="progressbar"]')?.textContent).toContain(
       'Syncing 512 / 1,024 B'
     );
     expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuemax')).toBe(
       '1024'
     );
-    act(() => {
-      snapshot = { kind: 'chunks', received: 2, total: 4 };
-      notify();
-    });
+    show({ kind: 'chunks', received: 2, total: 4 });
     expect(container.querySelector('[role="progressbar"]')?.textContent).toContain(
       'Syncing 2 / 4 chunks'
     );
-    act(() => {
-      snapshot = null;
-      notify();
-    });
+    show(null);
     expect(container.querySelector('[role="progressbar"]')).toBeNull();
   });
 

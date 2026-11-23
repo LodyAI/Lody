@@ -1,5 +1,6 @@
 import {
   createLoroSyncProgress,
+  createSessionSyncProgressStore,
   observeLoroBootstrap,
   type LoroTailDeadline,
   type SessionSyncProgress,
@@ -12,25 +13,9 @@ export function createLoroSessionSyncProgress(
   activeTransport: () => 'local' | 'cloud' | undefined,
   options: { tailDeadline?: LoroTailDeadline } = {}
 ) {
-  let snapshot: SessionSyncProgress | null = null;
+  const store = createSessionSyncProgressStore('Loro sync progress observer');
+  const publish = store.publish;
   let owner = activeTransport();
-  const listeners = new Set<() => void>();
-  const publish = (next: SessionSyncProgress | null) => {
-    if (
-      snapshot?.kind === next?.kind &&
-      snapshot?.received === next?.received &&
-      snapshot?.total === next?.total
-    )
-      return;
-    snapshot = next;
-    for (const listener of listeners) {
-      try {
-        listener();
-      } catch (error) {
-        console.error('Loro sync progress observer failed', error);
-      }
-    }
-  };
   const stream = createLoroSyncProgress((value) => {
     if (activeTransport() === 'cloud') publish(value);
   }, options.tailDeadline);
@@ -60,13 +45,7 @@ export function createLoroSessionSyncProgress(
   );
 
   return {
-    getSnapshot: () => snapshot,
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
+    ...store.view,
     local(value: SessionSyncProgress | null) {
       if (refreshOwner() === 'local') publish(value);
     },

@@ -49,9 +49,8 @@ import {
   type RoostCachedHead,
 } from './roost-history-cache';
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
-import type { SessionSyncProgress } from '@lody/shared';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
-import { SessionHistoryChangesSchema } from '@lody/shared';
+import { createSessionSyncProgressStore, SessionHistoryChangesSchema } from '@lody/shared';
 
 type HistoryReadResponse = Extract<
   LocalSessionControlResponse,
@@ -313,19 +312,8 @@ const createRoostSessionDataFactoryFromTransport =
     const pendingReads = new Map<string, Promise<SessionHistoryReadResponse>>();
     const listeners = new Set<SessionDataChangeListener>();
     const snapshotProvenance = new WeakSet<object>();
-    let sessionSyncProgress: SessionSyncProgress | null = null;
-    const progressListeners = new Set<() => void>();
-    const setSessionSyncProgress = (progress: SessionSyncProgress | null) => {
-      if (progress === sessionSyncProgress) return;
-      sessionSyncProgress = progress;
-      for (const listener of progressListeners) {
-        try {
-          listener();
-        } catch (error) {
-          console.error('Roost history progress observer failed', error);
-        }
-      }
-    };
+    const sessionSyncProgress = createSessionSyncProgressStore('Roost history progress observer');
+    const setSessionSyncProgress = sessionSyncProgress.publish;
 
     let ownerPublication: SessionHistoryPublication | undefined;
     const takeInline = (query: SessionHistoryReadQuery) => {
@@ -910,6 +898,8 @@ const createRoostSessionDataFactoryFromTransport =
                     )
                   );
             for (const row of affected) {
+              // Rows read one body at a time; count each staged row as it lands.
+              if (replacements.length > 0) reportProgress();
               const operations = patches.get(row.turnId);
               if (operations) {
                 let prepared: SessionHistoryInput | undefined;
@@ -1422,7 +1412,7 @@ const createRoostSessionDataFactoryFromTransport =
       dispose: () => {
         disposed = true;
         setSessionSyncProgress(null);
-        progressListeners.clear();
+        sessionSyncProgress.clearListeners();
         stopSubscription();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);
@@ -1434,14 +1424,9 @@ const createRoostSessionDataFactoryFromTransport =
     return {
       ...sessionData,
       sessionSyncProgress: {
-        getSnapshot: () => sessionSyncProgress,
-        subscribe(listener) {
-          if (disposed) return () => {};
-          progressListeners.add(listener);
-          return () => {
-            progressListeners.delete(listener);
-          };
-        },
+        getSnapshot: sessionSyncProgress.view.getSnapshot,
+        subscribe: (listener) =>
+          disposed ? () => {} : sessionSyncProgress.view.subscribe(listener),
       },
     };
   };

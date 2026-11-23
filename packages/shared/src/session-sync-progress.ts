@@ -9,6 +9,56 @@ export type SessionSyncProgressView = {
   readonly subscribe: (listener: () => void) => () => void;
 };
 
+/** True when `next` is worth a render: start, finish, a kind or total change,
+ *  completion, a regression, or at least 1% of the total (or of the bytes seen
+ *  so far when the total is unknown). */
+function isVisibleProgressStep(
+  previous: SessionSyncProgress | null,
+  next: SessionSyncProgress | null
+): boolean {
+  if (previous === null || next === null) return previous !== next;
+  if (previous.kind !== next.kind || previous.total !== next.total) return true;
+  if (next.received === previous.received) return false;
+  if (next.received === next.total || next.received < previous.received) return true;
+  return (next.received - previous.received) * 100 >= (next.total ?? previous.received);
+}
+
+/**
+ * Display state for one session's catch-up. Catch-up arrives as many small
+ * chunks, pages or records; publishing each would re-render every observer per
+ * step, so steps below 1% are dropped while start and finish always publish.
+ */
+export function createSessionSyncProgressStore(observerLabel: string) {
+  let snapshot: SessionSyncProgress | null = null;
+  const listeners = new Set<() => void>();
+  const view: SessionSyncProgressView = {
+    getSnapshot: () => snapshot,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  return {
+    view,
+    publish(next: SessionSyncProgress | null) {
+      if (!isVisibleProgressStep(snapshot, next)) return;
+      snapshot = next;
+      for (const listener of Array.from(listeners)) {
+        try {
+          listener();
+        } catch (error) {
+          console.error(`${observerLabel} failed`, error);
+        }
+      }
+    },
+    clearListeners() {
+      listeners.clear();
+    },
+  };
+}
+
 function streamOffset(offset: string): bigint | undefined {
   if (offset === '-1') return 0n;
   return /^\d{1,20}$/.test(offset) ? BigInt(offset) : undefined;
