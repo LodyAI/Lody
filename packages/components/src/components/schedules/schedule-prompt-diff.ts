@@ -4,7 +4,7 @@ const MAX_CELLS = 4_000_000;
 
 /**
  * Line diff of a schedule prompt. Unchanged runs keep `context` lines beside each
- * change and collapse the rest into one `gap`; `null` when too long to compare.
+ * change and collapse the rest into one `gap`; `null` when equal or too long to compare.
  *
  * shortcut: the table is lines × lines, so very long prompts get no diff; use a
  * linear-space diff if that matters.
@@ -17,7 +17,7 @@ export function diffPromptLines(
   const a = before.split('\n');
   const b = after.split('\n');
   const width = b.length + 1;
-  if ((a.length + 1) * width > MAX_CELLS) return null;
+  if (before === after || (a.length + 1) * width > MAX_CELLS) return null;
   const lcs = new Uint16Array((a.length + 1) * width);
   const at = (i: number, j: number) => lcs[i * width + j] ?? 0;
   for (let i = a.length - 1; i >= 0; i--)

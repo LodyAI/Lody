@@ -22,6 +22,7 @@ import { scheduleDeclarationSubject } from '../src/e2ee-execution-intent';
 import { readScheduleAuthorization } from '../src/schedule-authorization';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
 import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
+import { applyScheduleEditProposal } from '../src/schedule-recurrence';
 
 const definition = () =>
   ScheduleDefinitionSchema.parse({
@@ -297,6 +298,22 @@ describe('Schedule persistence contract', () => {
     expect(flushes.at(-1)?.rows).toBe(1);
     expect((await repo.read('test'))?.timeline).toHaveLength(1);
     expect((await repo.read('test'))?.prompt).toBe('hello');
+    const renamed = { patch: { title: 'Renamed' }, baseActivityId: 'created' };
+    const applyEdit = async () =>
+      repo.save({
+        scheduleId: 'test',
+        draft: applyScheduleEditProposal(renamed, (await repo.read('test'))!, 2, 'UTC', 'card')!,
+        actorId: 'owner',
+        now: 2,
+        activationId: 'edited',
+        activityId: 'card',
+      });
+    interruptPublication = true;
+    await expect(applyEdit()).rejects.toThrow('interrupted publication');
+    interruptPublication = false;
+    await applyEdit();
+    expect((await repo.list())[0]?.title).toBe('Renamed');
+    expect((await repo.read('test'))?.timeline).toHaveLength(2);
     await expect(
       repo.setEnabled({
         scheduleId: 'test',

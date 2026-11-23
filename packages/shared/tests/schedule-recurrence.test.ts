@@ -178,7 +178,7 @@ describe('applying an edit proposal', () => {
   it('changes only the proposed fields', () => {
     const current = document();
     expect(
-      applyScheduleEditProposal(proposal({ prompt: 'New prompt' }), current, 0, 'UTC')
+      applyScheduleEditProposal(proposal({ prompt: 'New prompt' }), current, 0, 'UTC', 'apply')
     ).toEqual({
       ...current.definition,
       prompt: 'New prompt',
@@ -188,7 +188,8 @@ describe('applying an edit proposal', () => {
         proposal({ title: 'Nightly', rule: { kind: 'daily', hour: 21, minute: 30 } }),
         current,
         0,
-        'Asia/Singapore'
+        'Asia/Singapore',
+        'apply'
       )
     ).toMatchObject({
       title: 'Nightly',
@@ -198,7 +199,7 @@ describe('applying an edit proposal', () => {
     });
   });
 
-  it('refuses once the schedule was edited, but not when it was only paused or run', () => {
+  it('refuses once the schedule was edited, but not after a pause, a run or its own save', () => {
     const paused = document([
       activity('create', 'created'),
       activity('pause', 'paused'),
@@ -206,11 +207,12 @@ describe('applying an edit proposal', () => {
       activity('run', 'manual_run'),
     ]);
     expect(scheduleContentRevision(paused)).toBe('create');
-    expect(applyScheduleEditProposal(proposal({ title: 'Nightly' }), paused, 0, 'UTC')).not.toBe(
-      null
-    );
+    const apply = (current: ScheduleDocument, activityId: string) =>
+      applyScheduleEditProposal(proposal({ title: 'Nightly' }), current, 0, 'UTC', activityId);
+    expect(apply(paused, 'apply')).not.toBe(null);
     const edited = document([activity('create', 'created'), activity('edit', 'edited')]);
-    expect(applyScheduleEditProposal(proposal({ title: 'Nightly' }), edited, 0, 'UTC')).toBe(null);
+    expect(apply(edited, 'apply')).toBe(null);
+    expect(apply(edited, 'edit')?.title).toBe('Daily');
   });
 });
 

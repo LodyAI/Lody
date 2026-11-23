@@ -9,6 +9,7 @@ import { CalendarClock } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import {
   applyScheduleEditProposal,
+  scheduleEditProposalActivityId,
   applyScheduleRecurrence,
   defaultScheduleRecurrence,
   getServerNow,
@@ -716,11 +717,15 @@ export function ScheduleEditProposalNotice({
   const { document, ready } = useScheduleDocument(meta.outcome ? undefined : meta.scheduleId);
   const [busy, setBusy] = useState(false);
   const { patch } = meta;
-  const activityId = `proposal-${meta.proposalId}`;
+  const activityId = scheduleEditProposalActivityId(notice.sessionId, meta.proposalId);
   const diff = useMemo(
     () =>
       document && patch.prompt !== undefined ? diffPromptLines(document.prompt, patch.prompt) : null,
-    [document, patch.prompt]
+    [document?.prompt, patch.prompt]
+  );
+  const stale = t(
+    'schedules.editProposal.stale',
+    'This scheduled task was edited after the proposal. Ask the Agent for a new one.'
   );
 
   const decide = (outcome: 'applied' | 'dismissed') => {
@@ -730,7 +735,7 @@ export function ScheduleEditProposalNotice({
         if (outcome === 'applied') {
           if (!runtime || !user) return;
           const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
-          const saved = await runtime.withScheduleStore(meta.scheduleId, async () => {
+          await runtime.withScheduleStore(meta.scheduleId, async () => {
             const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
               protectedContent: runtime.contentMode === 'e2ee',
               signDeclaration: runtime.signScheduleDeclaration,
@@ -738,16 +743,15 @@ export function ScheduleEditProposalNotice({
             const latest = await repository.read(meta.scheduleId);
             if (!latest)
               throw new Error(t('schedules.notFound', 'This schedule is unavailable or deleted.'));
-            // The save landed but the card write failed: only finish the card.
-            if (scheduleContentRevision(latest) === activityId) return true;
             const now = getServerNow();
             const draft = applyScheduleEditProposal(
               meta,
               latest,
               now,
-              machines.get(latest.definition.machineId as MachineId)?.timeZone ?? getDeviceTimeZone()
+              machines.get(latest.definition.machineId as MachineId)?.timeZone ?? getDeviceTimeZone(),
+              activityId
             );
-            if (!draft) return false;
+            if (!draft) throw new Error(stale);
             await repository.save({
               scheduleId: meta.scheduleId,
               draft,
@@ -756,9 +760,7 @@ export function ScheduleEditProposalNotice({
               activationId: uuid(),
               activityId,
             });
-            return true;
           });
-          if (!saved) return;
         }
         await writeOutcome({ ...meta, outcome });
       } catch (error) {
@@ -803,12 +805,7 @@ export function ScheduleEditProposalNotice({
     : !definition
       ? [t('schedules.notFound', 'This schedule is unavailable or deleted.')]
       : revision !== meta.baseActivityId && revision !== activityId
-        ? [
-            t(
-              'schedules.editProposal.stale',
-              'This scheduled task was edited after the proposal. Ask the Agent for a new one.'
-            ),
-          ]
+        ? [stale]
         : collectScheduleSaveBlockers(
             {
               disabledReason:

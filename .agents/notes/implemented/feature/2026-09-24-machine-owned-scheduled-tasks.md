@@ -64,10 +64,11 @@ offer Create and add a duplicate. The notice stores `baseActivityId`, the latest
 `created` or `edited` timeline activity, not a before-and-after copy (a second
 prompt of up to 32 KiB in Session history, and a schema import cycle) and not
 `updatedAt` (pause and resume write it). Apply refuses once that revision moved
-and never merges; its activity id `proposal-<proposalId>` lets a repeated Apply
-write only the outcome. A repeated call compares Schedule id and patch alone,
-because the live schedule differs after Apply. Scheduled messages, destination,
-Agent, machine and project are not proposable.
+and never merges. Its activity id is derived from the Session and proposal ids,
+because a create proposal or another Session can hold `proposal-<proposalId>`; a
+repeated Apply replays that save. A repeated call compares Schedule id and patch
+alone, because the live schedule differs after Apply. Scheduled messages,
+destination, Agent, machine and project are not proposable.
 
 **Editor (2026-09-24 revision).** The editor is built from the composer's own
 parts instead of look-alikes: name and prompt (split by a hairline) share one box

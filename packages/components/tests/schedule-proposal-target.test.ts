@@ -513,11 +513,12 @@ describe('the prompt diff on an edit proposal card', () => {
     ]);
   });
 
-  it('shows a prompt that only grew or shrank, and gives up on one too long to compare', () => {
+  it('shows a prompt that only grew or shrank, and gives no diff when equal or too long', () => {
     expect(kinds('keep', 'keep\nnew rule')).toEqual(['same:keep', 'add:new rule']);
     expect(kinds('keep\nold rule', 'keep')).toEqual(['same:keep', 'del:old rule']);
     const long = 'line\n'.repeat(2500);
     expect(diffPromptLines(long, `${long}more`)).toBe(null);
+    expect(diffPromptLines('same\ntext', 'same\ntext')).toBe(null);
   });
 });
 
