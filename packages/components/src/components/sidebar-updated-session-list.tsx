@@ -543,6 +543,7 @@ export type SidebarUpdatedSessionListProps = {
    * instead — it must stay reachable in every state.
    */
   headerAction?: ReactNode;
+  headerMenu?: ReactNode;
   /**
    * Updated organize mode mixes sessions from every project into one recency
    * list, so top-level rows show a second line: folder / GitHub owner mark +
@@ -618,6 +619,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   onShowMore,
   onShowLess,
   headerAction,
+  headerMenu,
   showProjectContext = false,
   grouping = 'recency',
   pinSectionMenu,
@@ -800,6 +802,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
       >
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
+          const bucketHeaderMenu = bucketIndex === 0 ? headerMenu : null;
           const collapsed = isSidebarBucketCollapsed(bucket.key, collapsedBuckets);
           const handleToggle = () => {
             if (!canToggleBucket) return;
@@ -910,6 +913,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                   label={headerLabel}
                   collapsed={collapsed}
                   activity={collapsedActivity}
+                  menu={bucketHeaderMenu}
                   action={bucketHeaderAction}
                   isMobile={isMobile}
                   toggleLabel={toggleBucketLabel}

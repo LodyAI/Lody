@@ -1068,6 +1068,61 @@ describe('LoroSidebar pinned section', () => {
     await flushFrame();
     expect(onCreateSection).toHaveBeenCalledWith('Routine', undefined);
   });
+
+  it('overlays the section menu on the folded pin section activity mark and hides the mark on hover', () => {
+    const onTogglePinSection = vi.fn();
+    const unreadItem = {
+      ...pinnedItem,
+      id: 'unread-in-ops',
+      title: 'Unread ops item',
+      hasUnreadMessages: true,
+    };
+    renderSidebar({
+      pinnedSections: [
+        { id: null, name: 'Pinned', items: [{ ...pinnedItem, hasUnreadMessages: true }] },
+        { id: 'ops', name: 'Ops', items: [unreadItem] },
+      ],
+      pinnedSectionCollapsed: true,
+      collapsedPinSectionIds: { ops: true },
+      onTogglePinSection,
+      pinSectionActions: {
+        onDropItem: () => {},
+        onMoveSection: () => {},
+        onCreateSection: () => {},
+        onRenameSection: () => {},
+        onDeleteSection: () => {},
+      },
+    });
+
+    const opsHeader = container?.querySelector<HTMLElement>(
+      '[data-pin-section="ops"] .group\\/section-header'
+    );
+    const opsMenuSlot = opsHeader?.querySelector('.group\\/section-menu');
+    const opsMenu = opsMenuSlot?.querySelector('button[aria-label="Section actions"]');
+    const opsMark = opsMenuSlot?.querySelector('[data-sidebar-group-activity]');
+    expect(opsMenu).not.toBeNull();
+    expect(opsMark).not.toBeNull();
+    expect(opsMark?.querySelector('[data-session-row-indicator]')).not.toBeNull();
+    expect(opsMark?.parentElement?.className).toContain('group-hover/section-header:opacity-0');
+    expect(opsMenu?.parentElement?.className).toContain('group-hover/section-header:opacity-100');
+
+    flushSync(() => {
+      opsMark?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onTogglePinSection).toHaveBeenCalledWith('ops');
+
+    const defaultHeader = container?.querySelector<HTMLElement>(
+      '[data-pin-section="default"] .group\\/section-header'
+    );
+    const defaultMenuSlot = defaultHeader?.querySelector('.group\\/section-menu');
+    const defaultMark = defaultMenuSlot?.querySelector('[data-sidebar-group-activity]');
+    const filterButton = defaultHeader?.querySelector('button[aria-label="Filter sidebar"]');
+    expect(defaultMark).not.toBeNull();
+    expect(filterButton).not.toBeNull();
+    expect(
+      defaultMenuSlot!.compareDocumentPosition(filterButton!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
 });
 
 describe('pinned row drag planning', () => {

@@ -1295,6 +1295,7 @@ export function SidebarSectionHeader({
   icon,
   label,
   collapsed,
+  menu,
   action,
   activity,
   describeActivity = true,
@@ -1306,6 +1307,7 @@ export function SidebarSectionHeader({
   icon?: ReactNode;
   label: ReactNode;
   collapsed?: boolean;
+  menu?: ReactNode;
   action?: ReactNode;
   /**
    * Status of the Sessions this section hides. Drawn only while collapsed, as
@@ -1327,6 +1329,13 @@ export function SidebarSectionHeader({
   const handleToggle = () => {
     if (canToggle) onToggleCollapsed?.();
   };
+  const activityMark =
+    collapsed && activity ? (
+      <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
+    ) : null;
+  const trailingActivityMark = menu && activityMark ? activityMark : null;
+  const toggleActivityMark = !menu && activityMark ? activityMark : null;
+  const overlayMenuOnHover = Boolean(menu) && !isMobile;
   const toggle = (
     <div
       role={canToggle ? 'button' : undefined}
@@ -1366,15 +1375,58 @@ export function SidebarSectionHeader({
         />
       ) : null}
       <span className="flex-1" aria-hidden="true" />
-      {collapsed && activity ? (
-        <SidebarGroupActivityMark activity={activity} describe={describeActivity} />
-      ) : null}
+      {toggleActivityMark}
     </div>
   );
   return (
     <div className="group group/section-header flex h-[26px] items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       {wrapToggle ? wrapToggle(toggle) : toggle}
-      {action ? <div className="mr-2 shrink-0">{action}</div> : null}
+      {menu || trailingActivityMark || action ? (
+        <div
+          className={cn(
+            'flex shrink-0 items-center',
+            action ? 'mr-2 gap-1' : overlayMenuOnHover || trailingActivityMark ? 'mr-[9px]' : 'mr-2'
+          )}
+        >
+          {overlayMenuOnHover ? (
+            <span
+              className={cn(
+                'group/section-menu relative flex h-5 shrink-0 items-center justify-center',
+                action ? 'w-6' : 'w-5'
+              )}
+            >
+              {trailingActivityMark ? (
+                <span
+                  onClick={canToggle ? handleToggle : undefined}
+                  className={cn(
+                    'inline-flex items-center transition-opacity duration-100',
+                    canToggle && 'cursor-pointer',
+                    'group-hover/section-header:pointer-events-none group-hover/section-header:opacity-0',
+                    'group-has-[:focus-visible]/section-menu:pointer-events-none group-has-[:focus-visible]/section-menu:opacity-0',
+                    'group-has-[[data-popup-open]]/section-menu:pointer-events-none group-has-[[data-popup-open]]/section-menu:opacity-0'
+                  )}
+                >
+                  {trailingActivityMark}
+                </span>
+              ) : null}
+              <span className="absolute inset-0 z-10 flex items-center justify-center">{menu}</span>
+            </span>
+          ) : (
+            <>
+              {menu}
+              {trailingActivityMark ? (
+                <span
+                  onClick={canToggle ? handleToggle : undefined}
+                  className={cn('inline-flex items-center', canToggle && 'cursor-pointer')}
+                >
+                  {trailingActivityMark}
+                </span>
+              ) : null}
+            </>
+          )}
+          {action}
+        </div>
+      ) : null}
     </div>
   );
 }
