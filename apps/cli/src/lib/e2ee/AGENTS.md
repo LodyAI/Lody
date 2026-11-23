@@ -120,6 +120,7 @@
   custody's purpose-limited `withEngineSeed`, never a general export. Device
   revocation retires only this writer; recorded member removal writes the
   pending-wipe marker before the drain, and the start-up refusal finishes the wipe.
+  An engine failure (host down, drop busy) never stops erasing the removed identity.
 - An encrypted workspace keeps one bounded background authority check: credential
   plus verified-ledger refresh, joined to the existing single-flight owner. Exact
   member/device refusal stops that owner through the durable receipt; a generic failure
