@@ -174,7 +174,7 @@ function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
       <div {...stylex.props(storyLayout.stack)}>
         <Button
           onClick={() => {
-            // Every open is cold: saved sizes would already count as measured.
+            // Every open is cold: saved sizes would warm initial estimates.
             clearSavedScrollStates();
             if (cachedOffset) {
               saveScrollState(sessionId, {

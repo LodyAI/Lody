@@ -1,28 +1,23 @@
 import { createListLayout, type ListLayout } from './keyed-layout/list';
 import { UNCACHED } from './keyed-layout/cache';
-import type { EngineRow } from './types';
+import type { EngineRow, SavedSizes } from './types';
 
-export interface SavedSizes {
-  layoutVersion: string;
-  keys: string[];
-  sizes: number[];
-}
+export type { SavedSizes };
 
 /**
  * Row sizes and offsets in item space (0 = the top of the rows container).
  *
- * Sizes follow row keys, so a placeholder that becomes several rows, or a row
- * that comes back, starts at a size seen before. A size counts as measured
- * only under the layout version it was measured in (width, font size, font
- * load, conversation font setting); under any other version it is an estimate
- * until the row is read again.
+ * Sizes follow row keys, so restored or pre-hide sizes warm initial estimates
+ * and survive in `snapshot()` while layoutVersion matches, but count as
+ * measured only after a live DOM read in the current epoch.
  */
 export class Geometry {
   private readonly layout: ListLayout;
   private keys: string[] = [];
   private estimates: number[] = [];
-  private readonly measuredIn = new Map<string, string>();
+  private readonly records = new Map<string, { version: string; epoch: number }>();
   private version: string;
+  private epoch = 1;
   /** Changes whenever any row's offset or size may have changed. */
   revision = 0;
 
@@ -35,10 +30,10 @@ export class Geometry {
     this.layout = createListLayout(0, undefined, snapshot, [], (index) =>
       Math.max(0, this.estimates[index] ?? 0)
     );
-    if (saved) {
+    if (snapshot && saved) {
       saved.keys.forEach((key, index) => {
         if ((saved.sizes[index] ?? UNCACHED) !== UNCACHED) {
-          this.measuredIn.set(key, saved.layoutVersion);
+          this.records.set(key, { version: saved.layoutVersion, epoch: 0 });
         }
       });
     }
@@ -68,7 +63,7 @@ export class Geometry {
     let estimatesChanged = false;
     if (!keysChanged) {
       for (let index = 0; index < estimates.length; index += 1) {
-        if (estimates[index] !== this.estimates[index] && !this.isMeasuredSize(index)) {
+        if (estimates[index] !== this.estimates[index] && !this.hasCachedSize(index)) {
           estimatesChanged = true;
           break;
         }
@@ -87,7 +82,12 @@ export class Geometry {
   setLayoutVersion(version: string): boolean {
     if (version === this.version) return false;
     this.version = version;
+    this.epoch += 1;
     return true;
+  }
+
+  invalidateLiveMeasurements(): void {
+    this.epoch += 1;
   }
 
   offset(index: number): number {
@@ -110,17 +110,16 @@ export class Geometry {
     return this.layout.$findIndex(y);
   }
 
-  /** Measured under the current layout version. */
   isMeasured(index: number): boolean {
     const key = this.keys[index];
-    return key !== undefined && this.measuredIn.get(key) === this.version;
+    return key !== undefined && this.records.get(key)?.epoch === this.epoch;
   }
 
   /** Record a read size. Returns true if the stored size changed. */
   setMeasured(index: number, size: number): boolean {
     const key = this.keys[index];
     if (key === undefined || !Number.isFinite(size) || size < 0) return false;
-    this.measuredIn.set(key, this.version);
+    this.records.set(key, { version: this.version, epoch: this.epoch });
     if (this.layout.$isSizeEqual(index, size)) return false;
     this.layout.$setItemSize(index, size);
     this.revision += 1;
@@ -129,12 +128,12 @@ export class Geometry {
 
   snapshot(): SavedSizes {
     const sizes = this.keys.map((key, index) =>
-      this.measuredIn.get(key) === this.version ? this.layout.$getItemSize(index) : UNCACHED
+      this.records.get(key)?.version === this.version ? this.layout.$getItemSize(index) : UNCACHED
     );
     return { layoutVersion: this.version, keys: this.keys.slice(), sizes };
   }
 
-  private isMeasuredSize(index: number): boolean {
+  private hasCachedSize(index: number): boolean {
     return !this.layout.$isSizeEqual(index);
   }
 }
