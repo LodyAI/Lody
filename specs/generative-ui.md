@@ -33,6 +33,14 @@ theme already in place.
   `GENUI_CATALOG` to @lody/ui components.
 - **The catalog**: the complete list of tags the model may use. Unknown tags
   render as diagnostics, not DOM.
+- **Catalog delivery**: the model learns the DSL through progressive
+  disclosure — a compact index (every tag, one line each: purpose and key
+  props) is always in context, while full prop tables and worked examples live
+  in per-family reference documents the model reads only for the component
+  families it uses. The skill and references live in
+  `.agents/skills/genui/`; the same layering is intended for the runtime
+  prompt path (a `lody.*` describe mechanism or reference documents served to
+  the answering agent).
 
 ## Wire format
 
@@ -79,6 +87,12 @@ theme already in place.
   styled native range input.
 - Action protocol for `lody.*` capabilities (submit message, open file) and
   how capabilities declare availability per surface.
+- The error feedback loop: surface diagnostics are visible to the user but
+  not yet reported back to the agent, so a rejected surface cannot currently
+  trigger a describe-and-retry repair.
+- How the layered catalog reaches the answering agent's context at runtime
+  (index in the system prompt vs. a `lody.describe(tag)` capability), given
+  the same trade-off between token cost and discovery.
 
 ## Evidence
 
@@ -86,3 +100,4 @@ theme already in place.
   `state.ts`, `surface.ts`); tests in `packages/genui/test/genui.test.ts`.
 - React adapter: `packages/components/src/components/ai-gui/genui/`.
 - Fence dispatch: `markdown-renderer.tsx` `MarkdownPre` (`genui` language).
+- Authoring contract: `.agents/skills/genui/` (index + per-family references).
