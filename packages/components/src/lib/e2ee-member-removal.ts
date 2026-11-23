@@ -1,3 +1,4 @@
+import { promptShortcutDatabaseName, closePromptShortcutDatabase } from './prompt-shortcut-storage';
 import { roostHistoryDatabase } from './roost-history-cache';
 import { createSessionInputStorage } from './session-input-storage';
 import { personalHostFailureCode } from './e2ee-control-failure';
@@ -62,7 +63,13 @@ export async function removeEncryptedWorkspaceLocalData(input: E2eeLocalDataScop
       await pending.close();
     }
   };
+  const removeShortcuts = async () => {
+    const name = promptShortcutDatabaseName(input.workspaceId, input.accountId, input);
+    await closePromptShortcutDatabase(name);
+    await remove(name);
+  };
   const results = await Promise.allSettled([
+    removeShortcuts(),
     removeInputs(),
     remove(roostHistoryDatabase(encryptedLocalInstance(input))),
     remove(`lody-loro-repo-db-${namespace}`),

@@ -1948,10 +1948,36 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const getWorkspaceStreamsGrant = async (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;
-  }): Promise<{ token: string; gatewayBaseUrl: string }> => {
+    write?: boolean;
+  }): Promise<{
+    token: string;
+    gatewayBaseUrl: string;
+    bucketId?: string;
+    shardHostSuffix?: string;
+  }> => {
     await waitForContentAdmission(options?.signal);
     if (!cloudPlaneEnabled) {
       throw new Error('Streams access is disabled in local-only sync mode');
+    }
+    if (protectedContent) {
+      const bucketId = deps.e2ee?.bucketId();
+      if (!bucketId || bucketId === LORO_STREAMS_BUCKET_ID)
+        throw new Error('e2ee_content_bucket_unavailable');
+      if (options?.write && deps.e2ee?.codeCollabRole?.get() !== 'write')
+        throw new Error('e2ee_shortcuts_read_only');
+      const provider = ensureStreamsTokenProvider();
+      if (options?.forceRefresh) provider.invalidate('unauthorized');
+      const token = await provider.getToken(options?.signal);
+      if (disposePromise || provider !== streamsTokenProvider || deps.e2ee?.bucketId() !== bucketId)
+        throw new SupersededAttachError();
+      if (options?.write && deps.e2ee?.codeCollabRole?.get() !== 'write')
+        throw new Error('e2ee_shortcuts_read_only');
+      return {
+        token,
+        bucketId,
+        gatewayBaseUrl: getStreamsBaseUrlForProvider(provider),
+        shardHostSuffix: getStreamsShardHostSuffixForProvider(provider),
+      };
     }
     requirePlaintextWorkspaceStreamsContent(deps.content);
     if (electronLocalDataPlane) {
@@ -6490,8 +6516,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
       : {}),
     attachmentToken: protectedContent ? deps.e2ee?.attachmentToken : undefined,
-    cloudStreamsEnabled: cloudPlaneEnabled && !protectedContent,
-    ...(cloudPlaneEnabled && !protectedContent ? { getWorkspaceStreamsGrant } : {}),
+    streamsContent: deps.content,
+    ...(protectedContent
+      ? {
+          localDataScope: { ...deps.e2eeLocalIdentity!, windowId: desktopWindowId() },
+          shortcutRole: deps.e2ee?.codeCollabRole ?? {
+            get: () => 'read' as const,
+            subscribe: () => () => undefined,
+          },
+        }
+      : {}),
+    cloudStreamsEnabled: cloudPlaneEnabled,
+    ...(cloudPlaneEnabled ? { getWorkspaceStreamsGrant } : {}),
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
     ...(protectedContent && deps.e2ee?.signScheduleDeclaration
       ? { signScheduleDeclaration: deps.e2ee.signScheduleDeclaration }

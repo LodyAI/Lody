@@ -1,3 +1,4 @@
+import { promptShortcutDatabaseName } from '../src/lib/prompt-shortcut-storage';
 import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
 import { createRoostHistoryCache, roostHistoryDatabase } from '../src/lib/roost-history-cache';
 import { createHistoryWriter } from '@lody/shared/history-writer';
@@ -1380,7 +1381,31 @@ it('member removal deletes only the stopped workspace input and replica namespac
   }
   retainEncryptedWorkspaceCleanup(scope);
   vi.resetModules();
-  await (await import('../src/lib/e2ee-member-removal')).resumeEncryptedWorkspaceCleanup(scope);
+  const shortcutName = promptShortcutDatabaseName(scope.workspaceId, scope.accountId, scope);
+  const plaintextName = promptShortcutDatabaseName(scope.workspaceId, scope.accountId);
+  const otherShortcutName = promptShortcutDatabaseName(scope.workspaceId, scope.accountId, {
+    ...scope,
+    windowId: 'other-window',
+  });
+  const shortcut = await database(shortcutName);
+  const ordinary = await database(plaintextName);
+  ordinary.close();
+  const otherShortcut = await database(otherShortcutName);
+  otherShortcut.close();
+  const { registerPromptShortcutDatabase } = await import('../src/lib/prompt-shortcut-storage');
+  const unregister = registerPromptShortcutDatabase(shortcutName, async () => {
+    shortcut.close();
+  });
+  try {
+    await (await import('../src/lib/e2ee-member-removal')).resumeEncryptedWorkspaceCleanup(scope);
+  } finally {
+    unregister();
+  }
+  const shortcutNames = (await factory.databases()).map((row) => row.name);
+  expect(shortcutNames).not.toContain(shortcutName);
+  expect(shortcutNames).toContain(plaintextName);
+  expect(shortcutNames).toContain(otherShortcutName);
+  expect(plaintextName).toBe('lody-shortcut-data-input-workspace:input-account');
   expect((await factory.databases()).map((db) => db.name)).not.toContain(
     roostHistoryDatabase(encryptedLocalInstance(scope))
   );
