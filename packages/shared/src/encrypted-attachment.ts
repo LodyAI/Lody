@@ -41,14 +41,27 @@ export type EncryptedAttachment = z.infer<typeof EncryptedAttachmentSchema>;
 type Manifest = Omit<EncryptedAttachment, 'parts'>;
 export type AttachmentContext = { workspaceId: string; sessionId: string };
 
-/** Stored image references must not bypass the bounded image contract. */
-export function assertEncryptedImageReference(
-  imageId: string,
-  encryption: EncryptedAttachment
-): void {
+/** Stored references must match their authenticated attachment kind and first part. */
+export function assertEncryptedAttachmentReference(
+  kind: 'image' | 'file',
+  objectId: string,
+  encryption: unknown
+): EncryptedAttachment {
   const manifest = EncryptedAttachmentSchema.parse(encryption);
-  if (manifest.kind !== 'image' || manifest.parts[0] !== imageId)
-    throw new Error('Encrypted image reference mismatch');
+  if (manifest.kind !== kind || manifest.parts[0] !== objectId)
+    throw new Error(`Encrypted ${kind} reference mismatch`);
+  return manifest;
+}
+
+/** Strip secret attachment manifests from detached plaintext output, at every JSON depth.
+ * Undeletable metadata rejects the output instead of publishing a file key. */
+export function stripEncryptedAttachmentMetadata(value: unknown): void {
+  if (!value || typeof value !== 'object') return;
+  if (Object.hasOwn(value, 'encryption')) {
+    if (!Reflect.deleteProperty(value, 'encryption') || Object.hasOwn(value, 'encryption'))
+      throw new Error('Plaintext output contains attachment encryption');
+  }
+  for (const child of Object.values(value)) stripEncryptedAttachmentMetadata(child);
 }
 
 const parameters = (context: AttachmentContext, manifest: Manifest, index: number) => {

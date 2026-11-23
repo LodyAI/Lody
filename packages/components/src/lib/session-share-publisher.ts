@@ -1,6 +1,8 @@
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import i18next from 'i18next';
 import {
+  assertEncryptedAttachmentReference,
+  SESSION_IMAGE_MAX_SIZE_BYTES,
   getSessionFileDownloadApiPath,
   getSessionImageDownloadApiPath,
   type SessionId,
@@ -15,8 +17,7 @@ import {
 } from '@lody/shared/session-sharing';
 import type { WorkspaceRuntime, SessionDocStore } from '@/atoms/runtime';
 import { API_BASE_URL } from '@/lib';
-import { protectedAttachmentChunks } from './encrypted-session-attachment';
-import { EncryptedAttachmentSchema } from '@lody/shared';
+import { protectedAttachmentBytes } from './encrypted-session-attachment';
 
 /** App-only source adapter. Never import this module from the anonymous entry. */
 export async function captureSessionShare(options: {
@@ -106,29 +107,29 @@ export async function captureSessionShare(options: {
         try {
           const maxBytes = kind === 'image' ? SHARE_LIMITS.imageBytes : SHARE_LIMITS.objectBytes;
           if (options.runtime.contentMode === 'e2ee' || reference.encryption) {
-            const encryption = EncryptedAttachmentSchema.parse(reference.encryption);
-            if (encryption.kind !== kind || encryption.parts[0] !== objectId)
-              throw new Error('Encrypted attachment reference mismatch');
-            if (encryption.sizeBytes > maxBytes) throw new Error('Share object exceeds size limit');
-            const parts: Uint8Array[] = [];
-            let length = 0;
-            for await (const bytes of protectedAttachmentChunks({
+            const size =
+              reference.encryption &&
+              typeof reference.encryption === 'object' &&
+              !Array.isArray(reference.encryption)
+                ? reference.encryption.sizeBytes
+                : undefined;
+            const byteLimit =
+              kind === 'image' ? Math.min(maxBytes, SESSION_IMAGE_MAX_SIZE_BYTES) : maxBytes;
+            if (typeof size === 'number' && size > byteLimit)
+              throw new Error('Share object exceeds size limit');
+            const encryption = assertEncryptedAttachmentReference(
+              kind,
+              objectId,
+              reference.encryption
+            );
+            const bytes = await protectedAttachmentBytes({
               workspaceId: options.runtime.workspaceId,
               sessionId: storageId,
               encryption,
               attachmentToken: options.runtime.attachmentToken,
               signal,
-            })) {
-              length += bytes.length;
-              if (length > maxBytes) throw new Error('Share object exceeds size limit');
-              parts.push(bytes);
-            }
-            const bytes = new Uint8Array(length);
-            let offset = 0;
-            for (const part of parts) {
-              bytes.set(part, offset);
-              offset += part.length;
-            }
+              maxBytes: byteLimit,
+            });
             return { bytes, mediaType: encryption.mimeType };
           }
           const response = await fetch(new URL(path, API_BASE_URL), {

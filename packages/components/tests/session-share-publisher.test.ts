@@ -1,6 +1,5 @@
 import { it, expect, vi } from 'vitest';
-import { uploadEncryptedAttachment } from '@lody/shared';
-import { SHARE_LIMITS } from '@lody/shared/session-sharing';
+import { uploadEncryptedAttachment, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shared';
 import { decodeShareHistoryBytes } from '@lody/shared/session-sharing';
 import { captureSessionShare } from '../src/lib/session-share-publisher';
 vi.mock('@/lib', () => ({ API_BASE_URL: 'https://api.example.test' }));
@@ -154,7 +153,7 @@ it('reports image download failures and still releases the source', async () => 
   }
 });
 
-it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
+it.each(['success', 'image-group', 'oversized', 'missing-manifest', 'tampered'])(
   'reads protected share image bytes: %s',
   async (scenario) => {
     const plain = new Uint8Array([1, 2, 3]);
@@ -173,7 +172,7 @@ it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
       },
     });
     if (scenario === 'tampered') sealed[0] ^= 1;
-    if (scenario === 'oversized') encryption.sizeBytes = SHARE_LIMITS.imageBytes + 1;
+    if (scenario === 'oversized') encryption.sizeBytes = SESSION_IMAGE_MAX_SIZE_BYTES + 1;
     const image = {
       type: 'image',
       imageId: 'ciphertext',
@@ -183,6 +182,18 @@ it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
       sizeBytes: plain.length,
       ...(scenario === 'missing-manifest' ? {} : { encryption }),
     };
+    const items = [
+      ...(scenario === 'image-group' ? [{ type: 'image_group', images: [image] }] : [image]),
+      { type: 'image', encryption },
+      {
+        type: 'tool_call',
+        toolCallId: 'tool',
+        rawInput: { nested: [{ encryption }] },
+        rawOutput: { encryption },
+        _meta: { hidden: { encryption } },
+      },
+      { type: 'system_notice', name: 'synthetic', meta: { nested: [{ encryption }] } },
+    ];
     const runtime = {
       workspaceId: 'workspace',
       contentMode: 'e2ee',
@@ -193,7 +204,7 @@ it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
         firstSynced: Promise.resolve(),
         acquireSync: () => () => {},
         sessionData: {
-          history: { readAll: async () => [{ id: 'turn', role: 'user', items: [image] }] },
+          history: { readAll: async () => [{ id: 'turn', role: 'user', items }] },
         },
       }),
       releaseSessionStoreRef: () => {},
@@ -215,8 +226,12 @@ it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
         token: 'ordinary-token',
         signal: new AbortController().signal,
       } as unknown as Parameters<typeof captureSessionShare>[0]);
-      if (scenario !== 'success') {
-        await expect(capturing).rejects.toThrow('Share attachment unavailable');
+      if (scenario !== 'success' && scenario !== 'image-group') {
+        await expect(capturing).rejects.toThrow(
+          scenario === 'oversized'
+            ? 'Share image exceeds size limit'
+            : 'Share attachment unavailable'
+        );
         if (scenario !== 'tampered') expect(requests).toEqual([]);
         return;
       }
@@ -228,8 +243,16 @@ it.each(['success', 'oversized', 'missing-manifest', 'tampered'])(
       const captured = JSON.parse(
         new TextDecoder().decode(decodeShareHistoryBytes(result.objects.get('h1')!, history))
       );
-      expect(captured[0].items[0]).toMatchObject({ imageId: 'a1', mimeType: 'image/png' });
-      expect(captured[0].items[0]).not.toHaveProperty('encryption');
+      const capturedImage =
+        scenario === 'image-group' ? captured[0].items[0].images[0] : captured[0].items[0];
+      expect(capturedImage).toMatchObject({ imageId: 'a1', mimeType: 'image/png' });
+      const assertClean = (value: unknown): void => {
+        if (!value || typeof value !== 'object') return;
+        expect(value).not.toHaveProperty('encryption');
+        for (const child of Object.values(value)) assertClean(child);
+      };
+      assertClean(captured);
+      expect(JSON.stringify(captured)).not.toContain(encryption.key);
       expect(image.encryption).toBe(encryption);
     } finally {
       vi.unstubAllGlobals();

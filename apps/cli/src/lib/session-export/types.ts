@@ -68,8 +68,6 @@ export type ExportSystemNoticeRecord = {
 
 export type ExportAttachmentRecord = {
   imageId: string;
-  encryption?: EncryptedAttachment;
-  storageSessionId?: string;
   mimeType: string;
   fileName: string | null;
   originalFileName: string | null;
@@ -80,12 +78,19 @@ export type ExportAttachmentRecord = {
   relativePath: string | null;
 };
 
+/** Secret download context; never part of a serialized attachment record. */
+export type ExportAttachmentSource = {
+  encryption?: EncryptedAttachment;
+  storageSessionId?: string;
+};
+
 export type ExportSessionArtifacts = {
   transcript: ExportTranscriptTurn[];
   plans: ExportPlanRecord[];
   toolCalls: ExportToolCallRecord[];
   systemNotices: ExportSystemNoticeRecord[];
   attachments: ExportAttachmentRecord[];
+  attachmentSources: ReadonlyMap<string, ExportAttachmentSource>;
 };
 
 export type ExportManifest = {
