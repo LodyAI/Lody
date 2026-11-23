@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +28,12 @@ import {
 } from '@/components/sessions/session-conversation-page';
 import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
 import { Button } from '@lody/ui/button';
+
+const sceneStyles = stylex.create({
+  page: { height: '100dvh' },
+  fill: { height: '100%' },
+  icon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+});
 
 const sessionId = 'share-selection-story' as SessionId;
 const session = {
@@ -123,7 +130,7 @@ function SelectionHarness({ long = false }: { long?: boolean }) {
   }, [start, candidates, confirm]);
   return (
     <SessionConversationPage
-      className="h-dvh"
+      xstyle={sceneStyles.page}
       headerSlot={
         <SessionConversationPageHeader
           titleSlot={session.title}
@@ -133,7 +140,7 @@ function SelectionHarness({ long = false }: { long?: boolean }) {
               size="small"
               onClick={() => selection.start(candidates, confirm)}
             >
-              <ImageIcon className="size-4" />
+              <ImageIcon {...stylex.props(sceneStyles.icon)} />
               {t('sessions.shareImage.dialogTitle', 'Share as image')}
             </Button>
           }
@@ -146,7 +153,7 @@ function SelectionHarness({ long = false }: { long?: boolean }) {
               <SessionChatStreamView
                 sessionId={sessionId}
                 items={items}
-                className="h-full"
+                xstyle={sceneStyles.fill}
                 renderMessageRow={({ message, sessionId: id }) => (
                   <MessageRowView message={message} sessionId={id} />
                 )}

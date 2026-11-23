@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionMeta } from '@lody/shared';
 import { useMemo } from 'react';
@@ -8,6 +9,19 @@ import {
   createFakeSessionFileProvider,
   type SessionFileProviderEntry,
 } from '@/lib/session-file-provider';
+
+const sceneStyles = stylex.create({
+  frame: {
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
 
 const HTML_FILE: SessionFileProviderEntry = {
   fileId: 't:result-html',
@@ -78,10 +92,7 @@ function HtmlPreviewStory({ mobile = false }: { mobile?: boolean }) {
   );
 
   return (
-    <div
-      style={{ width: mobile ? 390 : 760, height: 640 }}
-      className="flex flex-col overflow-hidden rounded-md border border-border bg-background"
-    >
+    <div style={{ width: mobile ? 390 : 760, height: 640 }} {...stylex.props(sceneStyles.frame)}>
       <SessionFileContentView
         sessionId={storySession.id}
         session={storySession}

@@ -4,6 +4,7 @@ import type { PromptShortcut } from '@lody/shared/prompt-shortcuts/model';
 import { PromptShortcutForm } from '@/components/settings/prompt-shortcut-form';
 import { SettingsEditorDialogFrame } from './settings-editor-dialog-frame';
 
+
 const shortcut: PromptShortcut = {
   v: 1,
   id: 'shortcut-review',
@@ -47,6 +48,7 @@ const meta = {
         title={args.isNew ? 'New Prompt' : 'Edit Prompt'}
         description="Saved to this workspace and sent as one message."
       >
+
         <Story />
       </SettingsEditorDialogFrame>
     ),

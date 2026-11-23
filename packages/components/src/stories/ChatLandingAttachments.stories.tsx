@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ReactNode } from 'react';
 import { ArrowUp } from 'lucide-react';
@@ -17,6 +18,75 @@ import {
 import { MobileInlinePickerRowSlot } from '@/components/mobile/mobile-inline-picker';
 import { Button } from '@lody/ui/button';
 import { registerBuiltInCommands } from '@/lib/commands';
+
+const mergedStoryLayout = stylex.create({
+  part1: {
+    fontSize: 'var(--text-lg)',
+    lineHeight: 'var(--text-lg--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+});
+
+const sceneStyles = stylex.create({
+  attachmentGlyph: {
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    opacity: 0.7,
+  },
+  footerLabel: {
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  sendGlyph: { width: 'calc(var(--spacing) * 5)', height: 'calc(var(--spacing) * 5)' },
+  mobileFrame: {
+    height: '720px',
+    width: '390px',
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-3xl)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  row: {
+    display: 'inline-flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: '100%',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+});
+
+const storyLayout = stylex.create({
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+  },
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '100vh',
+    'justify-content': 'center',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 40%, transparent)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+  },
+});
 
 // So the composer's ⌘L focus hint has a command binding to read.
 registerBuiltInCommands();
@@ -110,7 +180,7 @@ function DesktopLandingDemo() {
   const [prompt, setPrompt] = useState('Review the attached spec and screenshots.');
   return (
     <StoryPlatform>
-      <div className="min-h-screen bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <ChatLandingView
           tone="light"
           isMobile={false}
@@ -164,11 +234,11 @@ function MobileNewChatDemo() {
         onFileRemove={noop}
         onFileRetry={noop}
         footerSelector={
-          <span className="text-xs text-muted-foreground">claude-opus-4-8 · Thinking</span>
+          <span {...stylex.props(sceneStyles.footerLabel)}>claude-opus-4-8 · Thinking</span>
         }
         primaryAction={
           <Button type="button" variant="primary" aria-label="Send" icon shape="pill">
-            <ArrowUp className="h-5 w-5" />
+            <ArrowUp {...stylex.props(sceneStyles.sendGlyph)} />
           </Button>
         }
         autoResize
@@ -182,7 +252,7 @@ function MobileNewChatDemo() {
       title: '新建对话',
       backAriaLabel: 'Back',
     },
-    targetNode: <span className="text-lg font-semibold">loro-dev/lody</span>,
+    targetNode: <span {...stylex.props(mergedStoryLayout.part1)}>loro-dev/lody</span>,
     composer,
   };
 
@@ -190,8 +260,8 @@ function MobileNewChatDemo() {
     // Phone-width frame so the sheet reads like the real mobile drawer even on
     // a wide Storybook canvas. Mobile card sizing still keys off window width.
     <StoryPlatform>
-      <div className="flex min-h-screen justify-center bg-muted/40 py-6">
-        <div className="h-[720px] w-[390px] overflow-hidden rounded-3xl border bg-background shadow-xl">
+      <div {...stylex.props(storyLayout.row)}>
+        <div {...stylex.props(sceneStyles.mobileFrame)}>
           <MobileNewChatSheetContent {...contentProps} />
         </div>
       </div>

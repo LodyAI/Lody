@@ -1,8 +1,20 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SubagentTaskPanel, type SubagentTask } from '@/components/ai-gui/subagent-task-panel';
 import { SubagentRunHistory } from '@/components/ai-gui/view';
 import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
+const storyLayout = stylex.create({
+  popup: { width: '100%', maxWidth: 'none', inset: 'calc(var(--spacing) * 0)', borderRadius: 0 },
+  frame: {
+    width: '560px',
+    'max-width': '100%',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  canvas: {
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const running: SubagentTask[] = [
   {
@@ -295,7 +307,7 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <div className="w-[560px] max-w-full p-4">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),
@@ -336,9 +348,9 @@ export const InMobileDrawer: Story = {
   decorators: [
     (Story) => (
       <Drawer open direction="right">
-        <DrawerContent className="w-full! max-w-none! inset-0 rounded-none">
-          <DrawerTitle className="sr-only">Conversation</DrawerTitle>
-          <div data-vaul-no-drag="" className="p-4">
+        <DrawerContent xstyle={storyLayout.popup}>
+          <DrawerTitle visuallyHidden>Conversation</DrawerTitle>
+          <div data-vaul-no-drag="" {...stylex.props(storyLayout.canvas)}>
             <Story />
           </div>
         </DrawerContent>

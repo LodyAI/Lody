@@ -12,7 +12,11 @@ import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { useDrag } from '@use-gesture/react';
 import { useTranslation } from 'react-i18next';
 import { Archive, ArchiveRestore, CircleCheck, Clock, Pin, PinOff, Trash2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
+import { withClassName } from '@/lib/stylex';
 
 /**
  * iOS-style swipe-to-reveal-actions wrapper for a list row.
@@ -95,6 +99,95 @@ const SNAP_OPEN_AT = TOTAL_ACTION_WIDTH * 0.4;
 const AUTO_ARCHIVE_AT = 240;
 
 const SPRING = { type: 'spring' as const, stiffness: 260, damping: 32, mass: 0.7 };
+
+const styles = stylex.create({
+  leadingDrawer: { left: 0, right: 'auto' },
+  trailingDrawer: { flexDirection: 'row-reverse' },
+  chipClipped: { overflow: 'hidden' },
+  chipLater: { backgroundColor: 'var(--color-amber-500)', color: 'var(--color-white, #fff)' },
+  chipSettle: { backgroundColor: 'var(--color-emerald-600)', color: 'var(--color-white, #fff)' },
+  leadingFullSwipe: { alignItems: 'flex-end', paddingInlineEnd: themeSpace[5] },
+  trailingFullSwipe: { alignItems: 'flex-start', paddingInlineStart: themeSpace[5] },
+  /** The row's shell: the drawer slides out under the face. */
+  root: {
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+  },
+  /** The drawer under the row face. */
+  drawer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
+    zIndex: 0,
+    display: 'flex',
+    pointerEvents: 'none',
+  },
+  /** The drawer's chips. */
+  drawerChips: {
+    display: 'flex',
+    height: '100%',
+  },
+  /** The drawer, once the row is open. */
+  drawerOpen: { pointerEvents: 'auto' },
+  /** One action chip. */
+  chip: {
+    display: 'flex',
+    flexShrink: 0,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: themeSpace[1],
+  },
+  /** The chip's glyph. */
+  chipGlyph: {
+    width: themeSpace[5],
+    height: themeSpace[5],
+  },
+  /** The chip's label. */
+  chipLabel: {
+    fontSize: '0.72rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1,
+  },
+  /** The chip that restores a closed conversation. */
+  chipRestore: {
+    backgroundColor: themeColors.primary,
+    color: themeColors.primaryForeground,
+  },
+  /** The chip that deletes a closed conversation. */
+  chipDelete: {
+    backgroundColor: themeColors.destructive,
+    color: themeColors.destructiveForeground,
+  },
+  /** The chip that pins a conversation. */
+  chipPin: {
+    backgroundColor: themeColors.primary,
+    color: themeColors.primaryForeground,
+  },
+  /** The chip that archives a conversation. */
+  chipArchive: {
+    backgroundColor: themeColors.destructive,
+    color: themeColors.destructiveForeground,
+  },
+  /** The archive chip, grown to eat the pin's slot in a super-swipe. */
+  chipArchiveSuper: {
+    alignItems: 'flex-start',
+    paddingInlineStart: themeSpace[5],
+  },
+  /** The row's face: it slides, and it carries the row's own hairline. */
+  face: {
+    position: 'relative',
+    width: '100%',
+    backgroundColor: themeColors.background,
+    boxShadow: '0 1px 0 0 hsl(var(--background)), 0 -1px 0 0 hsl(var(--background))',
+  },
+  /** The face at rest: under the drill page's back-swipe strip. */
+  faceBase: { zIndex: 10 },
+  /** The face, lifted above the back-swipe strip. */
+  faceLifted: { zIndex: 30 },
+});
 
 /* --------------------------------------------------------------------------
  * Group registry — coordinates "only one row open at a time" across all
@@ -351,7 +444,7 @@ export function MobileSwipeableRow({
   return (
     <div
       ref={containerRef}
-      className={cn('relative overflow-hidden bg-background', className)}
+      {...withClassName(stylex.props(styles.root), className)}
       style={{ touchAction: 'pan-y' }}
     >
       {/* Action drawer under the row face. Opacity is 0 whenever the
@@ -360,13 +453,13 @@ export function MobileSwipeableRow({
       <motion.div
         style={{ opacity: drawerOpacity }}
         aria-hidden={!open}
-        className="pointer-events-none absolute inset-y-0 right-0 z-0 flex"
+        {...stylex.props(styles.drawer)}
       >
         {/* Re-enable pointer events only when the drawer is snapped open
             (or mid-swipe). `open` is React state; mid-swipe still needs
             hits on chips once fully revealed — chips keep their own
             onClick and the face has already slid away. */}
-        <div className={cn('flex h-full', open && 'pointer-events-auto')}>
+        <div {...stylex.props(styles.drawerChips, open && styles.drawerOpen)}>
           {archivedVariant ? (
             <>
               {onRestore ? (
@@ -379,13 +472,14 @@ export function MobileSwipeableRow({
                     closeDrawer();
                   }}
                   style={{ width: ACTION_WIDTH }}
-                  className={cn(
-                    'flex shrink-0 flex-col items-center justify-center gap-1',
-                    'bg-primary text-primary-foreground'
-                  )}
+                  {...stylex.props(styles.chip, styles.chipRestore)}
                 >
-                  <ArchiveRestore className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-                  <span className="text-[0.72rem] font-medium leading-none">{restoreLabel}</span>
+                  <ArchiveRestore
+                    {...stylex.props(styles.chipGlyph)}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  <span {...stylex.props(styles.chipLabel)}>{restoreLabel}</span>
                 </button>
               ) : null}
               {onDelete ? (
@@ -398,13 +492,14 @@ export function MobileSwipeableRow({
                     closeDrawer();
                   }}
                   style={{ width: ACTION_WIDTH }}
-                  className={cn(
-                    'flex shrink-0 flex-col items-center justify-center gap-1',
-                    'bg-destructive text-destructive-foreground'
-                  )}
+                  {...stylex.props(styles.chip, styles.chipDelete)}
                 >
-                  <Trash2 className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-                  <span className="text-[0.72rem] font-medium leading-none">{deleteLabel}</span>
+                  <Trash2
+                    {...stylex.props(styles.chipGlyph)}
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  />
+                  <span {...stylex.props(styles.chipLabel)}>{deleteLabel}</span>
                 </button>
               ) : null}
             </>
@@ -419,17 +514,14 @@ export function MobileSwipeableRow({
                 closeDrawer();
               }}
               style={{ width: pinWidth, opacity: pinOpacity }}
-              className={cn(
-                'flex shrink-0 flex-col items-center justify-center gap-1',
-                'bg-primary text-primary-foreground'
-              )}
+              {...stylex.props(styles.chip, styles.chipPin)}
             >
               {isPinned ? (
-                <PinOff className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+                <PinOff {...stylex.props(styles.chipGlyph)} strokeWidth={1.8} aria-hidden="true" />
               ) : (
-                <Pin className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+                <Pin {...stylex.props(styles.chipGlyph)} strokeWidth={1.8} aria-hidden="true" />
               )}
-              <span className="text-[0.72rem] font-medium leading-none">{pinLabel}</span>
+              <span {...stylex.props(styles.chipLabel)}>{pinLabel}</span>
             </motion.button>
           ) : null}
           {!archivedVariant && onArchive ? (
@@ -442,14 +534,14 @@ export function MobileSwipeableRow({
                 closeDrawer();
               }}
               style={{ width: archiveWidth }}
-              className={cn(
-                'flex shrink-0 flex-col items-center justify-center gap-1',
-                'bg-destructive text-destructive-foreground',
-                superSwipe ? 'items-start ps-5' : ''
+              {...stylex.props(
+                styles.chip,
+                styles.chipArchive,
+                superSwipe && styles.chipArchiveSuper
               )}
             >
-              <Archive className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-              <span className="text-[0.72rem] font-medium leading-none">{activeArchiveLabel}</span>
+              <Archive {...stylex.props(styles.chipGlyph)} strokeWidth={1.8} aria-hidden="true" />
+              <span {...stylex.props(styles.chipLabel)}>{activeArchiveLabel}</span>
             </motion.button>
           ) : null}
         </div>
@@ -461,13 +553,7 @@ export function MobileSwipeableRow({
          face so it cannot cover the revealed action buttons. */}
       <motion.div
         style={{ x }}
-        className={cn(
-          'relative w-full bg-background shadow-[0_1px_0_0_hsl(var(--background)),0_-1px_0_0_hsl(var(--background))]',
-          /* This element is a stacking context (positioned + transformed), so
-             nothing inside it can paint above the edge-swipe strip on its own
-             — the lift has to happen here, not on the child control. */
-          liftAboveEdgeSwipeZone ? 'z-30' : 'z-10'
-        )}
+        {...stylex.props(styles.face, liftAboveEdgeSwipeZone ? styles.faceLifted : styles.faceBase)}
       >
         <div {...bindDrag()} onClickCapture={handleCaptureClick}>
           {children}
@@ -577,11 +663,7 @@ export function MobileStatusSwipeRow({
   const iconOf = (id: MobileStatusSwipeActionId) =>
     id === 'settle' ? CircleCheck : id === 'later' ? Clock : Archive;
   const toneOf = (id: MobileStatusSwipeActionId) =>
-    id === 'archive'
-      ? 'bg-destructive text-destructive-foreground'
-      : id === 'later'
-        ? 'bg-amber-500 text-white'
-        : 'bg-emerald-600 text-white';
+    id === 'archive' ? styles.chipArchive : id === 'later' ? styles.chipLater : styles.chipSettle;
   const pinLabel = isPinned
     ? t('chat.mobileHome.swipeActions.unpin', 'Unpin')
     : t('chat.mobileHome.swipeActions.pin', 'Pin');
@@ -597,7 +679,7 @@ export function MobileStatusSwipeRow({
 
   return (
     <div
-      className={cn('relative overflow-hidden bg-background', className)}
+      {...withClassName(stylex.props(styles.root), className)}
       style={{ touchAction: 'pan-y' }}
       data-status-swipe-row=""
     >
@@ -605,7 +687,7 @@ export function MobileStatusSwipeRow({
         <motion.div
           style={{ opacity: leadingOpacity }}
           aria-hidden={side !== 'leading'}
-          className="pointer-events-none absolute inset-y-0 left-0 z-0 flex"
+          {...stylex.props(styles.drawer, styles.leadingDrawer)}
         >
           <motion.button
             type="button"
@@ -614,18 +696,19 @@ export function MobileStatusSwipeRow({
             title={pinLabel}
             onClick={() => run(onTogglePin)}
             style={{ width: pinWidth }}
-            className={cn(
-              'flex shrink-0 flex-col items-center justify-center gap-1 bg-primary text-primary-foreground',
-              side === 'leading' && 'pointer-events-auto',
-              fullSwipe && 'items-end pe-5'
+            {...stylex.props(
+              styles.chip,
+              styles.chipPin,
+              side === 'leading' && styles.drawerOpen,
+              fullSwipe && styles.leadingFullSwipe
             )}
           >
             {isPinned ? (
-              <PinOff className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              <PinOff {...stylex.props(styles.chipGlyph)} strokeWidth={1.8} aria-hidden="true" />
             ) : (
-              <Pin className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
+              <Pin {...stylex.props(styles.chipGlyph)} strokeWidth={1.8} aria-hidden="true" />
             )}
-            <span className="text-[0.72rem] font-medium leading-none">{pinLabel}</span>
+            <span {...stylex.props(styles.chipLabel)}>{pinLabel}</span>
           </motion.button>
         </motion.div>
       ) : null}
@@ -633,7 +716,7 @@ export function MobileStatusSwipeRow({
         <motion.div
           style={{ opacity: trailingOpacity }}
           aria-hidden={side !== 'trailing'}
-          className="pointer-events-none absolute inset-y-0 right-0 z-0 flex flex-row-reverse"
+          {...stylex.props(styles.drawer, styles.trailingDrawer)}
         >
           {trailing.map((action, index) => {
             const Icon = iconOf(action.id);
@@ -647,15 +730,16 @@ export function MobileStatusSwipeRow({
                 title={label}
                 onClick={() => run(action.onSelect)}
                 style={{ width: index === 0 ? edgeWidth : innerWidth }}
-                className={cn(
-                  'flex shrink-0 flex-col items-center justify-center gap-1 overflow-hidden',
+                {...stylex.props(
+                  styles.chip,
+                  styles.chipClipped,
                   toneOf(action.id),
-                  side === 'trailing' && 'pointer-events-auto',
-                  index === 0 && fullSwipe && 'items-start ps-5'
+                  side === 'trailing' && styles.drawerOpen,
+                  index === 0 && fullSwipe && styles.trailingFullSwipe
                 )}
               >
-                <Icon className="h-5 w-5" strokeWidth={1.8} aria-hidden="true" />
-                <span className="text-[0.72rem] font-medium leading-none">{label}</span>
+                <Icon {...stylex.props(styles.chipGlyph)} strokeWidth={1.8} aria-hidden="true" />
+                <span {...stylex.props(styles.chipLabel)}>{label}</span>
               </motion.button>
             );
           })}
@@ -663,10 +747,7 @@ export function MobileStatusSwipeRow({
       ) : null}
       <motion.div
         style={{ x }}
-        className={cn(
-          'relative w-full bg-background shadow-[0_1px_0_0_hsl(var(--background)),0_-1px_0_0_hsl(var(--background))]',
-          liftAboveEdgeSwipeZone ? 'z-30' : 'z-10'
-        )}
+        {...stylex.props(styles.face, liftAboveEdgeSwipeZone ? styles.faceLifted : styles.faceBase)}
       >
         <div
           {...bindDrag()}

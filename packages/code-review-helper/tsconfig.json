@@ -12,5 +12,13 @@
     "types": ["node", "react", "react-dom", "vite/client"],
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*", "tests/**/*", ".storybook/**/*", "vite.config.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    ".storybook/**/*",
+    "stylex-options.ts",
+    "vite.config.ts",
+    "vite.standalone.config.ts",
+    "vitest.config.ts"
+  ]
 }

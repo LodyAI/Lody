@@ -1,8 +1,14 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { AvatarEditor } from '@/components/settings/avatar-editor';
 import { AvatarCropDialog } from '@/components/settings/avatar-crop-dialog';
 import { ChangePasswordButton } from '@/components/settings/change-password-button';
 import { LinkedAccountsList } from '@/components/settings/linked-accounts-list';
+const storyLayout = stylex.create({
+  frame: {
+    width: 'calc(var(--spacing) * 80)',
+  },
+});
 
 const noop = async () => {};
 
@@ -71,7 +77,7 @@ export const AvatarCropper: Story = {
 
 export const LinkedAccounts: Story = {
   render: () => (
-    <div className="w-80">
+    <div {...stylex.props(storyLayout.frame)}>
       <LinkedAccountsList accounts={mockAccounts} onConnect={async () => {}} />
     </div>
   ),
@@ -79,7 +85,7 @@ export const LinkedAccounts: Story = {
 
 export const LinkedAccountsAllConnected: Story = {
   render: () => (
-    <div className="w-80">
+    <div {...stylex.props(storyLayout.frame)}>
       <LinkedAccountsList
         accounts={[
           { id: 'a1', providerId: 'github' },
@@ -94,7 +100,7 @@ export const LinkedAccountsAllConnected: Story = {
 
 export const LinkedAccountsLoading: Story = {
   render: () => (
-    <div className="w-80">
+    <div {...stylex.props(storyLayout.frame)}>
       <LinkedAccountsList accounts={[]} loading />
     </div>
   ),
@@ -102,7 +108,7 @@ export const LinkedAccountsLoading: Story = {
 
 export const LinkedAccountsNoneBound: Story = {
   render: () => (
-    <div className="w-80">
+    <div {...stylex.props(storyLayout.frame)}>
       <LinkedAccountsList accounts={[]} />
     </div>
   ),

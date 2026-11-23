@@ -1,3 +1,4 @@
+import { control } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { hx } from './harness.tokens.stylex';
 
@@ -30,7 +31,7 @@ export const pairStyles = stylex.create({
   methodActive: {
     boxShadow: `${hx.highlight}, 0 0 0 1.5px ${hx.ink}, 0 10px 24px -12px rgb(0 0 0 / 0.25)`,
   },
-  methodDisabled: { opacity: 0.45 },
+  methodDisabled: { opacity: control.disabledOpacity },
   methodGlyph: {
     width: '44px',
     height: '44px',

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { motion, useReducedMotion } from 'framer-motion';
+import * as stylex from '@stylexjs/stylex';
 import type { CliRuntimeStartupStage, ElectronCliPhase, ElectronCliState } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { getIpcServices, onIpcEvent, sendIpc } from '@/lib/electron-ipc-client';
 import lodyLogo from '@/assets/lody-icon.png';
+import { onboardingLoadingSurface } from './onboarding-loading.surface';
 
 const STARTUP_STAGES: CliRuntimeStartupStage[] = [
   'bootstrap',
@@ -45,38 +46,38 @@ export function OnboardingLoadingView({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
-      className="relative z-10 flex flex-col items-center gap-8"
+      {...stylex.props(onboardingLoadingSurface.stack)}
     >
-      <div className="relative flex h-28 w-28 items-center justify-center">
+      <div {...stylex.props(onboardingLoadingSurface.markBox)}>
         <motion.div
           aria-hidden
           animate={{ scale: [1, 1.15, 1], opacity: [0.4, 0.15, 0.4] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute inset-0 rounded-full bg-primary/30 blur-2xl"
+          {...stylex.props(onboardingLoadingSurface.glow)}
         />
         <motion.div
           aria-hidden
           animate={{ scale: [1, 1.35, 1], opacity: [0.25, 0, 0.25] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
-          className="absolute inset-0 rounded-full border border-primary/40"
+          {...stylex.props(onboardingLoadingSurface.pulseRing)}
         />
         <motion.img
           src={lodyLogo}
           alt="Lody"
           animate={{ y: [0, -4, 0] }}
           transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
-          className="relative h-16 w-16 select-none rounded-2xl shadow-lg shadow-black/20"
+          {...stylex.props(onboardingLoadingSurface.logo)}
           draggable={false}
         />
       </div>
 
-      <div className="space-y-1.5 text-center">
-        <h2 className="text-xl font-semibold tracking-tight text-foreground">
+      <div {...stylex.props(onboardingLoadingSurface.copy)}>
+        <h2 {...stylex.props(onboardingLoadingSurface.title)}>
           {bypassed
             ? t('onboarding.loading.titleBypassed', 'Almost ready')
             : t('onboarding.loading.title', 'Preparing your workspace')}
         </h2>
-        <p className="text-sm text-muted-foreground">
+        <p {...stylex.props(onboardingLoadingSurface.subtitle)}>
           {bypassed ? (
             <Trans
               i18nKey="onboarding.loading.bypassHint"
@@ -91,7 +92,7 @@ export function OnboardingLoadingView({
         </p>
       </div>
 
-      <ul className="flex flex-col gap-2 text-sm">
+      <ul {...stylex.props(onboardingLoadingSurface.stages)}>
         {STARTUP_STAGES.map((s, i) => {
           const reached = i <= reachedIndex;
           const active = i === reachedIndex && phase !== 'running';
@@ -99,21 +100,23 @@ export function OnboardingLoadingView({
           return (
             <li
               key={s}
-              className={cn(
-                'flex items-center gap-3 transition-colors',
-                reached ? 'text-foreground' : 'text-muted-foreground/60'
+              {...stylex.props(
+                onboardingLoadingSurface.stage,
+                reached
+                  ? onboardingLoadingSurface.stageReached
+                  : onboardingLoadingSurface.stagePending
               )}
             >
               <motion.span
-                className={cn(
-                  'inline-flex h-2 w-2 shrink-0 rounded-full transition-colors',
+                {...stylex.props(
+                  onboardingLoadingSurface.dot,
                   active
                     ? stalledProbe || shouldReduceMotion
-                      ? 'bg-primary'
-                      : 'animate-pulse bg-primary'
+                      ? onboardingLoadingSurface.dotActive
+                      : onboardingLoadingSurface.dotPulsing
                     : reached
-                      ? 'bg-primary'
-                      : 'bg-muted-foreground/30'
+                      ? onboardingLoadingSurface.dotDone
+                      : onboardingLoadingSurface.dotPending
                 )}
                 data-onboarding-stalled-probe={stalledProbe ? '' : undefined}
                 animate={

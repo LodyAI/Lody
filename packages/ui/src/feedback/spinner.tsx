@@ -7,6 +7,8 @@ export type SpinnerSize = 'small' | 'medium' | 'large';
 
 export interface SpinnerProps extends Omit<ComponentProps<'svg'>, 'className'> {
   size?: SpinnerSize;
+  /** Overrides the turning box's named size: numbers are pixels; strings are CSS lengths. */
+  diameter?: string | number;
   /**
    * What a screen reader is told while it turns. A spinner beside a label that
    * already says "Saving…" states nothing, and passing `null` says so.
@@ -20,6 +22,10 @@ const SIZES = {
   medium: surface.spinnerMedium,
   large: surface.spinnerLarge,
 } as const;
+
+const dynamic = stylex.create({
+  diameter: (value: string | number) => ({ width: value, height: value }),
+});
 
 /**
  * The mark that says work is under way with no idea how long it will take.
@@ -41,10 +47,14 @@ const SIZES = {
  * box asymmetrically and turn the spin into an orbit.
  */
 export const Spinner = forwardRef<SVGSVGElement, SpinnerProps>(function Spinner(
-  { size = 'medium', label = 'Loading', className, ...rest },
+  { size = 'medium', diameter, label = 'Loading', className, ...rest },
   ref
 ) {
-  const box = stylex.props(surface.spinnerSpin, SIZES[size]);
+  const box = stylex.props(
+    surface.spinnerSpin,
+    SIZES[size],
+    diameter != null && dynamic.diameter(diameter)
+  );
   const sx = stylex.props(surface.spinner);
   return (
     <span

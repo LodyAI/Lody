@@ -1,6 +1,25 @@
 import { AlertCircle } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
+
+const styles = stylex.create({
+  mark: {
+    display: 'inline-flex',
+    width: 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 4)',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'calc(infinity * 1px)',
+    color: 'hsl(var(--status-warning) / 1)',
+  },
+  icon: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  item: {
+    marginBlockStart: { default: null, ':not(:last-child)': 0 },
+    marginBlockEnd: { default: null, ':not(:last-child)': 'calc(var(--spacing) * 0.5)' },
+  },
+});
 
 /**
  * The exclamation mark shown next to the control that fixes a save blocker.
@@ -10,9 +29,11 @@ import { cn } from '@/lib/utils';
 export function FieldIssueMark({
   messages,
   className,
+  xstyle,
 }: {
   messages: readonly string[];
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }) {
   if (messages.length === 0) return null;
   const label = messages.join(' ');
@@ -25,12 +46,9 @@ export function FieldIssueMark({
             role="img"
             aria-label={label}
             tabIndex={0}
-            className={cn(
-              'inline-flex size-4 shrink-0 items-center justify-center rounded-full text-status-warning',
-              className
-            )}
+            {...withClassName(stylex.props(styles.mark, xstyle), className)}
           >
-            <AlertCircle className="size-3.5" aria-hidden="true" />
+            <AlertCircle {...stylex.props(styles.icon)} aria-hidden="true" />
           </span>
         }
       />
@@ -38,9 +56,11 @@ export function FieldIssueMark({
         {messages.length === 1 ? (
           messages[0]
         ) : (
-          <ul className="space-y-0.5">
+          <ul>
             {messages.map((message) => (
-              <li key={message}>{message}</li>
+              <li key={message} {...stylex.props(styles.item)}>
+                {message}
+              </li>
             ))}
           </ul>
         )}
