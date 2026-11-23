@@ -3,6 +3,8 @@
 [`ci.yml`](ci.yml) runs static checks and affected package tests on pull requests,
 and full checks on main pushes and manual dispatch. Ordinary E2EE package tests
 remain in those suites.
+Tests run as one runner per group ([test groups](../../.agents/notes/implemented/testing/2026-09-26-ci-test-groups-and-pnpm-store-cache.md)),
+and every Lody typecheck uses tsgo ([typecheck decision](../../.agents/notes/implemented/testing/2026-11-23-ci-typecheck-tsgo.md)).
 
 [`conversation-acceptance.yml`](conversation-acceptance.yml) runs the Storybook
 hydration, history-header and scrolling browser regressions on manual dispatch.

@@ -68,6 +68,7 @@ catalog:
 ignoredBuiltDependencies:
   - node-pty
   - better-sqlite3
+  - cpu-features
 
 managePackageManagerVersions: true
 
@@ -210,7 +211,6 @@ onlyBuiltDependencies:
   - '@prisma/engines'
   - '@swc/core'
   - core-js
-  - cpu-features
   - electron
   - electron-winstaller
   - esbuild
