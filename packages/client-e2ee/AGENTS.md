@@ -89,6 +89,9 @@
   `lody-e2ee:<platform>:v1:entry-pins` from the caller's fixed `web` or `mobile`
   platform, never from preferences or server input. Wrappers inject passkey and
   commands. Secrets keep their existing wipe paths; this engine adds no persistence.
+- Recovery files carry and require the signed-in site's `recoveryServiceLocator`. Web may
+  default to its HTTP(S) page origin; other wrappers pass the site URL, never an account ID
+  or backend URL. No locator refuses as `disabled`.
 - `recoveryWorkspacesPort` serves the console's recovery port from that engine. It picks
   the file before any await, wipes it after the command, returns outcomes only, and
   answers once each workspace has a result, `Unconfirmed` included. Restore rows carry

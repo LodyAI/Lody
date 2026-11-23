@@ -1,7 +1,7 @@
 # 恢复 vault
 
-Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#同源网页恢复)
-Previously approved revision: [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复保险库整库换新)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复文件服务定位符)
+Previously approved revision: [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#同源网页恢复)
 Translation: current
 
 [English](recovery-vault.md)
@@ -20,6 +20,15 @@ Translation: current
 包装密钥，salt 为 vaultId，域为 `lody-e2ee/vault-v1/<purpose>\0`，再用
 XChaCha20-Poly1305 包装 V。文件提供解锁能力，不是生成未来工作区身份的种子；
 文件无法重建已经丢失的云端密文。
+
+`serviceLocator` 标明文件属于哪个服务：客户端已登录的产品站点的规范 origin，Lody Cloud 为
+`https://lody.ai`，自托管部署为规范化后的 `SITE_URL` origin（协议、小写主机名和非默认端口；
+必须是 HTTPS，仅环回开发主机允许 HTTP）。桌面端、移动端和 Web 写入同一个值，因此任一端创建的文件
+在其他端都能打开。它从不是后端部署 URL（站点不变时它也可能变化），也不是账号 ID。打开文件时，
+把文件里的 `serviceLocator` 与已登录客户端自身的值做精确比较，不一致就在读取任何 vault 条目之前
+停止；客户端从不连接文件里的值。没有可用站点 origin 的客户端不提供恢复。写着其他值的文件，包括
+早期开发时写入 Convex 部署 URL 或账号 ID 的文件，一律拒绝且不迁移，因为 E2EE 尚未上线生产。
+更换站点 origin 的部署需要用户更换恢复文件。owner 于 2026-11-23 批准了这一绑定（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#恢复文件服务定位符)）。
 
 其他包装入口可以包装同一个 V，每个 passkey 一个，前提是真实 WebAuthn ceremony 满足
 [ceremony 约定](#passkey-解锁)：注册返回 PRF `enabled: true`，并且一次带用户验证的
@@ -343,6 +352,12 @@ Lab 合成保护不代表生产钥匙串。登录控制读取，恢复文件控�
 - core 和 Lab 之外没有包使用保险库。[#2125](https://github.com/LodyAI/Lody/pull/2125) 是未合入的 draft PR，且有冲突。
 
 已运行：[`recovery-vault-vector.json`](../../packages/e2ee-core/test/recovery-vault-vector.json) 由独立生成器写出，固定恢复文件，file-wrap、prf-wrap、workspace-entry 和索引密文，`formatVersion: 1` 私钥包和 passkey 索引，并包含必须拒绝的输入。`recovery-package.test.ts` 分别用恢复文件和 passkey PRF 打开它。向量里的 nonce 固定只是为了可复现。
+
+2026-11-23 仅针对合成服务核查并运行：`openRecoveryVault` 接收调用方的定位符，文件定位符不同时在
+读取任何存储之前以 `locator-mismatch` 拒绝（`recovery-package.test.ts`）。各宿主用
+[`recoveryServiceLocator`](../../packages/e2ee-client/src/recovery-locator.ts) 得出该值；client-e2ee、
+Electron 和移动端的恢复测试能打开其他宿主路径为同一站点写入的文件，并在不读取 vault 的情况下拒绝
+staging、Convex URL 和账号 ID 文件。没有运行已部署服务或真机。
 
 外部来源：[WebAuthn Level 3](https://www.w3.org/TR/webauthn-3/) 用于 `enabled`、注册结果可选、用户验证 PRF、
 `user.id` 覆盖和 RP 范围；[Apple](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-swift.struct)
