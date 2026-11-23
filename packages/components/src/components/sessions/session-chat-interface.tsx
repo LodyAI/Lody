@@ -3501,7 +3501,7 @@ export const SessionChatInterface = memo(
 
     /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
     const sessionHistory = sessionTailHistory;
-    const turnFacts = useSessionTurnFacts(conversationView);
+    const turnFacts = useSessionTurnFacts(conversationView, isVisible && !hideMessageArea);
     const conversationIndexRows = useConversationIndexRows(conversationView, {
       includeSummary: false,
     });
