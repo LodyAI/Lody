@@ -269,38 +269,9 @@ export interface SendSessionMessageReceipt {
 }
 
 export interface PendingInteractionSummary {
-  readonly kind: "permission" | "ask_user_question";
   readonly requestId: string;
-}
-
-export interface ElicitationOption {
-  readonly label: string;
-  readonly description?: string;
-  readonly preview?: string;
-}
-
-export interface ElicitationQuestion {
-  readonly answerKey: string;
-  readonly id?: string;
-  readonly header: string;
-  readonly question: string;
-  readonly options: readonly ElicitationOption[];
-  readonly multiSelect: boolean;
-  readonly allowCustomAnswer?: boolean;
-  readonly isSecret?: boolean;
-}
-
-export interface PendingQuestionPrompt {
-  readonly requestId: string;
-  readonly source: "lody" | "claude" | "codex";
-  readonly allowCustomAnswer: boolean;
-  readonly questions: readonly ElicitationQuestion[];
-  readonly autoResolveAt?: number;
-}
-
-export interface AnswerQuestionRequest {
-  readonly requestId: string;
-  readonly answers: Readonly<Record<string, string | readonly string[]>>;
+  readonly kind: "permission" | "elicitation";
+  readonly title?: string;
 }
 
 export interface LodyQueryDescriptor<S extends PluginScope, TInput, TOutput> {
@@ -459,8 +430,6 @@ export interface SessionDetail extends SessionSummary {
     readonly nextCheckAt?: number;
   };
   readonly queuedCount: number;
-  readonly pendingPermission: boolean;
-  readonly pendingQuestion?: PendingQuestionPrompt;
   readonly recentTurns: readonly SessionTurnSummary[];
 }
 
@@ -583,7 +552,6 @@ export interface MachineHostEventMap {
     readonly session: SessionRef;
     readonly project?: ProjectRef;
     readonly interaction: PendingInteractionSummary;
-    readonly question?: PendingQuestionPrompt;
   };
 }
 
@@ -608,7 +576,7 @@ export interface ClientHostEventMap extends MachineHostEventMap {
     readonly workspace: WorkspaceRef;
     readonly session: SessionRef;
     readonly requestId: string;
-    readonly kind: "permission" | "ask_user_question";
+    readonly kind: "permission" | "elicitation";
   };
   readonly "ui.command.invoked": {
     readonly workspace: WorkspaceRef;

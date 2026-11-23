@@ -65,7 +65,7 @@ Lody is an AI-native multi-Agent workspace spanning local and remote machines, D
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Machine Owner**            | Full authority over the machine daemon: approves/installs/enables/disables/removes plugins, approves `plugin_proposal` cards targeting that machine, configures `machine` secrets, and executes `'machine'`-scoped plugin handlers.                          |
 | **Workspace Collaborator**   | May run Desktop, Web, or Mobile client UI for trusted `clientDigest` bundles and invoke `'project'` / `'session'` handlers (and rooted workflow events) ONLY on machines/projects granted via `MachineSharing` (in E2EE) or workspace membership (non-E2EE). |
-| **Workspace Guest (`read`)** | Read-only observer. Views inline `<= 16 KiB` persisted history outputs and authorized `lodyQueries` / snapshots, but **MUST NOT** trigger dynamic `machine` plugin execution or `answerQuestion` writes in E2EE workspaces.                                  |
+| **Workspace Guest (`read`)** | Read-only observer. Views inline `<= 16 KiB` persisted history outputs and authorized `lodyQueries` / snapshots, but **MUST NOT** trigger dynamic `machine` plugin execution or session mutations in E2EE workspaces.                                        |
 | **Coding Agent (ACP / MCP)** | Invokes enabled `defineTool` and plugin `mcpServers` tools, and MAY call `lody_plugin` (`list`, `inspect`, `diagnostics`, `scaffold`, `propose_*`). **MUST NOT** bypass human confirmation to activate executable plugin code.                               |
 
 ---
@@ -114,7 +114,7 @@ flowchart TB
 
 - **Zero In-Daemon Guest Execution:** Neither `manifest.machine`, `manifest.mcpServers`, nor `manifest.acpProviders` SHALL ever be `import()`ed or evaluated inside the main daemon Node process.
 - **Zero-Subprocess Client/Asset Plugins:** Plugins declaring `client`, `themes`, `styles`, `assets`, `config`, or `skills` without `machine` MUST run with `0` spawned `PluginHost` child processes.
-- **Write-Path Singularity:** Plugins read rich typed queries and raw document snapshots freely, but all durable workspace/session mutations MUST flow through Kernel commands (`sessions.*`, `answerQuestion`, `HistoryWriter`, `config.set`).
+- **Write-Path Singularity:** Plugins read rich typed queries and raw document snapshots freely, but all durable workspace/session mutations MUST flow through Kernel commands (`sessions.*`, `HistoryWriter`, `config.set`).
 
 ### 3.3 Cross-Device Execution Topologies
 
@@ -191,7 +191,7 @@ Conforming hosts MUST expose `@lody/plugin-sdk`, `@lody/plugin-sdk/client`, `@lo
 Conforming hosts MUST provide a first-class, push-based event bus on both `ClientPluginRegistry.events.on` and `MachinePluginRegistry.events.on` so plugins never resort to DOM mutation observers or Session status polling:
 
 1. **Canonical Session & Agent Lifecycle Events (`MachineHostEventMap` — available on BOTH machine and client):**
-   - `session.created`, `session.status.changed`, `session.turn.started`, `session.turn.completed` (including `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` and `durationMs`), `session.tool.started`, `session.tool.completed` (`ObservedToolCall`), and `session.waiting_input` (`PendingInteractionSummary` + `PendingQuestionPrompt`).
+   - `session.created`, `session.status.changed`, `session.turn.started`, `session.turn.completed` (including `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` and `durationMs`), `session.tool.started`, `session.tool.completed` (`ObservedToolCall`), and `session.waiting_input` (`PendingInteractionSummary`: `{ requestId, kind: "permission" | "elicitation", title? }`).
 2. **Client UI Interaction Events (`ClientHostEventMap` — client-only):**
    - `ui.message.submitted`, `ui.session.switched`, `ui.interaction.resolved`, and `ui.command.invoked`.
 3. **Delivery, Isolation & Teardown Rules:**
@@ -267,14 +267,15 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
 3. **Detachment, Deep Immutability & Selector Memoization:** Every materialized `RawDocumentSnapshot` (`{ schemaVersion, revision, doc }`) MUST be detached from live CRDT handles and deeply frozen (`Object.freeze` in development/strict mode) while `HistoryWriter` and Kernel commands remain the sole write path ([`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)). `useLodySnapshot(target, selector, isEqual)` re-renders ONLY when `selector(snapshot)` changes under `isEqual` (default `Object.is`).
 4. **Redaction & Authorization:** Snapshots apply the exact same workspace/E2EE visibility gates as `lodyQueries` and strip keychain secrets, auth tokens, E2EE KEKs/signing keys, and other plugins' `businessKey` values prior to freezing.
 
-### 7.3 Session Orchestration, Idempotency & `answerQuestion`
+### 7.3 Session Orchestration, Idempotency & Host-Exclusive Interaction Resolution
 
 1. **Atomic `(requestId, businessKey)` `sessions.create` Receipt:**
    - Keyed by `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` in durable storage.
    - Replaying the identical normalized payload returns the original `SessionRef` even after Session archive; replaying `requestId` with a modified payload rejects with `idempotency_conflict`.
    - A new `requestId` targeting an already-active (non-archived) `businessKey` rejects with `business_key_conflict`; archiving the Session releases `businessKey` while retaining the `requestId` receipt.
-2. **`sessions.answerQuestion` vs Kernel Permission Exclusivity:**
-   - `answerQuestion` resolves `ask_user_question` prompts via `WorkspaceWriter.respondSessionPermission` ([`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)) and MUST reject kernel tool `permission` request IDs with `forbidden`.
+2. **Host-Exclusive Permission & Elicitation Settlement:**
+   - Pending user interactions (`kind: "permission" | "elicitation"`) are exposed to plugins purely as read-only state (`SessionSummary.pendingInteraction`) and lifecycle events (`session.waiting_input`, `ui.interaction.resolved`).
+   - Submitting outcomes through `WorkspaceWriter.respondSessionPermission` ([`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts), [`ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts) — including provider-specific elicitation schemas and `isSecret` inputs) MUST remain exclusively owned by Lody's native host UI; plugins MUST NOT expose or invoke raw permission/elicitation response mutators.
 
 ---
 

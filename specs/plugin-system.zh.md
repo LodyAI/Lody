@@ -65,7 +65,7 @@ Lody 是横跨本地与远程多机器、同时服务 Desktop、Web 与 Mobile �
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **机器所有者（Machine Owner）**    | 拥有该机器守护进程的完整控制权：审批 `plugin_proposal` 卡片、安装/启用/禁用/卸载插件、配置 `machine` 级密钥，并调用 `'machine'` 作用域接口。                                                          |
 | **工作区协作者（Collaborator）**   | 可在 Desktop、Web 或 Mobile 端运行已获信任 `clientDigest` 的前端插件，并仅在获得 `MachineSharing`（E2EE 下）或工作区成员授权的机器与绑定项目上调用 `'project'` / `'session'` 处理器与有根工作流事件。 |
-| **工作区只读访客（Guest `read`）** | 只读观察者。可查看历史记录中 `<= 16 KiB` 的内联快照及已授权 `lodyQueries` / 快照，但在 E2EE 工作区中 **MUST NOT** 触发动态 `machine` 插件执行或 `answerQuestion` 写入。                               |
+| **工作区只读访客（Guest `read`）** | 只读观察者。可查看历史记录中 `<= 16 KiB` 的内联快照及已授权 `lodyQueries` / 快照，但在 E2EE 工作区中 **MUST NOT** 触发动态 `machine` 插件执行或会话写操作。                                           |
 | **编码 Agent（ACP / MCP）**        | 可调用已启用的 `defineTool` 与插件 `mcpServers` 工具，并 **MAY** 调用 `lody_plugin`（`list`、`inspect`、`diagnostics`、`scaffold`、`propose_*`），但 **MUST NOT** 绕过人类确认直接启用可执行插件。    |
 
 ---
@@ -114,7 +114,7 @@ flowchart TB
 
 - **主守护进程零插件代码执行：** `manifest.machine`、`manifest.mcpServers` 与 `manifest.acpProviders` 均 **MUST NOT** 在主守护进程内被 `import()` 或执行。
 - **纯前端/资源插件零子进程：** 仅声明 `client`、`themes`、`styles`、`assets`、`config` 或 `skills` 而未声明 `machine` 的插件 **MUST** 以 `0` 个 `PluginHost` 子进程运行。
-- **唯一写入口：** 插件可自由读取类型化查询与只读原始文档快照，但一切持久化工作区/会话写操作 **MUST** 经由内核命令（`sessions.*`、`answerQuestion`、`HistoryWriter`、`config.set`）完成。
+- **唯一写入口：** 插件可自由读取类型化查询与只读原始文档快照，但一切持久化工作区/会话写操作 **MUST** 经由内核命令（`sessions.*`、`HistoryWriter`、`config.set`）完成。
 
 ### 3.3 跨设备运行拓扑规范
 
@@ -191,7 +191,7 @@ flowchart TB
 合规宿主 **MUST** 在 `ClientPluginRegistry.events.on` 与 `MachinePluginRegistry.events.on` 两端同时提供一等公民的推送式事件总线，使插件无需借助 DOM 监听或轮询 Session 状态即可构建实时响应逻辑：
 
 1. **规范化会话与 Agent 生命周期事件（`MachineHostEventMap` —— 机器侧与客户端共享）：**
-   - `session.created`、`session.status.changed`、`session.turn.started`、`session.turn.completed`（含 `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` 与 `durationMs`）、`session.tool.started`、`session.tool.completed`（携带归一化 `ObservedToolCall`）以及 `session.waiting_input`（携带 `PendingInteractionSummary` 与 `PendingQuestionPrompt`）。
+   - `session.created`、`session.status.changed`、`session.turn.started`、`session.turn.completed`（含 `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` 与 `durationMs`）、`session.tool.started`、`session.tool.completed`（携带归一化 `ObservedToolCall`）以及 `session.waiting_input`（携带轻量 `PendingInteractionSummary`：`{ requestId, kind: "permission" | "elicitation", title? }`）。
 2. **客户端本地交互事件（`ClientHostEventMap` —— 仅客户端）：**
    - `ui.message.submitted`、`ui.session.switched`、`ui.interaction.resolved` 与 `ui.command.invoked`。
 3. **投递、隔离与回收规则：**
@@ -267,14 +267,15 @@ flowchart TB
 3. **脱离底层句柄、深度只读冻结与 Selector 记忆化：** 物化后的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 与底层可变 CRDT 句柄分离并执行深度只读冻结（`Object.freeze`），一切写操作仍严格经由内核命令与 `HistoryWriter` 完成（[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)）；`useLodySnapshot(target, selector, isEqual)` 仅在 `selector(snapshot)` 变化时触发组件重渲染。
 4. **安全脱敏与一致授权：** 快照严格复用与 `lodyQueries` 相同的工作区及 E2EE 可见性门禁，并在冻结前剥离钥匙串密钥、认证令牌、E2EE KEK/签名私钥以及外部插件私有 `businessKey`。
 
-### 7.3 会话编排、幂等回执与原地回答追问（`answerQuestion`）
+### 7.3 会话编排、幂等回执与宿主独占交互结算
 
 1. **原子化 `(requestId, businessKey)` `sessions.create` 幂等回执：**
    - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 持久化。
    - 重放完全相同的归一化请求（即使目标 Session 后来已归档）始终返回原始 `SessionRef`；复用相同 `requestId` 但篡改参数时拒绝 `idempotency_conflict`。
    - 新 `requestId` 若命中尚未归档的同 `businessKey` 活跃会话则拒绝 `business_key_conflict`；Session 归档后释放 `businessKey` 预留，但永久保留原 `requestId` 回执。
-2. **`sessions.answerQuestion` 与内核权限弹窗独占边界：**
-   - `answerQuestion` 经 `WorkspaceWriter.respondSessionPermission`（[`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)）提交 `ask_user_question` 追问答案，对内核工具审批 `permission` 请求 ID **MUST** 一律以 `forbidden` 拒绝。
+2. **宿主独占权限审批与表单追问结算（Permission & Elicitation Exclusivity）：**
+   - 待处理用户交互（`kind: "permission" | "elicitation"`）仅作为只读状态摘要（`SessionSummary.pendingInteraction`）与生命周期事件（`session.waiting_input`、`ui.interaction.resolved`）向插件广播。
+   - 经 `WorkspaceWriter.respondSessionPermission`（[`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts)，含各 Provider 表单差异与 `isSecret` 敏感输入项）提交的交互结算 **MUST** 由 Lody 宿主原生组件独占完成；SDK **MUST NOT** 向插件暴露直接提交权限或追问答案的写接口。
 
 ---
 

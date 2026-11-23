@@ -261,13 +261,11 @@ export async function verifyClientTypeSafety(
   });
   if (detailRead.status === "ready") {
     const turnCount: number = detailRead.data.recentTurns.length;
-    const questionSource: "lody" | "claude" | "codex" | undefined =
-      detailRead.data.pendingQuestion?.source;
-    const answerKey: string | undefined =
-      detailRead.data.pendingQuestion?.questions[0]?.answerKey;
     void turnCount;
-    void questionSource;
-    void answerKey;
+    // @ts-expect-error Provider-specific elicitation internals (`pendingQuestion`) stay host-private.
+    void detailRead.data.pendingQuestion;
+    // @ts-expect-error Redundant `pendingPermission` was unified into `SessionSummary.pendingInteraction`.
+    void detailRead.data.pendingPermission;
   }
 
   const byKeyRead = useLodyQuery(project, lodyQueries.sessions, {
@@ -280,7 +278,7 @@ export async function verifyClientTypeSafety(
     const key: string | undefined = first?.businessKey;
     const rootOpener: string | undefined = first?.openedByRootSessionId;
     const roleId: string | undefined = first?.agentRoleId;
-    const pendingKind: "permission" | "ask_user_question" | undefined =
+    const pendingKind: "permission" | "elicitation" | undefined =
       first?.pendingInteraction?.kind;
     void key;
     void rootOpener;
@@ -307,10 +305,8 @@ export async function verifyClientTypeSafety(
     delivery: "queue",
   });
   void sendReceipt.disposition;
-  await lody.sessions.answerQuestion(session, {
-    requestId: "req-1",
-    answers: { rolloutTarget: "Canary shard (5%)" },
-  });
+  // @ts-expect-error Interactive permission & elicitation responses stay exclusively host-owned.
+  void lody.sessions.answerQuestion;
   await lody.sessions.requestStop(session);
   lody.panels.openSession(session, "issues", { identifier: "LODY-101" });
   lody.screens.open(workspace, "swarm-hub");

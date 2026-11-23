@@ -11,137 +11,56 @@ import {
   type SidebarItemProps,
   type SidebarViewProps,
 } from "@lody/plugin-sdk/client";
-import { Alert, Badge, Button, Card, Input } from "@lody/ui";
-import { useState } from "react";
+import { Alert, Badge, Button, Card } from "@lody/ui";
 
 /**
  * Layer 1 (`sidebar.sessionRow.decorate`): Composable row-level enhancement.
- * Adds a `? Input` pill and an interactive Claude Code-style hover popover to answer pending
- * `ask_user_question` prompts in place without switching out of the active Session — and works
- * automatically across both Lody's built-in sidebar and custom `<SessionRow />` sidebar views!
+ * Surfaces a `? Input` / `Approval` pill and a hover summary for sessions paused on user
+ * interaction, jumping directly into Lody's native permission/elicitation sheet on click — and
+ * works automatically across both Lody's built-in sidebar and custom `<SessionRow />` views!
  */
-function WaitingQuestionBadge({ session }: SessionRowSlotProps) {
+function WaitingInteractionBadge({ session }: SessionRowSlotProps) {
   if (!session.pendingInteraction) return null;
   return (
     <Badge
       tone={
-        session.pendingInteraction.kind === "ask_user_question"
+        session.pendingInteraction.kind === "elicitation"
           ? "running"
           : "warning"
       }
     >
-      {session.pendingInteraction.kind === "ask_user_question"
+      {session.pendingInteraction.kind === "elicitation"
         ? "? Input"
         : "Approval"}
     </Badge>
   );
 }
 
-function HoverQuickAnswerBody({ session }: { session: SessionSummary }) {
+function HoverInteractionPreviewCard({ session }: SessionRowSlotProps) {
   const lody = useLody();
-  const detail = useLodyQuery(session.session, lodyQueries.sessionDetail, {
-    recentTurnLimit: 1,
-  });
-  const [step, setStep] = useState(0);
-  const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
-  const [customAnswer, setCustomAnswer] = useState("");
-
-  if (detail.status !== "ready" || !detail.data.pendingQuestion) {
-    return <div>Loading question…</div>;
-  }
-
-  const prompt = detail.data.pendingQuestion;
-  const current = prompt.questions[step] ?? prompt.questions[0];
-  if (!current) return null;
-
-  const chooseAnswer = (value: string) => {
-    const nextAnswers = { ...draftAnswers, [current.answerKey]: value };
-    setDraftAnswers(nextAnswers);
-    if (step < prompt.questions.length - 1) {
-      setStep((index) => index + 1);
-      return;
-    }
-    void lody.sessions.answerQuestion(session.session, {
-      requestId: prompt.requestId,
-      answers: nextAnswers,
-    });
-  };
-
+  if (!session.pendingInteraction) return null;
   return (
     <Card.Root>
       <Card.Header>
         <Card.Title>{session.title}</Card.Title>
-        {prompt.questions.length > 1 && (
-          <div>
-            <Button
-              size="mini"
-              variant="ghost"
-              disabled={step === 0}
-              onClick={() => setStep((index) => Math.max(0, index - 1))}
-            >
-              Prev
-            </Button>
-            <span>
-              {step + 1}/{prompt.questions.length}
-            </span>
-            <Button
-              size="mini"
-              variant="ghost"
-              disabled={step >= prompt.questions.length - 1}
-              onClick={() =>
-                setStep((index) =>
-                  Math.min(prompt.questions.length - 1, index + 1),
-                )
-              }
-            >
-              Next
-            </Button>
-          </div>
-        )}
       </Card.Header>
-      <div>
-        <Card.Description>{current.header}</Card.Description>
-        <div>{current.question}</div>
-        <div>
-          {current.options.map((option) => (
-            <Button
-              key={option.label}
-              size="small"
-              variant={
-                draftAnswers[current.answerKey] === option.label
-                  ? "primary"
-                  : "secondary"
-              }
-              onClick={() => chooseAnswer(option.label)}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-        {(current.allowCustomAnswer ?? prompt.allowCustomAnswer) && (
-          <Card.Footer>
-            <Input
-              size="small"
-              value={customAnswer}
-              placeholder="Or type your own answer…"
-              onChange={(event) => setCustomAnswer(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && customAnswer.trim()) {
-                  chooseAnswer(customAnswer.trim());
-                  setCustomAnswer("");
-                }
-              }}
-            />
-          </Card.Footer>
-        )}
-      </div>
+      <Card.Description>
+        {session.pendingInteraction.title ??
+          (session.pendingInteraction.kind === "elicitation"
+            ? "Agent is waiting for your input."
+            : "Agent is waiting for tool approval.")}
+      </Card.Description>
+      <Card.Footer>
+        <Button
+          size="small"
+          variant="primary"
+          onClick={() => lody.sessions.open(session.session)}
+        >
+          Open Session to Respond
+        </Button>
+      </Card.Footer>
     </Card.Root>
   );
-}
-
-function HoverQuickAnswerCard({ session }: SessionRowSlotProps) {
-  if (session.pendingInteraction?.kind !== "ask_user_question") return null;
-  return <HoverQuickAnswerBody session={session} />;
 }
 
 /**
@@ -225,7 +144,7 @@ function SwarmHubScreen({ workspace }: ScreenProps) {
 
 /**
  * Layer 3 (`sidebar.views.add`): Paseo-style pure custom sidebar view over raw `lodyQueries.sessions`
- * (`openedByRootSessionId`, `agentRoleId`). Rendering `<SessionRow />` composes `HoverQuickAnswerCard`!
+ * (`openedByRootSessionId`, `agentRoleId`). Rendering `<SessionRow />` composes `HoverInteractionPreviewCard`!
  */
 function SwarmTreeSidebarView({ workspace, activeSession }: SidebarViewProps) {
   const lody = useLody();
@@ -294,9 +213,9 @@ function SwarmTreeSidebarView({ workspace, activeSession }: SidebarViewProps) {
 
 export default defineClientPlugin((lody) => {
   lody.sidebar.sessionRow.decorate({
-    id: "hover-quick-answer",
-    trailing: WaitingQuestionBadge,
-    hoverCard: HoverQuickAnswerCard,
+    id: "hover-pending-interaction",
+    trailing: WaitingInteractionBadge,
+    hoverCard: HoverInteractionPreviewCard,
   });
 
   lody.sidebar.headerItems.add({

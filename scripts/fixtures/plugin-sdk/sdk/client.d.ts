@@ -9,15 +9,12 @@ import {
   type AcpToolKind,
   type AgentProviderSummary,
   type AgentRoleSummary,
-  type AnswerQuestionRequest,
   type AttachmentItem,
   type AttachmentSnapshot,
   type AttachmentSourceDescriptor,
   type ClientHostEventMap,
   type ClientHostEventType,
   type CreateSessionRequest,
-  type ElicitationOption,
-  type ElicitationQuestion,
   type FilePreviewEntry,
   type InstalledPluginSummary,
   type LodyQueryDescriptor,
@@ -30,7 +27,6 @@ import {
   type ObservedToolCall,
   type ObservedToolLocation,
   type PendingInteractionSummary,
-  type PendingQuestionPrompt,
   type PluginCallError,
   type PluginCallErrorCode,
   type PluginScope,
@@ -72,12 +68,9 @@ export {
   type AcpToolKind,
   type AgentProviderSummary,
   type AgentRoleSummary,
-  type AnswerQuestionRequest,
   type ClientHostEventMap,
   type ClientHostEventType,
   type CreateSessionRequest,
-  type ElicitationOption,
-  type ElicitationQuestion,
   type FilePreviewEntry,
   type InstalledPluginSummary,
   type LodyQueryDescriptor,
@@ -89,7 +82,6 @@ export {
   type ObservedToolCall,
   type ObservedToolLocation,
   type PendingInteractionSummary,
-  type PendingQuestionPrompt,
   type PluginCallError,
   type PluginCallErrorCode,
   type PluginScope,
@@ -468,10 +460,6 @@ export interface LodyClient {
       session: SessionRef,
       request: SendSessionMessageRequest,
     ): Promise<SendSessionMessageReceipt>;
-    answerQuestion(
-      session: SessionRef,
-      request: AnswerQuestionRequest,
-    ): Promise<void>;
     requestStop(session: SessionRef): Promise<void>;
     requestArchive(session: SessionRef): Promise<void>;
   };
