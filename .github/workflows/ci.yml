@@ -84,13 +84,19 @@ jobs:
         run: node --test .github/scripts/*.test.mjs
 
       - name: Check document maintenance
+        env:
+          IS_STABLE_PROMOTION: ${{ github.event_name == 'pull_request' && github.base_ref == 'release' && github.head_ref == 'main' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # Gates apply to files this PR changed, so compare against the main commit
-            # the checked-out merge commit was built on (its first parent), not the
-            # possibly stale pull_request.base.sha. The shallow checkout still records
-            # the parent ids; fetch only that commit when not already local.
-            base="$(git cat-file -p HEAD | sed -n 's/^parent //p' | head -n 1)"
+            # Ordinary PRs compare with the merge's target parent. Stable promotion
+            # carries already-integrated main history, so check only changes the
+            # merge adds to its source parent instead of reclassifying old notes.
+            parent=1
+            if [ "$IS_STABLE_PROMOTION" = "true" ]; then
+              parent=2
+            fi
+            base="$(git cat-file -p HEAD | sed -n 's/^parent //p' | sed -n "${parent}p")"
+            test -n "$base"
             git cat-file -e "${base}^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"
             pnpm run docs check --base "$base"
           else

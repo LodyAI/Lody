@@ -495,6 +495,7 @@ export function useLocalProjectsAdmin(
         shell: resolveWorktreeSetupShellForPlatform(entry.machine.os),
         project: entry.project,
         sharedWithTeam: sharingUpdate?.desired ?? access?.sharedWithTeam ?? false,
+        machineSharedWithTeam: accessByMachineId.get(entry.machineId)?.sharedWithTeam ?? false,
         conversationCount: conversationCountByKey.get(entry.key) ?? 0,
         // Keep the control locked until the reactive query confirms the write.
         // This prevents a second toggle from racing a delayed first query result.

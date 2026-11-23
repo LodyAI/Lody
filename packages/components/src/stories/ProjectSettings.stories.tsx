@@ -207,13 +207,21 @@ function StoryWrapper({
         initialProjectKey={initialProjectKey}
         onSharedWithTeamChange={async (row, sharedWithTeam) => {
           setCurrentSections((prev) =>
-            prev.map((section) => ({
-              ...section,
-              rows: section.rows.map((current) =>
-                current.key === row.key ? { ...current, sharedWithTeam } : current
-              ),
-            }))
+            prev.map((section) =>
+              section.machineId !== row.machineId
+                ? section
+                : {
+                    ...section,
+                    sharedWithTeam: sharedWithTeam ? true : section.sharedWithTeam,
+                    rows: section.rows.map((current) =>
+                      current.key === row.key ? { ...current, sharedWithTeam } : current
+                    ),
+                  }
+            )
           );
+        }}
+        onOpenMachineSettings={(machineId) => {
+          console.info('Open machine settings', machineId);
         }}
         addableMachines={addableMachines}
         onAddLocalProject={(machineId) => {
