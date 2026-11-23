@@ -74,6 +74,10 @@ export class MachineRuntime {
         requester.executionUserId
       );
     }
+    if (request.method === 'session/history-write') {
+      if (!context?.authority || !context.requester) throw new Error('e2ee_feature_requester');
+      return this.requireHandler().handleLocalMachineRpc(request, context.signal, context);
+    }
     const target = e2eeFeatureTarget(request).kind;
     if (target === 'session' || target === 'project') {
       if (!context?.requester) throw new Error('e2ee_feature_requester');

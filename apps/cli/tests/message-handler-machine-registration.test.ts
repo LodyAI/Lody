@@ -249,6 +249,7 @@ describe('MessageHandler machine registration', () => {
               e2eeSessionFork: 1,
               e2eeSessionEditAndResend: 1,
               e2eeRemoteControl: 1,
+              e2eeRoostHistory: 1,
             }
           : {}),
         previewControl: 1,

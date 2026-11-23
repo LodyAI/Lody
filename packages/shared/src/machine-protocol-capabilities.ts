@@ -34,6 +34,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   e2eeSessionFork: 'e2eeSessionFork',
   e2eeSessionEditAndResend: 'e2eeSessionEditAndResend',
   e2eeRemoteControl: 'e2eeRemoteControl',
+  e2eeRoostHistory: 'e2eeRoostHistory',
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
@@ -90,6 +91,7 @@ export const E2EE_SESSION_FORK_PROTOCOL_VERSION = 1;
 /** Encrypted feature RPC accepts `session/edit-and-resend` from the machine owner. */
 export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
 /** Encrypted feature RPC accepts `E2EE_REMOTE_CONTROL_METHODS` (`e2ee-rpc.ts`). */
+export const E2EE_ROOST_HISTORY_PROTOCOL_VERSION = 1;
 export const E2EE_REMOTE_CONTROL_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 

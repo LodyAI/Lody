@@ -62,6 +62,7 @@ const projectRead = { lane: 'read', scope: 'project' } as const;
 const sessionControl = { lane: 'write', scope: 'session', remoteControl: true } as const;
 export const E2EE_RPC_POLICIES = {
   'session/history-read': sessionRead,
+  'session/history-write': { lane: 'write', scope: 'session' },
   'session/live-status': sessionRead,
   'code-collab/open-diff-manifest': sessionRead,
   'code-collab/read-blob': sessionRead,

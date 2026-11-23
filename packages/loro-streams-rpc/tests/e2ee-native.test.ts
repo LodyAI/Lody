@@ -880,6 +880,50 @@ it.each(['member', 'guest'] as const)(
         reopened.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
       )
     ).toEqual(result);
+    const write = E2eeFeatureInputSchema.parse({
+      requestId: 'ae'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'session/history-write',
+        params: {
+          sessionId: f.input.sessionId,
+          operation: 'accept_input',
+          payload: { entry: { id: 'test-turn', role: 'user', e2eeIntent: 'synthetic' } },
+        },
+      },
+    });
+    if (role === 'guest') {
+      await expect(Effect.runPromise(sender.prepareFeature(write))).rejects.toThrow();
+    } else {
+      const prepared = await Effect.runPromise(sender.prepareFeature(write));
+      const opened = await Effect.runPromise(
+        f.receiver.openFeature(f.machineId, prepared.frameHex)
+      );
+      if (!opened) throw new Error('Missing encrypted write');
+      expect(opened.input).toEqual(write);
+      const result = {
+        ok: true as const,
+        result: {
+          type: 'session/history-write_response' as const,
+          operation: 'accept_input' as const,
+          sessionId: SessionIdSchema.parse(f.input.sessionId),
+          success: true,
+          historyCount: 1,
+          historyRevision: 1,
+          historyChange: null,
+          result: { status: 'accepted', turnId: 'test-turn', active: true },
+        },
+      };
+      const frames = await Effect.runPromise(
+        f.receiver.sealFeatureResult(f.machineId, opened, result)
+      );
+      expect(
+        await Effect.runPromise(
+          sender.acceptFeatureResponse(write, Buffer.from(frames[0]!).toString('hex'))
+        )
+      ).toEqual(result);
+    }
     for (const request of [
       { method: 'machine/status' as const, params: { includeDisk: true } },
       { method: 'machine/ping' as const, params: { requestId: 'ping' } },

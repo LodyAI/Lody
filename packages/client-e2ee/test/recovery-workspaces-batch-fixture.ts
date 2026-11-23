@@ -312,6 +312,7 @@ export async function boot() {
   })!;
   engine = makeRecoveryWorkspaces({
     platform: 'web',
+    serviceLocator: 'https://lody.ai',
     passkey: browserPasskeyPort(),
     accountId: 'abc',
     sessionId: 'login',

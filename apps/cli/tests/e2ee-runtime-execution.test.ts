@@ -3291,14 +3291,6 @@ it.each(
       else expect(bodies).toEqual([{ backend: 'roost', count: 7 }]);
       if (audience === 'team' || audience === 'individual')
         expect(replies).toEqual([{ ok: true, result: { backend: 'roost', count: 7 } }]);
-      // Admission readiness does not enable the currently unsupported storage backend.
-      await expect(
-        LoroDocumentManager.prototype.getOrCreateSessionDoc.call(
-          { encryptedWorkspace: true } as LoroDocumentManager,
-          'roost-root' as SessionId,
-          { historyBackend: 'roost' }
-        )
-      ).rejects.toThrow('e2ee_history_backend_unavailable');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
