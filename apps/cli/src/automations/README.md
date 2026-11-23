@@ -92,7 +92,7 @@ Programs cannot select another Session or directly access Node or the daemon env
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
-`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment. Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
+`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment (`PATH`, home/temp directories, and host proxy variables `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials, while excluding unrelated host or Agent credentials). Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
 
 Each check has a 30-second deadline, at most 32 read, fetch or exec calls, four concurrent calls
 and a 128-KiB bound per operation. Cancellation interrupts the interpreter and
@@ -117,7 +117,7 @@ It is a wait without a program, so it shares `list`, `show`, `cancel`, the
 Session group's unsettled state and the continuation path above. The
 [run owner](runtime/managed-runs.ts) starts the process on the first check, in the
 Session workdir or a `cwd` inside it, with no shell and an explicit environment:
-the login-shell and daemon `PATH`, home and temp variables, plus the caller's `env`.
+the login-shell and daemon `PATH`, home/temp variables, host proxy variables (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials), plus the caller's `env`.
 Output goes to `<data dir>/automations/runs/<workspace>/<wait>.log`, capped at
 16 MiB; logs older than seven days are removed when another run starts.
 

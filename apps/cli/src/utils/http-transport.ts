@@ -4,13 +4,14 @@ import {
   Agent,
   Pool,
   ProxyAgent,
-  fetch as undiciFetch,
+  getGlobalDispatcher,
   setGlobalDispatcher,
   type Dispatcher,
 } from 'undici';
 import { sanitizeUrlForLogging } from './log-sanitize';
 import { getLogger, type Logger } from './logger';
 import { resolveProxyUrl } from './proxy';
+import { fetchWithUndiciDispatcher } from './undici-fetch-compat';
 
 export type CliFetch = typeof globalThis.fetch;
 
@@ -55,6 +56,10 @@ export interface CliHttpTransportOptions {
 let singletonTransport: CliHttpTransport | null = null;
 let singletonConfigKey: string | null = null;
 let undiciDiagnosticsInstalled = false;
+let activeGlobalTransport: CliHttpTransport | null = null;
+let installedGlobalFetch: CliFetch | null = null;
+let currentBaseFetch: CliFetch | null = null;
+let previousGlobalDispatcher: Dispatcher | null = null;
 
 const identifiedFetches = new WeakSet<CliFetch>();
 
@@ -148,14 +153,7 @@ export function createCliHttpTransport(
     },
   });
 
-  const fetchImpl: CliFetch = async (input, init) => {
-    const nextInit = {
-      ...(init ?? {}),
-      dispatcher,
-    } as NonNullable<Parameters<typeof undiciFetch>[1]>;
-    const response = await undiciFetch(input as Parameters<typeof undiciFetch>[0], nextInit);
-    return response as unknown as Response;
-  };
+  const fetchImpl: CliFetch = (input, init) => fetchWithUndiciDispatcher(input, init, dispatcher);
 
   return {
     dispatcher,
@@ -170,16 +168,26 @@ export function createCliHttpTransport(
 export function installCliHttpGlobalDispatcher(
   options: CliHttpTransportOptions = {}
 ): CliHttpTransport | null {
-  globalThis.fetch = withCliUserAgent(globalThis.fetch);
   const logger = options.logger ?? getLogger('http-transport');
   const transport = getOrCreateCliHttpTransport(options);
   const config = resolveCliHttpTransportConfig(options.env);
 
   if (!transport) {
+    activeGlobalTransport = null;
+    globalThis.fetch = withCliUserAgent(globalThis.fetch);
     logger.debug('[http-transport] using Node default global dispatcher');
     return null;
   }
 
+  activeGlobalTransport = transport;
+  if (currentBaseFetch === null || globalThis.fetch === currentBaseFetch) {
+    const baseFetch = globalThis.fetch;
+    currentBaseFetch = baseFetch;
+    installedGlobalFetch = (input, init) =>
+      (activeGlobalTransport?.fetch ?? withCliUserAgent(baseFetch))(input, init);
+    globalThis.fetch = installedGlobalFetch;
+  }
+  previousGlobalDispatcher ??= getGlobalDispatcher();
   setGlobalDispatcher(transport.dispatcher);
 
   if (config.diagnosticsEnabled) {
@@ -201,6 +209,16 @@ export async function resetCliHttpTransportForTests(): Promise<void> {
   const previous = singletonTransport;
   singletonTransport = null;
   singletonConfigKey = null;
+  activeGlobalTransport = null;
+  if (installedGlobalFetch && globalThis.fetch === installedGlobalFetch && currentBaseFetch) {
+    globalThis.fetch = currentBaseFetch;
+  }
+  installedGlobalFetch = null;
+  currentBaseFetch = null;
+  if (previousGlobalDispatcher) {
+    setGlobalDispatcher(previousGlobalDispatcher);
+    previousGlobalDispatcher = null;
+  }
   await previous?.close();
 }
 

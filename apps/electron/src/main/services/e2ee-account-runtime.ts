@@ -9,7 +9,8 @@ import {
   leaseE2eeIdentity,
   completedE2eeIdentityReset
 } from '@lody/shared/node/e2ee-identity'
-import { app } from 'electron'
+import { app, net } from 'electron'
+import { createDesktopAuthFetch } from '../auth-fetch'
 import { Effect, Exit, Scope, Semaphore, Deferred } from 'effect'
 import { makeElectronE2eeCustody } from '../e2ee-custody-electron'
 import { makeDesktopE2eeBootstrap, type DesktopE2eeCreationIntent } from './e2ee-bootstrap.mjs'
@@ -626,7 +627,11 @@ export async function desktopE2eeCloudClient(): Promise<{
           deploymentUrl: import.meta.env.VITE_CONVEX_DEPLOY_URL ?? '',
           // The request's signal reaches the sign-in request itself: quitting or a host stop
           // must not wait on a slow auth server, and no token request outlives it.
-          convexToken: (signal) => getIpcServiceDeps().authService.convexToken(undefined, signal)
+          convexToken: (signal) => getIpcServiceDeps().authService.convexToken(undefined, signal),
+          fetch: createDesktopAuthFetch({
+            whenReady: () => app.whenReady(),
+            fetch: (input, init) => net.fetch(input, init)
+          })
         }).pipe(Scope.provide(owner.scope))
       }
       return { accountId: owner.accountId, client: owner.cloud }

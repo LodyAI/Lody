@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Effect } from 'effect';
 import { processLayer } from '@lody/shared/node/process';
-import { execAutomationCommand } from './exec';
+import { execAutomationCommand, automationCommandEnvironment } from './exec';
 import { evaluateAutomationProgram } from '../programs/codemode';
 
 const roots: string[] = [];
@@ -119,5 +119,43 @@ describe('automation command execution', () => {
         root
       )
     ).rejects.toThrow('AUTOMATION_EXEC_OUTPUT_TOO_LARGE');
+  });
+
+  it('forwards HTTP/HTTPS proxy env vars while keeping unrelated credentials out', async () => {
+    const root = setup();
+    const env = automationCommandEnvironment(process.env.PATH, {
+      PATH: process.env.PATH,
+      HTTP_PROXY: 'http://proxy.internal:8080',
+      HTTPS_PROXY: 'https://proxy.internal:8443',
+      ALL_PROXY: 'http://proxy.internal:8080',
+      NO_PROXY: 'localhost,127.0.0.1',
+      http_proxy: 'http://proxy.internal:8080',
+      https_proxy: 'https://proxy.internal:8443',
+      ANTHROPIC_API_KEY: 'secret-must-not-leak',
+    });
+    const result = await Effect.runPromise(
+      Effect.provide(
+        execAutomationCommand(
+          {
+            command: process.execPath,
+            args: [
+              '-e',
+              'process.stdout.write(JSON.stringify({ HTTP_PROXY: process.env.HTTP_PROXY, HTTPS_PROXY: process.env.HTTPS_PROXY, ALL_PROXY: process.env.ALL_PROXY, NO_PROXY: process.env.NO_PROXY, http_proxy: process.env.http_proxy, https_proxy: process.env.https_proxy, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }))',
+            ],
+          },
+          root,
+          env
+        ),
+        processLayer({})
+      )
+    );
+    expect(JSON.parse(result.stdout)).toEqual({
+      HTTP_PROXY: 'http://proxy.internal:8080',
+      HTTPS_PROXY: 'https://proxy.internal:8443',
+      ALL_PROXY: 'http://proxy.internal:8080',
+      NO_PROXY: 'localhost,127.0.0.1',
+      http_proxy: 'http://proxy.internal:8080',
+      https_proxy: 'https://proxy.internal:8443',
+    });
   });
 });

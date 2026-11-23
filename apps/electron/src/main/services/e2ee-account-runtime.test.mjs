@@ -1208,6 +1208,52 @@ void test('confirmed cancellation survives real SQLite archival failure and the 
   )
 })
 
+void test('desktopE2eeCloudClient routes Convex HTTP calls through Electron net.fetch after app readiness', async () => {
+  const ready = Promise.withResolvers()
+  const events = []
+  let capturedClientFetch
+  const { api } = await account({
+    electron: {
+      app: {
+        getPath: () => '/synthetic-user-data',
+        whenReady: () => {
+          events.push('whenReady:start')
+          return ready.promise.then(() => events.push('whenReady:done'))
+        }
+      },
+      net: {
+        fetch: async (input, init) => {
+          events.push(`net.fetch:${String(input)}`)
+          return new Response(JSON.stringify({ ok: true, method: init?.method ?? 'GET' }), {
+            status: 200
+          })
+        }
+      }
+    },
+    cloud: (input) =>
+      Effect.sync(() => {
+        capturedClientFetch = input.fetch
+        return {}
+      })
+  })
+  await api.desktopE2eeCloudClient()
+  assert.equal(typeof capturedClientFetch, 'function')
+  const pending = capturedClientFetch(new URL('https://synthetic.convex.cloud/api/query'), {
+    method: 'POST'
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(events, ['whenReady:start'])
+  ready.resolve()
+  const res = await pending
+  assert.deepEqual(await res.json(), { ok: true, method: 'POST' })
+  assert.deepEqual(events, [
+    'whenReady:start',
+    'whenReady:done',
+    'net.fetch:https://synthetic.convex.cloud/api/query'
+  ])
+  await api.closeDesktopE2eeAccount()
+})
+
 void test('creation signing and exact retry do not acquire a cloud client', async () => {
   const original = Object.freeze({ genesisRecordHex: 'synthetic-original' })
   const { api } = await account({
