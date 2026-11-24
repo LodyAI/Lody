@@ -416,7 +416,6 @@ export interface LoroDocumentManagerOptions {
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
-  /** Daemon-only maintenance runs only when the manager owns shared durable cursors. */
   documentCursorScope?: DocumentCursorScope;
   remoteStreamsAttached?: boolean;
   attachCloudEphemeralSinks?: boolean;

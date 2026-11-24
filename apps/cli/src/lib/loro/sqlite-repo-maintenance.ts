@@ -43,15 +43,12 @@ export type SqliteRepoMaintenanceOptions = {
   bucketId?: string;
   logger: Logger;
   isDocActive: (docId: string) => boolean;
-  /** Override for free disk-space checks (used by tests). */
   getFreeDiskBytes?: (dirPath: string) => Promise<number | null>;
-  /** Override for current time in ms (used by tests). */
   now?: () => number;
   initialDelayMs?: number;
   intervalMs?: number;
   minCompactUpdateCount?: number;
   minCompactUpdateBytes?: number;
-  /** Compact any doc whose latest doc_updates row is at least this old (ms). */
   staleUpdateAgeMs?: number;
   maxCompactsPerPass?: number;
   maxDeletedPurgesPerPass?: number;
@@ -105,18 +102,6 @@ const defaultGetFreeDiskBytes = async (dirPath: string): Promise<number | null> 
   }
 };
 
-/**
- * Daemon-only background maintenance for `repo.sqlite3`.
- *
- * `loro-repo` compacts Flock and Meta update logs automatically, but:
- * - `repo.deleteDoc()` is a soft tombstone in `metaFlock` and retains local doc bodies.
- * - `doc_updates` only compacts on a subsequent `loadDoc(docId)`.
- * - `repo.purgeExpiredFlockDocs()` is opt-in and never runs on its own timer.
- * - SQLite defaults to `auto_vacuum = NONE`, so freed pages stay on disk forever.
- *
- * This controller bounds local storage growth without opening Streams rooms,
- * touching active documents, or surfacing `SQLITE_BUSY` as a write failure.
- */
 export class SqliteRepoMaintenance {
   private readonly repo: LoroRepo;
   private readonly store: CliSqliteRepoStore;

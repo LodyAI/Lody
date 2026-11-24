@@ -165,13 +165,9 @@ const initializeNewSqliteAutoVacuum = async (dbPath: string): Promise<void> => {
     const pageCount = Number(database.pragma('page_count', { simple: true }) ?? 0);
     if (pageCount === 0) {
       database.pragma('auto_vacuum = INCREMENTAL');
-      // Writing journal_mode persists the database header with auto_vacuum = INCREMENTAL
-      // before SqliteRepoStore creates tables.
       database.pragma('journal_mode = WAL');
     }
   } catch {
-    // Best-effort: if another process raced to initialize the DB first,
-    // SqliteRepoStore will open normally and maintenance can upgrade later.
   } finally {
     database?.close();
   }

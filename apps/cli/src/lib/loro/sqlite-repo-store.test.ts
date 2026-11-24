@@ -237,7 +237,6 @@ describe('SQLite Loro repo store', () => {
       const activeDeletedRoomId = getSessionRoomId(activeDeletedSessionId);
       const liveRoomId = getSessionRoomId(liveSessionId);
 
-      // Populate deleted session doc with a large payload + cursor + code-collab Flock.
       const deletedHandle = await repo.openPersistedDoc(deletedRoomId);
       deletedHandle.doc.getText('payload').insert(0, 'x'.repeat(256 * 1024));
       deletedHandle.doc.commit();
@@ -257,13 +256,11 @@ describe('SQLite Loro repo store', () => {
       await repo.flush();
       await repo.unloadFlockDoc(deletedFlockId);
 
-      // Populate active-but-deleted session doc (must be skipped while active).
       const activeDeletedHandle = await repo.openPersistedDoc(activeDeletedRoomId);
       activeDeletedHandle.doc.getText('payload').insert(0, 'keep-while-active');
       activeDeletedHandle.doc.commit();
       await repo.flush();
 
-      // Populate live session doc with many incremental doc_updates.
       const liveHandle = await repo.openPersistedDoc(liveRoomId);
       for (let i = 0; i < 40; i += 1) {
         liveHandle.doc.getText('stream').insert(i * 4, `msg${i}`);
@@ -271,15 +268,9 @@ describe('SQLite Loro repo store', () => {
         await repo.flush();
       }
 
-      // Soft-delete the two deleted sessions via repo.deleteDoc (leaves bodies on disk).
       await repo.deleteDoc(deletedRoomId);
       await repo.deleteDoc(activeDeletedRoomId);
       await repo.flush();
-
-      // Unload handles so maintenance can safely purge/compact.
-      await repo.unloadDoc(deletedRoomId);
-      await repo.unloadDoc(activeDeletedRoomId);
-      await repo.unloadDoc(liveRoomId);
 
       const db = getSqliteRepoDatabase(store);
       expect(
@@ -306,8 +297,6 @@ describe('SQLite Loro repo store', () => {
       expect(report.freelistPagesReclaimed).toBeGreaterThan(0);
       expect(report.ranWalCheckpoint).toBe(true);
 
-      // Deleted doc body, updates, cursor, and code-collab Flock are gone,
-      // while metaFlock retains the deleted tombstone for cross-machine sync.
       expect(db.prepare('SELECT 1 FROM docs WHERE doc_id = ?').get(deletedRoomId)).toBeUndefined();
       expect(
         db.prepare('SELECT 1 FROM doc_updates WHERE doc_id = ?').get(deletedRoomId)
@@ -319,11 +308,9 @@ describe('SQLite Loro repo store', () => {
       const deletedMeta = await repo.getDocMeta(deletedRoomId);
       expect(deletedMeta && isLoroRepoDocDeleted(deletedMeta)).toBe(true);
 
-      // Active deleted doc was untouched.
       const activeReloaded = await store.storageAdapter.loadDoc(activeDeletedRoomId);
       expect(activeReloaded?.getText('payload').toString()).toBe('keep-while-active');
 
-      // Live doc updates were folded into docs.snapshot and content survives reopen.
       expect(
         (
           db.prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?').get(liveRoomId) as {
@@ -347,7 +334,6 @@ describe('SQLite Loro repo store', () => {
     const dbPath = path.join(baseDir, 'repo.sqlite3');
     const workspaceId = 'ws-legacy' as WorkspaceId;
 
-    // Create a legacy DB directly via SqliteRepoStore (auto_vacuum = NONE).
     const sqliteStore = new SqliteRepoStore({ path: dbPath });
     openStores.add(sqliteStore);
     const store = {
@@ -375,9 +361,7 @@ describe('SQLite Loro repo store', () => {
       await repo.flush();
       await repo.deleteDoc(deadRoomId);
       await repo.flush();
-      await repo.unloadDoc(deadRoomId);
 
-      // First run with insufficient free disk space: deletes doc body, skips VACUUM.
       const lowDiskMaintenance = new SqliteRepoMaintenance({
         repo,
         store,
@@ -395,7 +379,6 @@ describe('SQLite Loro repo store', () => {
       expect(Number(db.pragma('auto_vacuum', { simple: true }))).toBe(0);
       await lowDiskMaintenance.stop();
 
-      // Second run with plenty of disk space: upgrades to auto_vacuum=INCREMENTAL via VACUUM.
       const okDiskMaintenance = new SqliteRepoMaintenance({
         repo,
         store,
@@ -413,13 +396,11 @@ describe('SQLite Loro repo store', () => {
       expect(Number(db.pragma('auto_vacuum', { simple: true }))).toBe(2);
       expect(Number(db.pragma('freelist_count', { simple: true }))).toBe(0);
 
-      // Subsequent repo writes work normally after VACUUM.
       const nextRoomId = getSessionRoomId('sess-after-vac' as SessionId);
       const nextHandle = await repo.openPersistedDoc(nextRoomId);
       nextHandle.doc.getText('ok').insert(0, 'alive');
       nextHandle.doc.commit();
       await repo.flush();
-      await repo.unloadDoc(nextRoomId);
       const loaded = await store.storageAdapter.loadDoc(nextRoomId);
       expect(loaded?.getText('ok').toString()).toBe('alive');
 
@@ -450,13 +431,11 @@ describe('SQLite Loro repo store', () => {
       staleHandle.doc.getText('msg').insert(0, 'old-message');
       staleHandle.doc.commit();
       await repo.flush();
-      await repo.unloadDoc(staleRoomId);
 
       const freshHandle = await repo.openPersistedDoc(freshRoomId);
       freshHandle.doc.getText('msg').insert(0, 'recent-message');
       freshHandle.doc.commit();
       await repo.flush();
-      await repo.unloadDoc(freshRoomId);
 
       const db = getSqliteRepoDatabase(store);
       const nowMs = Date.now();
