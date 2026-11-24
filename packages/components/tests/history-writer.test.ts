@@ -33,7 +33,18 @@ describe('createHistoryWriter', () => {
       parseHistoryWrite(HistoryEntryWriteSchema, entry)
     ) as SessionHistory[];
     const { doc, view, writer } = await openWriterDoc();
+    const structureReady = new Promise<void>((resolve) => {
+      const unsubscribe = view.subscribe((change) => {
+        if (change.kind === 'structure' && view.turnCount === history.length) {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
     for (const entry of history) writer.append(entry);
+    await structureReady;
+    const liveTail = view.acquireRange(history.length - 2, history.length);
+    await liveTail.ready;
 
     // Raw Mirror writes are not the storage oracle: schema storage hints can
     // intentionally give new writes a different layout. Check values against
@@ -66,6 +77,7 @@ describe('createHistoryWriter', () => {
     );
     expect(view.turnCount).toBe(history.length);
     expect(view.turn(history.length - 1)).toEqual(history[history.length - 1]);
+    liveTail.release();
     range.release();
     restoredView.dispose();
     view.dispose();

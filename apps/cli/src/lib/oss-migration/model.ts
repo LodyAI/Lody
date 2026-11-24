@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { LoroDoc } from 'loro-crdt';
 import type { JsonObject } from 'loro-repo';
 import { isSessionDocRoomId } from '@lody/shared';
+import { sessionImportFence, scheduleImportFence } from '../workspace-bundle/cross-workspace';
 
 export const safeId = z
   .string()
@@ -25,23 +26,37 @@ export const documentSchema = z.object({
   meta: jsonObject,
   sha256: z.string().length(64),
 });
-export const manifestSchema = z.object({
-  version: z.literal(2),
-  sourcePath: z.string(),
-  sourceWorkspaceId: safeId,
-  sourceMachineId: safeId,
-  sourceUserId: z.string().startsWith('local:'),
-  sourceName: z.string(),
-  targetWorkspaceId: safeId,
-  targetMachineId: safeId,
-  targetUserId: z.string(),
-  deployment: z.string(),
-  migrationId: z.string().length(32),
-  documents: z.array(documentSchema),
-  flocks: z.array(z.object({ id: z.string(), rows: z.array(rowSchema) })),
-  machineMeta: jsonObject,
-  createdAt: z.string(),
-});
+export const manifestSchema = z
+  .object({
+    version: z.literal(2),
+    sourcePath: z.string(),
+    sourceWorkspaceId: safeId,
+    sourceMachineId: safeId,
+    sourceUserId: z.string().startsWith('local:'),
+    sourceName: z.string(),
+    targetWorkspaceId: safeId,
+    targetContentMode: z.enum(['plaintext', 'protected']).default('plaintext'),
+    targetGenesisHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    targetMachineId: safeId,
+    targetUserId: z.string(),
+    deployment: z.string(),
+    migrationId: z.string().length(32),
+    documents: z.array(documentSchema),
+    flocks: z.array(z.object({ id: z.string(), rows: z.array(rowSchema) })),
+    machineMeta: jsonObject,
+    createdAt: z.string(),
+  })
+  .superRefine((manifest, context) => {
+    if (manifest.targetContentMode === 'protected' && !manifest.targetGenesisHash)
+      context.addIssue({
+        code: 'custom',
+        path: ['targetGenesisHash'],
+        message: 'Encrypted migration requires the pinned target genesis',
+      });
+  });
 export const journalSchema = z.object({
   version: z.literal(2),
   migrationId: z.string().length(32),
@@ -99,6 +114,19 @@ export function prepareDocument(
   const doc = new LoroDoc();
   doc.import(bytes);
   if (doc.isShallow()) throw new Error(`Cannot migrate shallow history: ${entry.id}`);
+  if (manifest.targetContentMode === 'protected') {
+    const fence = isSessionDocRoomId(entry.id)
+      ? sessionImportFence(
+          doc,
+          (field) => entry.meta[field],
+          manifest.targetWorkspaceId,
+          manifest.targetUserId
+        )
+      : entry.id.startsWith('schedule-')
+        ? scheduleImportFence(doc, manifest.targetWorkspaceId)
+        : undefined;
+    if (fence) doc.getMap(receiptRoot).set('importFence', fence);
+  }
   if (isSessionDocRoomId(entry.id)) {
     if (entry.meta.historyBackend && entry.meta.historyBackend !== 'loro')
       throw new Error(

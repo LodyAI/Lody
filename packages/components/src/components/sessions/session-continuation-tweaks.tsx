@@ -4,10 +4,10 @@ import { Archive, BatteryCharging, Layers, Rocket, Sparkles, type LucideIcon } f
 import type { AutoDeliverOptions } from '@lody/shared/automations';
 import { AutoDeliveryOptionsFields } from './session-auto-delivery';
 import { Separator } from '@lody/ui/separator';
-import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
+import { SessionAutomationTweakRow } from './session-continuation-note';
 
 export type SessionContinuationTweaksValue = {
   recoverCapacity: boolean;
@@ -67,45 +67,6 @@ const styles = stylex.create({
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
     whiteSpace: 'nowrap',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    paddingBlock: space[1.5],
-  },
-  icon: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 26,
-    height: 26,
-    flexShrink: 0,
-    borderRadius: radius.small,
-    cornerShape: corner.shape,
-    backgroundColor: colors.wellBackground,
-    color: colors.secondaryLabel,
-  },
-  copy: {
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    flex: 1,
-  },
-  title: {
-    color: colors.label,
-    fontSize: text.footnoteSize,
-    lineHeight: text.footnoteLeading,
-    fontWeight: 500,
-  },
-  description: {
-    color: colors.tertiaryLabel,
-    fontSize: text.captionSize,
-    lineHeight: text.captionLeading,
-    marginTop: 1,
-  },
-  unsupported: {
-    color: colors.warning,
   },
   suboptions: {
     paddingInlineStart: 34,
@@ -209,26 +170,21 @@ export function SessionContinuationTweaks({
           ) : null;
         return (
           <div key={row.key}>
-            <div {...stylex.props(styles.row)} data-session-continuation-tweak={row.key}>
-              <span {...stylex.props(styles.icon)} aria-hidden="true">
-                <Icon size={14} strokeWidth={1.8} />
-              </span>
-              <span {...stylex.props(styles.copy)}>
-                <span {...stylex.props(styles.title)}>{t(row.titleKey, row.title)}</span>
-                <span {...stylex.props(styles.description, !supported && styles.unsupported)}>
-                  {supported
-                    ? t(row.descriptionKey, row.description)
-                    : (availability?.reason ??
-                      t('sessions.continuation.tweaks.unsupported', '当前会话不支持'))}
-                </span>
-              </span>
-              <Switch
-                checked={value[row.key]}
-                disabled={disabled || !supported}
-                onCheckedChange={(checked) => onChange(row.key, checked)}
-                aria-label={t(row.titleKey, row.title)}
-              />
-            </div>
+            <SessionAutomationTweakRow
+              icon={Icon}
+              title={t(row.titleKey, row.title)}
+              description={
+                supported
+                  ? t(row.descriptionKey, row.description)
+                  : (availability?.reason ??
+                    t('sessions.continuation.tweaks.unsupported', '当前会话不支持'))
+              }
+              checked={value[row.key]}
+              disabled={disabled || !supported}
+              unsupported={!supported}
+              onCheckedChange={(checked) => onChange(row.key, checked)}
+              dataAttributes={{ 'data-session-continuation-tweak': row.key }}
+            />
             {options}
           </div>
         );

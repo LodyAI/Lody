@@ -22,8 +22,10 @@ Automations run in plaintext and encrypted workspaces. In an encrypted workspace
 [Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
 machine, and encrypted admission refuses an automation input without that signature, as it
 does for scheduled runs. The ledger stays machine-local, and continuation text enters the
-Session through its encrypted history. The PR poller is not registered there, so `github.*`
-reads stay `unknown`. Remote control rides workspace Machine RPC, which encrypted
+Session through its encrypted history. The local PR poller uses the account’s repository-scoped GitHub credentials and feeds
+PR/CI observations into the local automation ledger. PR state stays in protected Loro metadata;
+hosted PR association and content caches remain disabled. Device-only machine composition
+keeps its existing lack of account GitHub credentials. Remote control rides workspace Machine RPC, which encrypted
 workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
 remote controls, only where the shared content policy supports `rpc`.
 
@@ -209,7 +211,13 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   so a crash repeats nothing. The policy turns the event into the existing Create PR,
   Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
   is settled and while the PR head still matches. Progress is written to
-  `SessionMeta.autoDelivery` at transitions only. The daemon never mutates GitHub;
+  `SessionMeta.autoDelivery` at transitions only, under a `Semaphore` that `configure`
+  also holds, so a pass never republishes a status the user cleared. Only an open or
+  draft current PR binds an enablement; a head with no reported check waits out
+  `DELIVERY_CI_REPORT_GRACE_MS` before it counts as having no CI, and uncommitted or
+  unpushed work stops with `workspace_unpushed`. Turning it off cancels a request that
+  has not reached the Session queue, since a disabled rule's receipt would stay
+  `blocked` and keep the group from settling. The daemon never mutates GitHub;
   the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
   there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same

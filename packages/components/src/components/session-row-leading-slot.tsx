@@ -258,6 +258,9 @@ export function SessionRowLeadingSlot({
           <span
             aria-hidden="true"
             data-session-tree-connector="trunk"
+            data-session-tree-connector-variant={
+              childTree.isFirstChild && childTree.tallOpener ? 'tall-opener' : 'row'
+            }
             {...stylex.props(
               tree.trunk,
               childTree.isFirstChild && childTree.tallOpener

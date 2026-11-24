@@ -14,6 +14,7 @@ export function resolveLegacyWorkspaceQueryStatus({
   currentWorkspaceId,
   routeSlug,
   workspacesState,
+  allowNotifications = false,
 }: {
   workspaceId: string | null | undefined;
   platformKind: string;
@@ -23,8 +24,28 @@ export function resolveLegacyWorkspaceQueryStatus({
   currentWorkspaceId: string | null;
   routeSlug: string | null;
   workspacesState: WorkspacesState;
+  allowNotifications?: boolean;
 }): LegacyWorkspaceQueryStatus {
   if (platformKind === 'local') return 'allowed';
+  /** Encrypted content runtimes are published only after native ledger/key admission. */
+  if (
+    allowNotifications &&
+    accountId &&
+    workspaceId &&
+    routeSlug &&
+    currentWorkspaceId === workspaceId &&
+    mode?.accountId === accountId &&
+    mode.workspaceSlug === routeSlug &&
+    mode.workspaceId === workspaceId &&
+    mode.descriptor?.workspaceId === workspaceId &&
+    'contentMode' in mode.descriptor &&
+    mode.descriptor.contentMode === 'e2ee' &&
+    runtime?.contentMode === 'e2ee' &&
+    runtime.accountId === accountId &&
+    runtime.workspaceId === workspaceId &&
+    runtime.workspaceSlug === routeSlug
+  )
+    return 'allowed';
   if (!workspaceId) return 'pending';
   if (
     (mode?.workspaceId === workspaceId &&

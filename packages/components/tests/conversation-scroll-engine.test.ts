@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { UNCACHED } from '../src/lib/conversation-scroll/keyed-layout/cache';
 import { ScrollSim, turnRows, type SimRow } from './support/scroll-engine-sim';
 
 /**
@@ -754,10 +755,21 @@ describe('onScroll must not re-enter a cycle (React #185)', () => {
     const sim: ScrollSim = new ScrollSim(rowsFor(grouped), V, {
       // A recorded turn index can be out of date; the production report fell
       // back from the missing row to a turn ~9000px away.
-      initialIntent: {
-        kind: 'read',
-        anchor: { kind: 'turn', turnId: 'c1', turnIndex: 3, rowKey: 'c1', item: null, offsetPx: 0 },
-        screenY: 0,
+      savedState: {
+        formatVersion: 1,
+        intent: {
+          kind: 'read',
+          anchor: {
+            kind: 'turn',
+            turnId: 'c1',
+            turnIndex: 3,
+            rowKey: 'c1',
+            item: null,
+            offsetPx: 0,
+          },
+          screenY: 0,
+        },
+        sizes: null,
       },
       callbacks: {
         onScroll: (offset) => {
@@ -940,7 +952,7 @@ describe('momentum diagnostics', () => {
       sim.settle();
       sim.controller.release('reader-up');
       const before = sim.readScrollTop();
-      const anchor = sim.controller.savedIntent();
+      const anchor = sim.controller.currentIntent;
       const rowTop = sim.screenTop('t35');
       sim.elasticOffset = 24;
       // Growth above the reading anchor needs compensation. Additional
@@ -956,7 +968,7 @@ describe('momentum diagnostics', () => {
       sim.settle();
       expect(sim.readScrollTop()).toBe(before + growth);
       expect(sim.screenTop('t35')).toBe(rowTop);
-      expect(sim.controller.savedIntent()).toEqual(anchor);
+      expect(sim.controller.currentIntent).toEqual(anchor);
       expectHealthy(sim);
     }
   );
@@ -975,7 +987,7 @@ describe('momentum diagnostics', () => {
     sim.controller.release('reader-up');
     sim.nativeScroll(0);
     sim.settle();
-    const anchor = sim.controller.savedIntent();
+    const anchor = sim.controller.currentIntent;
     const rowTop = sim.screenTop('t0');
     sim.elasticOffset = -24;
     sim.contentTop += 40;
@@ -983,7 +995,227 @@ describe('momentum diagnostics', () => {
     sim.settle();
     expect(sim.readScrollTop()).toBe(40);
     expect(sim.screenTop('t0')).toBe(rowTop);
-    expect(sim.controller.savedIntent()).toEqual(anchor);
+    expect(sim.controller.currentIntent).toEqual(anchor);
     expectHealthy(sim);
+  });
+});
+
+describe('session switch & restore', () => {
+  it('persists replyRoom and disclosureSpace across unmount and remount', () => {
+    const initialRows: SimRow[] = [
+      ...turnRows(
+        20,
+        () => 100,
+        () => 100
+      ),
+      { key: 'user-3', turnId: 'u3', turnIndex: 20, height: 80, estimate: 80 },
+      { key: 'thought-3', turnId: 'a3', turnIndex: 21, height: 40, estimate: 40 },
+    ];
+    const sim = new ScrollSim(initialRows, V);
+    sim.render();
+    sim.settle();
+
+    sim.task(() => sim.controller.anchorToRow(20));
+    sim.settle();
+    const headerBefore = sim.screenTop('thought-3')!;
+    expect(sim.replyRoom).toBeGreaterThan(0);
+
+    sim.task(() => sim.controller.preserveDisclosure('thought-3', 0));
+    sim.settle();
+    expect(sim.controller.mode).toBe('read');
+    expect(sim.screenTop('thought-3')).toBe(headerBefore);
+    expect(sim.replyRoom).toBeGreaterThan(0);
+
+    const saved = sim.controller.savedState();
+    expect(saved.intent.kind).toBe('read');
+    if (saved.intent.kind === 'read') {
+      expect(saved.intent.replyRoom).toBeGreaterThan(0);
+      expect(saved.intent.disclosureSpace).toBe(true);
+    }
+
+    const remountShort = new ScrollSim(
+      initialRows.map((row) => ({ ...row })),
+      V,
+      { savedState: saved }
+    );
+    remountShort.render();
+    expect(remountShort.screenTop('thought-3')).toBe(headerBefore);
+    expect(remountShort.replyRoom).toBeGreaterThan(0);
+    expectHealthy(remountShort);
+
+    const grownRows: SimRow[] = [
+      ...initialRows.map((row) => ({ ...row })),
+      { key: 'thought-3-detail', turnId: 'a3', turnIndex: 21, height: 900, estimate: 120 },
+    ];
+    const remountGrown = new ScrollSim(grownRows, V, { savedState: saved });
+    remountGrown.render();
+    expect(remountGrown.screenTop('thought-3')).toBe(headerBefore);
+    expect(remountGrown.replyRoom).toBe(0);
+    expectHealthy(remountGrown);
+  });
+
+  it('aligns a fallback disclosure anchor to the viewport top instead of subtracting the old screenY', () => {
+    const rows: SimRow[] = [
+      ...turnRows(
+        20,
+        () => 100,
+        () => 100
+      ),
+      { key: 'a3-worked', turnId: 'a3', turnIndex: 20, height: 40, estimate: 40 },
+      { key: 'a3-thought', turnId: 'a3', turnIndex: 20, height: 40, estimate: 40 },
+      { key: 'a3-answer', turnId: 'a3', turnIndex: 20, height: 700, estimate: 700 },
+    ];
+    const sim = new ScrollSim(rows, V);
+    sim.render();
+    sim.settle();
+
+    sim.controller.release('reader-up');
+    const thoughtOffset = sim.controller.getItemOffset(21);
+    sim.nativeScroll(sim.contentTop + thoughtOffset - 500);
+    sim.settle();
+    expect(sim.screenTop('a3-thought')).toBe(500);
+
+    sim.task(() => sim.controller.preserveDisclosure('a3-thought', 0));
+    sim.settle();
+    const saved = sim.controller.savedState();
+
+    const foldedRows = rows.filter((row) => row.key !== 'a3-thought').map((row) => ({ ...row }));
+    const remount = new ScrollSim(foldedRows, V, { savedState: saved });
+    remount.render();
+    expect(remount.screenTop('a3-worked')).toBe(0);
+    expectHealthy(remount);
+  });
+
+  it('re-measures same-key rows synchronously on remount when restored sizes went stale', () => {
+    const rows = turnRows(
+      30,
+      () => 100,
+      () => 100
+    );
+    const sim = new ScrollSim(rows, V, { layoutVersion: '800|md' });
+    sim.render();
+    sim.settle();
+    sim.task(() => sim.controller.jumpToIndex(15, false));
+    sim.settle();
+    expect(sim.screenTop('t15')).toBe(0);
+    const saved = sim.controller.savedState();
+
+    const updatedRows = rows.map((row) => ({ ...row }));
+    updatedRows[14]!.height = 400;
+    updatedRows[15]!.height = 300;
+
+    const remount = new ScrollSim(updatedRows, V, { savedState: saved });
+    remount.render();
+    expect(remount.controller.getItemSize(14)).toBe(400);
+    expect(remount.controller.getItemSize(15)).toBe(300);
+    expect(remount.screenTop('t15')).toBe(0);
+    expectHealthy(remount);
+  });
+
+  it('re-measures same-key rows synchronously on reshow after a hidden tab grows', () => {
+    const rows = turnRows(
+      30,
+      () => 100,
+      () => 100
+    );
+    const sim = new ScrollSim(rows, V, { layoutVersion: '800|md' });
+    sim.render();
+    sim.settle();
+    sim.task(() => sim.controller.jumpToIndex(15, false));
+    sim.settle();
+    expect(sim.screenTop('t15')).toBe(0);
+
+    sim.setHidden(true);
+    sim.rows[14]!.height = 350;
+    sim.rows[15]!.height = 260;
+
+    sim.setHidden(false);
+    expect(sim.controller.getItemSize(14)).toBe(350);
+    expect(sim.controller.getItemSize(15)).toBe(260);
+    expect(sim.screenTop('t15')).toBe(0);
+    expectHealthy(sim);
+  });
+
+  it('preserves disclosure screenY and offsetPx when an item re-indexes under the same itemIdentity', () => {
+    const rows: SimRow[] = [
+      ...turnRows(
+        20,
+        () => 100,
+        () => 100
+      ),
+      {
+        key: 'a3-tool-old',
+        turnId: 'a3',
+        turnIndex: 20,
+        itemIndex: 0,
+        itemIdentity: 'tool-call-1',
+        height: 80,
+        estimate: 80,
+      },
+      { key: 'a3-tail', turnId: 'a3', turnIndex: 20, itemIndex: 1, height: 700, estimate: 700 },
+    ];
+    const sim = new ScrollSim(rows, V);
+    sim.render();
+    sim.settle();
+
+    sim.controller.release('reader-up');
+    sim.nativeScroll(sim.contentTop + sim.controller.getItemOffset(20) - 240);
+    sim.settle();
+    sim.task(() => sim.controller.preserveDisclosure('a3-tool-old', 15));
+    sim.settle();
+    const saved = sim.controller.savedState();
+
+    const reindexed: SimRow[] = [
+      ...turnRows(
+        20,
+        () => 100,
+        () => 100
+      ),
+      { key: 'a3-thought', turnId: 'a3', turnIndex: 20, itemIndex: 0, height: 60, estimate: 60 },
+      {
+        key: 'a3-tool-new',
+        turnId: 'a3',
+        turnIndex: 20,
+        itemIndex: 1,
+        itemIdentity: 'tool-call-1',
+        height: 80,
+        estimate: 80,
+      },
+      { key: 'a3-tail', turnId: 'a3', turnIndex: 20, itemIndex: 2, height: 700, estimate: 700 },
+    ];
+    const remount = new ScrollSim(reindexed, V, { savedState: saved });
+    remount.render();
+    expect(remount.screenTop('a3-tool-new')).toBe(240);
+    expectHealthy(remount);
+  });
+
+  it('preserves offscreen cached sizes in snapshot when layoutVersion matches and drops them when it changes', () => {
+    const rows = turnRows(
+      40,
+      (i) => (i === 0 ? 137 : 100),
+      () => 60
+    );
+    const first = new ScrollSim(rows, V, { layoutVersion: '800|md' });
+    first.render();
+    first.settle();
+    first.task(() => first.controller.jumpToIndex(0, false));
+    first.settle();
+    expect(first.controller.getItemSize(0)).toBe(137);
+    first.task(() => first.controller.jumpToIndex(30, false));
+    first.settle();
+    const saved = first.controller.savedState();
+    expect(saved.sizes?.sizes[0]).toBe(137);
+
+    const sameWidth = new ScrollSim(
+      rows.map((row) => ({ ...row })),
+      V,
+      { savedState: saved }
+    );
+    sameWidth.render();
+    expect(sameWidth.mounted.has('t0')).toBe(false);
+    expect(sameWidth.controller.savedState().sizes?.sizes[0]).toBe(137);
+
+    sameWidth.controller.setLayoutVersion('1000|md');
+    expect(sameWidth.controller.savedState().sizes?.sizes[0]).toBe(UNCACHED);
   });
 });

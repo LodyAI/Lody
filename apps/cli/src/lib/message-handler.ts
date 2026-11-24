@@ -6,6 +6,7 @@ import type { SessionDirectoryListRequest } from '@lody/shared';
 import {
   sessionHistoryWriteIntentDigest,
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   SESSION_HISTORY_SUBSCRIPTION_LEASE_MS,
   type SessionHistoryPublication,
   type SessionHistorySubscription,
@@ -32,6 +33,8 @@ import type {
   SorbetCustomProvider,
   SorbetCustomProviderEdit,
   SorbetCustomProviderInput,
+  SorbetHostSettings,
+  SorbetHostSettingsUpdate,
 } from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
 import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
@@ -182,9 +185,12 @@ import {
   E2EE_ACP_INTERACTION_PROTOCOL_VERSION,
   E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
   E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+  E2EE_ROOST_HISTORY_PROTOCOL_VERSION,
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
@@ -363,7 +369,11 @@ import {
   type ACPUpdateTarget,
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
-import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import {
+  fetchAcpCapabilities,
+  normalizeConfigOptions,
+  type FetchAcpCapabilitiesOptions,
+} from '@/agent/acp-capabilities';
 import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
@@ -714,6 +724,12 @@ export interface MessageHandlerConfig {
     ) => Promise<
       Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
     >;
+    /** Machine-wide Sorbet Host settings; not bound to a config. */
+    getHostSettings: (signal?: AbortSignal) => Promise<SorbetHostSettings>;
+    updateHostSettings: (
+      patch: SorbetHostSettingsUpdate,
+      signal?: AbortSignal
+    ) => Promise<SorbetHostSettings>;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -886,10 +902,9 @@ export class MessageHandler {
   private readonly cancelledHistorySubscriptions = new Map<string, number>();
   private sessionActivePresence!: SessionActivePresenceControllerLegacy;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
-  // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
+  // Note: titleGenerationInFlight is self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
-  private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
   /**
    * Latest output time and running tool title per Session, for on-demand live
@@ -1376,6 +1391,8 @@ export class MessageHandler {
         this.logger.debug(`[${sessionId}] Skipping usage update: missing userId`);
         return;
       }
+
+      if (this.encryptedAttachments && userId !== this.cloudPort.identity.userId) return;
 
       this.usageTrackingService?.recordSessionUsageUpdate({
         workspaceId: this.workspaceId,
@@ -1952,6 +1969,35 @@ export class MessageHandler {
     }
   }
 
+  private recordSessionObservedModelConfigOptions(
+    sessionId: SessionId,
+    configOptions: AcpConfigOptionSummary[] | undefined,
+    sessionDocHint?: SessionDocument
+  ): void {
+    if (!configOptions || configOptions.length === 0) return;
+    void (async () => {
+      const sessionDoc =
+        sessionDocHint ?? (await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
+      const agentConfigId = (await sessionDoc.getMetaState())?.agentConfigId;
+      if (!agentConfigId) return;
+      const sourceVersion =
+        this.sessionManager.getSession(sessionId)?.getAcpCapabilitySourceVersion?.() ??
+        (await this.workspaceDocument.getAcpCapabilities(this.machineId, agentConfigId))
+          ?.sourceVersion;
+      if (!sourceVersion) return;
+      await this.workspaceDocument.recordObservedAcpModelConfigOptions(
+        this.machineId,
+        agentConfigId,
+        sourceVersion,
+        configOptions
+      );
+    })().catch((error: unknown) => {
+      this.logger.debug(
+        `[${sessionId}] Failed to record observed model config options: ${formatErrorMessage(error)}`
+      );
+    });
+  }
+
   private async applyAcpModeAndModel(
     session: {
       sessionId: SessionId;
@@ -1971,6 +2017,11 @@ export class MessageHandler {
       logger: this.logger,
       signal: context.signal,
     });
+    this.recordSessionObservedModelConfigOptions(
+      session.sessionId,
+      normalizeConfigOptions(session.agentClient?.getConfigOptions?.()),
+      context.sessionDoc
+    );
 
     if (runtimeConfigPatch && context.basedOnUserTurnId) {
       const basedOnUserTurnId = context.basedOnUserTurnId;
@@ -2392,15 +2443,10 @@ export class MessageHandler {
 
     const tempPath = `${args.destPath}.${uuidV4()}.part`;
     const hash = crypto.createHash('sha256');
-    let source: fs.ReadStream;
-    try {
-      source = fs.createReadStream(blobPath);
-    } catch {
-      return false;
-    }
     const fileHandle = await fs.promises.open(tempPath, 'wx');
     try {
-      for await (const chunk of source) {
+      // Stream must open inside the awaited iteration so a post-handoff rename ENOENT lands in this catch, not as an uncaught 'error'.
+      for await (const chunk of fs.createReadStream(blobPath)) {
         const buf = chunk as Buffer;
         hash.update(buf);
         await fileHandle.write(buf);
@@ -3890,7 +3936,11 @@ export class MessageHandler {
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
       recordNativeWorkInterrupted: async (sessionId, turnId) => {
-        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
+        if (
+          this.deletedSessionIds.has(sessionId) ||
+          this.sessionManager.isArchiveInFlight(sessionId)
+        )
+          return;
         await this.recordAgentWarning(
           sessionId,
           {
@@ -3966,7 +4016,8 @@ export class MessageHandler {
         this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
       readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
       isRuntimeActive: (sessionId) =>
-        this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
+        this.sessionManager.isArchiveInFlight(sessionId) ||
+        this.sessionManager.hasSession(sessionId),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
       archiveProjectGroup: (input) =>
         archiveProjectGroup({
@@ -4343,7 +4394,12 @@ export class MessageHandler {
         },
         resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
         authorizeSessionHistoryRead: async ({ sessionId, readProof }) => {
-          if (!readProof || !this.cloudPort.access.verifySessionHistoryRead) return false;
+          if (
+            this.encryptedAttachments ||
+            !readProof ||
+            !this.cloudPort.access.verifySessionHistoryRead
+          )
+            return false;
           const target = await this.resolveSessionHistoryAccessTarget(sessionId);
           return await this.cloudPort.access.verifySessionHistoryRead({
             workspaceId: this.workspaceId,
@@ -4360,7 +4416,12 @@ export class MessageHandler {
           operation,
           payload,
         }) => {
-          if (!writeProof || !this.cloudPort.access.verifySessionHistoryWrite) return null;
+          if (
+            this.encryptedAttachments ||
+            !writeProof ||
+            !this.cloudPort.access.verifySessionHistoryWrite
+          )
+            return null;
           const target = await this.resolveSessionHistoryAccessTarget(sessionId);
           return await this.cloudPort.access.verifySessionHistoryWrite({
             workspaceId: this.workspaceId,
@@ -4708,16 +4769,19 @@ export class MessageHandler {
                 e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
                 e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
                 e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+                e2eeRoostHistory: E2EE_ROOST_HISTORY_PROTOCOL_VERSION,
               }
             : {}),
           ...(this.sorbetCredentials
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
                 sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                sorbetHostSettings: SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
                   ? {
                       sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
                       sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                      sorbetHostSettingsRemote: SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
                     }
                   : {}),
               }
@@ -5087,11 +5151,17 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
-          if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
-          // Revoke media before unrelated ACP/Browser cleanup can fail.
-          void this.iosSimulatorService.closeSession(sessionId);
-          void this.androidEmulatorService.closeSession(sessionId);
-          void this.handleSessionArchived(sessionId);
+          const { isArchived: archived, createdAt } = event.patch as Partial<SessionMeta>;
+          const initialActiveMetadata = archived === false && createdAt !== undefined;
+          if (typeof archived !== 'boolean' || initialActiveMetadata) return;
+          if (archived) {
+            // Revoke media before unrelated ACP/Browser cleanup can fail.
+            void this.iosSimulatorService.closeSession(sessionId);
+            void this.androidEmulatorService.closeSession(sessionId);
+          }
+          void this.sessionManager.observeArchiveChange(sessionId, () =>
+            this.handleSessionArchiveChanged(sessionId)
+          );
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
       ),
@@ -5220,22 +5290,24 @@ export class MessageHandler {
     return (snapshot?.meta as SessionMeta | undefined)?.machineId === this.machineId;
   }
 
-  private async handleSessionArchived(sessionId: SessionId): Promise<void> {
-    if (this.archiveInFlight.has(sessionId)) {
-      return;
-    }
-    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
-      return;
-    }
-    this.archiveInFlight.add(sessionId);
+  private async handleSessionArchiveChanged(sessionId: SessionId): Promise<void> {
     try {
-      await this.releaseArchivedSessionRuntime(sessionId);
+      if (!(await this.isSessionOwnedByThisMachine(sessionId))) return;
+      const current = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+      if (!current?.meta || isLoroRepoDocDeleted(current)) return;
+      if ((current.meta as SessionMeta).isArchived === true) {
+        await this.releaseArchivedSessionRuntime(sessionId);
+      } else {
+        try {
+          await this.sessionManager.syncNativeSessionArchive(sessionId, false);
+        } catch (error) {
+          this.sessionManager.reportNativeArchiveFailure(sessionId, error);
+        }
+      }
     } catch (error) {
       this.logger.error(
-        `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
+        `[${sessionId}] Archive state reconciliation failed: ${formatErrorMessage(error)}`
       );
-    } finally {
-      this.archiveInFlight.delete(sessionId);
     }
     void this.worktreeGc.schedule();
   }
@@ -5264,9 +5336,10 @@ export class MessageHandler {
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
 
+    let releaseFailure: string | undefined;
     if (this.sessionManager.hasSession(sessionId)) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.terminateSessionForRelease(sessionId);
+      releaseFailure = await this.terminateSessionForRelease(sessionId);
       if (options.writeIdleStatus !== false) {
         await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
           status: SessionStatusFactory.idle(),
@@ -5274,7 +5347,10 @@ export class MessageHandler {
       }
     }
 
-    await this.sessionManager.archiveSession(sessionId);
+    await this.sessionManager.archiveSession(sessionId, {
+      releaseFailure,
+      recordWarning: (warning) => this.recordAgentWarning(sessionId, warning),
+    });
     this.store.get(sessionId).logger = null;
     this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }
@@ -5583,14 +5659,16 @@ export class MessageHandler {
    * could be proven gone: the Session is not reused, so a survivor is an
    * orphan to report, not a reason to leave the archive half done.
    */
-  private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+  private async terminateSessionForRelease(sessionId: SessionId): Promise<string | undefined> {
     this.executionService.withdrawNativeWorkCompletion(sessionId);
     try {
       await this.sessionManager.terminateSession(sessionId, true);
+      return undefined;
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Releasing the session although its processes could not all be terminated: ${formatErrorMessage(error)}`
       );
+      return `Session processes could not all be terminated: ${formatErrorMessage(error)}`;
     }
   }
 
@@ -5706,6 +5784,14 @@ export class MessageHandler {
       this.persistOutOfTurnAvailableCommands(sessionId, update);
       return;
     }
+    if (!target && update.update.sessionUpdate === 'config_option_update') {
+      this.recordSessionObservedModelConfigOptions(
+        sessionId,
+        normalizeConfigOptions(update.update.configOptions)
+      );
+      this.persistOutOfTurnAvailableCommands(sessionId, update);
+      return;
+    }
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -5713,14 +5799,15 @@ export class MessageHandler {
       );
       return;
     }
+    const isVisible = this.isVisibleACPUpdate(update.update);
     if (target.source === 'finalized_turn') {
-      // Output inside a turn never touches the session: the turn keeps it from
-      // GC. Output after the turn means the model was woken by a finished
-      // background task, a ScheduleWakeup or a cron, so the idle timer restarts
-      // from it. Only agents that report `sessionActivity` get this; the others
-      // keep the old rule that only user actions and turn ends count.
-      if (this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity()) {
+      const reportsSessionActivity =
+        this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity() ?? false;
+      if (reportsSessionActivity || isVisible) {
         this.touchSession(sessionId);
+      }
+      if (!reportsSessionActivity && isVisible) {
+        this.sessionActivePresence.native.noteLateActivity(sessionId);
       }
       this.captureACPUpdateInvariant(
         'late_acp_update_routed_to_finalized_turn',
@@ -5733,7 +5820,7 @@ export class MessageHandler {
       );
     }
     const state = this.store.get(sessionId);
-    this.recordTurnEvent(sessionId, target.turnEpoch, this.isVisibleACPUpdate(update.update));
+    this.recordTurnEvent(sessionId, target.turnEpoch, isVisible);
     state.acpUpdateBuffer.push({
       operationId: uuidV4(),
       notification: update,
@@ -6260,6 +6347,15 @@ export class MessageHandler {
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
+          for (const buffered of group.updates) {
+            if (buffered.notification.update.sessionUpdate === 'config_option_update') {
+              this.recordSessionObservedModelConfigOptions(
+                sessionId,
+                normalizeConfigOptions(buffered.notification.update.configOptions),
+                sessionDoc
+              );
+            }
+          }
           const runtimeConfigPatch = mergeAcpRuntimeConfigUpdates(
             group.updates.map((update) => update.notification)
           );
@@ -6984,6 +7080,7 @@ export class MessageHandler {
 
   private clearSessionActivePresence(sessionId: SessionId): void {
     this.sessionActivePresence.clearUnleased(sessionId);
+    this.sessionActivePresence.native.clearLateActivity(sessionId);
   }
 
   private createRuntimeDispatchContext(): MessageDispatchContext {
@@ -7204,16 +7301,19 @@ export class MessageHandler {
                 e2eeSessionFork: E2EE_SESSION_FORK_PROTOCOL_VERSION,
                 e2eeSessionEditAndResend: E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
                 e2eeRemoteControl: E2EE_REMOTE_CONTROL_PROTOCOL_VERSION,
+                e2eeRoostHistory: E2EE_ROOST_HISTORY_PROTOCOL_VERSION,
               }
             : {}),
           ...(this.sorbetCredentials
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
                 sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                sorbetHostSettings: SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
                   ? {
                       sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
                       sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                      sorbetHostSettingsRemote: SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
                     }
                   : {}),
               }
@@ -8148,11 +8248,38 @@ export class MessageHandler {
     return downloadLocalAttachment(request, this.machineId);
   }
 
+  async handleEncryptedDevicePreview(
+    request: Extract<
+      LocalMachineRpcRequestValidated,
+      { method: 'ios-simulator/control' | 'android-emulator/control' }
+    >,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    const isCurrent = () =>
+      !!context.authority &&
+      !context.signal.aborted &&
+      !context.authority.signal.aborted &&
+      context.authority.isCurrent();
+    const authorize = async () => {
+      if (!isCurrent()) throw new Error('e2ee_feature_authority_withdrawn');
+    };
+    await authorize();
+    const result =
+      request.method === 'ios-simulator/control'
+        ? await this.iosSimulatorService.control(request.params, true, authorize, isCurrent)
+        : await this.androidEmulatorService.control(request.params, true, authorize, isCurrent);
+    await authorize();
+    return { ok: true, result };
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    context?: import('./e2ee/feature-rpc').EncryptedFeatureContext
   ): Promise<LocalMachineRpcResponse> {
     try {
+      if (request.method === 'session/history-write' && context)
+        return await this.handleEncryptedHistoryWrite(request, context);
       const result = await this.dispatchLocalMachineRpc(request, signal);
       return { ok: true, result };
     } catch (error) {
@@ -8242,6 +8369,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'session/history-write':
+        throw new Error('e2ee_verified_request_required');
       case 'session/history-read':
         return SessionHistoryReadResponseSchema.parse(
           await this.readSessionHistoryForRpc(
@@ -8316,13 +8445,41 @@ export class MessageHandler {
       case 'sorbet/providers-update':
       case 'sorbet/providers-delete':
       case 'sorbet/providers-refresh':
-      case 'sorbet/models-list': {
+      case 'sorbet/models-list':
+      case 'sorbet/host-settings-get':
+      case 'sorbet/host-settings-update': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
           request.ownerSessionId
         )
           throw new Error('Sorbet credentials scope mismatch');
+        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
+        // Host settings are machine-wide; the rest resolve a builtin Sorbet config first.
+        const isHostSettings =
+          request.method === 'sorbet/host-settings-get' ||
+          request.method === 'sorbet/host-settings-update';
+        if (isHostSettings) {
+          try {
+            const { SorbetHostSettingsResultSchema } =
+              await import('@lody/shared/local-machine-rpc');
+            if (request.method === 'sorbet/host-settings-get') {
+              return SorbetHostSettingsResultSchema.parse({
+                type: 'sorbet/host-settings-get',
+                settings: await this.sorbetCredentials.getHostSettings(signal),
+              });
+            }
+            return SorbetHostSettingsResultSchema.parse({
+              type: 'sorbet/host-settings-update',
+              settings: await this.sorbetCredentials.updateHostSettings(
+                request.params.patch,
+                signal
+              ),
+            });
+          } catch {
+            throw new Error('Sorbet host settings operation failed');
+          }
+        }
         const configId = request.params.configId as AgentConfigId;
         const config = await this.workspaceDocument.getAgentConfigForMachineLaunch(
           configId,
@@ -8335,7 +8492,6 @@ export class MessageHandler {
           config.agentType !== 'sorbet'
         )
           throw new Error('Sorbet credentials configuration unavailable');
-        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
         try {
           const { SorbetCredentialsResultSchema, SorbetProvidersResultSchema } =
             await import('@lody/shared/local-machine-rpc');
@@ -8922,6 +9078,33 @@ export class MessageHandler {
     return await this.withdrawQueuedInput(args);
   }
 
+  private async handleEncryptedHistoryWrite(
+    request: Extract<LocalMachineRpcRequestValidated, { method: 'session/history-write' }>,
+    context: import('./e2ee/feature-rpc').EncryptedFeatureContext
+  ): Promise<LocalMachineRpcResponse> {
+    const { sessionId, operation, payload } = request.params;
+    const entry = parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as SessionHistoryInput;
+    if (!context.requester || entry.userId !== context.requester.accountId)
+      throw new Error('e2ee_feature_requester');
+    await this.workspaceDocument.verifyRoostInput(sessionId, entry, context.requesterDevice);
+    const assertCurrent = () => {
+      if (
+        !context.authority ||
+        context.authority.signal.aborted ||
+        context.signal.aborted ||
+        !context.authority.isCurrent()
+      )
+        throw new Error('e2ee_authority_changed');
+    };
+    assertCurrent();
+    return {
+      ok: true,
+      result: SessionHistoryWriteResponseSchema.parse(
+        await this.writeSessionHistoryForRpc(sessionId, operation, { entry }, assertCurrent)
+      ),
+    };
+  }
+
   /** Session and project work the encrypted receiver admitted for a verified signer. It
    * runs as the signer's execution identity, passed beside the signed request. */
   async handleEncryptedSessionWork(
@@ -9334,7 +9517,8 @@ export class MessageHandler {
   private async writeSessionHistoryForRpc(
     sessionId: SessionId,
     operation: SessionHistoryWriteOperation,
-    rawPayload: Record<string, unknown>
+    rawPayload: Record<string, unknown>,
+    assertCurrent?: () => void
   ): Promise<SessionHistoryWriteResponse> {
     try {
       await this.resolveSessionHistoryOwnerSessionId(sessionId);
@@ -9344,6 +9528,9 @@ export class MessageHandler {
       if (backend.kind !== 'roost') {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
+      if (this.encryptedAttachments && !assertCurrent)
+        throw new Error('e2ee_verified_request_required');
+      assertCurrent?.();
       const payload = rawPayload;
       let result: unknown;
       switch (operation) {
@@ -9351,7 +9538,8 @@ export class MessageHandler {
           if (!backend.inputAcceptance?.acceptAndDispatch)
             throw new Error('Input dispatch is unavailable');
           const receipt = await backend.inputAcceptance.acceptAndDispatch(
-            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never,
+            assertCurrent
           );
           result = receipt;
           if (receipt.status === 'accepted' && receipt.active && !this.cleanedUp)
@@ -9361,7 +9549,8 @@ export class MessageHandler {
         case 'accept_input':
           if (!backend.inputAcceptance) throw new Error('Input acceptance is unavailable');
           result = await backend.inputAcceptance.accept(
-            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never
+            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as never,
+            assertCurrent
           );
           break;
         case 'append':
@@ -9463,12 +9652,15 @@ export class MessageHandler {
     message: SessionHistoryReadRequest,
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
-    if (message.workspaceId !== this.workspaceId) {
+    if (
+      message.workspaceId !== this.workspaceId ||
+      (this.encryptedAttachments && dispatchContext.source !== 'local')
+    ) {
       dispatchContext.send({
         type: 'session/history-read_response',
         sessionId: message.sessionId,
         success: false,
-        error: `Workspace mismatch for session ${message.sessionId}`,
+        error: 'Session history read access was refused.',
       });
       return;
     }
@@ -12350,6 +12542,7 @@ export class MessageHandler {
         ok: true,
         type: 'local-project/list-global-skills',
         result: await this.localProjectControlService.listGlobalSkills({
+          magpieGatewayUrl: request.magpieGatewayUrl,
           knownFingerprint: request.knownFingerprint,
         }),
       };
@@ -12899,7 +13092,7 @@ export class MessageHandler {
    * Check if a session is currently being archived.
    */
   isArchiveInFlight(sessionId: SessionId): boolean {
-    return this.archiveInFlight.has(sessionId);
+    return this.sessionManager.isArchiveInFlight(sessionId);
   }
 
   /**
@@ -12909,7 +13102,10 @@ export class MessageHandler {
   getNativeWork(sessionId: SessionId): NativeAgentWork {
     const session = this.sessionManager.getSession(sessionId);
     if (!session || session.hasLiveAgentProcess?.() === false) return null;
-    return session.agentClient?.getNativeWork() ?? null;
+    return (
+      session.agentClient?.getNativeWork() ??
+      (this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null)
+    );
   }
 
   /**

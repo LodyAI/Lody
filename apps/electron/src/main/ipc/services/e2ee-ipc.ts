@@ -845,7 +845,7 @@ export class E2eeIpc extends ProductWindowIpcService {
   async approveMemberJoin(workspaceId: string, requestId: string, mode: 'automatic' | 'explicit') {
     const id = sender()
     const scope = this.memberScope(workspaceId)
-    if (mode !== 'automatic' && mode !== 'explicit') throw new Error('e2ee_invalid-input')
+    if (mode !== 'explicit') throw new Error('e2ee_invalid-input')
     const access = await this.memberAccess(workspaceId, id, scope)
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
@@ -855,15 +855,9 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
     if (material.workspaceId !== workspaceId || material.requestId !== requestId)
       throw new Error('e2ee_conflict')
-    // `source` is a relay label: automatic admission is decided by the host, which verifies
-    // the invitation's endorsement against its own ledger before signing.
     const pending = await scope((owner) =>
       owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.prepareMemberAdmission(
-            workspaceId,
-            material.keyPackageHex,
-            mode === 'automatic' ? { offer: material.offer, now: Date.now() } : undefined
-          )
+        ? owner.host.prepareMemberAdmission(workspaceId, material.keyPackageHex)
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
     let primary: unknown
@@ -3009,7 +3003,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     if (await this.recoveryOperation(({ exists }) => exists))
       throw new Error('e2ee_recovery_exists')
     const method = input?.method ?? 'file'
-    const locator = recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
+    const locator = recoveryVaultLocator(import.meta.env.VITE_SITE_URL)
     if (method === 'passkey') {
       const label = passkeyLabel(
         input?.label ??
@@ -3083,7 +3077,7 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw new Error('e2ee_recovery_invalid-input')
     if (method !== 'file' && method !== 'passkey' && method !== 'password')
       throw new Error('e2ee_recovery_invalid-input')
-    recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
+    recoveryVaultLocator(import.meta.env.VITE_SITE_URL)
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const dialogOptions = {
       defaultPath: 'lody-recovery.lodyrecovery',
@@ -3201,7 +3195,7 @@ export class E2eeIpc extends ProductWindowIpcService {
   async beginRecoveryReplacement() {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
-    const locator = recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
+    const locator = recoveryVaultLocator(import.meta.env.VITE_SITE_URL)
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const options = {
       defaultPath: 'lody-recovery.lodyrecovery',
@@ -3244,21 +3238,15 @@ export class E2eeIpc extends ProductWindowIpcService {
     method: RecoveryUnlockMethod,
     options?: RecoveryUnlockOptions
   ): Promise<RecoveryUnlock | null> {
-    if (method === 'passkey')
-      return {
-        passkey: this.passkeyPort(),
-        locator: recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
-      }
+    const locator = recoveryVaultLocator(import.meta.env.VITE_SITE_URL)
+    if (method === 'passkey') return { passkey: this.passkeyPort(), locator }
     if (method === 'password') {
       if (typeof options?.password !== 'string') throw new Error('e2ee_recovery_invalid-input')
-      return {
-        password: options.password,
-        locator: recoveryVaultLocator(import.meta.env.VITE_CONVEX_DEPLOY_URL)
-      }
+      return { password: options.password, locator }
     }
     if (method !== 'file') throw new Error('e2ee_recovery_invalid-input')
     const file = await this.chooseRecoveryFile()
-    return file ? { file } : null
+    return file ? { file, locator } : null
   }
   private bindRecoveryUnlock(
     unlock: RecoveryUnlock,
@@ -3340,6 +3328,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
     const compromised = input?.compromised === true
+    const locator = recoveryVaultLocator(import.meta.env.VITE_SITE_URL)
     const file = await this.chooseRecoveryFile()
     if (!file) return { outcome: 'cancelled' as const }
     try {
@@ -3355,6 +3344,7 @@ export class E2eeIpc extends ProductWindowIpcService {
                   replacement,
                   workspaces,
                   file,
+                  locator,
                   compromised
                 })
             )
@@ -3687,6 +3677,7 @@ export class E2eeIpc extends ProductWindowIpcService {
   async inspectRecoveryFile() {
     sender()
     if (!recoveryVaultEnabled()) throw new Error('e2ee_recovery_disabled')
+    const locator = recoveryVaultLocator(import.meta.env.VITE_SITE_URL)
     const owner = BrowserWindow.fromWebContents(getIpcContext().event.sender)
     const options = {
       properties: ['openFile' as const],
@@ -3700,7 +3691,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     const file = await this.readRecoveryFile(path)
     try {
       const inspected = await this.recoveryOperation(({ store, journalPath }) =>
-        inspectRecoveryFile({ store, journalPath, file })
+        inspectRecoveryFile({ store, journalPath, file, locator })
       )
       return { outcome: 'opened' as const, ...inspected }
     } finally {

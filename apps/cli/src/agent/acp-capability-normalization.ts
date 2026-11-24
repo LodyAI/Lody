@@ -44,7 +44,7 @@ export function normalizeConfigOptions(
   if (supported.length === 0) {
     return undefined;
   }
-  return supported.map((opt) => {
+  const normalized = supported.flatMap((opt) => {
     if (opt.type === 'boolean') {
       return {
         id: opt.id,
@@ -57,6 +57,9 @@ export function normalizeConfigOptions(
       };
     }
 
+    if (!Array.isArray(opt.options)) {
+      return [];
+    }
     const flatOptions: AcpConfigOptionSummary['options'] = [];
     for (const entry of opt.options) {
       if (isSelectGroup(entry)) {
@@ -86,6 +89,7 @@ export function normalizeConfigOptions(
       options: flatOptions,
     };
   });
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 const zLegacySessionModels = z.object({

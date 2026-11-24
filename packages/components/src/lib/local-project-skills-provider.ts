@@ -17,7 +17,10 @@ export type LocalProjectSkillsTransport = {
     readonly skillDirs: readonly string[];
     readonly knownFingerprint?: string;
   }) => Promise<ProjectSkillsResult>;
-  listGlobalSkills: (args?: { readonly knownFingerprint?: string }) => Promise<ProjectSkillsResult>;
+  listGlobalSkills: (args?: {
+    readonly knownFingerprint?: string;
+    readonly magpieGatewayUrl?: string;
+  }) => Promise<ProjectSkillsResult>;
 };
 
 export function createLocalProjectSkillsTransport(args: {
@@ -51,10 +54,11 @@ export function createLocalProjectSkillsTransport(args: {
       );
       return assertLocalProjectControlResponse(response, 'local-project/list-skills').result;
     },
-    listGlobalSkills: async ({ knownFingerprint } = {}) => {
+    listGlobalSkills: async ({ knownFingerprint, magpieGatewayUrl } = {}) => {
       const response = await args.requestLocalProjectControl(
         {
           type: 'local-project/list-global-skills',
+          ...(magpieGatewayUrl ? { magpieGatewayUrl } : {}),
           machineId: args.machineId,
           workspaceId: args.workspaceId,
           ...(knownFingerprint ? { knownFingerprint } : {}),

@@ -31,8 +31,8 @@ catalog:
   '@loro-dev/flock-wasm': ^0.5.0
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/roost': 0.3.1
-  '@loro-dev/streams-client': 0.14.0
-  '@loro-dev/streams-crdt': 0.23.0
+  '@loro-dev/streams-client': 0.15.0
+  '@loro-dev/streams-crdt': 0.24.0
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -53,7 +53,7 @@ catalog:
   loro-mirror: 2.3.2
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
-  loro-repo: 0.28.0
+  loro-repo: 0.29.0
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -68,6 +68,7 @@ catalog:
 ignoredBuiltDependencies:
   - node-pty
   - better-sqlite3
+  - cpu-features
 
 managePackageManagerVersions: true
 
@@ -180,9 +181,9 @@ minimumReleaseAgeExclude:
   - '@vitest/mocker@5.0.2 || 5.1.0'
   - '@vitest/spy@5.0.2 || 5.1.0'
   - loro-crdt@1.17.0
-  - '@loro-dev/streams-crdt@0.22.1 || 0.23.0'
-  - '@loro-dev/streams-client@0.14.0'
-  - loro-repo@0.26.0 || 0.28.0
+  - '@loro-dev/streams-crdt@0.22.1 || 0.23.0 || 0.24.0'
+  - '@loro-dev/streams-client@0.14.0 || 0.15.0'
+  - loro-repo@0.26.0 || 0.28.0 || 0.29.0
   - '@loro-dev/flock-wasm@0.5.0'
   - '@lobehub/streamdown@1.4.0'
   - virtua@0.52.7
@@ -210,7 +211,6 @@ onlyBuiltDependencies:
   - '@prisma/engines'
   - '@swc/core'
   - core-js
-  - cpu-features
   - electron
   - electron-winstaller
   - esbuild
@@ -231,7 +231,7 @@ overrides:
   '@storybook/builder-vite@>=10.6.0 <10.6.2': 10.6.2
   '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
   'loro-repo>@loro-dev/flock-wasm': ^0.5.0
-  'loro-repo>@loro-dev/streams-crdt': 0.23.0
+  'loro-repo>@loro-dev/streams-crdt': 0.24.0
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
   '@opencode/codemode>effect': 4.0.2
   '@peculiar/x509>@peculiar/asn1-schema': 2.10.0

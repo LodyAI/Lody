@@ -1,3 +1,4 @@
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { radius as sharedRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { colors, colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
@@ -12,12 +13,10 @@ import {
 import { CoordinatorObservabilityHeaderButton } from '@/components/project-mode/coordinator-observability-panel';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import {
-  useLegacyWorkspaceQueryStatus,
   useWorkspaceFeature,
   useWorkspaceFeatureReason,
   useMachineRpcFeatureReason,
@@ -110,7 +109,12 @@ import {
   X,
 } from 'lucide-react';
 import { useChangeCoordinatorAction } from '@/components/project-mode/use-change-coordinator';
-import { buildSnoozePresets, expiredSnoozeTimestamp, statusViewTier } from '@lody/shared';
+import {
+  buildSnoozePresets,
+  expiredSnoozeTimestamp,
+  resolveSessionPullRequests,
+  statusViewTier,
+} from '@lody/shared';
 import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
 import { useOrganization } from '@/hooks/useOrganization';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
@@ -252,6 +256,7 @@ import SessionChatStream, {
   type UserMessageEditMentionContext,
   type UserMessageEditSubmission,
 } from '../ai-gui';
+import { GenuiCapabilitiesContext } from '../ai-gui/genui/genui-capabilities-context';
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
@@ -2841,12 +2846,22 @@ export const SessionChatInterface = memo(
       isVisible
     );
     const continuationNow = useStableNow(10_000).getTime();
-    // Auto delivery reads the PR poller, which encrypted workspaces do not run.
-    const autoDeliverSupported = runtime?.contentMode !== 'e2ee';
-    const canAutoDeliver =
-      autoDeliverSupported && !!continuation.value && !continuation.value.autoDeliver;
+    const canAutoDeliver = !!continuation.value && !continuation.value.autoDeliver;
     const [autoDeliveryDialogOpen, setAutoDeliveryDialogOpen] = useState(false);
     const autoDeliveryStatus = session.autoDelivery ?? null;
+    const autoDeliveryActiveKey =
+      autoDeliveryStatus === null
+        ? 'none'
+        : autoDeliveryStatus.state === 'merged'
+          ? 'merged'
+          : 'active';
+    const previousAutoDeliveryKeyRef = useRef(autoDeliveryActiveKey);
+    useEffect(() => {
+      if (previousAutoDeliveryKeyRef.current !== autoDeliveryActiveKey) {
+        previousAutoDeliveryKeyRef.current = autoDeliveryActiveKey;
+        continuation.refresh();
+      }
+    }, [autoDeliveryActiveKey, continuation.refresh]);
     // Session-scoped UI state below stores the session it belongs to and is read
     // only for that session: this instance can outlive a switch (the desktop
     // toolbar is not keyed), and a late async write must not reach the next one.
@@ -3190,8 +3205,8 @@ export const SessionChatInterface = memo(
     const [resolvingConflictsSessionId, setResolvingConflictsSessionId] =
       useState<SessionId | null>(null);
     const isResolvingConflicts = resolvingConflictsSessionId === session.id;
-    const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
-    const repositories = useLegacyWorkspaceQuery(
+    const legacyQueryStatus = useGithubWorkspaceStatus(workspaceId);
+    const repositories = useGithubWorkspaceQuery(
       cloudOperations.github.getWorkspaceRepositories,
       workspaceId ? { workspaceId } : 'skip'
     );
@@ -3244,12 +3259,19 @@ export const SessionChatInterface = memo(
       () =>
         !isArchivedSession && session.cliType && session.agentType
           ? {
+              magpieGatewayUrl: sessionAgentConfig?.magpieGatewayUrl,
               cliType: session.cliType,
               agentType: session.agentType,
               machineId: session.machineId,
             }
           : undefined,
-      [isArchivedSession, session.agentType, session.cliType, session.machineId]
+      [
+        sessionAgentConfig?.magpieGatewayUrl,
+        isArchivedSession,
+        session.agentType,
+        session.cliType,
+        session.machineId,
+      ]
     );
     const editMentionContext = useMemo<UserMessageEditMentionContext>(
       () => ({
@@ -5463,6 +5485,23 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    /**
+     * The `lody.*` manifest surfaces expose to genui programs. `sendPrompt`
+     * rides the ordinary send admission (queue/guide/dispatch routing), so a
+     * surface button behaves like the composer — fire-and-forget, since the
+     * confined evaluator cannot consume a promise.
+     */
+    const genuiCapabilities = useMemo<Record<string, unknown>>(
+      () => ({
+        sendPrompt: (prompt: unknown) => {
+          void dispatchPrompt(String(prompt)).catch((error: unknown) => {
+            console.warn('genui lody.sendPrompt failed', { sessionId: session.id, error });
+          });
+        },
+      }),
+      [dispatchPrompt, session.id]
+    );
+
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
       history: sessionHistory,
@@ -7595,11 +7634,7 @@ export const SessionChatInterface = memo(
                   ),
                 },
                 autoDeliver: {
-                  supported: autoDeliverSupported || continuation.value.autoDeliver,
-                  reason: t(
-                    'sessions.autoDelivery.encryptedUnavailable',
-                    'Encrypted workspaces do not observe pull requests yet.'
-                  ),
+                  supported: true,
                 },
               }}
               autoDeliverOptions={continuation.autoDeliverOptions}
@@ -7808,11 +7843,18 @@ export const SessionChatInterface = memo(
             <AutoDeliveryDialog
               open
               busy={continuation.busy}
+              openPullRequests={resolveSessionPullRequests(session)
+                .filter((pr) => pr.status === 'open' || pr.status === 'draft')
+                .map((pr) => {
+                  const gh = pr.url.match(/\/([^/]+\/[^/]+)\/pull\/(\d+)/i);
+                  const gl = pr.url.match(/\/([^/]+\/[^/]+)\/-\/merge_requests\/(\d+)/i);
+                  return {
+                    url: pr.url,
+                    label: gh ? `${gh[1]}#${gh[2]}` : gl ? `${gl[1]}!${gl[2]}` : pr.url,
+                  };
+                })}
               onOpenChange={setAutoDeliveryDialogOpen}
-              onStart={(options) => {
-                continuation.setAutoDeliver(options);
-                setAutoDeliveryDialogOpen(false);
-              }}
+              onStart={(options) => continuation.setAutoDeliver(options)}
             />
           ) : null}
           {toolbar?.container &&
@@ -7952,9 +7994,10 @@ export const SessionChatInterface = memo(
                               workspaceId={workspaceId}
                               isVisible={isVisible}
                             >
-                              <SessionChatStream
-                                key={session.id}
-                                ref={chatStreamRef}
+                              <GenuiCapabilitiesContext.Provider value={genuiCapabilities}>
+                                <SessionChatStream
+                                  key={session.id}
+                                  ref={chatStreamRef}
                                 sessionId={session?.id}
                                 workspaceId={workspaceId}
                                 showSenderIdentity={isMultiMember}
@@ -7969,29 +8012,45 @@ export const SessionChatInterface = memo(
                                   unsentFirstMessage ? undefined : (
                                     <>
                                       {pendingMessages.trailingContent}
-                                      {autoDeliveryStatus ? (
-                                        <ConversationColumn
-                                          {...stylex.props(styles.continuationNotesColumn)}
-                                        >
-                                          <SessionAutoDeliveryNote
-                                            status={autoDeliveryStatus}
-                                            busy={continuation.busy}
-                                            onTurnOff={
-                                              continuation.value?.autoDeliver
-                                                ? () => continuation.setAutoDeliver(false)
-                                                : undefined
-                                            }
-                                            onDismiss={() => continuation.setAutoDeliver(false)}
-                                          />
-                                        </ConversationColumn>
-                                      ) : null}
-                                      {continuation.views.length > 0 ? (
+                                      {autoDeliveryStatus || continuation.views.length > 0 ? (
                                         // The stream's trailing row is full-bleed, so the
-                                        // note mounts its own conversation column like every
-                                        // other region; otherwise it paints the whole pane.
+                                        // automation notes mount one shared conversation column.
                                         <ConversationColumn
                                           {...stylex.props(styles.continuationNotesColumn)}
                                         >
+                                          {autoDeliveryStatus ? (
+                                            <SessionAutoDeliveryNote
+                                              status={autoDeliveryStatus}
+                                              now={continuationNow}
+                                              compact={isMobile}
+                                              busy={continuation.busy}
+                                              options={continuation.autoDeliverOptions}
+                                              onOptionsChange={
+                                                continuation.supported
+                                                  ? (next) => void continuation.setAutoDeliver(next)
+                                                  : undefined
+                                              }
+                                              onTurnOff={
+                                                continuation.supported
+                                                  ? () => void continuation.setAutoDeliver(false)
+                                                  : undefined
+                                              }
+                                              onDismiss={
+                                                continuation.supported
+                                                  ? () => void continuation.setAutoDeliver(false)
+                                                  : undefined
+                                              }
+                                              onResume={() => {
+                                                void setTreeCollaborationStopped(session.id, false)
+                                                  .then(continuation.refresh)
+                                                  .catch(() =>
+                                                    toast.error(
+                                                      t('sessions.relations.controlFailed')
+                                                    )
+                                                  );
+                                              }}
+                                            />
+                                          ) : null}
                                           {continuation.views.map((view) => (
                                             <SessionContinuationNote
                                               key={view.id}
@@ -8054,6 +8113,7 @@ export const SessionChatInterface = memo(
                                 suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
                                 outlineOverlayRoot={outlineOverlayRoot}
                               />
+                              </GenuiCapabilitiesContext.Provider>
                             </SessionAgentFileLinkMenuProvider>
                           </MessageSelectionContext.Provider>
                         </MessageSendStatusContext.Provider>

@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   themeFontSize,
   themeFontWeight,
@@ -28,16 +29,8 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.xs,
     fontWeight: themeFontWeight.medium,
     boxShadow: themeShadow.xs,
-    borderColor: {
-      default: '#f99c004d',
-      '@supports (color: color-mix(in lab, red, red))':
-        'color-mix(in oklab, var(--color-amber-500) 30%, transparent)',
-    },
-    backgroundColor: {
-      default: '#f99c001a',
-      '@supports (color: color-mix(in lab, red, red))':
-        'color-mix(in oklab, var(--color-amber-500) 10%, transparent)',
-    },
+    borderColor: `color-mix(in oklab, ${colors.warning} 30%, transparent)`,
+    backgroundColor: `color-mix(in oklab, ${colors.warning} 10%, transparent)`,
     color: {
       default: 'var(--color-amber-950)',
       [DARK_SCOPE]: 'var(--color-amber-100)',

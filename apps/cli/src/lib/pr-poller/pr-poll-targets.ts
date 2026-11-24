@@ -184,6 +184,7 @@ export function computePrPollMetaSignature(
       ])
     ),
     meta.isArchived ? '1' : '0',
+    meta.autoDelivery ? '1' : '0',
     meta.lastMessageAt ?? '',
     resolveDiscoveryBranch(meta) ?? '',
     resolveGitHubRepo(meta) ?? '',

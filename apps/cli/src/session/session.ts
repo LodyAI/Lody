@@ -612,6 +612,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           finalEnv[key] = configEnv[key];
       }
     }
+    /** Desktop launches the CLI under ELECTRON_RUN_AS_NODE; agents are normal Node processes and must not inherit it. agent-client.ts/pi-extensions.ts read process.env directly, so this stays last. */
+    delete finalEnv.ELECTRON_RUN_AS_NODE;
     return finalEnv;
   }
 

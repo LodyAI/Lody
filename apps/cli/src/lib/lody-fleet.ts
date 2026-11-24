@@ -1,3 +1,4 @@
+import { encryptedGithubTokenPort } from './e2ee/runtime-cloud-port';
 import path from 'node:path';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -1342,33 +1343,32 @@ export class LodyFleet {
         }
 
         const startedLody = lody;
-        // The poller reads decrypted repo/branch metadata and has independent
-        // hosted credential/association ports. Do not construct it for E2EE:
-        // sanitizing Lody's own cloud port does not fence this Fleet owner.
-        const prPollerWorkspace =
-          workspace.contentMode === 'e2ee'
-            ? null
-            : (partialPoller = createLodyPrPollerWorkspace({
-                documentManager: startedLody.documentManager,
-                workspaceId: workspace.id,
-                userId: this.userId,
-                machineId: this.machineId,
-                githubTokens: this.cloudPort.githubTokens,
-                prAssociation: this.cloudPort.prAssociation,
-                logger: workspaceLogger,
-                workflowObservationOwners: () =>
-                  this.runtimes.get(workspace.id)?.automations?.workflowObservationOwners() ??
-                  new Set(),
-                recordWorkflowObservations: async (...args) => {
-                  await this.runtimes
-                    .get(workspace.id)
-                    ?.automations?.recordWorkflowObservations(...args);
-                },
-                recordObservations: async (...args) => {
-                  const runtime = this.runtimes.get(workspace.id);
-                  await runtime?.automations?.recordObservations(...args);
-                },
-              }));
+        const prPollerWorkspace = (partialPoller = createLodyPrPollerWorkspace({
+          documentManager: startedLody.documentManager,
+          workspaceId: workspace.id,
+          userId: this.userId,
+          machineId: this.machineId,
+          githubTokens:
+            workspace.contentMode === 'e2ee'
+              ? encryptedGithubTokenPort(this.cloudPort.githubTokens, this.userId)
+              : this.cloudPort.githubTokens,
+          prAssociation: workspace.contentMode === 'e2ee' ? null : this.cloudPort.prAssociation,
+          logger: workspaceLogger,
+          workflowObservationOwners: () =>
+            this.runtimes.get(workspace.id)?.automations?.workflowObservationOwners() ?? new Set(),
+          deliveryObservationOwners: () =>
+            this.runtimes.get(workspace.id)?.automations?.deliveryObservationOwners() ?? new Set(),
+          onPullRequestMetaWritten: async () => {
+            await this.runtimes.get(workspace.id)?.automations?.wake();
+          },
+          recordWorkflowObservations: async (...args) => {
+            await this.runtimes.get(workspace.id)?.automations?.recordWorkflowObservations(...args);
+          },
+          recordObservations: async (...args) => {
+            const runtime = this.runtimes.get(workspace.id);
+            await runtime?.automations?.recordObservations(...args);
+          },
+        }));
         // Scheduled automation: this machine runs the schedules it owns, so
         // entrusted work continues while nobody is looking.
         const schedules: ScheduleWorkspaceHandle = !workspaceSupports(
@@ -2994,6 +2994,7 @@ export class LodyFleet {
           ok: true,
           type: 'local-project/list-global-skills',
           result: await this.localProjectControlService.listGlobalSkills({
+            magpieGatewayUrl: message.magpieGatewayUrl,
             knownFingerprint: message.knownFingerprint,
           }),
         };

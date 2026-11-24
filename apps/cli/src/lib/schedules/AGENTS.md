@@ -42,7 +42,7 @@
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.
 - The command service is transport-neutral. Local CLI/MCP uses the authenticated
   user's private daemon socket; cloud one-shot commands use their workspace repo.
-  Official MCP has list/show/propose/pause only and is registered for every
+  Official MCP has list/show/propose/propose_edit/pause only and is registered for every
   Agent session; the service re-checks that the caller owns the invoking
   Session on this machine. A proposal takes effect only after the person
   confirms its card. Only the command client resolves `LODY_AGENT_SESSION_ID`
@@ -57,6 +57,10 @@
   The tool description tells the agent to ask rather than guess when the
   prompt, rule or destination is unclear — that guidance is the product
   behaviour, so keep it in step with what the card can resolve.
+  `propose_edit` publishes a `schedule_edit_proposal` notice for an owned,
+  prompt-only Schedule. It carries only the proposed title, prompt or rule and
+  the content revision it read (`scheduleContentRevision`), never a copy of the
+  Schedule; a repeated call matches on Schedule id and patch alone. [Decision](../../../../../.agents/notes/implemented/feature/2026-09-24-machine-owned-scheduled-tasks.md).
 - Schedule v2 preserves ACP string/boolean values. At handoff, exact legacy
   boolean literals are projected for declared boolean options and for the
   semantic Fast IDs `fast`/`fast-mode` only when the probe omits those IDs;

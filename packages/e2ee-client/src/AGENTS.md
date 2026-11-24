@@ -18,3 +18,7 @@ The host's single-workspace `restoreRecovery` writes the same progress markers t
 identity, so a revoked identity, or an interrupted or partial replacement, restores
 or resumes on its replacement. A retained ordinary offer whose identity the verified
 history shows lost fails as access loss and is never restored onto.
+
+Remote CLI pairing requires an active non-guest personal device and the retained
+verified ledger. Persist command and admission originals per installation before
+network dispatch; retries reuse them and terminal retirement archives them.

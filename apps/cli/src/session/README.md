@@ -44,6 +44,8 @@ binding rules remain complete.
 
 ## Automation ownership
 
+Agent archive and restore observations synchronize the exact saved native session after runtime release through optional Core capabilities. The Codex and Claude adapters preserve native history. Kimi and Sorbet require runtime versions that advertise the same native capability. A cold resume waits for an observed transition on the same Session. Unsupported agents, title marking and native failures have distinct notices. Account ownership, ordering and limits are recorded in the [native archive decision](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
+
 [Session authority](session-automation-authority.ts) admits actions requested by
 [Automations](../automations/README.md). Execution stages typed outcomes before
 Inbox release; the durable source reconciles release without replaying requests.
@@ -553,6 +555,19 @@ Memory identity references travel with turn configuration. `Session.createAgent`
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
 resident ACP process when the next turn changes identity. See the
 [memory Spec](../../../../specs/agent-role-memory.md).
+
+## Encrypted Roost history
+
+The owner keeps SQLite history, its sidecars, and its writer identity in the retained
+device's content directory under `roost/`. Member removal and device revocation drain
+the owner and erase this directory. A durable identity receipt retries cleanup before
+reopen. Other devices and workspaces keep their own files. Roost streams stay local.
+
+Remote clients require `e2eeRoostHistory: 1` and use encrypted feature RPC.
+A read uses exact-session read authority. Input acceptance requires session execution
+authority and a signed user entry. The owner verifies the intent and the sender before
+writing, and verifies the stored input again at execution. Fork and edit-and-resend run
+on the owner. Attachment manifests retain their original storage session.
 
 ## Roost history paging
 

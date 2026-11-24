@@ -1,9 +1,9 @@
-import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import {
-  useLegacyWorkspaceAction,
-  useLegacyWorkspaceMutation,
-  useLegacyWorkspaceQuery,
-} from '@/hooks/use-legacy-workspace-query';
+  useGithubWorkspaceQuery,
+  useGithubWorkspaceMutation,
+  useGithubWorkspaceAction,
+} from '@/hooks/use-github-workspace';
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
@@ -249,18 +249,18 @@ function CloudIntegrationsSettings() {
   const authorizeInBrowser = isElectronRenderer() || isNativeAppShell();
   const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
-  const personalOperationSettings = useLegacyWorkspaceQuery(
+  const personalOperationSettings = useGithubWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
-  const createGitHubInstallState = useLegacyWorkspaceAction(
+  const createGitHubInstallState = useGithubWorkspaceAction(
     cloudOperations.github.createGitHubInstallState
   );
-  const setRepoEnabled = useLegacyWorkspaceMutation(cloudOperations.github.setRepoEnabled);
-  const setPersonalOperationPreference = useLegacyWorkspaceMutation(
+  const setRepoEnabled = useGithubWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+  const setPersonalOperationPreference = useGithubWorkspaceMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
+  const refreshPersonalGitHubProfile = useGithubWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
   const [installNeedsAuthorization, setInstallNeedsAuthorization] = useState(false);

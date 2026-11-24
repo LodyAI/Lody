@@ -48,30 +48,62 @@ export const withProjectGroupPrScope = (prompt: string): string =>
 
 export const COMMIT_AND_PUSH_PROMPT = 'Commit the uncommitted changes and push the current branch.';
 
-/** A pull request named in a repair or merge request. */
+export type PrPromptProvider = 'github' | 'gitlab' | 'other';
+export type MergePrMethod = 'auto' | 'squash' | 'merge' | 'rebase';
+
+/** A pull/merge request named in a repair or merge request. */
 export type PrPromptTarget = {
-  repoFullName: string;
-  prNumber: number | null;
+  repoFullName?: string | null;
+  prNumber?: number | null;
   prUrl: string;
+  provider?: PrPromptProvider;
 };
 
 const prLabel = (target: PrPromptTarget) =>
   target.prNumber ? `#${target.prNumber}` : target.prUrl;
 
+const prSubject = (target: PrPromptTarget) => {
+  const kind = target.provider === 'gitlab' ? 'merge request' : 'pull request';
+  if (target.repoFullName && target.prNumber) {
+    return `${target.repoFullName} ${kind} #${target.prNumber}: ${target.prUrl}`;
+  }
+  if (target.repoFullName) {
+    return `${target.repoFullName} ${kind} ${prLabel(target)}`;
+  }
+  return `${kind} ${target.prUrl}`;
+};
+
+const mergeMethodPhrase = (method: MergePrMethod | undefined): string => {
+  switch (method) {
+    case 'squash':
+      return ' using squash merge';
+    case 'merge':
+      return ' using a merge commit';
+    case 'rebase':
+      return ' using rebase merge';
+    default:
+      return '';
+  }
+};
+
 /** English text of the Fix CI request; the UI sends its localized copy. */
 export const buildFixCiRequest = (target: PrPromptTarget): string =>
-  `Fix the failing CI checks of ${target.repoFullName} pull request ${prLabel(target)}: ${target.prUrl}`;
+  `Fix the failing CI checks of ${prSubject(target)}`;
 
 /** English text of the Resolve Conflicts request; the UI sends its localized copy. */
 export const buildResolveConflictsRequest = (target: PrPromptTarget): string =>
-  `Resolve the merge conflicts of ${target.repoFullName} pull request ${prLabel(target)}: ${target.prUrl}`;
+  `Resolve the merge conflicts of ${prSubject(target)}`;
 
 /**
  * Auto delivery's merge request: the request plus the commit whose checks Lody
  * observed passing, which the agent cannot otherwise tie to this message.
  */
-export const buildMergePrRequest = (target: PrPromptTarget & { headSha: string }): string =>
-  `Merge ${target.repoFullName} pull request ${prLabel(target)}: ${target.prUrl}. Its checks passed on head commit ${target.headSha}. ${GH_AUTH_FACT}`;
+export const buildMergePrRequest = (
+  target: PrPromptTarget & { headSha: string; mergeMethod?: MergePrMethod }
+): string => {
+  const authNote = !target.provider || target.provider === 'github' ? ` ${GH_AUTH_FACT}` : '';
+  return `Merge ${prSubject(target)}${mergeMethodPhrase(target.mergeMethod)}. Its checks passed on head commit ${target.headSha}.${authNote}`;
+};
 
 /** Origin line of every request Auto delivery sends, like the Info Bar's button lines. */
 export const AUTO_DELIVERY_ORIGIN_PROMPT =

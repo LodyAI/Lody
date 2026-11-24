@@ -193,3 +193,113 @@ test('a pinned row dragged into Focus is unpinned at the dropped slot', async ({
   await expect.poll(focusOrder).toEqual([before[0], 'pin-2', ...before.slice(1)]);
   await expect(page.locator('[data-pin-section="default"] [data-pin-node="pin-2"]')).toHaveCount(0);
 });
+
+test('hovering Status and Workspace session rows reveals end-slot actions with themed ink', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  for (const theme of ['dark', 'light'] as const) {
+    await page.goto(`${STATUS_STORY}&globals=theme:${theme}`);
+
+    const focusRow = page.locator('[data-sidebar-updated-id="focus-3"]');
+    await expect(focusRow).toBeVisible();
+    await focusRow.hover();
+
+    const focusEndSlot = focusRow.locator('[data-session-row-end-slot]');
+    const focusMenu = focusEndSlot.getByRole('button', { name: 'More actions' });
+    const settleBtn = focusEndSlot.getByRole('button', { name: 'Settle' });
+    await expect(focusRow.locator('[data-session-row-leading-slot] button')).toHaveCount(0);
+    await expect(focusMenu).toHaveCSS('opacity', '1');
+    await expect(focusMenu).toHaveCSS('pointer-events', 'auto');
+    await expect(settleBtn).toHaveCSS('opacity', '1');
+    await expect(settleBtn).toHaveCSS('pointer-events', 'auto');
+    await expect(focusEndSlot.locator(':scope > span:not([data-session-row-menu])')).toHaveCSS(
+      'opacity',
+      '0'
+    );
+
+    const settledRow = page.locator('[data-sidebar-updated-id="settled-1"]');
+    await expect(settledRow).toBeVisible();
+    await settledRow.hover();
+
+    const settledEndSlot = settledRow.locator('[data-session-row-end-slot]');
+    const settledMenu = settledEndSlot.getByRole('button', { name: 'More actions' });
+    const archiveBtn = settledEndSlot.getByRole('button', { name: 'Archive session' });
+    await expect(settledRow.locator('[data-session-row-leading-slot] button')).toHaveCount(0);
+    await expect(settledMenu).toHaveCSS('opacity', '1');
+    await expect(archiveBtn).toHaveCSS('opacity', '1');
+    await expect(archiveBtn).toHaveCSS('pointer-events', 'auto');
+
+    // Archive button at rest must share the same theme-matching muted sidebar ink as the menu trigger.
+    const [menuColor, archiveColor] = await Promise.all([
+      settledMenu.evaluate((el) => getComputedStyle(el).color),
+      archiveBtn.evaluate((el) => getComputedStyle(el).color),
+    ]);
+    expect(archiveColor).toBe(menuColor);
+
+    // Arming the two-step Archive pill must keep readable destructive ink in both themes.
+    await archiveBtn.click();
+    const confirmBtn = settledEndSlot.getByRole('button', { name: 'Confirm Archive session' });
+    await expect(confirmBtn).toBeVisible();
+    const confirmColor = await confirmBtn.evaluate((el) => getComputedStyle(el).color);
+    expect(confirmColor).not.toBe('rgb(0, 0, 0)');
+
+    // Later snooze countdown pill must use a translucent foreground tint so it
+    // reads against the resting sidebar surface instead of matching its solid fill.
+    const snoozeRow = page.locator('[data-sidebar-updated-id="later-1"]');
+    await expect(snoozeRow).toBeVisible();
+    const snoozeChip = snoozeRow.locator('[data-snooze-countdown]');
+    await expect(snoozeChip).toBeVisible();
+    const snoozeBg = await snoozeChip.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(snoozeBg).toMatch(/^rgba\(.+,\s*0\.1\)$/);
+  }
+});
+
+const paintedOpacity = (locator: Locator) =>
+  locator.evaluate((el) => {
+    let opacity = 1;
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      opacity *= Number(getComputedStyle(node).opacity);
+    }
+    return opacity;
+  });
+
+test('a status row hides its status mark only while Archive is revealed', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  const surfaces = [
+    'components-lodysidebar--all-sessions-working',
+    'components-lodysidebar--updated-mode',
+  ];
+  for (const story of surfaces) {
+    await page.goto(`/iframe.html?id=${story}&viewMode=story`);
+    const endSlot = page
+      .locator('[data-session-row-end-slot]:has([data-session-row-indicator])')
+      .filter({ has: page.getByRole('button', { name: 'Archive session' }) })
+      .first();
+    await expect(endSlot).toBeVisible();
+    const indicator = endSlot.locator('[data-session-row-indicator]');
+    const archive = endSlot.getByRole('button', { name: 'Archive session' });
+
+    await expect.poll(() => paintedOpacity(indicator)).toBe(1);
+    await expect.poll(() => paintedOpacity(archive)).toBe(0);
+
+    const box = (await endSlot.boundingBox())!;
+    await page.mouse.move(box.x - 60, box.y + box.height / 2);
+    await expect.poll(() => paintedOpacity(archive)).toBe(1);
+    await expect.poll(() => paintedOpacity(indicator)).toBe(0);
+
+    await page.mouse.move(box.x + 600, 5);
+    await expect.poll(() => paintedOpacity(indicator)).toBe(1);
+    await expect.poll(() => paintedOpacity(archive)).toBe(0);
+  }
+
+  await page.goto('/iframe.html?id=components-sidebar-send-status--states&viewMode=story');
+  const bareSlot = page
+    .locator('[data-session-row-end-slot]:has([data-session-row-indicator])')
+    .filter({ hasNot: page.locator('button') })
+    .first();
+  await expect(bareSlot).toBeVisible();
+  const bareBox = (await bareSlot.boundingBox())!;
+  await page.mouse.move(bareBox.x - 60, bareBox.y + bareBox.height / 2);
+  await expect.poll(() => paintedOpacity(bareSlot.locator('[data-session-row-indicator]'))).toBe(1);
+});

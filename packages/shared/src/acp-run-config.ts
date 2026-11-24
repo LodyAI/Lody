@@ -42,6 +42,43 @@ export const ACP_CONFIG_OPTION_ON_VALUE = 'on';
 export const ACP_CONFIG_OPTION_OFF_VALUE = 'off';
 export const ACP_FAST_MODE_VALUE_FAST = 'fast';
 export const ACP_FAST_MODE_VALUE_ULTRAFAST = 'ultrafast';
+export const ACP_FAST_MODE_NORMAL_ALIASES = ['off', 'normal', 'standard', 'default'] as const;
+
+export type NormalizedAcpSpeedTier =
+  | typeof ACP_CONFIG_OPTION_OFF_VALUE
+  | typeof ACP_FAST_MODE_VALUE_FAST
+  | typeof ACP_FAST_MODE_VALUE_ULTRAFAST;
+
+export const isAcpNormalSpeedAlias = (value: unknown): boolean =>
+  typeof value === 'string' &&
+  (ACP_FAST_MODE_NORMAL_ALIASES as readonly string[]).includes(value.trim().toLowerCase());
+
+/**
+ * Normalizes caller-facing speed tier inputs (`false`/`'normal'`/`'standard'`/`'off'`,
+ * `true`/`'fast'`/`'on'`, `'ultrafast'`) into the canonical ACP speed tier token.
+ */
+export const normalizeAcpSpeedTierValue = (
+  value: string | boolean
+): NormalizedAcpSpeedTier | undefined => {
+  if (typeof value === 'boolean') {
+    return value ? ACP_FAST_MODE_VALUE_FAST : ACP_CONFIG_OPTION_OFF_VALUE;
+  }
+  const normalized = value.trim().toLowerCase();
+  if ((ACP_FAST_MODE_NORMAL_ALIASES as readonly string[]).includes(normalized)) {
+    return ACP_CONFIG_OPTION_OFF_VALUE;
+  }
+  if (
+    normalized === ACP_FAST_MODE_VALUE_FAST ||
+    normalized === ACP_CONFIG_OPTION_ON_VALUE ||
+    normalized === 'priority'
+  ) {
+    return ACP_FAST_MODE_VALUE_FAST;
+  }
+  if (normalized === ACP_FAST_MODE_VALUE_ULTRAFAST) {
+    return ACP_FAST_MODE_VALUE_ULTRAFAST;
+  }
+  return undefined;
+};
 
 /** Permission mode id that means "plan without editing" across builtin agents. */
 export const ACP_PLAN_PERMISSION_MODE_ID = 'plan';
@@ -77,6 +114,8 @@ export type AgentRunConfigSelection = {
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
+  /** Response speed tier (`'normal' | 'off' | 'fast' | 'ultrafast'`). */
+  speedTier?: string;
   planMode?: boolean;
 };
 
@@ -86,10 +125,16 @@ export type AgentRunConfigCapabilities = {
   /** Advertised selector metadata only; never expose current configuration values. */
   configOptions: Array<Omit<AcpConfigOptionSummary, 'currentValue'>>;
   /**
-   * `reasoningEffortValues` is per model when the agent publishes that
-   * breakdown; otherwise it is absent and only the snapshot below applies.
+   * `reasoningEffortValues` and `speedTiers` are per model when the agent
+   * publishes that breakdown; otherwise they are absent and only the snapshot
+   * below applies.
    */
-  models: Array<{ id: string; name: string; reasoningEffortValues?: string[] }>;
+  models: Array<{
+    id: string;
+    name: string;
+    reasoningEffortValues?: string[];
+    speedTiers?: string[];
+  }>;
   /**
    * Effort values the agent reported for `measuredForModelId`. Agents rebuild
    * this list on every model switch, so it only describes that one model.
@@ -98,6 +143,8 @@ export type AgentRunConfigCapabilities = {
   /** The model `reasoningEffortValues` and `fastMode` were measured under. */
   measuredForModelId?: string;
   fastMode: boolean;
+  /** Additional speed tiers measured for `measuredForModelId` (e.g. `['fast', 'ultrafast']`). */
+  speedTiers?: string[];
   planMode: boolean;
 };
 
@@ -167,6 +214,7 @@ export const hasAgentRunConfigSelection = (
   (selection.modelId !== undefined ||
     selection.reasoningEffort !== undefined ||
     selection.fastMode !== undefined ||
+    selection.speedTier !== undefined ||
     selection.planMode !== undefined);
 
 const findConfigOption = (
@@ -206,6 +254,19 @@ const toggleValue = (option: AcpConfigOptionSummary, enabled: boolean): AcpConfi
       : enabled
         ? ACP_CONFIG_OPTION_ON_VALUE
         : ACP_CONFIG_OPTION_OFF_VALUE;
+
+const speedTierOptionValue = (
+  option: AcpConfigOptionSummary,
+  tier: NormalizedAcpSpeedTier
+): AcpConfigOptionValue => {
+  if (tier === ACP_CONFIG_OPTION_OFF_VALUE) {
+    return toggleValue(option, false);
+  }
+  if (tier === ACP_FAST_MODE_VALUE_FAST) {
+    return toggleValue(option, true);
+  }
+  return ACP_FAST_MODE_VALUE_ULTRAFAST;
+};
 
 const findFastModeOption = (
   capability: RunConfigCapabilitySource | undefined
@@ -308,6 +369,16 @@ export const withAcpConfigOptionsForModel = <T extends RunConfigCapabilitySource
   modelId: string | undefined
 ): T => forObservedModel(capability, modelId).capability;
 
+const readOptionSpeedTiers = (option: AcpConfigOptionSummary | undefined): string[] => {
+  if (!option) return [];
+  if (isSpeedTierSelectOption(option)) {
+    return option.options
+      .map((choice) => choice.value)
+      .filter((value) => value !== ACP_CONFIG_OPTION_OFF_VALUE);
+  }
+  return [ACP_FAST_MODE_VALUE_FAST];
+};
+
 /**
  * Additional speed tiers a model supports (e.g. `['fast']`, `['fast', 'ultrafast']`,
  * or `[]` when none). Undefined means unknown.
@@ -323,14 +394,26 @@ export const getAcpModelSpeedTiers = (
   }
   const target = forObservedModel(capability, modelId);
   if (!target.observed) return undefined;
-  const option = findFastModeOption(target.capability);
-  if (!option) return [];
-  if (isSpeedTierSelectOption(option)) {
-    return option.options
-      .map((choice) => choice.value)
-      .filter((value) => value !== ACP_CONFIG_OPTION_OFF_VALUE);
+  return readOptionSpeedTiers(findFastModeOption(target.capability));
+};
+
+const hasMultiTierSpeedCapability = (
+  capability: RunConfigCapabilitySource | undefined,
+  snapshotFastOption: AcpConfigOptionSummary | undefined
+): boolean => {
+  if (snapshotFastOption && isSpeedTierSelectOption(snapshotFastOption)) {
+    return true;
   }
-  return [ACP_FAST_MODE_VALUE_FAST];
+  if (
+    Object.values(capability?.declaredModelControls ?? {}).some(
+      (entry) => entry?.speedTiers !== undefined
+    )
+  ) {
+    return true;
+  }
+  return Object.values(capability?.observedModelConfigOptions ?? {}).some((options) =>
+    options.some(isSpeedTierSelectOption)
+  );
 };
 
 /**
@@ -369,6 +452,21 @@ const listModels = (
   return (capability?.models ?? []).map((model) => ({ id: model.modelId, name: model.name }));
 };
 
+export const findAcpCapabilityModelName = (
+  capability: RunConfigCapabilitySource | undefined,
+  modelId: string | undefined
+): string | undefined => {
+  const target = modelId?.trim();
+  if (!target || !capability) return undefined;
+  const modelOption = findConfigOption(
+    capability,
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  const optionName = modelOption?.options.find((value) => value.value === target)?.name?.trim();
+  if (optionName) return optionName;
+  return capability.models?.find((model) => model.modelId === target)?.name?.trim() || undefined;
+};
+
 /**
  * Summarizes the run-config choices an agent offers. Used by discovery surfaces
  * (MCP `lody_session_create_options`) so callers can pick valid values instead
@@ -378,6 +476,16 @@ export const summarizeAgentRunConfigCapabilities = (
   capability: RunConfigCapabilitySource | undefined
 ): AgentRunConfigCapabilities => {
   const measuredForModelId = findCurrentModelId(capability);
+  const snapshotFastOption = findFastModeOption(capability);
+  const includeSpeedTiers = hasMultiTierSpeedCapability(capability, snapshotFastOption);
+  const declaredMeasuredTiers =
+    includeSpeedTiers && capability && measuredForModelId
+      ? getAcpModelSpeedTiers(capability, measuredForModelId)
+      : undefined;
+  const measuredSpeedTiers = includeSpeedTiers
+    ? (declaredMeasuredTiers ??
+      (snapshotFastOption ? readOptionSpeedTiers(snapshotFastOption) : undefined))
+    : undefined;
   return {
     modes: Array.from(
       new Map([
@@ -423,13 +531,20 @@ export const summarizeAgentRunConfigCapabilities = (
     })),
     models: listModels(capability).map((model) => {
       const efforts = capability ? getAcpModelEffortChoices(capability, model.id) : undefined;
-      return { ...model, ...(efforts ? { reasoningEffortValues: efforts } : {}) };
+      const speedTiers =
+        includeSpeedTiers && capability ? getAcpModelSpeedTiers(capability, model.id) : undefined;
+      return {
+        ...model,
+        ...(efforts ? { reasoningEffortValues: efforts } : {}),
+        ...(speedTiers ? { speedTiers } : {}),
+      };
     }),
     reasoningEffortValues: (findReasoningEffortOption(capability)?.options ?? []).map(
       (value) => value.value
     ),
     ...(measuredForModelId ? { measuredForModelId } : {}),
-    fastMode: findFastModeOption(capability) !== undefined,
+    fastMode: snapshotFastOption !== undefined,
+    ...(measuredSpeedTiers ? { speedTiers: measuredSpeedTiers } : {}),
     planMode:
       findPlanModeOption(capability) !== undefined ||
       findPlanPermissionModeId(capability) !== undefined,
@@ -506,7 +621,75 @@ export const resolveAgentRunConfigSelection = (
     configOptionValues[configId] = selection.reasoningEffort;
   }
 
-  if (selection.fastMode !== undefined) {
+  if (selection.fastMode !== undefined && selection.speedTier !== undefined) {
+    const normalizedTier = normalizeAcpSpeedTierValue(selection.speedTier);
+    const tierImpliesFast =
+      normalizedTier !== undefined && normalizedTier !== ACP_CONFIG_OPTION_OFF_VALUE;
+    if (normalizedTier === undefined || tierImpliesFast !== selection.fastMode) {
+      throw new Error(
+        `Conflicting fastMode (${String(selection.fastMode)}) and speedTier (${selection.speedTier}) selections.`
+      );
+    }
+  }
+
+  if (selection.speedTier !== undefined) {
+    const normalizedTier = normalizeAcpSpeedTierValue(selection.speedTier);
+    if (!normalizedTier) {
+      throw new Error(
+        `Invalid speed tier: ${selection.speedTier}. Allowed values: normal, fast, ultrafast.`
+      );
+    }
+    const option = findFastModeOption(target.capability);
+    const declaredTiers = getAcpModelSpeedTiers(capability, targetModelId);
+    const builtinFastId = getBuiltinModelControlBinding(capability)?.fastConfigId;
+    if (declaredTiers?.length === 0) {
+      if (normalizedTier !== ACP_CONFIG_OPTION_OFF_VALUE) {
+        throw new Error(`Model ${targetModelId} does not offer ${normalizedTier} speed tier.`);
+      }
+    } else if (declaredTiers !== undefined) {
+      if (
+        normalizedTier !== ACP_CONFIG_OPTION_OFF_VALUE &&
+        !declaredTiers.includes(normalizedTier)
+      ) {
+        throw new Error(
+          `Model ${targetModelId} does not offer speed tier ${normalizedTier}. Allowed values: normal, ${declaredTiers.join(', ')}.`
+        );
+      }
+      const configId = option?.id ?? builtinFastId;
+      if (!configId) {
+        throw new Error('The selected agent does not offer a speed tier option.');
+      }
+      configOptionValues[configId] =
+        option !== undefined
+          ? speedTierOptionValue(option, normalizedTier)
+          : normalizedTier === ACP_CONFIG_OPTION_OFF_VALUE
+            ? false
+            : normalizedTier === ACP_FAST_MODE_VALUE_ULTRAFAST
+              ? ACP_FAST_MODE_VALUE_ULTRAFAST
+              : declaredTiers.length > 1
+                ? ACP_FAST_MODE_VALUE_FAST
+                : true;
+      validatedConfigIds.push(configId);
+    } else if (option) {
+      const snapshotTiers = readOptionSpeedTiers(option);
+      if (
+        !switchesModel &&
+        normalizedTier !== ACP_CONFIG_OPTION_OFF_VALUE &&
+        !snapshotTiers.includes(normalizedTier)
+      ) {
+        throw new Error(
+          `Model ${targetModelId ?? 'current'} does not offer speed tier ${normalizedTier}. Allowed values: normal${snapshotTiers.length ? `, ${snapshotTiers.join(', ')}` : ''}.`
+        );
+      }
+      configOptionValues[option.id] = speedTierOptionValue(option, normalizedTier);
+      if (switchesModel) {
+        validatedConfigIds.push(option.id);
+        unverifiedSelections.push(`speedTier=${selection.speedTier}`);
+      }
+    } else {
+      throw new Error('The selected agent does not offer a speed tier option.');
+    }
+  } else if (selection.fastMode !== undefined) {
     const option = findFastModeOption(target.capability);
     // A declaration decides; otherwise the target model's own list does.
     const declaredFast = getAcpModelFastSupport(capability, targetModelId);

@@ -1,17 +1,57 @@
 import {
   buildAgentMessageAuthor,
+  findAcpCapabilityModelName,
+  getStaticBuiltinAcpCapabilities,
   resolveAgentBrandId,
   getWorkspaceFlockDocId,
   listWorkspaceAgentRoles,
   snapshotAgentRole,
   readWorkspaceFlockRowsFromFlock,
+  type AgentConfigMeta,
   type AgentMessageAuthor,
   type ModelInfo,
   type SessionMeta,
   type SessionTurnInputConfig,
   type WorkspaceId,
 } from '@lody/shared';
+import { readMachineAcpCapabilityById } from '@/lib/agent-config-machine-flock';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+
+export async function resolveSessionModelDisplayName(
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  modelId: string | undefined,
+  workspaceId?: WorkspaceId,
+  config?: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'runtimeOverrides'> | null
+): Promise<string | undefined> {
+  const targetModelId = modelId?.trim();
+  if (!targetModelId) return undefined;
+
+  if (session.agentConfigId && session.machineId && workspaceId && manager.repo) {
+    try {
+      const capability = await readMachineAcpCapabilityById(
+        manager.repo,
+        workspaceId,
+        session.machineId,
+        session.agentConfigId
+      );
+      const cachedName = findAcpCapabilityModelName(capability, targetModelId);
+      if (cachedName) return cachedName;
+    } catch {}
+  }
+
+  const cliType = config?.cliType ?? session.cliType;
+  const agentType = config?.agentType ?? session.agentType;
+  if (cliType && agentType) {
+    const staticCapability = getStaticBuiltinAcpCapabilities(
+      cliType,
+      agentType,
+      config?.runtimeOverrides
+    );
+    return findAcpCapabilityModelName(staticCapability, targetModelId);
+  }
+  return undefined;
+}
 
 /** Once per execution/acceptance, using local catalogs only; never on token updates. */
 export async function resolveSessionMessageAuthor(
@@ -42,6 +82,17 @@ export async function resolveSessionMessageAuthor(
     );
     role = matchedRole ? snapshotAgentRole(matchedRole) : undefined;
   }
+  const configuredModelId =
+    inputConfig?.modelId ??
+    (typeof inputConfig?.configOptionValues?.model === 'string'
+      ? inputConfig.configOptionValues.model
+      : undefined);
+  const targetModelId = modelInfo?.modelId?.trim() || configuredModelId?.trim();
+  const needsModelNameLookup =
+    Boolean(targetModelId) && (!modelInfo?.name?.trim() || modelInfo.name.trim() === targetModelId);
+  const modelName = needsModelNameLookup
+    ? await resolveSessionModelDisplayName(manager, session, targetModelId, workspaceId, config)
+    : undefined;
   return buildAgentMessageAuthor({
     sessionId: session.id,
     turnId,
@@ -52,6 +103,7 @@ export async function resolveSessionMessageAuthor(
     brandId: config ? (resolveAgentBrandId(config) ?? undefined) : undefined,
     inputConfig,
     modelInfo,
+    modelName,
     role,
   });
 }

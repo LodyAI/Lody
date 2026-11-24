@@ -20,6 +20,7 @@ import {
 import type { AutomationSessionAdmission } from '@/session/session-automation-authority';
 import type { SessionTurnInputConfig } from '@lody/shared';
 import { providerBindingFingerprint } from '@/session/automation-observations';
+import { pullRequestCheckpointId } from './sources/pull-requests';
 import { internalPolicy } from './policies/session';
 import { createRpcSecretRecipient, encryptRpcSecret } from '@lody/loro-streams-rpc';
 import {
@@ -59,7 +60,9 @@ async function workspaceFixture(
   quota?: {
     config: Parameters<typeof providerBindingFingerprint>[0];
     refresh: () => Promise<unknown>;
-  }
+  },
+  contentMode: 'plaintext' | 'e2ee' = 'plaintext',
+  archiveAuthority = false
 ) {
   const root = existingRoot ?? mkdtempSync(path.join(os.tmpdir(), 'lody-automation-owner-'));
   if (!existingRoot) roots.push(root);
@@ -78,6 +81,8 @@ async function workspaceFixture(
     close: async () => {},
   };
   let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+  let rewriteBarrier = false;
+  let beforeArchiveAdmission: (() => Promise<void> | void) | undefined;
   const editors = new Set(['user']);
   const authors = new Map([['session-a', 'user']]);
   const authority = {
@@ -105,6 +110,35 @@ async function workspaceFixture(
         if (item.userTurnId === turnId) await backend.removeMessageQueueItem(item.$cid);
       return true;
     },
+    ...(archiveAuthority
+      ? {
+          settled: async () =>
+            rewriteBarrier
+              ? ({ value: 'no', reason: 'session_work_active' } as const)
+              : ({ value: 'yes', reason: 'group_settled' } as const),
+          archived: async () => meta.isArchived === true,
+          archive: async (
+            _sessionId: SessionId,
+            _userId: string,
+            admission: () => Promise<{ value: 'yes' | 'no' | 'unknown'; reason: string }>
+          ) => {
+            if (rewriteBarrier) return { value: 'no', reason: 'session_admission_busy' } as const;
+            rewriteBarrier = true;
+            try {
+              await beforeArchiveAdmission?.();
+              const admitted = await admission();
+              if (admitted.value !== 'yes') return admitted;
+              const backend = await createSessionBackend(doc);
+              if ((await backend.getMessageQueue()).length)
+                return { value: 'no', reason: 'queue_pending' } as const;
+              meta.isArchived = true;
+              return { value: 'yes', reason: 'session_archived' } as const;
+            } finally {
+              rewriteBarrier = false;
+            }
+          },
+        }
+      : {}),
     refreshCapacity: () => quota?.refresh(),
   };
   const repo = {
@@ -123,7 +157,7 @@ async function workspaceFixture(
     lody: {
       documentManager: {
         repo,
-        isEncryptedWorkspace: () => false,
+        isEncryptedWorkspace: () => contentMode === 'e2ee',
         signMachineInput: async () => undefined,
         getOrCreateSessionDoc: async () => doc,
         getAgentConfigForMachineLaunch: async () => quota?.config,
@@ -132,7 +166,12 @@ async function workspaceFixture(
       resolveAutomationWorkdir: async () => root,
       getAutomationSessionAuthority: () => authority,
     } as unknown as Lody,
-    workspace: { id: 'workspace', name: 'synthetic', slug: 'synthetic' } as WorkspaceSummary,
+    workspace: {
+      id: 'workspace',
+      name: 'synthetic',
+      slug: 'synthetic',
+      contentMode,
+    } as WorkspaceSummary,
     auth: {
       machineId: 'machine',
       userId: 'user',
@@ -146,12 +185,70 @@ async function workspaceFixture(
   owners.push(handle);
   return Object.assign(handle, {
     testRoot: root,
+    testRepo: repo,
     testDocument: doc,
     testEditors: editors,
     testAuthors: authors,
     testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
+    testBeforeArchiveAdmission: (hook: (() => Promise<void> | void) | undefined) => {
+      beforeArchiveAdmission = hook;
+    },
   });
 }
+
+async function archiveAfterMergeFixture() {
+  const prUrl = 'https://github.com/owner/repo/pull/7';
+  const meta = {
+    id: 'session-a',
+    machineId: 'machine',
+    userId: 'user',
+    collaborationStopped: false,
+    isArchived: false,
+    pullRequests: [{ url: prUrl, status: 'open' as const }],
+  };
+  const host = await workspaceFixture(meta, undefined, undefined, undefined, 'plaintext', true);
+  await host.command({
+    type: 'configure',
+    sessionId: 'session-a',
+    settings: { archiveAfterMerge: true },
+  });
+  const observation = {
+    number: 7,
+    url: prUrl,
+    headRefName: 'feature',
+    headSha: 'abc',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ciState: 's' as const,
+    mergeState: 'c' as const,
+  };
+  await host.recordObservations(
+    meta as never,
+    'owner/repo',
+    [{ ...observation, status: 'open' }],
+    99_000
+  );
+  return {
+    host,
+    meta,
+    observeMerge: async () => {
+      meta.pullRequests = [{ url: prUrl, status: 'merged' }];
+      await host.recordObservations(
+        meta as never,
+        'owner/repo',
+        [
+          {
+            ...observation,
+            status: 'merged',
+            updatedAt: '2026-01-01T00:01:00Z',
+          },
+        ],
+        100_000
+      );
+      await vi.advanceTimersByTimeAsync(1);
+    },
+  };
+}
+
 describe('Automation control authority', () => {
   it('executes a registered condition in the Session workspace', async () => {
     const host = await workspaceFixture({
@@ -255,6 +352,82 @@ describe('Automation control authority', () => {
     await refreshed.promise;
     expect(host.ledger.receipt(receipt.id)?.state).not.toBe('settled');
   });
+  it('archives an idle merged-PR Session and settles the receipt in one pass', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const { host, meta, observeMerge } = await archiveAfterMergeFixture();
+    await observeMerge();
+
+    expect(meta.isArchived).toBe(true);
+    expect(host.ledger.activities()).toEqual([
+      expect.objectContaining({
+        state: 'settled',
+        attempts: 1,
+        reason: 'session_archived',
+        intent: expect.objectContaining({
+          action: expect.objectContaining({ kind: 'session.archive' }),
+        }),
+      }),
+    ]);
+  });
+
+  it('settles a fresh archive receipt when the Session group is already archived', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const { host, meta, observeMerge } = await archiveAfterMergeFixture();
+    meta.isArchived = true;
+    host.testBeforeArchiveAdmission(() => {
+      throw new Error('already committed archive must not be submitted again');
+    });
+    await observeMerge();
+
+    expect(host.ledger.activities()).toEqual([
+      expect.objectContaining({
+        state: 'settled',
+        attempts: 1,
+        reason: 'archive_already_committed',
+        intent: expect.objectContaining({
+          action: expect.objectContaining({ kind: 'session.archive' }),
+        }),
+      }),
+    ]);
+  });
+
+  it('enables local Auto delivery settings in an encrypted workspace', async () => {
+    const host = await workspaceFixture(undefined, undefined, undefined, undefined, 'e2ee');
+    const result = await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: true } },
+    });
+    expect(result).toMatchObject({
+      autoDeliver: { fixCi: true, resolveConflicts: true, merge: true },
+    });
+    const url = 'https://github.com/owner/repo/pull/7';
+    await host.recordObservations(
+      { id: 'session-a' } as never,
+      'owner/repo',
+      [
+        {
+          number: 7,
+          url,
+          status: 'open',
+          headRefName: 'feature',
+          headSha: 'abc',
+          updatedAt: '2026-01-01T00:00:00Z',
+          ciState: 's',
+          mergeState: 'c',
+        },
+      ],
+      1
+    );
+    expect(host.ledger.checkpoint(pullRequestCheckpointId('session-a', url))?.data).toMatchObject({
+      prNumber: 7,
+      prUrl: url,
+      headSha: 'abc',
+      ciState: 's',
+    });
+  });
   it('clears a finished Auto delivery status when it is dismissed after the merge', async () => {
     const meta = {
       id: 'session-a',
@@ -270,6 +443,80 @@ describe('Automation control authority', () => {
       settings: { autoDeliver: false },
     });
     expect(meta.autoDelivery).toBeNull();
+  });
+  it('does not republish an Auto delivery status after it is turned off during a pass', async () => {
+    vi.useFakeTimers();
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+      pullRequests: [{ url: 'https://github.com/owner/project/pull/42', status: 'open' }],
+      autoDelivery: undefined as Record<string, unknown> | null | undefined,
+    };
+    const host = await workspaceFixture(meta);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: false } },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toMatchObject({ state: 'ci' });
+    const read = host.testRepo.getDocMeta;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    host.testRepo.getDocMeta = async (room: string) => {
+      host.testRepo.getDocMeta = read;
+      entered.resolve();
+      await release.promise;
+      return read(room);
+    };
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    await entered.promise;
+    const turnedOff = host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: false },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    release.resolve();
+    await vi.advanceTimersByTimeAsync(1);
+    await turnedOff;
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toBeNull();
+  });
+  it('withdraws an unsent Auto delivery request when delivery is turned off', async () => {
+    vi.useFakeTimers();
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      collaborationStopped: false,
+    };
+    const host = await workspaceFixture(meta);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: false } },
+    });
+    expect(host.deliveryObservationOwners().has('session-a' as SessionId)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    const request = required(
+      host.ledger.activities().find((receipt) => receipt.event.source === 'lody/auto-delivery')
+    );
+    expect(['accepted', 'blocked']).toContain(host.ledger.receipt(request.id)?.state);
+    expect(host.ledger.hasSessionWork('session-a')).toBe(true);
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: false },
+    });
+    expect(host.deliveryObservationOwners().has('session-a' as SessionId)).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(host.ledger.receipt(request.id)?.state).toBe('cancelled');
+    expect(host.ledger.hasSessionWork('session-a')).toBe(false);
   });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {

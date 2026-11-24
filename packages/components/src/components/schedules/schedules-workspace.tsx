@@ -1,6 +1,6 @@
+import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { ScheduleMentionForm } from './schedule-mention-form';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -8,6 +8,8 @@ import { ScheduledMessageEditor } from './scheduled-message-editor';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
+import { markMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -263,6 +265,13 @@ function SupportedSchedulesWorkspace({
         : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
     );
   };
+  useMobileBackHandler(
+    () => {
+      markMobileBackNavigation();
+      open();
+    },
+    { enabled: Boolean(mobile && scheduleId), layer: 'page' }
+  );
   if (createScheduleRef) createScheduleRef.current = () => open('new');
   useEffect(() => {
     if (!createScheduleRef) return undefined;
@@ -707,7 +716,7 @@ function ScheduleEditor({
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
-  const repos = useLegacyWorkspaceQuery(
+  const repos = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     runtime ? { workspaceId: runtime.workspaceId } : 'skip'
   ) as { repoFullName?: string; fullName?: string }[] | null | undefined;
@@ -977,6 +986,7 @@ function ScheduleEditor({
       skillAgent={
         selected?.cliType && selected.agentType
           ? {
+              magpieGatewayUrl: selected.magpieGatewayUrl,
               cliType: selected.cliType,
               agentType: selected.agentType,
               machineId: selected.machineId,

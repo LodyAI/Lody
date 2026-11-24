@@ -1,3 +1,4 @@
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { clsx } from 'clsx';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
@@ -7,8 +8,7 @@ import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
 import { SessionHistoryAccessBoundary } from './session-history-access-boundary';
 import { useSessionForkCapabilities } from '@/hooks/use-session-fork-capabilities';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
-import { useLegacyWorkspaceQueryStatus, useWorkspaceFeature } from '@/hooks/use-workspace-feature';
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { resolveLinkedWorkspaceGitHubRepo, resolveSessionRepoFullName } from '@/lib/session-repo';
 import { usePlatformCapability } from '@lody/platform/react';
@@ -1466,8 +1466,8 @@ const SessionDetail = ({
   const docMetaCacheSettled = useAtomValue(sessionMetaCacheSettledAtomFamily(sessionId));
   const activeSession = session ?? null;
   const hasHostedGitHub = usePlatformCapability('githubIntegration');
-  const legacyQueryStatus = useLegacyWorkspaceQueryStatus(currentWorkspaceId);
-  const workspaceRepositories = useLegacyWorkspaceQuery(
+  const legacyQueryStatus = useGithubWorkspaceStatus(currentWorkspaceId);
+  const workspaceRepositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
@@ -2246,9 +2246,7 @@ const SessionDetail = ({
       ? simulatorOwnerSession
       : null;
   const activeAndroidEmulatorSession =
-    simulatorOwnerSession &&
-    (runtime?.contentMode !== 'e2ee' || simulatorOwnerSession.machineId === localMachineId) &&
-    machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
+    simulatorOwnerSession && machineSupportsAndroidEmulatorProtocol(iosSimulatorMachine)
       ? simulatorOwnerSession
       : null;
   const [androidEmulatorOpen, setAndroidEmulatorOpen] = useState(false);

@@ -168,6 +168,22 @@ export const actorOf = (task: SubagentTask, t: TFunction): string =>
       task.workflowName ||
       t('sessions.subagentTasks.defaultActor', 'Task');
 
+export const configurationLabelOf = (task: SubagentTask, t: TFunction): string => {
+  const snapshot = task.run?.snapshot;
+  const modelId = snapshot ? snapshot.modelId : task.modelId;
+  const model = typeof modelId === 'string' ? modelId.trim() : '';
+  const effort =
+    typeof snapshot?.reasoningEffort === 'string' ? snapshot.reasoningEffort.trim() : '';
+  const labels: string[] = [];
+  if (model) labels.push(t('sessions.subagentTasks.model', 'Model: {{value}}', { value: model }));
+  if (effort) {
+    labels.push(
+      t('sessions.subagentTasks.reasoningEffort', 'Effort: {{value}}', { value: effort })
+    );
+  }
+  return labels.join(' · ');
+};
+
 export const durationOf = (task: SubagentTask): number | null =>
   typeof task.startedAtEpochSeconds === 'number' && typeof task.endedAtEpochSeconds === 'number'
     ? Math.max(0, (task.endedAtEpochSeconds - task.startedAtEpochSeconds) * 1000)

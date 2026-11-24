@@ -1956,7 +1956,6 @@ export function ChatComposer({
                       mcp={mcp}
                       onScheduleSend={onScheduleSend}
                       scheduleDisabledReason={scheduleDisabledReason}
-                      commandsEnabled={commandsEnabled}
                     />
                     <div {...stylex.props(modalStyles.actions)}>{primaryAction}</div>
                   </div>
@@ -1985,7 +1984,6 @@ export function ChatComposer({
                     mcp={mcp}
                     onScheduleSend={onScheduleSend}
                     scheduleDisabledReason={scheduleDisabledReason}
-                    commandsEnabled={commandsEnabled}
                   />
 
                   {/* Single row only: long model names must shrink/truncate inside

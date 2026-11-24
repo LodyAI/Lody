@@ -879,14 +879,10 @@ describe('history import persistence', () => {
       ),
       waitUntilSynced: vi.fn(async () => options.remoteSyncConfirmed ?? true),
     });
-    const upsertDocMeta = options.failMetaWrite
-      ? vi.fn(async () => {
-          calls.push('meta');
-          throw new Error('meta write failed');
-        })
-      : vi.fn(async () => {
-          calls.push('meta');
-        });
+    const upsertDocMeta = vi.fn(async (_roomId: string, _metadata: Partial<SessionMeta>) => {
+      calls.push('meta');
+      if (options.failMetaWrite) throw new Error('meta write failed');
+    });
     const deleteDoc = vi.fn(async () => undefined);
     const cleanSessionDoc = vi.fn(async () => undefined);
     const existing = options.existing ?? [];
@@ -1008,6 +1004,9 @@ describe('history import persistence', () => {
     const bound = createHarness({ agentConfig: agentConfig() });
     await bound.importNewSession(importArgs());
     expect(bound.upsertDocMeta.mock.calls[0]?.[1]).toMatchObject({ agentConfigId: 'config-1' });
+    for (const [, metadata] of bound.upsertDocMeta.mock.calls) {
+      expect(metadata).not.toHaveProperty('isArchived');
+    }
 
     const unbound = createHarness();
     await unbound.importNewSession(importArgs());

@@ -30,6 +30,7 @@ import type { SessionPullRequestCiState, SessionPullRequestReadiness } from '@lo
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
 import { useLongPress } from '@/hooks/use-long-press';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { Checkbox } from '@lody/ui/checkbox';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -95,10 +96,22 @@ const darkColors = {
 } as const;
 
 const styles = stylex.create({
-  prMergeMark: { display: 'inline-flex', width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  prMergeMark: {
+    display: 'inline-flex',
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   prMergeError: { width: themeSpace[3.5], height: themeSpace[3.5], color: themeColors.destructive },
   prMergeInk: { color: themeColors.githubMerged },
-  readOnlyGlyph: { width: themeSpace[3.5], height: themeSpace[3.5], flexShrink: 0, color: themeColors.mutedForeground },
+  readOnlyGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+  },
 
   statusBox: {
     display: 'flex',
@@ -1082,8 +1095,7 @@ export function ConversationRow({
     Boolean(conversation.prUrl?.trim()) ||
     (typeof conversation.prNumber === 'number' && conversation.prNumber > 0) ||
     prMergeStatus != null;
-  const prStatus =
-    prMergeStatus?.phase === 'merged' ? 'merged' : (conversation.prStatus ?? 'open');
+  const prStatus = prMergeStatus?.phase === 'merged' ? 'merged' : (conversation.prStatus ?? 'open');
   const isPrMerging = prMergeStatus?.phase === 'merging';
   const isPrMergeFailed = prMergeStatus?.phase === 'failed';
   /* Readiness can linger on a terminal PR (the webhook fan-out flips status to
@@ -1179,10 +1191,7 @@ export function ConversationRow({
           {conversation.title}
         </span>
         {conversation.readOnly ? (
-          <Eye
-            {...stylex.props(styles.readOnlyGlyph)}
-            aria-label={t('sessions.access.read')}
-          />
+          <Eye {...stylex.props(styles.readOnlyGlyph)} aria-label={t('sessions.access.read')} />
         ) : null}
       </div>
       {conversation.snoozeCountdown ? (
@@ -1202,17 +1211,11 @@ export function ConversationRow({
         <WorktreeIcon {...stylex.props(styles.rowWorktree)} aria-label="Worktree" />
       ) : null}
       {isPrMergeFailed ? (
-        <span
-          data-session-pr-merge-phase="failed"
-          {...stylex.props(styles.prMergeMark)}
-        >
+        <span data-session-pr-merge-phase="failed" {...stylex.props(styles.prMergeMark)}>
           <CircleAlert {...stylex.props(styles.prMergeError)} strokeWidth={2.25} />
         </span>
       ) : isPrMerging ? (
-        <span
-          data-session-pr-merge-phase="merging"
-          {...stylex.props(styles.prMergeMark)}
-        >
+        <span data-session-pr-merge-phase="merging" {...stylex.props(styles.prMergeMark)}>
           <SessionSendProgressRing xstyle={styles.prMergeInk} />
         </span>
       ) : showPr ? (
@@ -1368,181 +1371,187 @@ export function MobileProjectScreen({
   const rootRef = useRef<HTMLDivElement>(null);
   const animatedBack = useMobileDrillExit(rootRef, onBack) ?? onBack;
 
+  useMobileBackHandler(animatedBack, { layer: 'page' });
+
   return (
-    <div
-      ref={rootRef}
-      {...withClassName(stylex.props(styles.screen), 'mobile-home-app safe-areas')}
-    >
-      {/* iOS-style push enter: slide in from the right on mount, unless
+    <MobileBackDepthProvider>
+      <div
+        ref={rootRef}
+        {...withClassName(stylex.props(styles.screen), 'mobile-home-app safe-areas')}
+      >
+        {/* iOS-style push enter: slide in from the right on mount, unless
          we're a back-navigation destination (see `backRevealClass`
          above). Back slides this panel off via `animatedBack`. */}
-      <motion.div
-        data-mobile-drill-panel=""
-        initial={backRevealClass ? false : { x: '100%' }}
-        animate={{ x: 0 }}
-        transition={PROJECT_TRANSITION}
-        /* Column flex: header + (search) + (pills) all sit ABOVE the
+        <motion.div
+          data-mobile-drill-panel=""
+          initial={backRevealClass ? false : { x: '100%' }}
+          animate={{ x: 0 }}
+          transition={PROJECT_TRANSITION}
+          /* Column flex: header + (search) + (pills) all sit ABOVE the
            scroll container. Only the inner list region scrolls — so
            the vertical scrollbar appears to the right of the
            conversation list, not running through the header + pills.
            See the user-reported bug "scrollbar should be above the
            pills". */
-        {...withClassName(stylex.props(styles.shell), clsx('mobile-home-shell', backRevealClass))}
-      >
-        {filesTabNested ? null : (
-          <MobileEdgeBackSwipeZone
-            isNativeApp={isNativeAppShell()}
-            onBack={animatedBack}
-            zIndex={20}
-          />
-        )}
-        {selectedProjectTab === 'chat' ? (
-          <ProjectChatTopBar
-            project={project}
-            displayName={displayName}
-            labels={labels}
-            onBack={animatedBack}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            showArchived={showArchived}
-            onShowArchivedToggle={onShowArchivedToggle}
-          />
-        ) : (
-          <ProjectPlainTopBar
-            project={project}
-            displayName={displayName}
-            labels={labels}
-            /* At the file root the back chip exits the project (same as
+          {...withClassName(stylex.props(styles.shell), clsx('mobile-home-shell', backRevealClass))}
+        >
+          {filesTabNested ? null : (
+            <MobileEdgeBackSwipeZone
+              isNativeApp={isNativeAppShell()}
+              onBack={animatedBack}
+              zIndex={20}
+            />
+          )}
+          {selectedProjectTab === 'chat' ? (
+            <ProjectChatTopBar
+              project={project}
+              displayName={displayName}
+              labels={labels}
+              onBack={animatedBack}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              showArchived={showArchived}
+              onShowArchivedToggle={onShowArchivedToggle}
+            />
+          ) : (
+            <ProjectPlainTopBar
+              project={project}
+              displayName={displayName}
+              labels={labels}
+              /* At the file root the back chip exits the project (same as
                Settings); once drilled into a folder/file it pops one
                file-browser level instead. */
-            onBack={
-              selectedProjectTab === 'files' && (fileNavSegments?.length ?? 0) > 0 && onFileNavBack
-                ? onFileNavBack
-                : animatedBack
-            }
-          />
-        )}
+              onBack={
+                selectedProjectTab === 'files' &&
+                (fileNavSegments?.length ?? 0) > 0 &&
+                onFileNavBack
+                  ? onFileNavBack
+                  : animatedBack
+              }
+            />
+          )}
 
-        {/* Filter pill bar — toggled from the first group heading's
+          {/* Filter pill bar — toggled from the first group heading's
            trailing chip (mirrors home Chat). Unmounted on Files /
            Settings so those tabs stay free of conversation chrome. */}
-        <AnimatePresence initial={false}>
-          {selectedProjectTab === 'chat' && filtersOpen && hasFilterPills && filterPills ? (
-            <motion.div
-              key="project-filter-pills"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeInOut' }}
-              {...stylex.props(styles.accordion)}
-            >
-              <MobileFilterPillBar pills={filterPills} />
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+          <AnimatePresence initial={false}>
+            {selectedProjectTab === 'chat' && filtersOpen && hasFilterPills && filterPills ? (
+              <motion.div
+                key="project-filter-pills"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                {...stylex.props(styles.accordion)}
+              >
+                <MobileFilterPillBar pills={filterPills} />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
 
-        <div
-          ref={setListRef}
-          {...withClassName(
-            stylex.props(styles.scroll, settingsFold && styles.foldScroll),
-            'scrollbar-pro'
-          )}
-        >
-          {selectedProjectTab === 'chat' ? (
-            visibleConversations.length === 0 ? (
-              <>
-                {hasFilterPills ? (
-                  <div {...stylex.props(styles.filterRow)}>
-                    <ProjectListFilterToggle
-                      open={filtersOpen}
-                      hasActiveFilters={hasActiveProjectFilters}
-                      ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
-                      onToggle={() => setFiltersOpen((open) => !open)}
-                    />
-                  </div>
-                ) : null}
-                <ProjectEmptyState label={labels.emptyConversations ?? '没有匹配的对话'} />
-              </>
-            ) : (
-              <MobileChatList
-                chats={visibleConversations}
-                groupBy={chatGroupBy}
-                groupLabels={chatGroupLabels}
-                /* Project sub-page always shows the branch name in the
+          <div
+            ref={setListRef}
+            {...withClassName(
+              stylex.props(styles.scroll, settingsFold && styles.foldScroll),
+              'scrollbar-pro'
+            )}
+          >
+            {selectedProjectTab === 'chat' ? (
+              visibleConversations.length === 0 ? (
+                <>
+                  {hasFilterPills ? (
+                    <div {...stylex.props(styles.filterRow)}>
+                      <ProjectListFilterToggle
+                        open={filtersOpen}
+                        hasActiveFilters={hasActiveProjectFilters}
+                        ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
+                        onToggle={() => setFiltersOpen((open) => !open)}
+                      />
+                    </div>
+                  ) : null}
+                  <ProjectEmptyState label={labels.emptyConversations ?? '没有匹配的对话'} />
+                </>
+              ) : (
+                <MobileChatList
+                  chats={visibleConversations}
+                  groupBy={chatGroupBy}
+                  groupLabels={chatGroupLabels}
+                  /* Project sub-page always shows the branch name in the
                    row's meta line. We're already inside a single
                    project's surface, so the project label would be
                    redundant chrome — branch is the disambiguating piece
                    of info between rows. */
-                /* Active list is flat — no "全部对话" section label. Only
+                  /* Active list is flat — no "全部对话" section label. Only
                    the archived surface keeps a heading so the mode is
                    obvious. */
-                flatHeading={
-                  showArchived ? (labels.archivedConversationsHeading ?? '归档对话') : undefined
-                }
-                firstGroupTrailing={
-                  hasFilterPills ? (
-                    <ProjectListFilterToggle
-                      open={filtersOpen}
-                      hasActiveFilters={hasActiveProjectFilters}
-                      ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
-                      onToggle={() => setFiltersOpen((open) => !open)}
-                    />
-                  ) : undefined
-                }
-                selectedConversationId={selectedConversationId}
-                onSelect={onConversationSelect}
-                rowActions={{
-                  onTogglePin: onConversationTogglePin,
-                  onArchive: onConversationArchive,
-                  onRestore: onConversationRestore,
-                }}
-                archived={showArchived}
-                onPermanentDelete={showArchived ? onConversationPermanentDelete : undefined}
-                selectionLabels={labels.archiveSelection}
-              />
-            )
-          ) : null}
-          {selectedProjectTab === 'files' ? renderedFilesTabContent : null}
-          {selectedProjectTab === 'settings' ? (
-            <MobileSettingsFoldContext.Provider value={settingsFold}>
-              {settingsTabContent ?? (
-                <ProjectTabPlaceholder
-                  icon={
-                    <SettingsIcon
-                      {...stylex.props(styles.placeholderIcon)}
-                      strokeWidth={1.6}
-                      aria-hidden="true"
-                    />
+                  flatHeading={
+                    showArchived ? (labels.archivedConversationsHeading ?? '归档对话') : undefined
                   }
-                  title={labels.settingsTabPlaceholderTitle ?? labels.settingsTab ?? '设置'}
-                  body={labels.settingsTabPlaceholderBody ?? '即将上线'}
+                  firstGroupTrailing={
+                    hasFilterPills ? (
+                      <ProjectListFilterToggle
+                        open={filtersOpen}
+                        hasActiveFilters={hasActiveProjectFilters}
+                        ariaLabel={labels.filterBarToggleLabel ?? '过滤器'}
+                        onToggle={() => setFiltersOpen((open) => !open)}
+                      />
+                    ) : undefined
+                  }
+                  selectedConversationId={selectedConversationId}
+                  onSelect={onConversationSelect}
+                  rowActions={{
+                    onTogglePin: onConversationTogglePin,
+                    onArchive: onConversationArchive,
+                    onRestore: onConversationRestore,
+                  }}
+                  archived={showArchived}
+                  onPermanentDelete={showArchived ? onConversationPermanentDelete : undefined}
+                  selectionLabels={labels.archiveSelection}
                 />
-              )}
-            </MobileSettingsFoldContext.Provider>
-          ) : null}
-        </div>
+              )
+            ) : null}
+            {selectedProjectTab === 'files' ? renderedFilesTabContent : null}
+            {selectedProjectTab === 'settings' ? (
+              <MobileSettingsFoldContext.Provider value={settingsFold}>
+                {settingsTabContent ?? (
+                  <ProjectTabPlaceholder
+                    icon={
+                      <SettingsIcon
+                        {...stylex.props(styles.placeholderIcon)}
+                        strokeWidth={1.6}
+                        aria-hidden="true"
+                      />
+                    }
+                    title={labels.settingsTabPlaceholderTitle ?? labels.settingsTab ?? '设置'}
+                    body={labels.settingsTabPlaceholderBody ?? '即将上线'}
+                  />
+                )}
+              </MobileSettingsFoldContext.Provider>
+            ) : null}
+          </div>
 
-        {showProjectTabBar ? (
-          /* Bottom dock — same component the home page uses, with
+          {showProjectTabBar ? (
+            /* Bottom dock — same component the home page uses, with
              project-specific tabs (Chat / Files / Settings) and a
              project-context new-chat chip. The chip is hidden when
              `onNewChat` isn't wired. */
-          <MobileWorkspaceTabBar<MobileProjectTab>
-            tabs={projectTabSpecs(labels)}
-            selectedTab={selectedProjectTab}
-            onTabSelect={setSelectedProjectTab}
-            onNewChat={onNewChat}
-            newChatAriaLabel={labels.newChatAriaLabel}
-            ariaLabel={labels.chatTab ?? '导航'}
-            /* Distinct layoutId so the highlight FLIP animation doesn't
+            <MobileWorkspaceTabBar<MobileProjectTab>
+              tabs={projectTabSpecs(labels)}
+              selectedTab={selectedProjectTab}
+              onTabSelect={setSelectedProjectTab}
+              onNewChat={onNewChat}
+              newChatAriaLabel={labels.newChatAriaLabel}
+              ariaLabel={labels.chatTab ?? '导航'}
+              /* Distinct layoutId so the highlight FLIP animation doesn't
                share state with the home page's tabbar. */
-            layoutId="mobile-project-tabbar"
-            scrollContainerRef={listScrollRef}
-            scrollSignal={selectedProjectTab === 'files' ? filesScrollSignal : null}
-          />
-        ) : null}
-      </motion.div>
-    </div>
+              layoutId="mobile-project-tabbar"
+              scrollContainerRef={listScrollRef}
+              scrollSignal={selectedProjectTab === 'files' ? filesScrollSignal : null}
+            />
+          ) : null}
+        </motion.div>
+      </div>
+    </MobileBackDepthProvider>
   );
 }
 

@@ -297,6 +297,7 @@ import type {
   MachineId,
   MessageTextSpan,
   SessionFilePayload,
+  ScheduleEditProposalMeta,
   ScheduleProposalMeta,
 } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
@@ -307,7 +308,10 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
-import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import {
+  ScheduleEditProposalNotice,
+  ScheduleProposalNotice,
+} from '@/components/schedules/schedule-proposal-notice';
 import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
 import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
@@ -531,7 +535,6 @@ const viewStyles = stylex.create({
   turnConfigTooltip: { [tooltip.maxWidth]: '20rem' },
   forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
-  /* ── The live status row ──────────────────────────────────────────────── */
   agentActivityRow: {
     paddingBottom: {
       default: themeSpace[2],
@@ -566,7 +569,6 @@ const viewStyles = stylex.create({
     fontWeight: themeFontWeight.normal,
   },
 
-  /* ── The empty conversation ───────────────────────────────────────────── */
   emptyState: {
     display: 'flex',
     justifyContent: 'center',
@@ -583,7 +585,6 @@ const viewStyles = stylex.create({
     color: themeColors.mutedForeground,
   },
 
-  /* ── The stream's shell ───────────────────────────────────────────────── */
   streamRoot: {
     position: 'relative',
     backgroundColor: themeColors.background,
@@ -648,7 +649,6 @@ const viewStyles = stylex.create({
   },
   justifyEnd: { display: 'flex', justifyContent: 'flex-end' },
 
-  /* ── Operation status ─────────────────────────────────────────────────── */
   columnGap2: { display: 'flex', flexDirection: 'column', gap: themeSpace[2] },
   columnGap1_5: { display: 'flex', flexDirection: 'column', gap: themeSpace[1.5] },
   columnGap1: { display: 'flex', flexDirection: 'column', gap: themeSpace[1] },
@@ -705,7 +705,6 @@ const viewStyles = stylex.create({
     opacity: 0.6,
   },
 
-  /* ── The agent notice banner ──────────────────────────────────────────── */
   noticeFrame: {
     width: '100%',
     overflow: 'hidden',
@@ -762,7 +761,6 @@ const viewStyles = stylex.create({
     },
   },
 
-  /* ── The capacity retry control ───────────────────────────────────────── */
   retryButton: {
     position: 'relative',
     isolation: 'isolate',
@@ -823,7 +821,6 @@ const viewStyles = stylex.create({
   },
   relativeZ10: { position: 'relative', zIndex: 10 },
 
-  /* ── The system notice rows ───────────────────────────────────────────── */
   noticeStack: { paddingBlock: themeSpace[1] },
   /** A notice that sits on its own row is indented to sit apart from the
    *  conversation; inside a turn that same indent is a broken left edge. */
@@ -832,7 +829,6 @@ const viewStyles = stylex.create({
     '@container (min-width: 640px)': { paddingLeft: themeSpace[3] },
   },
 
-  /* ── The worktree script notice ───────────────────────────────────────── */
   iconSmFlexNone: {
     height: themeSpace[3.5],
     width: themeSpace[3.5],
@@ -846,7 +842,6 @@ const viewStyles = stylex.create({
     fontWeight: themeFontWeight.medium,
   },
 
-  /* ── The user's message row ───────────────────────────────────────────── */
   userName: {
     maxWidth: 'calc(var(--spacing) * 40)',
     overflow: 'hidden',
@@ -1232,16 +1227,13 @@ const viewStyles = stylex.create({
     objectFit: 'contain',
   },
 
-  /* ── The file group ───────────────────────────────────────────────────── */
   fileOverflow: {
     paddingInline: themeSpace[1],
     color: themeColors.mutedForeground,
   },
 
-  /* ── The tool verb ────────────────────────────────────────────────────── */
   toolVerb: { color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)' },
 
-  /* ── The plan ─────────────────────────────────────────────────────────── */
   planCard: {
     borderRadius: themeRadius.lg,
     borderWidth: '1px',
@@ -1555,13 +1547,13 @@ function useSessionCopyWorkspaceId(): string | undefined {
 
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
 // when the user scrolls a message out of the VList buffer and back.
-interface BubbleExpandState {
+export interface BubbleExpandState {
   /** Keyed by `AssistantTurnRenderSegment.key`: a turn can have more than one
    *  foldable region (plan, then the approved implementation). */
-  expandedWorkedGroups: Record<string, boolean>;
-  expandedGroups: Record<string, boolean>;
-  expandedByIndex: Record<number, boolean>;
-  planOpen: boolean;
+  readonly expandedWorkedGroups: Readonly<Record<string, boolean>>;
+  readonly expandedGroups: Readonly<Record<string, boolean>>;
+  readonly expandedByIndex: Readonly<Record<number, boolean>>;
+  readonly planOpen: boolean;
 }
 export type SelectionTurnLayout = {
   finished: boolean;
@@ -1664,6 +1656,7 @@ type AssistantVirtualContent =
   | {
       kind: 'activity_group_header';
       block: Extract<AssistantTurnRenderBlock, { kind: 'activity_group' }>;
+      segmentKey: string;
       expanded: boolean;
       isThinking: boolean;
     }
@@ -2035,11 +2028,10 @@ const AgentActivityStatus = ({
 type ModelProvider = 'anthropic' | 'openai' | 'unknown';
 
 const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): ModelProvider => {
-  if (!modelInfo) return 'anthropic'; // Default to Anthropic
+  if (!modelInfo) return 'anthropic';
   const modelId = modelInfo.modelId?.toLowerCase() ?? '';
   const name = modelInfo.name?.toLowerCase() ?? '';
 
-  // Check for OpenAI/GPT models
   if (
     modelId.includes('gpt') ||
     modelId.includes('codex') ||
@@ -2049,7 +2041,6 @@ const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): Mode
     return 'openai';
   }
 
-  // Check for Anthropic/Claude models
   if (
     modelId.includes('claude') ||
     modelId.includes('sonnet') ||
@@ -2063,7 +2054,6 @@ const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): Mode
     return 'anthropic';
   }
 
-  // Default to Anthropic for unknown models
   return 'anthropic';
 };
 
@@ -2605,7 +2595,8 @@ export const buildChatVirtualRows = ({
       target: AssistantChatVirtualRow[],
       block: AssistantTurnRenderBlock,
       blockIndex: number,
-      isWorkedDetail: boolean
+      isWorkedDetail: boolean,
+      segmentKey: string
     ) => {
       if (block.kind === 'content') {
         target.push({
@@ -2646,7 +2637,7 @@ export const buildChatVirtualRows = ({
         key: `assistant:${message.id}:${block.key}:header`,
         messageIndex,
         item,
-        content: { kind: 'activity_group_header', block, expanded, isThinking },
+        content: { kind: 'activity_group_header', block, segmentKey, expanded, isThinking },
         isWorkedDetail,
         isLastRowForMessage: false,
       });
@@ -2738,7 +2729,7 @@ export const buildChatVirtualRows = ({
       if (!shouldUseWorkedGroup) {
         for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
           const block = blocks[blockIndex];
-          if (block) appendBlockRows(assistantRows, block, blockIndex, false);
+          if (block) appendBlockRows(assistantRows, block, blockIndex, false, segment.key);
         }
         if (segmentSubagentTasks.length > 0) {
           appendSubagentTasksRow(assistantRows, false);
@@ -2778,10 +2769,11 @@ export const buildChatVirtualRows = ({
           didInsertWorkedGroup = true;
         }
         if (segment.workBlockKeys.has(block.key)) {
-          if (isWorkedGroupExpanded) appendBlockRows(assistantRows, block, blockIndex, true);
+          if (isWorkedGroupExpanded)
+            appendBlockRows(assistantRows, block, blockIndex, true, segment.key);
           continue;
         }
-        appendBlockRows(assistantRows, block, blockIndex, false);
+        appendBlockRows(assistantRows, block, blockIndex, false, segment.key);
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
@@ -3157,14 +3149,24 @@ export const SessionChatStreamView = forwardRef<
       [suppressStickyAutoScrollRef, messageSelection]
     );
     const handleAssistantGroupExpandedChange = useCallback(
-      (messageId: string, groupKey: string, expanded: boolean) => {
+      (messageId: string, groupKey: string, expanded: boolean, segmentKey: string) => {
         const cached = getExpandState(messageId);
+        const keepWorkedGroupOpen =
+          expanded && cached.expandedWorkedGroups[segmentKey] === undefined;
         setExpandState(messageId, {
           ...cached,
           expandedGroups: {
             ...cached.expandedGroups,
             [groupKey]: expanded,
           },
+          ...(keepWorkedGroupOpen
+            ? {
+                expandedWorkedGroups: {
+                  ...cached.expandedWorkedGroups,
+                  [segmentKey]: true,
+                },
+              }
+            : {}),
         });
         // The disclosure marker lets the scroll engine hold the clicked header
         // before these rows change, including when the reader was following.
@@ -4332,6 +4334,14 @@ const SystemMessageRowContent = ({
           <ScheduleProposalNotice
             key={`schedule-proposal-${itemIndex}`}
             meta={item.meta as ScheduleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' && item.name === 'schedule_edit_proposal' && item.meta ? (
+          <ScheduleEditProposalNotice
+            key={`schedule-edit-proposal-${itemIndex}`}
+            meta={item.meta as ScheduleEditProposalMeta}
             sessionId={sessionId}
             entryId={message.id}
             itemIndex={itemIndex}
@@ -7524,7 +7534,12 @@ interface AssistantChatItemProps {
   isForking?: boolean;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
-  onGroupExpandedChange: (messageId: string, groupKey: string, expanded: boolean) => void;
+  onGroupExpandedChange: (
+    messageId: string,
+    groupKey: string,
+    expanded: boolean,
+    segmentKey: string
+  ) => void;
   onWorkedGroupExpandedChange: (messageId: string, segmentKey: string, expanded: boolean) => void;
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
@@ -7591,6 +7606,7 @@ const areAssistantVirtualContentsEqual = (
       return (
         b.kind === 'activity_group_header' &&
         a.block === b.block &&
+        a.segmentKey === b.segmentKey &&
         a.expanded === b.expanded &&
         a.isThinking === b.isThinking
       );
@@ -7754,7 +7770,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
             summary={content.block.summary}
             expanded={content.expanded}
             onExpandedChange={(expanded) =>
-              onGroupExpandedChange(message.id, content.block.key, expanded)
+              onGroupExpandedChange(message.id, content.block.key, expanded, content.segmentKey)
             }
             shimmer={shimmerGroupHeader}
             liveMessage={shimmerGroupHeader ? message : undefined}

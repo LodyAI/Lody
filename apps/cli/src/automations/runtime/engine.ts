@@ -324,10 +324,17 @@ export class Automations extends Context.Service<
               { concurrency: 4, discard: true }
             );
             const receipts = yield* Effect.try(() => ledger.pending(now, 8));
+            let receiptTransitioned = false;
             yield* Effect.forEach(
               receipts,
               (receipt) =>
                 advanceOwned(receipt).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      const after = ledger.receipt(receipt.id);
+                      if (after && after.state !== receipt.state) receiptTransitioned = true;
+                    })
+                  ),
                   Effect.catchCause((cause) =>
                     Cause.hasInterrupts(cause)
                       ? Effect.failCause(cause)
@@ -340,6 +347,7 @@ export class Automations extends Context.Service<
                 ),
               { concurrency: 4, discard: true }
             );
+            if (receiptTransitioned && host.observe) yield* host.observe;
           })
         );
         yield* Effect.forever(

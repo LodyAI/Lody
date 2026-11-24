@@ -362,3 +362,54 @@ it('keeps account memory providers off the encrypted feature ingress', async () 
   await runtime.handleEncryptedFeatureRpc(identity);
   expect(dispatched).toEqual([identity]);
 });
+
+it.each(['ios-simulator/control', 'ios-simulator/agent-control'] as const)(
+  'allows local %s in an encrypted workspace while keeping ordinary turn dispatch blocked',
+  async (method) => {
+    const { runtime, handler, state } = createHarness(true);
+    const dispatched: unknown[] = [];
+    const response = {
+      type: 'ios-simulator/control_response' as const,
+      sessionId: 'session',
+      success: true,
+      devices: [],
+    };
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    Object.assign(handler, {
+      handleLocalMachineRpc: async (request: unknown, signal?: AbortSignal) => {
+        dispatched.push(request);
+        receivedSignal = signal;
+        return response;
+      },
+    });
+    const routing = { workspaceId: 'workspace', machineId: 'machine' };
+    const params = { sessionId: 'session', command: { action: 'list' as const } };
+    const request =
+      method === 'ios-simulator/control'
+        ? { ...routing, method, params: { ...params, requestedByUserId: 'owner' } }
+        : { ...routing, method, params };
+    await expect(runtime.dispatchLocalMachineRpc(request, controller.signal)).resolves.toEqual(
+      response
+    );
+    expect(dispatched).toEqual([request]);
+    controller.abort();
+    expect(receivedSignal?.aborted).toBe(true);
+    await expect(
+      runtime.dispatchLocalMachineRpc({
+        ...routing,
+        method: 'session/dispatch-turn',
+        params: {
+          sessionId: 'session',
+          userTurnId: 'turn',
+          userId: 'owner',
+          timestamp: '2026-11-23T00:00:00Z',
+          inputConfig: {},
+        },
+      })
+    ).rejects.toThrow('e2ee_feature_unavailable');
+    expect(dispatched).toEqual([request]);
+    expect(runtime.isRemoteBridgeAttached()).toBe(false);
+    expect(state).toEqual({ transportAttached: false, backfillEnabled: false });
+  }
+);

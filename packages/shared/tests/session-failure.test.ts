@@ -23,6 +23,29 @@ describe('session failure normalization', () => {
     ).toBe('context_overflow');
   });
 
+  it('classifies a silent turn by its reason code, not the synthesized banner', () => {
+    const silentTurnMessage =
+      'The agent ended the turn without producing any output. The model call most likely failed ' +
+      'upstream (a context-length or rate-limit rejection is the usual cause) and the agent ' +
+      'reported it as a normal completion instead of an error. Retry your message, or start a ' +
+      'new session if this conversation has grown too long.';
+    expect(
+      classifyFailureReason({ reason: 'agent_no_output', message: silentTurnMessage })
+    ).toBe('agent_crash');
+    expect(
+      describeChatFailure({ reason: 'agent_no_output', message: silentTurnMessage })
+    ).toMatchObject({ reason: 'agent_crash', retryable: true });
+  });
+
+  it('lets a specific reason code win over a misleading message', () => {
+    expect(
+      classifyFailureReason({ reason: 'agent_no_output', message: 'prompt is too long' })
+    ).toBe('agent_crash');
+    expect(
+      classifyFailureReason({ reason: 'context_overflow', message: 'unrelated provider text' })
+    ).toBe('context_overflow');
+  });
+
   it('reports the next reset for a usage-limit notice', () => {
     const at = '2026-11-03T20:15:00.000Z';
     expect(

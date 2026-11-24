@@ -192,7 +192,7 @@ async function awaitQueuedOriginal(
 }
 
 /** An input with no signed intent cannot start, so an unsigned input is not sent at all. */
-async function prepareSignedIntent(
+export async function prepareSignedIntent(
   runtime: SessionSendRuntime,
   sessionId: SessionId,
   input: Pick<SessionHistory, 'id' | 'userId' | 'timestamp' | 'inputConfig'> & {

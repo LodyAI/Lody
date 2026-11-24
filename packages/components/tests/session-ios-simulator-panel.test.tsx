@@ -243,7 +243,7 @@ async function advance(ms: number) {
 }
 
 it.each([false, true])(
-  'encrypted Android previews are shown only for a local machine (local=%s)',
+  'encrypted Android previews load on local and remote machines (local=%s)',
   async (localMachine) => {
     const machine = createFakeMachine({ devices: [] });
     await renderPanel({
@@ -272,8 +272,7 @@ it.each([false, true])(
             : undefined,
       }),
     });
-    if (localMachine) expect(text()).toContain('Pixel A');
-    else expect(container?.innerHTML).toBe('');
+    expect(text()).toContain('Pixel A');
   }
 );
 

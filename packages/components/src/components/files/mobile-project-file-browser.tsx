@@ -44,6 +44,7 @@ import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
 import { LazySessionMonacoTextViewer } from '@/components/sessions/lazy-session-monaco-text-viewer';
 import { SessionShikiTextViewer } from '@/components/sessions/session-shiki-text-viewer';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { isNativeAppShell } from '@/lib/native-platform';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
 import { getImageMimeTypeForPath, isSvgPath } from '@/lib/image-file-preview';
@@ -269,6 +270,8 @@ export const MobileProjectFileBrowser = forwardRef<
   const popFrame = useCallback(() => {
     popTo(stackRef.current.length - 1);
   }, [popTo]);
+
+  useMobileBackHandler(popFrame, { enabled: stack.length > 1, layer: 'drawer' });
 
   useImperativeHandle(
     ref,

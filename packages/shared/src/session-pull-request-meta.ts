@@ -81,6 +81,7 @@ export type SessionAutoDeliveryStallReason =
   | 'pr_draft'
   | 'pr_not_created'
   | 'multiple_prs'
+  | 'workspace_unpushed'
   | 'stopped'
   | 'request_failed';
 
@@ -90,6 +91,10 @@ export type SessionAutoDelivery = {
   attempt?: number;
   reason?: SessionAutoDeliveryStallReason;
   prUrl?: string;
+  /** 1-based position of `prUrl` when delivering multiple PRs sequentially. */
+  prIndex?: number;
+  /** Total PRs tracked by the current Auto delivery enablement when > 1. */
+  prTotal?: number;
   updatedAt: number;
 };
 

@@ -1,4 +1,10 @@
-import { getServerNow, type MessageContent, type ScheduleProposalMeta } from '@lody/shared';
+import {
+  canonicalScheduleJson,
+  getServerNow,
+  type MessageContent,
+  type ScheduleEditProposalMeta,
+  type ScheduleProposalMeta,
+} from '@lody/shared';
 import type { SessionBackend } from '@/session/session-backend';
 
 export type ScheduleProposalDraft = Pick<
@@ -72,4 +78,57 @@ export async function publishScheduleProposal(
     return { pending: false, outcome: 'created', scheduleId: current.scheduleId };
   if (current.outcome === 'dismissed') return { pending: false, outcome: 'dismissed' };
   return { pending: true };
+}
+
+/**
+ * Write a card proposing a change to an existing schedule, idempotent on
+ * `proposalId`. Only the request (`scheduleId`, `patch`) decides a match:
+ * `describe` reads the live schedule, which differs after Apply, so it runs
+ * only for a proposal that is not in the conversation yet.
+ */
+export async function publishScheduleEditProposal(
+  backend: ProposalBackend,
+  request: Pick<ScheduleEditProposalMeta, 'proposalId' | 'scheduleId' | 'patch'>,
+  describe: () => Promise<Pick<ScheduleEditProposalMeta, 'title' | 'baseActivityId'>>,
+  actor: ScheduleProposalActor,
+  now: () => number = getServerNow
+): Promise<{ pending: boolean; outcome?: 'applied' | 'dismissed' }> {
+  const entryId = `schedule-edit-proposal-${request.proposalId}`;
+  const read = await backend.readTurn(entryId);
+  if (read.state === 'missing') {
+    const meta: ScheduleEditProposalMeta = {
+      ...request,
+      ...(await describe()),
+      proposedBy: {
+        kind: 'agent',
+        ...(actor.agentConfigId ? { agentConfigId: actor.agentConfigId } : {}),
+        ...(actor.name ? { name: actor.name } : {}),
+      },
+    };
+    await backend.appendHistoryTurn({
+      id: entryId,
+      role: 'system',
+      timestamp: new Date(now()).toISOString(),
+      items: [{ type: 'system_notice', name: 'schedule_edit_proposal', meta }],
+      fileDiff: [],
+      finished: true,
+    });
+    return { pending: true };
+  }
+  if (read.state !== 'ready')
+    throw new Error('Proposal history is unavailable; retry with the same requestId');
+  const prior = (read.turn.items as MessageContent[] | undefined)?.find(
+    (candidate) => candidate.type === 'system_notice' && candidate.name === 'schedule_edit_proposal'
+  );
+  const current =
+    prior?.type === 'system_notice' && prior.name === 'schedule_edit_proposal'
+      ? (prior.meta as ScheduleEditProposalMeta | undefined)
+      : undefined;
+  if (
+    !current ||
+    canonicalScheduleJson({ scheduleId: current.scheduleId, patch: current.patch }) !==
+      canonicalScheduleJson({ scheduleId: request.scheduleId, patch: request.patch })
+  )
+    throw new Error('Idempotency key conflict');
+  return { pending: !current.outcome, ...(current.outcome ? { outcome: current.outcome } : {}) };
 }

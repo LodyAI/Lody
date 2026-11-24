@@ -64,6 +64,8 @@ export const personalRuntimeRecovery = (runtime: E2eeWorkspaceRuntime) =>
   recoveries.get(runtime) ?? null;
 /** Real application ports for one pinned workspace. No backend or identity creation is implicit. */
 export interface PersonalRuntimeOptions<E> {
+  /** Advertise remote CLI pairing only with actual persistent platform ports. */
+  readonly remoteMachinePairing?: boolean;
   readonly accountId: string;
   readonly workspaceId: string;
   readonly genesisHash: string;
@@ -562,8 +564,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
           run(
             withSession(id, (session) =>
               Effect.gen(function* () {
-                if (mode !== 'automatic' && mode !== 'explicit')
-                  return yield* fail('invalid-input');
+                if (mode !== 'explicit') return yield* fail('invalid-input');
                 // An earlier approval whose reply was lost left its signed original in the
                 // journal: resubmit those exact bytes and settle them before anything new.
                 const resumed = yield* session.resume();
@@ -993,6 +994,18 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
         )
       );
     },
+    ...(options.remoteMachinePairing
+      ? {
+          beginRemoteMachinePairing: (id) =>
+            run(withSession(id, (session) => session.remoteMachine.begin())),
+          inspectRemoteMachinePairing: (id, pairingId) =>
+            run(withSession(id, (session) => session.remoteMachine.inspect(pairingId))),
+          approveRemoteMachinePairing: (id, pairingId, summary) =>
+            run(withSession(id, (session) => session.remoteMachine.approve(pairingId, summary))),
+          cancelRemoteMachinePairing: (id, pairingId) =>
+            run(withSession(id, (session) => session.remoteMachine.cancel(pairingId))),
+        }
+      : {}),
     ledgerView: (id) =>
       run(
         withSession(

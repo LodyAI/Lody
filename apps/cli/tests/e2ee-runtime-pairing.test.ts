@@ -2086,9 +2086,23 @@ it('records an exact device revocation so the next offer uses a fresh identity o
       } as unknown as CloudE2eePort,
     });
     await host.refresh();
+    const history = join(host.repositoryDirectory, 'roost');
+    const sibling = join(root, '..', 'sibling', 'content', binding.genesisHash, key, 'roost');
+    await fs.mkdir(history, { recursive: true });
+    await fs.mkdir(sibling, { recursive: true });
+    for (const name of [
+      'history.sqlite3',
+      'history.sqlite3-wal',
+      'history.sqlite3-shm',
+      'history.sqlite3.identity.sqlite3',
+    ])
+      await fs.writeFile(join(history, name), 'synthetic');
+    await fs.writeFile(join(sibling, 'history.sqlite3'), 'sibling history');
     revoked = true;
     await host.refresh();
     await host.removalCleanup();
+    await expect(fs.stat(history)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await fs.readFile(join(sibling, 'history.sqlite3'), 'utf8')).toBe('sibling history');
     expect(removed).toEqual(['device-revoked']);
     // Membership and local data stay; only this identity is retired.
     await expect(fs.readFile(join(root, 'removed.json'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -2098,6 +2112,19 @@ it('records an exact device revocation so the next offer uses a fresh identity o
     });
     await host.close();
     host = undefined;
+    // Simulate an interrupted wipe. The receipt must finish it even with no backend.
+    await fs.mkdir(history, { recursive: true });
+    await fs.writeFile(join(history, 'history.sqlite3-wal'), 'pending');
+    await expect(
+      openCliE2eeWorkspaceLegacy({
+        accountId,
+        ...binding,
+        keyring: noKeyring,
+        cloud: {} as CloudE2eePort,
+        onUnavailable: () => {},
+      })
+    ).rejects.toThrow('e2ee_device_revoked');
+    await expect(fs.stat(history)).rejects.toMatchObject({ code: 'ENOENT' });
     const next = await prepareCliE2eeMachineLegacy({
       accountId,
       ...binding,
@@ -2514,6 +2541,9 @@ it.each(['history', 'renewal', 'account-race', 'close-race', 'receipt-error'] as
         undefined,
         host.repositoryDirectory
       );
+      const roost = join(host.repositoryDirectory, 'roost');
+      await fs.mkdir(roost, { recursive: true });
+      await fs.writeFile(join(roost, 'history.sqlite3.identity.sqlite3'), 'synthetic identity');
       const repo = store.baseDir;
       const originalDoc = new LoroDoc();
       originalDoc.getText('text').insert(0, 'synthetic local content');
@@ -2654,6 +2684,7 @@ it.each(['history', 'renewal', 'account-race', 'close-race', 'receipt-error'] as
         ).toBe('replacement account unsynced content');
       }
 
+      await expect(fs.stat(roost)).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(fs.readFile(join(repo, 'repo.sqlite3'))).rejects.toMatchObject({
         code: 'ENOENT',
       });

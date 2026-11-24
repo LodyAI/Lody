@@ -13,6 +13,10 @@ export type StartupAcpCapabilitiesRefreshPorts = {
   onError?: (error: unknown, context: { machineId: MachineId; configId?: string }) => void;
 };
 
+export type StartupAcpCapabilitiesRefreshResult = {
+  hasFailures: boolean;
+};
+
 /**
  * Refresh every configured ACP on online machines once, serializing configs per machine.
  *
@@ -35,31 +39,40 @@ export async function runStartupAcpCapabilitiesRefresh(
     machineConcurrency?: number;
     signal?: AbortSignal;
   }
-): Promise<void> {
+): Promise<StartupAcpCapabilitiesRefreshResult> {
   const { refreshedConfigKeys, signal } = options;
-  if (signal?.aborted) return;
+  let hasFailures = false;
+  if (signal?.aborted) return { hasFailures: true };
   const listedMachineIds = await ports.listMachineIds();
-  if (signal?.aborted) return;
+  if (signal?.aborted) return { hasFailures: true };
   const machineIds = listedMachineIds.filter(ports.isMachineOnline);
   const runMachine = createAsyncConcurrencyGate(options.machineConcurrency ?? 2);
 
   await Promise.all(
     machineIds.map((machineId) =>
       runMachine(async () => {
-        if (signal?.aborted || !ports.isMachineOnline(machineId)) return;
+        if (signal?.aborted || !ports.isMachineOnline(machineId)) {
+          hasFailures = true;
+          return;
+        }
 
         let configs: AgentConfigMeta[];
         try {
           configs = await ports.listAgentConfigs(machineId);
         } catch (error) {
+          hasFailures = true;
           if (signal?.aborted) return;
           ports.onError?.(error, { machineId });
           return;
         }
 
         for (const config of configs) {
-          if (signal?.aborted || !ports.isMachineOnline(machineId)) return;
+          if (signal?.aborted || !ports.isMachineOnline(machineId)) {
+            hasFailures = true;
+            return;
+          }
           if (config.machineId !== machineId) {
+            hasFailures = true;
             ports.onError?.(new Error('Agent config belongs to a different machine'), {
               machineId,
               configId: config.id,
@@ -74,6 +87,7 @@ export async function runStartupAcpCapabilitiesRefresh(
             await ports.refreshAgentConfig(machineId, config, signal);
             refreshedConfigKeys.add(refreshedConfigKey);
           } catch (error) {
+            hasFailures = true;
             if (signal?.aborted) return;
             ports.onError?.(error, { machineId, configId: config.id });
           }
@@ -81,4 +95,6 @@ export async function runStartupAcpCapabilitiesRefresh(
       })
     )
   );
+
+  return { hasFailures: hasFailures || Boolean(signal?.aborted) };
 }

@@ -60,7 +60,7 @@ prerequisites, shared conventions, business rules and the actions to confirm fir
 
      When `LODY_AGENT_SESSION_ID` is set, `lody schedule` allows only `list`, `show` and
      `pause`; creating or changing schedules requires a human action (use Lody's built-in
-     MCP tool `lody_schedule` action `propose` to post a confirmation card). For batch session
+     MCP tool `lody_schedule` action `propose` or `propose_edit` to post a confirmation card). For batch session
      orchestration or automatic completion callbacks inside a Lody session, prefer Lody's
      built-in MCP tools (`lody session` operates on one session per command).
 
@@ -308,7 +308,8 @@ names, whichever machine created it.
 Inside a Lody Agent session (`LODY_AGENT_SESSION_ID` set), `lody schedule` allows only
 `list`, `show` and `pause`; `create`, `edit`, `resume`, `run` and `delete` fail because
 schedule enablement requires a human action. From inside a session, use the Lody MCP tool
-`lody_schedule` action `propose` to post a human confirmation card instead.
+`lody_schedule` action `propose`, or `propose_edit` for a change to an existing schedule, to
+post a human confirmation card instead.
 
 - `list [--query] [--limit 30] [--offset 0]` lists schedules.
 - `show|pause|resume|run|delete <id>` act on one schedule. `run` starts it now.

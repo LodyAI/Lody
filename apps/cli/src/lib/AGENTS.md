@@ -13,6 +13,8 @@ directories keep their permissions. Windows retains direct file writes.
 
 ## Composition and transports
 
+- Encrypted local RPC allows iOS simulators; `session/dispatch-turn` stays blocked.
+
 - `session-command-environment.ts` `resolveDaemonTarget` is the sole binding and local-authority gate for daemon-hosted commands (`sameReplica`, `localHost`, `authority`, `nativeOwnerAccess`): bound ordinary daemon owners act on same-machine Sessions locally, while other accounts, remote targets, and `revoked`/`unauthorized`/`unknown` daemon states require cloud checks or fail closed.
 
 - Daemon commands borrow its replica; command cleanup failures never fence.
@@ -100,8 +102,8 @@ never pushed to renderers as local room health.
   cached sample once pressure appears; re-check briefly before failing a turn; bound
   evictions per call. The threshold is a safety MARGIN, not "what a turn needs".
   [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md). Idle counts
-  native work: never clean `running`, cap background waits. Post-turn output resets
-  it only for `sessionActivity` agents.
+  native work: never clean `running`, cap background waits. Visible post-turn output
+  resets idle and pulses presence.
   Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
   Candidates include every cached Session doc (`combineGCSessionSources`): an untracked
   doc idles from its last hand-out, unloads with status preserved, and GC checks peek

@@ -22,6 +22,7 @@ import {
 // so this lib module does not depend on the commands layer.
 const ACTIVE_PING_MIN_INTERVAL_MS = 60_000;
 const DEFAULT_SLOW_THRESHOLD_MS = 120_000;
+export const DEFAULT_LATE_STREAM_ACTIVITY_TTL_MS = 30_000;
 
 export type SessionActivePresencePhase =
   | 'thinking'
@@ -97,6 +98,7 @@ export type SessionActivePresenceOptions = {
   intervalMs?: number;
   slowThresholdMs?: number;
   stallBudgetsMs?: Partial<Record<InitializingStageKey, number>>;
+  lateStreamActivityTtlMs?: number;
 };
 
 const phaseToStatus = (
@@ -204,6 +206,9 @@ export interface SessionActivePresenceService {
     detail?: string
   ) => Effect.Effect<SessionActivePresenceLease, SessionPresenceUnavailable, Scope.Scope>;
   readonly setNativeWork: (sessionId: SessionId, work: 'running' | 'background' | null) => void;
+  readonly noteLateActivity: (sessionId: SessionId) => void;
+  readonly clearLateActivity: (sessionId: SessionId) => void;
+  readonly hasLateActivity: (sessionId: SessionId) => boolean;
   readonly setPhase: (
     sessionId: SessionId,
     phase: SessionActivePresencePhase | null,
@@ -232,11 +237,24 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
   const parent = yield* Scope.Scope;
   const active = new Map<SessionId, ActivePresenceState>();
   const nativeWork = new Map<SessionId, 'running' | 'background'>();
+  const lateActivityUntil = new Map<SessionId, number>();
   const nativePublished = new Map<SessionId, number>();
   let idle = yield* Deferred.make<void>();
   yield* Deferred.succeed(idle, undefined);
   let retired = false;
   const now = () => clock.currentTimeMillisUnsafe();
+  const lateActivityTtlMs = options.lateStreamActivityTtlMs ?? DEFAULT_LATE_STREAM_ACTIVITY_TTL_MS;
+
+  const hasActiveLateActivity = (sessionId: SessionId, nowMs: number): boolean => {
+    const deadline = lateActivityUntil.get(sessionId);
+    if (deadline === undefined) return false;
+    if (nowMs < deadline) return true;
+    lateActivityUntil.delete(sessionId);
+    return false;
+  };
+
+  const hasLiveOutOfTurnWork = (sessionId: SessionId, nowMs: number): boolean =>
+    nativeWork.has(sessionId) || hasActiveLateActivity(sessionId, nowMs);
 
   const tick = (sessionId: SessionId, state: ActivePresenceState): void => {
     if (active.get(sessionId) !== state || state.closing || state.stallReported) return;
@@ -287,9 +305,10 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
   const clear = (sessionId: SessionId, state: ActivePresenceState) =>
     Effect.sync(() => {
       if (active.get(sessionId) !== state) return;
-      if (nativeWork.has(sessionId) && !retired) {
+      const nowMs = now();
+      if (hasLiveOutOfTurnWork(sessionId, nowMs) && !retired) {
         host.publish(sessionId, SessionStatusFactory.running());
-        nativePublished.set(sessionId, now());
+        nativePublished.set(sessionId, nowMs);
       } else {
         host.clear(sessionId);
         nativePublished.delete(sessionId);
@@ -325,6 +344,7 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
           stallReported: false,
         };
         if (active.size === 0) idle = Deferred.makeUnsafe<void>();
+        lateActivityUntil.delete(sessionId);
         active.set(sessionId, state);
         yield* Scope.addFinalizer(
           scope,
@@ -368,19 +388,24 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
   // Reconcile at a fixed rate: activity notifications are not a presence write budget.
   yield* Effect.forkIn(
     Effect.sync(() => {
-      for (const sessionId of new Set([...nativeWork.keys(), ...nativePublished.keys()])) {
+      const nowMs = now();
+      for (const sessionId of new Set([
+        ...nativeWork.keys(),
+        ...lateActivityUntil.keys(),
+        ...nativePublished.keys(),
+      ])) {
         if (active.has(sessionId)) continue;
         try {
           const lastPublished = nativePublished.get(sessionId);
-          if (!nativeWork.has(sessionId)) {
+          if (!hasLiveOutOfTurnWork(sessionId, nowMs)) {
             if (lastPublished !== undefined) host.clear(sessionId);
             nativePublished.delete(sessionId);
           } else if (
             lastPublished === undefined ||
-            now() - lastPublished >= (options.intervalMs ?? LODY_PRESENCE_HEARTBEAT_MS)
+            nowMs - lastPublished >= (options.intervalMs ?? LODY_PRESENCE_HEARTBEAT_MS)
           ) {
             host.publish(sessionId, SessionStatusFactory.running());
-            nativePublished.set(sessionId, now());
+            nativePublished.set(sessionId, nowMs);
           }
         } catch (error) {
           host.report({ kind: 'heartbeat-failed', sessionId, cause: Cause.die(error) });
@@ -407,6 +432,14 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
       if (work) nativeWork.set(sessionId, work);
       else nativeWork.delete(sessionId);
     },
+    noteLateActivity: (sessionId) => {
+      if (retired) return;
+      lateActivityUntil.set(sessionId, now() + lateActivityTtlMs);
+    },
+    clearLateActivity: (sessionId) => {
+      lateActivityUntil.delete(sessionId);
+    },
+    hasLateActivity: (sessionId) => !retired && hasActiveLateActivity(sessionId, now()),
     setPhase: (sessionId, phase, detail) => {
       const state = active.get(sessionId);
       if (
@@ -426,17 +459,25 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
       const state = active.get(sessionId);
       return state
         ? phaseToStatus(state.phase, state.detail)
-        : nativeWork.has(sessionId)
+        : hasLiveOutOfTurnWork(sessionId, now())
           ? SessionStatusFactory.running()
           : null;
     },
-    activeSessionCount: () => new Set([...active.keys(), ...nativeWork.keys()]).size,
+    activeSessionCount: () => {
+      const nowMs = now();
+      const ids = new Set<SessionId>([...active.keys(), ...nativeWork.keys()]);
+      for (const sessionId of lateActivityUntil.keys()) {
+        if (hasLiveOutOfTurnWork(sessionId, nowMs)) ids.add(sessionId);
+      }
+      return ids.size;
+    },
     retire: () => {
       retired = true;
       for (const sessionId of nativePublished.keys()) {
         if (!active.has(sessionId)) host.clear(sessionId);
       }
       nativeWork.clear();
+      lateActivityUntil.clear();
       nativePublished.clear();
     },
     retryRelease: (sessionId) =>

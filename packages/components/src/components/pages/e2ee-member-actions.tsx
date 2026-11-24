@@ -1,3 +1,4 @@
+import { workspaceTransferErrorKey } from '../settings/workspace-transfer-errors';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MoreHorizontal } from 'lucide-react';
@@ -47,6 +48,7 @@ export function E2eeMemberActions(props: {
   const [transferring, setTransferring] = useState(false);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [transferError, setTransferError] = useState<string>();
   const [rotateAfter, setRotateAfter] = useState(true);
   const { member, management } = props;
   if (member.role === 'owner') return null;
@@ -55,10 +57,12 @@ export function E2eeMemberActions(props: {
   const run = async (work: () => Promise<void>) => {
     setPending(true);
     setFailed(false);
+    setTransferError(undefined);
     try {
       await work();
       setConfirming(false);
-    } catch {
+    } catch (error) {
+      setTransferError(transferring ? workspaceTransferErrorKey(error) : undefined);
       setFailed(true);
     } finally {
       setPending(false);
@@ -125,7 +129,7 @@ export function E2eeMemberActions(props: {
       </Menu.Root>
       {failed && !confirming && (
         <Alert.Root tone="warning">
-          <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
+          <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
         </Alert.Root>
       )}
       <Dialog.Root
@@ -156,7 +160,7 @@ export function E2eeMemberActions(props: {
           </ul>
           {failed && (
             <Alert.Root tone="warning">
-              <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
+              <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
             </Alert.Root>
           )}
           <Dialog.Footer>
@@ -211,7 +215,7 @@ export function E2eeMemberActions(props: {
           )}
           {failed && (
             <Alert.Root tone="warning">
-              <Alert.Description>{t('e2ee.members.failed')}</Alert.Description>
+              <Alert.Description>{t(transferError ?? 'e2ee.members.failed')}</Alert.Description>
             </Alert.Root>
           )}
           <Dialog.Footer>

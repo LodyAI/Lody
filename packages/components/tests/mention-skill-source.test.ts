@@ -79,6 +79,30 @@ describe('mergeMentionSkillState', () => {
 });
 
 describe('getAllowedSkillMentionDirs', () => {
+  it('offers and expands the Magpie router only for the bound builtin Codex', () => {
+    const dir = '~/.codex/skills/magpie-skills';
+    const absolutePath = '/home/test/.magpie/router/SKILL.md';
+    const items = buildSkillMentionItems([
+      {
+        scope: 'global',
+        dir,
+        skills: [skill({ name: 'magpie-skills', relativePath: dir + '/SKILL.md', absolutePath })],
+      },
+    ]);
+    const agent = { cliType: 'builtin', agentType: 'codex' } as const;
+    const magpie = { ...agent, magpieGatewayUrl: 'http://127.0.0.1:3425' };
+    const allowed = getAllowedSkillMentionDirs(magpie);
+    expect(selectSkillMentionCandidates(items, 'magpie', allowed)).toHaveLength(1);
+    expect(expandInText('$magpie-skills', items, allowed)).toBe(
+      `use /magpie-skills [Skill Path](${absolutePath})`
+    );
+    for (const other of [agent, { ...magpie, agentType: 'pi' }]) {
+      const dirs = getAllowedSkillMentionDirs(other);
+      expect(selectSkillMentionCandidates(items, 'magpie', dirs)).toEqual([]);
+      expect(expandInText('$magpie-skills', items, dirs)).toBe('$magpie-skills');
+    }
+  });
+
   it('returns no whitelist for an unregistered agent type instead of an empty one', () => {
     // An empty-but-present whitelist filters every candidate out; `null` keeps
     // them. Custom agents get generated `custom-<uuid>` types.

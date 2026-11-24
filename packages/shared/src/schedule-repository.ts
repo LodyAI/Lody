@@ -209,7 +209,7 @@ export class ScheduleRepository {
     }
   }
 
-  private async owned(scheduleId: string, actorId: string): Promise<ScheduleDocument> {
+  async owned(scheduleId: string, actorId: string): Promise<ScheduleDocument> {
     const row = (await this.list()).find((entry) => entry.scheduleId === scheduleId);
     const document = await this.read(scheduleId);
     if (!row || !document) throw new Error('Schedule not found');

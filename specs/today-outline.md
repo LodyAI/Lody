@@ -34,7 +34,9 @@ any time; when off it changes none of the app's existing behavior.
   sidebar (layout: left sidebar | Today | main area). Pinned state and column width are stored on this device
   only; the width is resizable. The pinned column is a page card like the main area's (the darker
   inset sheet, same radius and rim), anchored to the sidebar with 4px of window ground between it and the main
-  card, so the two read as separate pages rather than one fused panel (user decision). With the sidebar hidden the
+  card, so the two read as separate pages rather than one fused panel (user decision). Its toolbar row belongs to the
+  window's top bar like the sidebar header and the main page's tab bar: pressing its empty space drags the window,
+  and on macOS double-clicking it zooms or minimizes the window as System Settings choose (user decision). With the sidebar hidden the
   pinned column is the window's leftmost surface: the sidebar toggle and Back/Forward move to its toolbar (right of
   the traffic lights) and leave the main page, which no longer clears the traffic lights; its content tightens so the
   content lines up with the leftmost traffic light (x 16–30): bullet dots centre on its right edge (x=30), fold
@@ -160,7 +162,8 @@ any time; when off it changes none of the app's existing behavior.
 - Dragging works only within one day; over another date it shows "Can't move to another date" and the card
   flies back on release. Esc during a drag only cancels the drag.
 - Dragging a conversation from any section of the left sidebar between two nodes creates a node holding its
-  mention.
+  mention. Its depth follows the dragged card's left edge, not the pointer inside the card: a card aligned with
+  the node above lands as its sibling.
   Dropping into a node's text to make an inline reference is not supported.
 - Visuals reuse the pinned section's floating card, 5px threshold and ~100ms settle animation, with an insertion
   line instead of opening a gap.
@@ -175,6 +178,10 @@ any time; when off it changes none of the app's existing behavior.
   one undo returns to the `@query` text. Pasting a resolvable same-workspace `lody://session` link (bare or
   Markdown) anywhere converts it to a mention. Dragging a conversation from the sidebar between two nodes creates
   a node holding just that mention.
+- Dragging out: a mention of an available conversation drags like its sidebar row. Dropped on an open conversation
+  or the new-chat page it becomes a mention in that composer; the open conversation itself is not a drop target.
+  Today ignores drags that started in Today, so releasing the mention inside the outline changes nothing. The status
+  icon only opens its menu and never starts a drag; a deleted or loading mention does not drag.
 - Caret: a mention takes one caret position. With the caret right after it, ← first selects the whole mention
   (highlighted); a second ← moves before it; → is symmetric. Backspace after it (Delete before it) first selects,
   the second press deletes; `Alt/⌘+Backspace` deletes at once. Enter on a selected mention opens the conversation,

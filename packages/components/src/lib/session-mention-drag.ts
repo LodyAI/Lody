@@ -2,8 +2,9 @@
  * Dragging a sidebar session onto a chat surface, as a data transfer.
  *
  * The drop turns into a session mention in that surface's composer. Transfer
- * format stays here so both ends — sidebar rows and session tabs that start
- * the drag, and the pages that accept it — agree without importing each other.
+ * format stays here so both ends — sidebar rows, session tabs and Today
+ * mentions that start the drag, and the pages that accept it — agree without
+ * importing each other.
  *
  * A tiny in-memory store also tracks the drag WHILE it is in flight. HTML5
  * `dragenter` only fires after the pointer is already over a surface, which is
@@ -28,10 +29,21 @@ export const SESSION_MENTION_DRAG_TYPE = 'application/x-lody-session-mention';
  */
 const SESSION_MENTION_DRAG_ID_PREFIX = `${SESSION_MENTION_DRAG_TYPE}+id:`;
 
+/**
+ * The surface a drag started in, encoded into a type name like the id so it is
+ * readable during `dragover`. A surface that is itself a drop target for
+ * session drags (Today) uses it to ignore drags it started.
+ */
+const SESSION_MENTION_DRAG_SOURCE_PREFIX = `${SESSION_MENTION_DRAG_TYPE}+source:`;
+
+export type SessionMentionDragSource = 'today';
+
 export type SessionMentionDragPayload = {
   sessionId: string;
   /** Only for the `text/plain` fallback outside the app. */
   title?: string;
+  /** Set when the drag starts in a surface that also accepts session drags. */
+  source?: SessionMentionDragSource;
 };
 
 type DragTypes = { types?: ArrayLike<string> | Iterable<string> };
@@ -42,6 +54,7 @@ function toTypeArray(dataTransfer: DragTypes | null | undefined): string[] {
 }
 
 let inFlightSessionId: string | null = null;
+let inFlightPreviewOffsetX: number | null = null;
 const inFlightListeners = new Set<() => void>();
 let dragEndBound = false;
 
@@ -71,9 +84,18 @@ function unbindWindowDragEnd(): void {
   window.removeEventListener('dragend', onWindowDragEnd, true);
 }
 
-/** Session id currently being dragged out of the sidebar or a session tab, if any. */
+/** Session id currently being dragged out of the sidebar, a session tab or a Today mention, if any. */
 export function getInFlightSessionMentionDragId(): string | null {
   return inFlightSessionId;
+}
+
+/**
+ * Pointer x minus the drag preview's left edge, when the source knows it.
+ * Today aims a drop's depth with the preview's left edge, where the user sees
+ * the dragged row, rather than with the pointer somewhere inside it.
+ */
+export function getInFlightSessionMentionPreviewOffsetX(): number | null {
+  return inFlightSessionId ? inFlightPreviewOffsetX : null;
 }
 
 /**
@@ -101,7 +123,8 @@ let stopPointerHover: (() => void) | null = null;
  * caller must clear (`clearSessionMentionDrag`) on drag end/cancel — there is
  * no `dragend`.
  */
-export function armSessionMentionDrag(sessionId: string): void {
+export function armSessionMentionDrag(sessionId: string, previewOffsetX?: number): void {
+  inFlightPreviewOffsetX = previewOffsetX ?? null;
   setInFlightSessionId(sessionId);
   if (stopPointerHover || typeof window === 'undefined') return;
   const move = (event: PointerEvent) => {
@@ -126,6 +149,7 @@ export function clearSessionMentionDrag(): void {
   hoveredPointerTarget?.leave?.();
   hoveredPointerTarget = null;
   unbindWindowDragEnd();
+  inFlightPreviewOffsetX = null;
   setInFlightSessionId(null);
 }
 
@@ -137,7 +161,12 @@ export function clearSessionMentionDrag(): void {
  * without it the browser starts its own link drag and never reaches this.
  */
 export function startSessionMentionDrag(
-  event: { dataTransfer: Pick<DataTransfer, 'setData' | 'effectAllowed'> | null },
+  event: {
+    dataTransfer: Pick<DataTransfer, 'setData' | 'effectAllowed'> | null;
+    /** With `currentTarget`, the row the browser snapshots as the drag image. */
+    clientX?: number;
+    currentTarget?: EventTarget | null;
+  },
   payload: SessionMentionDragPayload
 ): void {
   const dataTransfer = event.dataTransfer;
@@ -146,8 +175,15 @@ export function startSessionMentionDrag(
   dataTransfer.effectAllowed = 'copyMove';
   dataTransfer.setData(SESSION_MENTION_DRAG_TYPE, payload.sessionId);
   dataTransfer.setData(`${SESSION_MENTION_DRAG_ID_PREFIX}${payload.sessionId.toLowerCase()}`, '');
+  if (payload.source) {
+    dataTransfer.setData(`${SESSION_MENTION_DRAG_SOURCE_PREFIX}${payload.source}`, '');
+  }
   // A drop outside any of our surfaces still leaves something readable behind.
   dataTransfer.setData('text/plain', payload.title?.trim() || payload.sessionId);
+  inFlightPreviewOffsetX =
+    event.clientX !== undefined && event.currentTarget instanceof Element
+      ? event.clientX - event.currentTarget.getBoundingClientRect().left
+      : null;
   setInFlightSessionId(payload.sessionId);
   bindWindowDragEnd();
 }
@@ -163,6 +199,15 @@ function peekSessionMentionDragSessionId(
     }
   }
   return null;
+}
+
+/** Whether this session drag started in `source`, readable during `dragover`. */
+export function isSessionMentionDragFrom(
+  dataTransfer: DragTypes | null | undefined,
+  source: SessionMentionDragSource
+): boolean {
+  const marker = `${SESSION_MENTION_DRAG_SOURCE_PREFIX}${source}`;
+  return toTypeArray(dataTransfer).some((type) => type.toLowerCase() === marker);
 }
 
 /**

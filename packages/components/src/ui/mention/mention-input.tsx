@@ -226,8 +226,10 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
 }
 
 /**
- * Copy the UA placeholder paint of a textarea styled like the editor. A
- * `placeholder:` utility reaches the editor directly (`tailwind/index.css`).
+ * Copy the UA placeholder paint of a textarea styled like the editor. The
+ * editor paints its placeholder as a `::before` (`tailwind/index.css`), and
+ * WebKit reports no computed style for `::placeholder`, so the colour is
+ * probed from a real textarea and forwarded via `--composer-placeholder-color`.
  */
 function usePlaceholderPaint(
   element: InputElement | null,

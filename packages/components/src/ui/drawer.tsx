@@ -4,14 +4,18 @@ import * as stylex from '@stylexjs/stylex';
 import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
 import { clsx } from 'clsx';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
   themeFontSize,
+  themeRadius,
   themeFontWeight,
   themeLineHeight,
   themeSpace,
 } from '../style/theme-scale.stylex';
+
+const DRAWER_VIEWPORT_BOTTOM_VAR = '--lody-drawer-viewport-bottom';
 
 const styles = stylex.create({
   overlay: {
@@ -24,6 +28,7 @@ const styles = stylex.create({
     backgroundColor: themeColors.background,
     position: 'fixed',
     zIndex: 50,
+    boxSizing: 'border-box',
     display: 'flex',
     height: 'auto',
     flexDirection: 'column',
@@ -31,29 +36,29 @@ const styles = stylex.create({
   top: {
     insetInline: 0,
     top: 0,
-    marginBottom: 'calc(var(--spacing) * 24)',
+    marginBottom: themeSpace[24],
     maxHeight: '80dvh',
-    borderBottomLeftRadius: 'var(--radius-lg)',
-    borderBottomRightRadius: 'var(--radius-lg)',
+    borderBottomLeftRadius: themeRadius.lg,
+    borderBottomRightRadius: themeRadius.lg,
     borderBottomWidth: 1,
-    borderColor: 'hsl(var(--border) / 1)',
+    borderColor: themeColors.border,
   },
   bottom: {
     insetInline: 0,
     bottom: 0,
-    marginTop: 'calc(var(--spacing) * 24)',
+    marginTop: themeSpace[24],
     maxHeight: '80dvh',
-    borderTopLeftRadius: 'var(--radius-lg)',
-    borderTopRightRadius: 'var(--radius-lg)',
+    borderTopLeftRadius: themeRadius.lg,
+    borderTopRightRadius: themeRadius.lg,
     borderTopWidth: 1,
-    borderColor: 'hsl(var(--border) / 1)',
+    borderColor: themeColors.border,
   },
-  right: { insetBlock: 0, right: 0, borderLeftWidth: 1, borderColor: 'hsl(var(--border) / 1)' },
+  right: { insetBlock: 0, right: 0, borderLeftWidth: 1, borderColor: themeColors.border },
   rightWidth: {
     width: '75%',
     maxWidth: { default: null, '@media (width >= 40rem)': '24rem' },
   },
-  left: { insetBlock: 0, left: 0, borderRightWidth: 1, borderColor: 'hsl(var(--border) / 1)' },
+  left: { insetBlock: 0, left: 0, borderRightWidth: 1, borderColor: themeColors.border },
   leftWidth: { width: 'var(--lody-drawer-width)', maxWidth: 'var(--lody-drawer-width)' },
   fullWidth: { width: '100%', maxWidth: 'none' },
   safeAreaBottom: { paddingBottom: 'max(1.25rem,var(--safe-area-bottom,0px))' },
@@ -72,8 +77,8 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: {
-      default: 'calc(var(--spacing) * .5)',
-      '@media (width >= 48rem)': 'calc(var(--spacing) * 1.5)',
+      default: themeSpace[0.5],
+      '@media (width >= 48rem)': themeSpace[1.5],
     },
     textAlign: {
       default: null,
@@ -117,60 +122,76 @@ const DrawerViewportContext = React.createContext(false);
 const DrawerDirectionContext = React.createContext<'top' | 'bottom' | 'left' | 'right'>('bottom');
 
 function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
-  // Vaul caches a focused drawer's initial height, which becomes stale after
-  // a fold/rotation or a keyboard-resized WebView. Keep side drawers CSS-sized.
-  // iOS surfaces already consume the native keyboard offset; other hosts need
-  // the currently occluded visual-viewport edge instead.
+  // Keep side drawers CSS-sized; Vaul caches initial height across folds/resizes.
   const manageSideDrawer =
     (props.direction === 'right' || props.direction === 'left') &&
     !props.snapPoints &&
     repositionInputs !== false &&
     (isNativeAppShell() || repositionInputs === true);
   const followViewport = manageSideDrawer && !isNativeIOSAppShell();
+  const canDismissOnBack = Boolean(props.open && props.onOpenChange && props.dismissible !== false);
+
+  useMobileBackHandler(
+    () => {
+      props.onOpenChange?.(false);
+    },
+    { enabled: canDismissOnBack, layer: 'drawer' }
+  );
 
   return (
-    <DrawerDirectionContext.Provider value={props.direction ?? 'bottom'}>
-      <DrawerViewportContext.Provider value={followViewport}>
-        <DrawerPrimitive.Root
-          data-slot="drawer"
-          {...props}
-          repositionInputs={manageSideDrawer ? false : repositionInputs}
-        />
-      </DrawerViewportContext.Provider>
-    </DrawerDirectionContext.Provider>
+    <MobileBackDepthProvider>
+      <DrawerDirectionContext.Provider value={props.direction ?? 'bottom'}>
+        <DrawerViewportContext.Provider value={followViewport}>
+          <DrawerPrimitive.Root
+            data-slot="drawer"
+            {...props}
+            repositionInputs={manageSideDrawer ? false : repositionInputs}
+          />
+        </DrawerViewportContext.Provider>
+      </DrawerDirectionContext.Provider>
+    </MobileBackDepthProvider>
   );
 }
 
-function useDrawerViewportBottom() {
+function readDrawerViewportBottomInset(viewport: VisualViewport | null): number {
+  // Never infer keyboard visibility from focus: Android Back can dismiss while focused.
+  if (!viewport || Math.abs(viewport.scale - 1) >= 0.01) return 0;
+  return Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
+}
+
+function useDrawerViewportInset(node: HTMLDivElement | null) {
   const enabled = React.useContext(DrawerViewportContext);
-  const [bottom, setBottom] = React.useState(0);
 
   React.useLayoutEffect(() => {
-    if (!enabled) return undefined;
+    if (!enabled || !node) return undefined;
     const viewport = window.visualViewport;
-    const measure = () => {
-      // A resized WebView needs no extra inset; an overlay keyboard does.
-      // Never infer keyboard visibility from focus or resize-event counts:
-      // Android's Back button can hide the keyboard while retaining focus.
-      setBottom(
-        // Allow small scale-reporting errors while excluding pinch zoom.
-        viewport && Math.abs(viewport.scale - 1) < 0.01
-          ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-          : 0
-      );
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    viewport?.addEventListener('resize', measure);
-    viewport?.addEventListener('scroll', measure);
-    return () => {
-      window.removeEventListener('resize', measure);
-      viewport?.removeEventListener('resize', measure);
-      viewport?.removeEventListener('scroll', measure);
-    };
-  }, [enabled]);
+    let rafId = 0;
 
-  return enabled ? bottom : undefined;
+    const apply = () => {
+      rafId = 0;
+      const inset = readDrawerViewportBottomInset(viewport);
+      node.style.setProperty(DRAWER_VIEWPORT_BOTTOM_VAR, `${inset}px`);
+    };
+
+    const schedule = () => {
+      if (rafId !== 0) return;
+      rafId = window.requestAnimationFrame(apply);
+    };
+
+    apply();
+    window.addEventListener('resize', schedule);
+    viewport?.addEventListener('resize', schedule);
+    viewport?.addEventListener('scroll', schedule);
+    return () => {
+      if (rafId !== 0) window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', schedule);
+      viewport?.removeEventListener('resize', schedule);
+      viewport?.removeEventListener('scroll', schedule);
+      node.style.removeProperty(DRAWER_VIEWPORT_BOTTOM_VAR);
+    };
+  }, [enabled, node]);
+
+  return enabled;
 }
 
 function DrawerTrigger({ ...props }: React.ComponentProps<typeof DrawerPrimitive.Trigger>) {
@@ -223,11 +244,24 @@ function DrawerContent({
   className,
   children,
   style,
+  ref,
   ...props
 }: DrawerContentProps) {
-  const viewportBottom = useDrawerViewportBottom();
+  const [contentNode, setContentNode] = React.useState<HTMLDivElement | null>(null);
+  const followViewport = useDrawerViewportInset(contentNode);
   const direction = React.useContext(DrawerDirectionContext);
   const [popupContainer, setPopupContainer] = React.useState<HTMLDivElement | null>(null);
+  const setContentRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      setContentNode(node);
+      if (typeof ref === 'function') {
+        ref(node);
+      } else if (ref) {
+        ref.current = node;
+      }
+    },
+    [ref]
+  );
   const sx = stylex.props(
     styles.content,
     styles[direction],
@@ -237,21 +271,31 @@ function DrawerContent({
     bottomPadding === 'safeArea' && styles.safeAreaBottom,
     xstyle
   );
+  const keyboardInset =
+    nativeKeyboardInset && isNativeIOSAppShell()
+      ? 'var(--native-keyboard-height, 0px)'
+      : followViewport
+        ? `var(${DRAWER_VIEWPORT_BOTTOM_VAR}, 0px)`
+        : undefined;
+  const keyboardPaddingBottom =
+    keyboardInset === undefined
+      ? undefined
+      : bottomPadding === 'safeArea'
+        ? `max(1.25rem, var(--safe-area-bottom, 0px), ${keyboardInset})`
+        : keyboardInset;
   const mergedStyle = {
     '--lody-drawer-width': '256px',
     ...sx.style,
     ...style,
     ...(skipOpenAnimation ? { animationName: 'none' } : {}),
-    ...(nativeKeyboardInset && isNativeIOSAppShell()
-      ? { bottom: 'var(--native-keyboard-height, 0px)' }
-      : {}),
-    ...(viewportBottom === undefined ? {} : { bottom: viewportBottom }),
+    ...(keyboardPaddingBottom === undefined ? {} : { paddingBottom: keyboardPaddingBottom }),
   } as React.CSSProperties;
 
   return (
     <DrawerPortal data-slot="drawer-portal">
       <DrawerOverlay style={skipOpenAnimation ? { animationName: 'none' } : undefined} />
       <DrawerPrimitive.Content
+        ref={setContentRef}
         data-slot="drawer-content"
         className={clsx(sx.className, className)}
         style={mergedStyle}
@@ -335,9 +379,9 @@ function DrawerTitle({
 function DrawerDescription({
   className,
   xstyle,
+  style,
   visuallyHidden = false,
   fontSize,
-  style,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Description> & {
   visuallyHidden?: boolean;

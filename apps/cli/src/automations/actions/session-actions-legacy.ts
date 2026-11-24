@@ -90,7 +90,7 @@ export class AutomationSessionActionsLegacy {
       auth: AuthContext;
       workspace: WorkspaceSummary;
       ledger: AutomationLedger;
-      condition(receipt: AutomationReceipt): Promise<ConditionObservation>;
+      admission(receipt: AutomationReceipt): Promise<ConditionObservation>;
       capacity(
         bindingId: string,
         modelId: string | undefined,
@@ -257,12 +257,18 @@ export class AutomationSessionActionsLegacy {
       )
         return { value: 'no', reason: 'guard:maintenance_input_changed' };
     }
-    if (meta.isArchived)
+    if (meta.isArchived) {
+      if (
+        action.kind === 'session.archive' &&
+        (await this.authority.archived(sessionId as SessionId))
+      )
+        return { value: 'yes', reason: 'archive_already_committed' };
       return {
         value: 'no',
         reason: 'target_archived',
         ...(unavailableFails ? { terminalState: 'failed' } : {}),
       };
+    }
     if (meta.collaborationStopped) return { value: 'no', reason: 'target_stopped' };
     return { value: 'yes', reason: 'authorized' };
   }
@@ -495,10 +501,12 @@ export class AutomationSessionActionsLegacy {
     const allowed = await this.authorize(receipt);
     if (allowed.value !== 'yes') return { state: 'blocked', reason: allowed.reason };
     if (receipt.intent.action.kind === 'session.archive') {
+      if (allowed.reason === 'archive_already_committed')
+        return { state: 'settled', reason: allowed.reason };
       const result = await this.authority.archive(
         receipt.sessionId as SessionId,
         receipt.rule.ownerUserId,
-        () => this.options.condition(receipt),
+        () => this.options.admission(receipt),
         receipt.id
       );
       return { state: result.value === 'yes' ? 'settled' : 'blocked', reason: result.reason };
@@ -614,7 +622,7 @@ export class AutomationSessionActionsLegacy {
     }
     if (receipt.intent.action.kind === 'session.archive') {
       if (await this.authority.archived(receipt.sessionId as SessionId))
-        return { state: 'settled' };
+        return { state: 'settled', reason: 'archive_already_committed' };
       if (!meta.isArchived) return this.submit(receipt);
       return { state: 'unknown', reason: 'archive_group_unconfirmed' };
     }
@@ -708,10 +716,12 @@ export class AutomationSessionActionsLegacy {
 
 const deliveryValues = z
   .object({
+    provider: z.enum(['github', 'gitlab', 'other']).optional(),
     repoFullName: z.string().min(1).optional(),
     prNumber: z.number().int().positive().optional(),
     prUrl: z.string().url().optional(),
     headSha: z.string().min(1).optional(),
+    mergeMethod: z.enum(['auto', 'squash', 'merge', 'rebase']).optional(),
     projectGroup: z.boolean().optional(),
   })
   .passthrough();
@@ -723,9 +733,15 @@ const deliveryValues = z
 export function deliveryRequest(step: string, values: unknown): string | undefined {
   const parsed = deliveryValues.safeParse(values);
   if (!parsed.success) return undefined;
-  const { repoFullName, prNumber, prUrl, headSha } = parsed.data;
-  const target =
-    repoFullName && prUrl ? { repoFullName, prNumber: prNumber ?? null, prUrl } : undefined;
+  const { provider, repoFullName, prNumber, prUrl, headSha, mergeMethod } = parsed.data;
+  const target = prUrl
+    ? {
+        ...(provider ? { provider } : {}),
+        repoFullName: repoFullName ?? null,
+        prNumber: prNumber ?? null,
+        prUrl,
+      }
+    : undefined;
   const request =
     step === 'create_pr'
       ? withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT)
@@ -734,7 +750,7 @@ export function deliveryRequest(step: string, values: unknown): string | undefin
         : step === 'resolve_conflicts' && target
           ? buildResolveConflictsRequest(target)
           : step === 'merge' && target && headSha
-            ? buildMergePrRequest({ ...target, headSha })
+            ? buildMergePrRequest({ ...target, headSha, ...(mergeMethod ? { mergeMethod } : {}) })
             : undefined;
   if (!request) return undefined;
   return withQuickActionOrigin(

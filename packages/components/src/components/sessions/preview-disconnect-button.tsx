@@ -4,7 +4,9 @@ import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Menu } from '@/ui/menu';
-import { cn } from '@/lib/utils';
+
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 
 const styles = stylex.create({
   group: {
@@ -27,6 +29,29 @@ const styles = stylex.create({
   menuIcon: {
     width: '14px',
     height: '14px',
+  },
+  chevronTrigger: {
+    flexShrink: 0,
+  },
+  iconPrimaryJoined: {
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  chevronTriggerJoined: {
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderLeftWidth: '1px',
+    borderLeftStyle: 'solid',
+    borderLeftColor: {
+      default: 'rgb(0 0 0 / 0.1)',
+      [DARK]: 'rgb(255 255 255 / 0.1)',
+    },
+  },
+  chevronTriggerMini: {
+    paddingInline: '4px',
+  },
+  chevronTriggerSmall: {
+    paddingInline: '6px',
   },
 });
 
@@ -79,7 +104,7 @@ export function PreviewDisconnectButton({
               disabled={disabled}
               aria-label={primaryLabel}
               data-testid={testId}
-              className={cn('shrink-0', showMenu && 'rounded-r-none')}
+              xstyle={[styles.chevronTrigger, showMenu && styles.iconPrimaryJoined]}
               onClick={onDisconnectOnly}
             >
               <Power {...stylex.props(styles.iconGlyph)} aria-hidden />
@@ -173,10 +198,10 @@ export function PreviewDisconnectButton({
               disabled={disabled}
               aria-label={menuAriaLabel}
               data-testid={testId ? `${testId}-menu` : undefined}
-              className={cn(
-                'rounded-l-none border-l border-black/10 dark:border-white/10',
-                size === 'mini' ? 'px-1' : 'px-1.5'
-              )}
+              xstyle={[
+                styles.chevronTriggerJoined,
+                size === 'mini' ? styles.chevronTriggerMini : styles.chevronTriggerSmall,
+              ]}
             >
               <ChevronDown
                 {...stylex.props(size === 'mini' ? styles.chevronCompact : styles.chevron)}
@@ -206,6 +231,12 @@ export function PreviewDisconnectButton({
 }
 
 const themeStyles = stylex.create({
-  panel: { width: appSpace[5], flexShrink: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingInline: 0 },
+  panel: {
+    width: appSpace[5],
+    flexShrink: 0,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    paddingInline: 0,
+  },
   panel2: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
 });

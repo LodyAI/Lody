@@ -5,7 +5,7 @@ import * as stylex from '@stylexjs/stylex';
 
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
-import { themeSpace } from '../../style/theme-scale.stylex';
+import { themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 export type DiffFileHeaderActionsProps = {
@@ -24,14 +24,14 @@ const styles = stylex.create({
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: '0.25rem',
+    borderRadius: themeRadius.sm,
     color: {
       default: themeColors.mutedForeground,
       '@media (hover: hover)': { ':hover': themeColors.foreground },
     },
     backgroundColor: {
       default: null,
-      '@media (hover: hover)': { ':hover': 'hsl(var(--accent) / 1)' },
+      '@media (hover: hover)': { ':hover': themeColors.hover },
     },
     transitionProperty:
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',

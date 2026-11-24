@@ -9,8 +9,7 @@
       "launchFadeOutDuration": 200
     },
     "Keyboard": {
-      "resize": "none",
-      "resizeOnFullScreen": true
+      "resize": "none"
     },
     "PushNotifications": {
       "presentationOptions": ["badge", "sound", "alert"]

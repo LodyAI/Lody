@@ -1471,6 +1471,7 @@ export type SystemNoticeName =
   | 'agent_warning'
   | 'task_proposal'
   | 'schedule_proposal'
+  | 'schedule_edit_proposal'
   | 'agent_role_proposal'
   | 'session_fork_origin';
 
@@ -1640,6 +1641,23 @@ export type ScheduleProposalMeta = {
 };
 
 /**
+ * Metadata for the schedule_edit_proposal system notice: an agent asks the
+ * owner to change an existing schedule. Only `patch` fields change, and only
+ * while the schedule's content is still the revision the agent read.
+ */
+export type ScheduleEditProposalMeta = {
+  proposalId: string;
+  scheduleId: string;
+  /** The schedule's name when proposed, for the card before the schedule loads. */
+  title: string;
+  patch: { title?: string; prompt?: string; rule?: ScheduleProposalRule };
+  /** Id of the schedule's latest create/edit activity when proposed. */
+  baseActivityId: string;
+  outcome?: 'applied' | 'dismissed';
+  proposedBy?: MessageItemActor;
+};
+
+/**
  * System notice metadata by notice name
  */
 export type SystemNoticeMeta = {
@@ -1648,6 +1666,7 @@ export type SystemNoticeMeta = {
   agent_warning: AgentWarningMeta;
   task_proposal: TaskProposalMeta;
   schedule_proposal: ScheduleProposalMeta;
+  schedule_edit_proposal: ScheduleEditProposalMeta;
   agent_role_proposal: AgentRoleProposalMeta;
   session_fork_origin: SessionForkOriginMeta;
 };

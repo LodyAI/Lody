@@ -42,14 +42,12 @@ const styles = stylex.create({
   },
   backButton: { marginLeft: 'calc(var(--spacing) * -1)' },
   menuButton: { marginRight: 'calc(var(--spacing) * -1)' },
-  /** The drawer's column. */
   column: {
     display: 'flex',
     height: '100%',
     minHeight: 0,
     flexDirection: 'column',
   },
-  /** The drawer's header. */
   header: {
     display: 'flex',
     height: MOBILE_FILE_DRAWER_HEADER_INSET,
@@ -62,7 +60,6 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: themeColors.border,
   },
-  /** The header's identity column. */
   identity: {
     display: 'flex',
     minWidth: 0,
@@ -72,13 +69,11 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: themeSpace[2],
   },
-  /** The file's mark. */
   fileIcon: {
     width: themeSpace[5],
     height: themeSpace[5],
     flexShrink: 0,
   },
-  /** The file's name. */
   fileName: {
     minWidth: 0,
     overflow: 'hidden',
@@ -88,7 +83,6 @@ const styles = stylex.create({
     lineHeight: themeLineHeight.sm,
     fontWeight: themeFontWeight.semibold,
   },
-  /** The drawer's body. */
   body: {
     minHeight: 0,
     flexGrow: 1,
@@ -96,12 +90,10 @@ const styles = stylex.create({
     flexBasis: '0%',
     overflow: 'hidden',
   },
-  /** The header's glyphs. */
   headerGlyph: {
     width: themeSpace[4],
     height: themeSpace[4],
   },
-  /** The glyphs the menu sheet's rows carry. */
   menuGlyph: {
     width: themeSpace[3.5],
     height: themeSpace[3.5],
@@ -171,12 +163,11 @@ export function MobileFileViewerDrawer({
           onOpenChange(nextOpen);
         }}
       >
-        {/* The file viewer fills the viewport without the sheet border. */}
         <DrawerContent
           forceMount
+          nativeKeyboardInset
           width="full"
           xstyle={styles.drawer}
-          style={isNativeIOS ? { bottom: 'var(--native-keyboard-height, 0px)' } : undefined}
           data-sidebar-swipe-open-disabled
         >
           <DrawerTitle {...stylex.props(sheetSurface.srOnly)}>{fileName}</DrawerTitle>

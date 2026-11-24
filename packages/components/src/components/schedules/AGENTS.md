@@ -82,6 +82,10 @@
   proposing conversation; a named Role/Agent/machine/project overrides only that
   part; a named Agent without a Role gets the builtin default mode. Same save
   rule, same gate, trigger on the target machine's clock.
+- A change to an existing schedule is a separate `schedule_edit_proposal` notice
+  (`ScheduleEditProposalNotice`), never a field on `schedule_proposal`. Apply
+  saves `applyScheduleEditProposal` over the live schedule and refuses once its
+  content revision moved; pause, resume and manual runs do not move it.
 - Owner-only pause/delete stays possible when the machine is gone or outdated;
   create/edit/resume/run require the machine's protocol capability. Never fall
   back to a different Agent.

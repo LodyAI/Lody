@@ -1,4 +1,4 @@
-import { duration as uiMotion, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { clsx } from 'clsx';
@@ -193,7 +193,7 @@ const shellStyles = stylex.create({
     outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
     outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, translate, scale, rotate, filter, -webkit-backdrop-filter, backdrop-filter, display, content-visibility, overlay, pointer-events',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
   },
@@ -2442,11 +2442,9 @@ const shortcutStyles = stylex.create({
     paddingLeft: themeSpace[2],
     opacity: {
       default: 0,
-      ':is(:where(.group):hover *)': 1,
-      ':is(:where(.group):focus-visible *)': 1,
+      '@media (hover: hover)': { [stylex.when.ancestor(':hover')]: 1 },
+      [stylex.when.ancestor(':focus-visible')]: 1,
     },
-    transitionProperty: { default: 'opacity', '@media (prefers-reduced-motion: reduce)': 'none' },
-    transitionDuration: uiMotion.fast,
   },
   held: { opacity: 1 },
 });

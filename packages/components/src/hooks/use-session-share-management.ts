@@ -383,10 +383,13 @@ export function useSessionShareManagement(
     );
   };
   const canCapture = entry !== undefined && selectionAvailable(selected, candidateIds);
+  // Consent scope is what the human approved, which excludes shareId: on a
+  // request card it is `request.shareId`, a publication output that flips to the
+  // share our own beginDeployment created while the upload is still running.
+  // Manual editors key their mount by shareId, so it cannot drift there either.
   const publicationScopeKey = JSON.stringify([
     workspaceId,
     sessionId,
-    shareId,
     userId,
     selectedSetKey(selected),
     confirmation?.requestId,
@@ -422,16 +425,25 @@ export function useSessionShareManagement(
         sourceMapKey(previousPublication?.sourceIds ?? []),
         sourceMapKey(value.prepared.sourceIds),
       ].includes(sourceMapKey(current.entry.sourceIds));
+    // The shareId our own deployment assigned also activates this hook's
+    // management query on a request card; while that row is still loading there
+    // is nothing external to compare, and the next checkpoint rechecks the
+    // resolved record. Any other unobserved or foreign record still throws.
+    const ownQueryWarmup =
+      current.entry === undefined &&
+      value?.deployment != null &&
+      value.deployment.shareId === shareId;
     if (
       consent.runtime !== store.get(activeWorkspaceRuntimeAtom) ||
       consent.scopeKey !== publicationScopeKey ||
       consent.scopeKey !== current.scopeKey ||
       !scope.enabled ||
       store.get(userAtom)?.id !== userId ||
-      current.entry === undefined ||
+      (current.entry === undefined && !ownQueryWarmup) ||
       !selectionAvailable(current.selected, current.candidateIds) ||
       (!(shareRecordVersion(current.entry) === consent.recordVersion && unchangedSources) &&
-        !ownAdmission)
+        !ownAdmission &&
+        !ownQueryWarmup)
     )
       throw new ShareConsentChangedError();
   };

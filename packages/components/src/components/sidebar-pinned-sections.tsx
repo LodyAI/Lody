@@ -1,4 +1,9 @@
-import { corner as uiCorner, duration as uiMotion, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import {
+  corner as uiCorner,
+  duration as uiMotion,
+  radius as uiRadius,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
 import { sidebarSectionHeaderMarker } from './sidebar-section-markers.stylex';
 import { themeSpace as appSpace } from '../style/theme-scale.stylex';
@@ -330,7 +335,7 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     setPinnedPointerDrag(false);
   }, []);
 
-  const handleDragStart = useCallback(({ active }: DragStartEvent) => {
+  const handleDragStart = useCallback(({ active, activatorEvent }: DragStartEvent) => {
     setPinnedPointerDrag(true);
     const track = (event: PointerEvent) => {
       pointerRef.current = { x: event.clientX, y: event.clientY };
@@ -354,7 +359,12 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
     }
     setActiveGhost(ghost);
     // The row's slot closes and conversation surfaces light up, as for a native drag.
-    armSessionMentionDrag(target.id);
+    // The overlay keeps the grab offset: Today aims a drop with the copy's left edge.
+    const grabX = dndPointerPoint({ activatorEvent, delta: { x: 0, y: 0 } })?.x;
+    armSessionMentionDrag(
+      target.id,
+      slot && grabX !== undefined ? grabX - slot.getBoundingClientRect().left : undefined
+    );
   }, []);
 
   // Aim the drag at the section under the pointer: its rows open a gap there.
@@ -552,7 +562,10 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                 className={
                   // Padding, not margin: the space between sections stays part of a
                   // drop target, so a drag crossing it never shows "no drop".
-                  stylex.props(index < visibleSections.length - 1 && (collapsed ? pinStyles.foldedGap : pinStyles.sectionGap)).className
+                  stylex.props(
+                    index < visibleSections.length - 1 &&
+                      (collapsed ? pinStyles.foldedGap : pinStyles.sectionGap)
+                  ).className
                 }
                 items={items}
                 grouping="manual"
@@ -588,7 +601,10 @@ export const SidebarPinnedSections = memo(function SidebarPinnedSections({
                             // slot + gap-2 puts this line on the title edge.
                             {...stylex.props(sectionStyles.hiddenRowsHint)}
                           >
-                            <span {...stylex.props(sectionStyles.leadingSpacer)} aria-hidden="true" />
+                            <span
+                              {...stylex.props(sectionStyles.leadingSpacer)}
+                              aria-hidden="true"
+                            />
                             <span {...stylex.props(sectionStyles.truncatedLabel)}>
                               {t('sidebar.pinSections.hiddenByScope', '{{count}} sessions hidden', {
                                 count: hiddenCount,
@@ -867,9 +883,7 @@ function PinSectionHeaderMenu({
   const hasHiddenSections = entries.some((entry) => !entry.visible);
   return (
     <Menu.Root>
-      <span
-        {...stylex.props(pinStyles.menuHost, revealOnHover && pinStyles.menuReveal)}
-      >
+      <span {...stylex.props(pinStyles.menuHost, revealOnHover && pinStyles.menuReveal)}>
         <Menu.Trigger
           render={
             <Button type="button" variant="ghost" size="mini" icon aria-label={label}>
@@ -1028,26 +1042,75 @@ function PinSectionNameDialog({
 }
 
 const sectionStyles = stylex.create({
-  hiddenRowsHint: { display: 'flex', cursor: 'default', userSelect: 'none', alignItems: 'center', gap: appSpace[2], paddingInline: appSpace[2], paddingBottom: appSpace[0.5], paddingTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  hiddenRowsHint: {
+    display: 'flex',
+    cursor: 'default',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: appSpace[2],
+    paddingInline: appSpace[2],
+    paddingBottom: appSpace[0.5],
+    paddingTop: appSpace[1],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
   leadingSpacer: { width: appSpace[3.5], flexShrink: 0 },
-  truncatedLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  dragSurface: { overflow: 'hidden', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground },
+  truncatedLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  dragSurface: {
+    overflow: 'hidden',
+    borderRadius: uiRadius.small,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+  },
   menuGlyph: { height: appSpace[3.5], width: appSpace[3.5] },
   sectionMenu: { minWidth: '160px' },
   visibilityMenu: { minWidth: '200px' },
-  nameDialog: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
-  nameDialogHeader: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4], paddingRight: { 'default': appSpace[12], '@media (min-width: 640px)': appSpace[12] }, textAlign: 'start' },
+  nameDialog: {
+    maxWidth: '24rem',
+    gap: 0,
+    overflow: 'hidden',
+    padding: { default: 0, '@media (min-width: 640px)': 0 },
+  },
+  nameDialogHeader: {
+    paddingInline: { default: appSpace[4], '@media (min-width: 640px)': appSpace[5] },
+    paddingBlock: appSpace[4],
+    paddingRight: { default: appSpace[12], '@media (min-width: 640px)': appSpace[12] },
+    textAlign: 'start',
+  },
   nameDialogTitle: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
-  nameDialogBody: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4] },
-  nameDialogFooter: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[3] },
+  nameDialogBody: {
+    paddingInline: { default: appSpace[4], '@media (min-width: 640px)': appSpace[5] },
+    paddingBlock: appSpace[4],
+  },
+  nameDialogFooter: {
+    backgroundColor: uiColors.secondaryBackground,
+    paddingInline: { default: appSpace[4], '@media (min-width: 640px)': appSpace[5] },
+    paddingBlock: appSpace[3],
+  },
 });
 
 const pinStyles = stylex.create({
   menuHost: { display: 'inline-flex' },
   menuReveal: {
-    opacity: { default: 0, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 1, ':has(:focus-visible, [data-popup-open])': 1 },
-    pointerEvents: { default: 'none', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'auto', ':has(:focus-visible, [data-popup-open])': 'auto' },
-    transitionProperty: 'opacity', transitionDuration: uiMotion.fast,
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 1,
+      ':has(:focus-visible, [data-popup-open])': 1,
+    },
+    pointerEvents: {
+      default: 'none',
+      [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'auto',
+      ':has(:focus-visible, [data-popup-open])': 'auto',
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: uiMotion.fast,
   },
   foldedGap: { paddingBottom: appSpace[1] },
   sectionGap: { paddingBottom: appSpace[4] },

@@ -53,10 +53,10 @@ const styles = stylex.create({
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     '::after': {
       content: '""',
-      insetBlock: 'calc(var(--spacing) * 0)',
-      top: 'calc(var(--spacing) * 0)',
-      bottom: 'calc(var(--spacing) * 0)',
-      left: 'calc(var(--spacing) * 0)',
+      insetBlock: themeSpace[0],
+      top: themeSpace[0],
+      bottom: themeSpace[0],
+      left: themeSpace[0],
       width: '2px',
       translate: '0 0',
       transitionProperty:
@@ -66,10 +66,8 @@ const styles = stylex.create({
       transitionDelay: { default: null, ':is([data-resize-handle-state="hover"])': '150ms' },
       backgroundColor: {
         default: null,
-        ':is([data-resize-handle-state="hover"])':
-          'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 50%, transparent)',
-        ':is([data-resize-handle-state="drag"])':
-          'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 70%, transparent)',
+        ':is([data-resize-handle-state="hover"])': `color-mix(in oklab, ${themeColors.sidebarRing} 50%, transparent)`,
+        ':is([data-resize-handle-state="drag"])': `color-mix(in oklab, ${themeColors.sidebarRing} 70%, transparent)`,
       },
     },
   },

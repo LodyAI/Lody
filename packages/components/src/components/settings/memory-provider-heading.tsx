@@ -18,6 +18,7 @@ const styles = stylex.create({
   // control under the description. A column so each child stretches, and the
   // padding keeps the step clear of the sentence that introduced it.
   actions: { display: 'flex', flexDirection: 'column', gap: space[2], paddingBlock: space[1] },
+  trailing: { display: 'flex', alignItems: 'center', gap: space[2], flexShrink: 0 },
 });
 
 /** Shared so the two providers' full-width steps cannot drift apart. */
@@ -38,6 +39,7 @@ export function MemoryProviderHeading({
   providerKey,
   description,
   action,
+  secondaryAction,
 }: {
   logo?: ReactNode;
   name: string;
@@ -47,6 +49,8 @@ export function MemoryProviderHeading({
   description?: string;
   /** Sits at the trailing edge. Omitted when the block acts below instead. */
   action?: ReactNode;
+  /** A quieter control after `action`, such as removing an installed provider. */
+  secondaryAction?: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
@@ -61,7 +65,14 @@ export function MemoryProviderHeading({
           {description ?? t(`settings.memory.about.${providerKey}`, { defaultValue: '' })}
         </span>
       </span>
-      {action}
+      {secondaryAction ? (
+        <span {...stylex.props(styles.trailing)}>
+          {action}
+          {secondaryAction}
+        </span>
+      ) : (
+        action
+      )}
     </div>
   );
 }

@@ -104,10 +104,11 @@ Metadata idle/Presence loss is not completion; sequence is local.
   transport teardown so writes do not strand in a closing transport; it must NEVER throw.
   When `resolveDaemonTarget` confirms the resident daemon's own replica, flush locally
   (`repo.flush()`) instead because the daemon keeps syncing that replica in the background
-  and executes the turn in-process. Cloud daemon Machine Flock reads skip remote confirmation
-  through `resolveDaemonTarget` but report unconfirmed freshness (`FlockSyncUnavailableError`
-  `local-replica-unconfirmed`), so absent local selections return retryable `SYNC_UNAVAILABLE`
-  rather than permanent absence. The durable pointer and SQLite Operation own delivery.
+  and executes the turn in-process. Same-replica `acpCapability` hits are immediately
+  confirmed (`confirmed: true`), while misses and multi-writer `agentConfig`/`localProject`
+  misses run one `requireRemoteConfirmation` sync before rejecting
+  ([authority note](../../../../.agents/notes/implemented/architecture/2026-11-23-per-model-session-config-and-same-replica-flock-authority.md)).
+  The durable pointer and SQLite Operation own delivery.
   Create/chat may unwind only before dispatch (`if (!dispatched)`). Never roll back
   a dispatched Session or introduce a hard-fail Streams acknowledgement.
 - MCP create combines semantic controls with `modeId`/`configOptionValues` via shared

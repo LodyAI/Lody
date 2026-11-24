@@ -1,4 +1,5 @@
 import { isWorkspaceCodeCollabFlockDocId } from './code-collab-rooms';
+import { getWorkspaceShortcutIndexStreamId } from './prompt-shortcuts/access';
 import { parseMachineFlockDocId } from './machine-flock';
 import { getScheduleRegistryFlockDocId } from './schedule-registry';
 import { getWorkspaceFlockDocId } from './workspace-flock';
@@ -70,7 +71,8 @@ export function encryptedWorkspaceRoom(
       (machine && machine.workspaceId === workspaceId) ||
       room.flockDocId === getWorkspaceFlockDocId(workspaceId as WorkspaceId) ||
       room.flockDocId === getScheduleRegistryFlockDocId(workspaceId as WorkspaceId) ||
-      isWorkspaceCodeCollabFlockDocId(workspaceId, room.flockDocId)
+      isWorkspaceCodeCollabFlockDocId(workspaceId, room.flockDocId) ||
+      room.flockDocId === getWorkspaceShortcutIndexStreamId(workspaceId)
     )
       return { resource: `flock:${room.flockDocId}`, model: 'flock' };
   }
@@ -127,7 +129,8 @@ export function workspaceSupports(
     feature === 'export' ||
     feature === 'attachments' ||
     feature === 'schedules' ||
-    feature === 'automations'
+    feature === 'automations' ||
+    feature === 'shortcuts'
   );
 }
 

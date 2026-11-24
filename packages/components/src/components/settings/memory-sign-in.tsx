@@ -92,6 +92,7 @@ export function MemorySignInCard({
   autoStart,
   onPendingChange,
   state,
+  secondaryAction,
 }: {
   logo?: ReactNode;
   name: string;
@@ -104,6 +105,8 @@ export function MemorySignInCard({
   autoStart?: boolean;
   onPendingChange?: (pending: boolean) => void;
   state: ReturnType<typeof useMemoryProvider>;
+  /** Sits beside the sign-in button, e.g. uninstalling the provider. */
+  secondaryAction?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('idle');
@@ -192,6 +195,7 @@ export function MemorySignInCard({
         logo={logo}
         name={name}
         providerKey={providerKey}
+        secondaryAction={secondaryAction}
         action={
           <Button
             type="button"

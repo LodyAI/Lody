@@ -1003,12 +1003,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div {...stylex.props(updatedStyles.rowBody)}>
-        <SessionRowLeadingSlot
-          showMenuButton={hasMenuActions}
-          menuLabel={contextMenuLabels.moreActions}
-          fadeClassName={stylex.props(updatedStyles.fade).className}
-          revealClassName={stylex.props(updatedStyles.reveal).className}
-        />
+        <SessionRowLeadingSlot />
         {showPinnedIcon && item.isPinned ? (
           <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
         ) : null}
@@ -1035,7 +1030,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}
-          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+          fadeClassName={stylex.props(updatedStyles.fade).className}
           restIcon={
             showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
@@ -1057,7 +1052,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             hasMenuActions ? (
               <SessionRowMenuButton
                 label={contextMenuLabels.moreActions}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                revealClassName={stylex.props(updatedStyles.reveal).className}
               />
             ) : undefined
           }

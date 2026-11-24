@@ -941,6 +941,29 @@ describe('durable submission', () => {
     }
   });
 
+  it('retains failed-append diagnostics without settling or replacing the original', async () => {
+    const f = fixture();
+    const record = rotate();
+    const refusal = new LedgerLogError({ cause: { code: 'workspace_transfer_payment_required' } });
+    try {
+      const result = await Effect.runPromise(
+        using(f, Effect.result(submitRecord(anchor, record)), {
+          ...f.remote.service,
+          appendCas: () => Effect.fail(refusal),
+        })
+      );
+      expect(errorCode(result)).toBe('unconfirmed');
+      expect(Result.isFailure(result) && result.failure).toMatchObject({ cause: refusal });
+      expect(f.remote.read()).toEqual([genesis]);
+      expect(await Effect.runPromise(using(f, resumeSubmission(anchor)))).toEqual({
+        outcome: 'Committed',
+        record,
+      });
+    } finally {
+      f.close();
+    }
+  });
+
   it('foreign/missing history does not manufacture a conflict or trust a local Owner row', async () => {
     const f = fixture();
     const record = rotate();

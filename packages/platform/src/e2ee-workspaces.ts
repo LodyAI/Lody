@@ -262,7 +262,7 @@ export interface E2eeWorkspaceRuntime
   memberJoinRequests?(
     workspaceId: string
   ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;
-  /** Automatic mode is permitted only for an accepted, targeted email invitation. */
+  /** Unattended automatic mode is disabled; only `'explicit'` administrator approval is permitted. */
   approveMemberJoin?(
     workspaceId: string,
     requestId: string,

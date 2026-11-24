@@ -20,6 +20,7 @@ import {
   sendDaemonScheduleCommand,
 } from './schedule-command-client';
 import { executeScheduleCommand, type ScheduleCommandContext } from './schedule-command-service';
+import { publishScheduleEditProposal } from './schedule-proposal';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -637,4 +638,148 @@ it('keeps a cold metadata failure retryable without changing the Schedule', asyn
   h.coldMeta(async () => true);
   await expect(executeScheduleCommand(h.context, command)).resolves.toMatchObject({ ok: true });
   expect((await h.repository.read('schedule'))?.definition.enabled).toBe(false);
+});
+
+describe('proposing a change to an existing schedule', () => {
+  const proposeEdit = (
+    h: Awaited<ReturnType<typeof fixture>>,
+    patch: Record<string, unknown> = { prompt: 'Revised prompt' },
+    scheduleId = 'schedule'
+  ) =>
+    executeScheduleCommand(h.context, {
+      action: 'propose_edit',
+      scheduleId,
+      requestId: 'revise',
+      patch,
+    } as ScheduleCommand);
+
+  it('writes one card against the revision it read and leaves the schedule alone', async () => {
+    const h = await fixture();
+    h.context.requesterSessionId = 'session' as never;
+    await expect(proposeEdit(h)).resolves.toMatchObject({ ok: true, pending: true });
+    await expect(proposeEdit(h)).resolves.toMatchObject({ ok: true, pending: true });
+    expect(h.history()).toHaveLength(1);
+    expect(h.history()[0]).toMatchObject({
+      id: 'schedule-edit-proposal-revise',
+      role: 'system',
+      items: [{ type: 'system_notice', name: 'schedule_edit_proposal' }],
+    });
+    expect(h.history()[0]?.items?.[0]?.meta).toEqual({
+      proposalId: 'revise',
+      scheduleId: 'schedule',
+      title: 'Daily',
+      patch: { prompt: 'Revised prompt' },
+      baseActivityId: 'create',
+      proposedBy: { kind: 'agent' },
+    });
+    expect((await h.repository.read('schedule'))?.prompt).toBe('Synthetic prompt');
+  });
+
+  it('reports the outcome after the person applied it, though the schedule has changed', async () => {
+    const h = await fixture();
+    h.context.requesterSessionId = 'session' as never;
+    await proposeEdit(h);
+    await h.repository.save({
+      scheduleId: 'schedule',
+      draft: { ...h.draft, prompt: 'Revised prompt' },
+      actorId: 'owner',
+      now: 2,
+      activationId: 'applied',
+      activityId: 'proposal-revise',
+    });
+    const session = await h.context.manager.getOrCreateSessionDoc('session' as never);
+    await session.updateHistory((history) =>
+      history.map((entry) => ({
+        ...entry,
+        items: [{ ...entry.items![0]!, meta: { ...entry.items![0]!.meta, outcome: 'applied' } }],
+      }))
+    );
+    await expect(proposeEdit(h)).resolves.toMatchObject({ pending: false, outcome: 'applied' });
+    await expect(proposeEdit(h, { title: 'Other' })).rejects.toThrow('Idempotency');
+  });
+
+  it('refuses what the owner could not apply, before writing anything', async () => {
+    const h = await fixture();
+    await expect(proposeEdit(h)).rejects.toThrow('invoking Session');
+    h.context.requesterSessionId = 'session' as never;
+    await expect(proposeEdit(h, {})).rejects.toThrow('Empty patch');
+    await expect(proposeEdit(h, { prompt: 'Synthetic prompt', title: 'Daily' })).rejects.toThrow(
+      'changes nothing'
+    );
+    await expect(
+      proposeEdit(h, { rule: { kind: 'once', at: '2026-09-10T00:00:00Z' } })
+    ).rejects.toThrow('changes nothing');
+    await expect(
+      proposeEdit(h, { rule: { kind: 'weekly', weekdays: [], hour: 9, minute: 0 } })
+    ).rejects.toThrow();
+    await expect(proposeEdit(h, undefined, 'missing')).rejects.toThrow('Schedule not found');
+    await h.repository.save({
+      scheduleId: 'theirs',
+      draft: h.draft,
+      actorId: 'teammate',
+      now: 1,
+      activationId: 'theirs',
+      activityId: 'create-theirs',
+      create: true,
+    });
+    await expect(proposeEdit(h, undefined, 'theirs')).rejects.toThrow('Only the Schedule owner');
+    await expect(proposeEdit(h, { prompt: '  ' })).rejects.toThrow('must contain text');
+    await expect(proposeEdit(h, { prompt: 'é'.repeat(20_000) })).rejects.toThrow('32 KiB');
+    await h.repository.save({
+      scheduleId: 'message',
+      draft: {
+        ...h.draft,
+        message: { inputBlocks: [{ type: 'text', text: 'Synthetic prompt' }] },
+        trigger: { kind: 'once', at: '2026-10-27T09:00:00Z' },
+        destination: { kind: 'existing_session', sessionId: 'chat' },
+      },
+      actorId: 'owner',
+      now: 1,
+      activationId: 'message',
+      activityId: 'create-message',
+      create: true,
+    });
+    await expect(proposeEdit(h, undefined, 'message')).rejects.toThrow('has its own editor');
+    await h.repository.delete('schedule', 'owner', 2);
+    await expect(proposeEdit(h)).rejects.toThrow('Schedule not found');
+    expect(h.history()).toEqual([]);
+  });
+
+  it('fails closed when proposal history cannot be read as missing or ready', async () => {
+    const appendHistoryTurn = vi.fn();
+    const describe = vi.fn();
+    await expect(
+      publishScheduleEditProposal(
+        {
+          readTurn: async () => ({ state: 'unavailable', reason: 'incomplete' }),
+          appendHistoryTurn,
+        },
+        { proposalId: 'revise', scheduleId: 'schedule', patch: { title: 'New' } },
+        describe,
+        {}
+      )
+    ).rejects.toThrow('unavailable');
+    expect(describe).not.toHaveBeenCalled();
+    expect(appendHistoryTurn).not.toHaveBeenCalled();
+  });
+
+  it('returns prompts longer than 8000 characters in full when reading one schedule via MCP', async () => {
+    const h = await fixture();
+    const longPrompt = 'a'.repeat(12_000);
+    await h.repository.save({
+      scheduleId: 'schedule',
+      draft: { ...h.draft, prompt: longPrompt },
+      actorId: 'owner',
+      now: 2,
+      activationId: 'long',
+      activityId: 'edit-long',
+    });
+    h.context.requesterSessionId = 'session' as never;
+    const shown = (await executeScheduleCommand(h.context, {
+      action: 'show',
+      scheduleId: 'schedule',
+    })) as { schedule: { prompt: string }; truncated: { promptCharsOmitted: number } };
+    expect(shown.schedule.prompt).toBe(longPrompt);
+    expect(shown.truncated.promptCharsOmitted).toBe(0);
+  });
 });

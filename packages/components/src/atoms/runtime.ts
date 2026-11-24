@@ -228,17 +228,32 @@ export type WorkspaceRuntime = {
   readonly contentMode?: 'plaintext' | 'e2ee';
   /** Host RPC support only; each operation still requires live admission and grants. */
   readonly protectedRpcAvailable?: boolean;
+  /** Host-verified ledger role, scoped to this runtime's account and workspace. */
+  readonly protectedMemberRole?: {
+    get(): 'owner' | 'admin' | 'member' | 'guest' | null;
+    subscribe(listener: () => void): () => void;
+  };
   /** Encrypted only: verified ledger file role for display gates; machines still authorize. */
   readonly protectedCodeCollabRole?: {
     get(): 'read' | 'write';
     subscribe(listener: () => void): () => void;
   };
   readonly attachmentToken?: () => Promise<string>;
+  readonly streamsContent?: import('@lody/shared/workspace-streams-content').WorkspaceStreamsContent;
+  readonly localDataScope?: import('../lib/e2ee-local-data').E2eeLocalDataScope;
+  readonly shortcutRole?: { get(): 'read' | 'write'; subscribe(listener: () => void): () => void };
   readonly cloudStreamsEnabled?: boolean;
+  readonly streamsWebSocketEnabled?: boolean;
   readonly getWorkspaceStreamsGrant?: (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;
-  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
+    write?: boolean;
+  }) => Promise<{
+    token: string;
+    gatewayBaseUrl: string;
+    bucketId?: string;
+    shardHostSuffix?: string;
+  }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -690,6 +705,25 @@ export type WorkspaceRuntime = {
           'method' | 'params'
         >
   ) => Promise<import('@lody/shared/local-machine-rpc').SorbetProvidersResult>;
+  /** Machine-wide Sorbet Host settings; machine-scoped, no configId. */
+  requestLocalSorbetHostSettings: (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/host-settings-get' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/host-settings-update' }
+          >,
+          'method' | 'params'
+        >
+  ) => Promise<import('@lody/shared/local-machine-rpc').SorbetHostSettingsResult>;
   requestLocalMcpAuthentication: (
     machineId: MachineId,
     params: Extract<

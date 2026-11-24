@@ -31,6 +31,7 @@ import {
   MachineProviderRateLimitsRefreshResponseSchema,
   SessionHistoryReadQuerySchema,
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
 } from './message-schemas';
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
@@ -240,6 +241,53 @@ export type SorbetCustomProviderEdit = z.infer<typeof SorbetCustomProviderEditSc
 export type SorbetCustomProvider = z.infer<typeof SorbetCustomProviderSchema>;
 export type SorbetProvidersResult = z.infer<typeof SorbetProvidersResultSchema>;
 
+/**
+ * Sorbet's Host-wide Session defaults, mirrored from `@sorbetai/control`'s
+ * `SorbetHostSettings`. Kept as an explicit zod contract (not a re-import) so
+ * the wire shape is versioned here and does not track the package's schema
+ * lib. All fields optional: a get returns whatever is set, an update merges.
+ */
+export const SorbetHostSettingsModelRefSchema = z
+  .object({
+    providerId: SorbetProviderIdSchema,
+    modelId: z.string().trim().min(1).max(1024),
+  })
+  .strict();
+export const SorbetHostSettingsNetworkSchema = z
+  .object({
+    mode: z.enum(['open', 'allowlist']).optional(),
+    allowedDomains: z.array(z.string().trim().min(1).max(253)).max(1000).optional(),
+    allowLocalBinding: z.boolean().optional(),
+  })
+  .strict();
+export const SorbetHostSettingsSchema = z
+  .object({
+    sandboxMode: z.enum(['workspace-read', 'workspace-write', 'disabled']).optional(),
+    permissionModeCeiling: z.enum(['ask', 'auto', 'full-access']).optional(),
+    network: SorbetHostSettingsNetworkSchema.optional(),
+    approvalReviewer: SorbetHostSettingsModelRefSchema.optional(),
+    defaultChildModel: SorbetHostSettingsModelRefSchema.optional(),
+  })
+  .strict();
+export type SorbetHostSettings = z.infer<typeof SorbetHostSettingsSchema>;
+export type SorbetHostSettingsUpdate = SorbetHostSettings;
+
+export const SorbetHostSettingsResultSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('sorbet/host-settings-get'),
+      settings: SorbetHostSettingsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('sorbet/host-settings-update'),
+      settings: SorbetHostSettingsSchema,
+    })
+    .strict(),
+]);
+export type SorbetHostSettingsResult = z.infer<typeof SorbetHostSettingsResultSchema>;
+
 export const E2eeAcpInteractionParamsSchema = z.union([
   z
     .object({
@@ -300,6 +348,16 @@ export const E2eeAcpInteractionResultSchema = z
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/history-write'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        operation: z.enum(['accept_input', 'accept_input_and_dispatch']),
+        payload: z.object({ entry: z.record(z.string(), z.unknown()) }).strict(),
+      })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/history-read'),
     params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
   }).strict(),
@@ -354,6 +412,14 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
     params: z
       .object({ configId: AgentConfigIdSchema, providerId: SorbetProviderIdSchema.optional() })
       .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/host-settings-get'),
+    params: z.object({}).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('sorbet/host-settings-update'),
+    params: z.object({ patch: SorbetHostSettingsSchema }).strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/status'),
@@ -836,8 +902,10 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 
 export const LocalMachineRpcResultSchema = z.union([
   SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,
+  SorbetHostSettingsResultSchema,
   MachineStatusResponseSchema,
   MachinePingResponseSchema,
   MachineAcpBinaryStatusResponseSchema,

@@ -1,3 +1,5 @@
+import { createLocalCloudPort, type CloudNotificationsPort } from '@lody/platform';
+import type { CloudPort, CloudGithubTokenManager } from '@lody/platform';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
 import * as httpTransport from '../src/utils/http-transport';
@@ -1439,4 +1441,154 @@ describe('CLI E2EE Round 2 optimizations', () => {
       vi.useRealTimers();
     }
   });
+});
+
+it('keeps E2EE GitHub tokens account-bound while removing hosted PR/session sinks', async () => {
+  const requests: unknown[] = [];
+  const app = {
+    token: 'fixture-app-token',
+    tokenSource: 'app' as const,
+    rateLimitScope: 'github:installation:7',
+  };
+  const manager = {
+    getAppTokenInfoForRepo: async (repo: string) => {
+      requests.push({ kind: 'app', repo });
+      return app;
+    },
+    getAppTokenForRepo: async (repo: string) => {
+      requests.push({ kind: 'app', repo });
+      return app.token;
+    },
+    getWriteTokenInfoForRepo: async (repo: string, context: { requesterUserId: string }) => {
+      if (context.requesterUserId !== 'account') throw new Error('cross-account delegation');
+      requests.push({ kind: 'operation', repo, context });
+      return app;
+    },
+    shutdown: async () => {},
+  } as unknown as CloudGithubTokenManager;
+  const port = encryptedRuntimeCloudPort(
+    {
+      ...createLocalCloudPort({ identity: { userId: 'account' }, workspaces: [] }),
+      githubTokens: { createTokenManager: () => manager },
+      prAssociation: {
+        associatePullRequest: async () => {
+          throw new Error('decrypted PR egress');
+        },
+      },
+      sessionSharing: {},
+      notifications: null,
+    } as unknown as CloudPort,
+    'account'
+  );
+  expect(port.prAssociation).toBeNull();
+  expect(port.sessionSharing).toBeNull();
+  expect(port.notifications).toBeNull();
+  const tokens = port.githubTokens!.createTokenManager('workspace');
+  await expect(
+    tokens.getWriteTokenInfoForRepo('owner/repo', {
+      requesterUserId: 'account',
+      machineId: 'machine',
+    })
+  ).resolves.toEqual(app);
+  const foreign = { requesterUserId: 'other-account', machineId: 'machine' };
+  await expect(tokens.getCredentialPolicy(foreign)).resolves.toEqual({ personalEnabled: false });
+  await expect(
+    tokens.getCredentialCandidate('owner/repo', foreign, 'personal')
+  ).resolves.toMatchObject({ available: false });
+  await expect(tokens.getWriteTokenInfoForRepo('owner/repo', foreign)).resolves.toEqual(app);
+  expect(requests).toEqual([
+    {
+      kind: 'operation',
+      repo: 'owner/repo',
+      context: { requesterUserId: 'account', machineId: 'machine' },
+    },
+    { kind: 'app', repo: 'owner/repo' },
+  ]);
+  await tokens.shutdown();
+});
+
+it('encrypted runtime notifications deliver only to their own account and keep HTTP approvals closed', async () => {
+  const delivered: Array<{ method: string; userId: string; items?: unknown }> = [];
+  const notifications: CloudNotificationsPort = {
+    notifySessionCompleted: async (input) => {
+      delivered.push({ method: 'completed', ...input });
+    },
+    notifyPermissionRequested: async (input) => {
+      delivered.push({ method: 'permission', ...input });
+    },
+    recordPermissionRequested: async (input) => {
+      delivered.push({ method: 'record', ...input });
+    },
+    resolvePermissionRequested: async (input) => {
+      delivered.push({ method: 'resolve', ...input });
+    },
+    syncLiveActivitySummary: async (input) => {
+      delivered.push({ method: 'summary', ...input });
+      return { sent: true, ended: false };
+    },
+  };
+  const port = encryptedRuntimeCloudPort({
+    ...createLocalCloudPort({ identity: { userId: 'account' }, workspaces: [] }),
+    notifications,
+  });
+  const input = {
+    userId: 'account',
+    sessionId: 'session' as SessionId,
+    occurrenceId: 'turn',
+    workspaceId: 'workspace' as WorkspaceId,
+    workspaceSlug: 'workspace',
+    requestId: 'request',
+    toolCallId: 'tool',
+  };
+  for (const userId of ['other', 'account']) {
+    const target = { ...input, userId };
+    await port.notifications!.notifySessionCompleted(target);
+    await port.notifications!.notifyPermissionRequested(target);
+    await port.notifications!.recordPermissionRequested(target);
+    await port.notifications!.resolvePermissionRequested(target);
+    const result = await port.notifications!.syncLiveActivitySummary({
+      ...target,
+      activityId: 'activity',
+      totalCount: 1,
+      updatedAt: 1,
+      statusCounts: { permission: 1, question: 0, running: 0, unread: 0 },
+      items: [
+        {
+          id: 'session',
+          title: 'Task',
+          status: 'permission',
+          statusLabel: 'Approval',
+          updatedAt: 1,
+          updatedAtLabel: 'now',
+          agentLogoKind: 'codex',
+          agentLogoText: 'Codex',
+          permissionRequestId: 'request',
+        },
+      ],
+    });
+    expect(result.sent).toBe(userId === 'account');
+  }
+  expect(delivered.map(({ method, userId }) => [method, userId])).toEqual([
+    ['completed', 'account'],
+    ['permission', 'account'],
+    ['record', 'account'],
+    ['resolve', 'account'],
+    ['summary', 'account'],
+  ]);
+  expect(delivered.at(-1)?.items).toEqual([
+    {
+      id: 'session',
+      title: 'Task',
+      status: 'permission',
+      statusLabel: 'Approval',
+      updatedAt: 1,
+      updatedAtLabel: 'now',
+      agentLogoKind: 'codex',
+      agentLogoText: 'Codex',
+    },
+  ]);
+  expect(port.streamsTokens).toBeNull();
+  expect(port.prAssociation).toBeNull();
+  expect(port.sessionSharing).toBeNull();
+  await expect(port.remotePreview!.verifyControl({} as never)).rejects.toThrow('unavailable');
 });
