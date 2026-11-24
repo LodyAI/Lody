@@ -197,20 +197,46 @@ export class SessionAutomationAuthority {
             rootId,
             'archive'
           );
-          // Commit the root last: it must not attest completion of a partial group write.
-          for (const meta of [...targets.slice(1), targets[0]]) {
+          const protectedIds = new Set(current.map((meta) => meta.id));
+          if (targets.some((meta) => !protectedIds.has(meta.id)))
+            return { value: 'unknown', reason: 'group_membership_changed' };
+          const archiveTarget = async (meta: SessionMeta) => {
             const fresh = await this.deps.manager.repo.getDocMeta(getSessionRoomId(meta.id));
             if (
               !fresh?.meta ||
               isLoroRepoDocDeleted(fresh) ||
               hasPendingUserTurnActivation(fresh.meta as SessionMeta)
             )
-              return { value: 'unknown', reason: 'session_changed' };
+              return false;
             await this.deps.manager.repo.upsertDocMeta(
               getSessionRoomId(meta.id),
               buildSessionArchiveMetaPatch()
             );
+            return true;
+          };
+          // Commit the root last: it must not attest completion of a partial group write.
+          for (const meta of targets.slice(1)) {
+            if (!(await archiveTarget(meta)))
+              return { value: 'unknown', reason: 'session_changed' };
           }
+          const finalTargets = await readSessionOperationTargets(
+            this.deps.manager.repo,
+            rootId,
+            'archive'
+          );
+          if (
+            finalTargets
+              .map((meta) => meta.id)
+              .sort()
+              .join('\0') !==
+            targets
+              .map((meta) => meta.id)
+              .sort()
+              .join('\0')
+          )
+            return { value: 'unknown', reason: 'group_membership_changed' };
+          if (!(await archiveTarget(targets[0])))
+            return { value: 'unknown', reason: 'session_changed' };
           await this.deps.manager.repo.flush();
           return { value: 'yes', reason: 'session_archived' };
         } finally {

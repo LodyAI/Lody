@@ -61,7 +61,8 @@ async function workspaceFixture(
     config: Parameters<typeof providerBindingFingerprint>[0];
     refresh: () => Promise<unknown>;
   },
-  contentMode: 'plaintext' | 'e2ee' = 'plaintext'
+  contentMode: 'plaintext' | 'e2ee' = 'plaintext',
+  archiveAuthority = false
 ) {
   const root = existingRoot ?? mkdtempSync(path.join(os.tmpdir(), 'lody-automation-owner-'));
   if (!existingRoot) roots.push(root);
@@ -80,6 +81,8 @@ async function workspaceFixture(
     close: async () => {},
   };
   let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+  let rewriteBarrier = false;
+  let beforeArchiveAdmission: (() => Promise<void> | void) | undefined;
   const editors = new Set(['user']);
   const authors = new Map([['session-a', 'user']]);
   const authority = {
@@ -107,6 +110,35 @@ async function workspaceFixture(
         if (item.userTurnId === turnId) await backend.removeMessageQueueItem(item.$cid);
       return true;
     },
+    ...(archiveAuthority
+      ? {
+          settled: async () =>
+            rewriteBarrier
+              ? ({ value: 'no', reason: 'session_work_active' } as const)
+              : ({ value: 'yes', reason: 'group_settled' } as const),
+          archived: async () => meta.isArchived === true,
+          archive: async (
+            _sessionId: SessionId,
+            _userId: string,
+            admission: () => Promise<{ value: 'yes' | 'no' | 'unknown'; reason: string }>
+          ) => {
+            if (rewriteBarrier) return { value: 'no', reason: 'session_admission_busy' } as const;
+            rewriteBarrier = true;
+            try {
+              await beforeArchiveAdmission?.();
+              const admitted = await admission();
+              if (admitted.value !== 'yes') return admitted;
+              const backend = await createSessionBackend(doc);
+              if ((await backend.getMessageQueue()).length)
+                return { value: 'no', reason: 'queue_pending' } as const;
+              meta.isArchived = true;
+              return { value: 'yes', reason: 'session_archived' } as const;
+            } finally {
+              rewriteBarrier = false;
+            }
+          },
+        }
+      : {}),
     refreshCapacity: () => quota?.refresh(),
   };
   const repo = {
@@ -158,8 +190,65 @@ async function workspaceFixture(
     testEditors: editors,
     testAuthors: authors,
     testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
+    testBeforeArchiveAdmission: (hook: (() => Promise<void> | void) | undefined) => {
+      beforeArchiveAdmission = hook;
+    },
   });
 }
+
+async function archiveAfterMergeFixture() {
+  const prUrl = 'https://github.com/owner/repo/pull/7';
+  const meta = {
+    id: 'session-a',
+    machineId: 'machine',
+    userId: 'user',
+    collaborationStopped: false,
+    isArchived: false,
+    pullRequests: [{ url: prUrl, status: 'open' as const }],
+  };
+  const host = await workspaceFixture(meta, undefined, undefined, undefined, 'plaintext', true);
+  await host.command({
+    type: 'configure',
+    sessionId: 'session-a',
+    settings: { archiveAfterMerge: true },
+  });
+  const observation = {
+    number: 7,
+    url: prUrl,
+    headRefName: 'feature',
+    headSha: 'abc',
+    updatedAt: '2026-01-01T00:00:00Z',
+    ciState: 's' as const,
+    mergeState: 'c' as const,
+  };
+  await host.recordObservations(
+    meta as never,
+    'owner/repo',
+    [{ ...observation, status: 'open' }],
+    99_000
+  );
+  return {
+    host,
+    meta,
+    observeMerge: async () => {
+      meta.pullRequests = [{ url: prUrl, status: 'merged' }];
+      await host.recordObservations(
+        meta as never,
+        'owner/repo',
+        [
+          {
+            ...observation,
+            status: 'merged',
+            updatedAt: '2026-01-01T00:01:00Z',
+          },
+        ],
+        100_000
+      );
+      await vi.advanceTimersByTimeAsync(1);
+    },
+  };
+}
+
 describe('Automation control authority', () => {
   it('executes a registered condition in the Session workspace', async () => {
     const host = await workspaceFixture({
@@ -263,6 +352,47 @@ describe('Automation control authority', () => {
     await refreshed.promise;
     expect(host.ledger.receipt(receipt.id)?.state).not.toBe('settled');
   });
+  it('archives an idle merged-PR Session and settles the receipt in one pass', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const { host, meta, observeMerge } = await archiveAfterMergeFixture();
+    await observeMerge();
+
+    expect(meta.isArchived).toBe(true);
+    expect(host.ledger.activities()).toEqual([
+      expect.objectContaining({
+        state: 'settled',
+        attempts: 1,
+        reason: 'session_archived',
+        intent: expect.objectContaining({
+          action: expect.objectContaining({ kind: 'session.archive' }),
+        }),
+      }),
+    ]);
+  });
+
+  it('settles a fresh archive receipt when the Session group is already archived', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const { host, meta, observeMerge } = await archiveAfterMergeFixture();
+    meta.isArchived = true;
+    host.testBeforeArchiveAdmission(() => {
+      throw new Error('already committed archive must not be submitted again');
+    });
+    await observeMerge();
+
+    expect(host.ledger.activities()).toEqual([
+      expect.objectContaining({
+        state: 'settled',
+        attempts: 1,
+        reason: 'archive_already_committed',
+        intent: expect.objectContaining({
+          action: expect.objectContaining({ kind: 'session.archive' }),
+        }),
+      }),
+    ]);
+  });
+
   it('enables local Auto delivery settings in an encrypted workspace', async () => {
     const host = await workspaceFixture(undefined, undefined, undefined, undefined, 'e2ee');
     const result = await host.command({
