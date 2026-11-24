@@ -40,10 +40,27 @@ failed in production:
 
 - **No heuristic `sessionActivity` synthesis.** `AgentClient.reportsSessionActivity()`
   returns `true` only when the agent advertises Core `sessionActivity` v1. Without an
-  authoritative signal from `agy`, turns finish immediately at `end_turn` and normal idle
-  GC applies, matching [Session GC respects native agent work](2026-10-18-gc-respects-native-agent-work.md).
+  authoritative signal from `agy`, turns finish immediately at `end_turn` and normal
+  completion notifications apply, matching [Session GC respects native agent work](2026-10-18-gc-respects-native-agent-work.md).
   If a future `agy` release advertises Core `sessionActivity` v1, `AgentClient` will
   consume it directly without heuristics.
+- **Bounded late-stream activity pulse for reactive wakeups.** In `agy` 1.5.10+,
+  subagent wakeups after `end_turn` actively stream visible ACP `session/update`
+  notifications (`tool_call`, `tool_call_update`, `agent_thought_chunk`,
+  `agent_message_chunk`) onto the finalized turn target. For agents without Core
+  `sessionActivity`, `MessageHandler.enqueueACPUpdate` resets idle GC (`touchSession`)
+  and calls `SessionActivePresence.noteLateActivity(sessionId)` on visible
+  `finalized_turn` updates only (ignoring passive metadata updates). `SessionActivePresence`
+  reconciles this on its existing 1-second timer with a 30-second sliding TTL
+  (`DEFAULT_LATE_STREAM_ACTIVITY_TTL_MS`), and clears it on TTL expiry, next Turn
+  `hold()`, stop/teardown (`clearLateActivity`), or `retire()`. While the bounded
+  pulse is active and the agent process is alive, `MessageHandler.getNativeWork`
+  also reports `'running'` to `SessionGCManager`, preventing both idle GC and
+  memory-pressure eviction from killing an actively streaming wakeup. This shows
+  active reactive wakeups as running across UI and MCP status without task-counting,
+  polling, or any risk of a stuck 24-hour `running` state. Silent waits while
+  subagents run before emitting any `session/update` still require upstream Core
+  `sessionActivity` v1.
 - **Keep deterministic Antigravity compatibility.** `antigravity-background.ts` retains
   `isAntigravityServer` (builtin `antigravity` and custom `Antigravity ACP Server` parity,
   excluding legacy `antigravity-acp`), and `AgentClient` keeps negotiating the `realpath`
