@@ -295,7 +295,19 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'new session if this conversation has grown too long.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
+  onRecoveredTurnFinished?: (
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    backend: SessionBackend,
+    turnId: string,
+    endedAt: number,
+    stopReason: 'cancelled' | 'error' | 'unknown'
+  ) => void;
+  finalizeACPState: (
+    sessionId: SessionId,
+    turnId?: string,
+    stopReason?: 'cancelled' | 'error'
+  ) => Promise<void>;
   persistCodeCollabTurnDiffs?: (
     sessionId: SessionId,
     turnId: string,
@@ -3912,7 +3924,11 @@ export class SessionExecutionService {
           options.sessionId,
           'Failed to settle context compaction after cancelled ACP prompt stopped',
           self.tryPromise(async () => {
-            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId);
+            await self.deps.turnFinalization.finalizeACPState(
+              options.sessionId,
+              options.turnId,
+              'cancelled'
+            );
             await self.runWorkspaceFinalization(
               options.sessionId,
               options.turnId,
@@ -4087,12 +4103,23 @@ export class SessionExecutionService {
       await backend.flushLocalWrites();
     }
     for (const entry of output) {
-      if (entry.role === 'assistant' && typeof entry.endedAt !== 'number')
-        await backend.applyHistoryAction({
+      if (entry.role === 'assistant' && typeof entry.endedAt !== 'number') {
+        const endedAt = Date.now();
+        const persisted = await backend.applyHistoryAction({
           kind: 'finish-assistant',
           turnId: entry.id,
-          endedAt: Date.now(),
+          endedAt,
         });
+        if (persisted.matched)
+          this.deps.turnFinalization.onRecoveredTurnFinished?.(
+            sessionId,
+            sessionDoc,
+            backend,
+            entry.id,
+            endedAt,
+            'error'
+          );
+      }
     }
     await this.setTerminalUserTurnStatus(sessionId, sessionDoc, userTurnId, 'failed');
     const meta = await this.getSessionMeta(sessionId);
@@ -4538,7 +4565,7 @@ export class SessionExecutionService {
     const turnId =
       this.turnRuntimeBySession.get(sessionId)?.turnId ?? this.currentTurnBySession.get(sessionId);
     try {
-      await this.deps.turnFinalization.finalizeACPState(sessionId, turnId);
+      await this.deps.turnFinalization.finalizeACPState(sessionId, turnId, 'error');
     } catch (finalizationError) {
       // The normal path fails on unfinished history. Error settlement must still
       // run independent status, failure attention and release bookkeeping.
@@ -8849,12 +8876,22 @@ export class SessionExecutionService {
           });
         }
       }
-      await backend.applyHistoryAction({
+      const endedAt = getServerNow();
+      const persisted = await backend.applyHistoryAction({
         kind: 'finish-assistant',
         turnId,
-        endedAt: getServerNow(),
+        endedAt,
         force: true,
       });
+      if (persisted.matched)
+        this.deps.turnFinalization.onRecoveredTurnFinished?.(
+          sessionId,
+          sessionDoc,
+          backend,
+          turnId,
+          endedAt,
+          userSettled ? 'unknown' : 'cancelled'
+        );
       await sessionDoc.setStatus(SessionStatusFactory.idle());
       return true;
     } finally {

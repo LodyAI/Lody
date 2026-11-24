@@ -18,32 +18,32 @@ export type PluginConfigField = {
   readonly required?: boolean;
 } & (
   | {
-      readonly type: "string";
-      readonly scope?: "client" | "machine" | "both";
+      readonly type: 'string';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly default?: string;
       readonly placeholder?: string;
     }
   | {
-      readonly type: "secret";
-      readonly scope?: "machine";
+      readonly type: 'secret';
+      readonly scope?: 'machine';
       readonly placeholder?: string;
     }
   | {
-      readonly type: "number";
-      readonly scope?: "client" | "machine" | "both";
+      readonly type: 'number';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly default?: number;
       readonly min?: number;
       readonly max?: number;
       readonly step?: number;
     }
   | {
-      readonly type: "boolean";
-      readonly scope?: "client" | "machine" | "both";
+      readonly type: 'boolean';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly default?: boolean;
     }
   | {
-      readonly type: "select";
-      readonly scope?: "client" | "machine" | "both";
+      readonly type: 'select';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly options: readonly PluginSelectOption[];
       readonly default?: string;
     }
@@ -81,7 +81,7 @@ export interface PluginMcpServerContribution {
   readonly id: string;
   readonly title: string;
   readonly description?: string;
-  readonly transport: "stdio" | "http";
+  readonly transport: 'stdio' | 'http';
   /** Relative path to the bundled Node MCP server entrypoint inside the plugin package. */
   readonly entry: string;
   readonly args?: readonly string[];
@@ -133,7 +133,7 @@ export interface PluginThemeTokens {
   readonly fontSans?: string;
   readonly fontMono?: string;
   readonly radius?: string;
-  readonly density?: "compact" | "comfortable" | "spacious";
+  readonly density?: 'compact' | 'comfortable' | 'spacious';
 }
 
 /**
@@ -143,17 +143,24 @@ export interface PluginThemeTokens {
 export type PluginThemeContribution = {
   readonly id: string;
   readonly label: string;
-  readonly appearance: "dark" | "light";
+  readonly appearance: 'dark' | 'light';
   readonly tokens?: PluginThemeTokens;
 } & (
   | { readonly path: string; readonly seed?: undefined }
   | { readonly seed: PluginThemeSeedColors; readonly path?: undefined }
 );
 
+export type PluginPermission =
+  | 'sessions.write'
+  | 'sessions.approve'
+  | 'workflow.autonomous'
+  | 'unstable.rawState';
+
 export interface PluginManifest {
   readonly id: string;
   readonly version: string;
-  readonly sdk: "^1.0.0";
+  readonly sdk: string;
+  readonly permissions?: readonly PluginPermission[];
   readonly title: string;
   readonly description?: string;
   readonly client?: string;

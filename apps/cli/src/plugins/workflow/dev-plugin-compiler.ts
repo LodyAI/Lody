@@ -86,7 +86,7 @@ export class DevPluginCompiler extends Context.Service<
           ],
           options: { env },
         }),
-        idleTimeToLive: 1000,
+        idleTimeToLive: '30 seconds',
       });
       const build = Effect.fn('DevPluginCompiler.build')(
         function* (sourceDir: string, outputRoot: string) {

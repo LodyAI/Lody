@@ -680,32 +680,36 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       };
       try {
         callbacks.abortSignal?.throwIfAborted();
-        const profile = this.config.codexProfile;
-        if (profile?.profile.mode === 'chatgpt')
-          releaseProfile = await registerCodexProfileProcess(profile);
-        const prepared = profile
-          ? await codexProfileSpawnEnvironment({ profile }, env)
-          : { env, close: undefined };
-        closeBroker = prepared.close;
-        Object.assign(prepared.env, memoryEnvironment(this.config.memory));
-        if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
-        const startupEnv = await prepareAcpProcessEnvironmentLegacy(
-          { command: callbacks.command, args: callbacks.args ?? [], env: callbacks.env },
-          prepared.env,
-          { logger: this.logger, signal: callbacks.abortSignal, cwd: this.getWorkdir() }
-        );
-        callbacks.abortSignal?.throwIfAborted();
-        const executable = resolveDeepSeekHarnessSpawn({
-          command: callbacks.command,
-          args: callbacks.args ?? [],
-          env: startupEnv,
-          workdir: this.getWorkdir(),
-        });
-        agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
-          cwd: this.getWorkdir(),
-          env: startupEnv,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        if (callbacks.spawnWorkflowProvider) {
+          agentProcessHandle = await callbacks.spawnWorkflowProvider();
+        } else {
+          const profile = this.config.codexProfile;
+          if (profile?.profile.mode === 'chatgpt')
+            releaseProfile = await registerCodexProfileProcess(profile);
+          const prepared = profile
+            ? await codexProfileSpawnEnvironment({ profile }, env)
+            : { env, close: undefined };
+          closeBroker = prepared.close;
+          Object.assign(prepared.env, memoryEnvironment(this.config.memory));
+          if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
+          const startupEnv = await prepareAcpProcessEnvironmentLegacy(
+            { command: callbacks.command, args: callbacks.args ?? [], env: callbacks.env },
+            prepared.env,
+            { logger: this.logger, signal: callbacks.abortSignal, cwd: this.getWorkdir() }
+          );
+          callbacks.abortSignal?.throwIfAborted();
+          const executable = resolveDeepSeekHarnessSpawn({
+            command: callbacks.command,
+            args: callbacks.args ?? [],
+            env: startupEnv,
+            workdir: this.getWorkdir(),
+          });
+          agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
+            cwd: this.getWorkdir(),
+            env: startupEnv,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        }
         agentProcessHandle.onExit(() => {
           void releaseResources().catch(() => {});
         });
@@ -763,7 +767,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       let stderrTail = '';
       agentProcess.stderr?.setEncoding('utf8');
       agentProcess.stderr?.on('data', (chunk: string) => {
-        if (chunk) {
+        if (chunk && !callbacks.spawnWorkflowProvider) {
           stderrTail = appendStderrTail(stderrTail, chunk);
           lastStderrTail = stderrTail;
           const preview = truncateLogText(chunk, {

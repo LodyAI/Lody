@@ -1678,6 +1678,36 @@ async function openWorkspaceOwned(
         : null,
     /** This machine's signing key: the only author of derived inputs. */
     signingPublicKey: opened.signingPublicKey,
+    verifyDeclaredWorkflowGrant: (
+      signature: import('@lody/shared/plugins/machine-rpc').DeclaredGrantSignature,
+      machineId: string
+    ) =>
+      run(
+        Effect.gen(function* () {
+          const { request: original, signer } = yield* rpc.openDeclaredWorkflowGrant(
+            machineId,
+            signature
+          );
+          if (
+            !original ||
+            original.params.targetDevice !== opened.signingPublicKey ||
+            original.workspaceId !== options.workspaceId ||
+            closed
+          )
+            throw Error('Workflow approval unavailable');
+          const auth = yield* opened.executionAuthorization.authorizeOwnedExecution(
+            options.workspaceId,
+            signer,
+            true
+          );
+          const state = (yield* opened.runtime.executionLedger()).inspectState();
+          const current =
+            auth._tag === 'Authorized' && auth.principal === 'owner' && auth.isCurrent;
+          if (!current || !current() || state.devices.get(signer)?.kind !== 'personal')
+            throw Error('Workflow approval forbidden');
+          return { approval: original.params, isCurrent: () => !closed && current() };
+        })
+      ),
     pluginAuthoritySignal: opened.executionAuthorization.authoritySignal,
     repositoryDirectory: repositoryDirectory(
       directory,

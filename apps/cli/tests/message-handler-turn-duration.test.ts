@@ -1,3 +1,10 @@
+import { PluginDaemon } from '../src/plugins/plugin-host-legacy';
+import { dispatchMachineHostCall } from '../src/plugins/workflow/daemon-command-executor';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 import { createSessionBackend } from '../src/session/session-backend';
 import { updateTestHistory, withHistoryPort } from './history-port-fixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,6 +12,7 @@ import { LoroRepo } from 'loro-repo';
 
 import {
   SessionStatusFactory,
+  getSessionRoomId,
   type ACPSessionId,
   type AcpConfigOptionValue,
   type ModelInfo,
@@ -41,6 +49,7 @@ const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
 type MessageHandlerHost = {
   store: SessionTransientStore;
+  pluginTurnEvents: import('../src/plugins/session-turn-events').PluginTurnEvents;
   writeAssistantEntryForTurn(
     sessionId: SessionId,
     doc: SessionDocument,
@@ -61,13 +70,15 @@ type MessageHandlerHost = {
   ): Promise<void>;
 };
 
-const createHandlerHarness = async (sessionId: SessionId) => {
+const createHandlerHarness = async (sessionId: SessionId, daemon?: PluginDaemon) => {
   const logger = createSilentLogger();
   const repo = await LoroRepo.create({});
   const doc = new SessionDocument(repo, sessionId);
   await doc.initOffline();
 
   const workspaceDocument = {
+    isEncryptedWorkspace: () => false,
+    ...(daemon ? { pluginDaemon: async () => daemon } : {}),
     isTransportConnected: vi.fn(() => true),
     markMachineFlockDocDirty: vi.fn(),
     registerMachine: vi.fn(),
@@ -650,4 +661,90 @@ describe('MessageHandler Claude Fable Fast mode compatibility', () => {
 
     expect(setSessionConfigOption).toHaveBeenCalledWith('acp-session-1', 'fast', value);
   });
+});
+
+it('delivers the committed assistant turn to the installed machine workflow without granting the past input write authority', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'durable-plugin-event-'));
+  const worker = join(root, 'worker.mjs'),
+    machineEntry = join(root, 'workflow.mjs');
+  const daemon = new PluginDaemon(
+    root,
+    'ws-1',
+    'm-1',
+    () => {},
+    undefined,
+    dispatchMachineHostCall,
+    worker
+  );
+  const sessionId = 'producer-session' as SessionId;
+  const { doc, repo, handler } = await createHandlerHarness(sessionId, daemon);
+  try {
+    await build({
+      entryPoints: [
+        fileURLToPath(new URL('../src/plugins/plugin-worker-entry.ts', import.meta.url)),
+      ],
+      outfile: worker,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+    });
+    await writeFile(
+      machineEntry,
+      `import {appendFile} from 'node:fs/promises';import {join} from 'node:path';export default {kind:'machine-plugin',register(m){m.events.on('session.turn.completed',async(ctx,event)=>{let denied=false;try{await ctx.lody.sessions.requestStop(ctx.session)}catch{denied=true}await appendFile(join(ctx.dataDir,'observed'),JSON.stringify({event,denied})+'\\n');});}}`
+    );
+    await writeFile(
+      join(root, 'catalog.json'),
+      JSON.stringify([
+        {
+          current: {
+            directory: root,
+            machineEntry,
+            manifest: {
+              id: 'observer',
+              version: '1.0.0',
+              sdk: '^1.0.0',
+              title: 'Observer',
+              machine: 'workflow.mjs',
+            },
+          },
+          enabled: true,
+          dev: false,
+          source: root,
+        },
+      ])
+    );
+    await daemon.start();
+    expect((await daemon.workflowCatalog()).map((r) => r.pluginId)).toContain('observer');
+    await repo.upsertDocMeta(getSessionRoomId(sessionId), {
+      id: sessionId,
+      machineId: 'm-1',
+      userId: 'u-1',
+      isArchived: false,
+    });
+    const turnId = handler.beginConversationTurn(sessionId);
+    await updateTestHistory(doc, () => [
+      { ...assistantEntry(), id: turnId, userTurnId: 'past-input' },
+    ]);
+    await handler.finalizeACPState(sessionId, turnId);
+    await handler.pluginTurnEvents.pending(sessionId);
+    const journal = join(root, 'data', 'observer', 'observed');
+    expect(JSON.parse(await readFile(journal, 'utf8'))).toMatchObject({
+      denied: true,
+      event: {
+        turnId,
+        userTurnId: 'past-input',
+        session: { workspaceId: 'ws-1', machineId: 'm-1', sessionId },
+      },
+    });
+    const other = handler.beginConversationTurn(sessionId);
+    await repo.upsertDocMeta(getSessionRoomId(sessionId), { userId: 'another-user' });
+    await updateTestHistory(doc, (history) => [...history, { ...assistantEntry(), id: other }]);
+    await handler.finalizeACPState(sessionId, other);
+    await handler.pluginTurnEvents.pending(sessionId);
+    expect((await readFile(journal, 'utf8')).trim().split('\n')).toHaveLength(1);
+  } finally {
+    await daemon.dispose();
+    await repo.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
 });

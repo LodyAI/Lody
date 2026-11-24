@@ -1,8 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Cause, Context, Deferred, Effect, Exit, Layer, Scope, Stream } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 import { NodeProcess, ProcessReleaseFailed } from '@lody/shared/node/process';
-import { childToHostSchema, type HostToChildFrame } from '@lody/shared/plugins/ipc-protocol';
+import { z } from 'zod';
+import type { DispatchMachineHostCall, MachineHostOrigin } from '../machine-host-port';
+import {
+  pluginIpcErrorSchema,
+  childToHostSchema,
+  type HostToChildFrame,
+} from '@lody/shared/plugins/ipc-protocol';
 import { lostInvocationCode } from '../pure/call-policy';
 import { makePluginInvocations, type InvocationFailure } from './plugin-invocations';
 
@@ -11,6 +18,9 @@ import type { PluginManifest } from '@lody/shared/plugins/manifest-schema';
 type Init = Extract<HostToChildFrame, { type: 'init' }>;
 type Invoke = Omit<Extract<HostToChildFrame, { type: 'invoke' }>, 'type' | 'callId'>;
 export interface PluginLaunchSpec {
+  previousVersion?: string;
+  installationId?: string;
+  beforeStart?: Effect.Effect<void, unknown>;
   pluginId: string;
   workspaceId: string;
   machineId: string;
@@ -26,18 +36,34 @@ interface Status {
   pid?: number;
   clientDigest?: string;
 }
-type HostEvent = Extract<HostToChildFrame, { type: 'event' }>;
+type HostEvent = Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'>;
 interface Api {
+  broadcast: (frame: HostEvent, admit?: () => Promise<boolean>) => Effect.Effect<void, unknown>;
   event: (id: string, frame: HostEvent) => Effect.Effect<void, unknown>;
   reload: (spec: PluginLaunchSpec) => Effect.Effect<Status, unknown>;
+  remove: (id: string) => Effect.Effect<void, unknown>;
   disable: (id: string) => Effect.Effect<void, unknown>;
-  inspect: (id: string) => { lifecycle: string; pid?: number; registrations: string[] };
+  inspect: (id: string) => {
+    instanceId?: number;
+    installationId?: string;
+    machineDigest?: string;
+    lifecycle: string;
+    pid?: number;
+    registrations: string[];
+  };
   logs: (id: string) => Effect.Effect<readonly string[]>;
-  invoke: (id: string, frame: Invoke) => Effect.Effect<unknown, InvocationFailure>;
+  invoke: (
+    id: string,
+    frame: Invoke,
+    execute?: DispatchMachineHostCall
+  ) => Effect.Effect<unknown, InvocationFailure>;
 }
 export class PluginHost extends Context.Service<PluginHost, Api>()('lody/plugins/PluginHost') {}
 export const makePluginHostLayer = (
-  worker = fileURLToPath(new URL('./plugin-worker.js', import.meta.url))
+  worker = fileURLToPath(new URL('./plugin-worker.js', import.meta.url)),
+  dispatch?: DispatchMachineHostCall,
+  store?: import('../plugin-state-store').PluginStateStore,
+  readmit?: (frame: HostEvent) => Promise<boolean>
 ) =>
   Layer.effect(
     PluginHost,
@@ -51,15 +77,19 @@ export const makePluginHostLayer = (
         child?: Child;
         spec: PluginLaunchSpec;
         status: Status;
+        readyForReads?: boolean;
         faulted: boolean;
         calls: ReturnType<typeof makePluginInvocations>;
         lease?: ProcessReleaseFailed;
         running?: boolean;
         subscribed?: Set<string>;
+        resume?: string[];
+        draining?: boolean;
+        origins: Map<string, { origin: MachineHostOrigin; controller: AbortController }>;
         registrations?: string[];
-        buffered: HostEvent[];
+        buffered: { frame: HostEvent; admit?: () => Promise<boolean> }[];
         eventTail?: Deferred.Deferred<void>;
-        eventReply?: { id: string; reply: Deferred.Deferred<void, Error> };
+        eventReply?: { contextId: string; reply: Deferred.Deferred<void, Error> };
       };
       const active = new Map<string, Generation>(),
         history = new Map<string, readonly string[]>(),
@@ -84,7 +114,7 @@ export const makePluginHostLayer = (
             );
           })
         );
-      const stop = Effect.fnUntraced(function* (id: string) {
+      const stop = Effect.fnUntraced(function* (id: string, remove = false) {
         const g = active.get(id);
         if (!g) return;
         if (g.lease) {
@@ -93,11 +123,23 @@ export const makePluginHostLayer = (
           const child = g.child;
           const disconnected = g.faulted;
           g.faulted = true;
+          for (const o of g.origins.values()) o.controller.abort();
+          g.origins.clear();
           yield* g.calls.close();
           if (child) {
+            const uninstallContextId = remove ? randomUUID() : undefined;
+            if (uninstallContextId)
+              g.origins.set(uninstallContextId, {
+                origin: { type: 'uninstall' },
+                controller: new AbortController(),
+              });
             yield* child
-              .send({ type: 'shutdown', graceMs: 2000 })
-              .pipe(Effect.andThen(child.exit), Effect.timeoutOption(2000), Effect.ignore);
+              .send({ type: 'shutdown', graceMs: 2000, uninstallContextId })
+              .pipe(
+                Effect.andThen(child.exit),
+                Effect.timeoutOption(remove ? 10000 : 2000),
+                Effect.ignore
+              );
             const logs = yield* child.ringBuffer;
             history.set(id, disconnected ? [...logs, 'Plugin worker disconnected'] : logs);
           }
@@ -116,7 +158,13 @@ export const makePluginHostLayer = (
           discard: true,
         })
       );
-      const deliverEvent = Effect.fnUntraced(function* (g: Generation, frame: HostEvent) {
+      const admissions = new Map<string, () => Promise<boolean>>();
+      const deliverEvent = Effect.fnUntraced(function* (
+        g: Generation,
+        frame: HostEvent,
+        admit?: () => Promise<boolean>
+      ) {
+        const contextId = randomUUID();
         const previous = g.eventTail;
         const done = yield* Deferred.make<void>();
         g.eventTail = done;
@@ -125,14 +173,29 @@ export const makePluginHostLayer = (
             if (previous) yield* Deferred.await(previous);
             const child = g.child;
             if (!child || g.faulted) return;
+            if (
+              admit &&
+              !(yield* Effect.tryPromise(admit).pipe(
+                Effect.timeout(3000),
+                Effect.orElseSucceed(() => false)
+              ))
+            )
+              return;
+            if (g.faulted) return;
             const reply = yield* Deferred.make<void, Error>();
-            g.eventReply = { id: frame.eventId, reply };
+            g.origins.set(contextId, {
+              origin: { type: 'event', frame },
+              controller: new AbortController(),
+            });
+            g.eventReply = { contextId, reply };
             yield* child
-              .send(frame)
+              .send({ ...frame, contextId })
               .pipe(Effect.andThen(Deferred.await(reply)), Effect.timeout(30000));
           }).pipe(
             Effect.ensuring(
               Effect.gen(function* () {
+                g.origins.get(contextId)?.controller.abort();
+                g.origins.delete(contextId);
                 g.eventReply = undefined;
                 if (g.eventTail === done) g.eventTail = undefined;
                 yield* Deferred.succeed(done, undefined);
@@ -156,9 +219,12 @@ export const makePluginHostLayer = (
           old.spec.machineId === spec.machineId &&
           old.spec.dataDir === spec.dataDir
         ) {
+          if (spec.beforeStart) yield* spec.beforeStart;
+          old.spec = spec;
           old.status = { ...old.status, clientDigest: spec.clientDigest };
           return old.status;
         }
+        const previousVersion = old?.spec.manifest?.version ?? spec.previousVersion;
         yield* stop(id);
         const g: Generation = {
           spec,
@@ -166,9 +232,11 @@ export const makePluginHostLayer = (
           status: { clientDigest: spec.clientDigest },
           calls: makePluginInvocations(),
           faulted: false,
+          origins: new Map(),
           buffered: [],
         };
         active.set(id, g);
+        if (spec.beforeStart) yield* spec.beforeStart;
         if (!spec.machineEntry) return g.status;
         const child = yield* Scope.provide(
           node.spawnIpcChild({
@@ -198,11 +266,15 @@ export const makePluginHostLayer = (
         ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
         g.child = child;
         g.status = { ...g.status, pid: child.pid, instanceId: ++generation };
+        const startupId = randomUUID();
+        let serviceId: string | undefined;
         const ready = yield* Deferred.make<void, Error>(),
           started = yield* Deferred.make<void, Error>();
         let phase: 'init' | 'ready' | 'running' = 'init';
         const ended = Effect.gen(function* () {
           g.faulted = true;
+          for (const o of g.origins.values()) o.controller.abort();
+          g.origins.clear();
           const err = new Error('Plugin worker disconnected');
           yield* Deferred.fail(ready, err);
           yield* Deferred.fail(started, err);
@@ -221,24 +293,118 @@ export const makePluginHostLayer = (
                 ...f.subscribedEvents.map((e) => `event: ${e}`),
               ];
               g.subscribed = new Set(f.subscribedEvents);
+              g.resume = f.resumeEvents.filter((t) => g.subscribed!.has(t));
+              for (const t of g.resume) store?.subscribe(id, t);
+              g.readyForReads = true;
+              if (f.hasService) serviceId = randomUUID();
+              g.origins.set(startupId, {
+                origin: { type: 'start' },
+                controller: new AbortController(),
+              });
               yield* Deferred.succeed(ready, undefined);
-            } else if (f.type === 'result' && phase === 'ready' && f.callId === 'start' && f.ok) {
+            } else if (f.type === 'result' && phase === 'ready' && f.callId === startupId) {
+              if (!f.ok) return yield* Effect.fail(new Error('Plugin startup failed'));
+              g.origins.get(startupId)?.controller.abort();
+              g.origins.delete(startupId);
               phase = 'running';
 
               yield* Deferred.succeed(started, undefined);
-            } else if (f.type === 'result' && g.eventReply?.id === f.callId) {
+            } else if (f.type === 'result' && g.eventReply?.contextId === f.callId) {
+              g.origins.get(g.eventReply.contextId)?.controller.abort();
+              g.origins.delete(g.eventReply.contextId);
               if (f.ok) yield* Deferred.succeed(g.eventReply.reply, undefined);
               else yield* Deferred.fail(g.eventReply.reply, new Error('Plugin event failed'));
-            } else if (f.type === 'result' && phase === 'running')
+            } else if (f.type === 'result' && (phase === 'running' || phase === 'ready')) {
+              const origin = g.origins.get(f.callId);
+              if (origin?.origin.type === 'invoke') {
+                origin.controller.abort();
+                g.origins.delete(f.callId);
+              }
               yield* g.calls.settle(f.callId, f);
-            else if (f.type === 'host_call')
-              yield* child.send({
-                type: 'host_result',
-                hostCallId: f.hostCallId,
-                ok: false,
-                error: { code: 'forbidden', message: 'Host operation unavailable' },
-              });
-            else if (f.type !== 'invalidate')
+            } else if (f.type === 'host_call') {
+              const authority = g.origins.get(f.contextId);
+              const instanceId = g.status.instanceId;
+              const descriptor = f.payload.descriptorId;
+              const gated =
+                f.op === 'lody.execute'
+                  ? descriptor === 'sessionRespondInteraction'
+                    ? 'sessions.approve'
+                    : [
+                          'sessionCreate',
+                          'sessionSend',
+                          'sessionStop',
+                          'sessionArchive',
+                          'sessionRestore',
+                          'sessionFork',
+                        ].includes(descriptor ?? '')
+                      ? 'sessions.write'
+                      : undefined
+                  : undefined;
+              if (
+                !authority ||
+                (gated &&
+                  (!spec.manifest?.permissions?.includes(gated) ||
+                    (authority.origin.type !== 'invoke' &&
+                      !spec.manifest?.permissions?.includes('workflow.autonomous')))) ||
+                !dispatch ||
+                !instanceId ||
+                (g.faulted &&
+                  !(authority.origin.type === 'uninstall' && f.op.startsWith('storage.'))) ||
+                (f.op === 'lody.unstable.readSnapshot' &&
+                  !spec.manifest?.permissions?.includes('unstable.rawState'))
+              ) {
+                yield* child.send({
+                  type: 'host_result',
+                  hostCallId: f.hostCallId,
+                  ok: false,
+                  error: { code: 'forbidden', message: 'Host call has no active authority' },
+                });
+                return;
+              }
+              const call = {
+                pluginId: id,
+                workspaceId: spec.workspaceId,
+                machineId: spec.machineId,
+                instanceId,
+                origin: authority.origin,
+                op: f.op,
+                payload: f.payload,
+              };
+              yield* Effect.forkIn(
+                Effect.tryPromise({
+                  try: async (signal) =>
+                    z
+                      .json()
+                      .parse(
+                        (await dispatch(
+                          call,
+                          AbortSignal.any([signal, authority.controller.signal])
+                        )) ?? null
+                      ),
+                  catch: (e) => {
+                    const parsed = pluginIpcErrorSchema.safeParse(
+                      e instanceof Error ? { message: e.message, code: Reflect.get(e, 'code') } : e
+                    );
+                    return parsed.success
+                      ? parsed.data
+                      : { code: 'handler_error' as const, message: 'Host call failed' };
+                  },
+                }).pipe(
+                  Effect.matchEffect({
+                    onSuccess: (data) =>
+                      child.send({ type: 'host_result', hostCallId: f.hostCallId, ok: true, data }),
+                    onFailure: (error) =>
+                      child.send({
+                        type: 'host_result',
+                        hostCallId: f.hostCallId,
+                        ok: false,
+                        error,
+                      }),
+                  })
+                ),
+                g.scope
+              );
+            } else if (f.type !== 'invalidate')
               return yield* Effect.fail(new Error('Unexpected plugin IPC'));
           })
         ).pipe(Effect.ensuring(ended));
@@ -263,14 +429,35 @@ export const makePluginHostLayer = (
             instanceId: g.status.instanceId,
             dataDir: spec.dataDir,
             config: spec.config,
+            permissions: spec.manifest?.permissions ?? [],
           })
           .pipe(Effect.andThen(Deferred.await(ready)), Effect.timeout(10000));
         yield* child
-          .send({ type: 'start' })
+          .send({
+            type: 'start',
+            contextId: startupId,
+
+            ...(previousVersion && spec.manifest && previousVersion !== spec.manifest.version
+              ? {
+                  upgrade: {
+                    fromVersion: previousVersion,
+                    toVersion: spec.manifest.version,
+                  },
+                }
+              : {}),
+          })
           .pipe(Effect.andThen(Deferred.await(started)), Effect.timeout(30000));
+        yield* drain(g);
         while (g.buffered.length) {
           const frame = g.buffered.shift();
-          if (frame) yield* deliverEvent(g, frame);
+          if (frame) yield* deliverEvent(g, frame.frame, frame.admit);
+        }
+        if (serviceId) {
+          g.origins.set(serviceId, {
+            origin: { type: 'service' },
+            controller: new AbortController(),
+          });
+          yield* child.send({ type: 'service', contextId: serviceId });
         }
         g.running = true;
         return g.status;
@@ -306,18 +493,63 @@ export const makePluginHostLayer = (
           })
         );
       });
+      const drain = Effect.fnUntraced(function* (g: Generation) {
+        if (!store || !g.resume?.length || g.draining) return;
+        g.draining = true;
+        try {
+          while (!g.faulted) {
+            const next = store.next(g.spec.pluginId, g.resume);
+            if (!next) return;
+            const check =
+              admissions.get(next.frame.eventId) ??
+              (() => readmit?.(next.frame) ?? Promise.resolve(false));
+            if (!(yield* Effect.tryPromise(check))) return;
+            yield* deliverEvent(g, next.frame, async () => {
+              if (!(await check())) throw Error('Event admission lost');
+              return true;
+            });
+            store.ack(g.spec.pluginId, next.frame.eventType, next.seq);
+          }
+        } finally {
+          g.draining = false;
+        }
+      });
+      const event = (id: string, frame: HostEvent, admit?: () => Promise<boolean>) =>
+        Effect.suspend(() => {
+          const g = active.get(id);
+          if (!g || g.faulted || !g.subscribed?.has(frame.eventType)) return Effect.void;
+          if (g.resume?.includes(frame.eventType)) return g.running ? drain(g) : Effect.void;
+          if (!g.running) {
+            g.buffered.push({ frame, admit });
+            return Effect.void;
+          }
+          return deliverEvent(g, frame, admit);
+        });
       return PluginHost.of({
         reload,
-        event: (id, frame) =>
-          Effect.suspend(() => {
-            const g = active.get(id);
-            if (!g || g.faulted || !g.subscribed?.has(frame.eventType)) return Effect.void;
-            if (!g.running) {
-              g.buffered.push(frame);
-              return Effect.void;
+        event,
+        broadcast: (frame, admit) =>
+          Effect.gen(function* () {
+            if (admit && !(yield* Effect.tryPromise(admit))) return;
+            store?.record(frame);
+            if (admit) {
+              admissions.set(frame.eventId, admit);
+              if (admissions.size > 1024) admissions.delete(admissions.keys().next().value!);
             }
-            return deliverEvent(g, frame);
+            return yield* Effect.forEach(
+              [...active.keys()],
+              (id) => event(id, frame, admit).pipe(Effect.exit),
+              {
+                concurrency: 'unbounded',
+              }
+            ).pipe(
+              Effect.flatMap((exits) => {
+                const failed = exits.find(Exit.isFailure);
+                return failed ? Effect.failCause(failed.cause) : Effect.void;
+              })
+            );
           }),
+        remove: (id) => serialize(id, stop(id, true)),
         disable: (id) =>
           Effect.suspend(() => {
             trailing.delete(id);
@@ -329,34 +561,61 @@ export const makePluginHostLayer = (
             lifecycle:
               !g || g.faulted
                 ? 'Faulted'
-                : g.running || !g.spec.machineEntry
+                : g.readyForReads || !g.spec.machineEntry
                   ? 'Running'
                   : 'Starting',
+            installationId: g?.spec.installationId,
+            machineDigest: g?.spec.machineDigest,
+            instanceId: g && !g.faulted && !g.lease ? g.status.instanceId : undefined,
             pid: g?.status.pid,
             registrations: g?.registrations ?? [],
           };
         },
         logs: (id) => active.get(id)?.child?.ringBuffer ?? Effect.succeed(history.get(id) ?? []),
-        invoke: (id, frame) =>
+        invoke: (id, frame, execute) =>
           Effect.suspend(() => {
             const g = active.get(id),
               child = g?.child;
-            if (!g || !child || !g.running || g.faulted)
+            if (
+              !g ||
+              !child ||
+              (!g.running && !(g.readyForReads && frame.kind === 'query')) ||
+              g.faulted
+            )
               return Effect.fail({ code: 'plugin_faulted', message: 'Plugin unavailable' });
-            return g.calls.invoke(
-              frame.kind,
-              (callId) =>
-                child.send({ type: 'invoke', callId, ...frame }).pipe(
-                  Effect.mapError(() => ({
-                    code: lostInvocationCode(frame.kind, 'exit'),
-                    message: 'Plugin disconnected',
-                  }))
-                ),
-              (callId) =>
-                child
-                  .send({ type: 'cancel', callId })
-                  .pipe(Effect.timeoutOption(100), Effect.ignore)
-            );
+            let dispatched: string | undefined;
+            return g.calls
+              .invoke(
+                frame.kind,
+                (callId) => {
+                  dispatched = callId;
+                  const invocation = { type: 'invoke' as const, callId, ...frame };
+                  g.origins.set(callId, {
+                    origin: { type: 'invoke', frame: invocation, execute },
+                    controller: new AbortController(),
+                  });
+                  return child.send(invocation).pipe(
+                    Effect.mapError(() => ({
+                      code: lostInvocationCode(frame.kind, 'exit'),
+                      message: 'Plugin disconnected',
+                    }))
+                  );
+                },
+                (callId) =>
+                  child
+                    .send({ type: 'cancel', callId })
+                    .pipe(Effect.timeoutOption(100), Effect.ignore)
+              )
+              .pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    if (dispatched) {
+                      g.origins.get(dispatched)?.controller.abort();
+                      g.origins.delete(dispatched);
+                    }
+                  })
+                )
+              );
           }),
       });
     })

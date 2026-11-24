@@ -17,6 +17,7 @@ export function usePluginCommandBindings(
   workspaceId: string,
   machineId: string,
   signal: AbortSignal,
+  permissions: readonly string[],
   reserveSession?: ReserveClientSession
 ): Pick<LodyClient, 'execute'> & Pick<ClientHostBindings, 'useLodyCommand'> {
   const { executePluginSessionCommand } = useSessionActions();
@@ -24,6 +25,21 @@ export function usePluginCommandBindings(
     store = useStore(),
     guard = useSessionManagementGuard(runtime);
   const execute: LodyClient['execute'] = async (target, command, ...args) => {
+    const permission =
+      command.id === 'sessionRespondInteraction'
+        ? 'sessions.approve'
+        : [
+              'sessionCreate',
+              'sessionSend',
+              'sessionStop',
+              'sessionArchive',
+              'sessionRestore',
+              'sessionFork',
+            ].includes(command.id)
+          ? 'sessions.write'
+          : undefined;
+    if (permission && !permissions.includes(permission))
+      throw Object.assign(Error('Undeclared plugin permission'), { code: 'forbidden' });
     if (command.id === 'sessionCreate') {
       const userId = store.get(userAtom)?.id;
       const check = () => {
@@ -81,6 +97,10 @@ export function usePluginCommandBindings(
         check
       )) as never;
     }
+    if (command.id.startsWith('pinSection'))
+      throw Object.assign(Error('Workspace pin section commands are unavailable in this host'), {
+        code: 'unsupported',
+      });
     if (
       !('sessionId' in target) ||
       target.workspaceId !== workspaceId ||

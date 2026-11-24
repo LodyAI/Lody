@@ -139,7 +139,12 @@ export async function createResourceDiscovery(args: {
         machineId,
         baselines.get(getMachineFlockDocId(workspaceId, machineId)) !== false
       );
-      return listMergedAgentConfigs(manager.repo, workspaceId, [machineId]);
+      return [
+        ...(await listMergedAgentConfigs(manager.repo, workspaceId, [machineId])),
+        ...(!args.delegatedRequester && machineId === auth.machineId
+          ? await manager.workflowProviders(machineId)
+          : []),
+      ];
     },
     capabilities: async (machineId: MachineId) => {
       const rows = await readMachineFlockRows(machineId);
@@ -192,11 +197,28 @@ export async function createResourceDiscovery(args: {
       const id = getWorkspaceFlockDocId(workspaceId);
       await sync(id);
       const handle = await manager.repo.openFlockDoc(id);
-      return listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock));
+      return [
+        ...listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)),
+        ...(!args.delegatedRequester ? await manager.workflowAgentRoles(auth.machineId) : []),
+      ];
     },
     mcpServers: async () => {
       await sync(getWorkspaceFlockDocId(workspaceId));
-      return listWorkspaceMcpCatalog(manager.repo, workspaceId);
+      return [
+        ...(await listWorkspaceMcpCatalog(manager.repo, workspaceId)),
+        ...(!args.delegatedRequester
+          ? (await manager.pluginWorkflows()).flatMap((g) =>
+              [...g.mcpServers.values()].map((s) => ({
+                id: s.id as import('@lody/shared').McpServerId,
+                name: s.title,
+                description: s.description,
+                transport: s.transport,
+                createdAt: 0,
+                updatedAt: 0,
+              }))
+            )
+          : []),
+      ];
     },
     repositories: async () => {
       if (getCliPlatformKind() === 'local') return [];

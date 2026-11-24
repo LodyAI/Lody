@@ -2266,6 +2266,9 @@ importers:
       mdast-util-from-markdown:
         specifier: ^2.0.2
         version: 2.0.2
+      semver:
+        specifier: ^7.7.4
+        version: 7.8.5
       zod:
         specifier: 4.6.7
         version: 4.6.7

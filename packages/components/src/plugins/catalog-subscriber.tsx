@@ -1,3 +1,5 @@
+import { useWorkspaceCatalog } from '../hooks/use-workspace-catalog';
+import { workspaceSnapshotSource } from './workspace-snapshot-source';
 import { PendingInteractionObserver } from './pending-interaction';
 import { useState, useCallback, useSyncExternalStore } from 'react';
 import type { PendingInteractionSummary, InstalledPluginSummary } from '@lody/plugin-sdk';
@@ -21,7 +23,7 @@ import { usePluginSessionMetaEvents } from './use-session-events';
 import { useVisibleSessionMetas as usePluginVisibleSessions } from '../hooks/use-visible-session-metas';
 import { useWorkspaceMembers } from '../hooks/use-workspace-members';
 import { useVisibleMachineMetas } from '../hooks/use-visible-machine-metas';
-import { getAllAgentConfigAtom } from '../atoms/agents';
+import { getAllAgentConfigAtom, workflowCatalogAtom } from '../atoms/agents';
 import type { ProjectRef, MachineRef } from '@lody/plugin-sdk';
 import { useVisibleLocalProjects } from '../hooks/use-visible-local-projects';
 import { WorkspacePluginReads } from './workspace-client';
@@ -30,7 +32,7 @@ import {
   useAgentRoleAvailability,
 } from '../hooks/use-workspace-agent-roles';
 import { useEffect, useMemo } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { activeWorkspaceRuntimeAtom } from '../atoms/runtime';
 import { useOnlineMachines } from '../hooks/use-online-machines';
 import { useWorkspaceLocalAccountId } from '../lib/e2ee-account';
@@ -48,6 +50,38 @@ export function PluginCatalogSubscriber() {
     owner?.snapshot ?? zero,
     zero
   );
+  const publishWorkflowCatalog = useSetAtom(workflowCatalogAtom);
+  useEffect(() => {
+    if (!owner || !runtime || owner.workspaceId !== runtime.workspaceId) return;
+    const entries = owner
+      .installations()
+      .filter((i) => i.enabled && i.dev.owner && i.workflowPrompts);
+    publishWorkflowCatalog({
+      workspaceId: owner.workspaceId,
+      providers: entries.flatMap((i) =>
+        (i.dev.manifest.acpProviders ?? []).map((p) => ({
+          id: `plugin:${i.pluginId}:${p.id}` as import('@lody/shared').AgentConfigId,
+          machineId: i.machineId as import('@lody/shared').MachineId,
+          name: p.title,
+          description: p.description,
+          env: {},
+          cliType: 'custom' as const,
+          agentType: `plugin:${i.pluginId}:${p.id}`,
+        }))
+      ),
+      servers: entries.flatMap((i) =>
+        (i.dev.manifest.mcpServers ?? []).map((s) => ({
+          id: `plugin:${i.pluginId}:${s.id}` as import('@lody/shared').McpServerId,
+          name: s.title,
+          description: s.description,
+          transport: s.transport,
+          createdAt: 0,
+          updatedAt: 0,
+        }))
+      ),
+    });
+  }, [owner, runtime, revision, publishWorkflowCatalog]);
+  useEffect(() => () => publishWorkflowCatalog(null), [owner, publishWorkflowCatalog]);
   const [pending, setPending] = useState<Record<string, PendingInteractionSummary | undefined>>({});
   const publishPending = useCallback(
     (id: string, value?: PendingInteractionSummary) =>
@@ -63,6 +97,7 @@ export function PluginCatalogSubscriber() {
     visible.allActiveSessions
   );
   const reads = useMemo(() => new WorkspacePluginReads(owner?.workspaceId ?? ''), [owner]);
+  const workspaceCatalog = useWorkspaceCatalog();
   const { roles, synced } = useWorkspaceAgentRoles();
   const { projects } = useVisibleLocalProjects();
   const { members } = useWorkspaceMembers();
@@ -85,6 +120,21 @@ export function PluginCatalogSubscriber() {
     }));
     const detach = publishPluginSidebarRows(owner.workspaceId, summaries);
     reads.publish({
+      snapshots: workspaceSnapshotSource(
+        runtime,
+        account,
+        visible.allActiveSessions,
+        archivedSessions,
+        projects,
+        roles,
+        schedule.rows,
+        {
+          mcpServers: workspaceCatalog.servers,
+          workspaceProjects: workspaceCatalog.projects,
+          pinSections: workspaceCatalog.pinSections,
+          projectMcpDefaults: workspaceCatalog.projectMcpDefaults,
+        }
+      ),
       plugins: owner.installations().map((i) => {
         const lifecycle = i.inspection?.lifecycle.toLowerCase();
         const state: InstalledPluginSummary['state'] = !i.enabled
@@ -235,6 +285,7 @@ export function PluginCatalogSubscriber() {
     local,
     revision,
     pending,
+    workspaceCatalog,
     schedule.rows,
     schedule.runtimes,
     flock,
@@ -274,7 +325,8 @@ export function PluginCatalogSubscriber() {
               runtime!.workspaceId,
               target,
               runtime!.requestPlugin,
-              (entry, port) => createWorkspacePluginRegistry(entry, port, reads)
+              (entry, port) =>
+                createWorkspacePluginRegistry(entry, port, reads, owner!.storageNamespace)
             );
             if (!active) return;
             snapshots.set(target.machineId, entries);

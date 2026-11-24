@@ -3077,7 +3077,8 @@ describe('SessionExecutionService', () => {
       expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
       expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
         'session-prompt-cancel-resolved',
-        'assistant-prompt-cancel-resolved'
+        'assistant-prompt-cancel-resolved',
+        'cancelled'
       );
       expect(deps.processMessageQueue).not.toHaveBeenCalled();
       expect(upsertDocMeta).toHaveBeenCalledWith('session-session-prompt-cancel-resolved', {

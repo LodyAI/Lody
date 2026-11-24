@@ -66,6 +66,79 @@ describe('createWorkspaceMachineRpcFacade', () => {
       })
     ).rejects.toThrow('256 KiB');
   });
+  it('exposes project creation approval only on an owner catalog and sends no implicit read permission', async () => {
+    const { readPluginCatalog } = await import('../src/plugins/workspace-catalog');
+    const issued: LocalMachineRpcRequest[] = [];
+    const workflowInstallation = {
+      issuer: 'owner',
+      installationId: '12345678-1234-4123-8123-123456789abc',
+      machineDigest: '1'.repeat(64),
+      targetDevice: '2'.repeat(64),
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw Error('No plaintext route');
+      },
+      requestEncryptedFeature: async (request) => {
+        if (request.method === 'plugin/catalog')
+          return {
+            ok: true,
+            result: {
+              type: request.method,
+              installations: [
+                {
+                  manifest: {
+                    id: 'test-workflow',
+                    title: 'Verifier',
+                    permissions: ['workflow.autonomous', 'sessions.write'],
+                    version: '1.0.0',
+                    sdk: '^1.0.0',
+                    machine: 'machine.js',
+                  },
+                  enabled: true,
+                  workflowInstallation,
+                },
+              ],
+            },
+          };
+        if (request.method !== 'plugin/declared-workflow-grant') throw Error('Unexpected request');
+        issued.push(request);
+        return {
+          ok: true,
+          result: { type: request.method, active: request.params.action === 'grant' },
+        };
+      },
+    });
+    const catalog = (owner: boolean) =>
+      readPluginCatalog(
+        workspaceId,
+        { machineId: remoteMachineId, owner },
+        facade.requestPlugin,
+        () => () => {
+          throw Error('No plugin execution');
+        }
+      );
+    expect((await catalog(false))[0]?.workflowApproval).toBeUndefined();
+    const approval = (await catalog(true))[0]!.workflowApproval!;
+    expect(issued).toEqual([]);
+    await approval('project-1', 'grant', ['reviewer'], ['sessions.create']);
+    expect(issued[0]?.params).toMatchObject({
+      grant_id: expect.any(String),
+      allowed_ops: ['sessions.create'],
+      allowed_role_ids: ['reviewer'],
+      allowed_project_ids: ['project-1'],
+      issued_by_user_id: 'owner',
+    });
+    await expect(
+      approval('project-1', 'revoke', ['reviewer'], ['sessions.create'])
+    ).rejects.toThrow('No active grant');
+  });
   it('negotiates blob persistence while retaining writer-only encrypted diff authority', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],

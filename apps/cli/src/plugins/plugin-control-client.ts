@@ -3,7 +3,7 @@ import { requestLocalPluginControl } from '@lody/shared/node/local-ipc';
 export async function requestPluginControl(
   command:
     | { action: 'link'; path: string; dev: true }
-    | { action: 'logs' | 'reload' | 'disable' | 'rollback'; pluginId: string },
+    | { action: 'logs' | 'reload' | 'disable' | 'remove' | 'rollback'; pluginId: string },
   encryptedWorkspaceId?: string
 ) {
   const { response, payload } = await Effect.runPromise(

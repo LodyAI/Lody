@@ -56,6 +56,8 @@ The encrypted runtime restores only its own account, workspace, genesis and sign
 
 Plaintext installations retain their existing per-field OS keychain entries. Encrypted installations never import or delete those entries: configure their secrets separately. Encrypted private settings are ciphertext in the verified identity directory, with one OS keychain wrapping key for that directory. Revocation deletes that key before removing the directory; a locked keychain leaves cleanup pending for retry.
 
+For Role and Skill IDs, MCP transports and child process configuration, see [Workflow contributions](src/plugins/workflow/README.md) ([中文](src/plugins/workflow/README.zh.md)).
+
 ## Encrypted remote execution authorization
 
 The encrypted workspace host exposes

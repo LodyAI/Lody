@@ -48,6 +48,11 @@ it('revokes a dev lease on escalation and never resurrects it on downgrade or no
   expect(store.allows({ ...entry, manifest: { ...manifest, machine: 'machine.js' } })).toBe(false);
   expect(store.allows(entry)).toBe(false);
   store.grant(entry);
+  expect(
+    store.allows({ ...entry, manifest: { ...manifest, permissions: ['unstable.rawState'] } })
+  ).toBe(false);
+  expect(store.allows(entry)).toBe(false);
+  store.grant(entry);
   expect(store.allows({ ...entry, devSessionNonce: 'b'.repeat(32) })).toBe(false);
   expect(store.allows(entry)).toBe(false);
 });
@@ -444,4 +449,115 @@ it('hands navigation identity to the next admitted registry but fences failed re
   await disabling;
   expect(await replace(4, 'lease B')).not.toBe(recovered);
   await host.reconcile(key, null);
+});
+
+it('resolves a bounded raw Loro transcript from the authorized workspace and releases it', async () => {
+  const { workspaceSnapshotSource } = await import('../src/plugins/workspace-snapshot-source');
+  const { snapshotBindings } = await import('../src/plugins/raw-snapshots');
+  const { createLoroSessionData } = await import('@lody/shared/session-data');
+  const { buildFixtureHistory, buildSessionDoc, FIXTURE_SESSION_ID } =
+    await import('./conversation-view-fixtures');
+  const data = createLoroSessionData({
+    sessionId: FIXTURE_SESSION_ID,
+    doc: buildSessionDoc(buildFixtureHistory(8)),
+  });
+  let leased = 0;
+  const runtime = {
+    workspaceId: 'w',
+    async acquireSessionStore() {
+      leased++;
+      return { sessionData: data, history: { subscribe: () => () => {} } };
+    },
+    releaseSessionStoreRef() {
+      leased--;
+    },
+  };
+  const session = {
+    id: FIXTURE_SESSION_ID,
+    machineId: 'm',
+    createdByPluginId: 'mine',
+    businessKey: 'owned',
+  };
+  const src = workspaceSnapshotSource(
+    runtime as never,
+    'actor',
+    [session as never],
+    [],
+    new Map(),
+    [],
+    []
+  );
+  const port = snapshotBindings(
+    'w',
+    'mine',
+    new AbortController().signal,
+    () => src,
+    () => () => {}
+  );
+  const ref = {
+    workspaceId: 'w',
+    machineId: 'm',
+    sessionId: FIXTURE_SESSION_ID,
+  } as import('@lody/plugin-sdk').SessionRef;
+  try {
+    const snapshot = await port.unstable.readSnapshot({
+      kind: 'session-transcript',
+      session: ref,
+      turnIds: ['a-2'],
+    });
+    expect(snapshot.doc.turns).toMatchObject([{ id: 'a-2', userTurnId: 'u-2' }]);
+    expect(Object.isFrozen(snapshot.doc.turns)).toBe(true);
+    expect(
+      (await port.unstable.readSnapshot({ kind: 'session-meta', session: ref })).doc.businessKey
+    ).toBe('owned');
+    await expect(
+      port.unstable.readSnapshot({
+        kind: 'session-transcript',
+        session: { ...ref, machineId: 'foreign' },
+      })
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(leased).toBe(0);
+  } finally {
+    data.dispose();
+  }
+});
+
+it('keeps the Session reader leased until a plugin subagent lookup finishes', async () => {
+  const { readPluginHistory } = await import('../src/plugins/workspace-history');
+  const started = Promise.withResolvers<void>();
+  const count = Promise.withResolvers<number>();
+  let leased = false;
+  const runtime = {
+    async acquireSessionStore() {
+      leased = true;
+      return {
+        sessionData: {
+          history: {
+            count() {
+              started.resolve();
+              return count.promise;
+            },
+            async readDirectory() {
+              if (!leased) throw Error('Reader closed');
+              return [];
+            },
+          },
+        },
+      };
+    },
+    releaseSessionStoreRef() {
+      leased = false;
+    },
+  };
+  const lookup = readPluginHistory(
+    runtime as never,
+    { session: { sessionId: 'parent' } } as never,
+    'subagentRun',
+    { runId: 'absent' },
+    new AbortController().signal
+  );
+  await started.promise;
+  count.resolve(1);
+  await expect(lookup).resolves.toBeNull();
+  expect(leased).toBe(false);
 });

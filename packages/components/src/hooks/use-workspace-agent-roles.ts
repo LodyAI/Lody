@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from 'react';
+import { useWorkspaceClientPlugins } from '../plugins/client-host-provider';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
@@ -39,13 +40,68 @@ export type WorkspaceAgentRolesSnapshot = {
  * must agree on what "private" means, and a rule copied into a component is one
  * that can drift into merely hiding a row.
  */
+const noPluginSubscription = () => () => {};
+const zero = () => 0;
+function useWorkflowInstallations() {
+  const host = useWorkspaceClientPlugins();
+  const revision = useSyncExternalStore(
+    host?.subscribe ?? noPluginSubscription,
+    host?.snapshot ?? zero,
+    zero
+  );
+  return useMemo(
+    () => host?.installations().filter((i) => i.enabled && i.dev.owner && i.workflowPrompts) ?? [],
+    [host, revision]
+  );
+}
 export function useWorkspaceAgentRoles(): WorkspaceAgentRolesSnapshot {
   const { roles, synced } = useWorkspaceCatalog();
   const currentUserId = useWorkspaceLocalAccountId();
-  return useMemo(
-    () => ({ roles: listAccessibleAgentRoles(roles, currentUserId), synced }),
-    [currentUserId, roles, synced]
-  );
+  const installations = useWorkflowInstallations(),
+    configs = useAtomValue(getAllAgentConfigAtom);
+  return useMemo(() => {
+    const merged = listAccessibleAgentRoles(roles, currentUserId);
+    if (currentUserId)
+      for (const i of installations)
+        for (const r of i.dev.manifest.agentRoles ?? []) {
+          const id = `plugin:${i.pluginId}:${r.id}` as AgentRoleId,
+            machineId = i.machineId as MachineId;
+          if (merged.some((row) => row.id === id && row.machineId === machineId)) continue;
+          const provider = r.defaultProvider?.startsWith('plugin:')
+            ? r.defaultProvider
+            : configs.find(
+                (c) =>
+                  c.machineId === machineId && (!r.defaultProvider || c.id === r.defaultProvider)
+              )?.id;
+          const promptPrefix = i.workflowPrompts?.[r.id];
+          if (!provider || promptPrefix === undefined) continue;
+          const target = { machineId, agentConfigId: provider as AgentConfigId, runConfig: {} };
+          const other = merged.find((row) => row.id === id);
+          if (other) {
+            const idx = merged.indexOf(other);
+            merged[idx] = {
+              ...other,
+              additionalTargets: [...(other.additionalTargets ?? []), target],
+            };
+            continue;
+          }
+          merged.push({
+            v: 1,
+            id,
+            ownerUserId: currentUserId,
+            visibility: 'workspace',
+            name: r.name,
+            emoji: r.emoji,
+            description: r.description,
+            ...target,
+            promptPrefix,
+            createdAt: 0,
+            updatedAt: 0,
+            revision: 1,
+          });
+        }
+    return { roles: merged, synced };
+  }, [currentUserId, roles, synced, installations, configs]);
 }
 
 export type AgentRoleAvailabilityResolver = {
@@ -113,8 +169,15 @@ export function useAgentRoleAvailability(
     )
   );
 
+  const workflow = useWorkflowInstallations();
   const context = useMemo<AgentRoleAvailabilityContext>(() => {
     const agentConfigMachineIds = new Map<AgentConfigId, MachineId>();
+    for (const i of workflow)
+      for (const provider of i.dev.manifest.acpProviders ?? [])
+        agentConfigMachineIds.set(
+          `plugin:${i.pluginId}:${provider.id}` as AgentConfigId,
+          i.machineId as MachineId
+        );
     for (const config of agentConfigs) {
       if (config.machineId) agentConfigMachineIds.set(config.id, config.machineId);
     }
@@ -130,7 +193,7 @@ export function useAgentRoleAvailability(
       loadedAgentConfigMachineIds: new Set(loadedMachineIds),
       runConfigCapability: createAgentRoleCapabilityResolver(agentConfigs, machines),
     };
-  }, [agentConfigs, loadedMachineIds, machines, onlineMachineIds]);
+  }, [agentConfigs, loadedMachineIds, machines, onlineMachineIds, workflow]);
 
   const resolve = useCallback(
     (role: AgentRole) => resolveAgentRoleAvailability(role, context),
@@ -153,7 +216,12 @@ export function useWorkspaceAgentRoleActions(): {
   const upsert = useCallback(
     async (role: AgentRole) => {
       if (!runtime) throw new Error('Workspace runtime is unavailable');
-      await writeWorkspaceAgentRole(runtime, role);
+      await writeWorkspaceAgentRole(
+        runtime,
+        role.id.startsWith('plugin:')
+          ? { ...role, id: crypto.randomUUID() as AgentRoleId, revision: 1 }
+          : role
+      );
     },
     [runtime]
   );

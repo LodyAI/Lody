@@ -1,3 +1,5 @@
+import { encryptedPluginDispatch } from '../../plugins/machine-host-port';
+import { dispatchMachineHostCall } from '../../plugins/workflow/daemon-command-executor';
 import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
@@ -517,7 +519,8 @@ effectIt.effect(
         authorization: {
           authoritySignal: controller.signal,
           authorizeRead: () => Effect.die('read authority used'),
-          authorizeOwnedExecution: () => Effect.die('owner authority used'),
+          authorizeOwnedExecution: () =>
+            Effect.succeed({ _tag: 'Authorized', principal: 'owner', isCurrent: () => true }),
           authorizeSessionRead: () => Effect.die('session read used'),
           authorizeExecution: (_w, _d, p, fresh) =>
             Effect.succeed(
@@ -545,7 +548,7 @@ effectIt.effect(
         });
         await writeFile(
           machineEntry,
-          `export default {kind:'machine-plugin', register(m){const schema={safeParse:data=>({success:true,data})};m.query({id:'read',scope:'session',input:schema,output:schema},ctx=>ctx.target.sessionId)}}`
+          `export default {kind:'machine-plugin', register(m){const schema={safeParse:data=>({success:true,data})};m.mutation({id:'probe',scope:'machine',input:schema,output:schema},async ctx=>{try{await ctx.lody.sessions.create(ctx.machine,{requestId:'must-not-exist',prompt:'forbidden'});return 'unexpected'}catch(e){return e.code}});m.query({id:'read',scope:'session',input:schema,output:schema},async ctx=>{let denied=false;try{await ctx.lody.unstable.readSnapshot({kind:"session-meta",session:{...ctx.target,sessionId:"another"}})}catch{denied=true}if(!denied)throw Error("cross-session access");return (await ctx.lody.unstable.readSnapshot({kind:"session-meta",session:ctx.target})).doc.id})}}`
         );
         await writeFile(
           join(f.directory, 'catalog.json'),
@@ -560,6 +563,7 @@ effectIt.effect(
                   version: '1.0.0',
                   title: 'Sample',
                   machine: 'plugin.mjs',
+                  permissions: ['unstable.rawState'],
                 },
               },
               source: '/unused',
@@ -571,7 +575,12 @@ effectIt.effect(
       });
       const runtime = ManagedRuntime.make(
         registryLayer(f.directory, f.workspaceId, f.machineId, () => {}).pipe(
-          Layer.provide(Layer.merge(makePluginHostLayer(worker), DevPluginCompiler.layer)),
+          Layer.provide(
+            Layer.merge(
+              makePluginHostLayer(worker, encryptedPluginDispatch(dispatchMachineHostCall)),
+              DevPluginCompiler.layer
+            )
+          ),
           Layer.provide(platformLayer({}))
         )
       );
@@ -598,7 +607,7 @@ effectIt.effect(
             repo: {
               getDocMeta: async (room: string) =>
                 room === getSessionRoomId(f.input.sessionId as SessionId)
-                  ? { meta: { machineId: f.machineId } }
+                  ? { meta: { machineId: f.machineId, id: f.input.sessionId } }
                   : undefined,
             },
           },
@@ -616,6 +625,31 @@ effectIt.effect(
         isOpen: () => true,
         client: streams.client,
         handle: (request, context) => machine.handleEncryptedFeatureRpc(request, context),
+      });
+      const probe = {
+        requestId: 'a6'.repeat(16),
+        request: {
+          method: 'plugin/mutate' as const,
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          params: {
+            pluginId: 'sample',
+            descriptorId: 'probe',
+            scope: 'machine' as const,
+            target: { workspaceId: f.workspaceId, machineId: f.machineId },
+            input: null,
+          },
+        },
+      };
+      const sealed = yield* f.sender.prepareFeature(probe);
+      yield* receive({ id: sealed.requestId, frame: sealed.frameHex });
+      yield* streams.waitResponse(probe.requestId, 1);
+      const envelope = streams.writes.filter((w) => w.stream.includes(':res:')).at(-1)?.value as {
+        frame: string;
+      };
+      expect(yield* f.sender.acceptFeatureResponse(probe, envelope.frame)).toMatchObject({
+        ok: true,
+        result: { data: 'forbidden' },
       });
       for (const [id, shared] of [
         ['a4', true],

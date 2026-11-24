@@ -1,17 +1,17 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import {
   defineMachinePlugin,
   lodyQueries,
   type MachineBaseContext,
   type ProjectRef,
   type SessionRef,
-} from "@lody/plugin-sdk/machine";
-import { workflowStatusQuery } from "./shared";
+} from '@lody/plugin-sdk/machine';
+import { workflowStatusQuery } from './shared';
 
-const ARCHITECT_ROLE_ID = "plugin:sorbet-workflow:sorbet-architect";
-const VERIFIER_ROLE_ID = "plugin:sorbet-workflow:sorbet-verifier";
-const SORBET_PROVIDER_ID = "plugin:sorbet-workflow:sorbet-acp";
+const ARCHITECT_ROLE_ID = 'plugin:sorbet-workflow:sorbet-architect';
+const VERIFIER_ROLE_ID = 'plugin:sorbet-workflow:sorbet-verifier';
+const SORBET_PROVIDER_ID = 'plugin:sorbet-workflow:sorbet-acp';
 
 interface WorkflowEntry {
   readonly sessionId: string;
@@ -37,10 +37,7 @@ function makeEntryKey(sessionId: string, turnId: string): string {
 
 async function readJournal(dataDir: string): Promise<WorkflowJournal> {
   try {
-    const raw = await readFile(
-      path.join(dataDir, "workflow-journal.json"),
-      "utf8",
-    );
+    const raw = await readFile(path.join(dataDir, 'workflow-journal.json'), 'utf8');
     const parsed = JSON.parse(raw) as Partial<WorkflowJournal>;
     return {
       lastReconciledUpdatedAt: parsed.lastReconciledUpdatedAt ?? 0,
@@ -48,7 +45,7 @@ async function readJournal(dataDir: string): Promise<WorkflowJournal> {
       latestTurnBySession: parsed.latestTurnBySession ?? {},
     };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       return {
         lastReconciledUpdatedAt: 0,
         entries: {},
@@ -61,23 +58,21 @@ async function readJournal(dataDir: string): Promise<WorkflowJournal> {
 
 async function saveJournal(
   dataDir: string,
-  updater: (prev: WorkflowJournal) => WorkflowJournal,
+  updater: (prev: WorkflowJournal) => WorkflowJournal
 ): Promise<WorkflowJournal> {
   const nextOp = writeQueue.then(async () => {
     await mkdir(dataDir, { recursive: true });
     const current = await readJournal(dataDir);
     const updated = updater(current);
-    const dest = path.join(dataDir, "workflow-journal.json");
-    const tmp = `${dest}.${process.pid}.${Date.now()}.${Math.random()
-      .toString(36)
-      .slice(2)}.tmp`;
-    await writeFile(tmp, JSON.stringify(updated, null, 2), { flag: "wx" });
+    const dest = path.join(dataDir, 'workflow-journal.json');
+    const tmp = `${dest}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+    await writeFile(tmp, JSON.stringify(updated, null, 2), { flag: 'wx' });
     await rename(tmp, dest);
     return updated;
   });
   writeQueue = nextOp.then(
     () => undefined,
-    () => undefined,
+    () => undefined
   );
   return nextOp;
 }
@@ -89,7 +84,7 @@ function ensureTurnVerified(
     readonly project?: ProjectRef;
     readonly turnId: string;
     readonly userTurnId?: string;
-  },
+  }
 ): Promise<void> {
   const entryKey = makeEntryKey(params.session.sessionId, params.turnId);
   const active = inFlightByEntry.get(entryKey);
@@ -110,7 +105,7 @@ async function runTurnVerification(
     readonly project?: ProjectRef;
     readonly turnId: string;
     readonly userTurnId?: string;
-  },
+  }
 ): Promise<void> {
   const current = await readJournal(ctx.dataDir);
   const existing = current.entries[entryKey];
@@ -118,12 +113,9 @@ async function runTurnVerification(
     return;
   }
 
-  const requestId =
-    existing?.requestId ??
-    `verify-${params.session.sessionId}-${params.turnId}`;
+  const requestId = existing?.requestId ?? `verify-${params.session.sessionId}-${params.turnId}`;
   const businessKey =
-    existing?.businessKey ??
-    `verify/${params.session.sessionId}/${params.turnId}`;
+    existing?.businessKey ?? `verify/${params.session.sessionId}/${params.turnId}`;
   const userTurnId = params.userTurnId ?? existing?.userTurnId;
 
   // Persist intent to durable ctx.dataDir BEFORE spawning so a mid-call daemon crash can recover
@@ -144,18 +136,15 @@ async function runTurnVerification(
     }));
   }
 
-  // Always preserve original ProjectRef target, parentSession lineage, and E2EE human-signed originTurn
-  const target = params.project ?? ctx.machine;
-  const verifier = await ctx.lody.sessions.create(target, {
+  if (!params.project) return;
+  const verifier = await ctx.lody.sessions.create(params.project, {
     requestId,
     businessKey,
     roleId: VERIFIER_ROLE_ID,
     providerId: SORBET_PROVIDER_ID,
     parentSession: params.session,
-    originTurn: userTurnId
-      ? { session: params.session, userTurnId }
-      : undefined,
-    skillIds: ["sorbet-verifier"],
+    ...(userTurnId ? { originTurn: { session: params.session, userTurnId } } : {}),
+    skillIds: ['sorbet-verifier'],
     prompt: `Verify completed Architect turn ${params.turnId}.`,
   });
 
@@ -188,18 +177,14 @@ export default defineMachinePlugin((machine) => {
 
     // 1. Replay unfinished journal entries using live host-minted SessionRef + ProjectRef
     const pendingEntries = Object.values(journal.entries).filter(
-      (entry) => entry.verifierSessionId === null,
+      (entry) => entry.verifierSessionId === null
     );
     if (pendingEntries.length > 0) {
-      const pendingSessionIds = [
-        ...new Set(pendingEntries.map((entry) => entry.sessionId)),
-      ];
+      const pendingSessionIds = [...new Set(pendingEntries.map((entry) => entry.sessionId))];
       const lookup = await ctx.lody.read(ctx.machine, lodyQueries.sessions, {
         sessionIds: pendingSessionIds,
       });
-      const bySessionId = new Map(
-        lookup.items.map((item) => [item.session.sessionId, item]),
-      );
+      const bySessionId = new Map(lookup.items.map((item) => [item.session.sessionId, item]));
       for (const entry of pendingEntries) {
         const summary = bySessionId.get(entry.sessionId);
         if (!summary) continue;
@@ -220,7 +205,7 @@ export default defineMachinePlugin((machine) => {
       const page = await ctx.lody.read(ctx.machine, lodyQueries.sessions, {
         agentRoleId: ARCHITECT_ROLE_ID,
         updatedAfter: journal.lastReconciledUpdatedAt,
-        cursor,
+        ...(cursor ? { cursor } : {}),
       });
       for (const item of page.items) {
         if (item.updatedAt > maxUpdatedAt) {
@@ -229,17 +214,12 @@ export default defineMachinePlugin((machine) => {
         let turnCursor: string | undefined;
         const completedTurns = [];
         do {
-          const turnsPage = await ctx.lody.read(
-            item.session,
-            lodyQueries.sessionTurns,
-            { limit: 20, cursor: turnCursor },
-          );
+          const turnsPage = await ctx.lody.read(item.session, lodyQueries.sessionTurns, {
+            limit: 20,
+            ...(turnCursor ? { cursor: turnCursor } : {}),
+          });
           for (const turn of turnsPage.items) {
-            if (
-              turn.role === "assistant" &&
-              turn.finished &&
-              turn.stopReason === "end_turn"
-            ) {
+            if (turn.role === 'assistant' && turn.finished && turn.stopReason === 'end_turn') {
               completedTurns.push(turn);
             }
           }
@@ -263,10 +243,7 @@ export default defineMachinePlugin((machine) => {
     if (nextWatermark > journal.lastReconciledUpdatedAt) {
       await saveJournal(ctx.dataDir, (prev) => ({
         ...prev,
-        lastReconciledUpdatedAt: Math.max(
-          prev.lastReconciledUpdatedAt,
-          nextWatermark,
-        ),
+        lastReconciledUpdatedAt: Math.max(prev.lastReconciledUpdatedAt, nextWatermark),
       }));
     }
   });
@@ -283,12 +260,12 @@ export default defineMachinePlugin((machine) => {
     };
   });
 
-  machine.events.on("session.turn.completed", async (ctx, event) => {
-    if (event.stopReason !== "end_turn") return;
+  machine.events.on('session.turn.completed', async (ctx, event) => {
+    if (event.stopReason !== 'end_turn') return;
     if (ctx.config.autoVerify === false) return;
 
-    const rawMeta = await ctx.lody.readSnapshot({
-      kind: "session-meta",
+    const rawMeta = await ctx.lody.unstable.readSnapshot({
+      kind: 'session-meta',
       session: event.session,
     });
     if (rawMeta.doc.agentRoleId !== ARCHITECT_ROLE_ID) {

@@ -39,8 +39,8 @@ import {
   type ProjectSummary,
   type PullRequestSummary,
   type QueryDescriptor,
-  type RawDocumentSnapshot,
-  type RawSnapshotTarget,
+  type UnstableDocumentSnapshot,
+  type UnstableSnapshotTarget,
   type ReadonlyJsonObject,
   type ReadonlyJsonPrimitive,
   type ReadonlyJsonValue,
@@ -102,8 +102,8 @@ export {
   type ProjectRef,
   type ProjectSummary,
   type PullRequestSummary,
-  type RawDocumentSnapshot,
-  type RawSnapshotTarget,
+  type UnstableDocumentSnapshot,
+  type UnstableSnapshotTarget,
   type ReadonlyJsonObject,
   type ReadonlyJsonPrimitive,
   type ReadonlyJsonValue,
@@ -322,7 +322,9 @@ export interface ClientPluginRegistry {
       TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
         Record<string, ReadonlyJsonPrimitive>
       >,
-    >(): TConfig;
+    >(
+      project?: ProjectRef
+    ): TConfig;
   };
   readonly assets: {
     url(relativePath: string): string;
@@ -454,6 +456,7 @@ export interface ClientPluginRegistry {
 }
 
 export interface LodyClient {
+  readonly storage: import('./index.js').PluginStorage;
   read<S extends PluginScope, TInput, TOutput>(
     target: ScopeTarget<S>,
     query: LodyQueryDescriptor<S, TInput, TOutput>,
@@ -472,7 +475,9 @@ export interface LodyClient {
    * Reads a detached, deeply frozen raw document/state-tree snapshot for power panels needing
    * upstream workspace or transcript fields beyond fixed `lodyQueries` summaries.
    */
-  readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
+  readonly unstable: {
+    readSnapshot(target: UnstableSnapshotTarget): Promise<UnstableDocumentSnapshot>;
+  };
   readonly assets: {
     url(relativePath: string): string;
   };
@@ -548,20 +553,20 @@ export function useLodyCommand<S extends PluginScope, TInput, TOutput>(
  * Reactive subscription to a detached, read-only raw document/state-tree snapshot with optional
  * selector projection so custom Workspace / Agent dashboards re-render only on relevant changes.
  */
-export function useLodySnapshot<TSelected = RawDocumentSnapshot>(
-  target: RawSnapshotTarget,
-  selector?: (snapshot: RawDocumentSnapshot) => TSelected,
+export function useUnstableLodySnapshot<TSelected = UnstableDocumentSnapshot>(
+  target: UnstableSnapshotTarget,
+  selector?: (snapshot: UnstableDocumentSnapshot) => TSelected,
   isEqual?: (prev: TSelected, next: TSelected) => boolean
 ): QueryResult<TSelected> {
-  return useBindings().useLodySnapshot(target, selector, isEqual);
+  return useBindings().useUnstableLodySnapshot(target, selector, isEqual);
 }
 
 export function usePluginConfig<
   TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
     Record<string, ReadonlyJsonPrimitive>
   >,
->(): PluginConfigHandle<TConfig> {
-  return useBindings().usePluginConfig();
+>(project?: ProjectRef): PluginConfigHandle<TConfig> {
+  return useBindings().usePluginConfig(project);
 }
 
 export function useHostCapabilities(): HostCapabilities {
@@ -613,7 +618,7 @@ export interface ClientHostBindings {
   SessionRow: ComponentType<SessionRowProps>;
   useLodyQuery: typeof useLodyQuery;
   useLodyCommand: typeof useLodyCommand;
-  useLodySnapshot: typeof useLodySnapshot;
+  useUnstableLodySnapshot: typeof useUnstableLodySnapshot;
   usePluginConfig: typeof usePluginConfig;
   useHostCapabilities: typeof useHostCapabilities;
   useQuery: typeof useQuery;

@@ -1,3 +1,12 @@
+import {
+  resolveDeclaredWorkflow,
+  bindDeclaredGrantActor,
+} from '../plugins/workflow/declared-workflow';
+import { encryptedPluginDispatch } from '../plugins/machine-host-port';
+import {
+  composeMachineHostDispatch,
+  type ResolveStandalonePluginOperation,
+} from '../plugins/workflow/daemon-command-executor';
 import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
@@ -45,6 +54,7 @@ const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 type PluginDaemon = import('../plugins/plugin-host-legacy').PluginDaemon;
 interface LodyOptions {
+  resolveStandalonePluginOperation?: ResolveStandalonePluginOperation;
   localPlugin?: () => PluginDaemon | undefined;
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
@@ -122,6 +132,7 @@ export class Lody {
   private runtime: MachineRuntime;
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
+  private startingEncryptedHost?: PluginDaemon;
   private encryptedPlugin?: Promise<PluginDaemon>;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
   private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
@@ -366,6 +377,44 @@ export class Lody {
     this.machineId = options.machineId;
     this.machineName = options.machineName;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
+    documentManager.workflowSessionAuthority = async (id, installation, project, role) => {
+      const identity = this.encryptedWorkspace,
+        daemon = await this.encryptedPlugin;
+      if (!identity || !daemon) throw Error('Workflow authorization unavailable');
+      const lease = await daemon.activeWorkflowLease(id);
+      if (!lease || lease.installationId !== installation)
+        throw Error('Workflow installation changed');
+      const proof = await identity.verifyDeclaredWorkflowGrant(lease.signature, this.machineId);
+      const a = proof.approval;
+      if (
+        a.action !== 'grant' ||
+        !a.allowed_ops.includes('sessions.create') ||
+        a.plugin_id !== id ||
+        a.installationId !== installation ||
+        a.machineDigest !== lease.machineDigest ||
+        a.targetDevice !== identity.signingPublicKey ||
+        (a.allowed_role_ids !== '*' && !a.allowed_role_ids.includes(role)) ||
+        (a.allowed_project_ids !== '*' && !a.allowed_project_ids.includes(project))
+      )
+        throw Error('Workflow approval mismatch');
+      return () => {
+        identity.pluginAuthoritySignal.throwIfAborted();
+        if (!lease.isCurrent() || !proof.isCurrent()) throw Error('Workflow approval withdrawn');
+      };
+    };
+    documentManager.workflowMachineId = this.machineId;
+    documentManager.pluginDaemon = async () => {
+      if (
+        this.cleanedUp ||
+        this.encryptedRevocation ||
+        this.encryptedWorkspace?.pluginAuthoritySignal.aborted ||
+        process.env.LODY_PLUGIN_SAFE_MODE === '1'
+      )
+        return undefined;
+      return options.contentMode === 'e2ee'
+        ? (this.startingEncryptedHost ?? (await this.encryptedPlugin))
+        : options.localPlugin?.();
+    };
     this.runtime = new MachineRuntime({
       sessionManagerFactory: () =>
         new SessionManager(
@@ -392,7 +441,20 @@ export class Lody {
           )
             throw new Error('Plugin host unavailable');
           signal?.throwIfAborted();
-          return daemon.dispatchMachineRpc(request, actor, signal);
+          const identity = this.encryptedWorkspace;
+          if (request.method === 'plugin/declared-workflow-grant')
+            actor = await bindDeclaredGrantActor({
+              request,
+              actor,
+              identity,
+              machineId: this.machineId,
+              projectExists: (id) => this.runtime.workflowProjectExists(id),
+            });
+          return daemon.dispatchMachineRpc(
+            request,
+            { ...actor, targetDevice: identity?.signingPublicKey },
+            signal
+          );
         },
         sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
         token: this.token,
@@ -457,13 +519,24 @@ export class Lody {
         const root = join(identity.repositoryDirectory, 'plugins');
         if (this.cleanedUp || this.encryptedRevocation || identity.pluginAuthoritySignal.aborted)
           throw Error('Plugin identity closed');
-        const host = new PluginDaemon(
+        const resolve: ResolveStandalonePluginOperation = resolveDeclaredWorkflow({
+          workspaceId: this.workspaceId,
+          machineId: this.machineId,
+          identity,
+          manager: this.documentManager,
+          lease: (id, instance) => host.workflowLease(id, instance),
+          projectExists: (id) => this.runtime.workflowProjectExists(id),
+          sessionScope: (id) => this.runtime.resolveSessionExecutionScope(id),
+        });
+        const host: PluginDaemon = new PluginDaemon(
           root,
           this.workspaceId,
           this.machineId,
           (m) => this.logger.warn(m),
-          identityPluginVault(root)
+          identityPluginVault(root),
+          encryptedPluginDispatch(composeMachineHostDispatch(resolve))
         );
+        this.startingEncryptedHost = host;
         const stop = () => {
           void host.dispose().catch(() => this.logger.warn('Plugin shutdown failed'));
         };
@@ -472,6 +545,7 @@ export class Lody {
           await host.start();
           return host;
         } catch (error) {
+          this.startingEncryptedHost = undefined;
           await host.dispose();
           throw error;
         }

@@ -51,7 +51,13 @@ export function bindClientSessionCreate(
             agentType: r.agentType,
             prompt: [
               r.role?.prefix?.trim(),
-              [input.prompt.trim(), ...(input.skillIds ?? []).map((id) => `$${id}`)].join(' '),
+              r.skillPrompt,
+              [
+                input.prompt.trim(),
+                ...(input.skillIds ?? [])
+                  .filter((id) => !id.startsWith('plugin:'))
+                  .map((id) => `$${id}`),
+              ].join(' '),
             ]
               .filter(Boolean)
               .join('\n\n'),
@@ -66,6 +72,7 @@ export function bindClientSessionCreate(
               agentRoleId: r.role.snapshot.id,
               agentRoleRevision: r.role.snapshot.revision,
               agentRoleSnapshot: r.role.snapshot,
+              ...(r.role.mcpServerIds ? { mcpServerIds: r.role.mcpServerIds } : {}),
               ...(r.role.memory ? { memory: r.role.memory } : {}),
             });
           const turnId = `plugin-create:${sessionId}`;

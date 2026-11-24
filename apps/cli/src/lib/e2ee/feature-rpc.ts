@@ -133,6 +133,7 @@ export type EncryptedFeatureContext = {
   signal: AbortSignal;
   authority?: { isCurrent(): boolean; signal: AbortSignal };
   /** Only the ledger authorization decision may identify this machine's owner. */
+  grantSignature?: string;
   pluginMachineOwner?: boolean;
   pluginScope?: { projectId?: string; sessionId?: string };
   /** Verified execution signer for fork and plugin calls. */
@@ -220,7 +221,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const plugin = isPluginMachineRequest(opened.input.request) ? opened.input.request : undefined;
     const invocation = plugin && 'scope' in plugin.params ? plugin.params : undefined;
     const authorize: AuthorizeEncryptedExecution =
-      plugin && invocation?.scope === 'machine'
+      plugin &&
+      (invocation?.scope === 'machine' || plugin.method === 'plugin/declared-workflow-grant')
         ? (workspace, device) =>
             options.authorizePluginOwner?.(workspace, device) ??
             Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
@@ -280,6 +282,9 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
               (owner.raw = options.handle(opened.input.request, {
                 requestId: opened.requestId,
                 requesterDevice: opened.requesterDevice,
+                ...(opened.input.request.method === 'plugin/declared-workflow-grant'
+                  ? { grantSignature: Buffer.from(opened.frame).toString('hex') }
+                  : {}),
                 expiresAt: opened.expiresAt,
                 signal: owner.controller.signal,
                 authority,

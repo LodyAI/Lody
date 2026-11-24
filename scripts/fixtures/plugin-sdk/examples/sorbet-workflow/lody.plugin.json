@@ -6,15 +6,23 @@
   "description": "End-to-end workflow plugin bundling Agent Roles, Skills, MCP memory, custom ACP runtime, event-driven verification, and cross-provider tool/block renderers.",
   "client": "./client.tsx",
   "machine": "./machine.ts",
-  "skills": ["sorbet-planner", "sorbet-verifier"],
+  "skills": [
+    "sorbet-planner",
+    "sorbet-verifier"
+  ],
   "agentRoles": [
     {
       "id": "sorbet-architect",
       "name": "Sorbet Architect",
       "emoji": "🍨",
       "promptPath": "./roles/sorbet-architect.md",
-      "skills": ["sorbet-planner", "sorbet-verifier"],
-      "mcpServers": ["sorbet-memory"],
+      "skills": [
+        "sorbet-planner",
+        "sorbet-verifier"
+      ],
+      "mcpServers": [
+        "sorbet-memory"
+      ],
       "defaultProvider": "plugin:sorbet-workflow:sorbet-acp"
     },
     {
@@ -22,8 +30,12 @@
       "name": "Sorbet Verifier",
       "emoji": "✅",
       "promptPath": "./roles/sorbet-verifier.md",
-      "skills": ["sorbet-verifier"],
-      "mcpServers": ["sorbet-memory"],
+      "skills": [
+        "sorbet-verifier"
+      ],
+      "mcpServers": [
+        "sorbet-memory"
+      ],
       "defaultProvider": "plugin:sorbet-workflow:sorbet-acp"
     }
   ],
@@ -32,21 +44,14 @@
       "id": "sorbet-memory",
       "title": "Sorbet Graph Memory",
       "transport": "stdio",
-      "entry": "./dist/sorbet-mcp.js",
-      "envKeys": ["SORBET_API_KEY"]
+      "entry": "./runtime/sorbet-mcp.mjs"
     }
   ],
   "acpProviders": [
     {
       "id": "sorbet-acp",
       "title": "Sorbet Harness",
-      "entry": "./dist/sorbet-acp.js",
-      "envKeys": ["SORBET_API_KEY"],
-      "capabilities": {
-        "loadSession": true,
-        "subagentEvents": true,
-        "configOptions": true
-      }
+      "entry": "./runtime/sorbet-acp.mjs"
     }
   ],
   "config": {
@@ -55,17 +60,18 @@
       "scope": "both",
       "label": "Auto-spawn verifier after Architect turn",
       "default": true
-    },
-    "SORBET_API_KEY": {
-      "type": "secret",
-      "scope": "machine",
-      "label": "Sorbet API Key",
-      "required": true
     }
   },
   "onboarding": {
     "title": "Connect Sorbet Super Assistant",
-    "summary": "Enter your Sorbet API key to unlock the Sorbet Architect Role and automated verification.",
-    "fields": ["SORBET_API_KEY", "autoVerify"]
-  }
+    "summary": "Choose whether completed Architect turns start a verifier session.",
+    "fields": [
+      "autoVerify"
+    ]
+  },
+  "permissions": [
+    "sessions.write",
+    "workflow.autonomous",
+    "unstable.rawState"
+  ]
 }

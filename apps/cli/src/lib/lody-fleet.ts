@@ -1,3 +1,7 @@
+import {
+  composeMachineHostDispatch,
+  type ResolveStandalonePluginOperation,
+} from '../plugins/workflow/daemon-command-executor';
 import path from 'node:path';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -187,6 +191,7 @@ function keepsEncryptedMode(
 }
 
 export class LodyFleet {
+  private readonly resolveStandalonePluginOperation?: ResolveStandalonePluginOperation;
   private pluginWorkspaceId?: string;
   private plugins?: import('../plugins/plugin-host-legacy').PluginDaemon;
   private readonly logger: Logger;
@@ -278,6 +283,7 @@ export class LodyFleet {
   private reconcileRetryDelayMs = 0;
 
   constructor(options: {
+    resolveStandalonePluginOperation?: ResolveStandalonePluginOperation;
     logger: Logger;
     builtinAgentConfigCliTypes: CliType[];
     supportRegistryAgentTypes?: string[];
@@ -299,6 +305,7 @@ export class LodyFleet {
     onFatalAuthFailure?: (error: Error) => void;
     onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   }) {
+    this.resolveStandalonePluginOperation = options.resolveStandalonePluginOperation;
     this.logger = options.logger;
     this.builtinAgentConfigCliTypes = options.builtinAgentConfigCliTypes;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
@@ -510,7 +517,9 @@ export class LodyFleet {
             path.join(getLodyDataDir(), 'plugins', encodeURIComponent(workspace.id)),
             workspace.id,
             this.machineId,
-            (m) => this.logger.warn(m)
+            (m) => this.logger.warn(m),
+            undefined,
+            composeMachineHostDispatch(this.resolveStandalonePluginOperation)
           );
           this.pluginWorkspaceId = workspace.id;
           this.plugins = daemon;
@@ -1242,6 +1251,7 @@ export class LodyFleet {
       const workspaceStartAt = Date.now();
       try {
         lody = await Lody.create({
+          resolveStandalonePluginOperation: this.resolveStandalonePluginOperation,
           logger: workspaceLogger,
           localPlugin: workspace.id === this.pluginWorkspaceId ? () => this.plugins : undefined,
           onEncryptedAuthorityConfirmed: (startedAt) =>

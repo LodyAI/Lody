@@ -59,31 +59,48 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         />
       </SidebarHoverCard>
     ),
-    useLodySnapshot: () => ({ status: 'unavailable', reason: 'unknown', refresh: () => {} }),
-    usePluginConfig: () => ({
-      values: Object.fromEntries(
-        Object.entries(entry.dev.manifest.config ?? {})
-          .filter(([, f]) => f.type !== 'secret' && f.scope !== 'machine')
-          .map(([k, f]) => [
-            k,
-            entry.inspection?.preferences[k] ?? ('default' in f ? f.default : undefined),
-          ])
-      ) as never,
-      set: async (k, v) => {
-        signal.throwIfAborted();
-        const field = entry.dev.manifest.config?.[String(k)];
-        if (
-          !entry.control ||
-          typeof k !== 'string' ||
-          !field ||
-          field.type === 'secret' ||
-          field.scope === 'machine' ||
-          v === null
-        )
-          unavailable();
-        await entry.control!('configure', { [k]: v as string | number | boolean });
-      },
-    }),
+    useUnstableLodySnapshot: hooks.useUnstableLodySnapshot,
+    usePluginConfig: (project) => {
+      if (
+        project &&
+        (project.workspaceId !== entry.workspaceId || project.machineId !== entry.dev.machineId)
+      )
+        throw Error('Invalid project configuration target');
+      return {
+        values: Object.fromEntries(
+          Object.entries(entry.dev.manifest.config ?? {})
+            .filter(
+              ([, f]) =>
+                f.type !== 'secret' && f.scope !== 'machine' && (f.scope !== 'project' || !!project)
+            )
+            .map(([k, f]) => [
+              k,
+              (f.scope === 'project'
+                ? entry.inspection?.projectPreferences?.[project!.projectId]?.[k]
+                : entry.inspection?.preferences[k]) ?? ('default' in f ? f.default : undefined),
+            ])
+        ) as never,
+        set: async (k, v) => {
+          signal.throwIfAborted();
+          const field = entry.dev.manifest.config?.[String(k)];
+          if (
+            !entry.control ||
+            typeof k !== 'string' ||
+            !field ||
+            field.type === 'secret' ||
+            field.scope === 'machine' ||
+            (field.scope === 'project' && !project) ||
+            v === null
+          )
+            unavailable();
+          await entry.control!(
+            'configure',
+            { [k]: v as string | number | boolean },
+            field?.scope === 'project' ? project?.projectId : undefined
+          );
+        },
+      };
+    },
     useHostCapabilities: () => ({
       platform: getIpcServices() ? 'desktop' : isNativeAppShell() ? 'mobile' : 'web',
       formFactor: matchMedia('(max-width: 700px)').matches ? 'compact' : 'wide',
@@ -93,10 +110,11 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
       const nav = hooks.useNavigation();
       const execute = hooks.useExecute();
       return {
+        storage: hooks.storage,
         read: hooks.read,
         execute,
         assets,
-        readSnapshot: unavailable,
+        unstable: hooks.unstable,
         sessions: {
           open: nav.openSession,
           create: (target, r) => execute(target, lodyCommands.sessionCreate, r),
@@ -152,7 +170,8 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     bindings,
     signal,
     entry.dev.machineId,
-    (stack) => clientDiagnostics.report(entry, 'surface_render_crashed', stack)
+    (stack) => clientDiagnostics.report(entry, 'surface_render_crashed', stack),
+    entry.pluginId
   );
   return {
     ...createTranscriptSurfaces(entry, signal, bindings),

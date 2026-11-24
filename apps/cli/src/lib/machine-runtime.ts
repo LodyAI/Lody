@@ -64,6 +64,28 @@ export class MachineRuntime {
     )
       throw new Error('e2ee_feature_scope');
     if (request.method === 'plugin/control') throw Error('Local plugin control required');
+    if (request.method === 'plugin/declared-workflow-grant') {
+      if (
+        !context?.pluginMachineOwner ||
+        !context.grantSignature ||
+        !context.authority?.isCurrent() ||
+        !context.requester ||
+        !config.pluginRpc
+      )
+        throw Error('Verified machine owner required');
+      return {
+        ok: true as const,
+        result: await config.pluginRpc(
+          request,
+          {
+            userId: context.requester.accountId,
+            machineOwner: true,
+            declaredGrantSignature: context.grantSignature,
+          },
+          context.signal
+        ),
+      };
+    }
     if (isPluginMachineRequest(request)) {
       if (
         !context?.requester ||
@@ -110,6 +132,11 @@ export class MachineRuntime {
     if (request.method === 'machine/memory' && isLocalOnlyMemoryProvider(request.params.providerId))
       throw new Error('e2ee_feature_unavailable');
     return this.dispatchLocalMachineRpc(request, context?.signal);
+  }
+  async workflowProjectExists(id: string) {
+    return !!(await this.requireSessionManager().resolveLocalProjectRootPath(
+      id as import('@lody/shared').LocalProjectId
+    ));
   }
   resolveSessionHistoryAccessTarget(sessionId: string) {
     return this.requireHandler().resolveSessionHistoryAccessTarget(sessionId as SessionId);

@@ -133,6 +133,46 @@ describe('createConversationSession backend seam', () => {
                 },
               ];
         expect(await readSessionHistoryMetadata(data.history)).toEqual(expected);
+        if (format === 'current') {
+          const { workspaceSnapshotSource } =
+            await import('../src/plugins/workspace-snapshot-source');
+          const { snapshotBindings } = await import('../src/plugins/raw-snapshots');
+          const runtime = {
+            workspaceId,
+            async acquireSessionStore() {
+              return { sessionData: data, history: { subscribe: () => () => {} } };
+            },
+            releaseSessionStoreRef() {},
+          };
+          const src = workspaceSnapshotSource(
+            runtime as never,
+            'actor',
+            [{ id: sessionId, machineId } as import('@lody/shared').SessionMeta],
+            [],
+            new Map(),
+            [],
+            []
+          );
+          const { unstable } = snapshotBindings(
+            workspaceId,
+            'test',
+            new AbortController().signal,
+            () => src,
+            () => () => {}
+          );
+          const snapshot = await unstable.readSnapshot({
+            kind: 'session-transcript',
+            session: {
+              workspaceId: String(workspaceId),
+              machineId: String(machineId),
+              sessionId: String(sessionId),
+            } as import('@lody/plugin-sdk').SessionRef,
+            turnIds: ['scheduled-assistant'],
+          });
+          expect(snapshot.doc.turns).toMatchObject([
+            { id: 'scheduled-assistant', userTurnId: 'scheduled-user' },
+          ]);
+        }
       } finally {
         bulkRead?.mockRestore();
         data.dispose();

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { workflowCatalogAtom } from '@/atoms/agents';
+import { useEffect, useState, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import {
@@ -34,5 +35,13 @@ export function useWorkspaceCatalog(): WorkspaceCatalogSnapshot {
     return lease.release;
   }, [runtime]);
 
-  return runtime && state.runtime === runtime ? state.snapshot : EMPTY_WORKSPACE_CATALOG;
+  const extra = useAtomValue(workflowCatalogAtom),
+    base = runtime && state.runtime === runtime ? state.snapshot : EMPTY_WORKSPACE_CATALOG;
+  return useMemo(
+    () =>
+      extra && runtime?.workspaceId === extra.workspaceId && extra.servers.length
+        ? { ...base, servers: [...base.servers, ...extra.servers] }
+        : base,
+    [extra, runtime, base]
+  );
 }

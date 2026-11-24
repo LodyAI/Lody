@@ -81,7 +81,7 @@ export const machineWorkflowEventChecks = defineMachinePlugin((machine) => {
   machine.events.on('session.tool.completed', async (ctx, event) => {
     const completedTool: string = event.toolCall.toolName;
     void completedTool;
-    const raw = await ctx.lody.readSnapshot({
+    const raw = await ctx.lody.unstable.readSnapshot({
       kind: 'session-meta',
       session: event.session,
     });
