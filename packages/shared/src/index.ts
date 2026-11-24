@@ -100,6 +100,7 @@ export * from './repo-doc-meta';
 export * from './session-input';
 export * from './acp-config-option-sensitivity';
 export * from './session-bootstrap';
+export * from './session-sync-progress';
 export * from './goal';
 export * from './comment-reference-format';
 export * from './session-comment-types';

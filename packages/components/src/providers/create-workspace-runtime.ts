@@ -194,6 +194,10 @@ import {
   getWorkspaceMetaStreamUrl,
   getWorkspaceDocStreamUrl,
 } from './workspace-streams-transport';
+import {
+  createLoroSessionSyncProgress,
+  type LoroSessionSyncProgress,
+} from './loro-session-sync-progress';
 import { scheduleAfterStartupNavigationCooldown } from './startup-network-idle';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import { readSessionAndMachineMetas, type ReadDocMetaCache } from '@/lib/doc-meta-batch';
@@ -721,6 +725,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let localStartupPromise: Promise<void> | null = null;
   let initialTokenAttachPromise: Promise<void> | null = null;
   let localLoroTransport: LocalLoroTransportAdapter | null = null;
+  const loroSessionProgress = new Map<string, LoroSessionSyncProgress>();
   let localMachineMonitorTransport: WorkspaceLocalMachineMonitorTransport | null = null;
   let localDataPlaneConnectionDispose: (() => void) | null = null;
   let localPresenceUnsubscribe: (() => void) | null = null;
@@ -3935,6 +3940,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       workspaceId,
       peerId,
       connection: localConnection.connection,
+      onDocSyncProgress: (docId, progress) => loroSessionProgress.get(docId)?.local(progress),
     });
     localMachineMonitorTransport = new WorkspaceLocalMachineMonitorTransport({
       workspaceId,
@@ -4004,6 +4010,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       repo,
       workspaceId,
       documentRemoteCursorStore: remoteCursorStore,
+      getDocumentProgress: (docId) => loroSessionProgress.get(docId),
       auth: activeStreamsTokenProvider.createAuthCallback(),
       streamsBaseUrl,
       shardHostSuffix: getStreamsShardHostSuffixForProvider(activeStreamsTokenProvider),
@@ -5459,6 +5466,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     let cloudRepairUnsubscribe: (() => void) | null = null;
     let disposed = false;
     let syncLeaseCount = 0;
+    const documentProgress =
+      backendKind === 'loro'
+        ? createLoroSessionSyncProgress(() =>
+            disposed || syncLeaseCount === 0
+              ? undefined
+              : targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId })
+          )
+        : undefined;
+    if (documentProgress) loroSessionProgress.set(roomId, documentProgress);
+    const stopProgressStatus = documentProgress
+      ? syncTracker.subscribeSyncState(documentProgress.updateState)
+      : undefined;
     let syncReleaseTimer: ReturnType<typeof setTimeout> | null = null;
     let joinAttempt: SyncJoinAttempt | null = null;
     // A join whose every attempt failed leaves no room for repo.reconnect() to
@@ -5485,6 +5504,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     };
 
     const stopSyncNow = () => {
+      documentProgress?.clear();
       clearSyncReleaseTimer();
       clearJoinRetryTimer();
       joinRetryAttempt = 0;
@@ -5621,6 +5641,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (syncLeaseCount > 0 || disposed) {
           return;
         }
+        documentProgress?.clear();
         clearSyncReleaseTimer();
         syncReleaseTimer = setTimeout(stopSyncNow, SESSION_ROOM_SYNC_RELEASE_DELAY_MS);
       };
@@ -5648,12 +5669,17 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       },
       subscribe: (listener) => mirror.subscribe(listener as never),
       history,
-      sessionData,
+      sessionData: documentProgress
+        ? { ...sessionData, sessionSyncProgress: documentProgress }
+        : sessionData,
       dispose: () => {
         disposed = true;
         sharedWindowDocuments.delete(roomId);
         materializedSessionIds.delete(sessionId);
         stopSyncNow();
+        stopProgressStatus?.();
+        if (documentProgress && loroSessionProgress.get(roomId) === documentProgress)
+          loroSessionProgress.delete(roomId);
         syncTracker.dispose();
         unsubscribeImportWatch();
         disposeConversation();

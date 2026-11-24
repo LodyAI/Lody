@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { clsx } from 'clsx';
@@ -17,6 +17,7 @@ import type {
 import { hasWorkspaceChanges, sanitizeGoalObjective } from '@lody/shared';
 import { composerSurfaceStyles } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import type { SessionSyncProgressView } from '@lody/shared';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { ActionChip, PopoverActionChip } from './info-chip';
 import {
@@ -114,6 +115,7 @@ export type SessionInfoBarProps = {
   syncing?: boolean;
   /** Overrides `syncing` with a specific conversation content-sync state. */
   syncStatus?: SessionSyncIndicatorVariant | null;
+  sessionSyncProgress?: SessionSyncProgressView;
   /** Mobile native shell only: lift the bar above the session drawer's
    *  transparent z-30 left-edge swipe-back strip, which otherwise covers the
    *  leftmost ~48px of the row and swallows taps on the first chip. Same
@@ -275,6 +277,11 @@ const styles = stylex.create({
   },
 });
 
+const emptySessionSyncProgress: SessionSyncProgressView = {
+  getSnapshot: () => null,
+  subscribe: () => () => {},
+};
+
 export function SessionInfoBar({
   status,
   machine,
@@ -308,11 +315,17 @@ export function SessionInfoBar({
   diffStat,
   syncing = false,
   syncStatus,
+  sessionSyncProgress = emptySessionSyncProgress,
   protectFromEdgeBackZone = false,
   initialStage,
   queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
+  const hasSyncProgress = useSyncExternalStore(
+    sessionSyncProgress.subscribe,
+    () => sessionSyncProgress.getSnapshot() !== null,
+    () => false
+  );
   const hasDiff = hasWorkspaceChanges(diffStat);
   const hasContext = !!pr || !!projectName || !!branch || hasDiff || !!contextActions?.length;
   const goalObjective = goal ? sanitizeGoalObjective(goal.objective) : '';
@@ -398,6 +411,7 @@ export function SessionInfoBar({
     onOpenIosSimulator ||
     onOpenAndroidEmulator ||
     ambientSync ||
+    hasSyncProgress ||
     privateAccessStatus
   );
   if (!hasSurfaceContent && !hasMachine) {
@@ -619,13 +633,14 @@ export function SessionInfoBar({
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {ambientSync ? (
-            <span {...stylex.props(styles.ambientSync)}>
+          {ambientSync || hasSyncProgress ? (
+            <div {...stylex.props(styles.ambientSync)}>
               <SessionSyncingIndicator
-                variant={ambientSync}
+                variant={ambientSync ?? undefined}
+                syncProgress={sessionSyncProgress}
                 labelClassName={stylex.props(styles.ambientSyncLabel).className}
               />
-            </span>
+            </div>
           ) : null}
         </div>
       </ConversationColumn>

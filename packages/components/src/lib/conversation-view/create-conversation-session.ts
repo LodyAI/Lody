@@ -10,8 +10,10 @@ import {
 } from '@lody/shared/session-control-plane';
 import type { CreateConversationViewFromReaderOptions } from './create-conversation-view-from-reader';
 import { createConversationViewFromReader } from './create-conversation-view-from-reader';
+import type { SessionSyncProgressView } from '@lody/shared';
 
 export type ConversationSessionData = SessionData & {
+  readonly sessionSyncProgress?: SessionSyncProgressView;
   /** Optional storage-owned cleanup for composed backend data. */
   readonly dispose?: () => void;
 };

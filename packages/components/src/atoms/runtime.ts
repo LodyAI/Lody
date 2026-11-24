@@ -15,7 +15,7 @@ import type {
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
-import type { SessionData } from '@lody/shared/session-data';
+import type { ConversationSessionData } from '@/lib/conversation-view/create-conversation-session';
 import { atom } from 'jotai';
 import type { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
@@ -131,7 +131,7 @@ export type SessionDocStore = {
   /** Windowed read access to the session's turns; see `lib/conversation-view`. */
   readonly history: ConversationView;
   /** CRDT-neutral history reads, commands and stored-copy capabilities. */
-  readonly sessionData: SessionData;
+  readonly sessionData: ConversationSessionData;
   dispose: () => void;
   /**
    * Resolves when all pending local CRDT changes have been flushed to the server.

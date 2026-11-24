@@ -265,6 +265,7 @@ patchedDependencies:
   '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   glob@13.0.1: patches/glob@13.0.1.patch
+  loro-repo@0.28.0: patches/loro-repo@0.28.0.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch
   react-photo-view@1.2.7: patches/react-photo-view@1.2.7.patch
