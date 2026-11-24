@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.116.0](https://github.com/LodyAI/Lody/compare/lody-cli-v0.115.1...lody-cli-v0.116.0) (2026-11-24)
+
+
+### Features
+
+* **genui:** confined SVG diagram family, PascalCase catalog tags ([#3293](https://github.com/LodyAI/Lody/issues/3293)) ([84ff0c4](https://github.com/LodyAI/Lody/commit/84ff0c42efa769d5a7709780bac9ffd4e30596c1))
+* **genui:** generative UI runtime — fenced surfaces, confined evaluator, host-owned state ([#3285](https://github.com/LodyAI/Lody/issues/3285)) ([20ac7ab](https://github.com/LodyAI/Lody/commit/20ac7ab6a721521b2015f9918f62156a1a8b3818))
+* **memory:** uninstall EverMe from the memory settings ([#3261](https://github.com/LodyAI/Lody/issues/3261)) ([7eeeba2](https://github.com/LodyAI/Lody/commit/7eeeba2af2212d71971d310860b1f7e41aff65c6))
+* **schedules:** let agents propose edits to an existing schedule ([#3181](https://github.com/LodyAI/Lody/issues/3181)) ([f23aacf](https://github.com/LodyAI/Lody/commit/f23aacf67f32691cd0722af96ba0a62619f27446)), closes [#2626](https://github.com/LodyAI/Lody/issues/2626)
+* **sorbet:** wire Host settings through the Lody Agent surface ([#3271](https://github.com/LodyAI/Lody/issues/3271)) ([ad1525b](https://github.com/LodyAI/Lody/commit/ad1525b040934853dda00b573c9d6c3d9cec5318))
+* synchronize agent session archives ([#2281](https://github.com/LodyAI/Lody/issues/2281)) ([a8c4420](https://github.com/LodyAI/Lody/commit/a8c4420732531e73ff87332ef8bf99f51e7c5b12))
+
+
+### Bug Fixes
+
+* **cli:** catch async ENOENT when local attachment blob was backfilled ([#3290](https://github.com/LodyAI/Lody/issues/3290)) ([a230905](https://github.com/LodyAI/Lody/commit/a230905e071ee2efd8a61ce3c8c1a266d63278d9))
+* **cli:** keep ELECTRON_RUN_AS_NODE when spawning process.execPath ACP adapters ([#3303](https://github.com/LodyAI/Lody/issues/3303)) ([b41e6b8](https://github.com/LodyAI/Lody/commit/b41e6b87a30a3ca8cf26bd9d5dfb1a065f657d91))
+* **cli:** reclaim deleted docs, stale doc_updates, and freelist space in repo.sqlite3 ([#3301](https://github.com/LodyAI/Lody/issues/3301)) ([defd1cd](https://github.com/LodyAI/Lody/commit/defd1cddf46d74f68bb9c6ed497bd79b2e2667c7))
+* **cli:** strip ELECTRON_RUN_AS_NODE from agent session env ([#3273](https://github.com/LodyAI/Lody/issues/3273)) ([c1f3f04](https://github.com/LodyAI/Lody/commit/c1f3f04e8ef3e22f5d4b52c270c77d10234aa15d))
+* **cli:** track bounded late-stream running presence and GC protection ([#3287](https://github.com/LodyAI/Lody/issues/3287)) ([3c4915b](https://github.com/LodyAI/Lody/commit/3c4915be7841e10163016a28700306a5c1074dab))
+* expose installed Magpie skills in isolated Codex sessions ([#3260](https://github.com/LodyAI/Lody/issues/3260)) ([4571efa](https://github.com/LodyAI/Lody/commit/4571efa861881341441c6e8f6b5e8028e1f6130f))
+* **mcp:** resolve readable model names in agent author popover ([#3289](https://github.com/LodyAI/Lody/issues/3289)) ([61deef6](https://github.com/LodyAI/Lody/commit/61deef6df4f8e19291336348b66a757e82a33330))
+* prevent archive automation self-deadlock ([#3272](https://github.com/LodyAI/Lody/issues/3272)) ([512fb1c](https://github.com/LodyAI/Lody/commit/512fb1cb866859ad15e579acb46838e670588a03))
+* **session:** settle finished Inbox input whose claim survived an interrupt ([#2994](https://github.com/LodyAI/Lody/issues/2994)) ([#3281](https://github.com/LodyAI/Lody/issues/3281)) ([d713589](https://github.com/LodyAI/Lody/commit/d71358942a649aeaa2dff375347c5f06df3e1479))
+* stabilize auto delivery, reuse automation UI, and support multi-PR/providers ([#3296](https://github.com/LodyAI/Lody/issues/3296)) ([3b5c47a](https://github.com/LodyAI/Lody/commit/3b5c47a369779c1a3eb3ee00e0b034b8d176ea87))
+
+
+### Performance
+
+* **streams:** reduce redundant HTTP and SSE traffic in WebSocket mode (phase 0) ([#3214](https://github.com/LodyAI/Lody/issues/3214)) ([ccd45b2](https://github.com/LodyAI/Lody/commit/ccd45b2c3078b5e87615460220ac938ac9035ac2))
+
 ## [0.115.1](https://github.com/LodyAI/Lody/compare/lody-cli-v0.115.0...lody-cli-v0.115.1) (2026-11-23)
 
 
