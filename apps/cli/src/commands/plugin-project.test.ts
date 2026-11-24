@@ -54,5 +54,7 @@ test('registered CLI creates and checks source but rejects activation in an agen
   await invoke('create', 'sample', '--template', 'workflow');
   const path = join(cwd, 'sample');
   expect(await readFile(join(path, 'machine/index.ts'), 'utf8')).toContain('defineMachinePlugin');
-  await expect(invoke('link', '--dev', path)).rejects.toThrow('interactive owner terminal');
+  await expect(invoke('link', '--dev', path)).rejects.toThrow(
+    'Agent sessions must propose plugin activation'
+  );
 });

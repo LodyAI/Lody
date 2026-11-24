@@ -697,6 +697,7 @@ it('delivers the committed assistant turn to the installed machine workflow with
       JSON.stringify([
         {
           current: {
+            provenance: { kind: 'local', origin: 'dir' },
             directory: root,
             machineEntry,
             manifest: {

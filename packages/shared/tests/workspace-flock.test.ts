@@ -240,3 +240,69 @@ describe('project MCP preferences', () => {
     expect(getProjectMcpDefaults(deleted)[key]).toBeUndefined();
   });
 });
+
+it('removes a pinned release from the local catalog when a synced row no longer matches its disclosure', async () => {
+  const { listWorkspacePlugins, writeWorkspacePluginToFlock } =
+    await import('../src/workspace-flock');
+  const flock = new FakeWorkspaceFlock();
+  const pin = {
+    plugin_id: 'clock',
+    source: {
+      kind: 'npm' as const,
+      package_name: '@example/clock',
+      exact_version: '1.0.0',
+      integrity: 'sha512-' + 'A'.repeat(86) + '==',
+    },
+    manifest_summary: {
+      id: 'clock',
+      sdk: '^1.0.0',
+      title: 'Clock',
+      version: '1.0.0',
+      client: 'client.js',
+    },
+    permissions: [],
+    config_schema: {},
+    enabled: true,
+    machine_sync: 'manual' as const,
+  };
+  const { pluginOwnerSyncSubject } = await import('../src/plugins/workspace-entry');
+  const { listPluginOwnerPins } = await import('../src/workspace-flock');
+  const approved = {
+    ...pin,
+    machine_sync: 'owner_machines' as const,
+    sync_decision_id: crypto.randomUUID(),
+    sync_owner_user_id: 'alice',
+    sync_signature: 'proof',
+  };
+  const aliceKey = workspaceFlockKeys.pluginOwnerSync('alice', pin.plugin_id);
+  const bobKey = workspaceFlockKeys.pluginOwnerSync('bob', pin.plugin_id);
+  const rows = applyWorkspaceFlockRowEvents({}, [
+    { key: aliceKey, value: approved },
+    { key: bobKey, value: approved },
+  ]);
+  expect(listPluginOwnerPins(rows)).toEqual([approved]);
+  expect(listWorkspacePlugins(rows)).toEqual([]);
+  expect(
+    listPluginOwnerPins(applyWorkspaceFlockRowEvents(rows, [{ key: aliceKey, value: undefined }]))
+  ).toEqual([]);
+  expect(pluginOwnerSyncSubject({ ...approved, sync_owner_user_id: 'bob' }).contentDigest).not.toBe(
+    pluginOwnerSyncSubject(approved).contentDigest
+  );
+  expect(() => pluginOwnerSyncSubject(pin)).toThrow();
+  expect(writeWorkspacePluginToFlock(flock, pin)).toBe(true);
+  const before = readWorkspaceFlockRowsFromFlock(flock);
+  expect(listWorkspacePlugins(before)).toEqual([pin]);
+  expect(
+    listWorkspacePlugins(
+      applyWorkspaceFlockRowEvents(before, [
+        {
+          key: workspaceFlockKeys.plugin('clock'),
+          value: {
+            ...pin,
+            manifest_summary: { ...pin.manifest_summary, permissions: ['sessions.approve'] },
+          },
+        },
+      ])
+    )
+  ).toEqual([]);
+});

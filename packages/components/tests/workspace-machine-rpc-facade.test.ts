@@ -7,7 +7,10 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
+import {
+  LocalMachineRpcRequestSchema,
+  type LocalMachineRpcRequest,
+} from '@lody/shared/local-machine-rpc';
 import { isE2eeFeatureMethod } from '@lody/shared/e2ee-rpc';
 import { encryptedRemoteEditAndResendAvailable } from '../src/lib/encrypted-machine-controls';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
@@ -28,7 +31,7 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
-  it('never sends local plugin control or oversized UTF-8 invocations through encrypted transport', async () => {
+  it('routes plugin control through encrypted transport and rejects oversized UTF-8 invocations', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
       protectedContent: true,
@@ -40,6 +43,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
         throw Error('plaintext unavailable');
       },
       requestEncryptedFeature: async (request) => {
+        if (request.method === 'plugin/control')
+          return { ok: false, error: 'owner authorization denied' };
         if (request.method !== 'plugin/catalog') throw Error('Unexpected encrypted request');
         return { ok: true, result: { type: 'plugin/catalog', installations: [] } };
       },
@@ -52,7 +57,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
         method: 'plugin/control',
         params: { pluginId: 'test', action: 'reload' },
       })
-    ).rejects.toThrow(/local/i);
+    ).rejects.toThrow('owner authorization denied');
     await expect(
       facade.requestPlugin(remoteMachineId, {
         method: 'plugin/query',
@@ -102,16 +107,25 @@ describe('createWorkspaceMachineRpcFacade', () => {
                     machine: 'machine.js',
                   },
                   enabled: true,
+                  source: { kind: 'local', origin: 'dir' },
                   workflowInstallation,
                 },
               ],
             },
           };
-        if (request.method !== 'plugin/declared-workflow-grant') throw Error('Unexpected request');
-        issued.push(request);
+        if (
+          request.method !== 'plugin/control' ||
+          request.params.action !== 'manage-workflow-grant'
+        )
+          throw Error('Unexpected request');
+        issued.push(LocalMachineRpcRequestSchema.parse(request));
         return {
           ok: true,
-          result: { type: request.method, active: request.params.action === 'grant' },
+          result: {
+            type: 'plugin/control',
+            action: 'manage-workflow-grant',
+            active: request.params.grant.action === 'grant',
+          },
         };
       },
     });
@@ -129,11 +143,14 @@ describe('createWorkspaceMachineRpcFacade', () => {
     expect(issued).toEqual([]);
     await approval('project-1', 'grant', ['reviewer'], ['sessions.create']);
     expect(issued[0]?.params).toMatchObject({
-      grant_id: expect.any(String),
-      allowed_ops: ['sessions.create'],
-      allowed_role_ids: ['reviewer'],
-      allowed_project_ids: ['project-1'],
-      issued_by_user_id: 'owner',
+      action: 'manage-workflow-grant',
+      grant: {
+        grant_id: expect.any(String),
+        allowed_ops: ['sessions.create'],
+        allowed_role_ids: ['reviewer'],
+        allowed_project_ids: ['project-1'],
+        issued_by_user_id: 'owner',
+      },
     });
     await expect(
       approval('project-1', 'revoke', ['reviewer'], ['sessions.create'])

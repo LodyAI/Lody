@@ -74,32 +74,38 @@ export async function readPluginCatalog(
               roleIds: string[] | '*',
               operations: import('@lody/shared/plugins/machine-rpc').DeclaredWorkflowGrant['allowed_ops']
             ) => {
-              const { issuer, activeGrant, ...binding } = row.workflowInstallation!;
+              const { issuer, activeGrant, machineDigest, targetDevice } =
+                row.workflowInstallation!;
               if (action === 'revoke' && !activeGrant) throw Error('No active grant');
               const now = Date.now();
               const result = await request(target, {
-                method: 'plugin/declared-workflow-grant',
+                method: 'plugin/control',
                 params: {
-                  ...binding,
-                  issued_by_user_id: issuer,
-                  grant_id: action === 'revoke' ? activeGrant!.grant_id : crypto.randomUUID(),
-                  issued_at_ms: now,
-                  workspace_id: workspaceId,
-                  machine_id: target,
-                  plugin_id: pluginId,
-                  allowed_project_ids:
-                    action === 'revoke'
-                      ? activeGrant!.allowed_project_ids
-                      : projectId === '*'
-                        ? '*'
-                        : [projectId],
-                  allowed_role_ids: action === 'revoke' ? activeGrant!.allowed_role_ids : roleIds,
-                  allowed_ops: action === 'revoke' ? activeGrant!.allowed_ops : operations,
-                  action,
+                  action: 'manage-workflow-grant',
+                  grant: {
+                    machineDigest,
+                    targetDevice,
+                    issued_by_user_id: issuer,
+                    grant_id: action === 'revoke' ? activeGrant!.grant_id : crypto.randomUUID(),
+                    issued_at_ms: now,
+                    workspace_id: workspaceId,
+                    machine_id: target,
+                    plugin_id: pluginId,
+                    allowed_project_ids:
+                      action === 'revoke'
+                        ? activeGrant!.allowed_project_ids
+                        : projectId === '*'
+                          ? '*'
+                          : [projectId],
+                    allowed_role_ids: action === 'revoke' ? activeGrant!.allowed_role_ids : roleIds,
+                    allowed_ops: action === 'revoke' ? activeGrant!.allowed_ops : operations,
+                    action,
+                  },
                 },
               });
               if (
-                result.type !== 'plugin/declared-workflow-grant' ||
+                result.type !== 'plugin/control' ||
+                !('active' in result) ||
                 result.active !== (action === 'grant')
               )
                 throw Error('Workflow approval not confirmed');
@@ -136,7 +142,6 @@ export async function readPluginCatalog(
       configurationKey: JSON.stringify([
         row.manifest,
         row.inspection?.preferences,
-        row.inspection?.projectPreferences,
       ]),
       digest: row.clientDigest ?? '',
       invalidations: row.invalidations ?? 0,
@@ -179,7 +184,7 @@ export async function readPluginCatalog(
                 },
                 { requireLocal: true }
               );
-              if (result.type !== 'plugin/control') throw Error('Unexpected inspection response');
+              if (result.type !== 'plugin/control' || !('inspection' in result)) throw Error('Unexpected inspection response');
               return result.inspection;
             },
             control: async (action, changes, projectId) => {
@@ -197,7 +202,7 @@ export async function readPluginCatalog(
                 },
                 { requireLocal: true }
               );
-              if (result.type !== 'plugin/control')
+              if (result.type !== 'plugin/control' || !('inspection' in result))
                 throw Error('Unexpected plugin control response');
               return result.inspection;
             },

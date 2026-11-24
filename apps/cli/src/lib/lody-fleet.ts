@@ -1,3 +1,4 @@
+import { projectConfigStore } from '../plugins/project-config-store';
 import { makePluginApproval } from '../plugins/plugin-control-approval';
 import {
   composeMachineHostDispatch,
@@ -522,7 +523,12 @@ export class LodyFleet {
             composeMachineHostDispatch(this.resolveStandalonePluginOperation),
             undefined,
             async (frame) =>
-              (await this.runtimes.get(workspace.id)?.lody.admitPluginEvent(frame)) ?? false
+              (await this.runtimes.get(workspace.id)?.lody.admitPluginEvent(frame)) ?? false,
+            projectConfigStore(
+              () => this.runtimes.get(workspace.id)?.lody.documentManager,
+              workspace.id as WorkspaceId,
+              this.machineId
+            )
           );
           this.pluginWorkspaceId = workspace.id;
           this.plugins = daemon;

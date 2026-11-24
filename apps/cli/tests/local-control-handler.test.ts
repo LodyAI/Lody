@@ -103,7 +103,7 @@ describe('LocalControlHandler', () => {
       (
         await send('/plugin/control', {
           ...expected,
-          command: { action: 'remove', pluginId: 'demo' },
+          command: { action: 'remove', pluginId: 'demo', purgeData: true },
         })
       ).status
     ).toBe(403);
@@ -114,6 +114,31 @@ describe('LocalControlHandler', () => {
           workspaceId: 'w',
           method: 'plugin/control',
           params: { action: 'enable', pluginId: 'demo' },
+        })
+      ).status
+    ).toBe(403);
+    expect(
+      (
+        await send('/plugin/control', {
+          command: { action: 'install', sha256: 'a'.repeat(64), path: '/tmp/artifact' },
+        })
+      ).status
+    ).toBe(403);
+    expect(
+      (
+        await send('/machine-rpc', {
+          machineId: 'm',
+          workspaceId: 'w',
+          method: 'plugin/control',
+          params: {
+            action: 'resolve-proposal',
+            decision: {
+              sessionId: 's',
+              requestId: '98a0dc46-f012-4c6a-a331-b1348465aa21',
+              sha256: 'a'.repeat(64),
+              decision: 'approve',
+            },
+          },
         })
       ).status
     ).toBe(403);

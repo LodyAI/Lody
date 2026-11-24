@@ -1,4 +1,10 @@
 import {
+  syncChallengeSchema,
+  type PluginSyncChallenge,
+  workspacePluginEntrySchema,
+  type WorkspacePluginEntry,
+} from './plugins/workspace-entry';
+import {
   normalizeWorkspaceProject,
   type WorkspaceProject,
   type ProjectId,
@@ -26,7 +32,16 @@ export type WorkspaceFlockAgentRoleKey = ['agentRole', AgentRoleId];
 export type WorkspaceFlockProjectKey = ['project', ProjectId];
 export type WorkspaceFlockProjectMcpDefaultKey = ['projectMcpDefault', string];
 export type WorkspaceFlockPinSectionKey = ['pinSection', string];
+type ChallengeKey = ['pluginSyncChallenge', string, string, string];
+type ChallengeRow = { key: ChallengeKey; value: PluginSyncChallenge };
+type OwnerSyncKey = ['pluginOwnerSync', string, string];
+type OwnerSyncRow = { key: OwnerSyncKey; value: WorkspacePluginEntry };
+type PluginKey = ['plugin', string];
+type PluginRow = { key: PluginKey; value: WorkspacePluginEntry };
 export type WorkspaceFlockKey =
+  | ChallengeKey
+  | OwnerSyncKey
+  | PluginKey
   | WorkspaceFlockPinSectionKey
   | WorkspaceFlockProjectKey
   | WorkspaceFlockMcpServerKey
@@ -43,6 +58,9 @@ export type WorkspaceFlockKey =
  * neither.
  */
 export const WORKSPACE_FLOCK_ROW_FAMILIES = [
+  'pluginSyncChallenge',
+  'pluginOwnerSync',
+  'plugin',
   'mcpServer',
   'agentRole',
   'project',
@@ -51,6 +69,14 @@ export const WORKSPACE_FLOCK_ROW_FAMILIES = [
 ] as const;
 
 export const workspaceFlockKeys = {
+  pluginSyncChallenge: (owner: string, machine: string, id: string): ChallengeKey => [
+    'pluginSyncChallenge',
+    owner,
+    machine,
+    id,
+  ],
+  pluginOwnerSync: (owner: string, id: string): OwnerSyncKey => ['pluginOwnerSync', owner, id],
+  plugin: (id: string): PluginKey => ['plugin', id],
   project: (id: ProjectId): WorkspaceFlockProjectKey => ['project', id],
   projectMcpDefault: (projectKey: string): WorkspaceFlockProjectMcpDefaultKey => [
     'projectMcpDefault',
@@ -62,6 +88,9 @@ export const workspaceFlockKeys = {
 } as const;
 
 export type ParsedWorkspaceFlockKey =
+  | { kind: 'pluginSyncChallenge'; key: ChallengeKey }
+  | { kind: 'pluginOwnerSync'; key: OwnerSyncKey }
+  | { kind: 'plugin'; key: PluginKey }
   | { kind: 'pinSection'; key: WorkspaceFlockPinSectionKey; sectionId: string }
   | { kind: 'project'; key: WorkspaceFlockProjectKey; projectId: ProjectId }
   | { kind: 'projectMcpDefault'; key: WorkspaceFlockProjectMcpDefaultKey; projectKey: string }
@@ -79,6 +108,24 @@ export type ParsedWorkspaceFlockKey =
 export const parseWorkspaceFlockKey = (
   key: readonly unknown[]
 ): ParsedWorkspaceFlockKey | undefined => {
+  if (
+    key.length === 4 &&
+    key[0] === 'pluginSyncChallenge' &&
+    typeof key[1] === 'string' &&
+    typeof key[2] === 'string' &&
+    typeof key[3] === 'string'
+  )
+    return {
+      kind: 'pluginSyncChallenge',
+      key: workspaceFlockKeys.pluginSyncChallenge(key[1], key[2], key[3]),
+    };
+  if (
+    key.length === 3 &&
+    key[0] === 'pluginOwnerSync' &&
+    typeof key[1] === 'string' &&
+    typeof key[2] === 'string'
+  )
+    return { kind: 'pluginOwnerSync', key: workspaceFlockKeys.pluginOwnerSync(key[1], key[2]) };
   if (key.length !== 2 || typeof key[1] !== 'string') {
     return undefined;
   }
@@ -86,6 +133,7 @@ export const parseWorkspaceFlockKey = (
   if (!id) {
     return undefined;
   }
+  if (key[0] === 'plugin') return { kind: 'plugin', key: workspaceFlockKeys.plugin(id) };
   if (key[0] === 'pinSection') {
     return { kind: 'pinSection', key: workspaceFlockKeys.pinSection(id), sectionId: id };
   }
@@ -126,6 +174,9 @@ export type WorkspaceFlockProjectMcpDefaultRow = {
 };
 export type WorkspaceFlockPinSectionRow = { key: WorkspaceFlockPinSectionKey; value: PinSection };
 export type WorkspaceFlockRow =
+  | ChallengeRow
+  | OwnerSyncRow
+  | PluginRow
   | WorkspaceFlockPinSectionRow
   | WorkspaceFlockProjectRow
   | WorkspaceFlockMcpServerRow
@@ -159,6 +210,32 @@ export const parseWorkspaceFlockRow = (
   const parsedKey = parseWorkspaceFlockKey(key);
   if (!parsedKey) {
     return undefined;
+  }
+  if (parsedKey.kind === 'pluginSyncChallenge') {
+    const r = syncChallengeSchema.safeParse(value);
+    return r.success &&
+      r.data.owner === key[1] &&
+      r.data.machine === key[2] &&
+      r.data.plugin === key[3]
+      ? { key: parsedKey.key, value: r.data }
+      : undefined;
+  }
+  if (parsedKey.kind === 'pluginOwnerSync') {
+    const r = workspacePluginEntrySchema.safeParse(value);
+    return r.success &&
+      r.data.sync_owner_user_id === parsedKey.key[1] &&
+      r.data.plugin_id === parsedKey.key[2] &&
+      !r.data.sync_challenge &&
+      !!r.data.sync_decision_id &&
+      r.data.sync_signature
+      ? { key: parsedKey.key, value: r.data }
+      : undefined;
+  }
+  if (parsedKey.kind === 'plugin') {
+    const r = workspacePluginEntrySchema.safeParse(value);
+    return r.success && r.data.plugin_id === parsedKey.key[1]
+      ? { key: parsedKey.key, value: r.data }
+      : undefined;
   }
   if (parsedKey.kind === 'pinSection') {
     const section = normalizePinSection(value);
@@ -381,3 +458,22 @@ export const listWorkspacePinSections = (rows: WorkspaceFlockRowMap): PinSection
     .filter(isPinSectionRow)
     .map((row) => row.value)
     .sort(comparePinSections);
+
+export const listWorkspacePlugins = (rows: WorkspaceFlockRowMap) =>
+  Object.values(rows)
+    .filter((r): r is PluginRow => r.key[0] === 'plugin')
+    .map((r) => r.value);
+export const writeWorkspacePluginToFlock = (
+  flock: WorkspaceFlockWritableFlock,
+  entry: WorkspacePluginEntry
+) => writeWorkspaceFlockRow(flock, workspaceFlockKeys.plugin(entry.plugin_id), entry);
+
+export const listPluginOwnerPins = (rows: WorkspaceFlockRowMap) =>
+  Object.values(rows)
+    .filter((row): row is OwnerSyncRow => row.key[0] === 'pluginOwnerSync')
+    .map((row) => row.value);
+
+export const listPluginChallenges = (rows: WorkspaceFlockRowMap) =>
+  Object.values(rows)
+    .filter((row): row is ChallengeRow => row.key[0] === 'pluginSyncChallenge')
+    .map((row) => row.value);

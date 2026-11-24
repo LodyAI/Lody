@@ -68,7 +68,7 @@ void test('remote executable module bytes must match the authenticated catalog o
     doc = {}
   const catalog = (enabled) => ({
     type: 'plugin/catalog',
-    installations: [{ manifest, enabled, clientDigest: digest }]
+    installations: [{ manifest, enabled, clientDigest: digest, source: {kind: 'local', origin: 'dir'} }]
   })
   observePluginCatalog(reader, doc, 'a', catalog(true))
   const open = (r, d, m, data) => openAuthenticatedPluginSource(r, d, m, 'example', digest, data)

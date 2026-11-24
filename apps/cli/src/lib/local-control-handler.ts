@@ -314,10 +314,7 @@ async function handleMachineRpcRequest(
   }
 
   try {
-    if (
-      (message.method === 'plugin/control' && message.params.action !== 'inspect') ||
-      message.method === 'plugin/declared-workflow-grant'
-    ) {
+    if (message.method === 'plugin/control' && message.params.action !== 'inspect') {
       if (!(await config.approvePluginAction?.(message, signal)) || signal?.aborted)
         return handlerResponse(403, { ok: false, error: 'plugin_approval_required' });
     }

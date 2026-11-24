@@ -175,9 +175,9 @@ describe('local IPC socket server', () => {
     });
     const command = { action: 'logs', pluginId: 'demo' };
     const reply = await Effect.runPromise(
-      requestLocalPluginControl(command, { runFilePath: paths.runFilePath })
+      requestLocalPluginControl({ command }, { runFilePath: paths.runFilePath })
     );
-    expect(reply.payload).toEqual({ ok: true, received: command });
+    expect(reply.payload).toEqual({ ok: true, received: { command } });
   });
   afterEach(async () => {
     await stopLocalIpcSocketServers();

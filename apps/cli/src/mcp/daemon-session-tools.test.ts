@@ -785,6 +785,9 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
 
   it('lists and reads session status from the daemon replica without starting Streams sync', async () => {
     stubCreateOptionsReaders();
+    vi.spyOn(commandRuntime, 'withMachineRpcClient').mockRejectedValue(
+      new Error('Live status unavailable')
+    );
     const { metaSync, flockSync } = rejectStreamsSync();
 
     const listed = await runWithDaemonWorkspace(daemon, () =>

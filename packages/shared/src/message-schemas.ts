@@ -1,3 +1,4 @@
+import { pluginProposalMetaSchema } from './plugins/proposal';
 import {
   ManagedDaemonUpdateStatusSchema,
   ManagedDaemonUpgradeOptionsSchema,
@@ -3894,6 +3895,11 @@ export const SystemNoticeSchema = z.discriminatedUnion('name', [
     type: z.literal('system_notice'),
     name: z.literal('task_proposal'),
     meta: TaskProposalMetaSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('system_notice'),
+    name: z.literal('plugin_proposal'),
+    meta: pluginProposalMetaSchema.optional(),
   }),
   z.object({
     type: z.literal('system_notice'),

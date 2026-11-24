@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { toolFact } from '@lody/shared/plugins/history';
 export { toolFact };
 import {
@@ -14,6 +15,18 @@ import type {
   PendingInteractionSummary,
 } from '@lody/plugin-sdk';
 import { clientPluginEvents } from './client-events';
+const outcomeMetadata = z.record(z.string(), z.json()).nullable().optional();
+export function pluginInteractionOutcome(
+  outcome: import('@lody/shared/message').PermissionOutcome
+): import('@lody/plugin-sdk').InteractionOutcome {
+  const meta = outcomeMetadata.safeParse(outcome._meta);
+  return {
+    ...(outcome.outcome === 'selected'
+      ? { outcome: 'selected' as const, optionId: outcome.optionId }
+      : { outcome: 'cancelled' as const }),
+    ...(meta.success && meta.data !== undefined ? { _meta: meta.data } : {}),
+  };
+}
 export type SessionIdentity = Pick<SessionMeta, 'id' | 'machineId' | 'project'>;
 export function eventRefs(workspaceId: string, s: SessionIdentity) {
   const projectId =

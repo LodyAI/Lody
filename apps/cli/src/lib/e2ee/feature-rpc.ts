@@ -121,6 +121,7 @@ export type EncryptedFeatureReplySink = EncryptedReplySink & { end(): Promise<vo
 const attempt = <A>(body: () => A) => Effect.try({ try: body, catch: (cause) => cause });
 /** Who signed a request, from the verified ledger; never from request parameters. */
 export type EncryptedFeatureRequester = {
+  personalDevice?: boolean;
   /** The signer's account, which a request's `requestedByUserId` must name. */
   accountId: string;
   /** The identity execution runs under: the machine owner's account or `e2ee-member:`. */
@@ -221,8 +222,7 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const plugin = isPluginMachineRequest(opened.input.request) ? opened.input.request : undefined;
     const invocation = plugin && 'scope' in plugin.params ? plugin.params : undefined;
     const authorize: AuthorizeEncryptedExecution =
-      plugin &&
-      (invocation?.scope === 'machine' || plugin.method === 'plugin/declared-workflow-grant')
+      plugin && (invocation?.scope === 'machine' || plugin.method === 'plugin/control')
         ? (workspace, device) =>
             options.authorizePluginOwner?.(workspace, device) ??
             Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
@@ -282,7 +282,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
               (owner.raw = options.handle(opened.input.request, {
                 requestId: opened.requestId,
                 requesterDevice: opened.requesterDevice,
-                ...(opened.input.request.method === 'plugin/declared-workflow-grant'
+                ...(plugin?.method === 'plugin/control' &&
+                plugin.params.action === 'manage-workflow-grant'
                   ? { grantSignature: Buffer.from(opened.frame).toString('hex') }
                   : {}),
                 expiresAt: opened.expiresAt,
@@ -322,7 +323,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
       if (
         (forkRequest || plugin) &&
         authority._tag === 'Denied' &&
-        authority.reason === 'e2ee_machine_not_shared' &&
+        (authority.reason === 'e2ee_machine_not_shared' ||
+          (plugin?.method === 'plugin/control' && authority.reason === 'e2ee_machine_not_owned')) &&
         options.isOpen() &&
         (yield* Clock.currentTimeMillis) < opened.expiresAt
       ) {
@@ -332,8 +334,11 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
         yield* options.native.retainFeatureRequest(options.machineId, opened);
         const refusal = yield* options.native.sealFeatureResult(options.machineId, opened, {
           ok: false,
-          code: 'e2ee_machine_not_shared',
-          error: 'This machine or one of its projects is not shared with you.',
+          code: plugin?.method === 'plugin/control' ? 'forbidden' : 'e2ee_machine_not_shared',
+          error:
+            plugin?.method === 'plugin/control'
+              ? 'Machine owner required'
+              : 'This machine or one of its projects is not shared with you.',
         });
         yield* options.native.verifyFeatureRequest(opened);
         const client = options.client;

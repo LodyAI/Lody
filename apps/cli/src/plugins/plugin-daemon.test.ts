@@ -1,3 +1,7 @@
+import { projectConfigStore } from './project-config-store';
+import { getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
+import { LoroRepo } from 'loro-repo';
+import { FileSystemStorageAdaptor } from 'loro-repo/storage/filesystem';
 import { Effect, Layer, Deferred, Fiber } from 'effect';
 import { packClientBundle, PLUGIN_BUNDLE_CHUNK_BYTES } from '@lody/shared/plugins/digest';
 import { createHash, randomUUID } from 'node:crypto';
@@ -12,16 +16,28 @@ import { basename, join } from 'node:path';
 import { PluginDaemon } from './plugin-host-legacy';
 it('restores an enabled generation without its source checkout and preserves disable across restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-registry-'));
-  const create = () => new PluginDaemon(root, 'workspace', 'machine', () => {});
+  const vault = new Map<string, string>();
+  const create = () =>
+    new PluginDaemon(root, 'workspace', 'machine', () => {}, {
+      read: async (k) => vault.get(k),
+      write: async (k, v) => {
+        vault.set(k, v);
+      },
+    });
   let daemon = create();
   try {
     const generation = {
-      directory: join(root, 'release'),
+      provenance: { kind: 'local', origin: 'dir' },
+      directory: join(root, 'generations', randomUUID()),
       manifest: {
         id: 'test-plugin',
         sdk: '^1.0.0',
         version: '1.0.0',
         title: 'Test',
+        config: {
+          token: { type: 'secret', label: 'Token' },
+          ordinary: { type: 'string', label: 'Ordinary' },
+        },
         client: 'client.js',
       },
       clientDigest: 'test',
@@ -70,6 +86,26 @@ it('restores an enabled generation without its source checkout and preserves dis
         owner
       )
     ).rejects.toThrow('generation changed');
+    const setSecret = (fieldKey: string) => ({
+      ...control,
+      params: {
+        ...control.params,
+        action: 'set-secret' as const,
+        fieldKey,
+        value: 'synthetic-test-value',
+      },
+    });
+    await expect(daemon.dispatchMachineRpc(setSecret('token'), member)).rejects.toThrow(
+      'Owner required'
+    );
+    await expect(daemon.dispatchMachineRpc(setSecret('ordinary'), owner)).rejects.toThrow(
+      'Not a secret'
+    );
+    expect(vault.size).toBe(0);
+    const saved = await daemon.dispatchMachineRpc(setSecret('token'), owner);
+    expect(saved).toMatchObject({ inspection: { configured: ['token'], preferences: {} } });
+    expect(JSON.stringify(saved)).not.toContain('synthetic-test-value');
+    expect(await readFile(file, 'utf8')).not.toContain('synthetic-test-value');
     await writeFile(join(root, 'data', 'test-plugin', 'journal'), 'checkpoint');
     expect(await daemon.dispatchMachineRpc(control, owner)).toMatchObject({
       inspection: { lifecycle: 'Disabled' },
@@ -100,7 +136,12 @@ it('serves digest-bound staged pages and rejects unverified invocation scopes', 
     const file = Buffer.alloc(PLUGIN_BUNDLE_CHUNK_BYTES, 65);
     const packed = (await packClientBundle(manifest, async () => file))!;
     const clientDigest = createHash('sha256').update(packed).digest('hex');
-    const current = { directory: root, manifest, clientDigest };
+    const current = {
+      provenance: { kind: 'local', origin: 'dir' },
+      directory: root,
+      manifest,
+      clientDigest,
+    };
     await writeFile(join(root, 'client.js'), file);
     await writeFile(
       join(root, 'catalog.json'),
@@ -166,7 +207,31 @@ it('serves digest-bound staged pages and rejects unverified invocation scopes', 
 
 it('resumes a pending installation from its saved generation once all required settings exist', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-pending-'));
-  const daemon = new PluginDaemon(root, 'workspace', 'machine', () => {});
+  const repo = await LoroRepo.create({
+    storageAdapter: new FileSystemStorageAdaptor({ baseDir: join(root, 'repo') }),
+  });
+  const workspace = 'workspace' as WorkspaceId;
+  const store = projectConfigStore(
+    () => ({
+      repo,
+      syncFlockDocOrThrow: async (id) => {
+        await repo.sync({ scope: 'doc', flockDocIds: [id] });
+      },
+    }),
+    workspace,
+    'machine'
+  );
+  const daemon = new PluginDaemon(
+    root,
+    workspace,
+    'machine',
+    () => {},
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    store
+  );
   const id = 'pending-plugin';
   try {
     await writeFile(
@@ -177,6 +242,7 @@ it('resumes a pending installation from its saved generation once all required s
           dev: false,
           source: join(root, 'missing'),
           current: {
+            provenance: { kind: 'local', origin: 'dir' },
             directory: root,
             manifest: {
               id,
@@ -225,13 +291,50 @@ it('resumes a pending installation from its saved generation once all required s
     ).rejects.toThrow('target mismatch');
     expect(
       JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'))[0].projectPreferences
-    ).toEqual({ a: { format: 'a' }, b: { format: 'b' } });
+    ).toBeUndefined();
+    const { flock } = await repo.openFlockDoc(getWorkspaceFlockDocId(workspace));
+    const projects = () =>
+      Object.fromEntries(
+        Array.from(flock.scan({ prefix: ['projectPluginConfig', 'machine', id] }), (r) => [
+          String(r.key[3]),
+          r.value,
+        ])
+      );
+    expect(projects()).toEqual({ a: { format: 'a' }, b: { format: 'b' } });
+    await expect(
+      daemon.dispatch({
+        action: 'configure-many',
+        pluginId: id,
+        projectId: 'a',
+        changes: { format: '界'.repeat(5500) },
+      })
+    ).rejects.toThrow('16 KiB');
+    expect(projects().a).toEqual({ format: 'a' });
+    const edit = (projectId: string, checkProjectWrite: () => void) =>
+      daemon.dispatchMachineRpc(
+        {
+          workspaceId: workspace,
+          machineId: 'machine',
+          method: 'plugin/control',
+          params: {
+            pluginId: id,
+            action: 'configure-many',
+            projectId,
+            changes: { format: 'collaborator' },
+          },
+        },
+        { userId: 'collaborator', machineOwner: false, projectId: 'a', checkProjectWrite }
+      );
+    await expect(edit('b', () => {})).rejects.toThrow('Owner required');
+    await expect(edit('a', () => {})).rejects.toThrow('Owner required');
+    expect(projects().a).toEqual({ format: 'a' });
     expect(JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'))[0].preferences).toEqual({
       channel: 'test',
       topic: 'test',
     });
   } finally {
     await daemon.dispose();
+    await repo.destroy();
     await rm(root, { force: true, recursive: true });
   }
 });
@@ -245,6 +348,7 @@ it('reports an uncommitted disable without advertising it when catalog replaceme
       JSON.stringify([
         {
           current: {
+            provenance: { kind: 'local', origin: 'dir' },
             directory: root,
             manifest: {
               id: 'demo',
@@ -435,7 +539,12 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
           dev: false,
           source: 'missing',
           preferences: { autoVerify: false },
-          current: { ...compiled, directory, machineEntry: join(directory, 'machine.js') },
+          current: {
+            provenance: { kind: 'local', origin: 'dir' },
+            ...compiled,
+            directory,
+            machineEntry: join(directory, 'machine.js'),
+          },
         },
       ])
     );
@@ -443,7 +552,6 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     if (!compiled.machineDigest) throw Error('No staged machine digest');
     const approval = {
       action: 'grant' as const,
-      installationId,
       plugin_id: pluginId,
       machineDigest: compiled.machineDigest,
       targetDevice: owner.identity.signingPublicKey,
@@ -457,7 +565,8 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
       allowed_ops: ['sessions.create'] as 'sessions.create'[],
     };
     expect(await owner.issue(daemon, approval, projectExists)).toEqual({
-      type: 'plugin/declared-workflow-grant',
+      type: 'plugin/control',
+      action: 'manage-workflow-grant',
       active: true,
     });
     await daemon.dispose();
@@ -499,6 +608,18 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     await daemon.dispatch({ action: 'disable', pluginId });
     expect(renewed?.isCurrent()).toBe(false);
     expect(await daemon.workflowLease(pluginId, instance)).toBeUndefined();
+    await daemon.dispose();
+    const catalogPath = join(f.directory, 'catalog.json');
+    const persisted = JSON.parse(await readFile(catalogPath, 'utf8'));
+    persisted[0].enabled = true;
+    const { action: _, ...signed } = approval;
+    persisted[0].declaredGrant = { ...signed, installationId, signature: restored };
+    await writeFile(catalogPath, JSON.stringify(persisted));
+    daemon = open();
+    await daemon.start();
+    const restarted = await daemon.dispatch({ action: 'inspect', pluginId });
+    expect(restarted.instanceId).toEqual(expect.any(Number));
+    expect(await daemon.activeWorkflowLease(pluginId)).toBeUndefined();
   } finally {
     await daemon.dispose();
     await owner.close();
@@ -557,7 +678,12 @@ it('workflow contribution processes belong to the enabled generation and receive
     await writeFile(
       join(root, 'catalog.json'),
       JSON.stringify([
-        { enabled: true, source: root, dev: false, current: { directory, manifest } },
+        {
+          enabled: true,
+          source: root,
+          dev: false,
+          current: { provenance: { kind: 'local', origin: 'dir' }, directory, manifest },
+        },
       ])
     );
     await daemon.start();
@@ -629,28 +755,30 @@ it('admits verifier lineage only for the approved project, signed parent turn an
         request: {
           workspaceId,
           machineId,
-          method: 'plugin/declared-workflow-grant',
+          method: 'plugin/control',
           params: {
-            plugin_id: pluginId,
-            installationId,
-            machineDigest,
-            grant_id: randomUUID(),
-            workspace_id: workspaceId,
-            machine_id: machineId,
-            issued_by_user_id: receipt.signer,
-            issued_at_ms: Date.now(),
-            allowed_project_ids: [projectId],
-            allowed_role_ids: [roleId],
-            targetDevice: fixture.identity.signingPublicKey,
-            action: 'grant',
-            allowed_ops: [
-              'sessions.create',
-              'sessions.respondInteraction',
-              'sessions.send',
-              'sessions.requestStop',
-              'sessions.requestArchive',
-              'sessionFork',
-            ],
+            action: 'manage-workflow-grant',
+            grant: {
+              plugin_id: pluginId,
+              machineDigest,
+              grant_id: randomUUID(),
+              workspace_id: workspaceId,
+              machine_id: machineId,
+              issued_by_user_id: receipt.signer,
+              issued_at_ms: Date.now(),
+              allowed_project_ids: [projectId],
+              allowed_role_ids: [roleId],
+              targetDevice: fixture.identity.signingPublicKey,
+              action: 'grant',
+              allowed_ops: [
+                'sessions.create',
+                'sessions.respondInteraction',
+                'sessions.send',
+                'sessions.requestStop',
+                'sessions.requestArchive',
+                'sessionFork',
+              ],
+            },
           },
         },
       })
@@ -1000,7 +1128,12 @@ it('restores Issue Context pins from host storage without sharing pins across pr
           enabled: true,
           dev: false,
           source: 'unavailable',
-          current: { ...compiled, directory: stage, machineEntry: join(stage, 'machine.js') },
+          current: {
+            provenance: { kind: 'local', origin: 'dir' },
+            ...compiled,
+            directory: stage,
+            machineEntry: join(stage, 'machine.js'),
+          },
         },
       ])
     );

@@ -20,11 +20,12 @@ export class PluginDaemon {
     vault?: import('./plugin-machine-config').MachineConfigVault,
     dispatch?: DispatchMachineHostCall,
     worker?: string,
-    readmit?: (frame: Parameters<PluginDaemon['event']>[0]) => Promise<boolean>
+    readmit?: (frame: Parameters<PluginDaemon['event']>[0]) => Promise<boolean>,
+    projectStore?: ReturnType<typeof import('./project-config-store').projectConfigStore>
   ) {
     this.state = new PluginStateStore(root);
     this.runtime = ManagedRuntime.make(
-      registryLayer(root, workspaceId, machineId, warn, vault).pipe(
+      registryLayer(root, workspaceId, machineId, warn, vault, this.state, projectStore).pipe(
         Layer.provideMerge(
           Layer.merge(
             makePluginHostLayer(
@@ -110,10 +111,16 @@ export class PluginDaemon {
     return this.runtime.runPromise(Effect.map(Registry, (r) => r.workflow.provider(id, agent)));
   }
   sessionTools() {
-    return this.runtime.runPromise(Effect.map(Registry, r => r.sessionTools()));
+    return this.runtime.runPromise(Effect.map(Registry, (r) => r.sessionTools()));
   }
-  invokeSessionTool(name: string, input: Extract<HostToChildFrame, {type: 'invoke'}>['input'], turn: import('./workflow/plugin-registry').PluginToolTurn) {
-    return this.runtime.runPromise(Effect.flatMap(Registry, r => r.invokeSessionTool(name, input, turn)));
+  invokeSessionTool(
+    name: string,
+    input: Extract<HostToChildFrame, { type: 'invoke' }>['input'],
+    turn: import('./workflow/plugin-registry').PluginToolTurn
+  ) {
+    return this.runtime.runPromise(
+      Effect.flatMap(Registry, (r) => r.invokeSessionTool(name, input, turn))
+    );
   }
   async workflowCatalog() {
     return this.runtime.runPromise(Effect.map(Registry, (r) => r.workflow.catalog()));
@@ -144,9 +151,43 @@ export class PluginDaemon {
       { signal }
     );
   }
+  installOwnerNpm(
+    entry: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry,
+    signal: AbortSignal,
+    admit: () => void
+  ) {
+    return this.runtime.runPromise(
+      Effect.flatMap(Registry, (r) => r.installOwnerNpm(entry, signal, admit)),
+      { signal }
+    );
+  }
+  reconcileOwnerPin(
+    entry: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry,
+    owner: string,
+    signal: AbortSignal,
+    verify: () => Promise<() => void>
+  ) {
+    return this.runtime.runPromise(
+      Effect.flatMap(Registry, (r) => r.reconcileOwnerPin(entry, owner, signal, verify)),
+      { signal }
+    );
+  }
+  async activateProposal(
+    meta: import('@lody/shared/plugins/proposal').PluginProposalMeta,
+    path: string,
+    signal?: AbortSignal
+  ) {
+    await this.ready;
+    signal?.throwIfAborted();
+    return this.runtime.runPromise(
+      Effect.flatMap(Registry, (r) => r.activateProposal(meta, path)),
+      { signal }
+    );
+  }
   event(
     frame: Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'>,
-    admit?: () => Promise<boolean>
+    admit?: () => Promise<boolean>,
+    projectStore?: ReturnType<typeof import('./project-config-store').projectConfigStore>
   ) {
     return this.runtime.runPromise(Effect.flatMap(PluginHost, (h) => h.broadcast(frame, admit)));
   }

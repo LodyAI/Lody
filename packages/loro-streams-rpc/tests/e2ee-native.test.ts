@@ -488,21 +488,23 @@ describe('trusted-host encrypted dispatch originals', () => {
       request: {
         workspaceId: f.workspaceId,
         machineId: f.machineId,
-        method: 'plugin/declared-workflow-grant',
+        method: 'plugin/control',
         params: {
-          plugin_id: 'architect',
-          grant_id: '00000000-0000-4000-8000-000000000002',
-          workspace_id: f.workspaceId,
-          machine_id: f.machineId,
-          issued_by_user_id: signer,
-          issued_at_ms: Date.now(),
-          allowed_project_ids: ['selected'],
-          allowed_role_ids: '*',
-          allowed_ops: ['sessions.create'],
-          installationId: '00000000-0000-4000-8000-000000000001',
-          machineDigest: 'aa'.repeat(32),
-          targetDevice,
-          action: 'grant',
+          action: 'manage-workflow-grant',
+          grant: {
+            plugin_id: 'architect',
+            grant_id: '00000000-0000-4000-8000-000000000002',
+            workspace_id: f.workspaceId,
+            machine_id: f.machineId,
+            issued_by_user_id: signer,
+            issued_at_ms: Date.now(),
+            allowed_project_ids: ['selected'],
+            allowed_role_ids: '*',
+            allowed_ops: ['sessions.create'],
+            machineDigest: 'aa'.repeat(32),
+            targetDevice,
+            action: 'grant',
+          },
         },
       },
     });
@@ -569,16 +571,17 @@ describe('trusted-host encrypted dispatch originals', () => {
     await expect(Effect.runPromise(codec.prepareFeature(ownerCall))).rejects.toThrow(
       'e2ee_machine_not_owned'
     );
-    expect(
-      E2eeFeatureInputSchema.safeParse({
-        ...input,
-        request: {
-          ...base,
-          method: 'plugin/control',
-          params: { pluginId: 'sample', action: 'reload' },
-        },
-      }).success
-    ).toBe(false);
+    const control = E2eeFeatureInputSchema.parse({
+      ...input,
+      request: {
+        ...base,
+        method: 'plugin/control',
+        params: { pluginId: 'sample', action: 'reload' },
+      },
+    });
+    await expect(Effect.runPromise(codec.prepareFeature(control))).rejects.toThrow(
+      'e2ee_machine_not_owned'
+    );
   });
 
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {

@@ -1,3 +1,6 @@
+import { getWorkspaceFlockDocId } from '@lody/shared';
+import { watchPluginOwnerDecisions } from '../plugins/owner-pin-reconciler';
+import { projectConfigStore } from '../plugins/project-config-store';
 import {
   resolveDeclaredWorkflow,
   bindDeclaredGrantActor,
@@ -18,6 +21,7 @@ import { MachineRuntime } from '@/lib/machine-runtime';
 import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
 import { Logger } from '@/utils/logger';
 import {
+  getServerNow,
   CliType,
   getScheduleRoomId,
   getSessionRoomId,
@@ -136,6 +140,7 @@ export class Lody {
   private cleanedUp = false;
   private startingEncryptedHost?: PluginDaemon;
   private encryptedPlugin?: Promise<PluginDaemon>;
+  private stopPluginSync?: () => void;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
   private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
   private startReceipt?: Promise<void>;
@@ -392,7 +397,6 @@ export class Lody {
         a.action !== 'grant' ||
         !a.allowed_ops.includes('sessions.create') ||
         a.plugin_id !== id ||
-        a.installationId !== installation ||
         a.machineDigest !== lease.machineDigest ||
         a.targetDevice !== identity.signingPublicKey ||
         (a.allowed_role_ids !== '*' && !a.allowed_role_ids.includes(role)) ||
@@ -443,10 +447,74 @@ export class Lody {
           )
             throw new Error('Plugin host unavailable');
           signal?.throwIfAborted();
+          if (request.method === 'plugin/control' && request.params.action === 'resolve-proposal') {
+            const decision = request.params.decision;
+            if (
+              !actor.machineOwner ||
+              !actor.userId ||
+              request.workspaceId !== this.workspaceId ||
+              request.machineId !== this.machineId
+            )
+              throw Error('Owner required');
+            const { decidePluginProposal, proposalLedgerDir } =
+              await import('./plugin-proposal-decision');
+            const { pluginProposalMetaSchema } = await import('@lody/shared/plugins/proposal');
+            const session = await documentManager.getOrCreateSessionDoc(
+              decision.sessionId as import('@lody/shared').SessionId
+            );
+            const { createSessionBackend } = await import('../session/session-backend');
+            const backend = await createSessionBackend(session);
+            if (backend.kind !== 'loro')
+              throw Error('Proposal decision unavailable for history backend');
+            const turnId = `plugin-proposal-${decision.requestId}`;
+            const read = async () => {
+              const row = await backend.readTurn(turnId);
+              if (
+                row.state !== 'ready' ||
+                row.turn.role !== 'system' ||
+                row.turn.items?.length !== 1
+              )
+                throw Error('Proposal card missing');
+              const item = row.turn.items[0];
+              if (
+                !item ||
+                typeof item !== 'object' ||
+                !('name' in item) ||
+                item.name !== 'plugin_proposal' ||
+                !('type' in item) ||
+                item.type !== 'system_notice' ||
+                !('meta' in item)
+              )
+                throw Error('Invalid proposal card');
+              return { turn: row.turn, meta: pluginProposalMetaSchema.parse(item.meta) };
+            };
+            return decidePluginProposal({
+              root: proposalLedgerDir(),
+              workspaceId: request.workspaceId,
+              machineId: request.machineId,
+              actor,
+              params: decision,
+              signal,
+              now: getServerNow,
+              readCard: async () => (await read()).meta,
+              updateCard: async (meta) => {
+                const { turn } = await read();
+                await session.sessionData.commands.replaceTurn(turnId, {
+                  ...turn,
+                  items: [{ type: 'system_notice', name: 'plugin_proposal', meta }],
+                });
+                await documentManager.repo.flush();
+              },
+              activate: (meta, path) => daemon.activateProposal(meta, path, signal),
+            });
+          }
           const identity = this.encryptedWorkspace;
-          if (request.method === 'plugin/declared-workflow-grant')
+          if (
+            request.method === 'plugin/control' &&
+            request.params.action === 'manage-workflow-grant'
+          )
             actor = await bindDeclaredGrantActor({
-              request,
+              params: request.params.grant,
               actor,
               identity,
               machineId: this.machineId,
@@ -546,10 +614,7 @@ export class Lody {
   }
 
   private async startRuntime(): Promise<void> {
-    // Warm the login-shell env probe (~100-300ms) concurrently with startup so
-    // synchronous terminal environment callbacks usually read a populated PATH.
-    // ACP startup awaits the same cached probe before spawning. The Legacy cache
-    // retains and reports failures; launchers receive them on later reads.
+    // Warm PATH for synchronous terminal callbacks; launchers still observe cached probe failures.
     void getLoginShellEnvLegacy().catch(() => undefined);
     await traceAsync(
       this.logger,
@@ -595,7 +660,8 @@ export class Lody {
           identityPluginVault(root),
           encryptedPluginDispatch(composeMachineHostDispatch(resolve)),
           undefined,
-          (frame) => this.admitPluginEvent(frame)
+          (frame) => this.admitPluginEvent(frame),
+          projectConfigStore(() => this.documentManager, this.workspaceId, this.machineId)
         );
         this.startingEncryptedHost = host;
         const stop = () => {
@@ -604,6 +670,9 @@ export class Lody {
         identity.pluginAuthoritySignal.addEventListener('abort', stop, { once: true });
         try {
           await host.start();
+          void this.watchOwnerPins(host, identity).catch(() =>
+            this.logger.warn('Workspace plugin sync unavailable')
+          );
           return host;
         } catch (error) {
           this.startingEncryptedHost = undefined;
@@ -624,6 +693,35 @@ export class Lody {
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
 
+  private async watchOwnerPins(
+    host: import('../plugins/plugin-host-legacy').PluginDaemon,
+    identity: CliE2eeWorkspaceLegacy
+  ) {
+    const room = await this.documentManager.repo.openFlockDoc(
+      getWorkspaceFlockDocId(this.workspaceId)
+    );
+    const pins = watchPluginOwnerDecisions({
+      flock: room.flock,
+      owner: this.userId,
+      machine: this.machineId,
+      signal: identity.pluginAuthoritySignal,
+      verify: identity.verifyOwnerPin,
+      installed: async (id) =>
+        (
+          (await host.dispatch({ action: 'list' })) as { plugins: { pluginId: string }[] }
+        ).plugins.some((p) => p.pluginId === id),
+      install: (pin, signal, verify) => host.reconcileOwnerPin(pin, this.userId, signal, verify),
+      flush: () => this.documentManager.repo.flush(),
+      warn: () => this.logger.warn('Owner plugin sync deferred'),
+    });
+    this.stopPluginSync = pins.stop;
+    if (this.cleanedUp || identity.pluginAuthoritySignal.aborted) this.stopPluginSync();
+    else {
+      identity.pluginAuthoritySignal.addEventListener('abort', this.stopPluginSync, { once: true });
+      void pins.refresh();
+    }
+  }
+
   async registerAgent(cliTypes: CliType[]): Promise<void> {
     if (this.cleanedUp) {
       return;
@@ -639,8 +737,7 @@ export class Lody {
         `[agent-config] Initial meta sync is not complete for workspace ${this.workspaceId}; deferring builtin agent registration`
       );
       let detachMetaSyncedListener: (() => void) | null = null;
-      // Both the meta-synced listener and the initial-sync promise below can
-      // fire for the same sync; run the registration exactly once.
+      // The listener and initial-sync promise can signal the same sync.
       let registered = false;
       const registerAfterMetaSync = async () => {
         detachMetaSyncedListener?.();
@@ -800,6 +897,7 @@ export class Lody {
   stopNewIdentityRestoreDispatch = () => this.runtime.stopNewIdentityRestoreDispatch();
 
   cleanup = async () => {
+    this.stopPluginSync?.();
     this.cleanedUp = true;
     if (this.builtinAgentConfigRetryTimer) {
       clearTimeout(this.builtinAgentConfigRetryTimer);
@@ -819,7 +917,9 @@ export class Lody {
     }
   };
 
-  async dispatchEncryptedPluginControl(command: unknown) {
+  async dispatchEncryptedPluginControl(
+    command: import('../plugins/plugin-control-approval').PluginControlEnvelope['command']
+  ) {
     const identity = this.encryptedWorkspace;
     const host = await this.encryptedPlugin;
     if (
@@ -830,6 +930,31 @@ export class Lody {
       identity.pluginAuthoritySignal.aborted
     )
       throw Error('Encrypted plugin owner unavailable');
+    if (command.action === 'install-npm') {
+      const current = await identity.authorizeWorkspacePluginInstall();
+      const { inspectPinnedNpmPackage } = await import('../plugins/plugin-package');
+      const { entry } = await inspectPinnedNpmPackage(command.path, command.source);
+      if (JSON.stringify(entry.permissions) !== JSON.stringify(command.permissions))
+        throw Error('npm permission disclosure changed');
+      const { getWorkspaceFlockDocId, writeWorkspacePluginToFlock } = await import('@lody/shared');
+      const docId = getWorkspaceFlockDocId(this.workspaceId);
+      await this.documentManager.syncFlockDocOrThrow(docId, {
+        timeoutMs: 10_000,
+        reason: 'workspace-npm-install',
+      });
+      const handle = await this.documentManager.repo.openFlockDoc(docId);
+      identity.pluginAuthoritySignal.throwIfAborted();
+      if (!current()) throw Error('Workspace plugin installation forbidden');
+      const result = await host.installOwnerNpm(entry, identity.pluginAuthoritySignal, () => {
+        if (!current()) throw Error('Workspace plugin installation forbidden');
+      });
+      identity.pluginAuthoritySignal.throwIfAborted();
+      if (!current() || this.cleanedUp || this.encryptedRevocation)
+        throw Error('Encrypted plugin owner unavailable');
+      writeWorkspacePluginToFlock(handle.flock, entry);
+      await this.documentManager.repo.flush();
+      return result;
+    }
     return host.dispatch(command);
   }
   async dispatchLocalControl(

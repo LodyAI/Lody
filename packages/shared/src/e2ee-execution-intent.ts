@@ -20,6 +20,7 @@ export const E2EE_INTENT_KIND = {
   /** An input this machine wrote itself: derived work, a scheduled run, an automation. */
   machineInput: 2,
   /** A schedule's definition or manual run, signed by whoever set it. */
+  pluginOwnerSync: 4,
   scheduleDeclaration: 3,
 } as const;
 export type E2eeIntentKind = (typeof E2EE_INTENT_KIND)[keyof typeof E2EE_INTENT_KIND];
