@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -34,9 +34,8 @@ export type MobileSettingsLayoutProps = {
  * The settings chrome: the drill header, the scroll region, and the safe-area
  * padding the last row needs.
  *
- * The safe-area insets are Konsta's `--k-safe-area-*` variables, added to the
- * theme's own spacing step — the same expressions Konsta's `pt-safe-*` and
- * `pb-safe-*` utilities resolve to.
+ * The safe-area insets are the `--k-safe-area-*` variables from
+ * `style/theme-defaults.css`, added to the theme's own spacing step.
  */
 const styles = stylex.create({
   foldHidden: { overflow: 'hidden' },
@@ -248,7 +247,7 @@ function SettingsInnerBody({ children, hasMounted }: { children: ReactNode; hasM
   return (
     <div
       {...bodyProps}
-      className={clsx(
+      className={cn(
         bodyProps.className,
         entrance === 'push' && 'mobile-drill-in',
         entrance === 'reveal' && 'mobile-drill-reveal'

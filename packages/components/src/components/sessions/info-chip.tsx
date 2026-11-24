@@ -1,7 +1,7 @@
 import { useRef, useState, type ComponentType, type ReactNode, type SVGProps } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Popover } from '@lody/ui/popover';
 import { INFO_BAR_TEXT_CLASS } from './info-bar-type';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -177,7 +177,7 @@ export function ActionChip({
       title={label}
       onClick={onAction}
       {...chipProps}
-      className={clsx(
+      className={cn(
         chipProps.className,
         INFO_BAR_TEXT_CLASS,
         textClassName ?? stylex.props(styles.chipTextMuted).className
@@ -224,7 +224,7 @@ export function PopoverActionChip({
             aria-label={label}
             title={label}
             {...chipProps}
-            className={clsx(
+            className={cn(
               chipProps.className,
               INFO_BAR_TEXT_CLASS,
               stylex.props(open ? styles.chipTextForeground : styles.chipTextMuted).className
@@ -276,7 +276,7 @@ export function ClusterChip({
       title={label}
       onClick={onPromote}
       {...chipProps}
-      className={clsx(
+      className={cn(
         chipProps.className,
         INFO_BAR_TEXT_CLASS,
         textClassName ?? stylex.props(styles.chipTextMuted).className
@@ -329,7 +329,7 @@ export function StageChip({
   const iconBadge = iconOverride ?? (
     <span
       {...iconBadgeProps}
-      className={clsx(
+      className={cn(
         iconBadgeProps.className,
         INFO_BAR_TEXT_CLASS,
         textClassName ?? stylex.props(styles.chipTextMuted).className
@@ -352,7 +352,7 @@ export function StageChip({
     isInteractive && styles.summaryInteractive,
     detail?.kind === 'popover' && popoverOpen && styles.summaryOpen
   );
-  const summaryClassName = clsx(
+  const summaryClassName = cn(
     summaryStyleProps.className,
     INFO_BAR_TEXT_CLASS,
     textClassName ?? stylex.props(styles.chipTextMuted).className

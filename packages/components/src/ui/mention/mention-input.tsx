@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { composeEventHandlers, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import { createEmptyHistoryState, registerHistory } from '@lexical/history';
@@ -227,7 +227,7 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
 
 /**
  * Copy the UA placeholder paint of a textarea styled like the editor. The
- * editor paints its placeholder as a `::before` (`tailwind/index.css`), and
+ * editor paints its placeholder as a `::before` (`style/index.css`), and
  * WebKit reports no computed style for `::placeholder`, so the colour is
  * probed from a real textarea and forwarded via `--composer-placeholder-color`.
  */
@@ -1370,10 +1370,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   const containerProps = stylex.props(inputStyles.container, containerXstyle);
   const inputStyleProps = stylex.props(inputStyles.input, xstyle);
   return (
-    <div
-      className={clsx(containerProps.className, containerClassName)}
-      style={containerProps.style}
-    >
+    <div className={cn(containerProps.className, containerClassName)} style={containerProps.style}>
       <div
         role="combobox"
         id={context.inputId}
@@ -1398,7 +1395,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         data-empty={paint.empty ? '' : undefined}
         data-system-selection={mirrorSelection ? '' : undefined}
         data-disabled={disabled ? '' : undefined}
-        className={clsx(inputStyleProps.className, className)}
+        className={cn(inputStyleProps.className, className)}
         style={
           {
             ...inputStyleProps.style,

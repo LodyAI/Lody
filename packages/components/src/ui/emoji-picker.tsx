@@ -13,7 +13,7 @@ import { control, corner, text } from '@lody/ui/tokens/scales.stylex';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   themeFontSize,
   themeLineHeight,
@@ -171,7 +171,7 @@ function EmojiPicker({
   const sx = stylex.props(styles.root, xstyle);
   return (
     <EmojiPickerPrimitive.Root
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       data-slot="emoji-picker"
       {...props}
@@ -187,7 +187,7 @@ function EmojiPickerSearch({
   const sx = stylex.props(styles.searchWrapper, xstyle);
   return (
     <div
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style}
       data-slot="emoji-picker-search-wrapper"
     >
@@ -214,7 +214,7 @@ function EmojiPickerEmoji({ emoji, className, ...props }: EmojiPickerListEmojiPr
   return (
     <button
       {...props}
-      className={clsx(stylex.props(styles.emoji).className, className)}
+      className={cn(stylex.props(styles.emoji).className, className)}
       data-slot="emoji-picker-emoji"
     >
       {emoji.emoji}
@@ -250,7 +250,7 @@ function EmojiPickerContent({
   const sx = stylex.props(styles.viewport, xstyle);
   return (
     <EmojiPickerPrimitive.Viewport
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       data-slot="emoji-picker-viewport"
       {...props}
@@ -290,7 +290,7 @@ function EmojiPickerFooter({
   const sx = stylex.props(styles.footer, xstyle);
   return (
     <div
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       data-slot="emoji-picker-footer"
       {...props}

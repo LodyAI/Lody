@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
@@ -58,7 +58,7 @@ import {
 import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 
 /* Duration of the level slide. Keep in sync with the
-   `.mobile-drill-out` keyframe in `tailwind/index.css`. */
+   `.mobile-drill-out` keyframe in `style/index.css`. */
 const MOBILE_DRILL_EXIT_MS = 280;
 
 /* The bottom tab bar floats fixed over the viewport, so the scrollable
@@ -312,7 +312,7 @@ export const MobileProjectFileBrowser = forwardRef<
   }, [onScrollActivity, topPath]);
 
   return (
-    <div className={clsx(stylex.props(styles.root).className, className)}>
+    <div className={cn(stylex.props(styles.root).className, className)}>
       {/* The breadcrumb sits at the top of the body (not in the screen
           header) and is shared across every level — the levels slide
           beneath it. Hidden at the root: the project header already
@@ -332,7 +332,7 @@ export const MobileProjectFileBrowser = forwardRef<
               key={frameKey(frame)}
               ref={isTop ? topFrameRef : undefined}
               aria-hidden={!isTop}
-              className={clsx(
+              className={cn(
                 stylex.props(styles.frame, !isTop && styles.inactiveFrame).className,
                 index > 0 && 'mobile-drill-in'
               )}
@@ -412,7 +412,7 @@ function FilesBreadcrumb({
                 type="button"
                 disabled={isLast}
                 onClick={() => onNavigateSegment(index)}
-                className={clsx(
+                className={cn(
                   stylex.props(styles.crumbButton, isLast && styles.currentCrumb).className,
                   !isLast && stylex.props(styles.ancestorCrumb).className
                 )}
@@ -574,7 +574,7 @@ function MobileDirectoryList({
 
   return (
     <div
-      className={clsx(stylex.props(styles.directoryScroller).className, bottomClearanceClassName)}
+      className={cn(stylex.props(styles.directoryScroller).className, bottomClearanceClassName)}
       onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
     >
       {resolved.children.map((item, index) => (
@@ -609,7 +609,7 @@ function FileRow({
         <FileIcon filePath={item.path} {...stylex.props(styles.fileIcon)} />
       )}
       <span
-        className={clsx(
+        className={cn(
           stylex.props(styles.fileName, item.modified && styles.modifiedName).className
         )}
       >
@@ -696,7 +696,7 @@ function MobileFilePreview({
   if (snapshot.kind === 'binary') {
     if (getVideoMimeTypeForPath(path) && snapshot.bytes !== undefined) {
       return (
-        <div className={clsx(stylex.props(videoStyles.frame).className, bottomClearanceClassName)}>
+        <div className={cn(stylex.props(videoStyles.frame).className, bottomClearanceClassName)}>
           <SessionFileVideoPreview path={path} bytes={snapshot.bytes} />
         </div>
       );
@@ -783,7 +783,7 @@ function MobileImagePreview({
   readonly bottomClearanceClassName: string;
 }) {
   return (
-    <div className={clsx(stylex.props(styles.preview).className, bottomClearanceClassName)}>
+    <div className={cn(stylex.props(styles.preview).className, bottomClearanceClassName)}>
       <SessionFileImagePreview path={path} bytes={bytes} svgText={svgText} />
     </div>
   );
@@ -821,7 +821,7 @@ function MobileTextPreview({
 
   if (/\.(?:html|htm)$/iu.test(path) && !truncated) {
     return (
-      <div className={clsx(stylex.props(htmlStyles.root).className, bottomClearanceClassName)}>
+      <div className={cn(stylex.props(htmlStyles.root).className, bottomClearanceClassName)}>
         <div {...stylex.props(htmlStyles.toolbar)}>
           <Button
             variant="ghost"
@@ -887,7 +887,7 @@ function MobileTextPreview({
   if (isSessionMarkdownPath(path)) {
     return (
       <div
-        className={clsx(stylex.props(styles.markdownScroller).className, bottomClearanceClassName)}
+        className={cn(stylex.props(styles.markdownScroller).className, bottomClearanceClassName)}
         data-text-selectable
         onScroll={(event) => onScrollActivity?.(event.currentTarget.scrollTop)}
       >
@@ -900,7 +900,7 @@ function MobileTextPreview({
 
   if (isSessionFileShikiLanguage(language)) {
     return (
-      <div className={clsx(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
+      <div className={cn(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
         <SessionShikiTextViewer
           key={path}
           path={path}
@@ -913,7 +913,7 @@ function MobileTextPreview({
   }
 
   return (
-    <div className={clsx(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
+    <div className={cn(stylex.props(styles.codePreview).className, bottomClearanceClassName)}>
       <LazySessionMonacoTextViewer
         key={path}
         text={text}
@@ -949,7 +949,7 @@ function StatusPanel({
 }) {
   return (
     <div
-      className={clsx(
+      className={cn(
         stylex.props(styles.status, tone === 'destructive' && styles.errorStatus).className
       )}
     >

@@ -3,6 +3,7 @@ export type OpenSourceAttributionKind = 'package' | 'vendored';
 export type OpenSourceAttributionScope =
   | 'production-dependency'
   | 'bundled-theme'
+  | 'compiled-webassembly'
   | 'vendored-icon-set'
   | 'vendored-source';
 

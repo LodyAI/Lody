@@ -689,7 +689,7 @@ effect 里，列表因此同步 commit，又一次上报 0。大多数 tab 在�
   - `packages/virtua/src/core/store.ts`、`observer.ts`、`layouts/list.ts`、`src/react/Virtualizer.tsx`；
   - `packages/shared/src/session-data/history-actions.ts`；
   - `apps/electron/src/renderer/src/warm-window-reveal.ts`；
-  - `packages/components/src/tailwind/index.css`（`.chat-scrollbar`）。
+  - `packages/components/src/style/index.css`（`.chat-scrollbar`）。
 - 已执行的探针（固定行高，均非浏览器复现）：
   - 作者会话（`5d8fa2ca`）的 store 层探针：keyed 行高 100px、视口 300px、offset 500、无 overscan。同 offset 的 scroll 之后范围停在
     `[8, 10]`，而视口实际显示 `[5, 7]`；

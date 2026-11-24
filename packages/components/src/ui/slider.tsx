@@ -2,7 +2,7 @@ import { control, focus } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as React from 'react';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeRadius, themeShadow, themeSpace } from '../style/theme-scale.stylex';
@@ -68,7 +68,7 @@ const styles = stylex.create({
  * and value, and a touch target that behaves the way the OS expects. Only the
  * track and thumb are ours.
  *
- * Two rules in `tailwind/index.css` have to be worked around by hand, and both
+ * Two rules in `style/index.css` have to be worked around by hand, and both
  * are why this is a primitive instead of an inline input:
  *
  * - The "Pro focus style" paints `box-shadow: inset 0 0 0 1px` on ANY focused
@@ -114,7 +114,7 @@ export const Slider = React.forwardRef<HTMLInputElement, SliderProps>(function S
       disabled={disabled}
       onChange={(event) => onValueChange(Number(event.target.value))}
       style={{ ...style, '--lody-slider-fill': `${fill}%` } as React.CSSProperties}
-      className={clsx(stylex.props(styles.input).className, className)}
+      className={cn(stylex.props(styles.input).className, className)}
       {...props}
     />
   );

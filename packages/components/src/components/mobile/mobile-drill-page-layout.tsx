@@ -44,7 +44,7 @@ export type MobileDrillPageLayoutProps = {
 };
 
 /* Exit slide and reveal duration. Keep in sync with `.mobile-drill-reveal`
-   in `tailwind/index.css`. */
+   in `style/index.css`. */
 const MOBILE_DRILL_EXIT_MS = 280;
 /* Same curve as `.mobile-drill-in` / `.mobile-drill-reveal`. */
 const MOBILE_DRILL_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
@@ -198,7 +198,7 @@ export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayou
         <div
           ref={layoutRef}
           /* `safe-areas` opts into the `--k-safe-area-*` CSS variables
-             (defined in `tailwind/theme-defaults.css`) for every
+             (defined in `style/theme-defaults.css`) for every
              descendant. Without it the vars stay 0px and the
              headers/content end up tucked under the notch on iOS. The
              home screen does the same opt-in on its root container —

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { LockKeyhole, MonitorPlay, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -496,7 +496,7 @@ export function SessionInfoBar({
   );
   const surfaceProps = {
     ...surfaceStyleProps,
-    className: clsx(surfaceStyleProps.className, INFO_BAR_TEXT_CLASS),
+    className: cn(surfaceStyleProps.className, INFO_BAR_TEXT_CLASS),
   };
 
   const barProps = stylex.props(styles.bar, protectFromEdgeBackZone && styles.barEdgeGuard);
@@ -529,7 +529,7 @@ export function SessionInfoBar({
               <LockKeyhole {...stylex.props(styles.privateAccessGlyph)} aria-hidden="true" />
               <span
                 {...privateAccessLabelProps}
-                className={clsx(
+                className={cn(
                   privateAccessLabelProps.className,
                   compactMachineInfo && stylex.props(styles.compactPrivateLabel).className
                 )}

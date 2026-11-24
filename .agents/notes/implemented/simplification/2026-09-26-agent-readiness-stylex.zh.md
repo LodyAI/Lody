@@ -24,7 +24,7 @@ Storybook 场景在迁移前后的对比均为零像素差异。产品主题的 
 下一层迁移调用方时，可由标记的 `surface="avatar"` 属性选择这两条规则。默认 tile
 保留 40% 的浅色混合，外部 `className` 仍可用于调用方布局。
 
-旋转关键帧从 `tailwind/index.css` 移入组件。不定进度的 SVG 仍放在带动画的 HTML
+旋转关键帧从 `style/index.css` 移入组件。不定进度的 SVG 仍放在带动画的 HTML
 `span` 内，维持[旋转动画决策](../bug-fix/2026-09-13-spinner-off-svg-retina-composite.md)
 记录的 Retina 合成约束。调用方可选的 `className` 仍作用于外层标记，用于布局。
 

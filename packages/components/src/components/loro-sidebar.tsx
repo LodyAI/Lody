@@ -1,7 +1,6 @@
 import { duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
-import { clsx } from 'clsx';
 import { EncryptedWorkspaceMark } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useTranslation } from 'react-i18next';
@@ -1038,7 +1037,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function GlassSurface({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={clsx(stylex.props(shellStyles.glass).className, className)}>
+    <div className={cn(stylex.props(shellStyles.glass).className, className)}>
       <div {...stylex.props(shellStyles.relative)}>{children}</div>
     </div>
   );
@@ -1110,7 +1109,7 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
         type="button"
         aria-label={label}
         aria-current={active ? 'page' : undefined}
-        className={clsx(
+        className={cn(
           stylex.props(
             sidebarSurface.iconButton,
             active && sidebarSurface.selected,
@@ -1198,7 +1197,7 @@ function NavButton({
       <button
         type="button"
         onClick={onClick}
-        className={clsx(
+        className={cn(
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
           SIDEBAR_ROW_TEXT_CLASS,
@@ -1239,7 +1238,7 @@ function NavButton({
         <span {...stylex.props(shellStyles.navLabel)}>{label}</span>
         {badge !== undefined && badge > 0 ? (
           <span
-            className={clsx(
+            className={cn(
               SIDEBAR_CAPTION_TEXT_CLASS,
               stylex.props(shellStyles.switcherMeta).className
             )}
@@ -1603,13 +1602,11 @@ export const LoroSidebar = memo(function LoroSidebar({
           />
         )}
       </div>
-      <p
-        className={clsx(SIDEBAR_CONTROL_TEXT_CLASS, stylex.props(shellStyles.emptyTitle).className)}
-      >
+      <p className={cn(SIDEBAR_CONTROL_TEXT_CLASS, stylex.props(shellStyles.emptyTitle).className)}>
         {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
       </p>
       <p
-        className={clsx(
+        className={cn(
           SIDEBAR_HELPER_TEXT_CLASS,
           stylex.props(shellStyles.emptyDescription).className
         )}
@@ -1697,7 +1694,7 @@ export const LoroSidebar = memo(function LoroSidebar({
     </>
   );
   const desktopWorkspaceRowClassName = (interactive: boolean) =>
-    clsx(
+    cn(
       SIDEBAR_ROW_TEXT_CLASS,
       stylex.props(
         sidebarSurface.row,
@@ -1708,7 +1705,7 @@ export const LoroSidebar = memo(function LoroSidebar({
       interactive && stylex.props(shellStyles.noFocusRing).className
     );
   const windowDrag = isElectron && !isElectronFullscreen;
-  const mobileWorkspaceIdentityClassName = clsx(
+  const mobileWorkspaceIdentityClassName = cn(
     SIDEBAR_CONTROL_TEXT_CLASS,
     stylex.props(
       shellStyles.identityMobile,
@@ -1733,7 +1730,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               isMobile ? (
                 <button
                   type="button"
-                  className={clsx(
+                  className={cn(
                     mobileWorkspaceIdentityClassName,
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
@@ -1747,7 +1744,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               ) : (
                 <button
                   type="button"
-                  className={clsx(
+                  className={cn(
                     desktopWorkspaceRowClassName(true),
                     windowDrag && WINDOW_DRAG_EXEMPT_CLASS
                   )}
@@ -1764,7 +1761,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         </div>
         <Menu.Content align="start" side={menuSide} {...stylex.props(shellStyles.switcherMenu)}>
           <Menu.GroupLabel
-            className={clsx(
+            className={cn(
               SIDEBAR_HELPER_TEXT_CLASS,
               stylex.props(shellStyles.groupLabelType).className
             )}
@@ -1776,7 +1773,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           {workspaces.length > 0 ? (
             <>
               <Menu.GroupLabel
-                className={clsx(
+                className={cn(
                   SIDEBAR_HELPER_TEXT_CLASS,
                   stylex.props(shellStyles.switcherMenuHeading).className
                 )}
@@ -1868,7 +1865,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                             // carries the richer plan/members line that used to
                             // need a separate header card.
                             <span
-                              className={clsx(
+                              className={cn(
                                 SIDEBAR_CAPTION_TEXT_CLASS,
                                 stylex.props(shellStyles.switcherMeta).className,
                                 stylex.props(shellStyles.clipped).className
@@ -1959,7 +1956,7 @@ export const LoroSidebar = memo(function LoroSidebar({
     <div
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
-      className={clsx(shellProps.className, className)}
+      className={cn(shellProps.className, className)}
       style={
         canResize
           ? {
@@ -2003,12 +2000,12 @@ export const LoroSidebar = memo(function LoroSidebar({
 
       <div id={mobileResize ? sidebarContentId : undefined} {...stylex.props(shellStyles.column)}>
         <div
-          className={clsx(
+          className={cn(
             stylex.props(
               shellStyles.header,
               isMobile ? shellStyles.headerMobile : shellStyles.headerDesktop
             ).className,
-            clsx(macTrafficLightRowPadClass, windowsCaptionRowPadClass),
+            cn(macTrafficLightRowPadClass, windowsCaptionRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
@@ -2040,7 +2037,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         </div>
 
         <div
-          className={clsx(
+          className={cn(
             // `gap-px` keeps navigation rows from painting as one fused block
             // when both are selected-adjacent or hover-highlighted.
             stylex.props(
@@ -2088,7 +2085,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 
         <ScrollArea
           viewportRef={scrollViewportRef}
-          className={clsx(
+          className={cn(
             stylex.props(
               shellStyles.scrollColumn,
               isMobile ? shellStyles.scrollColumnMobile : shellStyles.scrollColumnDesktop
@@ -2226,7 +2223,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                 {repoSections.map((section, sectionIndex) => (
                   <div key={section.id} {...stylex.props(shellStyles.repoGroup)}>
                     <div
-                      className={clsx(
+                      className={cn(
                         SIDEBAR_CONTROL_TEXT_CLASS,
                         stylex.props(shellStyles.repoHeader).className
                       )}
@@ -2247,7 +2244,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                           {section.items.map((item) => (
                             <li key={item.id} {...stylex.props(shellStyles.trayItem)}>
                               <div
-                                className={clsx(
+                                className={cn(
                                   SIDEBAR_ROW_TEXT_CLASS,
                                   stylex.props(
                                     shellStyles.repoRow,
@@ -2261,7 +2258,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                                 <span {...stylex.props(shellStyles.repoTitle)}>{item.title}</span>
                                 {item.ageLabel ? (
                                   <span
-                                    className={clsx(
+                                    className={cn(
                                       SIDEBAR_CAPTION_TEXT_CLASS,
                                       stylex.props(shellStyles.repoAge).className
                                     )}
@@ -2293,7 +2290,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 
         {bottomFloatingContent ? (
           <div
-            className={clsx(
+            className={cn(
               stylex.props(
                 shellStyles.floating,
                 isMobile ? shellStyles.floatingMobile : shellStyles.floatingDesktop
@@ -2305,7 +2302,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         ) : null}
 
         <div
-          className={clsx(
+          className={cn(
             getLoroSidebarFooterClassName(isMobile),
             !isMobile && stylex.props(footerStyles.desktop).className
           )}

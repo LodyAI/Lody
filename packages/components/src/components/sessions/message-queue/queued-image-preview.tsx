@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { runtimeAtom } from '@/atoms/runtime';
 import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
@@ -201,7 +201,7 @@ export function QueuedImagePreview({
                 setPreviewOpen(true);
               }}
               onPointerDown={(event) => event.stopPropagation()}
-              className={clsx(stylex.props(styles.trigger).className, className)}
+              className={cn(stylex.props(styles.trigger).className, className)}
               style={{ width: size, height: size }}
               aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
                 name: label,

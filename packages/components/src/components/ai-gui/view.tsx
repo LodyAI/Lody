@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { saveBytesAsFile } from '@/lib/download-file';
@@ -3828,7 +3828,7 @@ export const SessionChatStreamView = forwardRef<
                   // branch) pads the scroll content so the first message clears the
                   // header at rest while later content scrolls under it and blurs.
                   // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-                  viewportClassName={clsx(
+                  viewportClassName={cn(
                     'chat-scrollbar',
                     stylex.props(viewStyles.conversationViewport).className
                   )}
@@ -6191,17 +6191,17 @@ const activityTypography = stylex.create({
   footnote: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
 });
-const ACTIVITY_PROCESS_TEXT_CLASS = clsx(stylex.props(conversationSurface.processText).className);
-const ACTIVITY_STEP_BODY_CLASS = clsx(stylex.props(conversationSurface.processText).className);
+const ACTIVITY_PROCESS_TEXT_CLASS = cn(stylex.props(conversationSurface.processText).className);
+const ACTIVITY_STEP_BODY_CLASS = cn(stylex.props(conversationSurface.processText).className);
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
 /** A one-line process status ("Context compacted"): the group header's box and type. */
 const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
-  clsx(
+  cn(
     stylex.props(conversationSurface.processLine).className,
     isMobile
-      ? clsx(stylex.props(viewStyles.processLineMobile).className, ACTIVITY_PROCESS_TEXT_CLASS)
+      ? cn(stylex.props(viewStyles.processLineMobile).className, ACTIVITY_PROCESS_TEXT_CLASS)
       : stylex.props(activityTypography.body).className
   );
 
@@ -6280,7 +6280,7 @@ function ProcessDisclosureButton({
           conversationSurface.disclosure,
           isMobile && conversationSurface.mobileDisclosure
         ),
-        clsx('group', isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined)
+        cn('group', isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined)
       )}
       onClick={() => {
         const next = !expanded;
@@ -6410,7 +6410,7 @@ function ActivityProcessStep({
     <div
       {...withClassName(
         stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep),
-        clsx(ACTIVITY_PROCESS_TEXT_CLASS, className)
+        cn(ACTIVITY_PROCESS_TEXT_CLASS, className)
       )}
     >
       {icon ? <span {...stylex.props(viewStyles.activityStepIcon)}>{icon}</span> : null}
@@ -9037,7 +9037,7 @@ const CollapsibleCard = ({
       {...containerProps}
       {...withClassName(
         stylex.props(viewStyles.collapsibleContainer, containerStyles),
-        clsx(containerClassName, containerProps?.className)
+        cn(containerClassName, containerProps?.className)
       )}
     >
       <button
@@ -9052,7 +9052,7 @@ const CollapsibleCard = ({
               ? viewStyles.collapsibleCursorPointer
               : viewStyles.collapsibleCursorDefault
           ),
-          clsx('group', buttonClassName)
+          cn('group', buttonClassName)
         )}
         onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
@@ -9112,7 +9112,7 @@ const ThoughtCard = ({
       isCollapsible
       expanded={searchState.hasActive ? true : expanded}
       onExpandedChange={onExpandedChange}
-      containerClassName={clsx(
+      containerClassName={cn(
         searchState.hasMatched && SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
         searchState.hasActive && SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME
       )}

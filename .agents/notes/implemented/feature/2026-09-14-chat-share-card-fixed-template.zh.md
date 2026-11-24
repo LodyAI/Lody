@@ -103,7 +103,7 @@ body 上那条 important 的 `padding-block`——但能盖掉它的普通声明
 
 `ui/slider.tsx` 是新增的，而且用的是原生 range input 而不是库：平台已经提供了键盘步
 进、Home/End、正确的 ARIA role 与 value，以及符合系统预期的触摸目标，我们只负责轨道和
-滑块本身。`tailwind/index.css` 里有两条全局规则必须手工绕开，已记在
+滑块本身。`style/index.css` 里有两条全局规则必须手工绕开，已记在
 [该 primitive 的规则](../../../../packages/components/src/ui/AGENTS.md)里——"Pro focus
 style" 会把整个控件框起来，而 `*:focus-visible` 的重置会通过继承的自定义属性让 `ring-*`
 工具类在滑块上失效。

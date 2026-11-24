@@ -77,7 +77,7 @@ import {
   SidebarMachineOfflinePill,
   type SidebarMachineInfo,
 } from '@/components/sidebar-machine-card';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -800,7 +800,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         }
       : baseOpenedByTree;
   const lineBoxClassName = showMetaLine
-    ? clsx(stylex.props(appStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS)
+    ? cn(stylex.props(appStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS)
     : stylex.props(appStyles.contents).className;
   const readOnly = sharing?.access === 'read';
   const showInlineArchive = !isMobile && !readOnly;
@@ -846,7 +846,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
   const isUnsent = useSessionUnsentNewConversation(session.id);
   const titleContent = (
     <span
-      className={clsx(
+      className={cn(
         stylex.props(appStyles.titleText).className,
         isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS
       )}
@@ -885,7 +885,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
       // Drag a conversation onto a chat surface to mention it there.
       draggable
       onDragStart={(event) => startSessionMentionDrag(event, { sessionId: session.id, title })}
-      className={clsx(
+      className={cn(
         'group',
         stylex.props(
           appStyles.rowBox,
@@ -919,7 +919,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         </div>
         <div {...stylex.props(showMetaLine ? appStyles.titleColumn : appStyles.contents)}>
           <div
-            className={clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(appStyles.titleContent).className)}
+            className={cn(SIDEBAR_ROW_TEXT_CLASS, stylex.props(appStyles.titleContent).className)}
             // Double-click to rename is scoped to the title only, so it can't be
             // triggered by double-clicking the Archive confirm button.
             onDoubleClick={(event) => {
@@ -944,10 +944,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             the time / branch live in the hover info card, so nothing sits here. */}
         {isMobile ? (
           <span
-            className={clsx(
-              SIDEBAR_CAPTION_TEXT_CLASS,
-              stylex.props(appStyles.mobileTime).className
-            )}
+            className={cn(SIDEBAR_CAPTION_TEXT_CLASS, stylex.props(appStyles.mobileTime).className)}
           >
             {relativeTime}
           </span>
@@ -1471,7 +1468,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       // and ContextMenuTrigger both target this element through
       // `asChild`, so their `data-state` values collide here.
       data-menu-open={projectMenuOpen ? '' : undefined}
-      className={clsx(
+      className={cn(
         'group',
         stylex.props(
           appStyles.rowBox,
@@ -1508,7 +1505,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             ink with the hover or selected fill. */}
         <ProjectFolderIcon
           strokeWidth={1.5}
-          className={clsx(
+          className={cn(
             stylex.props(
               appStyles.folderGlyph,
               showSelectedState ? appStyles.currentInk : appStyles.folderHoverInk,
@@ -1520,7 +1517,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
         />
         <ChevronDown
           strokeWidth={1.5}
-          className={clsx(
+          className={cn(
             stylex.props(
               appStyles.chevronGlyph,
               isMobile ? appStyles.shown : appStyles.chevronDesktop,
@@ -1537,7 +1534,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             delay={300}
             render={
               <span
-                className={clsx(
+                className={cn(
                   SIDEBAR_CAPTION_TEXT_CLASS,
                   stylex.props(appStyles.removalStatus).className
                 )}
@@ -1561,7 +1558,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           {showProjectMenu ? (
             <button
               type="button"
-              className={clsx(hoverActionClassName, menuTriggerOpenClassName)}
+              className={cn(hoverActionClassName, menuTriggerOpenClassName)}
               aria-label={projectMenuLabel}
               onClick={(event) => {
                 // Open the row's own right-click menu from a left click.
@@ -1609,7 +1606,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   return (
     <div>
       <div
-        className={clsx(
+        className={cn(
           'group',
           stylex.props(appStyles.flexRow, appStyles.projectListSpacing).className
         )}
@@ -1627,7 +1624,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                 className={stylex.props(appStyles.projectTooltip).className}
               >
                 <div
-                  className={clsx(
+                  className={cn(
                     SIDEBAR_HELPER_TEXT_CLASS,
                     stylex.props(appStyles.tooltipLines).className
                   )}
@@ -1637,7 +1634,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   ) : null}
                   {formattedPath ? (
                     <span
-                      className={clsx(
+                      className={cn(
                         SIDEBAR_CAPTION_TEXT_CLASS,
                         stylex.props(appStyles.mono).className
                       )}
@@ -1793,7 +1790,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-id={`show-more:${groupKey}`}
               data-scope-item="row"
               data-sidebar-show-more={groupKey}
-              className={clsx(
+              className={cn(
                 // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
                 stylex.props(appStyles.showMore, appStyles.noFocusRing).className
@@ -1817,7 +1814,6 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             >
               <span {...stylex.props(appStyles.glyphBox16)} aria-hidden="true" />
               <span>{showLessLabel}</span>
-
             </button>
           ) : null}
         </div>
@@ -1847,7 +1843,7 @@ const SortableLocalProjectItem = memo(
       <button
         type="button"
         ref={setActivatorNodeRef}
-        className={clsx(hoverActionClassName, stylex.props(appStyles.dragHandle).className)}
+        className={cn(hoverActionClassName, stylex.props(appStyles.dragHandle).className)}
         aria-label={t('sidebar.localProjects.reorder', 'Reorder project')}
         {...attributes}
         {...listeners}
@@ -4698,7 +4694,7 @@ export function LoroAppSidebar({
     <FocusScope
       id={WORKSPACE_FOCUS_SCOPES.sidebar}
       {...scopeProps}
-      className={clsx(scopeProps.className, className)}
+      className={cn(scopeProps.className, className)}
     >
       <SidebarVisibilityGate
         disableWhenHidden={pauseSidebarSourcesWhenHidden}
@@ -4712,7 +4708,7 @@ export function LoroAppSidebar({
       </SidebarVisibilityGate>
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
-        className={clsx(
+        className={cn(
           stylex.props(
             appStyles.shellFill,
             !isMobile && appStyles.desktopFill,

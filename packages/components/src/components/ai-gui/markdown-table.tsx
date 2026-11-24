@@ -3,7 +3,7 @@ import { Check, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ExtraProps } from 'react-markdown';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -256,11 +256,11 @@ export function MarkdownTable({ node, children, ...props }: MarkdownTableProps) 
   return (
     <div
       data-markdown-table-frame=""
-      className={clsx('group/table', stylex.props(typography.frame).className)}
+      className={cn('group/table', stylex.props(typography.frame).className)}
     >
       <div
         data-markdown-table=""
-        className={clsx('scrollbar-pro', stylex.props(typography.scroller).className)}
+        className={cn('scrollbar-pro', stylex.props(typography.scroller).className)}
       >
         <table
           ref={tableRef}
@@ -268,7 +268,7 @@ export function MarkdownTable({ node, children, ...props }: MarkdownTableProps) 
           data-break-anywhere-columns={columns.breakAnywhere.join(' ')}
           data-wide-columns={columns.wide.join(' ')}
           {...props}
-          className={clsx(stylex.props(typography.table).className, props.className)}
+          className={cn(stylex.props(typography.table).className, props.className)}
         >
           {columns.widthsEm.length > 0 ? (
             <colgroup>

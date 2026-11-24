@@ -81,7 +81,7 @@ than from this change.
 A review of this change found four defects and one stale comment; all are fixed
 in the same pull request, and the cause left unidentified above is now named.
 
-The ring's stylesheet rule was outranked by `tailwind/index.css`'s global
+The ring's stylesheet rule was outranked by `style/index.css`'s global
 `*:focus, *:focus-visible { outline: none !important }` — activating focuses the
 diagram, and specificity does not beat `important`. Inline `important` was
 therefore necessary, not merely expedient. Moving the ring back to a stylesheet

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { CheckCircle2, Circle, ChevronRight } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
 
 import type { SessionPlanEntry } from '@lody/shared';
@@ -132,16 +132,16 @@ const PlanStatusIcon = ({ status, className }: { status: PlanStatus; className?:
   switch (status) {
     case 'completed': {
       const iconProps = stylex.props(styles.icon, styles.iconSuccess);
-      return <CheckCircle2 {...iconProps} className={clsx(iconProps.className, className)} />;
+      return <CheckCircle2 {...iconProps} className={cn(iconProps.className, className)} />;
     }
     case 'in_progress': {
       const iconProps = stylex.props(styles.icon, styles.iconPrimary);
-      return <CarbonInProgress {...iconProps} className={clsx(iconProps.className, className)} />;
+      return <CarbonInProgress {...iconProps} className={cn(iconProps.className, className)} />;
     }
     case 'pending':
     default: {
       const iconProps = stylex.props(styles.icon, styles.iconMuted);
-      return <Circle {...iconProps} className={clsx(iconProps.className, className)} />;
+      return <Circle {...iconProps} className={cn(iconProps.className, className)} />;
     }
   }
 };
@@ -186,7 +186,7 @@ export const SessionPlanBar = ({
 
   return (
     <Collapsible.Root defaultOpen={defaultOpen} open={open} onOpenChange={onOpenChange}>
-      <div {...rootProps} className={clsx(rootProps.className, className)}>
+      <div {...rootProps} className={cn(rootProps.className, className)}>
         <Collapsible.Trigger
           render={
             <button
@@ -194,7 +194,7 @@ export const SessionPlanBar = ({
               {...triggerProps}
               // `group` is the marker the chevron's `group-data-[panel-open]`
               // rotation reads; StyleX has no group variant.
-              className={clsx(triggerProps.className, 'group')}
+              className={cn(triggerProps.className, 'group')}
             />
           }
         >

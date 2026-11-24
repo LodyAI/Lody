@@ -54,7 +54,7 @@ export async function buildCssFixture(cssMinify) {
     const source = `
       import ${JSON.stringify(requireFromComponents.resolve('pdfjs-dist/legacy/web/pdf_viewer.css'))};
       import ${JSON.stringify(requireFromComponents.resolve('monaco-editor/esm/vs/editor/browser/widget/diffEditor/style.css'))};
-      import ${JSON.stringify(join(componentsRoot, 'src/tailwind/index.css'))};
+      import ${JSON.stringify(join(componentsRoot, 'src/style/index.css'))};
       import * as stylex from '@stylexjs/stylex';
       import { colors } from ${JSON.stringify(join(uiRoot, 'src/tokens/colors.stylex'))};
       import { productDarkPalette, productLightPalette } from ${JSON.stringify(join(componentsRoot, 'src/lib/vscode-theme/lody-ui-palette.stylex'))};

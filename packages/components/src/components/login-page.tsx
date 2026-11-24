@@ -1,7 +1,14 @@
-import { control, corner, duration as sharedMotion, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration as sharedMotion,
+  radius,
+  space,
+  text,
+} from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { field } from '@lody/ui/field/field.tokens.stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
@@ -433,7 +440,7 @@ function BrowserRedirect({
 
 function ProviderIcon({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <span className={clsx(stylex.props(styles.providerIcon).className, className)}>{children}</span>
+    <span className={cn(stylex.props(styles.providerIcon).className, className)}>{children}</span>
   );
 }
 
@@ -1863,7 +1870,8 @@ export function LoginPage({
         type="button"
         variant="secondary"
         onClick={() => void handleUseInWebBrowser()}
-        width="100%" size="large"
+        width="100%"
+        size="large"
         disabled={isSwitchingElectronAccount}
       >
         {t('login.desktopHandoff.useWeb', 'Continue in browser')}

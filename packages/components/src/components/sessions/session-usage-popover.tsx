@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { memo, useCallback, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowLeftRight } from 'lucide-react';
@@ -345,7 +345,7 @@ function UsageMeter({
   });
 
   return (
-    <div className={clsx(stylex.props(styles.meter).className, className)}>
+    <div className={cn(stylex.props(styles.meter).className, className)}>
       <div {...stylex.props(styles.meterRow)}>
         <span {...stylex.props(styles.meterLabel)}>{label}</span>
         <span {...stylex.props(styles.shrink, styles.mono, styles.muted)}>{valueLabel}</span>

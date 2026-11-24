@@ -22,7 +22,7 @@ import {
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
 import { sidebarCollapsedAtom } from '@lody/components/atoms/sidebar-state'
-import '@lody/components/tailwind/index.css'
+import '@lody/components/style/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'

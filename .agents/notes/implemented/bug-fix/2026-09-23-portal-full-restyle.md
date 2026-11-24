@@ -38,7 +38,7 @@ has not been recorded yet.
 
 ## Decision
 
-- `src/tailwind/index.css` no longer `@source`-scans `konsta/react`, `konsta/shared` or
+- `src/style/index.css` no longer `@source`-scans `konsta/react`, `konsta/shared` or
   `konsta/styles`. Only the theme, safe-area utilities and the `safe-areas` hook are used; 417
   classes (69KB) disappeared, and every flagged "still referenced" class was a false positive whose
   real variant form is still generated from our own sources.

@@ -60,7 +60,7 @@ import {
   normalizeTexMathDelimiters,
   remarkSingleDollarTextMath,
 } from '@/lib/markdown-single-dollar-math';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -698,7 +698,7 @@ function MarkdownSessionLink({
         data-session-link={sessionId}
         style={stylex.props(xstyle).style}
         title={title}
-        className={clsx(
+        className={cn(
           SESSION_LINK_CHIP_CLASS_NAME,
           stylex.props(markdownStyles.sessionChip, xstyle).className
         )}
@@ -713,7 +713,7 @@ function MarkdownSessionLink({
       data-session-link={sessionId}
       style={stylex.props(xstyle).style}
       title={title}
-      className={clsx(
+      className={cn(
         SESSION_LINK_CHIP_CLASS_NAME,
         stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive, xstyle)
           .className
@@ -755,7 +755,7 @@ function MarkdownActionLink({
       <span
         data-action-link={canonicalHref}
         title={title}
-        className={clsx(
+        className={cn(
           SESSION_LINK_CHIP_CLASS_NAME,
           stylex.props(markdownStyles.sessionChip).className
         )}
@@ -769,7 +769,7 @@ function MarkdownActionLink({
       type="button"
       data-action-link={canonicalHref}
       title={title}
-      className={clsx(
+      className={cn(
         SESSION_LINK_CHIP_CLASS_NAME,
         stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
       )}
@@ -1762,7 +1762,7 @@ const createMarkdownComponents = ({
           rel={rel}
           {...rest}
           style={{ ...stylex.props(partStyles?.referenceChip).style, ...rest.style }}
-          className={clsx(
+          className={cn(
             rest.className,
             'markdown-reference-chip',
             stylex.props(
@@ -1892,7 +1892,7 @@ function SizedMarkdownImage(props: MarkdownImageProps) {
       // With `height: auto`, these reserve the image's aspect ratio before it loads.
       width={outcome?.width ?? rest.width}
       height={outcome?.height ?? rest.height}
-      className={clsx(stylex.props(markdownStyles.image).className, rest.className)}
+      className={cn(stylex.props(markdownStyles.image).className, rest.className)}
       onLoad={(event) => {
         const image = event.currentTarget;
         if (key !== undefined && image.naturalWidth > 0) {
@@ -2197,7 +2197,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         if (match.resultId) {
           mark.dataset.searchResultId = match.resultId;
         }
-        mark.className = clsx(
+        mark.className = cn(
           SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
           match.isActive && SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME
         );
@@ -2235,7 +2235,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             markdownDescendants.content,
             (compact || muted) && markdownStyles.muted
           ),
-          clsx('markdown-renderer', className)
+          cn('markdown-renderer', className)
         )}
         style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}

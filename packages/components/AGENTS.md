@@ -74,7 +74,7 @@ Migration rationale: [Tailwind to StyleX](../../.agents/notes/implemented/archit
   `window.__LODY_STARTUP_THEME__.persist` (type here, like `LodyLiveActivityBridge`;
   the shell implements it from its own storage). The renderer's own first frame
   needs no help: `lib/boot-shell-script.ts` applies the class before parse.
-- Never `@source`-scan a third-party component library in `src/tailwind/index.css`:
+- Never `@source`-scan a third-party component library in `src/style/index.css`:
   it emits that library's utilities globally. Konsta's `last-child-hairline-b-none`
   (unanchored `:last-child … ::after`) made every portal open/close restyle the whole
   app. Keep `#root` off `<body>`'s tail (`lib/body-tail-sentinel.ts`, mounted by

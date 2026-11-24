@@ -4,7 +4,6 @@ import {
   radius as uiRadius,
   text as uiText,
 } from '@lody/ui/tokens/scales.stylex';
-import { clsx } from 'clsx';
 import { cn } from '@/lib/utils';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
@@ -810,7 +809,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     return (
       <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <div className={clsx(stylex.props(updatedStyles.emptyCard).className, className)}>
+        <div className={cn(stylex.props(updatedStyles.emptyCard).className, className)}>
           <div {...stylex.props(updatedStyles.emptyTitle)}>{merged.emptyTitle}</div>
           <div {...stylex.props(updatedStyles.emptyDescription)}>{merged.emptyDescription}</div>
         </div>
@@ -821,7 +820,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   return (
     <Tooltip.Provider>
       <div
-        className={clsx(stylex.props(updatedStyles.listStack).className, className)}
+        className={cn(stylex.props(updatedStyles.listStack).className, className)}
         data-pin-section={
           pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_KEY)
         }
@@ -933,7 +932,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           return (
             <div
               key={bucket.key}
-              className={clsx(
+              className={cn(
                 'group',
                 stylex.props(updatedStyles.bucket, collapsed && updatedStyles.collapsedBucket)
                   .className
@@ -1139,13 +1138,13 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   return (
     <div
       data-sidebar-updated-project={item.kind}
-      className={clsx(
+      className={cn(
         stylex.props(updatedStyles.projectLine, sidebarSurface.meta).className,
         SIDEBAR_CAPTION_TEXT_CLASS
       )}
     >
       <span
-        className={clsx(
+        className={cn(
           stylex.props(
             updatedStyles.projectMark,
             isGithub ? updatedStyles.githubMark : updatedStyles.smallMark
@@ -1403,7 +1402,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             }
           : undefined
       }
-      className={clsx(
+      className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
@@ -1460,26 +1459,24 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div
-        className={clsx(
+        className={cn(
           stylex.props(updatedStyles.rowBody, isMobile && updatedStyles.mobileRowBody).className,
           SIDEBAR_ROW_TEXT_CLASS
         )}
       >
-        <div
-          className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
-        >
+        <div className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}>
           <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         {item.owner ? (
           <span
-            className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+            className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
           >
             <SessionRowAuthorAvatar author={item.owner} />
           </span>
         ) : null}
         {showPinnedIcon && item.isPinned ? (
           <span
-            className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+            className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
           >
             <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
           </span>
@@ -1491,7 +1488,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           }
         >
           <div
-            className={clsx(
+            className={cn(
               stylex.props(updatedStyles.titleLine).className,
               SIDEBAR_ROW_LINE_CLASS,
               SIDEBAR_ROW_TEXT_CLASS
@@ -1511,7 +1508,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           {showMetaLine ? (
             <div
               data-sidebar-session-meta=""
-              className={clsx(
+              className={cn(
                 stylex.props(updatedStyles.metaLine, sidebarSurface.meta).className,
                 SIDEBAR_CAPTION_TEXT_CLASS
               )}
@@ -1522,9 +1519,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           ) : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <div
-          className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
-        >
+        <div className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}>
           <SidebarRowEndSlot
             sessionId={item.id}
             selected={showSelectedState}
@@ -1540,7 +1535,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               isMobile ||
               (item.kind === 'local' && item.isWorktree) ? (
                 <span
-                  className={clsx(
+                  className={cn(
                     stylex.props(
                       updatedStyles.restMetrics,
                       sidebarSurface.faint,

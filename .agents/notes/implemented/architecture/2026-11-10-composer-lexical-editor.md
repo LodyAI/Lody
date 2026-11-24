@@ -70,7 +70,7 @@ there" pins this; it fails on the textarea and passes on the editor.
   - CSS gives it a textarea's UA box: inline-block, pre-wrap, `overflow: auto`.
   - It is `rows` lines high plus padding, and utilities can still size it.
   - A caller's `placeholder:` utilities style the editor's placeholder too, through
-    a `placeholder` variant in `tailwind/index.css`. Without one, the UA placeholder
+    a `placeholder` variant in `style/index.css`. Without one, the UA placeholder
     colour is copied from a textarea styled like the editor. WebKit cannot report a
     `::placeholder` style, so there the copy is skipped and the CSS default applies.
   - Spellcheck is off wherever chips render. Plain text uses system selection

@@ -1,6 +1,6 @@
 import { control, radius as sharedRadius, text as type } from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   useCallback,
   useEffect,
@@ -378,7 +378,7 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       data-message-queue-row=""
       {...rowProps}
       style={style}
-      className={clsx(
+      className={cn(
         rowProps.className,
         // Keep the CSS hook; the StyleX marker limits the swap to this row.
         'group/row'

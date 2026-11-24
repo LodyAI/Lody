@@ -1,7 +1,7 @@
 import { E2eeDeviceRequestsButton } from '@/components/pages/e2ee-automatic-pairing';
 import type { CSSProperties, ReactNode } from 'react';
 import { Menu } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -119,7 +119,7 @@ export function BaseHeader({
   return (
     <div
       {...barProps}
-      className={clsx(barProps.className, className)}
+      className={cn(barProps.className, className)}
       style={{ ...barProps.style, ...style }}
     >
       {/* Mobile: drawer toggle */}

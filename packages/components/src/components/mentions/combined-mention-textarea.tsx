@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { control } from '@lody/ui/tokens/scales.stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
@@ -1113,7 +1113,7 @@ export const CombinedMentionTextarea = React.forwardRef<
 
       const wrapper = stylex.props(containerXstyle);
       return containerClassName || containerXstyle ? (
-        <div className={clsx(wrapper.className, containerClassName)} style={wrapper.style}>
+        <div className={cn(wrapper.className, containerClassName)} style={wrapper.style}>
           {textarea}
         </div>
       ) : (

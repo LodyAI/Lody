@@ -21,7 +21,7 @@ cmdk 面板的 512px 是重构后的有意设计,保持不变。
 `maxWidth: calc(100vw - 32px)`。三种覆盖写法效果不同:
 
 - 单独 `max-w-2xl`:`max-width` 只能封顶,面板停在 512px —— 本次回归。
-- `w-[…]` 类:今天能生效只是因为 `tailwind/index.css` 声明了
+- `w-[…]` 类:今天能生效只是因为 `style/index.css` 声明了
   `@layer …, stylex, …, utilities`,把 utilities 排在组件样式表之后。可靠但
   隐晦,而且覆盖 `max-w-*` 会把 rung 自带的 `100vw - 32px` 视口封顶一起换掉。
 - 第二个 StyleX `width` 类:与面板自身声明同层,谁赢由样式表顺序决定 ——
@@ -55,7 +55,7 @@ cmdk 面板的 512px 是重构后的有意设计,保持不变。
 
 ## 证据与边界
 
-层叠事实均从源码核实:`tailwind/index.css` 的层顺序、`settings/surface.ts`
+层叠事实均从源码核实:`style/index.css` 的层顺序、`settings/surface.ts`
 里 `w-[620px]` 的先例注释、`modal.popup` 的固定 `width` token。桌面端行为宽度
 与迁移前 `max-w-*` 值一致,窄视口行为反而更稳(rung 自带封顶替代手写的
 `100vw - 2rem`)。尚未执行:`tsgo`/`oxlint`(此 nested checkout 未装依赖)与
