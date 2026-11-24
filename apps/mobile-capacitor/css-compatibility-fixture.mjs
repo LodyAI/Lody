@@ -39,7 +39,7 @@ export function assertCompatibleCss(css, from) {
   );
 }
 
-// Build the installed PDF/Monaco sheets, the real app Tailwind sheet, and real
+// Build the installed PDF/Monaco sheets, the real app stylesheet, and real
 // UI token imports through the mobile pipeline. The small JS entry avoids an
 // entire app/Worker build in unit tests; the optional artifact test scans dist too.
 export async function buildCssFixture(cssMinify) {

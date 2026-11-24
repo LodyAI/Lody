@@ -4,10 +4,11 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { assertCompatibleCss, buildCssFixture } from './css-compatibility-fixture.mjs';
 
-void test('the mobile CSS pipeline lowers installed PDF, Monaco, Tailwind and StyleX styles', async () => {
+void test('the mobile CSS pipeline lowers installed PDF, Monaco, application and StyleX styles', async () => {
   const { css } = await buildCssFixture();
   assertCompatibleCss(css, 'mobile CSS fixture');
-  for (const selector of ['.textLayer', '.monaco-editor', '@layer', '.flex']) {
+  // The shared application stylesheet no longer generates Tailwind utility classes.
+  for (const selector of ['.textLayer', '.monaco-editor', '@layer', 'body']) {
     assert.ok(css.includes(selector), `missing emitted styles: ${selector}`);
   }
 });
