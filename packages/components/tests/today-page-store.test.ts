@@ -359,8 +359,6 @@ describe('Today page store cache', () => {
     const target = day('2026-11-24');
     const stop = h.cache.observeDates('u1', () => {});
     const pending = h.cache.acquire(target);
-    // Registration arrives before openDoc resolves: isRegistered saw false and
-    // peek(target) is still undefined.
     h.emit(target, true);
     finishOpen();
     await pending;
@@ -388,7 +386,6 @@ describe('Today page store cache', () => {
     await h.cache.acquire(target);
     h.cache.releaseRef(target);
     expect(h.isObserving()).toBe(false);
-    // Registered remotely while no Today surface was mounted.
     h.meta.set(target, {});
     await h.cache.acquire(target);
     await flush();

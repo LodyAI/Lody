@@ -54,10 +54,6 @@ export function createTodayPageStoreCache(options: {
   onBackgroundError?: (docId: string, stage: string, error: unknown) => void;
 }): TodayPageStoreCache {
   const { repo } = options;
-  // Cache-level registration index: active while any page is held, opening, or
-  // any member's dates are observed. Keeping this at the cache level (instead
-  // of only inside `observeDates`) ensures a peer's registration arriving while
-  // `openDoc` is in-flight or before `observeDates` mounts still joins the room.
   const dateListeners = new Map<string, Set<(dates: readonly TodayDate[]) => void>>();
   const registeredDocs = new Set<string>();
   let pendingAcquires = 0;
@@ -156,9 +152,6 @@ export function createTodayPageStoreCache(options: {
       ensureObserving();
       try {
         const store = await stores.acquire(docId);
-        // Covers registrations that arrived in the microtask between `create`
-        // returning and `stores.peek` observing the settled store, as well as
-        // warm idle stores registered while no observer was active.
         if (registeredDocs.has(docId)) store.markRegistered();
         held.set(docId, (held.get(docId) ?? 0) + 1);
         return store;
