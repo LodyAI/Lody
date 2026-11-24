@@ -2810,6 +2810,8 @@
   "sessions.subagentTasks.runningTool": "Running {{tool}}",
   "sessions.subagentTasks.statusPending": "Pending",
   "sessions.subagentTasks.statusRunning": "Running",
+  "sessions.subagentTasks.model": "Model: {{value}}",
+  "sessions.subagentTasks.reasoningEffort": "Effort: {{value}}",
   "sessions.subagentTasks.statusCompleted": "Completed",
   "sessions.subagentTasks.statusFailed": "Failed",
   "sessions.subagentTasks.command": "Command",

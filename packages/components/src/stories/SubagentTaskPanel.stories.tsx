@@ -164,7 +164,12 @@ const streamedRuns: SubagentTask[] = [
     startedAtEpochSeconds: Math.floor(Date.now() / 1000) - 83,
     run: {
       sessionId: 'root-acp',
-      snapshot: { state: 'running', support: support(true) },
+      snapshot: {
+        state: 'running',
+        modelId: 'claude-sonnet-4-6',
+        reasoningEffort: 'high',
+        support: support(true),
+      },
       progress: { totalTokens: 12_400, toolCallCount: 4 },
       items: [
         { type: 'thought', text: 'Start from where the daemon reads capabilities.' },
@@ -379,5 +384,5 @@ export const DeferredRuns: Story = {
 
 /** Agents and shell commands in one turn: Subagents and Tasks tabs. */
 export const SubagentsAndCommands: Story = {
-  args: { tasks: [...running, ...backgroundCommands] },
+  args: { tasks: [...streamedRuns.slice(0, 2), ...backgroundCommands], renderHistory },
 };

@@ -13,6 +13,7 @@ import { dialogLayout, styles as detailStyles } from './subagent-task-detail.sty
 import { SubagentTaskDetail } from './subagent-task-detail';
 import {
   actorOf,
+  configurationLabelOf,
   durationOf,
   groupOf,
   isRunning,
@@ -53,6 +54,7 @@ function SubagentTaskRow({
   const state = stateOf(task);
   const running = isRunning(task);
   const duration = durationOf(task);
+  const configuration = configurationLabelOf(task, t);
   const latest = latestActionOf(task, t);
   const tone = SETTLED_TONE[state];
 
@@ -74,7 +76,7 @@ function SubagentTaskRow({
     <button
       type="button"
       aria-haspopup="dialog"
-      aria-label={task.description ? `${actor} · ${task.description}` : actor}
+      aria-label={[actor, task.description, configuration].filter(Boolean).join(' · ')}
       data-subagent-task-id={task.taskId}
       onClick={() => onOpen(task.taskId)}
       {...stylex.props(styles.row, depth === 1 && styles.depth1, depth >= 2 && styles.depth2)}
@@ -94,6 +96,7 @@ function SubagentTaskRow({
           <span {...stylex.props(styles.meta, tone === 'danger' && styles.danger)}>{meta}</span>
         ) : null}
       </span>
+      {configuration ? <span {...stylex.props(styles.configuration)}>{configuration}</span> : null}
       {latest ? (
         <span data-subagent-latest-action="" {...stylex.props(styles.latest)}>
           {latest}
