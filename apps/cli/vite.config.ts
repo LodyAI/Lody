@@ -6,6 +6,7 @@ import wasm from 'vite-plugin-wasm';
 import { validateNightlyBuildIdentity } from '../electron/nightly-candidate.mjs';
 import { validateNightlyVersion } from '../electron/nightly-version.mjs';
 import desktopPackage from '../electron/package.json';
+import { isLoroStreamsWebSocketEnabled } from '../../packages/shared/src/loro-streams-websocket';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
 import { externalWasmPlugin } from './scripts/external-wasm.mjs';
 import { inlinePackageManifestPlugin } from './scripts/inline-package-manifest.mjs';
@@ -61,6 +62,9 @@ const inlineEnv = {
   // Local builds ignore deployment endpoints; cloud builds use explicit caller values.
   'process.env.LODY_PLATFORM': JSON.stringify(platform),
   'process.env.LODY_ENV': JSON.stringify(runtimeEnv),
+  __LODY_LORO_STREAMS_WS_DEFAULT__: JSON.stringify(
+    cloud && isLoroStreamsWebSocketEnabled(undefined, process.env.LODY_LORO_STREAMS_WS_ENABLED)
+  ),
   __LODY_DESKTOP_BUILD_JSON__: JSON.stringify(desktopBuildJson),
   ...(cloud && process.env.LODY_CLI_INLINE_DEPLOY_ENV !== '0'
     ? Object.fromEntries(
