@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useEffect, useState } from 'react';
 import { GenuiSurface } from '@/components/ai-gui/genui/genui-surface';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 
@@ -90,4 +91,41 @@ const brokenFence = `前文。
 export const InMarkdownBroken: Story = {
   args: { code: brokenFence },
   render: () => <MarkdownRenderer text={brokenFence} />,
+};
+
+const liveDoc = `进度卡片：
+
+\`\`\`genui
+{@state const [value, setValue] = useState(65)}
+<card>
+  <column gap={8}>
+    <row>
+      <heading level={4}>Progress</heading>
+      <badge tone="success">live</badge>
+    </row>
+    <slider value={value} min={0} max={100} onChange={(n) => setValue(n)} />
+    <row>
+      <button onClick={() => setValue(65)}>Reset</button>
+    </row>
+  </column>
+</card>
+\`\`\`
+
+收尾文字。`;
+
+function LiveStream() {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (n >= liveDoc.length) return;
+    const t = setTimeout(() => setN((v) => Math.min(v + 2, liveDoc.length)), 24);
+    return () => clearTimeout(t);
+  }, [n]);
+  const done = n >= liveDoc.length;
+  return <MarkdownRenderer text={liveDoc.slice(0, n)} isStreaming={!done} />;
+}
+
+/** The fence types in character by character; elements mount as tags close. */
+export const StreamingLive: Story = {
+  args: { code: liveDoc },
+  render: () => <LiveStream />,
 };
