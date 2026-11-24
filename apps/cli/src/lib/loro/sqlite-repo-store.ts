@@ -121,6 +121,62 @@ export type CliSqliteRepoStore = {
   baseDir: string;
 };
 
+export const getSqliteRepoDatabase = (store: CliSqliteRepoStore): Database.Database =>
+  (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
+
+export const findDocumentRemoteCursorUrls = (
+  database: Database.Database,
+  workspaceId: WorkspaceId,
+  docId: string,
+  bucketId = LORO_STREAMS_BUCKET_ID
+): string[] => {
+  const pathname = new URL(
+    createLoroStreamUrl({
+      bucketId,
+      baseUrl: 'https://cursor-mapping.invalid',
+      streamId: getLoroStreamIdForDocId(workspaceId, docId),
+    })
+  ).pathname;
+  const rows = database
+    .prepare('SELECT stream_url FROM remote_cursors WHERE stream_url LIKE ?')
+    .all('%' + pathname) as Array<{ stream_url: string }>;
+  return rows
+    .filter(({ stream_url }) => {
+      try {
+        return new URL(stream_url).pathname === pathname;
+      } catch {
+        return false;
+      }
+    })
+    .map(({ stream_url }) => stream_url);
+};
+
+const initializeNewSqliteAutoVacuum = async (dbPath: string): Promise<void> => {
+  try {
+    await fs.access(dbPath);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return;
+  }
+
+  let database: Database.Database | null = null;
+  try {
+    database = new Database(dbPath, { timeout: 5_000 });
+    const pageCount = Number(database.pragma('page_count', { simple: true }) ?? 0);
+    if (pageCount === 0) {
+      database.pragma('auto_vacuum = INCREMENTAL');
+      // Writing journal_mode persists the database header with auto_vacuum = INCREMENTAL
+      // before SqliteRepoStore creates tables.
+      database.pragma('journal_mode = WAL');
+    }
+  } catch {
+    // Best-effort: if another process raced to initialize the DB first,
+    // SqliteRepoStore will open normally and maintenance can upgrade later.
+  } finally {
+    database?.close();
+  }
+};
+
 export const createCliSqliteRepoStore = async (
   workspaceId: WorkspaceId,
   onWriteFailure?: (error: Error) => void,
@@ -132,6 +188,7 @@ export const createCliSqliteRepoStore = async (
   // only durable together with FileSystemStorageAdaptor snapshots; migrating
   // cursors without doc/meta state could skip required stream replay.
   const dbPath = path.join(baseDir, 'repo.sqlite3');
+  await initializeNewSqliteAutoVacuum(dbPath);
   const sqliteStore = new SqliteRepoStore({
     path: dbPath,
     onWriteFailure,
@@ -222,28 +279,13 @@ export const createDocumentRemoteCursorStore = (
     store.sqliteStore.createProcessDocumentCursorStore({
       // Older Lody writers did not populate docCursorIndex. Resolve only this
       // workspace/document/bucket's existing URLs inside the capture transaction.
-      documentStreamUrls: (docId) => {
-        const pathname = new URL(
-          createLoroStreamUrl({
-            bucketId,
-            baseUrl: 'https://cursor-mapping.invalid',
-            streamId: getLoroStreamIdForDocId(store.workspaceId, docId),
-          })
-        ).pathname;
-        const database = (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
-        const rows = database
-          .prepare('SELECT stream_url FROM remote_cursors WHERE stream_url LIKE ?')
-          .all('%' + pathname) as Array<{ stream_url: string }>;
-        return rows
-          .filter(({ stream_url }) => {
-            try {
-              return new URL(stream_url).pathname === pathname;
-            } catch {
-              return false;
-            }
-          })
-          .map(({ stream_url }) => stream_url);
-      },
+      documentStreamUrls: (docId) =>
+        findDocumentRemoteCursorUrls(
+          getSqliteRepoDatabase(store),
+          store.workspaceId,
+          docId,
+          bucketId
+        ),
       resolveStreamUrlAliases: getLoroStreamsRemoteCursorUrlAliases,
     })
   );

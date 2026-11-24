@@ -113,6 +113,7 @@ import {
 } from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
 import { CliPromptSuggestions } from './prompt-suggestions';
+import { SqliteRepoMaintenance } from './sqlite-repo-maintenance';
 import type { LodyPromptSuggestion } from 'acp-extension-core';
 import {
   attachAutoMarkLatestUserHistoryAsRead,
@@ -415,6 +416,8 @@ export interface LoroDocumentManagerOptions {
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
+  /** Daemon-only maintenance runs only when the manager owns shared durable cursors. */
+  documentCursorScope?: DocumentCursorScope;
   remoteStreamsAttached?: boolean;
   attachCloudEphemeralSinks?: boolean;
   encryptedWorkspace?: Pick<
@@ -487,6 +490,7 @@ export class LoroDocumentManager {
   private readonly localLoroDataPlaneServer: LocalLoroDataPlaneServerLegacy | null;
   private readonly sqliteRepoStore: CliSqliteRepoStore | null;
   private readonly documentRemoteCursorStore: RemoteCursorStore | null;
+  private readonly sqliteRepoMaintenance: SqliteRepoMaintenance | null;
   private remoteStreamsAttached: boolean;
   private remoteStreamsGeneration: number;
   private machineExistenceWatcher: RepoWatchHandle | null = null;
@@ -768,6 +772,7 @@ export class LoroDocumentManager {
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
         documentRemoteCursorStore,
+        documentCursorScope: options.documentCursorScope ?? 'process',
         remoteStreamsAttached: false,
         attachCloudEphemeralSinks: options.attachCloudEphemeralSinks,
         streamsTokens: options.streamsTokens ?? null,
@@ -919,6 +924,30 @@ export class LoroDocumentManager {
         void this.encryptedWorkspace?.refresh();
       }
     );
+    if (options.documentCursorScope === 'shared-durable' && this.sqliteRepoStore) {
+      this.sqliteRepoMaintenance = new SqliteRepoMaintenance({
+        repo: this.repo,
+        store: this.sqliteRepoStore,
+        workspaceId: this.workspaceId,
+        bucketId: this.encryptedWorkspace?.bucketId(),
+        logger: this.logger,
+        isDocActive: (docId) => {
+          const sessionId = getSessionIdFromRoomId(docId);
+          if (
+            sessionId &&
+            (this.sessions.has(sessionId) ||
+              this.pendingSessionDocs.has(sessionId) ||
+              this.sessionDocCleanup.has(sessionId))
+          ) {
+            return true;
+          }
+          return this.localDocRoomBridges.has(docId);
+        },
+      });
+      this.sqliteRepoMaintenance.start();
+    } else {
+      this.sqliteRepoMaintenance = null;
+    }
   }
 
   private setTransportStatus(status: TransportConnectionStatus): void {
@@ -2438,6 +2467,7 @@ export class LoroDocumentManager {
     }
     this.detachMachineFlockMetaRoomSyncedListener?.();
     this.detachMachineFlockMetaRoomSyncedListener = null;
+    await this.sqliteRepoMaintenance?.stop();
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
     const attempt = async (scope: string, close: () => Promise<unknown>) => {
