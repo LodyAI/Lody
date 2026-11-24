@@ -688,3 +688,153 @@ it('workflow contribution processes belong to the enabled generation and receive
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it('admits verifier lineage only for the approved project, signed parent turn and installed role skills', async () => {
+  const { ownerApprovalFixture } = await import('../../tests/fixtures/plugin-workflow-approval');
+  const { authorizedProjectCreate } = await import('./workflow/authorized-project-create');
+  const { makeVerifiedExecutionIntent } = await import('../lib/e2ee/execution-intent-verification');
+  const { LoroDoc, LoroMap } = await import('loro-crdt');
+  const fixture = await ownerApprovalFixture(),
+    { f } = fixture;
+  try {
+    const { machineId, workspaceId } = f,
+      projectId = 'p',
+      pluginId = 'sorbet-workflow',
+      installationId = randomUUID(),
+      machineDigest = 'aa'.repeat(32),
+      receipt = {
+        signer: Buffer.from(f.ledger.owner.raw).toString('hex'),
+        requestId: 'de'.repeat(16),
+      },
+      roleId = `plugin:${pluginId}:verifier`,
+      providerId = `plugin:${pluginId}:provider`,
+      skill = `plugin:${pluginId}:verify`,
+      target = { workspaceId, machineId, projectId };
+    const original = await Effect.runPromise(
+      f.sender.prepareFeature({
+        requestId: receipt.requestId,
+        request: {
+          workspaceId,
+          machineId,
+          method: 'plugin/workflow-create-approval',
+          params: {
+            pluginId,
+            installationId,
+            machineDigest,
+            projectId,
+            targetDevice: fixture.identity.signingPublicKey,
+            action: 'grant',
+            operation: 'sessions.create',
+            expiresAt: Date.now() + 60000,
+            readOperations: ['session-meta', 'sessionTurns'],
+          },
+        },
+      })
+    );
+    const frame = await Effect.runPromise(f.receiver.openFeature(machineId, original.frameHex));
+    if (!frame) throw Error('Missing approval');
+    await Effect.runPromise(f.receiver.retainFeatureRequest(machineId, frame));
+    const dispatch = await Effect.runPromise(f.sender.prepareDispatch(machineId, f.input)),
+      signed = await Effect.runPromise(f.receiver.openDispatch(machineId, dispatch.frameHex));
+    const doc = new LoroDoc(),
+      row = doc.getList('history').pushContainer(new LoroMap());
+    row.set('id', f.input.userTurnId);
+    row.set('role', 'user');
+    row.set('e2eeIntent', signed.e2eeIntent);
+    row.set('inputConfig', f.input.inputConfig);
+    const parentSession = { ...target, sessionId: f.input.sessionId },
+      originTurn = { session: parentSession, userTurnId: f.input.userTurnId };
+    let footprint = [projectId];
+    const reserved: unknown[] = [];
+    const manager = {
+      isEncryptedWorkspace: () => true,
+      pluginWorkflows: async () => [
+        {
+          root: `/fixture/${installationId}`,
+          pluginId,
+          roles: new Map([[roleId, { defaultProvider: providerId, skills: [skill] }]]),
+          acpProviders: new Map([[providerId, {}]]),
+          skills: new Map([[skill, {}]]),
+        },
+      ],
+      repo: {
+        getDocMeta: async () => ({
+          meta: {
+            id: f.input.sessionId,
+            machineId,
+            project: { kind: 'local', localProjectId: projectId },
+          },
+        }),
+      },
+      getOrCreateSessionDoc: async () => ({ handle: { doc } }),
+      createClientPluginSession: async (p: unknown, userId: string) => {
+        reserved.push(p);
+        return { archived: true, sessionId: 'verifier', userId };
+      },
+    };
+    const resolve = authorizedProjectCreate({
+      workspaceId,
+      machineId: machineId as import('@lody/shared').MachineId,
+      manager: manager as unknown as import('../lib/loro/doc').LoroDocumentManager,
+      identity: {
+        ...fixture.identity,
+        resolveVerifiedExecutionOriginal: makeVerifiedExecutionIntent({
+          workspaceId,
+          genesis: f.ledger.context.genesis,
+          selfDevice: fixture.identity.signingPublicKey,
+          isClosed: () => false,
+          ledger: f.ledger.ledger,
+          refreshLedger: Effect.void,
+          readIncoming: () => Effect.succeed(null),
+          openDispatch: (id, frame) => f.receiver.openDispatch(id, frame),
+        }),
+      },
+      lease: async () => ({ receipt, installationId, machineDigest, isCurrent: () => true }),
+      projectExists: async () => true,
+      sessionScope: async () => footprint,
+    });
+    const create = async (extra: Record<string, string | string[]> = {}) => {
+      const signal = new AbortController().signal;
+      const fn = await resolve(
+        {
+          workspaceId,
+          machineId,
+          pluginId,
+          instanceId: 1,
+          op: 'sessions.create',
+          payload: {
+            target,
+            input: {
+              prompt: 'Verify',
+              requestId: 'request',
+              parentSession,
+              originTurn,
+              roleId,
+              providerId,
+              skillIds: ['verify'],
+              ...extra,
+            },
+          },
+        },
+        signal
+      );
+      if (!fn) throw Error('Denied');
+      return fn(signal);
+    };
+    expect(await create()).toEqual({ ...target, sessionId: 'verifier' });
+    expect(reserved[0]).toMatchObject({
+      target,
+      input: { parentSession, originTurn, skillIds: [skill] },
+    });
+    await expect(create({ skillIds: ['foreign'] })).rejects.toThrow('skill');
+    await expect(create({ roleId: 'external' })).rejects.toThrow('binding');
+    footprint = ['other'];
+    await expect(create()).rejects.toThrow('parent');
+    footprint = [projectId];
+    row.set('inputConfig', { prompt: 'tampered' });
+    await expect(create()).rejects.toThrow('origin');
+    expect(reserved).toHaveLength(1);
+  } finally {
+    await fixture.close();
+  }
+});

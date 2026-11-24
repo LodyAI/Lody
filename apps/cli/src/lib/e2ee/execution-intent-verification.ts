@@ -40,7 +40,7 @@ const derivedFromSchema = z
   .strict();
 
 /** The newest user row with this ID, as plain JSON; never another role's row. */
-function findUserTurn(doc: LoroDoc, userTurnId: string) {
+export function findUserTurn(doc: LoroDoc, userTurnId: string) {
   const list = doc.getList('history');
   for (let index = list.length - 1; index >= 0; index -= 1) {
     const value: unknown = list.get(index);
