@@ -125,9 +125,6 @@ export function classifyFailureReason(notice: {
   message?: string;
 }): LodyFailureReason {
   const reason = notice.reason;
-  // A specific structured code is the classification itself. Its message is
-  // often a Lody-synthesized explanation (like the silent-turn banner) whose
-  // wording must not override the code.
   if (reason) {
     if (CONTEXT_OVERFLOW_REASON_CODES.has(reason)) return 'context_overflow';
     if (USAGE_LIMIT_REASON_CODES.has(reason)) return 'usage_limit';
@@ -136,8 +133,6 @@ export function classifyFailureReason(notice: {
     if (AGENT_CRASH_REASON_CODES.has(reason)) return 'agent_crash';
     if (!MODEL_ERROR_REASON_CODES.has(reason)) return 'unknown';
   }
-  // Generic ACP error codes (or no code at all) carry no signal on their own;
-  // the provider's free-text message does.
   const message = notice.message ?? '';
   if (CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(message))) return 'context_overflow';
   if (USAGE_LIMIT_PATTERNS.some((pattern) => pattern.test(message))) return 'usage_limit';

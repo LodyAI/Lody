@@ -24,8 +24,6 @@ describe('session failure normalization', () => {
   });
 
   it('classifies a silent turn by its reason code, not the synthesized banner', () => {
-    // The banner mentions "context-length or rate-limit"; pattern-matching it
-    // would mark a retryable agent_no_output crash as non-retryable overflow.
     const silentTurnMessage =
       'The agent ended the turn without producing any output. The model call most likely failed ' +
       'upstream (a context-length or rate-limit rejection is the usual cause) and the agent ' +
