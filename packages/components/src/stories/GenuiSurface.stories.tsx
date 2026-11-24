@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState } from 'react';
+import { GenuiCapabilitiesContext } from '@/components/ai-gui/genui/genui-capabilities-context';
 import { GenuiSurface } from '@/components/ai-gui/genui/genui-surface';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 
@@ -128,4 +129,35 @@ function LiveStream() {
 export const StreamingLive: Story = {
   args: { code: liveDoc },
   render: () => <LiveStream />,
+};
+
+const sendPromptDoc = `试试下面的卡片：
+
+\`\`\`genui
+<card>
+  <column gap={8}>
+    <heading level={4}>Ask the agent</heading>
+    <row gap={8}>
+      <button onClick={() => lody.sendPrompt('Summarize this PR')}>Summarize PR</button>
+      <button onClick={() => lody.sendPrompt('Fix the failing checks')}>Fix CI</button>
+    </row>
+  </column>
+</card>
+\`\`\``;
+
+/** `lody.sendPrompt` rides the host's ordinary send path (logged here). */
+export const LodySendPrompt: Story = {
+  args: { code: sendPromptDoc },
+  render: () => (
+    <GenuiCapabilitiesContext.Provider
+      value={{
+        sendPrompt: (prompt: unknown) => {
+          // eslint-disable-next-line no-console -- storybook only
+          console.log('lody.sendPrompt', prompt);
+        },
+      }}
+    >
+      <MarkdownRenderer text={sendPromptDoc} />
+    </GenuiCapabilitiesContext.Provider>
+  ),
 };

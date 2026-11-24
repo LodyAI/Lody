@@ -107,8 +107,10 @@ theme already in place.
   there is no protocol for editing a committed tree.
 - A `Slider` primitive belongs in `@lody/ui`; the catalog currently uses a
   styled native range input.
-- Action protocol for `lody.*` capabilities (submit message, open file):
-  which functions the first manifest ships and what each one does.
+- `lody.*` capabilities: the first manifest ships `sendPrompt(text)`, which
+  submits a user message on the conversation's ordinary send path
+  (queue/guide/dispatch routing, like the composer). Further members
+  (open file, copy) extend the same static manifest.
 - The error feedback loop: surface diagnostics are model-facing but not yet
   reported back to the agent, so a rejected surface cannot currently
   trigger a describe-and-retry repair.

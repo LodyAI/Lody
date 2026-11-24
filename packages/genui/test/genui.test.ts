@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  callValue,
   compileSurface,
   compileSurfacePartial,
   createSurface,
@@ -180,5 +181,23 @@ describe('createSurface', () => {
     setValue((c: number) => c + 5);
     expect(surface.state.get('value')).toBe(15);
     expect(notified).toBe(2);
+  });
+
+  it('reaches host capabilities under lody, and absent members abort', () => {
+    const capSource = '<card><button onClick={() => lody.sendPrompt("go")}>send</button></card>';
+    const surface = createSurface('test', compileSurface(capSource));
+    const sent: string[] = [];
+    const scope = surfaceScope(surface, {
+      lody: { sendPrompt: (text: string) => sent.push(text) },
+    });
+    const card = (surface.program.view as UiElement).children[0] as UiElement;
+    const button = card.children[0] as UiElement;
+    const onClick = button.props.find((p) => p.name === 'onClick')!.value;
+    const fn = evalValue(onClick, scope);
+    callValue(fn, undefined, []);
+    expect(sent).toEqual(['go']);
+
+    const emptyScope = surfaceScope(surface, { lody: {} });
+    expect(() => callValue(evalValue(onClick, emptyScope), undefined, [])).toThrow();
   });
 });

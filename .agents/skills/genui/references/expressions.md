@@ -40,9 +40,14 @@ never inside `{expr}` holes.
 
 ## Host capabilities (`lody.*`)
 
-Hosts inject a `lody` object of capability functions. Only call members you know
-the host provides; an absent function surfaces a diagnostic instead of running.
-Example convention: `<button onClick={() => lody.copy('text')}>`.
+Hosts inject a `lody` object of capability functions. The manifest is fixed per
+release — only call members listed here; an absent function surfaces a
+diagnostic instead of running.
+
+- `lody.sendPrompt(text)` — submits `text` as a user message on the current
+  conversation, on the ordinary send path (queues behind a busy agent like the
+  composer). Use for buttons that hand the reader a ready-made next step:
+  `<button onClick={() => lody.sendPrompt('Fix the failing checks')}>Fix CI</button>`.
 
 ## Error shapes
 

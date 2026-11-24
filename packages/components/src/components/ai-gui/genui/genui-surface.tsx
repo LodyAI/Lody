@@ -25,8 +25,17 @@ import {
 } from '@lody/genui';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
-import { Fragment, useMemo, useReducer, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  Fragment,
+  useContext,
+  useMemo,
+  useReducer,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
+import { GenuiCapabilitiesContext } from './genui-capabilities-context';
 import { GENU_CATALOG } from './genui-catalog.js';
 
 const surfaces = new Map<string, SurfaceState>();
@@ -190,7 +199,10 @@ export function GenuiSurface({
     lastKey.current = key;
     eventDiagnostics.current = [];
   }
-  const scope = surfaceScope(surface, { lody: capabilities ?? {} });
+  const hostCapabilities = useContext(GenuiCapabilitiesContext);
+  const scope = surfaceScope(surface, {
+    lody: { ...hostCapabilities, ...capabilities },
+  });
   const ctx: RenderContext = {
     scope,
     diagnostics: [],
