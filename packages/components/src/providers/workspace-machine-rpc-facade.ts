@@ -2236,7 +2236,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     await deps.waitForContentAdmission?.();
     const local = !deps.protectedContent && (await canUseLocalMachineRpc(machineId));
     if (local && call.method === 'plugin/workflow-create-approval') throw Error('Signed machine-owner approval required');
-    if (!local && (options?.requireLocal || call.method === 'plugin/control'))
+    if (
+      !local &&
+      (options?.requireLocal ||
+        call.method === 'plugin/control' ||
+        call.method === 'plugin/proposal-decision')
+    )
       throw Error('Local plugin route unavailable');
     options?.signal?.throwIfAborted();
     const send = local ? getLocalMachineRpcSender() : deps.requestEncryptedFeature;

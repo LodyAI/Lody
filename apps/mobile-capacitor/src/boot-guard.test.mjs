@@ -34,6 +34,7 @@ function boot({ native = true, plugin, storageThrows = false, confirmed = true }
   const timers = new Map();
   const context = {
     document: { getElementById: () => root, createElement: element, body: element() },
+    URL,
     navigator: {},
     localStorage: {
       getItem() {
@@ -143,7 +144,7 @@ void test('styled boot renderer also receives the reset action; throwing rendere
     assert.equal(buttons(root).filter((b) => b.textContent === 'Reset app data').length, 1);
     if (!throws)
       assert.equal(
-        root.querySelector('.bf-actions').children[0].className,
+        buttons(root).find((button) => button.textContent === 'Reset app data').className,
         'bf-button bf-secondary'
       );
   }
@@ -235,4 +236,20 @@ void test('pre-React failure beacon excludes an error name carrying private meta
   assert.equal(wire.includes('PRIVATE_'), false);
   assert.equal(JSON.parse(wire).properties.error_type, 'Error');
   assert.equal(visibleError, error, 'local copyable diagnostics retain the original');
+});
+
+void test('reopens the same workspace route without plugin activation or resetting native data', () => {
+  const { context, root, timers } = boot();
+  let destination;
+  context.location = {
+    href: 'capacitor://localhost/workspace/session?tab=chat#latest',
+    replace(url) {
+      destination = url;
+    },
+  };
+  timers.get(12000)();
+  buttons(root)
+    .find((b) => b.textContent === 'Reload without plugins')
+    .listeners.click();
+  assert.equal(destination, 'capacitor://localhost/workspace/session?tab=chat&safeMode=1#latest');
 });

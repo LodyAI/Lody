@@ -111,18 +111,6 @@ try {
     createE2eeRuntime,
     prepareE2eeCreation: encryptedHost?.prepareCreation,
   });
-  if (encryptedHost) {
-    const retire = () => {
-      // The owner retains incomplete-close failures until native work settles.
-      void encryptedHost.close().catch(() => {
-        console.debug('Encrypted mobile host shutdown remains pending');
-      });
-    };
-    window.addEventListener('pagehide', (event) => {
-      if (!event.persisted) retire();
-    });
-    import.meta.hot?.dispose(retire);
-  }
   if (window.__LODY_NATIVE__) {
     initPushBridge();
     const stopPairLinks = initE2eePairLinks();
@@ -159,7 +147,26 @@ try {
     throw new Error('Missing #root element.');
   }
 
-  createRoot(rootElement).render(
+  const root = createRoot(rootElement);
+  let retired = false;
+  const retire = () => {
+    if (retired) return;
+    retired = true;
+    window.removeEventListener('pagehide', onPageHide);
+    try {
+      root.unmount();
+    } finally {
+      void encryptedHost
+        ?.close()
+        .catch(() => console.debug('Encrypted mobile host shutdown remains pending'));
+    }
+  };
+  const onPageHide = (event: PageTransitionEvent) => {
+    if (!event.persisted) retire();
+  };
+  window.addEventListener('pagehide', onPageHide);
+  import.meta.hot?.dispose(retire);
+  root.render(
     <ErrorBoundary name="AppRoot" variant="page" showErrorDetails>
       <Provider store={jotaiStore}>
         <MobileRecoveryContext.Provider value={recovery}>

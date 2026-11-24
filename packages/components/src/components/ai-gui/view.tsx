@@ -1,3 +1,4 @@
+import { PluginProposalNotice } from './plugin-proposal-notice';
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { downloadBytesAsFile } from '@/lib/download-file';
@@ -2926,7 +2927,14 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
+        item.type === 'system_notice' && item.name === 'plugin_proposal' && item.meta ? (
+          <PluginProposalNotice
+            key={`plugin-${itemIndex}`}
+            meta={item.meta}
+            sessionId={sessionId}
+            entryId={message.id}
+          />
+        ) : item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
           <AgentRoleProposalNotice
             key={`role-proposal-${itemIndex}`}
             meta={item.meta as AgentRoleProposalMeta}

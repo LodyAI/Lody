@@ -117,6 +117,18 @@ export class PluginDaemon {
       { signal }
     );
   }
+  async activateProposal(
+    meta: import('@lody/shared/plugins/proposal').PluginProposalMeta,
+    path: string,
+    signal?: AbortSignal
+  ) {
+    await this.ready;
+    signal?.throwIfAborted();
+    return this.runtime.runPromise(
+      Effect.flatMap(Registry, (r) => r.activateProposal(meta, path)),
+      { signal }
+    );
+  }
   event(frame: Extract<HostToChildFrame, { type: 'event' }>, admit?: () => Promise<boolean>) {
     return this.runtime.runPromise(Effect.flatMap(PluginHost, (h) => h.broadcast(frame, admit)));
   }

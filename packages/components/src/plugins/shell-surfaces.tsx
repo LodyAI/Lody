@@ -1,10 +1,11 @@
+import { MobilePluginContainer } from './mobile-container';
+import { isNativeAppShell } from '../lib/native-platform';
 import { shellIdentity } from './shell-generation';
 import { ContextMenu } from '@lody/ui/context-menu';
 import { Dialog } from '../ui/dialog';
 import {
   createContext,
   useContext,
-  Component,
   useState,
   useSyncExternalStore,
   type ComponentType,
@@ -20,22 +21,8 @@ import {
   type WorkspaceRef,
   type SessionRowSlotProps,
 } from '@lody/plugin-sdk/client';
-export class SurfaceErrorBoundary extends Component<
-  { children: ReactNode; fallback?: ReactNode; onCrash?: (stack: string) => void },
-  { failed: boolean }
-> {
-  override state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-  override componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('surface_render_crashed', error, info.componentStack);
-    this.props.onCrash?.(info.componentStack ?? error.message);
-  }
-  override render() {
-    return this.state.failed ? this.props.fallback : this.props.children;
-  }
-}
+import { SurfaceErrorBoundary } from './surface-error-boundary';
+export { SurfaceErrorBoundary };
 type Slot = {
   identity: AbortSignal;
   source: string;
@@ -205,6 +192,17 @@ export function PluginScreenOutlet({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const slot = list.find((s) => s.identity === current?.identity && s.workspaceId === workspaceId);
   if (!current || !slot) return null;
+  const content = slot.render({
+    workspace: { workspaceId },
+    ...current.target,
+    params: current.params,
+  });
+  if (isNativeAppShell())
+    return (
+      <MobilePluginContainer close={closeScreen} title={slot.title}>
+        {content}
+      </MobilePluginContainer>
+    );
   return (
     <Dialog.Root
       open
@@ -217,11 +215,7 @@ export function PluginScreenOutlet({ workspaceId }: { workspaceId: string }) {
           <Dialog.Title>{slot.title}</Dialog.Title>
         </Dialog.Header>
         <Button onClick={() => changeScreen(undefined)}>{t('common.close', 'Close')}</Button>
-        {slot.render({
-          workspace: { workspaceId },
-          ...current.target,
-          params: current.params,
-        })}
+        {content}
       </Dialog.Content>
     </Dialog.Root>
   );

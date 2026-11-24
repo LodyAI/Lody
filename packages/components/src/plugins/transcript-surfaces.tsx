@@ -9,7 +9,7 @@ import {
   type MatchedToolRenderProps,
 } from '@lody/plugin-sdk/client';
 import type { SurfaceFactory } from './workspace-plugin-registry';
-import { SurfaceErrorBoundary } from './shell-surfaces';
+import { SurfaceErrorBoundary } from './surface-error-boundary';
 
 type Scope = Parameters<SurfaceFactory>[0];
 type Slot = { entry: Scope; id: string; priority: number; bindings: ClientHostBindings } & (
