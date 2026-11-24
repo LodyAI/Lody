@@ -1,3 +1,6 @@
+import { Effect, Layer, ManagedRuntime } from 'effect';
+import { PluginHost } from './workflow/plugin-host';
+import { Registry } from './workflow/plugin-registry';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { test, expect, vi } from 'vitest';
 import { mkdtemp, writeFile, mkdir, rm, readFile, readdir } from 'node:fs/promises';
@@ -66,15 +69,20 @@ test('deterministic releases include only declared files; integrity and approval
   const repo = await LoroRepo.create({});
   try {
     const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
-    const host = {
-      installOwnerNpm: (entry: typeof a.workspaceEntry, signal: AbortSignal) =>
-        installWorkspacePin(
-          entry,
-          join(root, 'workspace-machine'),
-          signal,
-          async () => new Response(bytes)
-        ),
-    };
+    const registry = {
+      installOwnerNpm: (entry, signal, admit) =>
+        Effect.tryPromise(async () => {
+          admit();
+          return installWorkspacePin(
+            entry,
+            join(root, 'workspace-machine'),
+            signal,
+            async () => new Response(bytes)
+          );
+        }),
+    } satisfies Pick<typeof Registry.Service, 'installOwnerNpm'>;
+    const host = ManagedRuntime.make(Layer.succeed(Registry, registry as typeof Registry.Service));
+    t.onTestFinished(() => host.dispose());
     const runtime = Object.assign(Object.create(Lody.prototype), {
       workspaceId,
       encryptedWorkspace: {
@@ -225,8 +233,8 @@ test('deterministic releases include only declared files; integrity and approval
   const synced = await installWorkspacePin(a.workspaceEntry, syncRoot, signal, registry);
   expect(synced.clientDigest).toBe(current.clientDigest);
   expect(await readdir(syncRoot)).toHaveLength(1);
-  const { PluginDaemon } = await import('./plugin-host-legacy');
-  const daemon = new PluginDaemon(join(root, 'owned-machine'), 'workspace', 'target', () => {});
+  const { makePluginRuntime } = await import('./plugin-runtime');
+  const daemon = makePluginRuntime(join(root, 'owned-machine'), 'workspace', 'target', () => {});
   const pin = {
     ...a.workspaceEntry,
     machine_sync: 'owner_machines' as const,
@@ -235,13 +243,16 @@ test('deterministic releases include only declared files; integrity and approval
     sync_signature: 'owner-proof',
   };
   try {
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     vi.stubGlobal('fetch', registry);
     const reconcile = (
       owner: string,
       verify: () => Promise<() => void>,
       row = pin as typeof a.workspaceEntry
-    ) => daemon.reconcileOwnerPin(row, owner, signal, verify);
+    ) =>
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.reconcileOwnerPin(row, owner, signal, verify))
+      );
     const admit = async () => () => {};
     await reconcile('bob', admit);
     await reconcile('alice', admit, a.workspaceEntry);
@@ -250,27 +261,41 @@ test('deterministic releases include only declared files; integrity and approval
         throw Error('invalid signature');
       })
     ).rejects.toThrow();
-    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({ plugins: [] });
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({ plugins: [] });
     await reconcile('alice', admit);
-    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({
       plugins: [{ pluginId: 'demo', enabled: false }],
     });
     const catalog = JSON.parse(await readFile(join(root, 'owned-machine', 'catalog.json'), 'utf8'));
     expect(catalog[0]).not.toHaveProperty('declaredGrant');
     expect(catalog[0]).not.toHaveProperty('preferences');
     const installed = async () =>
-      await daemon.dispatchMachineRpc(
-        { workspaceId: 'workspace', machineId: 'target', method: 'plugin/catalog', params: {} },
-        { userId: 'member', machineOwner: false }
+      await daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.machineRpc(
+            { workspaceId: 'workspace', machineId: 'target', method: 'plugin/catalog', params: {} },
+            { userId: 'member', machineOwner: false }
+          )
+        )
       );
     expect(await installed()).toMatchObject({
       installations: [{ source: a.workspaceEntry.source }],
     });
-    await daemon.dispatch({ action: 'install', path: a.path, sha256: a.sha256 });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) =>
+        r.dispatch({ action: 'install', path: a.path, sha256: a.sha256 })
+      )
+    );
     expect(await installed()).toMatchObject({
       installations: [{ source: { kind: 'local', origin: 'archive' } }],
     });
-    await daemon.dispatch({ action: 'rollback', pluginId: 'demo' });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'rollback', pluginId: 'demo' }))
+    );
     expect(await installed()).toMatchObject({
       installations: [{ source: a.workspaceEntry.source }],
     });
@@ -284,11 +309,15 @@ test('deterministic releases include only declared files; integrity and approval
     const next = await packPlugin(source, join(root, 'upgrade'));
     const archive = await readFile(next.path);
     vi.stubGlobal('fetch', async () => new Response(archive));
-    await daemon.installOwnerNpm(next.workspaceEntry, signal, () => {});
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.installOwnerNpm(next.workspaceEntry, signal, () => {}))
+    );
     expect(await installed()).toMatchObject({
       installations: [{ source: next.workspaceEntry.source }],
     });
-    await daemon.dispatch({ action: 'rollback', pluginId: 'demo' });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'rollback', pluginId: 'demo' }))
+    );
     expect(await installed()).toMatchObject({
       installations: [{ source: a.workspaceEntry.source }],
     });
@@ -312,7 +341,7 @@ test('deterministic releases include only declared files; integrity and approval
 });
 
 test('release removal preserves data and replays missed events unless purge was explicitly requested', async (t) => {
-  const { PluginDaemon } = await import('./plugin-host-legacy');
+  const { makePluginRuntime } = await import('./plugin-runtime');
   const { build } = await import('esbuild');
   const { fileURLToPath } = await import('node:url');
   const root = await mkdtemp(join(tmpdir(), 'release-remove-')),
@@ -327,7 +356,7 @@ test('release removal preserves data and replays missed events unless purge was 
     format: 'esm',
     bundle: true,
   });
-  const daemon = new PluginDaemon(
+  const daemon = makePluginRuntime(
     root,
     'w',
     'm',
@@ -338,7 +367,7 @@ test('release removal preserves data and replays missed events unless purge was 
     async () => true
   );
   try {
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     await writeFile(
       join(source, 'machine.ts'),
       `import {appendFileSync} from 'node:fs';import {join} from 'node:path';export default {kind:'machine-plugin',register(m){const append=(ctx,s)=>appendFileSync(join(ctx.dataDir,'journal'),s+'\\n');m.onStart(async ctx=>append(ctx,'start:'+((await ctx.storage.get('last'))??'empty')));m.onUninstall(async ctx=>{await ctx.storage.set('last','uninstalled');append(ctx,'uninstall')});m.events.on('session.created',async(ctx,p)=>{await ctx.storage.set('last',p);append(ctx,p);},{resumeFromCursor:true})}}`
@@ -355,26 +384,38 @@ test('release removal preserves data and replays missed events unless purge was 
       b = await release('sibling');
     const journal = (id: string) => readFile(join(root, 'data', id, 'journal'), 'utf8');
     const event = (n: string) =>
-      daemon.event(
-        { type: 'event', eventType: 'session.created', eventId: n, payload: n },
-        async () => true
+      daemon.runPromise(
+        Effect.flatMap(PluginHost, (r) =>
+          r.broadcast(
+            { type: 'event', eventType: 'session.created', eventId: n, payload: n },
+            async () => true
+          )
+        )
       );
-    await daemon.dispatch(a);
-    await daemon.dispatch(b);
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(a)));
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(b)));
     await event('before');
-    await daemon.dispatch({ action: 'remove', pluginId: 'primary' });
-    await daemon.dispatch({ action: 'remove', pluginId: 'sibling' });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'remove', pluginId: 'primary' }))
+    );
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'remove', pluginId: 'sibling' }))
+    );
     await event('while-removed');
-    await daemon.dispatch(a);
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(a)));
     expect(await journal('primary')).toBe(
       'start:empty\nbefore\nuninstall\nstart:uninstalled\nwhile-removed\n'
     );
-    await daemon.dispatch({ action: 'remove', pluginId: 'primary', purgeData: true });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) =>
+        r.dispatch({ action: 'remove', pluginId: 'primary', purgeData: true })
+      )
+    );
     await expect(journal('primary')).rejects.toMatchObject({ code: 'ENOENT' });
     await event('after-purge');
-    await daemon.dispatch(a);
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(a)));
     expect(await journal('primary')).toBe('start:empty\n');
-    await daemon.dispatch(b);
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(b)));
     expect(await journal('sibling')).toBe(
       'start:empty\nbefore\nuninstall\nstart:uninstalled\nwhile-removed\nafter-purge\n'
     );

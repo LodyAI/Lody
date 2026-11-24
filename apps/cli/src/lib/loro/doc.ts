@@ -1,3 +1,4 @@
+import type { PluginRuntime } from '../../plugins/plugin-runtime';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -475,9 +476,12 @@ function describeDocOpener(stack: string | undefined): string {
 }
 
 export class LoroDocumentManager {
-  pluginDaemon?: () => Promise<import('../../plugins/plugin-host-legacy').PluginDaemon | undefined>;
+  pluginRuntime?: () => Promise<PluginRuntime | undefined>;
   async pluginWorkflows() {
-    return (await (await this.pluginDaemon?.())?.workflowCatalog()) ?? [];
+    const runtime = await this.pluginRuntime?.();
+    if (!runtime) return [];
+    const { Registry } = await import('../../plugins/workflow/plugin-registry');
+    return runtime.runPromise(Effect.map(Registry, (r) => r.workflow.catalog()));
   }
   workflowSessionAuthority?: (
     pluginId: string,
@@ -2249,7 +2253,9 @@ export class LoroDocumentManager {
   }
 
   get pluginResultRepository(): string {
-    return this.encryptedWorkspace?.repositoryDirectory ?? getLoroRepoStorageBaseDir(this.workspaceId);
+    return (
+      this.encryptedWorkspace?.repositoryDirectory ?? getLoroRepoStorageBaseDir(this.workspaceId)
+    );
   }
 
   private get pluginReceiptsPath(): string {

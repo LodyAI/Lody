@@ -1,3 +1,4 @@
+import { spawnWorkflowMcp } from './workflow/plugin-mcp-session';
 import { projectConfigStore } from './project-config-store';
 import { getWorkspaceFlockDocId, type WorkspaceId } from '@lody/shared';
 import { LoroRepo } from 'loro-repo';
@@ -13,12 +14,12 @@ import { expect, it } from 'vitest';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { PluginDaemon } from './plugin-host-legacy';
+import { makePluginRuntime } from './plugin-runtime';
 it('restores an enabled generation without its source checkout and preserves disable across restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-registry-'));
   const vault = new Map<string, string>();
   const create = () =>
-    new PluginDaemon(root, 'workspace', 'machine', () => {}, {
+    makePluginRuntime(root, 'workspace', 'machine', () => {}, {
       read: async (k) => vault.get(k),
       write: async (k, v) => {
         vault.set(k, v);
@@ -55,9 +56,11 @@ it('restores an enabled generation without its source checkout and preserves dis
         mkdir(join(generations, name), { recursive: true })
       )
     );
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     expect(await readdir(generations)).toEqual(['unmanaged']);
-    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({
       plugins: [{ pluginId: 'test-plugin', enabled: true }],
     });
     const request = {
@@ -68,10 +71,14 @@ it('restores an enabled generation without its source checkout and preserves dis
     };
     const owner = { userId: 'owner', machineOwner: true };
     const member = { userId: 'member', machineOwner: false };
-    expect(await daemon.dispatchMachineRpc(request, owner)).toMatchObject({
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(request, owner)))
+    ).toMatchObject({
       installations: [{ inspection: { lifecycle: 'Running' } }],
     });
-    const catalog = await daemon.dispatchMachineRpc(request, member);
+    const catalog = await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.machineRpc(request, member))
+    );
     if (catalog.type !== 'plugin/catalog') throw Error('Unexpected catalog response');
     expect(catalog.installations[0]?.inspection).toBeUndefined();
     const control = {
@@ -79,11 +86,14 @@ it('restores an enabled generation without its source checkout and preserves dis
       method: 'plugin/control' as const,
       params: { pluginId: 'test-plugin', action: 'disable' as const, clientDigest: 'test' },
     };
-    await expect(daemon.dispatchMachineRpc(control, member)).rejects.toThrow('Owner required');
     await expect(
-      daemon.dispatchMachineRpc(
-        { ...control, params: { ...control.params, clientDigest: 'stale' } },
-        owner
+      daemon.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(control, member)))
+    ).rejects.toThrow('Owner required');
+    await expect(
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.machineRpc({ ...control, params: { ...control.params, clientDigest: 'stale' } }, owner)
+        )
       )
     ).rejects.toThrow('generation changed');
     const setSecret = (fieldKey: string) => ({
@@ -95,25 +105,31 @@ it('restores an enabled generation without its source checkout and preserves dis
         value: 'synthetic-test-value',
       },
     });
-    await expect(daemon.dispatchMachineRpc(setSecret('token'), member)).rejects.toThrow(
-      'Owner required'
-    );
-    await expect(daemon.dispatchMachineRpc(setSecret('ordinary'), owner)).rejects.toThrow(
-      'Not a secret'
-    );
+    await expect(
+      daemon.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(setSecret('token'), member)))
+    ).rejects.toThrow('Owner required');
+    await expect(
+      daemon.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(setSecret('ordinary'), owner)))
+    ).rejects.toThrow('Not a secret');
     expect(vault.size).toBe(0);
-    const saved = await daemon.dispatchMachineRpc(setSecret('token'), owner);
+    const saved = await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.machineRpc(setSecret('token'), owner))
+    );
     expect(saved).toMatchObject({ inspection: { configured: ['token'], preferences: {} } });
     expect(JSON.stringify(saved)).not.toContain('synthetic-test-value');
     expect(await readFile(file, 'utf8')).not.toContain('synthetic-test-value');
     await writeFile(join(root, 'data', 'test-plugin', 'journal'), 'checkpoint');
-    expect(await daemon.dispatchMachineRpc(control, owner)).toMatchObject({
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(control, owner)))
+    ).toMatchObject({
       inspection: { lifecycle: 'Disabled' },
     });
     await daemon.dispose();
     daemon = create();
-    await daemon.start();
-    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({
       plugins: [{ enabled: false }],
     });
     expect(await readFile(join(root, 'data', 'test-plugin', 'journal'), 'utf8')).toBe('checkpoint');
@@ -124,7 +140,7 @@ it('restores an enabled generation without its source checkout and preserves dis
 });
 it('serves digest-bound staged pages and rejects unverified invocation scopes', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-pages-'));
-  const daemon = new PluginDaemon(root, 'w', 'm', () => {});
+  const daemon = makePluginRuntime(root, 'w', 'm', () => {});
   try {
     const manifest = {
       id: 'pages',
@@ -147,17 +163,21 @@ it('serves digest-bound staged pages and rejects unverified invocation scopes', 
       join(root, 'catalog.json'),
       JSON.stringify([{ current, enabled: true, dev: false, source: '/unused' }])
     );
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     const base = { workspaceId: 'w', machineId: 'm' };
     const actor = { userId: 'owner', machineOwner: true };
     const page = (offset: number) =>
-      daemon.dispatchMachineRpc(
-        {
-          ...base,
-          method: 'plugin/bundle-chunk',
-          params: { pluginId: 'pages', clientDigest, offset },
-        },
-        actor
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.machineRpc(
+            {
+              ...base,
+              method: 'plugin/bundle-chunk',
+              params: { pluginId: 'pages', clientDigest, offset },
+            },
+            actor
+          )
+        )
       );
     const pages = await Promise.all([page(0), page(PLUGIN_BUNDLE_CHUNK_BYTES)]);
     expect(
@@ -187,18 +207,28 @@ it('serves digest-bound staged pages and rejects unverified invocation scopes', 
       },
     };
     await expect(
-      daemon.dispatchMachineRpc(
-        { ...query, params: { ...query.params, clientDigest: 'a'.repeat(64) } },
-        { ...actor, sessionId: 's' }
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.machineRpc(
+            { ...query, params: { ...query.params, clientDigest: 'a'.repeat(64) } },
+            { ...actor, sessionId: 's' }
+          )
+        )
       )
     ).rejects.toThrow('Stale plugin generation');
-    await expect(daemon.dispatchMachineRpc(query, actor)).rejects.toThrow('scope forbidden');
     await expect(
-      daemon.dispatchMachineRpc(query, { ...actor, sessionId: 'other' })
+      daemon.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(query, actor)))
     ).rejects.toThrow('scope forbidden');
-    await expect(daemon.dispatchMachineRpc(query, { ...actor, sessionId: 's' })).rejects.toThrow(
-      'handler unavailable'
-    );
+    await expect(
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.machineRpc(query, { ...actor, sessionId: 'other' }))
+      )
+    ).rejects.toThrow('scope forbidden');
+    await expect(
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.machineRpc(query, { ...actor, sessionId: 's' }))
+      )
+    ).rejects.toThrow('handler unavailable');
   } finally {
     await daemon.dispose();
     await rm(root, { recursive: true, force: true });
@@ -221,7 +251,7 @@ it('resumes a pending installation from its saved generation once all required s
     workspace,
     'machine'
   );
-  const daemon = new PluginDaemon(
+  const daemon = makePluginRuntime(
     root,
     workspace,
     'machine',
@@ -260,19 +290,38 @@ it('resumes a pending installation from its saved generation once all required s
         },
       ])
     );
-    await daemon.start();
-    const list = () => daemon.dispatch({ action: 'list' });
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
+    const list = () =>
+      daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })));
     const configure = (key: string) =>
-      daemon.dispatch({ action: 'configure', pluginId: id, key, value: 'test' });
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.dispatch({ action: 'configure', pluginId: id, key, value: 'test' })
+        )
+      );
     await configure('topic');
     expect(await list()).toMatchObject({ plugins: [{ pendingConfiguration: true }] });
-    expect(await daemon.dispatch({ action: 'inspect', pluginId: id })).toMatchObject({
+    expect(
+      await daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.dispatch({ action: 'inspect', pluginId: id }))
+      )
+    ).toMatchObject({
       lifecycle: 'PendingConfiguration',
       configured: ['topic'],
     });
-    await daemon.dispatch({ action: 'disable', pluginId: id });
-    await daemon.dispatch({ action: 'enable', pluginId: id, changes: { channel: 'test' } });
-    expect(await daemon.dispatch({ action: 'inspect', pluginId: id })).toMatchObject({
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'disable', pluginId: id }))
+    );
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) =>
+        r.dispatch({ action: 'enable', pluginId: id, changes: { channel: 'test' } })
+      )
+    );
+    expect(
+      await daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.dispatch({ action: 'inspect', pluginId: id }))
+      )
+    ).toMatchObject({
       lifecycle: 'Running',
       preferences: { channel: 'test', topic: 'test' },
     });
@@ -280,14 +329,22 @@ it('resumes a pending installation from its saved generation once all required s
       plugins: [{ enabled: true, pendingConfiguration: false }],
     });
     for (const projectId of ['a', 'b'])
-      await daemon.dispatch({
-        action: 'configure-many',
-        pluginId: id,
-        projectId,
-        changes: { format: projectId },
-      });
+      await daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.dispatch({
+            action: 'configure-many',
+            pluginId: id,
+            projectId,
+            changes: { format: projectId },
+          })
+        )
+      );
     await expect(
-      daemon.dispatch({ action: 'configure', pluginId: id, key: 'format', value: 'shared' })
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.dispatch({ action: 'configure', pluginId: id, key: 'format', value: 'shared' })
+        )
+      )
     ).rejects.toThrow('target mismatch');
     expect(
       JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'))[0].projectPreferences
@@ -302,28 +359,36 @@ it('resumes a pending installation from its saved generation once all required s
       );
     expect(projects()).toEqual({ a: { format: 'a' }, b: { format: 'b' } });
     await expect(
-      daemon.dispatch({
-        action: 'configure-many',
-        pluginId: id,
-        projectId: 'a',
-        changes: { format: '界'.repeat(5500) },
-      })
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.dispatch({
+            action: 'configure-many',
+            pluginId: id,
+            projectId: 'a',
+            changes: { format: '界'.repeat(5500) },
+          })
+        )
+      )
     ).rejects.toThrow('16 KiB');
     expect(projects().a).toEqual({ format: 'a' });
     const edit = (projectId: string, checkProjectWrite: () => void) =>
-      daemon.dispatchMachineRpc(
-        {
-          workspaceId: workspace,
-          machineId: 'machine',
-          method: 'plugin/control',
-          params: {
-            pluginId: id,
-            action: 'configure-many',
-            projectId,
-            changes: { format: 'collaborator' },
-          },
-        },
-        { userId: 'collaborator', machineOwner: false, projectId: 'a', checkProjectWrite }
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.machineRpc(
+            {
+              workspaceId: workspace,
+              machineId: 'machine',
+              method: 'plugin/control',
+              params: {
+                pluginId: id,
+                action: 'configure-many',
+                projectId,
+                changes: { format: 'collaborator' },
+              },
+            },
+            { userId: 'collaborator', machineOwner: false, projectId: 'a', checkProjectWrite }
+          )
+        )
       );
     await expect(edit('b', () => {})).rejects.toThrow('Owner required');
     await expect(edit('a', () => {})).rejects.toThrow('Owner required');
@@ -341,7 +406,7 @@ it('resumes a pending installation from its saved generation once all required s
 it('reports an uncommitted disable without advertising it when catalog replacement fails', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-catalog-')),
     catalog = join(root, 'catalog.json'),
-    daemon = new PluginDaemon(root, 'workspace', 'machine', () => {});
+    daemon = makePluginRuntime(root, 'workspace', 'machine', () => {});
   try {
     await writeFile(
       catalog,
@@ -364,18 +429,30 @@ it('reports an uncommitted disable without advertising it when catalog replaceme
         },
       ])
     );
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     await rm(catalog);
     await mkdir(catalog);
-    await expect(daemon.dispatch({ action: 'disable', pluginId: 'demo' })).rejects.toThrow();
-    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({
+    await expect(
+      daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.dispatch({ action: 'disable', pluginId: 'demo' }))
+      )
+    ).rejects.toThrow();
+    expect(
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({
       plugins: [{ enabled: true }],
     });
-    expect(await daemon.dispatch({ action: 'logs', pluginId: 'demo' })).toMatchObject({
+    expect(
+      await daemon.runPromise(
+        Effect.flatMap(Registry, (r) => r.dispatch({ action: 'logs', pluginId: 'demo' }))
+      )
+    ).toMatchObject({
       logs: ['Catalog persistence failed'],
     });
     await rm(catalog, { recursive: true });
-    await daemon.dispatch({ action: 'disable', pluginId: 'demo' });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'disable', pluginId: 'demo' }))
+    );
     expect(JSON.parse(await readFile(catalog, 'utf8'))[0].enabled).toBe(false);
   } finally {
     await daemon.dispose();
@@ -500,7 +577,7 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
   const projectId = 'project';
   const projectExists = async (id: string) => id === projectId;
   const open = () =>
-    new PluginDaemon(
+    makePluginRuntime(
       f.directory,
       f.workspaceId,
       f.machineId,
@@ -548,7 +625,7 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
         },
       ])
     );
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     if (!compiled.machineDigest) throw Error('No staged machine digest');
     const approval = {
       action: 'grant' as const,
@@ -571,7 +648,7 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     });
     await daemon.dispose();
     daemon = open();
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     const restored = JSON.parse(await readFile(join(f.directory, 'catalog.json'), 'utf8'))[0]
       .declaredGrant.signature;
     expect(
@@ -580,12 +657,18 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     await expect(
       owner.identity.verifyDeclaredWorkflowGrant(restored.slice(0, -2), f.machineId)
     ).rejects.toThrow();
-    const inspection = await daemon.dispatch({ action: 'inspect', pluginId });
+    const inspection = await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'inspect', pluginId }))
+    );
     const instance = inspection.instanceId;
     if (typeof instance !== 'number') throw Error('No running Sorbet worker');
-    const lease = await daemon.workflowLease(pluginId, instance);
+    const lease = await daemon.runPromise(
+      Effect.map(Registry, (r) => r.workflowLease(pluginId, instance))
+    );
     expect(lease?.isCurrent()).toBe(true);
-    expect(await daemon.workflowLease(pluginId, instance + 1)).toBeUndefined();
+    expect(
+      await daemon.runPromise(Effect.map(Registry, (r) => r.workflowLease(pluginId, instance + 1)))
+    ).toBeUndefined();
     const revoke = (id: string) =>
       owner.issue(
         daemon,
@@ -600,14 +683,22 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     expect(lease?.isCurrent()).toBe(true);
     await revoke(projectId);
     expect(lease?.isCurrent()).toBe(false);
-    expect(await daemon.workflowLease(pluginId, instance)).toBeUndefined();
+    expect(
+      await daemon.runPromise(Effect.map(Registry, (r) => r.workflowLease(pluginId, instance)))
+    ).toBeUndefined();
     await expect(owner.issue(daemon, approval, projectExists)).rejects.toThrow();
     await owner.issue(daemon, { ...approval, grant_id: randomUUID() }, projectExists);
-    const renewed = await daemon.workflowLease(pluginId, instance);
+    const renewed = await daemon.runPromise(
+      Effect.map(Registry, (r) => r.workflowLease(pluginId, instance))
+    );
     expect(renewed?.isCurrent()).toBe(true);
-    await daemon.dispatch({ action: 'disable', pluginId });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'disable', pluginId }))
+    );
     expect(renewed?.isCurrent()).toBe(false);
-    expect(await daemon.workflowLease(pluginId, instance)).toBeUndefined();
+    expect(
+      await daemon.runPromise(Effect.map(Registry, (r) => r.workflowLease(pluginId, instance)))
+    ).toBeUndefined();
     await daemon.dispose();
     const catalogPath = join(f.directory, 'catalog.json');
     const persisted = JSON.parse(await readFile(catalogPath, 'utf8'));
@@ -616,10 +707,14 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     persisted[0].declaredGrant = { ...signed, installationId, signature: restored };
     await writeFile(catalogPath, JSON.stringify(persisted));
     daemon = open();
-    await daemon.start();
-    const restarted = await daemon.dispatch({ action: 'inspect', pluginId });
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
+    const restarted = await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'inspect', pluginId }))
+    );
     expect(restarted.instanceId).toEqual(expect.any(Number));
-    expect(await daemon.activeWorkflowLease(pluginId)).toBeUndefined();
+    expect(
+      await daemon.runPromise(Effect.map(Registry, (r) => r.workflowLease(pluginId)))
+    ).toBeUndefined();
   } finally {
     await daemon.dispose();
     await owner.close();
@@ -630,7 +725,7 @@ it('workflow contribution processes belong to the enabled generation and receive
   const { once } = await import('node:events');
   const root = await mkdtemp(join(tmpdir(), 'workflow-generation-'));
   const directory = join(root, 'generations', randomUUID());
-  const daemon = new PluginDaemon(root, 'workspace', 'machine', () => {});
+  const daemon = makePluginRuntime(root, 'workspace', 'machine', () => {});
   try {
     await mkdir(join(directory, 'skills', 'plan'), { recursive: true });
     await writeFile(join(directory, 'skills', 'plan', 'SKILL.md'), 'Plan instructions');
@@ -686,19 +781,19 @@ it('workflow contribution processes belong to the enabled generation and receive
         },
       ])
     );
-    await daemon.start();
-    const rows = (await daemon.workflowCatalog())[0]!;
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
+    const rows = (await daemon.runPromise(Effect.map(Registry, (r) => r.workflow.catalog())))[0]!;
     expect(rows.roles.get('plugin:demo:planner')).toMatchObject({
       defaultProvider: 'plugin:demo:acp',
       prompt: 'Role instructions',
       skills: ['plugin:demo:plan'],
       mcpServers: ['plugin:demo:lookup'],
     });
-    const handle = await daemon.spawnWorkflowMcp('plugin:demo:lookup');
+    const handle = await spawnWorkflowMcp(daemon, 'plugin:demo:lookup');
     const reply = once(handle.child.stdout!, 'data');
     handle.child.stdin!.write('read');
     expect(JSON.parse(String((await reply)[0]))).toEqual({ allowed: 'public-input' });
-    const http = await daemon.spawnWorkflowMcp('plugin:demo:web');
+    const http = await spawnWorkflowMcp(daemon, 'plugin:demo:web');
     const { bindWorkflowHttp } = await import('./workflow/plugin-mcp-session');
     const binding = await bindWorkflowHttp('web', http, http.socketPath!);
     expect((await fetch(binding.entry.url)).status).toBe(403);
@@ -709,8 +804,14 @@ it('workflow contribution processes belong to the enabled generation and receive
         })
       ).json()
     ).toEqual({ path: '/mcp' });
-    const bind = await daemon.managedProvider('plugin:demo:acp', 'pi');
-    await expect(daemon.managedProvider('plugin:demo:acp', 'codex')).rejects.toThrow();
+    const bind = await daemon.runPromise(
+      Effect.map(Registry, (r) => r.workflow.provider('plugin:demo:acp', 'pi'))
+    );
+    await expect(
+      daemon.runPromise(
+        Effect.map(Registry, (r) => r.workflow.provider('plugin:demo:acp', 'codex'))
+      )
+    ).rejects.toThrow();
     const { createNoopSessionSandbox } = await import('../session/session-sandbox');
     const sandbox = createNoopSessionSandbox();
     t.onTestFinished(() => sandbox.cleanup());
@@ -718,9 +819,11 @@ it('workflow contribution processes belong to the enabled generation and receive
       sandbox.spawn(process.execPath, ['-e', 'process.stdin.resume()'], { stdio: 'pipe' })
     );
     const ended = Promise.all([once(handle.child, 'close'), once(provider.child, 'close')]);
-    await daemon.dispatch({ action: 'disable', pluginId: 'demo' });
+    await daemon.runPromise(
+      Effect.flatMap(Registry, (r) => r.dispatch({ action: 'disable', pluginId: 'demo' }))
+    );
     await ended;
-    expect(await daemon.workflowCatalog()).toEqual([]);
+    expect(await daemon.runPromise(Effect.map(Registry, (r) => r.workflow.catalog()))).toEqual([]);
     expect(() => bind(() => Promise.resolve(provider))).toThrow('withdrawn');
   } finally {
     await daemon.dispose();
@@ -1072,7 +1175,7 @@ it('restores Issue Context pins from host storage without sharing pins across pr
   const stage = join(root, 'generations', randomUUID());
   const worker = join(root, 'worker.mjs');
   const open = () =>
-    new PluginDaemon(
+    makePluginRuntime(
       root,
       'w',
       'm',
@@ -1089,19 +1192,23 @@ it('restores Issue Context pins from host storage without sharing pins across pr
     input: Record<string, string | boolean>
   ) => {
     const machine = { workspaceId: 'w', machineId: 'm' };
-    return daemon.dispatchMachineRpc(
-      {
-        ...machine,
-        method,
-        params: {
-          pluginId: 'issue-context',
-          descriptorId,
-          scope: 'project',
-          target: { ...machine, projectId },
-          input,
-        },
-      },
-      { userId: 'viewer', machineOwner: false, projectId }
+    return daemon.runPromise(
+      Effect.flatMap(Registry, (r) =>
+        r.machineRpc(
+          {
+            ...machine,
+            method,
+            params: {
+              pluginId: 'issue-context',
+              descriptorId,
+              scope: 'project',
+              target: { ...machine, projectId },
+              input,
+            },
+          },
+          { userId: 'viewer', machineOwner: false, projectId }
+        )
+      )
     );
   };
   try {
@@ -1137,11 +1244,11 @@ it('restores Issue Context pins from host storage without sharing pins across pr
         },
       ])
     );
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     await call('p', 'plugin/mutate', 'issues.togglePin', { issueId: 'iss_101', pinned: true });
     await daemon.dispose();
     daemon = open();
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     for (const project of ['p', 'q'])
       expect(await call(project, 'plugin/query', 'issues.list', {})).toMatchObject({
         data: [{ id: 'iss_101', pinned: project === 'p' }],

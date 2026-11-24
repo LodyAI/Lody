@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+import { Registry } from '../plugins/workflow/plugin-registry';
 import { describe, it, expect } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import { type SessionId } from '@lody/shared';
@@ -128,10 +130,10 @@ it('only the machine owner may consume an exact review, and replay never launche
     { tmpdir } = await import('node:os'),
     { join } = await import('node:path');
   const root = await mkdtemp(join(tmpdir(), 'plugin-review-'));
-  const { PluginDaemon } = await import('../plugins/plugin-host-legacy');
-  const host = new PluginDaemon(join(root, 'host'), 'w', 'm', () => {});
+  const { makePluginRuntime } = await import('../plugins/plugin-runtime');
+  const host = makePluginRuntime(join(root, 'host'), 'w', 'm', () => {});
   try {
-    await host.start();
+    await host.runPromise(Effect.flatMap(Registry, (r) => r.start));
     const pkg = join(root, 'plugin.tgz');
     const { packPlugin } = await import('../plugins/plugin-package');
     await writeFile(
@@ -179,10 +181,13 @@ it('only the machine owner may consume an exact review, and replay never launche
         updateCard: async (m) => {
           meta = m;
         },
-        activate: (m, p) => host.activateProposal(m, p),
+        activate: (m, p) =>
+          host.runPromise(Effect.flatMap(Registry, (r) => r.activateProposal(m, p))),
       });
     await expect(call(false)).rejects.toThrow('Owner');
-    expect(await host.dispatch({ action: 'list' })).toMatchObject({ plugins: [] });
+    expect(
+      await host.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({ plugins: [] });
     now = 100;
     expect(await call(true)).toMatchObject({ status: 'expired' });
     now = 1;
@@ -191,7 +196,9 @@ it('only the machine owner may consume an exact review, and replay never launche
     meta = { ...meta, artifact };
     expect(await call(true, 'deny')).toMatchObject({ status: 'rejected' });
     expect(await call(true)).toMatchObject({ status: 'rejected' });
-    expect(await host.dispatch({ action: 'list' })).toMatchObject({ plugins: [] });
+    expect(
+      await host.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({ plugins: [] });
     params.requestId = 'changed';
     meta = {
       ...meta,
@@ -206,12 +213,16 @@ it('only the machine owner may consume an exact review, and replay never launche
     expect(await call(true)).toMatchObject({ status: 'superseded' });
     await writeFile(pkg, original);
     expect(await call(true)).toMatchObject({ status: 'superseded' });
-    expect(await host.dispatch({ action: 'list' })).toMatchObject({ plugins: [] });
+    expect(
+      await host.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({ plugins: [] });
     params.requestId = 'next';
     meta = { ...meta, status: 'pending', command: { ...meta.command, requestId: 'next' } };
     await rememberPluginProposal(root, meta, pkg);
     expect(await call(true)).toMatchObject({ status: 'approved' });
-    expect(await host.dispatch({ action: 'list' })).toMatchObject({
+    expect(
+      await host.runPromise(Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' })))
+    ).toMatchObject({
       plugins: [{ pluginId: 'test-plugin', enabled: true }],
     });
     const generations = await readdir(join(root, 'host', 'generations'));

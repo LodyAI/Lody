@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { WorkspaceGitService } from './workspace-git-service';
 import {
   reconcileProjectMemberLink,
@@ -395,9 +396,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   protected token: string;
   private githubTokenManager: CloudGithubTokenManager | null = null;
   private gitCredentialBroker: GitCredentialBroker | null = null;
-  private readonly pluginToolMounts = new WeakMap<ISession,()=>boolean>();
-  hasTurnScopedPluginTools(session:ISession){return this.pluginToolMounts.has(session)}
-  pluginToolMountExpired(session:ISession){return this.pluginToolMounts.get(session)?.()===false}
+  private readonly pluginToolMounts = new WeakMap<ISession, () => boolean>();
+  hasTurnScopedPluginTools(session: ISession) {
+    return this.pluginToolMounts.has(session);
+  }
+  pluginToolMountExpired(session: ISession) {
+    return this.pluginToolMounts.get(session)?.() === false;
+  }
   private readonly sessions = new Map<SessionId, Session>();
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
   private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
@@ -407,7 +412,17 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly sessionSandboxFactory: SessionSandboxFactory;
   private readonly cloudPort: CloudPort;
   readonly mcpAuthentication: McpAuthenticationLegacy;
-  capturePluginToolTurn?: (id: SessionId) => { turnId: string; sourceTurnId:string; userId: string; isCurrent(): boolean; executeHostCall:import('../plugins/machine-host-port').DispatchMachineHostCall } | undefined;
+  capturePluginToolTurn?: (
+    id: SessionId
+  ) =>
+    | {
+        turnId: string;
+        sourceTurnId: string;
+        userId: string;
+        isCurrent(): boolean;
+        executeHostCall: import('../plugins/machine-host-port').DispatchMachineHostCall;
+      }
+    | undefined;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
@@ -790,49 +805,83 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         const workflowSelected = selected.size > 0 || config.agentRoleId?.startsWith('plugin:');
         const turn = this.capturePluginToolTurn?.(sessionId);
         if (!workflowSelected && !turn) return base;
-        const daemon = await this.workspaceDocument.pluginDaemon?.();
-        if (!daemon) {
+        const runtime = await this.workspaceDocument.pluginRuntime?.();
+        if (!runtime) {
           if (workflowSelected) throw Error('Workflow server forbidden');
           return base;
         }
-        const rows = workflowSelected ? await daemon.workflowCatalog() : [];
+        const { Registry } = await import('../plugins/workflow/plugin-registry');
+        const rows = workflowSelected
+          ? await runtime.runPromise(Effect.map(Registry, (r) => r.workflow.catalog()))
+          : [];
         for (const row of rows)
           for (const id of row.roles.get(config.agentRoleId ?? '')?.mcpServers ?? [])
             selected.add(id);
         const servers: import('@lody/shared').ResolvedMcpServer[] = [];
-        if (turn && turn.userId === mcpRequesterUserId && (await daemon.sessionTools()).length && turn.isCurrent()) {
+        if (
+          turn &&
+          turn.userId === mcpRequesterUserId &&
+          (await runtime.runPromise(Effect.map(Registry, (r) => r.sessionTools()))).length &&
+          turn.isCurrent()
+        ) {
           const key = `lody-plugin-tools:${turn.turnId}:${turn.sourceTurnId}`;
-          for(const [old,binding] of bindings)if(old.startsWith('lody-plugin-tools:')&&old!==key){bindings.delete(old);await (await binding).release();}
+          for (const [old, binding] of bindings)
+            if (old.startsWith('lody-plugin-tools:') && old !== key) {
+              bindings.delete(old);
+              await (await binding).release();
+            }
           let binding = bindings.get(key);
           if (!binding) {
-            binding = import('../plugins/workflow/plugin-tool-mcp').then(({bindPluginToolMcp}) => bindPluginToolMcp(daemon, {
-              ...turn, sessionId, projectId: localProjectId,
-              executeHostCall: turn.executeHostCall,
-            }, async (toolCallId, signal) => {
-              const {createSessionBackend} = await import('./session-backend');
-              const history = await createSessionBackend(await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
-              return {documents:this.workspaceDocument,history,sessionId,turnId:turn.turnId,toolCallId,signal,
-                authorize:async () => {if (!turn.isCurrent()) throw Error('Plugin turn ended');}};
-            }));
+            binding = import('../plugins/workflow/plugin-tool-mcp').then(({ bindPluginToolMcp }) =>
+              bindPluginToolMcp(
+                runtime,
+                {
+                  ...turn,
+                  sessionId,
+                  projectId: localProjectId,
+                  executeHostCall: turn.executeHostCall,
+                },
+                async (toolCallId, signal) => {
+                  const { createSessionBackend } = await import('./session-backend');
+                  const history = await createSessionBackend(
+                    await this.workspaceDocument.getOrCreateSessionDoc(sessionId)
+                  );
+                  return {
+                    documents: this.workspaceDocument,
+                    history,
+                    sessionId,
+                    turnId: turn.turnId,
+                    toolCallId,
+                    signal,
+                    authorize: async () => {
+                      if (!turn.isCurrent()) throw Error('Plugin turn ended');
+                    },
+                  };
+                }
+              )
+            );
             bindings.set(key, binding);
           }
           servers.push((await binding).entry);
-          this.pluginToolMounts.set(session,turn.isCurrent);
+          this.pluginToolMounts.set(session, turn.isCurrent);
         }
         for (const id of selected) {
           const row = rows.find((g) => g.mcpServers.has(id))?.mcpServers.get(id);
           if (!row) throw Error('Workflow MCP unavailable');
           let binding = bindings.get(id);
           if (!binding) {
-            const { bindWorkflowStdio, bindWorkflowHttp } =
+            const { bindWorkflowStdio, bindWorkflowHttp, spawnWorkflowMcp } =
               await import('../plugins/workflow/plugin-mcp-session');
-            binding = daemon
-              .spawnWorkflowMcp(id, options?.abortSignal, await admitWorkflow('mcpServers', id))
-              .then(async (child) =>
-                child.socketPath
-                  ? await bindWorkflowHttp(id, child, child.socketPath)
-                  : await bindWorkflowStdio(id, child)
-              );
+            binding = spawnWorkflowMcp(
+              runtime,
+              id,
+              options?.abortSignal,
+              await admitWorkflow('mcpServers', id)
+            ).then(async (child) =>
+              child.socketPath
+                ? await bindWorkflowHttp(id, child, child.socketPath)
+                : await bindWorkflowStdio(id, child)
+            );
             bindings.set(id, binding);
           }
           servers.push((await binding).entry);
@@ -931,16 +980,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       let withManagedProvider: CreateAgentConfig['withManagedProvider'];
       if (config.agentConfigId?.startsWith('plugin:')) {
         const id = config.agentConfigId,
-          daemon = await this.workspaceDocument.pluginDaemon?.();
+          runtime = await this.workspaceDocument.pluginRuntime?.();
         if (
-          !daemon ||
+          !runtime ||
           config.agentCliType !== 'builtin' ||
           config.customAcp ||
           config.runtimeOverrides ||
           config.magpieGatewayUrl
         )
           throw Error('Workflow provider unavailable');
-        const bind = await daemon.managedProvider(id, config.agentType);
+        const { Registry } = await import('../plugins/workflow/plugin-registry');
+        const bind = await runtime.runPromise(
+          Effect.map(Registry, (r) => r.workflow.provider(id, config.agentType))
+        );
         const admit =
           config.requesterUserId === this.cloudPort.identity.userId
             ? undefined

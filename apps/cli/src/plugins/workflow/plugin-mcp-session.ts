@@ -1,13 +1,16 @@
+import { Effect, Exit, Scope } from 'effect';
+import type { PluginRuntime } from '../plugin-runtime';
+import { Registry } from './plugin-registry';
 import { createServer } from 'node:net';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { once } from 'node:events';
-import type { SessionProcessHandle } from '../../session/session-sandbox';
+type WorkflowProcess = Awaited<ReturnType<typeof spawnWorkflowMcp>>;
 import type { ResolvedStdioMcpServer } from '@lody/shared';
 
 // ACP agents launch stdio commands themselves. Forward bytes, not configuration or secrets,
 // from their process tree to the already scoped, environment-isolated MCP server.
 const relay = `const net=require('node:net');const s=net.connect(Number(process.argv[1]),'127.0.0.1',()=>{s.write(process.argv[2]+'\\n');process.stdin.pipe(s);s.pipe(process.stdout)});s.on('error',()=>process.exit(1));s.on('close',()=>process.exit());`;
-export async function bindWorkflowStdio(name: string, handle: SessionProcessHandle) {
+export async function bindWorkflowStdio(name: string, handle: WorkflowProcess) {
   const token = randomBytes(32).toString('hex');
   const sockets = new Set<import('node:net').Socket>();
   let claimed = false;
@@ -43,7 +46,7 @@ export async function bindWorkflowStdio(name: string, handle: SessionProcessHand
       socket.pipe(stdin);
       stdout.pipe(socket);
       socket.once('close', () => {
-        void handle.terminate(false).catch(() => {});
+        void handle.terminate().catch(() => {});
       });
     }
     socket.on('data', handshake);
@@ -56,7 +59,7 @@ export async function bindWorkflowStdio(name: string, handle: SessionProcessHand
     const ready = once(server, 'listening');
     server.listen(0, '127.0.0.1');
     await ready;
-    handle.onClose(close);
+    handle.child.once('close', close);
     if (handle.child.exitCode !== null || handle.child.signalCode !== null)
       throw Error('Workflow MCP exited');
     const address = server.address();
@@ -71,22 +74,18 @@ export async function bindWorkflowStdio(name: string, handle: SessionProcessHand
       entry,
       release: async () => {
         close();
-        await handle.terminate(false);
+        await handle.terminate();
       },
     };
   } catch (error) {
     close();
-    await handle.terminate(true);
+    await handle.terminate();
     throw error;
   }
 }
 
 /** The child listens on LODY_MCP_SOCKET. Only the authenticated loopback facade is sent to the ACP client. */
-export async function bindWorkflowHttp(
-  name: string,
-  handle: SessionProcessHandle,
-  socketPath: string
-) {
+export async function bindWorkflowHttp(name: string, handle: WorkflowProcess, socketPath: string) {
   const { createServer, request } = await import('node:http');
   const token = randomBytes(32).toString('hex');
   const server = createServer((input, out) => {
@@ -112,7 +111,7 @@ export async function bindWorkflowHttp(
     const ready = once(server, 'listening');
     server.listen(0, '127.0.0.1');
     await ready;
-    handle.onClose(close);
+    handle.child.once('close', close);
     const address = server.address();
     if (
       !address ||
@@ -130,12 +129,37 @@ export async function bindWorkflowHttp(
       },
       release: async () => {
         close();
-        await handle.terminate(false);
+        await handle.terminate();
       },
     };
   } catch (e) {
     close();
-    await handle.terminate(true);
+    await handle.terminate();
+    throw e;
+  }
+}
+
+export async function spawnWorkflowMcp(
+  runtime: PluginRuntime,
+  id: string,
+  signal?: AbortSignal,
+  admit?: () => void
+) {
+  const scope = Scope.makeUnsafe();
+  let drain: Promise<void> | undefined;
+  const close = () => (drain ??= Effect.runPromise(Scope.close(scope, Exit.void)));
+  try {
+    const {
+      processHandle: { child },
+      socketPath,
+    } = await runtime.runPromise(
+      Effect.flatMap(Registry, (r) => Scope.provide(r.workflow.start(id, admit), scope)),
+      { signal }
+    );
+    child.once('close', () => void close().catch(() => {}));
+    return { child, socketPath, terminate: close };
+  } catch (e) {
+    await close();
     throw e;
   }
 }

@@ -1,3 +1,4 @@
+import { Registry } from '../../src/plugins/workflow/plugin-registry';
 import { Effect, Scope, Exit } from 'effect';
 import { encryptedRpcFixture } from '../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
 import { makeCliE2eeExecutionAuthorization } from '../../src/lib/e2ee/execution-authorization';
@@ -6,7 +7,7 @@ import type {
   DeclaredGrantSignature,
 } from '@lody/shared/plugins/machine-rpc';
 import { bindDeclaredGrantActor } from '../../src/plugins/workflow/declared-workflow';
-import type { PluginDaemon } from '../../src/plugins/plugin-host-legacy';
+import type { PluginRuntime } from '../../src/plugins/plugin-runtime';
 import type { MachineId } from '@lody/shared';
 
 /** Fixed ledger with actual owner personal-device and machine signers; latest-history I/O is local. */
@@ -90,7 +91,7 @@ export async function ownerApprovalFixture() {
     f,
     identity,
     async issue(
-      host: PluginDaemon,
+      host: PluginRuntime,
       params: WorkflowGrantRequest,
       projectExists: (id: string) => Promise<boolean>
     ) {
@@ -127,7 +128,7 @@ export async function ownerApprovalFixture() {
           declaredGrantSignature: receipt,
         },
       });
-      return host.dispatchMachineRpc(verifiedRequest, actor);
+      return host.runPromise(Effect.flatMap(Registry, (r) => r.machineRpc(verifiedRequest, actor)));
     },
     async close() {
       await Effect.runPromise(Scope.close(scope, Exit.void));

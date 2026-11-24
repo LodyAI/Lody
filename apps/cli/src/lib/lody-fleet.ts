@@ -121,6 +121,7 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import type { LocalLoroDataPlaneServerLegacy } from '@lody/shared/local-loro-data-plane-server';
+import type { PluginRuntime } from '../plugins/plugin-runtime';
 import { Effect } from 'effect';
 import { ScheduleConfigurationError } from './schedules/schedule-engine';
 import {
@@ -195,7 +196,7 @@ function keepsEncryptedMode(
 export class LodyFleet {
   private readonly resolveStandalonePluginOperation?: ResolveStandalonePluginOperation;
   private pluginWorkspaceId?: string;
-  private plugins?: import('../plugins/plugin-host-legacy').PluginDaemon;
+  private plugins?: PluginRuntime;
   private readonly logger: Logger;
   private readonly builtinAgentConfigCliTypes: CliType[];
   private readonly supportRegistryAgentTypes: string[];
@@ -393,7 +394,9 @@ export class LodyFleet {
           return runtime.lody.dispatchEncryptedPluginControl(command);
         }
         if (!this.plugins) throw new Error('Plugin host unavailable');
-        return this.plugins.dispatch(command);
+        const { Registry } = await import('../plugins/workflow/plugin-registry');
+        if (!this.plugins || this.stopped) throw new Error('Plugin host unavailable');
+        return this.plugins.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(command)));
       },
       machineId: this.machineId,
       logger: this.logger,
@@ -509,12 +512,13 @@ export class LodyFleet {
           logger: this.logger,
         });
         if (workspace.role === 'owner' && process.env.LODY_PLUGIN_SAFE_MODE !== '1') {
-          const pluginModule = await import('../plugins/plugin-host-legacy').catch(() => {
+          const plugin = await import('../plugins/plugin-runtime').catch(() => {
             this.logger.warn('Plugin runtime unavailable');
             return undefined;
           });
-          if (!pluginModule) return;
-          const daemon = new pluginModule.PluginDaemon(
+          if (!plugin || this.stopped) return;
+          const { makePluginRuntime, Registry } = plugin;
+          const daemon = makePluginRuntime(
             path.join(getLodyDataDir(), 'plugins', encodeURIComponent(workspace.id)),
             workspace.id,
             this.machineId,
@@ -532,14 +536,11 @@ export class LodyFleet {
           );
           this.pluginWorkspaceId = workspace.id;
           this.plugins = daemon;
-          void daemon
-            .start()
-            .catch(async () => {
-              if (this.plugins === daemon) this.plugins = undefined;
-              this.logger.warn('Plugin catalog unavailable');
-              await daemon.dispose();
-            })
-            .catch(() => this.logger.warn('Plugin cleanup failed'));
+          void daemon.runPromise(Effect.flatMap(Registry, (r) => r.start)).catch(async () => {
+            if (this.plugins === daemon) this.plugins = undefined;
+            this.logger.warn('Plugin catalog unavailable');
+            await daemon.dispose().catch(() => this.logger.warn('Plugin cleanup failed'));
+          });
         }
       });
     }
