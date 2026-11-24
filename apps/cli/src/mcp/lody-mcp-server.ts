@@ -1,3 +1,4 @@
+import { repliedUserTurnId } from '@lody/shared/session-data';
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
 import { isContainedSession, type ScheduleCommand } from '@lody/shared';
@@ -2034,8 +2035,7 @@ const readLastTurnFailure = async (
       const read = await backend.history.readAt(directory[next]!.position);
       if (read.state !== 'ready') continue;
       if (next > index && read.turn.role === 'user') break;
-      if (read.turn.role === 'assistant' && read.turn.userTurnId === scalars.id)
-        assistantTurnId = read.turn.id;
+      if (repliedUserTurnId(read.turn) === scalars.id) assistantTurnId = read.turn.id;
       if (read.turn.role === 'system') notices.push(read.turn as SessionHistoryInput);
     }
     const notice = readChatFailureNotice(notices);

@@ -59,7 +59,9 @@ export {
   readLatestUserId,
   readSessionHistory,
   readSessionHistoryMetadata,
+  repliedUserTurnId,
   selectTurnOutput,
+  STANDALONE_ASSISTANT_FILE_ID_PREFIX,
 } from './read';
 export {
   SESSION_DIRECTORY_SCALAR_KEYS,

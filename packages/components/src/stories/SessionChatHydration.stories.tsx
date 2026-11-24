@@ -1,9 +1,22 @@
 import * as stylex from '@stylexjs/stylex';
-import { useState, type ComponentProps, type CSSProperties } from 'react';
+import { useMemo, useState, type ComponentProps, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import {
+  collectConversationMessages,
+  type ConversationMessage,
+  type SessionHistory,
+  type SessionHistoryParsed,
+  type SessionId,
+} from '@lody/shared';
+import { buildChatStreamItems } from '@/components/ai-gui/build-chat-stream-items';
+import {
+  MessageSelectionContext,
+  MessageSelectionOverlay,
+  MessageSelectionToolbar,
+  useMessageSelection,
+} from '@/components/ai-gui/message-selection';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -11,6 +24,7 @@ import {
 } from '@/components/ai-gui/view';
 import { Button } from '@lody/ui/button';
 import { clearSavedScrollStates, saveScrollState } from '@/lib/conversation-scroll/saved-state';
+import { createConversationViewFromHistory, inQuestionFirstOrder } from '@/lib/conversation-view';
 
 const migrationStyles = stylex.create({
   cachedOffset: { height: '400px', flexShrink: 0 },
@@ -232,3 +246,80 @@ function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
 
 export const ColdTail: Story = { render: () => <ColdTailStory /> };
 export const ColdCachedOffset: Story = { render: () => <ColdTailStory cachedOffset /> };
+
+const reversedStoredHistory: SessionHistory[] = [
+  {
+    id: 'previous',
+    role: 'user',
+    timestamp: '2026-11-24T11:55:00.000Z',
+    read: true,
+    fileDiff: [],
+    items: [{ type: 'text', text: 'Synthetic earlier turn.' }],
+  },
+  {
+    id: 'assistant:question',
+    role: 'assistant',
+    userTurnId: 'question',
+    timestamp: '2026-11-24T11:57:25.711Z',
+    read: true,
+    fileDiff: [],
+    finished: true,
+    items: [{ type: 'text', text: 'Synthetic reply stored before its question.' }],
+  },
+  {
+    id: 'question',
+    role: 'user',
+    timestamp: '2026-11-24T11:56:23.432Z',
+    read: true,
+    fileDiff: [],
+    items: [{ type: 'text', text: 'Synthetic question synced after its reply.' }],
+  },
+];
+
+const reversedSessionId = 'reversed-turn-order' as SessionId;
+
+function ReversedTurnOrderStory() {
+  const { items, lastAssistantMessageId, lastCompletedAssistantMessageId, candidates } =
+    useMemo(() => {
+      const view = createConversationViewFromHistory({
+        sessionId: reversedSessionId,
+        getHistory: () => reversedStoredHistory,
+        subscribe: () => () => {},
+      });
+      const stream = buildChatStreamItems(view, reversedSessionId);
+      return {
+        ...stream,
+        candidates: collectConversationMessages(inQuestionFirstOrder(reversedStoredHistory)),
+      };
+    }, []);
+  const selection = useMessageSelection(reversedSessionId);
+  const [selected, setSelected] = useState<ConversationMessage[]>([]);
+  return (
+    <PlatformContext.Provider value={platform}>
+      <div {...stylex.props(storyLayout.stack)} data-testid="reversed-turn-order-story">
+        <div {...stylex.props(storyLayout.canvas)}>
+          <Button onClick={() => selection.start(candidates, setSelected)}>Start selection</Button>
+          <output data-testid="selection-preview">
+            {selected.map((message) => message.id).join(',')}
+          </output>
+        </div>
+        <div {...stylex.props(storyLayout.frame)}>
+          <MessageSelectionContext.Provider value={selection.context}>
+            <SessionChatStreamView
+              sessionId={reversedSessionId}
+              xstyle={storyOverrides.stream}
+              items={items}
+              lastAssistantMessageId={lastAssistantMessageId}
+              lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+              renderMessageRow={(props) => <MessageRowView {...props} />}
+            />
+            <MessageSelectionOverlay />
+          </MessageSelectionContext.Provider>
+          <MessageSelectionToolbar selection={selection} />
+        </div>
+      </div>
+    </PlatformContext.Provider>
+  );
+}
+
+export const ReversedTurnOrder: Story = { render: () => <ReversedTurnOrderStory /> };

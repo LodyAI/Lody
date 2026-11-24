@@ -2,8 +2,17 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConversationMessage } from '@lody/shared';
+import {
+  collectConversationMessages,
+  type ConversationMessage,
+  type SessionHistory,
+  type SessionId,
+} from '@lody/shared';
 import { initI18n } from '../src/i18n';
+import type { SessionDocStore, WorkspaceRuntime } from '../src/atoms/runtime';
+import { readConversationCopySource } from '../src/lib/conversation-copy-source';
+import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { buildSessionDoc, createManualIdle, openReaderView } from './conversation-view-fixtures';
 import {
   MessageSelectionContext,
   MessageSelectionOverlay,
@@ -144,6 +153,107 @@ describe('chat message selection', () => {
     await pointer('followup', 'pointerover');
     expect(selectedIds()).toEqual(['user']);
     await release();
+  });
+
+  const loroTurn = (id: string, role: 'user' | 'assistant', text?: string): SessionHistory =>
+    ({
+      id,
+      role,
+      timestamp: '2026-11-25T00:00:00.000Z',
+      items: text === undefined ? [] : [{ type: 'text', text }],
+      ...(role === 'assistant' ? { userTurnId: 'question', finished: true } : {}),
+    }) as SessionHistory;
+  it.each([
+    {
+      name: 'a reply before its question, a repeated user id once',
+      stored: [
+        loroTurn('previous', 'user', 'Synthetic earlier turn'),
+        loroTurn('assistant:question', 'assistant', 'Synthetic reply'),
+        loroTurn('question', 'user', 'Synthetic question'),
+        loroTurn('previous', 'user', 'Synthetic newer duplicate'),
+      ],
+      shown: [
+        ['previous', 'Synthetic newer duplicate'],
+        ['question', 'Synthetic question'],
+        ['assistant:question', 'Synthetic reply'],
+      ],
+      drag: ['previous', 'question'],
+      preview: 'previous:Synthetic newer duplicate,question:Synthetic question',
+    },
+    {
+      name: 'an empty reply slot filled by a newer duplicate',
+      stored: [
+        loroTurn('assistant:question', 'assistant'),
+        loroTurn('previous', 'user', 'Synthetic other turn'),
+        loroTurn('question', 'user', 'Synthetic question'),
+        loroTurn('assistant:question', 'assistant', 'Synthetic reply'),
+      ],
+      shown: [
+        ['question', 'Synthetic question'],
+        ['assistant:question', 'Synthetic reply'],
+        ['previous', 'Synthetic other turn'],
+      ],
+      drag: ['question', 'assistant:question'],
+      preview: 'question:Synthetic question,assistant:question:Synthetic reply',
+    },
+  ])('selects the rows the Loro chat shows: $name', async ({ stored, shown, drag, preview }) => {
+    const sessionId = 'session-reversed' as SessionId;
+    const view = await openReaderView(buildSessionDoc(stored), {
+      sessionId,
+      tailKeep: stored.length,
+      scheduleIdle: createManualIdle().scheduleIdle,
+    });
+    const range = view.acquireRange(0, view.turnCount);
+    await range.ready;
+    const streamed = buildChatStreamItems(view, sessionId).items.flatMap((item) =>
+      item.type === 'message'
+        ? [
+            [
+              item.message.id,
+              item.message.items.map((block) => ('text' in block ? block.text : '')).join(''),
+            ],
+          ]
+        : []
+    );
+    expect(streamed).toEqual(shown);
+    const runtime = {
+      withSessionStore: async (_id, read) => read({ history: view } as SessionDocStore),
+    } as Pick<WorkspaceRuntime, 'withSessionStore'>;
+    const candidates = collectConversationMessages(
+      await readConversationCopySource(runtime, sessionId, view)
+    );
+    expect(candidates.map((message) => [message.id, message.text])).toEqual(shown);
+    function Reversed() {
+      const selection = useMessageSelection('session-reversed');
+      const [selected, setSelected] = useState<ConversationMessage[]>([]);
+      return (
+        <>
+          <button onClick={() => selection.start(candidates, setSelected)}>Start</button>
+          <MessageSelectionContext.Provider value={selection.context}>
+            {candidates.map((message) => (
+              <MessageSelectionRow key={message.id} id={message.id} first>
+                <p>{message.text}</p>
+              </MessageSelectionRow>
+            ))}
+          </MessageSelectionContext.Provider>
+          <MessageSelectionToolbar selection={selection} />
+          <output>{selected.map((message) => `${message.id}:${message.text}`).join(',')}</output>
+        </>
+      );
+    }
+    await act(async () => root.render(<Reversed />));
+    await click('Start');
+    const pointer = async (id: string, type: string) => {
+      const row = container.querySelector<HTMLElement>(`[data-message-selection-id="${id}"]`)!;
+      await act(async () => row.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 })));
+    };
+    await pointer(drag[0]!, 'pointerdown');
+    await pointer(drag[1]!, 'pointerover');
+    await act(async () => window.dispatchEvent(new MouseEvent('pointerup')));
+    await click('Preview image');
+    expect(container.querySelector('output')?.textContent).toBe(preview);
+    range.release();
+    view.dispose();
   });
 
   it('scrolls at the edge, selects newly reached messages, and stops on release', async () => {

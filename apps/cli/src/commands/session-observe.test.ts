@@ -205,6 +205,36 @@ describe('Session observation', () => {
     expect(f.observer.current?.state).toBe('idle');
   });
 
+  it('never takes a standalone attachment entry as the turn reply or its completion', async () => {
+    const f = await fixture([
+      entry('u', { status: 'processing' }),
+      entry('assistant-file-1', { role: 'assistant', userTurnId: 'u', finished: true }),
+      entry('assistant:u', { role: 'assistant', userTurnId: 'u', finished: false }),
+    ]);
+    expect(f.observer.current?.latestTurn).toEqual({
+      userTurnId: 'u',
+      assistantTurnId: 'assistant:u',
+      state: 'running',
+    });
+    await f.update('u', { status: 'handled' });
+    expect(f.events.filter((event) => event.type === 'turn.finished')).toEqual([]);
+    expect(f.observer.current?.latestTurn).toMatchObject({
+      assistantTurnId: 'assistant:u',
+      state: 'running',
+    });
+    await f.update('assistant:u', { finished: true });
+    expect(f.events.filter((event) => event.type === 'turn.finished')).toEqual([
+      {
+        type: 'turn.finished',
+        sessionId: 's',
+        userTurnId: 'u',
+        assistantTurnId: 'assistant:u',
+        outcome: 'completed',
+        durationMs: 0,
+      },
+    ]);
+  });
+
   it.each(['latestUserMsgId', 'processingUserMsgId'] as const)(
     'does not settle the previous turn while %s points to missing history',
     async (pointer) => {

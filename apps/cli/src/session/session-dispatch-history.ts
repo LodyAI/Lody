@@ -1,8 +1,9 @@
 import type { SessionHistoryInput } from '@lody/shared';
-import type {
-  SessionDirectoryRow,
-  SessionHistoryReader,
-  SessionTurnRead,
+import {
+  repliedUserTurnId,
+  type SessionDirectoryRow,
+  type SessionHistoryReader,
+  type SessionTurnRead,
 } from '@lody/shared/session-data';
 
 /** Dispatch evidence has no prompt, items, plan, tool output or provider metadata. */
@@ -53,10 +54,7 @@ export function selectDispatchHistory(
   return entries.filter(
     (entry) =>
       ids.has(entry.id) ||
-      (entry.role === 'assistant' &&
-        entry.userTurnId !== undefined &&
-        ids.has(entry.userTurnId) &&
-        typeof entry.endedAt === 'number')
+      (ids.has(repliedUserTurnId(entry) ?? '') && typeof entry.endedAt === 'number')
   );
 }
 

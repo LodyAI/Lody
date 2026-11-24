@@ -99,6 +99,21 @@ export function readSessionHistory(reader: { readAll(): readonly unknown[] }): S
     }));
 }
 
+/** A standalone attachment entry records its turn's `userTurnId` only so readers can order it. */
+export const STANDALONE_ASSISTANT_FILE_ID_PREFIX = 'assistant-file-';
+
+/** The user turn `entry` replies to; a standalone attachment entry is never a reply. */
+export function repliedUserTurnId(
+  entry:
+    | { readonly id?: unknown; readonly role?: unknown; readonly userTurnId?: unknown }
+    | undefined
+): string | undefined {
+  if (entry?.role !== 'assistant' || typeof entry.userTurnId !== 'string') return undefined;
+  if (typeof entry.id === 'string' && entry.id.startsWith(STANDALONE_ASSISTANT_FILE_ID_PREFIX))
+    return undefined;
+  return entry.userTurnId;
+}
+
 /** Adapter-side selection for a consistent output observation. `scalars` never
  * reads items; only the selected assistant (and failure notices) needs a body. */
 export function selectTurnOutput(
@@ -114,8 +129,7 @@ export function selectTurnOutput(
     let assistantFound = false;
     for (let j = i + 1; j < count; j++) {
       const row = scalars(j);
-      const assistant =
-        !assistantFound && row?.role === 'assistant' && row.userTurnId === userTurnId;
+      const assistant = !assistantFound && repliedUserTurnId(row) === userTurnId;
       if (assistant || (user.status === 'failed' && row?.role === 'system')) {
         const turn = body(j);
         if (turn) selected.push(turn);

@@ -1,5 +1,9 @@
 import { describeChatFailure, readChatFailureNotice } from '@lody/shared';
-import { pageVisibleTranscript, type SessionHistoryReader } from '@lody/shared/session-data';
+import {
+  pageVisibleTranscript,
+  repliedUserTurnId,
+  type SessionHistoryReader,
+} from '@lody/shared/session-data';
 import { isVisibleTranscriptTurn, toSessionTranscriptEntry } from '@/commands/session';
 import {
   buildSessionHistoryPage,
@@ -107,10 +111,8 @@ export async function buildSessionHistoryForReader(
     );
   }
   const entries = formattedEntries.map(({ entry, turn }) => {
-    const failure =
-      turn.role === 'assistant' && turn.userTurnId
-        ? failedTurns.get(turn.userTurnId)
-        : failedTurns.get(turn.id);
+    const replied = repliedUserTurnId(turn);
+    const failure = failedTurns.get(replied ?? turn.id);
     return failure ? { ...entry, isError: true as const, errorReason: failure.reason } : entry;
   });
   return buildSessionHistoryPage({

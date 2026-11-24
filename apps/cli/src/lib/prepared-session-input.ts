@@ -1,4 +1,4 @@
-import { readSessionHistoryMetadata } from '@lody/shared/session-data';
+import { readSessionHistoryMetadata, repliedUserTurnId } from '@lody/shared/session-data';
 import { normalizeSessionTurnInputConfig } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -42,8 +42,7 @@ export function hasSessionDispatchEvidence(
       user.status === 'canceled' ||
       history.some(
         (entry) =>
-          entry.role === 'assistant' &&
-          entry.userTurnId === userTurnId &&
+          repliedUserTurnId(entry) === userTurnId &&
           (entry.finished === true || typeof entry.endedAt === 'number')
       ))
   );

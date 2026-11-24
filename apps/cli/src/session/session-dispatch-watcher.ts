@@ -1,3 +1,4 @@
+import { repliedUserTurnId } from '@lody/shared/session-data';
 import { isMissingHistoryUserTurn } from '@lody/shared';
 import { createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
@@ -2738,10 +2739,7 @@ export class SessionDispatchWatcher {
         return status === 'handled' || status === 'failed' || status === 'canceled';
       }) ||
       history.some(
-        (entry) =>
-          entry.role === 'assistant' &&
-          entry.userTurnId === turnId &&
-          typeof entry.endedAt === 'number'
+        (entry) => repliedUserTurnId(entry) === turnId && typeof entry.endedAt === 'number'
       )
     );
   }
@@ -3518,10 +3516,7 @@ export class SessionDispatchWatcher {
       // entry linked to this user turn is positive proof it ran to completion.
       // endedAt is written at ACP finalization. Only this proves 'handled'.
       const assistantCompleted = history.some(
-        (entry) =>
-          entry.role === 'assistant' &&
-          entry.userTurnId === turn.id &&
-          typeof entry.endedAt === 'number'
+        (entry) => repliedUserTurnId(entry) === turn.id && typeof entry.endedAt === 'number'
       );
       if (assistantCompleted) {
         terminalStatus = 'handled';

@@ -140,6 +140,18 @@ describe('stored history operations', () => {
     ]);
   });
 
+  it('never selects a standalone attachment entry as the turn output', async () => {
+    const { data } = makeHarness();
+    await data.commands.appendTurn(userTurn('user-1'));
+    await data.commands.appendTurn({ ...assistantTurn('assistant-file-1'), userTurnId: 'user-1' });
+    expect((await data.history.readTurnOutput('user-1')).map((t) => t.id)).toEqual(['user-1']);
+    await data.commands.appendTurn({ ...assistantTurn('assistant:user-1'), userTurnId: 'user-1' });
+    expect((await data.history.readTurnOutput('user-1')).map((t) => t.id)).toEqual([
+      'user-1',
+      'assistant:user-1',
+    ]);
+  });
+
   it('reads turns by business id and raw range', async () => {
     const { data } = makeHarness();
     await data.commands.appendTurn(userTurn('a'));

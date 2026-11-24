@@ -232,3 +232,42 @@ test('a saved reading position opens at its row without waiting for row measurem
   await releaseRowMeasurements(page);
   await expect.poll(rowDistance).toBeLessThanOrEqual(1);
 });
+
+test('renders a question above its earlier-stored reply and drags in display order', async ({
+  page,
+}) => {
+  await page.goto(
+    '/iframe.html?id=sessions-sessionchathydration--reversed-turn-order&viewMode=story',
+    { waitUntil: 'domcontentloaded' }
+  );
+  const previous = page.getByText('Synthetic earlier turn.', { exact: true });
+  const question = page.getByText('Synthetic question synced after its reply.', { exact: true });
+  const reply = page.getByText('Synthetic reply stored before its question.', { exact: true });
+  await expect(previous).toBeVisible();
+  await expect(question).toBeVisible();
+  await expect(reply).toBeVisible();
+
+  const previousBox = (await previous.boundingBox())!;
+  const questionBox = (await question.boundingBox())!;
+  const replyBox = (await reply.boundingBox())!;
+  expect(previousBox.y + previousBox.height).toBeLessThanOrEqual(questionBox.y);
+  expect(questionBox.y + questionBox.height).toBeLessThanOrEqual(replyBox.y);
+
+  await page.getByRole('button', { name: 'Start selection', exact: true }).click();
+  const previousRow = (await page.locator('[data-message-selection-id="previous"]').boundingBox())!;
+  const questionRow = (await page.locator('[data-message-selection-id="question"]').boundingBox())!;
+  await page.mouse.move(
+    previousRow.x + previousRow.width / 2,
+    previousRow.y + previousRow.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    questionRow.x + questionRow.width / 2,
+    questionRow.y + questionRow.height / 2,
+    { steps: 8 }
+  );
+  await page.mouse.up();
+
+  await page.getByRole('button', { name: /^(Preview image|预览图片)$/u }).click();
+  await expect(page.getByTestId('selection-preview')).toHaveText('previous,question');
+});

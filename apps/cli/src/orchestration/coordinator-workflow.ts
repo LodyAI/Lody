@@ -13,6 +13,7 @@ import {
 import {
   getOperationProgressTargetKey,
   getOperationProgressTurnId,
+  repliedUserTurnId,
   type OperationProgressStatusByTarget,
 } from '@lody/shared/session-data';
 import { Cause, Context, Effect, Exit, FiberMap, Layer, Scope, Semaphore } from 'effect';
@@ -299,7 +300,7 @@ export class CoordinatorWorkflow {
             );
             if (!userTurn) return;
             const assistantRead = output.find(
-              (entry) => entry.role === 'assistant' && entry.userTurnId === target.userTurnId
+              (entry) => repliedUserTurnId(entry) === target.userTurnId
             );
             const key = getOperationProgressTargetKey(target);
             if (userTurn.status === 'failed') {
@@ -349,9 +350,7 @@ export class CoordinatorWorkflow {
       const userTurn = output.find(
         (entry) => entry.id === successorTurnId && entry.role === 'user'
       );
-      const next = output.find(
-        (entry) => entry.role === 'assistant' && entry.userTurnId === successorTurnId
-      );
+      const next = output.find((entry) => repliedUserTurnId(entry) === successorTurnId);
       if (!next) {
         // An applied steer can still lose the race with the turn it targeted
         // (stale-turn, or a failure before handoff) and never start a successor.
@@ -595,15 +594,11 @@ export class CoordinatorWorkflow {
       );
       const assistant = targetOutput.find(
         (entry) =>
-          entry.role === 'assistant' &&
-          entry.userTurnId === item.target.userTurnId &&
-          isTerminalAssistantEntry(entry)
+          repliedUserTurnId(entry) === item.target.userTurnId && isTerminalAssistantEntry(entry)
       );
       const failedAssistantTurn =
         assistant ??
-        targetOutput.find(
-          (entry) => entry.role === 'assistant' && entry.userTurnId === item.target.userTurnId
-        );
+        targetOutput.find((entry) => repliedUserTurnId(entry) === item.target.userTurnId);
       const targetFailed = (): LodyOperationItemResult => ({
         status: 'failed',
         ...(item.label ? { label: item.label } : {}),
@@ -682,10 +677,7 @@ export class CoordinatorWorkflow {
       if (!userTurn) return false;
       const meta = metaRecord.meta as SessionMeta;
       const assistantIsTerminal = output.some(
-        (entry) =>
-          entry.role === 'assistant' &&
-          entry.userTurnId === userTurnId &&
-          isTerminalAssistantEntry(entry)
+        (entry) => repliedUserTurnId(entry) === userTurnId && isTerminalAssistantEntry(entry)
       );
       return (
         meta.latestUserMsgId === userTurnId ||

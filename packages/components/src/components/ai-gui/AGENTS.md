@@ -19,8 +19,8 @@ Ownership: [README.md](README.md).
   Manual disclosure scrolling follows [the header-position contract](README.md#manual-disclosures).
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
-- `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
-  history ids.
+- `buildChatStreamItems()` must drop empty assistant entries, de-duplicate
+  history ids, and render each question before its stored-earlier reply.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
   targets; never overlay or persist it.
 - Empty state stays outside the list even with an empty leading Fragment; zero-height

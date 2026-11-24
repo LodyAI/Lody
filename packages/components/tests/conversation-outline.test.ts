@@ -206,6 +206,28 @@ describe('conversation-outline-active', () => {
         { outlineIndex: 2, rowIndex: 1 },
       ]);
     });
+
+    it('keeps every round when a question is shown before its earlier-stored reply', () => {
+      const rows = [
+        { messageIndex: 2 },
+        { messageIndex: 0 },
+        { messageIndex: -1 },
+        { messageIndex: 1 },
+      ];
+      expect(buildOutlineAnchors(rows, [entry(2), entry(1)])).toEqual<ConversationOutlineAnchor[]>([
+        { outlineIndex: 0, rowIndex: 0 },
+        { outlineIndex: 1, rowIndex: 3 },
+      ]);
+      expect(
+        buildOutlineAnchors(
+          [{ messageIndex: 0 }, { messageIndex: -1 }, { messageIndex: 3 }],
+          [entry(0), entry(3)]
+        )
+      ).toEqual<ConversationOutlineAnchor[]>([
+        { outlineIndex: 0, rowIndex: 0 },
+        { outlineIndex: 1, rowIndex: 2 },
+      ]);
+    });
   });
 
   describe('resolveActiveOutlineIndex', () => {

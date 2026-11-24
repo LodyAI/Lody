@@ -358,15 +358,18 @@ export interface ConversationOutlineAnchor {
  * every consumer works on a strictly ascending list. A round can genuinely have
  * no rows: `buildChatStreamItems` discards empty assistant entries.
  *
- * Both inputs are ascending by `messageIndex`, so this is a two-pointer merge:
- * no hash map, no per-row allocation. It runs on every streamed delta over the
- * WHOLE row list, which is exactly the shape of pass this module exists to
- * avoid paying for.
+ * Both inputs are normally ascending by `messageIndex`, so this is a
+ * two-pointer merge: no hash map, no per-row allocation. It runs on every
+ * streamed delta over the WHOLE row list, which is exactly the shape of pass
+ * this module exists to avoid paying for. A question that `buildChatStreamItems`
+ * moved before its earlier-stored answer inverts that order locally; only then
+ * do anchors come from a first-row lookup, still ascending by row.
  */
 export function buildOutlineAnchors(
   rows: readonly ConversationOutlineRow[],
   outline: readonly ConversationOutlineEntry[]
 ): readonly ConversationOutlineAnchor[] {
+  if (!isAscendingByMessageIndex(rows)) return lookupOutlineAnchors(rows, outline);
   const anchors: ConversationOutlineAnchor[] = [];
   let rowIndex = 0;
   for (let outlineIndex = 0; outlineIndex < outline.length; outlineIndex += 1) {
@@ -380,6 +383,34 @@ export function buildOutlineAnchors(
     anchors.push({ outlineIndex, rowIndex });
   }
   return anchors;
+}
+
+/** Local rows (`messageIndex < 0`) have no history position and never break the order. */
+function isAscendingByMessageIndex(rows: readonly ConversationOutlineRow[]): boolean {
+  let previous = -1;
+  for (const row of rows) {
+    if (row.messageIndex < 0) continue;
+    if (row.messageIndex < previous) return false;
+    previous = row.messageIndex;
+  }
+  return true;
+}
+
+function lookupOutlineAnchors(
+  rows: readonly ConversationOutlineRow[],
+  outline: readonly ConversationOutlineEntry[]
+): readonly ConversationOutlineAnchor[] {
+  const firstRowByMessage = new Map<number, number>();
+  rows.forEach((row, rowIndex) => {
+    if (row.messageIndex >= 0 && !firstRowByMessage.has(row.messageIndex))
+      firstRowByMessage.set(row.messageIndex, rowIndex);
+  });
+  const anchors: ConversationOutlineAnchor[] = [];
+  outline.forEach((entry, outlineIndex) => {
+    const rowIndex = firstRowByMessage.get(entry.messageIndex);
+    if (rowIndex !== undefined) anchors.push({ outlineIndex, rowIndex });
+  });
+  return anchors.sort((left, right) => left.rowIndex - right.rowIndex);
 }
 
 /**

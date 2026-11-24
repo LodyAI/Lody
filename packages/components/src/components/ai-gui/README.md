@@ -458,6 +458,34 @@ in `view.tsx`, shared by `PendingMessageRow` and `UserMessageRowView` across loc
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
 
+## Causal order
+
+A reply can be stored before the question it answers. An RPC fast-path turn
+whose `TurnHistoryGate` timed out (or any concurrent Loro insert at the same
+anchor) leaves `[assistant:U, …, U]` in the list on every replica, and no
+client can safely rewrite that order. Readers therefore repair presentation
+only, through one visitor, `visitQuestionFirst` in `lib/conversation-view`: an
+assistant row linked to `U` by `userTurnId` or by the `assistant:U` id pulls `U`
+just ahead of it, so the question shows first, its configuration reaches the
+reply header, and a following agent notice still folds onto the reply. A reply
+that renders nothing (no items and no plan) moves nothing, so an interrupted
+empty entry cannot lift `U` above unrelated earlier turns. Ordered histories
+pay one index lookup per assistant row. When the CLI's active-turn file upload
+cannot find its reply entry, the fallback `assistant-file-*` entry records the
+turn's `userTurnId` so it pairs the same way.
+
+Items keep their stored `turnIndex`, so positions are locally non-monotonic and
+every consumer reads them that way: outline anchors fall back to a first-row
+lookup, the visible range takes the minimum and maximum over all visible rows,
+and an outline preview of `U` also acquires every earlier row that answers it.
+An accepted local input whose history row has not arrived renders above its
+own reply rather than at the end of the list. Copy, share and export read the
+authoritative `readAll` through `readConversationCopySource`, which applies the
+same order and shows a repeated id once, at its first position with its newest
+body, as `readTurn` resolves it and the reader view renders it
+(`inQuestionFirstOrder`), so a copy range or a share-image drag selects exactly
+the rows and bodies shown.
+
 ## Completed work batches
 
 Render `operation_completion_batch` as one result group with total count and delivery

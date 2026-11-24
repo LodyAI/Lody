@@ -15,6 +15,8 @@
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
+- Select a turn's reply with `repliedUserTurnId`. Standalone `assistant-file-*`
+  attachments carry `userTurnId` only for display order and never prove output or completion.
 - Display projection caches hold weak values and bounded container metadata. Invalidate
   affected items for local/import/checkout edits and bypass cached values after pending
   writes; list/parent edits invalidate membership. Authoritative reads stay detached.

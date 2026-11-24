@@ -5,6 +5,7 @@ import {
   pickDirectoryScalars,
   pickDirectoryInputConfig,
   historyQueryRow,
+  repliedUserTurnId,
   type SessionEntry,
 } from '@lody/shared/session-data';
 import {
@@ -213,7 +214,7 @@ const completionKey = (row: RoostDispatchRow) => ({
   key: Buffer.concat([completionPrefix(row.entry.userTurnId ?? ''), utf8.encode(row.entry.id)]),
 });
 const hasCompletion = (entry: SessionDispatchEntry) =>
-  entry.role === 'assistant' && entry.userTurnId !== undefined && typeof entry.endedAt === 'number';
+  repliedUserTurnId(entry) !== undefined && typeof entry.endedAt === 'number';
 const matchesPrefix = (bytes: Uint8Array, prefix: Uint8Array) =>
   prefix.every((byte, index) => bytes[index] === byte);
 const ownerKey = (id: string, row: RoostDispatchRow) =>
@@ -225,8 +226,8 @@ const inspectionRefs = (row: RoostDispatchRow): { table: string; key: Uint8Array
       ? [{ table: permissionOwnersTable, key: ownerKey(tool.requestId, row) }]
       : []),
   ]),
-  ...(row.entry.role === 'assistant' && row.entry.userTurnId !== undefined
-    ? [{ table: outputOwnersTable, key: ownerKey(row.entry.userTurnId, row) }]
+  ...(repliedUserTurnId(row.entry) !== undefined
+    ? [{ table: outputOwnersTable, key: ownerKey(row.entry.userTurnId ?? '', row) }]
     : []),
   ...(row.entry.role === 'system'
     ? [
@@ -625,7 +626,7 @@ export class RoostDispatchIndex {
               ? row.entry.role === 'assistant' &&
                 inspection.tools.some((tool) => tool.requestId === id)
               : kind === 'output'
-                ? row.entry.role === 'assistant' && row.entry.userTurnId === id
+                ? repliedUserTurnId(row.entry) === id
                 : row.entry.role === 'system';
         if (!matches)
           throw new RoostDispatchIndexCorrupt('Roost history owner does not match its index');

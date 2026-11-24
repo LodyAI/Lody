@@ -1672,6 +1672,19 @@ type ChatVirtualRow =
   | PlaceholderChatVirtualRow
   | LocalUserChatVirtualRow;
 
+/**
+ * Whether `row` renders a reply to the user turn `userTurnId`. A local input
+ * whose reply arrived before its own history row is placed above that reply.
+ */
+const rowAnswersUserTurn = (row: ChatVirtualRow, userTurnId: string): boolean => {
+  if (row.type === 'assistant') {
+    const { message } = row.item;
+    return message.userTurnId === userTurnId || message.id === `assistant:${userTurnId}`;
+  }
+  if (row.type !== 'placeholder' || row.item.row.role !== 'assistant') return false;
+  return row.item.row.userTurnId === userTurnId || row.key === `assistant:${userTurnId}`;
+};
+
 /** One row per placeholder item, identity-stable while the item is. */
 
 export interface SessionChatStreamHandle {
@@ -3098,12 +3111,15 @@ export const SessionChatStreamView = forwardRef<
           : row;
       });
       for (const message of local.values()) {
-        merged.push({
+        const row: ChatVirtualRow = {
           type: 'local-user',
           key: message.id,
           messageIndex: -1,
           content: message.content,
-        });
+        };
+        const answer = merged.findIndex((candidate) => rowAnswersUserTurn(candidate, message.id));
+        if (answer >= 0) merged.splice(answer, 0, row);
+        else merged.push(row);
       }
       return merged;
     }, [
@@ -3484,15 +3500,20 @@ export const SessionChatStreamView = forwardRef<
       );
       // Local rows have no history index. They must not request a bogus
       // hydration range when the viewport contains only accepted inputs.
-      const historyRows = rows.slice(startRow, endRow + 1).filter((row) => row.messageIndex >= 0);
-      const from = historyRows[0]?.messageIndex;
-      const end = historyRows.at(-1);
-      const to =
-        end?.type === 'standard'
-          ? (end.groupedItems?.at(-1)?.turnIndex ?? end.messageIndex)
-          : end?.messageIndex;
+      let from: number | undefined;
+      let to: number | undefined;
+      for (let index = startRow; index <= endRow; index += 1) {
+        const row = rows[index];
+        if (!row || row.messageIndex < 0) continue;
+        const last =
+          row.type === 'standard'
+            ? (row.groupedItems?.at(-1)?.turnIndex ?? row.messageIndex)
+            : row.messageIndex;
+        from = Math.min(from ?? row.messageIndex, row.messageIndex, last);
+        to = Math.max(to ?? last, row.messageIndex, last);
+      }
       if (from === undefined || to === undefined) return;
-      const next = { from: Math.min(from, to), to: Math.max(from, to) + 1 };
+      const next = { from, to: to + 1 };
       const last = lastVisibleRangeRef.current;
       if (last && last.from === next.from && last.to === next.to) return;
       lastVisibleRangeRef.current = next;

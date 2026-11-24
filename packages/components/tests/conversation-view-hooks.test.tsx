@@ -318,6 +318,44 @@ describe('conversation view React readers', () => {
     expect(itemFor('a-10')?.type).toBe('placeholder');
   });
 
+  it.each([
+    { link: 'its assistant id', reply: { id: 'assistant:u-10' } },
+    { link: 'userTurnId', reply: { id: 'assistant-file-u-10', userTurnId: 'u-10' } },
+  ])(
+    'previews a round with a reply stored before the question via $link',
+    async ({ reply: link }) => {
+      const history = buildFixtureHistory(40);
+      const question = history.findIndex((turn) => turn.id === 'u-10');
+      const [user, reply] = history.splice(question, 2);
+      history.splice(question, 0, { ...reply!, ...link }, user!);
+      const doc = reimport(buildSessionDoc(history));
+      const idle = createManualIdle();
+      const view = await openReaderView(doc, {
+        sessionId: FIXTURE_SESSION_ID,
+        maxHydrated: 200,
+        tailKeep: 2,
+        scheduleIdle: idle.scheduleIdle,
+        yieldToEventLoop: () => Promise.resolve(),
+      });
+      views.push(view);
+      let stream!: ReturnType<typeof useConversationStreamItems>;
+      function Probe() {
+        stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+        return null;
+      }
+      await act(async () => root.render(<Probe />));
+      await flush();
+      const replyIndex = view.indexOf(link.id);
+      expect(replyIndex).toBe(view.indexOf('u-10') - 1);
+      expect(view.isHydrated(replyIndex)).toBe(false);
+
+      await act(async () => stream.onOutlinePreviewRound(view.indexOf('u-10')));
+      await flush();
+
+      expect(view.isHydrated(replyIndex)).toBe(true);
+    }
+  );
+
   it('loads a restored reading turn far from the tail before the first viewport report', async () => {
     const { view } = await openView(150, 200);
     let stream!: ReturnType<typeof useConversationStreamItems>;

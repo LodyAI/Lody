@@ -369,4 +369,95 @@ describe('conversation rows', () => {
       expect(row()!.getBoundingClientRect().top).toBe(sentScreenY);
     }
   );
+
+  it('keeps an unmatched local input above its reply and reports reordered visible turns', async () => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    }));
+    const px = (value: string | undefined) => parseFloat(value ?? '0') || 0;
+    let attached: HTMLElement | null = null;
+    frames = createFrameHarness({
+      viewportHeight: () => 400,
+      sizeOf: (element) =>
+        element.hasAttribute('data-message-selection-scroll')
+          ? 400
+          : element.hasAttribute('data-virtual-index')
+            ? 100
+            : undefined,
+      scrollHeightOf: (viewport) => px((viewport.firstElementChild as HTMLElement)?.style.height),
+      rectOf: (element, scrollTop) => {
+        const el = element as HTMLElement;
+        const viewport = el.closest<HTMLElement>('[data-message-selection-scroll]');
+        if (viewport && viewport !== attached) {
+          attached = viewport;
+          frames!.attachViewport(viewport);
+        }
+        if (el.hasAttribute('data-message-selection-scroll')) return { top: 0, height: 400 };
+        if (el.parentElement?.hasAttribute('data-message-selection-scroll'))
+          return { top: -scrollTop, height: px(el.style.height) };
+        if (el.hasAttribute('data-virtual-index'))
+          return { top: px(el.style.top) - scrollTop, height: 100 };
+        return undefined;
+      },
+    });
+    const settle = async () => {
+      for (let i = 0; i < 30; i++) {
+        let delivered = false;
+        await act(async () => {
+          delivered = frames!.frame();
+        });
+        if (!delivered) return;
+      }
+      throw new Error('frames did not settle');
+    };
+    const formal = (id: string, turnIndex: number): ChatStreamItem => ({
+      type: 'message',
+      sessionId,
+      turnIndex,
+      message: { ...history[0]!, id } as never,
+    });
+    const ranges: { from: number; to: number }[] = [];
+    const render = async (items: ChatStreamItem[], local: { id: string; content: never }[]) => {
+      await act(async () =>
+        root.render(
+          <SessionChatStreamView
+            items={items}
+            sessionId={sessionId}
+            localUserMessages={local}
+            onVisibleTurnRangeChange={(range) => ranges.push(range)}
+            renderMessageRow={({ message }) => <p>{message.id}</p>}
+          />
+        )
+      );
+      await settle();
+    };
+    const renderedOrder = () =>
+      [...container.querySelectorAll<HTMLElement>('[data-virtual-index]')]
+        .sort((a, b) => Number(a.dataset.virtualIndex) - Number(b.dataset.virtualIndex))
+        .map(
+          (el) =>
+            el.dataset.conversationTurnId ??
+            el.querySelector<HTMLElement>('[data-conversation-turn-id]')?.dataset.conversationTurnId
+        );
+
+    await render(
+      [
+        formal('first', 0),
+        {
+          type: 'placeholder',
+          turnIndex: 1,
+          row: { ...history[1]!, id: 'assistant:local-a' } as never,
+        },
+      ],
+      [{ id: 'local-a', content: (<p>Local A</p>) as never }]
+    );
+    expect(renderedOrder()).toEqual(['first', 'local-a', 'assistant:local-a']);
+
+    await render([formal('a', 0), formal('d', 3), formal('b', 1), formal('c', 2)], []);
+    expect(ranges.at(-1)).toEqual({ from: 0, to: 4 });
+  });
 });

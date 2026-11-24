@@ -1,3 +1,4 @@
+import { repliedUserTurnId } from '@lody/shared/session-data';
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
 import { readChatFailureNotice } from '@lody/shared';
 import type { SessionDocument } from '@/lib/loro/doc';
@@ -84,7 +85,7 @@ export function findAssistantEntryForUserTurn(
 
   for (let index = userTurnIndex + 1; index < history.length; index += 1) {
     const entry = history[index];
-    if (entry?.role === 'assistant' && entry.userTurnId === userTurnId) {
+    if (repliedUserTurnId(entry) === userTurnId) {
       return entry;
     }
   }

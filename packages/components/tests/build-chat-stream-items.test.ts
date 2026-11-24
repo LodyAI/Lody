@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { buildChatStreamItems as buildChatStreamItemsFromView } from '../src/components/ai-gui/build-chat-stream-items';
-import { createConversationViewFromHistory } from '../src/lib/conversation-view';
+import {
+  createConversationViewFromHistory,
+  inQuestionFirstOrder,
+} from '../src/lib/conversation-view';
 import { resolveSessionHistoryDurationMs } from '../src/lib/session-history-duration';
 
 const sessionId = 'session-test' as SessionId;
@@ -97,6 +100,81 @@ describe('buildChatStreamItems', () => {
     });
     expect(result.cache.has('question')).toBe(false);
     view.dispose();
+  });
+
+  it('shows a question before its reply when the stored history is reversed', () => {
+    const config = { cliType: 'builtin', agentType: 'claude', modelId: 'reply-model' };
+    const history = [
+      entry({ id: 'first', role: 'user', items: [text('first')] }),
+      entry({ id: 'assistant:first', role: 'assistant', items: [text('one')] }),
+      entry({ id: 'assistant:second', role: 'assistant', items: [text('two')] }),
+      {
+        id: 'notice',
+        role: 'system',
+        timestamp: '2026-06-18T00:00:00.000Z',
+        fileDiff: [],
+        items: [{ type: 'system_notice', name: 'agent_warning', meta: { message: 'slow' } }],
+      } as unknown as SessionHistory,
+      { ...entry({ id: 'second', role: 'user', items: [text('second')] }), inputConfig: config },
+      entry({ id: 'third', role: 'user', items: [text('third')] }),
+      {
+        ...entry({ id: 'assistant-file', role: 'assistant', items: [text('file')] }),
+        userTurnId: 'fourth',
+      } as SessionHistory,
+      entry({ id: 'fourth', role: 'user', items: [text('fourth')] }),
+    ] as SessionHistory[];
+
+    const { items } = buildChatStreamItems(history, sessionId);
+
+    expect(renderedIds(items)).toEqual([
+      'first',
+      'assistant:first',
+      'second',
+      'assistant:second',
+      'third',
+      'fourth',
+      'assistant-file',
+    ]);
+    expect(items.map((item) => (item.type === 'message' ? item.turnIndex : -1))).toEqual([
+      0, 1, 4, 2, 5, 7, 6,
+    ]);
+    const reply = items[3];
+    expect(reply?.type === 'message' && reply.message.inputConfig).toEqual(config);
+    expect(reply?.type === 'message' && reply.message.items.map((item) => item.type)).toEqual([
+      'text',
+      'system_notice',
+    ]);
+  });
+
+  it('does not move a question ahead of earlier turns for a reply that renders nothing', () => {
+    const history = [
+      entry({ id: 'assistant:question', role: 'assistant', items: [] }),
+      entry({ id: 'previous', role: 'user', items: [text('previous')] }),
+      entry({ id: 'assistant:previous', role: 'assistant', items: [text('answer')] }),
+      entry({ id: 'question', role: 'user', items: [text('question')] }),
+    ] as SessionHistory[];
+
+    expect(renderedIds(buildChatStreamItems(history, sessionId).items)).toEqual([
+      'previous',
+      'assistant:previous',
+      'question',
+    ]);
+  });
+
+  it('orders a full history for copy and share like the chat stream', () => {
+    const history = [
+      entry({ id: 'previous', role: 'user', items: [text('previous')] }),
+      entry({ id: 'assistant:question', role: 'assistant', items: [text('reply')] }),
+      {
+        ...entry({ id: 'assistant-file', role: 'assistant', items: [text('file')] }),
+        userTurnId: 'question',
+      } as SessionHistory,
+      entry({ id: 'question', role: 'user', items: [text('question')] }),
+    ] as SessionHistory[];
+
+    const ordered = inQuestionFirstOrder(history).map((turn) => turn.id);
+    expect(ordered).toEqual(['previous', 'question', 'assistant:question', 'assistant-file']);
+    expect(renderedIds(buildChatStreamItems(history, sessionId).items)).toEqual(ordered);
   });
 
   it('drops empty assistant entries (no items, no plan) left by interrupted turns', () => {

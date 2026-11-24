@@ -35,7 +35,11 @@ import type {
   SorbetHostSettingsUpdate,
 } from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
-import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
+import {
+  readLatestUserId,
+  STANDALONE_ASSISTANT_FILE_ID_PREFIX,
+  summarizeHistoryQuery,
+} from '@lody/shared/session-data';
 import {
   readEncryptedAttachment,
   encryptedAttachmentPath,
@@ -801,7 +805,7 @@ type ConversationTurnGateContext = {
 };
 
 type SessionImageUploadAttachTarget =
-  | { kind: 'active_turn'; turnId: string; turnEpoch?: number }
+  | { kind: 'active_turn'; turnId: string; turnEpoch?: number; userTurnId?: string }
   | { kind: 'new_entry' }
   | { kind: 'unavailable'; statusType: string };
 type SessionImageUploadOptions = {
@@ -2195,6 +2199,7 @@ export class MessageHandler {
         kind: 'active_turn',
         turnId,
         ...(turn.phase !== 'idle' ? { turnEpoch: turn.turnEpoch } : {}),
+        ...(turn.phase !== 'idle' && turn.userTurnId ? { userTurnId: turn.userTurnId } : {}),
       };
     }
 
@@ -9949,8 +9954,11 @@ export class MessageHandler {
     sessionId: SessionId;
     sessionDoc: SessionDocument;
     files?: UploadedSessionFile[];
+    /** Pairs an active turn's fallback entry with its question even if it lands first. */
+    userTurnId?: string;
   }): Promise<string> {
-    const entryId = `assistant-file-${uuidV4()}`;
+    await this.awaitTurnHistoryGate(args.sessionId);
+    const entryId = `${STANDALONE_ASSISTANT_FILE_ID_PREFIX}${uuidV4()}`;
     const modelInfo = this.sessionManager.getSession(args.sessionId)?.agentClient?.currentModel;
     const items = args.files
       ? inputBlocksToHistoryItems(args.files.map(({ downloadUrl: _downloadUrl, ...file }) => file))
@@ -9966,6 +9974,7 @@ export class MessageHandler {
       modelInfo,
       fileDiff: [],
       finished: true,
+      ...(args.userTurnId ? { userTurnId: args.userTurnId } : {}),
     });
     return entryId;
   }
@@ -10100,6 +10109,8 @@ export class MessageHandler {
     let historyEntryId: string;
     let attachedTo: SessionFileUploadResponse['attachedTo'];
     if (attachTarget.kind === 'active_turn') {
+      // Wait for the gate to create the active assistant entry before appending.
+      await this.awaitTurnHistoryGate(sessionId);
       const appended = await this.appendAssistantFileBlocksToActiveTurn({
         sessionDoc,
         turnId: attachTarget.turnId,
@@ -10113,6 +10124,7 @@ export class MessageHandler {
           sessionId,
           sessionDoc,
           files: uploadedFiles,
+          userTurnId: attachTarget.userTurnId,
         });
         attachedTo = 'new_entry';
       }

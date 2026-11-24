@@ -2,7 +2,7 @@ import type { MessageContent, SessionHistory, SessionHistoryParsed, SessionId } 
 import {
   isEmptyAssistantIndexRow,
   resolveLastAssistantTurnIds,
-  isUnloadedTurnId,
+  visitQuestionFirst,
   type ConversationView,
   type TurnIndexRow,
 } from '@/lib/conversation-view';
@@ -77,6 +77,7 @@ function canReuseCachedMessageItem(
     cached.item.message.tokenUsage === entry.tokenUsage &&
     cached.rawFileDiff === entry.fileDiff &&
     cached.item.message.finished === entry.finished &&
+    cached.item.message.userTurnId === entry.userTurnId &&
     cached.rawPlan === entry.plan &&
     cached.rawTurnInputConfig === expectedInputConfig
   );
@@ -120,7 +121,7 @@ const placeholderItemFor = (row: TurnIndexRow, turnIndex: number): PlaceholderSe
  * carrying the index row for the rest. Both carry `turnIndex`, the absolute
  * position every scroll target and outline anchor is expressed in.
  *
- * Two defensive normalizations keep the virtual list robust against histories
+ * Defensive normalizations keep the virtual list robust against histories
  * left in an unusual shape by interrupted / bad-network turns. Such shapes
  * corrupt Virtua's index-keyed size cache and make its absolutely-positioned
  * rows overlap ("explode") deterministically — a stable, per-conversation bug:
@@ -133,6 +134,10 @@ const placeholderItemFor = (row: TurnIndexRow, turnIndex: number): PlaceholderSe
  *     produces duplicate React keys and desyncs Virtua's element↔index map. Ids
  *     are random UUIDs so collisions are improbable, but this is cheap insurance
  *     so a single corrupt doc cannot permanently break the layout.
+ *  3. Show a question before its reply. When the reply is stored first (see
+ *     `visitQuestionFirst`), the user turn is emitted just ahead of it and
+ *     skipped at its stored position; items keep their own `turnIndex`, so
+ *     consumers must tolerate that local inversion.
  *
  * `lastAssistantMessageId` / `lastCompletedAssistantMessageId` come from the
  * index over the WHOLE conversation with the same empty-entry rule, so
@@ -192,25 +197,18 @@ export function buildChatStreamItems(
    *  non-hydrated user turn resets it: the header then shows nothing rather
    *  than an older turn's configuration. */
   let lastUserInputConfig: SessionHistoryParsed['inputConfig'] | undefined;
-
-  for (let turnIndex = 0; turnIndex < view.turnCount; turnIndex += 1) {
-    const row = view.index(turnIndex);
-    if (!row) continue;
-    // Reverse-page views keep absolute positions with sentinel rows until the
-    // user requests the older page. A sentinel is layout space, never a chat
-    // message or a placeholder that should reach the renderer.
-    if (isUnloadedTurnId(row.id)) continue;
+  const emitTurn = (turnIndex: number, row: TurnIndexRow): void => {
     const entry = view.turn(turnIndex);
 
     // A leased predecessor supplies configuration even when its body is offscreen.
     if (row.role === 'user') lastUserInputConfig = entry?.inputConfig;
 
     if (!entry || !shouldRenderTurn(turnIndex)) {
-      if (isEmptyAssistantIndexRow(row)) continue;
-      if (seenIds.has(row.id)) continue;
+      if (isEmptyAssistantIndexRow(row)) return;
+      if (seenIds.has(row.id)) return;
       seenIds.add(row.id);
       items.push(placeholderItemFor(row, turnIndex));
-      continue;
+      return;
     }
 
     const expectedInputConfig =
@@ -222,11 +220,11 @@ export function buildChatStreamItems(
 
     const cached = previousCache?.get(entry.id);
     if (canReuseCachedMessageItem(cached, entry, sessionId, turnIndex, expectedInputConfig)) {
-      if (seenIds.has(entry.id)) continue;
+      if (seenIds.has(entry.id)) return;
       seenIds.add(entry.id);
       cache.set(entry.id, cached);
       items.push(cached.item);
-      continue;
+      return;
     }
 
     const message: SessionHistoryParsed = {
@@ -241,6 +239,7 @@ export function buildChatStreamItems(
       userId: entry.userId,
       author: entry.author,
       acpTurnId: entry.acpTurnId,
+      userTurnId: entry.userTurnId,
       modelInfo: entry.modelInfo,
       tokenUsage: entry.tokenUsage,
       fileDiff: entry.fileDiff,
@@ -251,8 +250,8 @@ export function buildChatStreamItems(
       inputConfig: expectedInputConfig,
     };
 
-    if (isEmptyAssistantMessage(message)) continue;
-    if (seenIds.has(message.id)) continue;
+    if (isEmptyAssistantMessage(message)) return;
+    if (seenIds.has(message.id)) return;
 
     // An agent warning / failure is durably its OWN system turn — the CLI keeps
     // it out of the assistant entry so it never reaches titles or replay
@@ -275,7 +274,7 @@ export function buildChatStreamItems(
       // The host entry is unchanged, so a cached copy of it would be reused
       // WITHOUT this notice on the next build. Drop it and rebuild instead.
       cache.delete(target.message.id);
-      continue;
+      return;
     }
 
     seenIds.add(message.id);
@@ -283,7 +282,17 @@ export function buildChatStreamItems(
     const cachedMessageItem = createCachedMessageItem(entry, sessionId, turnIndex, message);
     cache.set(message.id, cachedMessageItem);
     items.push(cachedMessageItem.item);
-  }
+  };
+
+  // Reverse-page sentinels are layout space, never a message or placeholder;
+  // the visitor skips them.
+  visitQuestionFirst(view, emitTurn, (turnIndex, row) => {
+    if (isEmptyAssistantIndexRow(row)) return false;
+    const entry = shouldRenderTurn(turnIndex) ? view.turn(turnIndex) : undefined;
+    return (
+      !entry || parseHistoryItemsForRender(entry.items).length > 0 || (entry.plan?.length ?? 0) > 0
+    );
+  });
 
   if (!items.length) {
     return {

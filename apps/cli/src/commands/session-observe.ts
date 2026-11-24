@@ -1,10 +1,11 @@
 import type { SessionId, SessionMeta, WorkspaceId } from '@lody/shared';
-import type {
-  SessionDataChange,
-  SessionDirectoryRow,
-  SessionDirectoryScalars,
-  SessionHistoryReader,
-  SessionObservation,
+import {
+  repliedUserTurnId,
+  type SessionDataChange,
+  type SessionDirectoryRow,
+  type SessionDirectoryScalars,
+  type SessionHistoryReader,
+  type SessionObservation,
 } from '@lody/shared/session-data';
 import { calculateTurnDurationMs, classifySessionTurnOutcome } from './session-output';
 import type { SessionTurnOutcome } from './session-output';
@@ -248,9 +249,8 @@ export class SessionObserver {
             this.users.set(scalar.id, retained);
         }
       }
-      if (scalar.role === 'assistant' && scalar.userTurnId) {
-        this.assistants.get(scalar.userTurnId)?.delete(row.position);
-      }
+      const replied = repliedUserTurnId(scalar);
+      if (replied) this.assistants.get(replied)?.delete(row.position);
     }
     if (row.state === 'missing') this.rows.delete(row.position);
     else this.rows.set(row.position, row);
@@ -268,11 +268,12 @@ export class SessionObserver {
         this.users.set(scalar.id, row);
       if (!this.latestUser || row.position >= this.latestUser.position) this.latestUser = row;
     }
-    if (scalar.role === 'assistant' && scalar.userTurnId) {
-      let linked = this.assistants.get(scalar.userTurnId);
+    const replied = repliedUserTurnId(scalar);
+    if (replied) {
+      let linked = this.assistants.get(replied);
       if (!linked) {
         linked = new Map();
-        this.assistants.set(scalar.userTurnId, linked);
+        this.assistants.set(replied, linked);
       }
       linked.set(row.position, scalar);
     }
@@ -322,7 +323,8 @@ export class SessionObserver {
       for (const row of reads) {
         for (const scalars of [this.rows.get(row.position)?.scalars, row.scalars]) {
           if (scalars?.role === 'user') affected.add(scalars.id);
-          if (scalars?.role === 'assistant' && scalars.userTurnId) affected.add(scalars.userTurnId);
+          const replied = repliedUserTurnId(scalars);
+          if (replied) affected.add(replied);
         }
         this.replaceRow(row);
       }

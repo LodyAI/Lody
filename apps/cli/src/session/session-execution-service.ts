@@ -166,7 +166,7 @@ import {
   createLocalProjectBranchSelector,
   localProjectsLegacy,
 } from '@lody/shared/node/local-project';
-import { findProgressMessageId } from '@lody/shared/session-data';
+import { findProgressMessageId, repliedUserTurnId } from '@lody/shared/session-data';
 import { Cause, Clock, Data, Effect, Exit, Fiber, Random, Scope } from 'effect';
 import { createHash, randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
@@ -4049,7 +4049,7 @@ export class SessionExecutionService {
       }
       return rows.flatMap((row, index) =>
         row.id === noticeId ||
-        (row.role === 'assistant' && row.userTurnId === userTurnId) ||
+        repliedUserTurnId(row) === userTurnId ||
         (start >= 0 && index > start && index < end && row.role === 'system')
           ? [index]
           : []

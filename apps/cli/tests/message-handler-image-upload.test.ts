@@ -14,6 +14,7 @@ import type {
 } from '@lody/shared';
 
 import { MessageHandler } from '../src/lib/message-handler';
+import { TurnHistoryGate } from '../src/session/turn-history-gate';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
@@ -339,6 +340,154 @@ describe('MessageHandler image upload flow', () => {
     expect(responses[0]?.content?.images).toHaveLength(1);
     expect(responses[0]?.images).toHaveLength(1);
     expect(harness.sessionDoc.setLastMessageAt).toHaveBeenCalledOnce();
+  });
+
+  it('holds an agent file upload until the RPC turn user entry syncs, then attaches to its reply', async () => {
+    const harness = createHarness();
+    handlers.push(harness.handler);
+    const sessionId = 'session-1' as SessionId;
+    const userTurnId = 'user-rpc-1';
+    const turnId = (
+      harness.host.beginConversationTurn as (sessionId: SessionId, userTurnId: string) => string
+    )(sessionId, userTurnId);
+    let userTurnSynced = false;
+    let historyChanged: (() => void) | undefined;
+    const gate = TurnHistoryGate.waitForUserTurn({
+      logger: createSilentLogger(),
+      sessionId,
+      userTurnId,
+      hasUserTurn: async () => userTurnSynced,
+      subscribeHistory: (listener) => {
+        historyChanged = listener;
+        return () => {};
+      },
+      onBeforeOpen: (_reason, signal) =>
+        (harness.host.writeAssistantEntryForTurn as (...args: unknown[]) => Promise<void>)(
+          sessionId,
+          harness.sessionDoc,
+          turnId,
+          undefined,
+          userTurnId,
+          signal
+        ),
+    });
+    (
+      harness.handler as unknown as {
+        store: { get(id: SessionId): { turnHistoryGate: TurnHistoryGate | null } };
+      }
+    ).store.get(sessionId).turnHistoryGate = gate;
+
+    vi.spyOn(harness.host, 'resolveSessionWorkspaceRoot').mockReturnValue('/workspace');
+    vi.spyOn(harness.host, 'resolveCodeCollabV2Workspace').mockResolvedValue({ ok: true });
+    vi.spyOn(harness.host, 'validateSessionFileUploadPath').mockResolvedValue({
+      absolutePath: '/workspace/report.txt',
+      fileName: 'report.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      sha256: 'a'.repeat(64),
+      textPreview: true,
+    });
+    const uploaded = Promise.withResolvers<void>();
+    vi.spyOn(harness.host, 'uploadValidatedSessionFile').mockImplementation(async () => {
+      uploaded.resolve();
+      return {
+        type: 'file',
+        fileId: 'file-1',
+        fileName: 'report.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 4,
+        sha256: 'a'.repeat(64),
+        textPreview: true,
+        downloadUrl: 'https://example.com/file-1',
+      };
+    });
+
+    const responses: Array<Record<string, unknown>> = [];
+    const upload = harness.host.handleSessionFileUpload(
+      {
+        type: 'session/file-upload',
+        machineId: 'machine-1',
+        sessionId,
+        paths: ['/workspace/report.txt'],
+      },
+      {
+        source: 'local-control',
+        send: (message: unknown) => responses.push(message as Record<string, unknown>),
+      }
+    ) as Promise<void>;
+    await uploaded.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(gate.isOpen).toBe(false);
+    expect(harness.history).toEqual([]);
+    expect(responses).toEqual([]);
+
+    harness.history.push({ id: userTurnId, role: 'user', items: [], timestamp: '' });
+    userTurnSynced = true;
+    historyChanged?.();
+    await upload;
+
+    expect(harness.history.map((entry) => entry.id)).toEqual([userTurnId, turnId]);
+    expect(harness.history[1]?.items).toMatchObject([{ type: 'file', fileId: 'file-1' }]);
+    expect(responses).toEqual([
+      expect.objectContaining({ success: true, attachedTo: 'active_turn', historyEntryId: turnId }),
+    ]);
+  });
+
+  it('pairs an agent file upload with its question when the active reply entry is missing', async () => {
+    const harness = createHarness();
+    handlers.push(harness.handler);
+    const sessionId = 'session-1' as SessionId;
+    const userTurnId = 'user-rpc-2';
+    (harness.host.beginConversationTurn as (sessionId: SessionId, userTurnId: string) => string)(
+      sessionId,
+      userTurnId
+    );
+    vi.spyOn(harness.host, 'resolveSessionWorkspaceRoot').mockReturnValue('/workspace');
+    vi.spyOn(harness.host, 'resolveCodeCollabV2Workspace').mockResolvedValue({ ok: true });
+    vi.spyOn(harness.host, 'validateSessionFileUploadPath').mockResolvedValue({
+      absolutePath: '/workspace/report.txt',
+      fileName: 'report.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      sha256: 'a'.repeat(64),
+      textPreview: true,
+    });
+    vi.spyOn(harness.host, 'uploadValidatedSessionFile').mockResolvedValue({
+      type: 'file',
+      fileId: 'file-2',
+      fileName: 'report.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      sha256: 'a'.repeat(64),
+      textPreview: true,
+      downloadUrl: 'https://example.com/file-2',
+    });
+    const responses: Array<Record<string, unknown>> = [];
+
+    await harness.host.handleSessionFileUpload(
+      {
+        type: 'session/file-upload',
+        machineId: 'machine-1',
+        sessionId,
+        paths: ['/workspace/report.txt'],
+      },
+      {
+        source: 'local-control',
+        send: (message: unknown) => responses.push(message as Record<string, unknown>),
+      }
+    );
+
+    expect(responses).toEqual([
+      expect.objectContaining({ success: true, attachedTo: 'new_entry' }),
+    ]);
+    expect(harness.history).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^assistant-file-/),
+        role: 'assistant',
+        userTurnId,
+        items: [expect.objectContaining({ type: 'file', fileId: 'file-2' })],
+      }),
+    ]);
   });
 
   it.each([false, true])(

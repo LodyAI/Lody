@@ -6,7 +6,11 @@ import {
   type BuildChatStreamItemsResult,
 } from '@/components/ai-gui/build-chat-stream-items';
 import type { VisibleTurnRange } from '@/components/ai-gui/view';
-import { isUnloadedTurnId, type ConversationView } from '@/lib/conversation-view';
+import {
+  answeredUserTurnId,
+  isUnloadedTurnId,
+  type ConversationView,
+} from '@/lib/conversation-view';
 import { LRUCache } from '@/lib/lru-cache';
 import { scrollDebug } from './scroll-debug-log';
 import { useConversationVersion, useTurnRange } from './use-conversation-view';
@@ -210,7 +214,14 @@ export function useConversationStreamItems(
       // A round includes its user question and replies up to the next user.
       let end = turnIndex + 1;
       while (end < view.turnCount && view.index(end)?.role !== 'user') end++;
-      const range = view.acquireRange(turnIndex, end);
+      // Replies stored before their question (see `visitQuestionFirst`) belong to this round.
+      const questionId = view.index(turnIndex)?.id;
+      let start = turnIndex;
+      for (let index = turnIndex - 1; questionId && index >= 0; index -= 1) {
+        const row = view.index(index);
+        if (row && answeredUserTurnId(row) === questionId) start = index;
+      }
+      const range = view.acquireRange(start, end);
       previewRangeRef.current = range;
       const release = () => {
         range.release();
