@@ -3,6 +3,12 @@ import { getCliPlatformKind } from '../lib/cli-platform';
 
 const commands = [
   {
+    name: 'plugin',
+    description: 'Develop plugins on this machine',
+    usage: '[command]',
+    load: async () => (await import('./plugin')).pluginCommand,
+  },
+  {
     name: 'login',
     description: 'Login to Lody using device authorization flow or an API key',
     usage: '[options]',

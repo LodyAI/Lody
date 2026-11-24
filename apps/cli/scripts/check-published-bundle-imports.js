@@ -26,6 +26,9 @@ const workspacePackageNames = new Set();
 const requiredPublishedRuntimeDependencies = [
   '@loro-dev/roost-node',
   '@napi-rs/keyring',
+  '@lody/plugin-sdk',
+  'esbuild',
+  'zod',
   'better-sqlite3',
   'loro-crdt',
   '@lydell/node-pty',
@@ -53,7 +56,8 @@ for (const block of dependencyBlocks) {
 
   for (const [name, version] of Object.entries(dependencies)) {
     if (typeof version === 'string' && version.startsWith('workspace:')) {
-      workspacePackageNames.add(name);
+      // prepare-publish ships this public dependency inside the npm package.
+      if (name !== '@lody/plugin-sdk') workspacePackageNames.add(name);
     }
   }
 }
@@ -119,6 +123,10 @@ runPublishedInternalCommandSmoke();
 runWorkspaceWatchWorkerSmoke();
 runDiffWorkerSmoke();
 runTurnDiffStoreWorkerSmoke();
+execFileSync(process.execPath, [path.join(__dirname, 'probe-plugin-workers.mjs'), distDir], {
+  timeout: 30_000,
+  stdio: 'inherit',
+});
 
 console.log('Published CLI bundle import check passed.');
 

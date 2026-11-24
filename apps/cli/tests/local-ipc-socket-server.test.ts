@@ -22,6 +22,7 @@ import {
   LOCAL_CONTROL_HEADER,
   LOCAL_SESSION_CONTROL_PATH,
   makeLocalControlClientSocket,
+  requestLocalPluginControl,
   makeLocalProbeClientSocket,
   readLocalDaemonRunFile,
 } from '@lody/shared/node/local-ipc';
@@ -165,6 +166,19 @@ function postOversizedControlBody(
 }
 
 describe('local IPC socket server', () => {
+  it('dispatches owner plugin control with credentials discovered from the daemon run file', async () => {
+    const paths = makePaths();
+    const config = makeServerConfig(paths);
+    await startLocalIpcSocketServers({
+      ...config,
+      control: { ...config.control, dispatchPlugin: async (raw) => ({ received: raw }) },
+    });
+    const command = { action: 'logs', pluginId: 'demo' };
+    const reply = await Effect.runPromise(
+      requestLocalPluginControl(command, { runFilePath: paths.runFilePath })
+    );
+    expect(reply.payload).toEqual({ ok: true, received: command });
+  });
   afterEach(async () => {
     await stopLocalIpcSocketServers();
     for (const tempDir of tempDirs.splice(0)) {

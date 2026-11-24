@@ -4,15 +4,13 @@ const text = z.string().min(1);
 const opt = z.string().optional();
 export const pluginIdSchema = text.max(64).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const descriptorIdSchema = text.max(96).regex(/^[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)*$/);
-// Lexical check only: the filesystem owner must also enforce realpath containment.
-export const pluginPathSchema = text
+const relativePath = text
   .transform((p) => (p.startsWith('./') ? p.slice(2) : p))
   .refine(
     (p) =>
       !/[\\:\x00-\x1f]/.test(p) && p.split('/').every((s) => s !== '' && s !== '.' && s !== '..')
   );
-const path = pluginPathSchema;
-const paths = path.array().optional();
+const paths = relativePath.array().optional();
 const keys = text.array().optional();
 const obj = z.strictObject;
 const meta = { label: text, description: opt, required: z.boolean().optional() };
@@ -39,7 +37,7 @@ const contribution = {
   id: descriptorIdSchema,
   title: text,
   description: opt,
-  entry: path,
+  entry: relativePath,
   envKeys: keys,
 };
 const theme = {
@@ -63,8 +61,8 @@ export const pluginManifestSchema = obj({
   sdk: z.literal('^1.0.0'),
   title: text,
   description: opt,
-  client: path.optional(),
-  machine: path.optional(),
+  client: relativePath.optional(),
+  machine: relativePath.optional(),
   config: z.record(text, configField).optional(),
   onboarding: obj({ title: text, summary: opt, fields: text.array() }).optional(),
   skills: descriptorIdSchema.array().optional(),
@@ -73,7 +71,7 @@ export const pluginManifestSchema = obj({
     name: text,
     description: opt,
     emoji: opt,
-    promptPath: path,
+    promptPath: relativePath,
     skills: keys,
     mcpServers: keys,
     defaultProvider: opt,
@@ -95,7 +93,7 @@ export const pluginManifestSchema = obj({
     .optional(),
   themes: z
     .union([
-      obj({ ...theme, path }),
+      obj({ ...theme, path: relativePath }),
       obj({
         ...theme,
         seed: obj({

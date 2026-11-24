@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-本文将规范性文档 [Lody 插件系统规范](../../../../specs/plugin-system.zh.md) 以及 [插件架构收敛与 E2EE 工作区边界](2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md) 中的架构边界决策，转化为覆盖 `@lody/plugin-sdk`、`@lody/shared`、`apps/cli`、`@lody/components`、`apps/electron` 与 `apps/mobile-capacitor` 的仓库级工程实施蓝图。守护进程侧的所有 OS 子进程（`PluginHost` 与 `DevPluginCompiler`）均严格收敛至通用 Effect 进程边界 [`packages/shared/src/node/process.ts`](../../../../packages/shared/src/node/process.ts) 并由原生 Effect v4（`4.0.2`）`Scope` 托管；客户端渲染、原始状态快照读取、永久保留的 `SessionCreationReceipt` 幂等回执与 E2EE 执行签名则直接复用现有的 `ai-gui`、`sidebar-surface`、`vscode-theme`、Loro/Flock、`sessionData`/Roost 与 `e2ee-execution-intent` 模块所有者，不引入任何平行状态存储。整体交付按依赖顺序拆解为四个纵向闭环的 Stacked PR（`PR-1` 至 `PR-4`）：其中 `PR-2` 即跑通覆盖 Desktop Electron 与 Web 的完整交互插件纵向闭环，`PR-3` 在此之上叠加原始快照、机器侧工作流与有根 E2EE 派生。本文不直接提交生产运行时代码，四个 PR 切片均有待按本蓝图依次实施。
+本文将规范性文档 [Lody 插件系统规范](../../../../specs/plugin-system.zh.md) 以及 [插件架构收敛与 E2EE 工作区边界](2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md) 中的架构边界决策，转化为覆盖 `@lody/plugin-sdk`、`@lody/shared`、`apps/cli`、`@lody/components`、`apps/electron` 与 `apps/mobile-capacitor` 的仓库级工程实施蓝图。守护进程侧的所有 OS 子进程（`PluginHost` 与 `DevPluginCompiler`）均严格收敛至通用 Effect 进程边界 [`packages/shared/src/node/process.ts`](../../../../packages/shared/src/node/process.ts) 并由原生 Effect v4（`4.0.2`）`Scope` 托管；客户端渲染、原始状态快照读取、永久保留的 `SessionCreationReceipt` 幂等回执与 E2EE 执行签名则直接复用现有的 `ai-gui`、`sidebar-surface`、`vscode-theme`、Loro/Flock、`sessionData`/Roost 与 `e2ee-execution-intent` 模块所有者，不引入任何平行状态存储。整体交付按依赖顺序拆解为四个纵向闭环的 Stacked PR（`PR-1` 至 `PR-4`）：其中 `PR-2` 即跑通覆盖 Desktop Electron 与 Web 的完整交互插件纵向闭环，`PR-3` 在此之上叠加原始快照、机器侧工作流与有根 E2EE 派生。当前实施证据见[规范 §17.4](../../../../specs/plugin-system.zh.md)。
 
 ## 1. 包结构与模块拓扑
 

@@ -92,6 +92,7 @@ const explicitlyExternal = new Set([
   // Tinypool resolves its own entry/worker.js relative to its package dir, so it
   // cannot be inlined. Kept external and staged into the Electron app like the
   // other external runtime deps (apps/electron/scripts/cli-native-deps.mjs).
+  'esbuild',
   'tinypool',
 ]);
 
@@ -102,6 +103,8 @@ const runtimeEntries = {
   index: path.resolve(__dirname, 'src/index.ts'),
   'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
   'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
+  'plugin-worker': path.resolve(__dirname, 'src/plugins/plugin-worker-entry.ts'),
+  'plugin-compiler-worker': path.resolve(__dirname, 'src/plugins/plugin-compiler-worker.ts'),
   'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
   'file-index-scan-worker': path.resolve(
     __dirname,

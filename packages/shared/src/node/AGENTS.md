@@ -23,22 +23,14 @@ CLI, desktop main and supervisor helpers. Rules: [shared](../../AGENTS.md).
 The sole OS process implementation. Effect and boundary rules: [cli-effect-ts](../../../../.agents/docs/cli-effect-ts.md). Decision
 record: [process tree layer](../../../../.agents/notes/implemented/architecture/2026-09-27-effect-process-tree-layer.md).
 
-- Effect callers use `effect/process` commands and `ChildProcessSpawner`,
-  provided by `ProcessSpawnerLive` with Lody's bounded backend. Process acquisition
-  requires Scope; only legacy Promise entry points use raw handle compatibility.
-  Temporary execution entry points carry the `Legacy` suffix and `@deprecated`;
-  keep it visible in imports and calls. New Effect workflows compose core APIs
-  and execute once at their owning application entry point.
-  Use the workspace Effect v4 catalog and `Context.Service` / `Layer.effect`;
-  follow the pinned-version APIs in cli-effect-ts, not v3 compatibility helpers.
-- Only `process.ts` imports `child_process`, a process library (`cross-spawn`,
-  `execa`, `shell-env`, ...) or signals the OS (`process.kill`, Node `child.kill`).
-  Everything else uses the official process service or shared legacy facades;
-  never put an Effect through a Promise facade and wrap it back into Effect.
-  `pnpm check:cli-process-boundary` enforces this across `apps/cli`,
-  `apps/electron/src/main`, `packages/cli-supervisor`,
-  `packages/code-review-helper` and this directory; its allowlist names each
-  exception and its reason.
+- Effect callers compose scoped `effect/process` commands through `ChildProcessSpawner`
+  and `ProcessSpawnerLive`. Only legacy Promise entrypoints use raw handle compatibility;
+  mark temporary entries `@deprecated`, suffix them `Legacy` and keep that suffix visible
+  at call sites. Execute native workflows once at the application boundary using the
+  pinned Effect v4 `Context.Service` and `Layer.effect` APIs.
+- Only `process.ts` imports process libraries or signals the OS. Use the official
+  service or shared legacy facades; never wrap a Promise facade in Effect.
+  `pnpm check:cli-process-boundary` lists guarded paths and justified exceptions.
 - Login-shell probes use `LoginShellEnvironment`; the shared `LoginShellCache`
   Layer owns one producer in the application's Scope. Reader cancellation/timeout
   does not stop siblings; application shutdown interrupts and joins the producer.
@@ -49,6 +41,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   before changing the probe or either cache consumer.
 - `process.ts` stays one module with no relative imports (Electron's
   `node --test` resolves them only via `node-test-ts-resolve.mjs`).
+- `spawnIpcChild` owns only generic IPC and scoped OS tree release. Application
+  owners send their shutdown protocol before closing the child scope.
 - Missing a capability (a new spawn shape, a pid-only kill)? Add it to
   `process.ts` with a test and a facade; never work around the layer in a caller.
 - End processes through the official Effect handle or `terminateTree`; never add another

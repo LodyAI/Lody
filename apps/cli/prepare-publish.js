@@ -102,6 +102,17 @@ const cliPublishDir = path.join(publishRoot, 'lody');
 fs.mkdirSync(cliPublishDir, { recursive: true });
 const cliPackage = readPackageJson(path.join(publicCliDir, 'package.json'));
 cliPackage.version = releaseVersion;
+cliPackage.dependencies['@lody/plugin-sdk'] =
+  '^' + readPackageJson(path.join(repoRoot, 'packages/plugin-sdk/package.json')).version;
+// Ship the matching SDK even when a CLI release precedes its standalone npm release.
+cliPackage.bundleDependencies = ['@lody/plugin-sdk'];
+// pnpm pack requires hoisted layout for bundled dependencies in this staged directory.
+fs.writeFileSync(path.join(cliPublishDir, '.npmrc'), 'node-linker=hoisted\n');
+const sdkRoot = path.join(repoRoot, 'packages/plugin-sdk');
+const bundledSdk = path.join(cliPublishDir, 'node_modules/@lody/plugin-sdk');
+fs.mkdirSync(bundledSdk, { recursive: true });
+for (const file of ['package.json', 'dist'])
+  copyRequired(path.join(sdkRoot, file), path.join(bundledSdk, file));
 const removedCount = removeWorkspaceDependencies(cliPackage);
 assertPublishable(cliPackage, 'lody');
 fs.writeFileSync(

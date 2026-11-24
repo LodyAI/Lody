@@ -34,6 +34,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Queue,
   References,
   Ref,
   Option,
@@ -56,6 +57,7 @@ const formatErrorMessage = (error: unknown): string =>
  * child, a real signal, or the host platform.
  */
 export interface NodeProcessApi {
+  readonly spawnIpcChild: typeof spawnIpcChild;
   readonly platform: NodeJS.Platform;
   /** Application-owned observation; never grants signal authority by itself. */
   readonly observeTree?: (tree: ProcessTree) => void;
@@ -198,6 +200,7 @@ const listPsProcessGroup = (pgid: number): readonly ProcessGroupMember[] | null 
 };
 
 export const nodeProcessLive: NodeProcessApi = {
+  spawnIpcChild: (spec) => spawnIpcChild(spec),
   platform: process.platform,
   spawn: (command, args, options) => {
     if (process.platform !== 'win32') return spawn(command, [...args], options);
@@ -1183,6 +1186,86 @@ export const spawnProcess = Effect.fnUntraced(function* (
       })
     );
   return (handle as ProcessHandleWithDetails)[processDetails];
+});
+
+export class ProcessIpcError extends Data.TaggedError('ProcessIpcError')<{ cause: unknown }> {}
+
+export const spawnIpcChild = Effect.fnUntraced(function* (spec: {
+  command: string;
+  args: readonly string[];
+  options?: Pick<SpawnOptions, 'cwd' | 'env' | 'windowsHide'>;
+}) {
+  const inbox = yield* Queue.bounded<unknown, ProcessIpcError | Cause.Done>(256);
+  const lines: string[] = [];
+  let bytes = 0;
+  const capture = (source: NodeJS.ReadableStream | null) => {
+    let pending = Buffer.alloc(0);
+    const flush = () => {
+      let line = pending.toString('utf8');
+      if (Buffer.byteLength(line) > 16384) {
+        const encoded = Buffer.from(line);
+        let end = 16384;
+        while ((encoded.readUInt8(end) & 0xc0) === 0x80) end--;
+        line = encoded.toString('utf8', 0, end);
+      }
+      pending = Buffer.alloc(0);
+      lines.push(line);
+      bytes += Buffer.byteLength(line);
+      while (lines.length > 500 || bytes > 262144) bytes -= Buffer.byteLength(lines.shift()!);
+    };
+    source
+      ?.on('data', (chunk: Buffer) => {
+        let start = 0;
+        while (start < chunk.length) {
+          const end = chunk.indexOf(10, start);
+          const limit = Math.min(end < 0 ? chunk.length : end, start + 16384 - pending.length);
+          if (limit > start) pending = Buffer.concat([pending, chunk.subarray(start, limit)]);
+          if (end < 0) break;
+          flush();
+          start = end + 1;
+        }
+      })
+      .once('end', () => {
+        if (pending.length) flush();
+      });
+  };
+  const managed = yield* spawnProcess({
+    ...spec,
+    processGroup: true,
+    options: { ...spec.options, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
+    onSpawned(child) {
+      capture(child.stdout);
+      capture(child.stderr);
+      child.on('message', (message) => {
+        if (!Queue.offerUnsafe(inbox, message))
+          Queue.failCauseUnsafe(
+            inbox,
+            Cause.fail(new ProcessIpcError({ cause: new Error('IPC receive backlog exceeded') }))
+          );
+      });
+      child.once('error', (cause) =>
+        Queue.failCauseUnsafe(inbox, Cause.fail(new ProcessIpcError({ cause })))
+      );
+      child.once('disconnect', () => Queue.endUnsafe(inbox));
+      child.once('close', () => Queue.endUnsafe(inbox));
+    },
+  });
+  return {
+    pid: yield* managed.started,
+    messages: Stream.fromQueue(inbox),
+    exit: managed.closed,
+    ringBuffer: Effect.sync((): readonly string[] => lines.slice()),
+    send: (message: Parameters<ChildProcess['send']>[0]) =>
+      Effect.callback<void, ProcessIpcError>((resume) => {
+        try {
+          managed.child.send(message, (error) =>
+            resume(error ? Effect.fail(new ProcessIpcError({ cause: error })) : Effect.void)
+          );
+        } catch (cause) {
+          resume(Effect.fail(new ProcessIpcError({ cause })));
+        }
+      }),
+  };
 });
 
 // ---- command --------------------------------------------------

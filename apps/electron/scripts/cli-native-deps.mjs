@@ -42,6 +42,9 @@ const CLI_RUNTIME_PACKAGE_CHAIN = [
   { name: '@lydell/node-pty', from: 'cli' },
   // tinypool drives the diff line-count worker pool; it stays external because it
   // resolves its own entry/worker.js relative to its package dir. Pure JS, no deps.
+  { name: '@lody/plugin-sdk', from: 'cli' },
+  { name: 'esbuild', from: 'cli' },
+  { name: 'zod', from: 'cli' },
   { name: 'tinypool', from: 'cli' }
 ]
 
@@ -190,6 +193,42 @@ export function installEmbeddedKeyringBinding(target) {
       path.join(stagedNodeModulesDir, ...packageName.split('/')),
       { isTopLevel: false }
     )
+  } finally {
+    downloaded?.cleanup()
+  }
+}
+
+export function installEmbeddedEsbuildBinary({ platform, arch }) {
+  const wrapper = resolvePackageDir('esbuild', cliAppRoot)
+  stageEsbuildBinary(wrapper, path.join(stagedNodeModulesDir, '@esbuild'), { platform, arch })
+}
+
+export function stageEsbuildBinary(
+  wrapper,
+  scope,
+  { platform, arch },
+  fetchPackage = fetchNativeBinaryPackage
+) {
+  const name = `@esbuild/${platform}-${arch}`
+  const version = JSON.parse(fs.readFileSync(path.join(wrapper, 'package.json'), 'utf8'))
+    .optionalDependencies[name]
+  if (!version) throw new Error(`Unsupported esbuild target: ${name}`)
+  const binary = platform === 'win32' ? 'esbuild.exe' : 'bin/esbuild'
+  const installed = path.join(path.dirname(wrapper), name)
+  const downloaded = fs.existsSync(path.join(installed, binary))
+    ? undefined
+    : fetchPackage(name, version)
+  try {
+    const source = downloaded?.packageDir ?? installed
+    const metadata = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'))
+    if (
+      metadata.name !== name ||
+      metadata.version !== version ||
+      !fs.existsSync(path.join(source, binary))
+    )
+      throw new Error(`Invalid esbuild binary package: ${name}@${version}`)
+    fs.rmSync(scope, { recursive: true, force: true })
+    fs.cpSync(source, path.join(scope, `${platform}-${arch}`), { recursive: true })
   } finally {
     downloaded?.cleanup()
   }

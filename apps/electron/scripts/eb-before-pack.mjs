@@ -1,5 +1,6 @@
 import {
   installEmbeddedKeyringBinding,
+  installEmbeddedEsbuildBinary,
   installEmbeddedRoostBinding,
   installEmbeddedNodePtyBinding,
   installEmbeddedSqliteBinding
@@ -31,5 +32,6 @@ export default async function beforePack(context) {
   installEmbeddedSqliteBinding({ platform, arch: archName })
   installEmbeddedNodePtyBinding({ platform, arch: archName })
   installEmbeddedKeyringBinding({ platform, arch: archName })
+  installEmbeddedEsbuildBinary({ platform, arch: archName })
   installEmbeddedRoostBinding({ platform, arch: archName })
 }

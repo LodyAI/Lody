@@ -21,6 +21,7 @@ import {
   fetchNativeBinaryPackage,
   roostPrebuildFileName,
   stageRoostBinding,
+  stageEsbuildBinary,
   stageLoroRuntimePackage
 } from './cli-native-deps.mjs'
 import { probeRoostRuntime } from './roost-runtime-probe.mjs'
@@ -339,5 +340,37 @@ void test('the inherited environment is preserved except for prefer-offline', ()
     assert.equal(calls[0].options.env.npm_config_prefer_offline, 'false')
   } finally {
     result.cleanup()
+  }
+})
+
+test('repacking the embedded compiler selects only the requested esbuild executable and rejects mismatched packages', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'esbuild-target-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const wrapper = path.join(root, 'esbuild'),
+    scope = path.join(root, 'out', '@esbuild')
+  await mkdir(wrapper)
+  await writeFile(
+    path.join(wrapper, 'package.json'),
+    JSON.stringify({
+      optionalDependencies: { '@esbuild/darwin-arm64': '1.2.3', '@esbuild/win32-x64': '1.2.3' }
+    })
+  )
+  for (const [platform, arch, bin] of [
+    ['darwin', 'arm64', 'bin/esbuild'],
+    ['win32', 'x64', 'esbuild.exe']
+  ]) {
+    const name = `@esbuild/${platform}-${arch}`,
+      pkg = path.join(root, name)
+    await mkdir(path.dirname(path.join(pkg, bin)), { recursive: true })
+    await writeFile(path.join(pkg, bin), name)
+    await writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name, version: '1.2.3' }))
+    stageEsbuildBinary(wrapper, scope, { platform, arch })
+    assert.deepEqual(await readdir(scope), [`${platform}-${arch}`])
+    assert.equal(await readFile(path.join(scope, `${platform}-${arch}`, bin), 'utf8'), name)
+    await writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name, version: '1.2.4' }))
+    assert.throws(
+      () => stageEsbuildBinary(wrapper, scope, { platform, arch }),
+      /Invalid esbuild binary/
+    )
   }
 })

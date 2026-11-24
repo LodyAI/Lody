@@ -109,7 +109,8 @@ export function createLocalSessionControlRequestHandler(
       requestPath !== LOCAL_MACHINE_RPC_PATH &&
       requestPath !== LOCAL_E2EE_PAIRING_PATH &&
       requestPath !== LOCAL_E2EE_RESET_PATH &&
-      requestPath !== LOCAL_PROJECT_CONTROL_PATH
+      requestPath !== LOCAL_PROJECT_CONTROL_PATH &&
+      requestPath !== '/plugin/control'
     ) {
       config.logger.debug(
         `[local-control:${requestId}] rejected request: not_found (path=${requestPath || 'empty'})`
