@@ -128,7 +128,12 @@ it('serves digest-bound staged pages and rejects unverified invocation scopes', 
       )
     ).toEqual(Buffer.from(packed));
     await writeFile(join(root, 'client.js'), 'changed');
-    await expect(page(0)).rejects.toThrow('Stale bundle');
+    // Pages are content-addressed: the digest-verified bytes outlive file churn in the generation.
+    const stable = await page(0);
+    if (stable.type !== 'plugin/bundle-chunk') throw Error('Unexpected page');
+    expect(Buffer.from(stable.base64, 'base64')).toEqual(
+      Buffer.from(packed.subarray(0, PLUGIN_BUNDLE_CHUNK_BYTES))
+    );
     const query = {
       ...base,
       method: 'plugin/query' as const,
@@ -140,6 +145,12 @@ it('serves digest-bound staged pages and rejects unverified invocation scopes', 
         input: null,
       },
     };
+    await expect(
+      daemon.dispatchMachineRpc(
+        { ...query, params: { ...query.params, clientDigest: 'a'.repeat(64) } },
+        { ...actor, sessionId: 's' }
+      )
+    ).rejects.toThrow('Stale plugin generation');
     await expect(daemon.dispatchMachineRpc(query, actor)).rejects.toThrow('scope forbidden');
     await expect(
       daemon.dispatchMachineRpc(query, { ...actor, sessionId: 'other' })
@@ -825,6 +836,23 @@ it('admits verifier lineage only for the approved project, signed parent turn an
       return fn(signal);
     };
     await expect(decision('sessionRestore')).rejects.toThrow('Denied');
+    const readAllowed = async (descriptorId: string) => {
+      const fn = await resolve(
+        {
+          workspaceId,
+          machineId,
+          pluginId,
+          instanceId: 1,
+          origin: { type: 'service' },
+          op: 'lody.read',
+          payload: { descriptorId, target: parentSession, input: {} },
+        },
+        new AbortController().signal
+      );
+      return !!fn;
+    };
+    expect(await readAllowed('sessionDetail')).toBe(true);
+    expect(await readAllowed('automations')).toBe(false);
     await decision('sessionSend');
     const sent = queue[0]!,
       record = sdk.decodeE2eeIntentRecord(sent.e2eeIntent)!;
