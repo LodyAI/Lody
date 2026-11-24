@@ -255,6 +255,10 @@ import {
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
 import { getDefaultSessionWorkdir } from '../session/session';
+import {
+  extractChildDirectTailSummary,
+  resolveCoordinatorProjectFactsDelta,
+} from './coordinator-project-delta';
 import { captureCli } from '@/lib/analytics/posthog';
 import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
 import {
@@ -2778,6 +2782,62 @@ export class MessageHandler {
     }
   }
 
+  private async readProjectFactsDeltaHeader(
+    workspaceId: WorkspaceId,
+    sessionId: SessionId,
+    userTurnId: string | undefined
+  ): Promise<string | undefined> {
+    if (!userTurnId) return undefined;
+    try {
+      const ownMetaRow = await this.workspaceDocument.repo
+        .getDocMeta(getSessionRoomId(sessionId))
+        .catch(() => undefined);
+      const ownMeta = ownMetaRow?.meta as SessionMeta | undefined;
+      if (!isCoordinatorSession(ownMeta) || !ownMeta?.userId) return undefined;
+      const cursorStore = this.operationCoordinator.getCoordinatorCursorStore();
+      if (!cursorStore) return undefined;
+      const [sessionDoc, aliveSessions] = await Promise.all([
+        this.workspaceDocument.getOrCreateSessionDoc(sessionId),
+        listAliveSessionMetas(this.workspaceDocument),
+      ]);
+      const docState = await sessionDoc.getDocState();
+      return await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: sessionId,
+        coordinatorUserId: ownMeta.userId,
+        userTurnId,
+        allSessionMetas: aliveSessions.map((entry) => entry.meta),
+        rawWorkItems: docState?.workItems,
+        cursorStore,
+        readChildTail: async (childSessionId, previousLatestUserMsgId) => {
+          const childMetaRow = await this.workspaceDocument.repo
+            .getDocMeta(getSessionRoomId(childSessionId))
+            .catch(() => undefined);
+          const childMeta = childMetaRow?.meta as SessionMeta | undefined;
+          const remoteTimeout =
+            childMeta?.machineId && childMeta.machineId !== this.machineId ? 800 : 0;
+          return await this.workspaceDocument.readSessionDocTransiently(
+            childSessionId,
+            async (childDoc) => {
+              const childBackend = await this.getSessionBackend(childDoc);
+              return await extractChildDirectTailSummary({
+                history: childBackend.history,
+                coordinatorSessionId: sessionId,
+                previousLatestUserMsgId,
+              });
+            },
+            { remoteSyncTimeoutMs: remoteTimeout }
+          );
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Omitting project facts delta for ${userTurnId}: ${formatErrorMessage(error)}`
+      );
+      return undefined;
+    }
+  }
+
   private async buildAcpPromptBlocks(args: {
     requesterUserId?: string;
     workspaceId: WorkspaceId;
@@ -2922,12 +2982,14 @@ export class MessageHandler {
     });
 
     // Build the full text prompt: comment references first, then user text
-    const [senderHeader, replyContextHeader] = await Promise.all([
+    const [senderHeader, replyContextHeader, projectFactsDeltaHeader] = await Promise.all([
       this.readAgentSenderHeader(args.sessionId, args.userTurnId),
       this.readReplyContextHeader(args.workspaceId, args.sessionId, args.userTurnId),
+      this.readProjectFactsDeltaHeader(args.workspaceId, args.sessionId, args.userTurnId),
     ]);
     const allTextParts = [
       ...(senderHeader ? [senderHeader] : []),
+      ...(projectFactsDeltaHeader ? [projectFactsDeltaHeader] : []),
       ...(replyContextHeader ? [replyContextHeader] : []),
       ...commentRefTexts,
       ...visualAnnotationRefTexts,

@@ -8376,6 +8376,7 @@ function CoordinatorProactiveCardRow({
                   bubbleBody: entry.body || resolvedCard.title,
                   bubbleReplyTo: entry.replyTo,
                   activeThreadRootId: coordinator.activeThreadRootId,
+                  cardKind: resolvedCard.kind,
                   action,
                 })
             : undefined

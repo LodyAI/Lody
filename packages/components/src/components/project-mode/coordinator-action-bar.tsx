@@ -261,6 +261,22 @@ const styles = stylex.create({
     backgroundColor: WARNING_BADGE_BG,
     color: colors.warning,
   },
+  kindHandoff: {
+    backgroundColor: ACCENT_BADGE_BG,
+    color: colors.accent,
+  },
+  directModePill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 16,
+    paddingInline: 5,
+    borderRadius: radius.full,
+    backgroundColor: ACCENT_BADGE_BG,
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: 600,
+    flexShrink: 0,
+  },
   taskChipGroup: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -538,9 +554,15 @@ type OptimisticCardChoice = {
   phase: 'sending' | 'settled';
 };
 
-function shouldActionCollapseCard(spec: CoordinatorActionSpec): boolean {
+function shouldActionCollapseCard(
+  spec: CoordinatorActionSpec,
+  cardKind: CoordinatorCardKind
+): boolean {
   if (spec.intent.kind === 'client_command') {
-    return spec.intent.command !== COORDINATOR_CLIENT_COMMANDS.panelOpen;
+    if (spec.intent.command === COORDINATOR_CLIENT_COMMANDS.panelOpen) {
+      return Boolean(spec.intent.params?.handoff === true || cardKind === 'handoff');
+    }
+    return true;
   }
   return spec.intent.mode !== 'prefill';
 }
@@ -566,6 +588,14 @@ function ActionIcon({ icon, defaultKind }: { icon?: string; defaultKind?: string
 
 function CardKindBadge({ kind }: { kind: CoordinatorCardKind }) {
   const { t } = useTranslation();
+  if (kind === 'handoff') {
+    return (
+      <span {...stylex.props(styles.kindBadge, styles.kindHandoff)}>
+        <ArrowRight size={12} aria-hidden="true" />
+        <span>{t('projectMode.card.kindHandoff', 'Direct co-work')}</span>
+      </span>
+    );
+  }
   if (kind === 'review_ready') {
     return (
       <span {...stylex.props(styles.kindBadge, styles.kindReviewReady)}>
@@ -682,7 +712,7 @@ export function CoordinatorProactiveCard({
   const handleActionClick = (spec: CoordinatorActionSpec) => {
     if (!onExecuteAction) return;
     setInFlightId(spec.id);
-    const collapses = shouldActionCollapseCard(spec);
+    const collapses = shouldActionCollapseCard(spec, card.kind);
     if (collapses) {
       setManualExpanded(false);
       setOptimisticChoice({ kind: 'action', spec, phase: 'sending' });
@@ -902,6 +932,11 @@ export function CoordinatorProactiveCard({
                           >
                             {num ? <span {...stylex.props(styles.taskNumber)}>{num}</span> : null}
                             <span {...stylex.props(styles.taskTitle)}>{title}</span>
+                            {task.collaborationMode === 'direct' ? (
+                              <span {...stylex.props(styles.directModePill)}>
+                                {t('projectMode.board.directMode', 'Direct')}
+                              </span>
+                            ) : null}
                             {showDiff && diff ? (
                               <>
                                 {diff.add > 0 ? (

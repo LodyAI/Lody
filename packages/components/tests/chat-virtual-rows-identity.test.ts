@@ -1341,6 +1341,52 @@ describe('coordinator conversation bubbles and search', () => {
         tasksById: groupedTasksAfterChildChat,
       }).has(groupedCardKey)
     ).toBe(true);
+
+    const handoffCardEntry: Extract<MessageContent, { type: 'coordinator_message' }> = {
+      type: 'coordinator_message',
+      id: 'b-handoff-card',
+      body: '已为原型设计会话注入上下文，建议直接在右侧与它迭代布局细节。',
+      linkedSessionIds: ['wi-impl' as SessionId],
+      card: {
+        kind: 'handoff',
+        title: '切换到右侧直连共创',
+        summary: '高频 UI 细节微调无需经协调者中转，点击即可在右侧面板直接沟通。',
+        actions: [
+          {
+            id: 'open-direct',
+            label: '在右侧面板直接沟通',
+            tone: 'primary',
+            source: 'agent',
+            intent: {
+              kind: 'client_command',
+              command: 'panel.open',
+              params: { target: 'session', sessionId: 'wi-impl', handoff: true },
+            },
+          },
+        ],
+      },
+      actionResolutions: {
+        'open-direct': {
+          status: 'executed',
+          resolvedAt: 3000,
+          summary: 'Opened in side panel',
+        },
+      },
+    };
+    const resolvedHandoffCard = resolveCoordinatorProactiveCard({
+      entry: handoffCardEntry,
+      tasksById: groupedTasks,
+      translate,
+    });
+    expect(resolvedHandoffCard).toMatchObject({
+      kind: 'handoff',
+      title: '切换到右侧直连共创',
+      chosenAction: {
+        liveState: 'completed',
+        wasChosen: true,
+        displayLabel: 'Opened in side panel',
+      },
+    });
   });
 
   it('selects coordinator avatar moods from message content and restricts Lottie playback to one-shot live arrivals', () => {

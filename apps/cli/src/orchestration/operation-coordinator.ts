@@ -33,6 +33,7 @@ import type { Logger } from '@/utils/logger';
 import { TURN_BUDGETS } from '@/session/turn-budgets';
 
 import {
+  type CoordinatorCursorStorePort,
   getLodyOperationStorePath,
   LodyOperationStore,
   LodyOperationStoreError,
@@ -430,6 +431,10 @@ export class LodyOperationCoordinator {
       })
       .catch(() => undefined);
     return recovery;
+  }
+
+  getCoordinatorCursorStore(): CoordinatorCursorStorePort | undefined {
+    return this.started && this.store ? this.store : undefined;
   }
 
   wake(reason: string): Promise<void> {

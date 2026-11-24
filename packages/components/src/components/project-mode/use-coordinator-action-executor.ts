@@ -13,6 +13,7 @@ import {
   resolveSessionPrimaryPullRequest,
   type CoordinatorActionResolution,
   type CoordinatorActionSpec,
+  type CoordinatorCardKind,
   type CoordinatorReplyRef,
   type GitHubMergeMethod,
   type SessionId,
@@ -55,6 +56,7 @@ export type CoordinatorBubbleActionExecutionRequest = {
   readonly bubbleBody: string;
   readonly bubbleReplyTo?: CoordinatorReplyRef;
   readonly activeThreadRootId?: string | null;
+  readonly cardKind?: CoordinatorCardKind;
   readonly action: CoordinatorActionSpec;
 };
 
@@ -245,6 +247,12 @@ export function useCoordinatorActionExecutor(options: {
         }
         if (sid) {
           onOpenTask(sid);
+          if (params?.handoff === true || ctx.cardKind === 'handoff') {
+            return {
+              persistResolution: true,
+              summary: t('projectMode.actions.state.handoffOpened', 'Opened in side panel'),
+            };
+          }
         }
       },
 
@@ -408,7 +416,8 @@ export function useCoordinatorActionExecutor(options: {
 
   const executeBubbleAction = useCallback(
     async (req: CoordinatorBubbleActionExecutionRequest) => {
-      const { action, turnId, bubbleId, bubbleBody, bubbleReplyTo, activeThreadRootId } = req;
+      const { action, turnId, bubbleId, bubbleBody, bubbleReplyTo, activeThreadRootId, cardKind } =
+        req;
       const { intent } = action;
 
       if (intent.kind === 'client_command') {
@@ -419,6 +428,7 @@ export function useCoordinatorActionExecutor(options: {
           bubbleBody,
           bubbleReplyTo,
           activeThreadRootId,
+          cardKind,
           action,
           tasks,
         });

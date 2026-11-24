@@ -86,6 +86,7 @@ export type CoordinatorActionCommandContext = {
   readonly bubbleBody: string;
   readonly bubbleReplyTo?: CoordinatorReplyRef;
   readonly activeThreadRootId?: string | null;
+  readonly cardKind?: CoordinatorCardKind;
   readonly action: CoordinatorActionSpec;
   readonly tasks: ReadonlyMap<string, ProjectBoardRow>;
 };
@@ -456,11 +457,12 @@ export const DEFAULT_COORDINATOR_RULE_PROVIDERS: readonly CoordinatorActionRuleP
 function resolveSingleActionLiveStatus(args: {
   spec: CoordinatorActionSpec;
   dedupKey: string;
+  cardKind?: CoordinatorCardKind;
   resolution: CoordinatorActionResolution | undefined;
   tasksById: ReadonlyMap<string, ProjectBoardRow>;
   translate: CoordinatorTranslateFn;
 }): { liveState: CoordinatorActionLiveState; displayLabel: string } {
-  const { spec, dedupKey, resolution, tasksById, translate } = args;
+  const { spec, dedupKey, cardKind, resolution, tasksById, translate } = args;
   if (resolution?.status === 'dismissed') {
     return { liveState: 'dismissed', displayLabel: spec.label };
   }
@@ -531,8 +533,11 @@ function resolveSingleActionLiveStatus(args: {
       }
     }
 
+    const isHandoffOpen =
+      intent.command === COORDINATOR_CLIENT_COMMANDS.panelOpen &&
+      (intent.params?.handoff === true || cardKind === 'handoff');
     if (
-      intent.command !== COORDINATOR_CLIENT_COMMANDS.panelOpen &&
+      (intent.command !== COORDINATOR_CLIENT_COMMANDS.panelOpen || isHandoffOpen) &&
       resolution?.status === 'executed'
     ) {
       return {
@@ -716,6 +721,7 @@ export function resolveCoordinatorProactiveCard(args: {
     const { liveState, displayLabel } = resolveSingleActionLiveStatus({
       spec,
       dedupKey,
+      cardKind: normalizedCard?.kind,
       resolution,
       tasksById,
       translate,

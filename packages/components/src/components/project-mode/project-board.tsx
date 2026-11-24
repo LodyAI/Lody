@@ -660,6 +660,12 @@ const ProjectBoardGroupRow = memo(function ProjectBoardGroupRow({
                   count: row.members.length,
                 })}
               </span>
+              {row.collaborationMode === 'direct' ? (
+                <>
+                  <span>·</span>
+                  <span>{t('projectMode.board.directMode', 'Direct')}</span>
+                </>
+              ) : null}
               <span>·</span>
               <span>{updated}</span>
             </span>
@@ -774,6 +780,9 @@ const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
           </span>
           <span {...stylex.props(styles.rowMeta)}>{updated}</span>
         </span>
+        {row.collaborationMode === 'direct' ? (
+          <Badge tone="neutral">{t('projectMode.board.directMode', 'Direct')}</Badge>
+        ) : null}
         {row.createdManually ? (
           <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
         ) : null}

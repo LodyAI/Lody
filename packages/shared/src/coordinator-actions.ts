@@ -19,7 +19,12 @@ export const COORDINATOR_CARD_TITLE_MAX_CHARS = 140;
 export const COORDINATOR_CARD_SUMMARY_MAX_CHARS = 600;
 export const COORDINATOR_CARD_DISMISSED_ACTION_ID = '__card_dismissed__';
 
-export const CoordinatorCardKindSchema = z.enum(['next_step', 'decision', 'review_ready']);
+export const CoordinatorCardKindSchema = z.enum([
+  'next_step',
+  'decision',
+  'review_ready',
+  'handoff',
+]);
 export type CoordinatorCardKind = z.infer<typeof CoordinatorCardKindSchema>;
 
 export const COORDINATOR_CLIENT_COMMANDS = {

@@ -323,7 +323,7 @@ const CoordinatorSendMessageActionInputSchema = z
 const CoordinatorSendMessageCardInputSchema = z
   .object({
     kind: CoordinatorCardKindSchema.optional().describe(
-      'Card category: "next_step" (predicted follow-up options after child results), "decision" (answering a child question or choosing between approaches), or "review_ready" (code changes or PR ready for review/merge).'
+      'Card category: "next_step" (predicted follow-up options after child results), "decision" (answering a child question or choosing between approaches), "review_ready" (code changes or PR ready for review/merge), or "handoff" (recommending direct collaboration in a child conversation for open-ended design, UI polish, or multi-round co-work).'
     ),
     title: z
       .string()
