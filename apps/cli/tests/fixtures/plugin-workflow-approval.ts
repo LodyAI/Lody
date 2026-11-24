@@ -2,10 +2,10 @@ import { Effect, Scope, Exit } from 'effect';
 import { encryptedRpcFixture } from '../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
 import { makeCliE2eeExecutionAuthorization } from '../../src/lib/e2ee/execution-authorization';
 import type {
-  WorkflowCreateApproval,
-  WorkflowApprovalReceipt,
+  WorkflowGrantRequest,
+  DeclaredGrantSignature,
 } from '@lody/shared/plugins/machine-rpc';
-import { bindWorkflowApprovalActor } from '../../src/plugins/workflow/authorized-project-create';
+import { bindDeclaredGrantActor } from '../../src/plugins/workflow/declared-workflow';
 import type { PluginDaemon } from '../../src/plugins/plugin-host-legacy';
 import type { MachineId } from '@lody/shared';
 
@@ -62,20 +62,21 @@ export async function ownerApprovalFixture() {
       scope
     )
   );
-  const verifyWorkflowApproval = async (receipt: WorkflowApprovalReceipt, machine: string) => {
-    const req = await Effect.runPromise(
-      f.receiver.readWorkflowApproval(machine, receipt.signer, receipt.requestId)
+  const verifyDeclaredWorkflowGrant = async (
+    signature: DeclaredGrantSignature,
+    machine: string
+  ) => {
+    const { request: req, signer } = await Effect.runPromise(
+      f.receiver.openDeclaredWorkflowGrant(machine, signature)
     );
-    const grant = await Effect.runPromise(
-      auth.authorizeOwnedExecution(workspaceId, receipt.signer, true)
-    );
+    const grant = await Effect.runPromise(auth.authorizeOwnedExecution(workspaceId, signer, true));
     if (
       !req ||
       req.params.targetDevice !== signingPublicKey ||
       grant._tag !== 'Authorized' ||
       grant.principal !== 'owner' ||
       !grant.isCurrent?.() ||
-      f.ledger.view().inspectState().devices.get(receipt.signer)?.kind !== 'personal'
+      f.ledger.view().inspectState().devices.get(signer)?.kind !== 'personal'
     )
       throw Error('Owner approval denied');
     return { approval: req.params, isCurrent: grant.isCurrent };
@@ -83,20 +84,20 @@ export async function ownerApprovalFixture() {
   const identity = {
     pluginAuthoritySignal: auth.authoritySignal,
     signingPublicKey,
-    verifyWorkflowApproval,
+    verifyDeclaredWorkflowGrant,
   };
   return {
     f,
     identity,
     async issue(
       host: PluginDaemon,
-      params: WorkflowCreateApproval,
+      params: WorkflowGrantRequest,
       projectExists: (id: string) => Promise<boolean>
     ) {
       const request = {
         workspaceId,
         machineId,
-        method: 'plugin/workflow-create-approval' as const,
+        method: 'plugin/declared-workflow-grant' as const,
         params,
       };
       const orig = await Effect.runPromise(
@@ -109,9 +110,9 @@ export async function ownerApprovalFixture() {
       if (!opened || opened.input.request.method !== request.method)
         throw Error('Invalid approval envelope');
       await Effect.runPromise(f.receiver.retainFeatureRequest(machineId, opened));
-      const receipt = { requestId: opened.requestId, signer: opened.requesterDevice };
-      const proof = await verifyWorkflowApproval(receipt, machineId);
-      const actor = await bindWorkflowApprovalActor({
+      const receipt = Buffer.from(opened.frame).toString('hex');
+      const proof = await verifyDeclaredWorkflowGrant(receipt, machineId);
+      const actor = await bindDeclaredGrantActor({
         request: opened.input.request,
         machineId,
         identity,
@@ -119,7 +120,7 @@ export async function ownerApprovalFixture() {
         actor: {
           userId: opened.requesterDevice,
           machineOwner: proof.isCurrent(),
-          workflowReceipt: receipt,
+          declaredGrantSignature: receipt,
         },
       });
       return host.dispatchMachineRpc(opened.input.request, actor);

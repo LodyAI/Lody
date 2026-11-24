@@ -21,8 +21,8 @@ import {
   type PluginScope,
   type ProjectRef,
   type QueryDescriptor,
-  type RawDocumentSnapshot,
-  type RawSnapshotTarget,
+  type UnstableDocumentSnapshot,
+  type UnstableSnapshotTarget,
   type ReadonlyJsonPrimitive,
   type RespondInteractionRequest,
   type ScopeTarget,
@@ -52,8 +52,8 @@ export {
   type MachinePluginScope,
   type MachineRef,
   type ProjectRef,
-  type RawDocumentSnapshot,
-  type RawSnapshotTarget,
+  type UnstableDocumentSnapshot,
+  type UnstableSnapshotTarget,
   type ReadonlyJsonPrimitive,
   type RespondInteractionRequest,
   type SendSessionMessageReceipt,
@@ -76,7 +76,9 @@ export interface MachineHostPort {
     command: LodyCommandDescriptor<S, TInput, TOutput>,
     ...[input]: [void] extends [TInput] ? [input?: TInput] : [input: TInput]
   ): Promise<TOutput>;
-  readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
+  readonly unstable: {
+    readSnapshot(target: UnstableSnapshotTarget): Promise<UnstableDocumentSnapshot>;
+  };
   readonly sessions: {
     /**
      * Encrypted execution rechecks the signed root and current project grants. Recovery
@@ -96,6 +98,7 @@ export interface MachineHostPort {
 }
 
 export interface MachineBaseContext {
+  readonly storage: import('./index.js').PluginStorage;
   readonly workspace: WorkspaceRef;
   readonly machine: MachineRef;
   readonly dataDir: string;
@@ -145,6 +148,14 @@ export interface MachinePluginRegistry {
    * Invoked once per subprocess generation immediately after `ready` (including after daemon restart),
    * allowing workflow plugins to recover durable task state from `ctx.dataDir` without polling.
    */
+  service(handler: (ctx: MachineStartupContext) => Promise<void> | void): void;
+  onUpgrade(
+    handler: (
+      ctx: MachineStartupContext,
+      version: { fromVersion: string; toVersion: string }
+    ) => Promise<void> | void
+  ): void;
+  onUninstall(handler: (ctx: MachineStartupContext) => Promise<void> | void): void;
   onStart(handler: (ctx: MachineStartupContext) => void | Promise<void>): void;
   query<S extends MachinePluginScope, TInput extends z.ZodType, TOutput extends z.ZodType>(
     descriptor: QueryDescriptor<S, TInput, TOutput>,
@@ -187,7 +198,8 @@ export interface MachinePluginRegistry {
   readonly events: {
     on<K extends MachineHostEventType>(
       type: K,
-      handler: (ctx: MachineEventContext<K>, event: MachineHostEventMap[K]) => void | Promise<void>
+      handler: (ctx: MachineEventContext<K>, event: MachineHostEventMap[K]) => void | Promise<void>,
+      options?: { readonly resumeFromCursor?: boolean }
     ): void;
   };
 }

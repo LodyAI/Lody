@@ -22,19 +22,25 @@ import type { PluginInspection, InspectorAction } from '../components/settings/p
 
 export interface ClientCatalogInstallation extends ClientInstallation {
   workflowPrompts?: Readonly<Record<string, string>>;
+  declaredGrant?: Omit<
+    import('@lody/shared/plugins/machine-rpc').DeclaredWorkflowGrant,
+    'signature'
+  >;
   workflowBinding?: string;
   workflowApproval?: (
     projectId: string,
     action: 'grant' | 'revoke',
-    readOperations?: import('@lody/shared/plugins/machine-rpc').WorkflowReadOperation[]
-  ) => Promise<number>;
+    roleIds: string[] | '*',
+    operations: import('@lody/shared/plugins/machine-rpc').DeclaredWorkflowGrant['allowed_ops']
+  ) => Promise<void>;
   reserveSession?: import('./client-session-create').ReserveClientSession;
   dev: DevInstallation;
   enabled: boolean;
   inspection?: Omit<PluginInspection, 'manifest' | 'clientDigest' | 'trusted' | 'devSessionNonce'>;
   control?: (
     action: Exclude<InspectorAction, 'approve-dev' | 'approve-release' | 'revoke'>,
-    changes?: Record<string, string | number | boolean>
+    changes?: Record<string, string | number | boolean>,
+    projectId?: string
   ) => Promise<NonNullable<ClientCatalogInstallation['inspection']>>;
 }
 class WorkspaceClientPlugins {
@@ -67,7 +73,10 @@ class WorkspaceClientPlugins {
     this.releases.delete(this.release(i));
     return this.revokeDev(i);
   }
-  constructor(readonly workspaceId: string) {}
+  constructor(
+    readonly workspaceId: string,
+    readonly storageNamespace: string
+  ) {}
   private release(i: ClientInstallation) {
     return JSON.stringify([i.workspaceId, i.pluginId, i.digest]);
   }
@@ -186,7 +195,7 @@ export function ClientPluginHostProvider({
   admission,
   children,
 }: {
-  admission: { workspaceId: string; signal: AbortSignal } | null;
+  admission: { storageNamespace: string; workspaceId: string; signal: AbortSignal } | null;
   children: ReactNode;
 }) {
   const [binding, setBinding] = useState<{
@@ -196,7 +205,7 @@ export function ClientPluginHostProvider({
   useLayoutEffect(() => {
     if (!admission || admission.signal.aborted) return;
     const { workspaceId, signal } = admission;
-    const owner = new WorkspaceClientPlugins(workspaceId);
+    const owner = new WorkspaceClientPlugins(workspaceId, admission.storageNamespace);
     const subscriptions = new AbortController();
     const close = () => {
       if (subscriptions.signal.aborted) return;

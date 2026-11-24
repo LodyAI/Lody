@@ -1,3 +1,4 @@
+import { PluginStateStore } from './plugin-state-store';
 import type { PluginMachineRequest } from '@lody/shared/plugins/machine-rpc';
 import { ManagedRuntime, Effect, Layer, Scope, Exit } from 'effect';
 import { platformLayer } from '@/platform/process-options';
@@ -8,6 +9,7 @@ import { DevPluginCompiler } from './workflow/dev-plugin-compiler';
 import { Registry, registryLayer, type VerifiedPluginGrant } from './workflow/plugin-registry';
 /** @deprecated Fleet and local control bridge until their entrypoints compose the native layer. */
 export class PluginDaemon {
+  private readonly state: import('./plugin-state-store').PluginStateStore;
   private runtime;
   private ready?: Promise<void>;
   constructor(
@@ -17,12 +19,33 @@ export class PluginDaemon {
     warn: (m: string) => void,
     vault?: import('./plugin-machine-config').MachineConfigVault,
     dispatch?: DispatchMachineHostCall,
-    worker?: string
+    worker?: string,
+    readmit?: (frame: Parameters<PluginDaemon['event']>[0]) => Promise<boolean>
   ) {
+    this.state = new PluginStateStore(root);
     this.runtime = ManagedRuntime.make(
       registryLayer(root, workspaceId, machineId, warn, vault).pipe(
         Layer.provideMerge(
-          Layer.merge(makePluginHostLayer(worker, dispatch), DevPluginCompiler.layer)
+          Layer.merge(
+            makePluginHostLayer(
+              worker,
+              async (call, signal) => {
+                signal.throwIfAborted();
+                if (call.op.startsWith('storage.'))
+                  return this.state.storage(
+                    call.pluginId,
+                    call.op,
+                    call.payload.target,
+                    call.payload.input
+                  );
+                if (!dispatch) throw Error('Host operation unavailable');
+                return dispatch(call, signal);
+              },
+              this.state,
+              readmit
+            ),
+            DevPluginCompiler.layer
+          )
         ),
         Layer.provideMerge(platformLayer({}))
       )
@@ -117,7 +140,10 @@ export class PluginDaemon {
       { signal }
     );
   }
-  event(frame: Extract<HostToChildFrame, { type: 'event' }>, admit?: () => Promise<boolean>) {
+  event(
+    frame: Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'>,
+    admit?: () => Promise<boolean>
+  ) {
     return this.runtime.runPromise(Effect.flatMap(PluginHost, (h) => h.broadcast(frame, admit)));
   }
   async dispatch(raw: unknown) {
@@ -125,6 +151,6 @@ export class PluginDaemon {
     return this.runtime.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(raw)));
   }
   dispose() {
-    return this.runtime.dispose();
+    return this.runtime.dispose().finally(() => this.state.close());
   }
 }

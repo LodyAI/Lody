@@ -40,6 +40,20 @@ export function valueFor(field: Field, value: unknown): Value {
   }
   return z.string().parse(value);
 }
+export function resolveProjectConfig(
+  manifest: PluginManifest,
+  values: Readonly<Record<string, unknown>> | undefined
+) {
+  const result: Record<string, Value> = Object.create(null);
+  for (const [name, f] of Object.entries(manifest.config ?? {})) {
+    if (f.scope !== 'project') continue;
+    const v = values && Object.hasOwn(values, name) ? values[name] : f.default;
+    if (v !== undefined) result[name] = valueFor(f, v);
+    else if (f.required)
+      throw new MissingPluginConfiguration(`Missing required project configuration: ${name}`);
+  }
+  return result;
+}
 export function machineConfig(
   manifest: PluginManifest,
   workspaceId: string,
@@ -52,6 +66,7 @@ export function machineConfig(
     async configured(preferences: Readonly<Record<string, unknown>>) {
       const names: string[] = [];
       for (const [name, field] of Object.entries(manifest.config ?? {})) {
+        if (field.scope === 'project') continue;
         if (
           ('default' in field && field.default !== undefined) ||
           (privateField(field)
@@ -70,7 +85,7 @@ export function machineConfig(
     async resolve(preferences: Readonly<Record<string, unknown>> = {}) {
       const result: Record<string, Value> = Object.create(null);
       for (const [name, field] of Object.entries(manifest.config ?? {})) {
-        if (field.scope === 'client') continue;
+        if (field.scope === 'client' || field.scope === 'project') continue;
         const stored = privateField(field) ? await vault.read(key(name)) : undefined;
         const value =
           stored !== undefined

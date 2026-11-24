@@ -98,13 +98,17 @@ it('preserves the real session metadata on replay after archive and manager rest
   });
   writeFileSync(
     machineEntry,
-    `export default {kind:'machine-plugin',register(m){const schema={safeParse:data=>({success:true,data})};for (const scope of ['session','project']) m.query({id:'inspect-'+scope,scope,input:schema,output:schema},async(ctx,p)=>p.snapshot?ctx.lody.readSnapshot(p.snapshot):ctx.lody.read(p.target,{id:p.id},p.input));m.mutation({id:'create',scope:'machine',input:schema,output:schema},(ctx,input)=>ctx.lody.sessions.create(ctx.machine,input));m.mutation({id:'rename',scope:'session',input:schema,output:schema},async(ctx,input)=>{await ctx.lody.execute(ctx.target,{id:'sessionUpdateTitle'},{title:input});const title=(await ctx.lody.readSnapshot({kind:'session-meta',session:ctx.target})).doc.title;await ctx.lody.sessions.send(ctx.target,{prompt:'ready for review'});const detail=await ctx.lody.read(ctx.target,{id:'sessionDetail'});return {title,queued:detail.queuedCount,first:detail.recentTurns[0].previewText}})}}`
+    `export default {kind:'machine-plugin',register(m){const schema={safeParse:data=>({success:true,data})};for (const scope of ['session','project']) m.query({id:'inspect-'+scope,scope,input:schema,output:schema},async(ctx,p)=>p.snapshot?ctx.lody.unstable.readSnapshot(p.snapshot):ctx.lody.read(p.target,{id:p.id},p.input));m.mutation({id:'create',scope:'machine',input:schema,output:schema},(ctx,input)=>ctx.lody.sessions.create(ctx.machine,input));m.mutation({id:'rename',scope:'session',input:schema,output:schema},async(ctx,input)=>{await ctx.lody.execute(ctx.target,{id:'sessionUpdateTitle'},{title:input});const title=(await ctx.lody.unstable.readSnapshot({kind:'session-meta',session:ctx.target})).doc.title;await ctx.lody.sessions.send(ctx.target,{prompt:'ready for review'});const detail=await ctx.lody.read(ctx.target,{id:'sessionDetail'});return {title,queued:detail.queuedCount,first:detail.recentTurns[0].previewText}})}}`
   );
   let dropAcceptedReply = false;
   let unacknowledged: unknown;
   const hostCall: typeof dispatchMachineHostCall = async (call, signal) => {
     const result = await dispatchMachineHostCall(call, signal);
-    if (dropAcceptedReply && call.op === 'sessions.create') {
+    if (
+      dropAcceptedReply &&
+      call.op === 'lody.execute' &&
+      call.payload.descriptorId === 'sessionCreate'
+    ) {
       dropAcceptedReply = false;
       unacknowledged = result;
       throw Object.assign(Error('synthetic lost acceptance reply'), { code: 'outcome_unknown' });
@@ -131,6 +135,7 @@ it('preserves the real session metadata on replay after archive and manager rest
           clientDigest: digest,
           manifest: {
             sdk: '^1.0.0',
+            permissions: ['unstable.rawState', 'sessions.write'],
             id: 'plugin',
             title: 'Plugin',
             version: '1.0.0',

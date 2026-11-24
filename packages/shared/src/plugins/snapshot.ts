@@ -1,57 +1,94 @@
-type SnapshotValue =
-  | null
-  | string
-  | number
-  | boolean
-  | readonly SnapshotValue[]
-  | { readonly [key: string]: SnapshotValue };
-const denied = () => Object.assign(Error('Snapshot target unavailable'), { code: 'forbidden' });
-const sensitive =
-  /(?:secret|password|passwd|privatekey|signingkey|recoverykey|encryptionkey|wrappingkey|credential|keychain|keyring|^kek$|^dek$|authtoken|accesstoken|refreshtoken|apikey|bearer|authorization|cookie|^env$|^envpassthrough$|^argv$|^args$|^headers$|^auth$|token$|^oauth|codexauth|^authprofile|^authentication|keyenvelope|epochkey|rootkey|contentkey|signedurl|signingmaterial|passphrase|mnemonic|recoverycode|sessioncookie|clientsecret|keymaterial|^e2ee|^launchconfig$|^customacp$)/i;
-const blocked = (key: string) =>
-  ['__proto__', 'constructor', 'prototype'].includes(key) ||
-  sensitive.test(key.replace(/[^a-z0-9]/gi, ''));
-function plain(value: unknown): value is Record<string, unknown> {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
-  );
-}
-/** Only JSON data crosses the binding; do not invoke getters, serialize handles, or follow prototype paths. */
+export const MAX_UNSTABLE_SNAPSHOT_BYTES = 512 * 1024;
+const fields = {
+  sessions: [
+    'id',
+    'title',
+    'machineId',
+    'userId',
+    'createdAt',
+    'updatedAt',
+    'isArchived',
+    'agentRoleId',
+    'branchName',
+    'createdByPluginId',
+  ],
+  projects: ['id', 'name', 'machineId', 'createdAt', 'updatedAt', 'path'],
+  machines: ['id', 'name', 'platform', 'version'],
+  roles: ['id', 'name', 'description', 'machineId'],
+  schedules: ['scheduleId', 'title', 'enabled', 'machineId', 'nextRunAt'],
+  rateLimits: ['used', 'remaining', 'limit', 'resetsAt'],
+  turns: [
+    'id',
+    'role',
+    'userTurnId',
+    'timestamp',
+    'startedAt',
+    'endedAt',
+    'finished',
+    'proseMarkdown',
+  ],
+} as const;
+const deny = (): never => {
+  throw Object.assign(Error('Snapshot target unavailable'), { code: 'forbidden' });
+};
+const own = (x: unknown, k: string): unknown =>
+  x && typeof x === 'object' ? Object.getOwnPropertyDescriptor(x, k)?.value : undefined;
+/** Project known scalar fields rather than copying unknown nested data. */
 export function copyPluginSnapshot(
   raw: unknown,
   path: readonly string[],
   pluginId: string,
   kind: string
-): SnapshotValue {
-  const own = (value: unknown, key: string) => Object.getOwnPropertyDescriptor(value, key)?.value;
-  const allowed = (row: unknown, key: string, position: readonly string[]) =>
-    !blocked(key) &&
-    (key !== 'businessKey' ||
-      (((kind === 'session-meta' && position.length === 0) ||
-        (kind === 'workspace-state' && position.length === 2 && position[0] === 'sessions')) &&
-        own(row, 'createdByPluginId') === pluginId));
-  const location: string[] = [];
-  for (const key of path) {
-    if (!raw || (!plain(raw) && !Array.isArray(raw)) || !allowed(raw, key, location))
-      throw denied();
-    location.push(key);
-    raw = own(raw, key);
-    if (raw === undefined) throw denied();
-  }
-  function copy(v: unknown, loc: readonly string[]): SnapshotValue {
-    if (v === null || typeof v === 'boolean' || typeof v === 'string') return v;
-    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-    if (Array.isArray(v)) return Object.freeze(v.map((item, i) => copy(item, [...loc, String(i)])));
-    if (!plain(v)) throw Error('Invalid snapshot source');
-    const out: Record<string, SnapshotValue> = Object.create(null);
-    for (const key of Object.keys(v)) {
-      if (!allowed(v, key, loc)) continue;
-      const value = own(v, key);
-      if (value !== undefined) out[key] = copy(value, [...loc, key]);
+) {
+  let size = 0;
+  const count = (v: string) => {
+    if (v.length > MAX_UNSTABLE_SNAPSHOT_BYTES) throw Error('Snapshot exceeds byte limit');
+    size += new TextEncoder().encode(JSON.stringify(v)).length;
+    if (size > MAX_UNSTABLE_SNAPSHOT_BYTES) throw Error('Snapshot exceeds byte limit');
+  };
+  function row(x: unknown, collection: keyof typeof fields) {
+    const result: Record<string, string | number | boolean | null> = Object.create(null);
+    for (const k of [
+      ...fields[collection],
+      ...(collection === 'sessions' && own(x, 'createdByPluginId') === pluginId
+        ? ['businessKey']
+        : []),
+    ]) {
+      const value = own(x, k);
+      if (
+        value === null ||
+        typeof value === 'string' ||
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+      ) {
+        if (typeof value === 'string') count(value);
+        result[k] = value;
+      }
     }
-    return Object.freeze(out);
+    return Object.freeze(result);
   }
-  return copy(raw, location);
+  let projected: unknown;
+  if (kind === 'workspace-state') {
+    const [collection, key, ...tail] = path;
+    if (!collection || !key || !Object.hasOwn(fields, collection) || collection === 'turns')
+      return deny();
+    projected = row(own(own(raw, collection), key), collection as keyof typeof fields);
+    path = tail;
+  } else if (kind === 'session-meta') projected = row(raw, 'sessions');
+  else if (kind === 'project-state' && path.length) projected = row(raw, 'projects');
+  else if (kind === 'session-transcript') {
+    const turns = own(raw, 'turns');
+    if (!Array.isArray(turns) || turns.length > 100) return deny();
+    projected = Object.freeze({ turns: Object.freeze(turns.map((t) => row(t, 'turns'))) });
+  } else return deny();
+  for (const k of path) {
+    projected = own(projected, k);
+    if (projected === undefined) return deny();
+  }
+  return projected;
+}
+export function checkSnapshotEnvelope<T>(value: T): T {
+  if (new TextEncoder().encode(JSON.stringify(value)).length > MAX_UNSTABLE_SNAPSHOT_BYTES)
+    throw Error('Snapshot exceeds byte limit');
+  return Object.freeze(value);
 }

@@ -1,7 +1,7 @@
 import {
-  authorizedProjectCreate,
-  bindWorkflowApprovalActor,
-} from '../plugins/workflow/authorized-project-create';
+  resolveDeclaredWorkflow,
+  bindDeclaredGrantActor,
+} from '../plugins/workflow/declared-workflow';
 import { encryptedPluginDispatch } from '../plugins/machine-host-port';
 import {
   composeMachineHostDispatch,
@@ -377,29 +377,29 @@ export class Lody {
     this.machineId = options.machineId;
     this.machineName = options.machineName;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
-    documentManager.workflowSessionAuthority = async (id, installation, project) => {
+    documentManager.workflowSessionAuthority = async (id, installation, project, role) => {
       const identity = this.encryptedWorkspace,
         daemon = await this.encryptedPlugin;
       if (!identity || !daemon) throw Error('Workflow authorization unavailable');
       const lease = await daemon.activeWorkflowLease(id);
       if (!lease || lease.installationId !== installation)
         throw Error('Workflow installation changed');
-      const proof = await identity.verifyWorkflowApproval(lease.receipt, this.machineId);
+      const proof = await identity.verifyDeclaredWorkflowGrant(lease.signature, this.machineId);
       const a = proof.approval;
       if (
         a.action !== 'grant' ||
-        a.operation !== 'sessions.create' ||
-        a.pluginId !== id ||
+        !a.allowed_ops.includes('sessions.create') ||
+        a.plugin_id !== id ||
         a.installationId !== installation ||
         a.machineDigest !== lease.machineDigest ||
         a.targetDevice !== identity.signingPublicKey ||
-        a.projectId !== project
+        (a.allowed_role_ids !== '*' && !a.allowed_role_ids.includes(role)) ||
+        (a.allowed_project_ids !== '*' && !a.allowed_project_ids.includes(project))
       )
         throw Error('Workflow approval mismatch');
       return () => {
         identity.pluginAuthoritySignal.throwIfAborted();
-        if (!lease.isCurrent() || !proof.isCurrent() || Date.now() >= a.expiresAt)
-          throw Error('Workflow approval withdrawn');
+        if (!lease.isCurrent() || !proof.isCurrent()) throw Error('Workflow approval withdrawn');
       };
     };
     documentManager.workflowMachineId = this.machineId;
@@ -442,8 +442,8 @@ export class Lody {
             throw new Error('Plugin host unavailable');
           signal?.throwIfAborted();
           const identity = this.encryptedWorkspace;
-          if (request.method === 'plugin/workflow-create-approval')
-            actor = await bindWorkflowApprovalActor({
+          if (request.method === 'plugin/declared-workflow-grant')
+            actor = await bindDeclaredGrantActor({
               request,
               actor,
               identity,
@@ -519,7 +519,7 @@ export class Lody {
         const root = join(identity.repositoryDirectory, 'plugins');
         if (this.cleanedUp || this.encryptedRevocation || identity.pluginAuthoritySignal.aborted)
           throw Error('Plugin identity closed');
-        const resolve: ResolveStandalonePluginOperation = authorizedProjectCreate({
+        const resolve: ResolveStandalonePluginOperation = resolveDeclaredWorkflow({
           workspaceId: this.workspaceId,
           machineId: this.machineId,
           identity,

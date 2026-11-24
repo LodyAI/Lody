@@ -325,7 +325,8 @@ export function PluginCatalogSubscriber() {
               runtime!.workspaceId,
               target,
               runtime!.requestPlugin,
-              (entry, port) => createWorkspacePluginRegistry(entry, port, reads)
+              (entry, port) =>
+                createWorkspacePluginRegistry(entry, port, reads, owner!.storageNamespace)
             );
             if (!active) return;
             snapshots.set(target.machineId, entries);

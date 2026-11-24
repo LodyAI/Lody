@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
-import { machineConfig } from './plugin-machine-config';
+import { resolveProjectConfig, machineConfig } from './plugin-machine-config';
 import type { PluginManifest } from '@lody/shared/plugins/manifest-schema';
 it('hydrates private values only from the workspace-specific credential entry', async () => {
   const store = new Map<string, string>();
@@ -91,4 +91,19 @@ it('keeps encrypted configuration in identity custody, not an unscoped plugin cr
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+it('does not hydrate project values into the process-wide context', async () => {
+  const manifest: PluginManifest = {
+    id: 'sample',
+    sdk: '1.x',
+    version: '1.0.0',
+    title: 'Sample',
+    config: { name: { type: 'string', label: 'Name', scope: 'project', required: true } },
+  };
+  expect(await machineConfig(manifest, 'w', 'm').resolve({ name: 'workspace' })).toEqual({});
+  expect(() => resolveProjectConfig(manifest, undefined)).toThrow('required project');
+  expect(resolveProjectConfig(manifest, { name: 'project', token: 'wrong' })).toEqual({
+    name: 'project',
+  });
 });

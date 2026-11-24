@@ -40,8 +40,8 @@ import {
   type ProjectSummary,
   type PullRequestSummary,
   type QueryDescriptor,
-  type RawDocumentSnapshot,
-  type RawSnapshotTarget,
+  type UnstableDocumentSnapshot,
+  type UnstableSnapshotTarget,
   type ReadonlyJsonObject,
   type ReadonlyJsonPrimitive,
   type ReadonlyJsonValue,
@@ -103,8 +103,8 @@ export {
   type ProjectRef,
   type ProjectSummary,
   type PullRequestSummary,
-  type RawDocumentSnapshot,
-  type RawSnapshotTarget,
+  type UnstableDocumentSnapshot,
+  type UnstableSnapshotTarget,
   type ReadonlyJsonObject,
   type ReadonlyJsonPrimitive,
   type ReadonlyJsonValue,
@@ -321,7 +321,9 @@ export interface ClientPluginRegistry {
       TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
         Record<string, ReadonlyJsonPrimitive>
       >,
-    >(): TConfig;
+    >(
+      project?: ProjectRef
+    ): TConfig;
   };
   readonly assets: {
     url(relativePath: string): string;
@@ -471,7 +473,9 @@ export interface LodyClient {
    * Reads a detached, deeply frozen raw document/state-tree snapshot for power panels needing
    * upstream workspace or transcript fields beyond fixed `lodyQueries` summaries.
    */
-  readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
+  readonly unstable: {
+    readSnapshot(target: UnstableSnapshotTarget): Promise<UnstableDocumentSnapshot>;
+  };
   readonly assets: {
     url(relativePath: string): string;
   };
@@ -543,9 +547,9 @@ export declare function useLodyCommand<S extends PluginScope, TInput, TOutput>(
  * Reactive subscription to a detached, read-only raw document/state-tree snapshot with optional
  * selector projection so custom Workspace / Agent dashboards re-render only on relevant changes.
  */
-export declare function useLodySnapshot<TSelected = RawDocumentSnapshot>(
-  target: RawSnapshotTarget,
-  selector?: (snapshot: RawDocumentSnapshot) => TSelected,
+export declare function useUnstableLodySnapshot<TSelected = UnstableDocumentSnapshot>(
+  target: UnstableSnapshotTarget,
+  selector?: (snapshot: UnstableDocumentSnapshot) => TSelected,
   isEqual?: (prev: TSelected, next: TSelected) => boolean
 ): QueryResult<TSelected>;
 
@@ -553,7 +557,7 @@ export declare function usePluginConfig<
   TConfig extends Readonly<Record<string, ReadonlyJsonPrimitive>> = Readonly<
     Record<string, ReadonlyJsonPrimitive>
   >,
->(): PluginConfigHandle<TConfig>;
+>(project?: ProjectRef): PluginConfigHandle<TConfig>;
 
 export declare function useHostCapabilities(): HostCapabilities;
 

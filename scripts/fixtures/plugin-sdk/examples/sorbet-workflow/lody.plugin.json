@@ -68,5 +68,10 @@
     "fields": [
       "autoVerify"
     ]
-  }
+  },
+  "permissions": [
+    "sessions.write",
+    "workflow.autonomous",
+    "unstable.rawState"
+  ]
 }

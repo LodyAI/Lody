@@ -1,6 +1,6 @@
 import {
   pluginSessionCreateParams,
-  workflowCreateApproval,
+  workflowGrantRequest,
   pluginCatalogParams,
   pluginControlParams,
   pluginBundleParams,
@@ -284,8 +284,8 @@ export const E2eeAcpInteractionResultSchema = z
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
-    method: z.literal('plugin/workflow-create-approval'),
-    params: workflowCreateApproval,
+    method: z.literal('plugin/declared-workflow-grant'),
+    params: workflowGrantRequest,
   }),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('plugin/session-create'),

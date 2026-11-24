@@ -44,6 +44,8 @@ export async function readPluginCatalog(
     };
     const entry: ClientCatalogInstallation = {
       ...(row.enabled &&
+      row.manifest.permissions?.includes('workflow.autonomous') &&
+      row.manifest.permissions.some((p) => p === 'sessions.write' || p === 'sessions.approve') &&
       row.workflowInstallation &&
       response.transport === 'encrypted' &&
       machine.owner
@@ -56,31 +58,45 @@ export async function readPluginCatalog(
               row.workflowInstallation.installationId,
               row.workflowInstallation.machineDigest,
               row.workflowInstallation.targetDevice,
+              row.workflowInstallation.activeGrant?.grant_id,
             ]),
+            declaredGrant: row.workflowInstallation.activeGrant,
             workflowApproval: async (
               projectId: string,
               action: 'grant' | 'revoke',
-              readOperations?: import('@lody/shared/plugins/machine-rpc').WorkflowReadOperation[]
+              roleIds: string[] | '*',
+              operations: import('@lody/shared/plugins/machine-rpc').DeclaredWorkflowGrant['allowed_ops']
             ) => {
-              const expiresAt = Date.now() + 3600000;
+              const { issuer, activeGrant, ...binding } = row.workflowInstallation!;
+              if (action === 'revoke' && !activeGrant) throw Error('No active grant');
+              const now = Date.now();
               const result = await request(target, {
-                method: 'plugin/workflow-create-approval',
+                method: 'plugin/declared-workflow-grant',
                 params: {
-                  ...row.workflowInstallation!,
-                  pluginId,
-                  projectId,
+                  ...binding,
+                  issued_by_user_id: issuer,
+                  grant_id: action === 'revoke' ? activeGrant!.grant_id : crypto.randomUUID(),
+                  issued_at_ms: now,
+                  workspace_id: workspaceId,
+                  machine_id: target,
+                  plugin_id: pluginId,
+                  allowed_project_ids:
+                    action === 'revoke'
+                      ? activeGrant!.allowed_project_ids
+                      : projectId === '*'
+                        ? '*'
+                        : [projectId],
+                  allowed_role_ids: action === 'revoke' ? activeGrant!.allowed_role_ids : roleIds,
+                  allowed_ops: action === 'revoke' ? activeGrant!.allowed_ops : operations,
                   action,
-                  operation: 'sessions.create',
-                  ...(action === 'grant' && readOperations?.length ? { readOperations } : {}),
-                  expiresAt,
                 },
               });
               if (
-                result.type !== 'plugin/workflow-create-approval' ||
+                result.type !== 'plugin/declared-workflow-grant' ||
                 result.active !== (action === 'grant')
               )
                 throw Error('Workflow approval not confirmed');
-              return expiresAt;
+              return;
             },
           }
         : {}),
@@ -110,7 +126,11 @@ export async function readPluginCatalog(
       pluginId,
       machineId: target,
       sourceKey: response.transport === 'local' ? 'local' : `machine:${target}`,
-      configurationKey: JSON.stringify([row.manifest, row.inspection?.preferences]),
+      configurationKey: JSON.stringify([
+        row.manifest,
+        row.inspection?.preferences,
+        row.inspection?.projectPreferences,
+      ]),
       digest: row.clientDigest ?? '',
       client: row.manifest.client,
       enabled: row.enabled,
@@ -154,7 +174,7 @@ export async function readPluginCatalog(
               if (result.type !== 'plugin/control') throw Error('Unexpected inspection response');
               return result.inspection;
             },
-            control: async (action, changes) => {
+            control: async (action, changes, projectId) => {
               const result = await request(
                 target,
                 {
@@ -164,6 +184,7 @@ export async function readPluginCatalog(
                     clientDigest: row.clientDigest,
                     action: action === 'configure' ? 'configure-many' : action,
                     changes,
+                    projectId,
                   },
                 },
                 { requireLocal: true }

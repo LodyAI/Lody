@@ -47,7 +47,7 @@ pluginCommand
       );
     })
   );
-for (const action of ['reload', 'disable', 'logs'] as const)
+for (const action of ['reload', 'disable', 'remove', 'logs'] as const)
   pluginCommand
     .command(`${action} <id>`)
     .option('--encrypted-workspace <id>', 'Use this running encrypted workspace identity')

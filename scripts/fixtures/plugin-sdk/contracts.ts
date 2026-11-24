@@ -116,14 +116,6 @@ export const clientOnlyManifest: PluginManifest = {
   client: './dist/client.js',
 };
 
-export const invalidSdkRangeManifest: PluginManifest = {
-  id: 'bad-sdk',
-  version: '0.1.0',
-  // @ts-expect-error Manifest must target a supported SDK major range.
-  sdk: '^2.0.0',
-  title: 'Invalid SDK',
-};
-
 export const retriableOfflineCode: PluginCallErrorCode = 'machine_offline';
 export const unknownOutcomeCode: PluginCallErrorCode = 'outcome_unknown';
 export const quarantinedPluginCode: PluginCallErrorCode = 'plugin_faulted';
@@ -374,7 +366,11 @@ export async function verifyClientTypeSafety(
   pageProps.params.pr = '99';
 }
 
-import { useHostCapabilities, useLodySnapshot, usePluginConfig } from '@lody/plugin-sdk/client';
+import {
+  useHostCapabilities,
+  useUnstableLodySnapshot,
+  usePluginConfig,
+} from '@lody/plugin-sdk/client';
 
 export const invalidClientSecretManifest: PluginManifest = {
   id: 'bad-secret-scope',
@@ -453,16 +449,17 @@ export async function verifyExtensibilityAndRawSnapshots(
     void nestedTurnCount;
   }
 
-  const rawSnap = await lody.readSnapshot({
+  const rawSnap = await lody.unstable.readSnapshot({
     kind: 'session-transcript',
     session,
+    limit: 5,
   });
   const rev: string = rawSnap.revision;
   void rev;
-  // @ts-expect-error RawDocumentSnapshot is deeply readonly; mutations go through Kernel/HistoryWriter APIs.
+  // @ts-expect-error UnstableDocumentSnapshot is deeply readonly; mutations go through Kernel/HistoryWriter APIs.
   rawSnap.doc.mutated = true;
 
-  const selectedSnap = useLodySnapshot(
+  const selectedSnap = useUnstableLodySnapshot(
     { kind: 'session-meta', session },
     (snap) => snap.schemaVersion
   );

@@ -25,8 +25,13 @@ type Descriptor = {
 };
 type Handler = (context: unknown, input: unknown) => unknown;
 const handlers = new Map<string, { descriptor: Descriptor; kind: Kind; handler: Handler }>();
-const events = new Map<string, Handler>();
+const resumeEvents = new Set<string>();
+const events = new Map<string, Handler[]>();
 const calls = new Map<string, AbortController>();
+let service: Handler | undefined,
+  upgrade: Handler | undefined,
+  uninstall: Handler | undefined,
+  serviceTask: Promise<unknown> | undefined;
 let start: Handler | undefined, cleanup: (() => unknown) | undefined;
 let init: Extract<HostToChildFrame, { type: 'init' }> | undefined;
 let phase: 'new' | 'initializing' | 'ready' | 'starting' | 'running' | 'closing' = 'new';
@@ -63,12 +68,26 @@ const registry = {
   query: register('query'),
   mutation: register('mutation'),
   tool: register('tool'),
+  service(handler: Handler) {
+    service = handler;
+  },
+  onUpgrade(handler: Handler) {
+    upgrade = handler;
+  },
+  onUninstall(handler: Handler) {
+    uninstall = handler;
+  },
   onStart(handler: Handler) {
     start = handler;
   },
   events: {
-    on(type: string, handler: Handler) {
-      events.set(type, handler);
+    on(type: string, handler: Handler, options?: { resumeFromCursor?: boolean }) {
+      if (events.has(type) && resumeEvents.has(type) !== !!options?.resumeFromCursor)
+        throw Error('Conflicting event resume policy');
+      if (options?.resumeFromCursor) resumeEvents.add(type);
+      const listeners = events.get(type) ?? [];
+      listeners.push(handler);
+      events.set(type, listeners);
     },
   },
   attachmentSource(d: Descriptor, h: { search: Handler; resolve: Handler }) {
@@ -155,19 +174,37 @@ const context = (contextId: string, signal: AbortSignal) => {
     machine: { workspaceId, machineId },
     config: init?.config,
     dataDir: init?.dataDir,
+    storage: {
+      get: async (key: string) => ((await call('storage.get', key)) as { value?: unknown }).value,
+      set: async (key: string, value: unknown) => {
+        await call('storage.set', key, { value });
+      },
+      delete: async (key: string) => {
+        await call('storage.delete', key);
+      },
+      update: (key: string, expected: unknown, value: unknown) =>
+        call('storage.update', key, {
+          ...(expected !== undefined ? { expected } : {}),
+          ...(value !== undefined ? { value } : {}),
+        }),
+    },
     signal,
     lody: {
       read: (target: unknown, d: { id: string }, input?: unknown) =>
         call('lody.read', target, input, d.id),
       execute: (target: unknown, d: { id: string }, input?: unknown) =>
         call('lody.execute', target, input, d.id),
-      readSnapshot: (target: unknown) => call('lody.readSnapshot', target).then(freezeSnapshot),
+      unstable: {
+        readSnapshot: (target: unknown) =>
+          call('lody.unstable.readSnapshot', target).then(freezeSnapshot),
+      },
       sessions: {
-        create: (t: unknown, i: unknown) => call('sessions.create', t, i),
-        send: (t: unknown, i: unknown) => call('sessions.send', t, i),
-        respondInteraction: (t: unknown, i: unknown) => call('sessions.respondInteraction', t, i),
-        requestStop: (t: unknown) => call('sessions.requestStop', t),
-        requestArchive: (t: unknown) => call('sessions.requestArchive', t),
+        create: (t: unknown, i: unknown) => call('lody.execute', t, i, 'sessionCreate'),
+        send: (t: unknown, i: unknown) => call('lody.execute', t, i, 'sessionSend'),
+        respondInteraction: (t: unknown, i: unknown) =>
+          call('lody.execute', t, i, 'sessionRespondInteraction'),
+        requestStop: (t: unknown) => call('lody.execute', t, undefined, 'sessionStop'),
+        requestArchive: (t: unknown) => call('lody.execute', t, undefined, 'sessionArchive'),
       },
     },
     invalidate(d: Descriptor, target: unknown) {
@@ -181,8 +218,21 @@ async function receive(frame: HostToChildFrame) {
       if (phase === 'closing') return;
       phase = 'closing';
       life.abort();
-      await cleanup?.();
-      process.disconnect?.();
+      try {
+        if (frame.uninstallContextId)
+          await uninstall?.(
+            context(frame.uninstallContextId, AbortSignal.timeout(10000)),
+            undefined
+          );
+      } finally {
+        try {
+          await serviceTask?.catch(() => undefined);
+        } finally {
+          await cleanup?.();
+          process.disconnect?.();
+        }
+      }
+
       return;
     case 'init': {
       if (phase !== 'new') throw new Error('Duplicate init');
@@ -201,19 +251,33 @@ async function receive(frame: HostToChildFrame) {
           scope: d.scope ?? 'session',
         })),
         subscribedEvents: [...events.keys()],
+        resumeEvents: [...resumeEvents],
+        hasService: !!service,
       });
       return;
     }
     case 'start':
       if (phase !== 'ready') throw new Error('Unexpected start');
       phase = 'starting';
-      await start?.(
-        context('start', AbortSignal.any([life.signal, AbortSignal.timeout(30_000)])),
-        undefined
+      const startup = context(
+        frame.contextId,
+        AbortSignal.any([life.signal, AbortSignal.timeout(30000)])
       );
+      if (frame.upgrade) await upgrade?.(startup, frame.upgrade);
+      await start?.(startup, undefined);
       if (life.signal.aborted) return;
       phase = 'running';
-      send({ type: 'result', callId: 'start', ok: true, data: null });
+      send({ type: 'result', callId: frame.contextId, ok: true, data: null });
+      return;
+    case 'service':
+      if (phase !== 'running' || !service || serviceTask)
+        throw new Error('Unexpected plugin service start');
+      {
+        serviceTask = Promise.resolve(service(context(frame.contextId, life.signal), undefined));
+        serviceTask.catch(() => {
+          if (!life.signal.aborted) process.exit(1);
+        });
+      }
       return;
     case 'cancel':
       calls.get(frame.callId)?.abort();
@@ -226,18 +290,22 @@ async function receive(frame: HostToChildFrame) {
         try {
           await Promise.race([
             once(signal, 'abort', { signal: listener.signal }),
-            Promise.resolve().then(() =>
-              events.get(frame.eventType)?.(
-                {
-                  ...context(frame.eventId, signal),
-                  eventType: frame.eventType,
-                  ...(frame.payload &&
-                  typeof frame.payload === 'object' &&
-                  !Array.isArray(frame.payload)
-                    ? { session: frame.payload.session, project: frame.payload.project }
-                    : {}),
-                },
-                frame.payload
+            Promise.all(
+              (events.get(frame.eventType) ?? []).map((handler) =>
+                Promise.resolve().then(() =>
+                  handler(
+                    {
+                      ...context(frame.contextId, signal),
+                      eventType: frame.eventType,
+                      ...(frame.payload &&
+                      typeof frame.payload === 'object' &&
+                      !Array.isArray(frame.payload)
+                        ? { session: frame.payload.session, project: frame.payload.project }
+                        : {}),
+                    },
+                    frame.payload
+                  )
+                )
               )
             ),
           ]);
@@ -245,11 +313,11 @@ async function receive(frame: HostToChildFrame) {
           listener.abort();
         }
         signal.throwIfAborted();
-        send({ type: 'result', callId: frame.eventId, ok: true, data: null });
+        send({ type: 'result', callId: frame.contextId, ok: true, data: null });
       } catch {
         send({
           type: 'result',
-          callId: frame.eventId,
+          callId: frame.contextId,
           ok: false,
           error: { code: 'handler_error', message: 'Plugin event failed' },
         });
@@ -259,7 +327,12 @@ async function receive(frame: HostToChildFrame) {
       replies.get(frame.hostCallId)?.(frame);
       return;
     case 'invoke': {
-      if (phase !== 'running' || calls.has(frame.callId)) throw new Error('Unexpected invocation');
+      if (
+        (phase !== 'running' &&
+          !(frame.kind === 'query' && (phase === 'starting' || phase === 'ready'))) ||
+        calls.has(frame.callId)
+      )
+        throw new Error('Unexpected invocation');
       const c = new AbortController();
       calls.set(frame.callId, c);
       try {
@@ -278,6 +351,7 @@ async function receive(frame: HostToChildFrame) {
                 AbortSignal.timeout(invocationDeadlineMs(frame.kind)),
               ])
             ),
+            config: { ...init?.config, ...frame.projectConfig },
             target: frame.target,
             session: frame.scope === 'session' ? frame.target : undefined,
             toolCallId: frame.callId,

@@ -13,6 +13,7 @@ import {
 } from '@/lib/e2ee-member-removal';
 import {
   readEncryptedLocalIdentity,
+  encryptedLocalInstance,
   retainEncryptedLocalIdentity,
   type E2eeLocalDataIdentity,
   type E2eeLocalDataScope,
@@ -184,6 +185,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     workspaceId: string;
     workspaceSlug: string;
     accountId: string | null;
+    storageNamespace: string;
     genesis?: string;
     signal: AbortSignal;
   } | null>(null);
@@ -729,6 +731,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceId: effectiveWorkspaceId,
         workspaceSlug,
         accountId,
+        storageNamespace: localIdentity
+          ? encryptedLocalInstance(localIdentity)
+          : JSON.stringify([accountId, effectiveWorkspaceId]),
         genesis: localIdentity?.genesisHash,
         signal,
       });
