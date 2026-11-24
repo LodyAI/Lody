@@ -26,9 +26,9 @@
  * `LoroJsonStreamState` and are untouched by transport switches.
  */
 
-export type LoroStreamsLiveTransport = 'sse' | 'long-poll';
+export type LoroStreamsLiveTransport = 'ws' | 'sse' | 'long-poll';
 
-export type LoroStreamsLiveRequestMode = 'auto' | 'sse' | 'long-poll';
+export type LoroStreamsLiveRequestMode = 'auto' | 'ws' | 'sse' | 'long-poll';
 
 export type LoroStreamsLiveModeReason =
   /** Initial SSE-first selection. */
@@ -151,11 +151,24 @@ export class LoroStreamsLiveModePolicy {
     return 'auto';
   }
 
+  noteObservedTransport(transport: LoroStreamsLiveTransport): void {
+    this.observedTransport = transport;
+    if (transport === 'ws') {
+      this.consecutiveSseReadFailures = 0;
+      this.sseResponseTimeouts = 0;
+    }
+  }
+
   noteReadOutcome(outcome: LoroStreamsLiveReadOutcome): void {
     if (outcome.observedTransport) {
       this.observedTransport = outcome.observedTransport;
     }
     if (this.pin || outcome.requestedMode === 'long-poll') {
+      return;
+    }
+    if (outcome.observedTransport === 'ws') {
+      this.consecutiveSseReadFailures = 0;
+      this.sseResponseTimeouts = 0;
       return;
     }
 
@@ -194,7 +207,7 @@ export class LoroStreamsLiveModePolicy {
    * evidence of a connection that stays open but never delivers.
    */
   noteResponseTimeout(): void {
-    if (this.pin || this.transport !== 'sse') {
+    if (this.pin || this.transport !== 'sse' || this.observedTransport === 'ws') {
       return;
     }
     this.sseResponseTimeouts += 1;
@@ -205,7 +218,7 @@ export class LoroStreamsLiveModePolicy {
 
   /** Recover the response read without expiring or replaying an input write. */
   recoverPendingWrite(): void {
-    if (this.pin) return;
+    if (this.pin || this.observedTransport === 'ws') return;
     if (this.transport === 'sse') {
       this.fallback('pending-write-recovery', { probeAgain: true });
     } else if (this.nextSseProbeAtMs !== undefined) {
