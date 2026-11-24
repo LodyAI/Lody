@@ -63,6 +63,7 @@ export function MobileEdgeBackSwipeZone({
     ({
       first,
       last,
+      canceled,
       movement: [movementX, movementY],
       direction: [directionX],
       velocity: [vx],
@@ -80,6 +81,11 @@ export function MobileEdgeBackSwipeZone({
       }
 
       if (edgeSwipeStartXRef.current == null) return;
+
+      if (canceled || event.type === 'touchcancel' || event.type === 'pointercancel') {
+        edgeSwipeStartXRef.current = null;
+        return;
+      }
 
       /* Wrong-way drag → bail. We only commit on rightward swipes
          that originated at the left edge. */

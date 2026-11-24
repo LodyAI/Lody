@@ -17,6 +17,7 @@ import { Provider } from 'jotai';
 import { isNativePlatform } from 'better-auth-capacitor/client';
 
 import { initNativeKeyboard } from './native-keyboard';
+import { initNativeBackNavigation } from './native-back';
 import { initE2eePairLinks } from './e2ee-pair-link';
 import { initAppStoreReviewBridge } from './app-store-review';
 import { initAppIconBridge } from './app-icon';
@@ -136,8 +137,10 @@ try {
   if (window.__LODY_NATIVE__) {
     initPushBridge();
     const stopPairLinks = initE2eePairLinks();
+    const stopNativeBack = initNativeBackNavigation(router);
     import.meta.hot?.dispose(() => {
       void stopPairLinks().catch(() => {});
+      void stopNativeBack().catch(() => {});
     });
     initNativeKeyboard();
     initAppIconBridge();

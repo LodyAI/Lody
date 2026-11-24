@@ -19,6 +19,7 @@ import { SessionConversationPage } from '@/components/sessions/session-conversat
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { EDGE_ZONE_PX } from './mobile-edge-back-swipe';
 import { useHorizontalFoldLayout } from './use-horizontal-fold-layout';
 
@@ -135,6 +136,8 @@ function MobileNewChatPage({
     settle('100%', () => onCloseRef.current());
   }, [settle, stopEntrance]);
 
+  useMobileBackHandler(close, { layer: 'drawer' });
+
   const snapBack = useCallback(() => {
     swipingRef.current = false;
     settle('0px', () => {
@@ -151,6 +154,7 @@ function MobileNewChatPage({
     ({
       first,
       last,
+      canceled,
       movement: [movementX, movementY],
       direction: [directionX],
       velocity: [velocityX],
@@ -194,9 +198,14 @@ function MobileNewChatPage({
       }
 
       if (!last) return;
+      const gestureCanceled =
+        canceled || event.type === 'touchcancel' || event.type === 'pointercancel';
       const commit =
-        offsetX >= SWIPE_COMMIT_PX ||
-        (directionX > 0 && velocityX >= SWIPE_COMMIT_VELOCITY && offsetX >= SWIPE_COMMIT_PX * 0.3);
+        !gestureCanceled &&
+        (offsetX >= SWIPE_COMMIT_PX ||
+          (directionX > 0 &&
+            velocityX >= SWIPE_COMMIT_VELOCITY &&
+            offsetX >= SWIPE_COMMIT_PX * 0.3));
       if (commit) close();
       else snapBack();
     },
@@ -208,24 +217,26 @@ function MobileNewChatPage({
   );
 
   return (
-    <div {...stylex.props(styles.pageLayer)}>
-      <div
-        ref={panelRef}
-        data-mobile-new-chat-panel=""
-        {...withClassName(stylex.props(styles.panel), entering ? 'mobile-drill-in' : undefined)}
-        onAnimationEnd={(event) => {
-          if (event.target === event.currentTarget) setEntering(false);
-        }}
-        {...(isNativeAppShell() ? bindEdgeBack() : {})}
-      >
-        <MobileNewChatSheetContent
-          {...contentProps}
-          onClose={close}
-          className={className}
-          xstyle={styles.flexFill}
-        />
+    <MobileBackDepthProvider>
+      <div {...stylex.props(styles.pageLayer)}>
+        <div
+          ref={panelRef}
+          data-mobile-new-chat-panel=""
+          {...withClassName(stylex.props(styles.panel), entering ? 'mobile-drill-in' : undefined)}
+          onAnimationEnd={(event) => {
+            if (event.target === event.currentTarget) setEntering(false);
+          }}
+          {...(isNativeAppShell() ? bindEdgeBack() : {})}
+        >
+          <MobileNewChatSheetContent
+            {...contentProps}
+            onClose={close}
+            className={className}
+            xstyle={styles.flexFill}
+          />
+        </div>
       </div>
-    </div>
+    </MobileBackDepthProvider>
   );
 }
 

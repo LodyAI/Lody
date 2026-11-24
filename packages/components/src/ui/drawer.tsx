@@ -4,6 +4,7 @@ import * as stylex from '@stylexjs/stylex';
 import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
 import { clsx } from 'clsx';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -128,17 +129,27 @@ function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof Draw
     repositionInputs !== false &&
     (isNativeAppShell() || repositionInputs === true);
   const followViewport = manageSideDrawer && !isNativeIOSAppShell();
+  const canDismissOnBack = Boolean(props.open && props.onOpenChange && props.dismissible !== false);
+
+  useMobileBackHandler(
+    () => {
+      props.onOpenChange?.(false);
+    },
+    { enabled: canDismissOnBack, layer: 'drawer' }
+  );
 
   return (
-    <DrawerDirectionContext.Provider value={props.direction ?? 'bottom'}>
-      <DrawerViewportContext.Provider value={followViewport}>
-        <DrawerPrimitive.Root
-          data-slot="drawer"
-          {...props}
-          repositionInputs={manageSideDrawer ? false : repositionInputs}
-        />
-      </DrawerViewportContext.Provider>
-    </DrawerDirectionContext.Provider>
+    <MobileBackDepthProvider>
+      <DrawerDirectionContext.Provider value={props.direction ?? 'bottom'}>
+        <DrawerViewportContext.Provider value={followViewport}>
+          <DrawerPrimitive.Root
+            data-slot="drawer"
+            {...props}
+            repositionInputs={manageSideDrawer ? false : repositionInputs}
+          />
+        </DrawerViewportContext.Provider>
+      </DrawerDirectionContext.Provider>
+    </MobileBackDepthProvider>
   );
 }
 
@@ -368,9 +379,9 @@ function DrawerTitle({
 function DrawerDescription({
   className,
   xstyle,
+  style,
   visuallyHidden = false,
   fontSize,
-  style,
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Description> & {
   visuallyHidden?: boolean;
