@@ -23,7 +23,6 @@ export async function renderPluginPreview(sourceDir: string, output?: string) {
       ...(manifest.styles ?? []),
     ]))
       files[file] = (await readFile(join(stage, file))).toString('base64');
-    // The outer page owns just the viewport switcher. No plugin HTML or executable text enters its DOM.
     const nonce = randomBytes(18).toString('base64');
     const encode = (s: string) => Buffer.from(s).toString('base64');
     const template = frameDocument

@@ -8,7 +8,6 @@ import { pluginManifestSchema, type PluginManifest } from '@lody/shared/plugins/
 import { computeClientDigest } from '@lody/shared/plugins/digest';
 import type { PluginBuild } from './workflow/dev-plugin-compiler';
 
-// Uncompressed archive: magic, uint32 BE header length, UTF-8 integrity index, ordered file bodies.
 const magic = Buffer.from('LODYPKG1\n'),
   limit = 32 * 1024 * 1024,
   headerLimit = 256 * 1024;
@@ -172,7 +171,6 @@ export async function installPackage(
   }
 }
 
-/** Inspect a release without extracting it or evaluating plugin code. */
 export async function inspectProposalPackage(path: string) {
   const bytes = await bounded(path, limit);
   const { manifest: m } = verify(bytes);
