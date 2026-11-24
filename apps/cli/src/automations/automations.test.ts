@@ -2362,4 +2362,238 @@ describe('Engine scheduling', () => {
     );
     vi.useRealTimers();
   });
+
+  it('exposes coordinator.workItems only to coordinator sessions and suppresses wakes during active child viewing or debounce bursts', async () => {
+    const { readAutomationContext } = await import('./context/reads-legacy');
+    const { evaluateCoordinatorWakeGate, COORDINATOR_WAKE_DEBOUNCE_MS } =
+      await import('./context/coordinator-watch-gate');
+    const { getSessionRoomId } = await import('@lody/shared');
+    const { ledger } = fixture();
+
+    const ordinaryWait = ledger.registerWait(
+      { program: '() => false', intervalMs: 30_000 },
+      'ordinary-session',
+      'user',
+      1_000
+    );
+    ledger.updateWait(ordinaryWait.id, 'waiting', { state: 'checking' }, 1_000);
+
+    const coordinatorId = 'coord-session';
+    const childImplId = 'child-impl-1';
+    const childForeignId = 'child-foreign-1';
+    let viewingChild = true;
+    let childLastMessageAt = 8_500;
+    const baseMeta = {
+      machineId: 'machine',
+      userId: 'user',
+      cliType: 'builtin',
+      agentType: 'claude',
+    };
+
+    const docsByRoom = new Map<string, { meta: Record<string, unknown> }>([
+      [
+        getSessionRoomId('ordinary-session' as never),
+        { meta: { ...baseMeta, id: 'ordinary-session' } },
+      ],
+      [
+        getSessionRoomId(coordinatorId as never),
+        { meta: { ...baseMeta, id: coordinatorId, userId: 'user', coordinator: { version: 1 } } },
+      ],
+      [
+        getSessionRoomId(childImplId as never),
+        {
+          meta: {
+            ...baseMeta,
+            id: childImplId,
+            userId: 'user',
+            openedBySessionId: coordinatorId,
+            workItemId: childImplId,
+            workItemRole: 'implement',
+            createdAt: '2026-11-24T00:01:00.000Z',
+            lastMessageAt: childLastMessageAt,
+            latestUserMsgId: 'u-direct-3',
+            pullRequests: [{ url: 'https://github.com/LodyAI/lody/pull/120', status: 'open' }],
+            pullRequestState: {
+              'https://github.com/LodyAI/lody/pull/120': { s: 's', m: 'c', t: 8_500 },
+            },
+          },
+        },
+      ],
+      [
+        getSessionRoomId(childForeignId as never),
+        {
+          meta: {
+            ...baseMeta,
+            id: childForeignId,
+            userId: 'other-user',
+            openedBySessionId: coordinatorId,
+            createdAt: '2026-11-24T00:02:00.000Z',
+            lastMessageAt: 8_000,
+          },
+        },
+      ],
+    ]);
+
+    const mockManager = {
+      repo: {
+        getDocMeta: async (room: string) => docsByRoom.get(room),
+        getMeta: () => ({
+          scan: async () =>
+            [...docsByRoom.keys()].map((room) => ({ key: ['e', room], value: true })),
+        }),
+      },
+      getOrCreateSessionDoc: async () => ({
+        getDocState: async () => ({
+          workItems: {
+            [childImplId]: {
+              id: childImplId,
+              title: 'Interactive UI co-work',
+              mode: 'direct',
+              createdAt: 1_000,
+              updatedAt: 8_500,
+            },
+          },
+        }),
+      }),
+      getPresenceStates: () =>
+        viewingChild
+          ? {
+              viewer1: {
+                kind: 'session-viewing' as const,
+                userId: 'user',
+                instanceId: 'inst-1' as never,
+                sessionId: childImplId as never,
+                since: 5_000,
+                updatedAt: 9_500,
+              },
+            }
+          : {},
+    } as unknown as import('@/lib/loro/doc').LoroDocumentManager;
+
+    const authority = {
+      canEdit: async () => 'yes' as const,
+    } as unknown as import('@/session/session-automation-authority').SessionAutomationAuthority;
+
+    await expect(
+      readAutomationContext({
+        ledger,
+        manager: mockManager,
+        authority,
+        wait: ordinaryWait,
+        input: { resource: 'coordinator.workItems', parameters: {} },
+        now: 10_000,
+      })
+    ).rejects.toThrow('AUTOMATION_READ_UNAVAILABLE');
+
+    const coordWait = ledger.registerWait(
+      { program: '() => false', intervalMs: 30_000 },
+      coordinatorId,
+      'user',
+      10_000
+    );
+    ledger.updateWait(coordWait.id, 'waiting', { state: 'checking' }, 10_000);
+
+    const observedWhileViewing: import('./context/coordinator-watch-gate').ObservedCoordinatorWorkItem[] =
+      [];
+    const response1 = await readAutomationContext({
+      ledger,
+      manager: mockManager,
+      authority,
+      wait: coordWait,
+      input: { resource: 'coordinator.workItems', parameters: { workItemId: childImplId } },
+      now: 10_000,
+      onCoordinatorWorkItemsObserved: (items) => observedWhileViewing.push(...items),
+    });
+
+    expect(ledger.wantsRead('coordinator.workItems', coordinatorId)).toBe(true);
+    expect(response1.value).toMatchObject([
+      {
+        workItemId: childImplId,
+        taskNumber: 1,
+        title: 'Interactive UI co-work',
+        mode: 'direct',
+        userViewingAnyMember: true,
+        quietForMs: 1_500,
+        pullRequests: [
+          expect.objectContaining({
+            url: 'https://github.com/LodyAI/lody/pull/120',
+            status: 'open',
+            readiness: 'y',
+          }),
+        ],
+      },
+    ]);
+
+    const matchCandidate = {
+      resumeText: 'Direct session opened PR #120.',
+      payload: { workItemId: childImplId },
+    };
+
+    const suppressedByFocus = evaluateCoordinatorWakeGate({
+      result: matchCandidate,
+      observedSnapshots: observedWhileViewing,
+    });
+    expect(suppressedByFocus).toEqual({
+      kind: 'suppress',
+      reason: 'user_viewing',
+      retryDelayMs: COORDINATOR_WAKE_DEBOUNCE_MS,
+    });
+
+    const parkedAfterFocus = ledger.finishWait(
+      coordWait,
+      false,
+      10_000,
+      COORDINATOR_WAKE_DEBOUNCE_MS
+    );
+    expect(parkedAfterFocus).toMatchObject({
+      state: 'waiting',
+      nextCheckAt: 10_000 + COORDINATOR_WAKE_DEBOUNCE_MS,
+    });
+
+    viewingChild = false;
+    ledger.updateWait(coordWait.id, 'waiting', { state: 'checking' }, 10_500);
+    const observedDuringBurst: import('./context/coordinator-watch-gate').ObservedCoordinatorWorkItem[] =
+      [];
+    await readAutomationContext({
+      ledger,
+      manager: mockManager,
+      authority,
+      wait: coordWait,
+      input: { resource: 'coordinator.workItems', parameters: { workItemId: childImplId } },
+      now: 10_500,
+      onCoordinatorWorkItemsObserved: (items) => observedDuringBurst.push(...items),
+    });
+    const suppressedByDebounce = evaluateCoordinatorWakeGate({
+      result: matchCandidate,
+      observedSnapshots: observedDuringBurst,
+    });
+    expect(suppressedByDebounce).toEqual({
+      kind: 'suppress',
+      reason: 'debounce',
+      retryDelayMs: 2_000,
+    });
+    ledger.finishWait(coordWait, false, 10_500, 2_000);
+    expect(ledger.wait(coordWait.id)?.nextCheckAt).toBe(12_500);
+
+    childLastMessageAt = 8_500;
+    ledger.updateWait(coordWait.id, 'waiting', { state: 'checking' }, 13_000);
+    const observedAfterQuiet: import('./context/coordinator-watch-gate').ObservedCoordinatorWorkItem[] =
+      [];
+    await readAutomationContext({
+      ledger,
+      manager: mockManager,
+      authority,
+      wait: coordWait,
+      input: { resource: 'coordinator.workItems', parameters: { workItemId: childImplId } },
+      now: 13_000,
+      onCoordinatorWorkItemsObserved: (items) => observedAfterQuiet.push(...items),
+    });
+    const passedGate = evaluateCoordinatorWakeGate({
+      result: matchCandidate,
+      observedSnapshots: observedAfterQuiet,
+    });
+    expect(passedGate).toEqual({ kind: 'pass', result: matchCandidate });
+    const matched = ledger.finishWait(coordWait, matchCandidate, 13_000);
+    expect(matched?.state).toBe('matched');
+  });
 });

@@ -2,6 +2,15 @@ import { z } from 'zod';
 
 const json = z.record(z.string(), z.json());
 export const automationEmptyReadParametersSchema = z.object({}).strict();
+export const automationCoordinatorWorkItemsReadParametersSchema = z
+  .object({
+    workItemId: z.string().trim().min(1).max(128).optional(),
+    includeAccepted: z.boolean().default(false),
+  })
+  .strict();
+export type AutomationCoordinatorWorkItemsReadParameters = z.infer<
+  typeof automationCoordinatorWorkItemsReadParametersSchema
+>;
 export const automationEventReadParametersSchema = z
   .object({
     since: z.number().int().nonnegative().default(0),

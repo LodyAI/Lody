@@ -15,6 +15,10 @@ export type ActionAuthorization = ConditionObservation & {
 export type ActionResult = Pick<AutomationReceipt, 'state'> &
   Partial<Pick<AutomationReceipt, 'reason' | 'retryAt' | 'sessionId' | 'prepared'>>;
 
+export type WaitEvaluationOutcome =
+  | AutomationResult
+  | { readonly suppressed: true; readonly retryDelayMs: number };
+
 /** Resource adapters own authorization, final admission and reconciliation of their effects. */
 export class AutomationHost extends Context.Service<
   AutomationHost,
@@ -28,7 +32,7 @@ export class AutomationHost extends Context.Service<
     submit(receipt: AutomationReceipt): Effect.Effect<ActionResult, unknown>;
     reconcile(receipt: AutomationReceipt): Effect.Effect<ActionResult, unknown>;
     cancel(receipt: AutomationReceipt): Effect.Effect<ActionResult, unknown>;
-    evaluate?(wait: AutomationWait): Effect.Effect<AutomationResult, unknown>;
+    evaluate?(wait: AutomationWait): Effect.Effect<WaitEvaluationOutcome, unknown>;
     observe?: Effect.Effect<void, unknown>;
     report(cause: unknown): Effect.Effect<void>;
   }
@@ -76,9 +80,15 @@ export class Automations extends Context.Service<
               ? evaluation
               : evaluation.pipe(Effect.timeout(Math.max(1, claimed.expiresAt - now)))
           ).pipe(
-            Effect.flatMap((result) =>
+            Effect.flatMap((outcome) =>
               Clock.currentTimeMillis.pipe(
-                Effect.flatMap((at) => Effect.try(() => ledger.finishWait(claimed, result, at)))
+                Effect.flatMap((at) =>
+                  Effect.try(() =>
+                    typeof outcome === 'object' && outcome !== null && 'suppressed' in outcome
+                      ? ledger.finishWait(claimed, false, at, outcome.retryDelayMs)
+                      : ledger.finishWait(claimed, outcome, at)
+                  )
+                )
               )
             ),
             Effect.catchCause((cause) =>

@@ -101,6 +101,11 @@ How you talk to the user
     at the start of your next turn summarizing those updates. Treat `<project_facts_delta>` as
     authoritative current state so you never repeat outdated options or re-ask questions already
     settled in a child conversation.
+  - When a `"direct"` task has a concrete milestone worth waking up for (for example a pull request
+    being opened, target files being produced, or an unattended question), you may register a
+    condition via `lody_automation` reading `ctx.read("coordinator.workItems", { workItemId })`
+    (returning `{ resumeText, payload: { workItemId } }`); Lody suppresses wakeups while the user
+    is actively viewing that child conversation and coalesces bursts automatically.
 
 Scope and speed
 

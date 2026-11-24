@@ -1,5 +1,11 @@
 import { readAutomationContext } from './context/reads-legacy';
 import {
+  COORDINATOR_WAKE_DEBOUNCE_MS,
+  COORDINATOR_WORK_ITEMS_RESOURCE,
+  evaluateCoordinatorWakeGate,
+  type ObservedCoordinatorWorkItem,
+} from './context/coordinator-watch-gate';
+import {
   automationCommandEnvironment,
   execAutomationCommand,
   resolveAutomationCwd,
@@ -369,8 +375,9 @@ export async function createAutomationWorkspaceLegacy(options: {
   const evaluateProgram = (wait: AutomationWait) =>
     Effect.tryPromise(() => sessionContext(wait.sessionId, wait.ownerUserId)).pipe(
       Effect.uninterruptible,
-      Effect.flatMap((context) =>
-        evaluateAutomationProgram(
+      Effect.flatMap((context) => {
+        const observedSnapshots: ObservedCoordinatorWorkItem[] = [];
+        return evaluateAutomationProgram(
           wait.program ?? '',
           context,
           (input) =>
@@ -382,6 +389,9 @@ export async function createAutomationWorkspaceLegacy(options: {
                 wait,
                 input,
                 now: Date.now(),
+                onCoordinatorWorkItemsObserved: (items) => {
+                  observedSnapshots.push(...items);
+                },
               })
             ).pipe(Effect.uninterruptible),
           false,
@@ -398,8 +408,18 @@ export async function createAutomationWorkspaceLegacy(options: {
                   : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
               )
             )
-        )
-      )
+        ).pipe(
+          Effect.map((result) => {
+            const verdict = evaluateCoordinatorWakeGate({
+              result,
+              observedSnapshots,
+            });
+            return verdict.kind === 'suppress'
+              ? { suppressed: true as const, retryDelayMs: verdict.retryDelayMs }
+              : verdict.result;
+          })
+        );
+      })
     );
   const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
     status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
@@ -529,6 +549,39 @@ export async function createAutomationWorkspaceLegacy(options: {
     authority.setPendingWork(
       (sessionId, excludingId) => !closing && ledger.hasSessionWork(sessionId, excludingId)
     );
+    const invalidateCoordinatorWorkItemWatches = async (
+      childSessionId: SessionId,
+      knownMeta?: SessionMeta,
+      observedAt = Date.now()
+    ) => {
+      const watchers = ledger.wantsReadSessions(COORDINATOR_WORK_ITEMS_RESOURCE);
+      if (watchers.size === 0) return;
+      const record = knownMeta
+        ? undefined
+        : await lody.documentManager.repo
+            .getDocMeta(getSessionRoomId(childSessionId))
+            .catch(() => undefined);
+      const meta = knownMeta ?? (record?.meta as SessionMeta | undefined);
+      if (!meta) return;
+      const wakeAt = observedAt + COORDINATOR_WAKE_DEBOUNCE_MS;
+      if (meta.openedBySessionId && watchers.has(meta.openedBySessionId)) {
+        ledger.invalidateReads(COORDINATOR_WORK_ITEMS_RESOURCE, meta.openedBySessionId, wakeAt);
+      }
+      const explicitWid = meta.workItemId?.trim();
+      if (explicitWid) {
+        for (const coordinatorId of watchers) {
+          if (coordinatorId === meta.openedBySessionId) continue;
+          const doc = await lody.documentManager
+            .getOrCreateSessionDoc(coordinatorId as SessionId)
+            .catch(() => undefined);
+          const state = await doc?.getDocState().catch(() => undefined);
+          if (state?.workItems && explicitWid in state.workItems) {
+            ledger.invalidateReads(COORDINATOR_WORK_ITEMS_RESOURCE, coordinatorId, wakeAt);
+          }
+        }
+      }
+    };
+
     authority.setObservations({
       stage: (fact) => {
         if (!closing) ledger.stageTurn(fact);
@@ -536,6 +589,7 @@ export async function createAutomationWorkspaceLegacy(options: {
       turn: (fact) =>
         observe(async () => {
           ledger.stageTurn(fact);
+          await invalidateCoordinatorWorkItemWatches(fact.sessionId, undefined, fact.observedAt);
           await runtime.runPromise(service.wake);
         }),
       capacity: (binding, snapshot, source) =>
@@ -787,11 +841,13 @@ export async function createAutomationWorkspaceLegacy(options: {
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         observe(async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);
+          await invalidateCoordinatorWorkItemWatches(meta.id, meta, observedAt);
           await runtime.runPromise(service.wake);
         })) satisfies NonNullable<PrPollerWorkspaceHandle['recordWorkflowObservations']>,
       recordObservations: ((meta, repoFullName, observations, observedAt) =>
         observe(async () => {
           observePullRequests(ledger, meta, repoFullName, observations, observedAt);
+          await invalidateCoordinatorWorkItemWatches(meta.id, meta, observedAt);
           await runtime.runPromise(service.wake);
         })) satisfies NonNullable<PrPollerWorkspaceHandle['recordObservations']>,
       publish: (event: AutomationEvent) =>

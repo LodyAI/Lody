@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   automationCommandSchema,
+  automationCoordinatorWorkItemsReadParametersSchema,
   automationEmptyReadParametersSchema,
   automationEventReadParametersSchema,
   automationEventSchema,
@@ -37,6 +38,7 @@ export const automationSkill = bundleSkill({
       readParameters: z.object({
         session: automationEmptyReadParametersSchema,
         'session.group': automationEmptyReadParametersSchema,
+        'coordinator.workItems': automationCoordinatorWorkItemsReadParametersSchema,
         'github.pullRequests': automationEmptyReadParametersSchema,
         'github.workflowRuns': automationEmptyReadParametersSchema,
         'provider.capacity': automationEmptyReadParametersSchema,

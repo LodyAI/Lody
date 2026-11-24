@@ -23,14 +23,15 @@ Workspace is the storage/runtime scope; Session is the fixed continuation target
 `ctx.now` is not evidence that an external service is ready. `observedAt` is the
 observation timestamp, not a promise of freshness for every nested field.
 
-| Resource              | Parameters         | Read when                                                                                          |
-| --------------------- | ------------------ | -------------------------------------------------------------------------------------------------- |
-| `session`             | None               | [Session state](skill://lody-automations/references/session.md): compare input identifiers         |
-| `session.group`       | None               | [Session state](skill://lody-automations/references/session.md): wait for related work to settle   |
-| `github.pullRequests` | None               | [GitHub](skill://lody-automations/references/github.md): inspect associated PRs                    |
-| `github.workflowRuns` | None               | [GitHub](skill://lody-automations/references/github.md): evaluate CI results for current PR HEAD   |
-| `provider.capacity`   | None               | [Capacity](skill://lody-automations/references/capacity.md): inspect an existing quota observation |
-| `events`              | `since?`, `limit?` | [Events](skill://lody-automations/references/events.md): compose predicates over persisted facts   |
+| Resource                | Parameters                        | Read when                                                                                          |
+| ----------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `session`               | None                              | [Session state](skill://lody-automations/references/session.md): compare input identifiers         |
+| `session.group`         | None                              | [Session state](skill://lody-automations/references/session.md): wait for related work to settle   |
+| `coordinator.workItems` | `workItemId?`, `includeAccepted?` | Coordinator sessions only: inspect managed `WorkItem`s, member sessions, PR state, and view focus  |
+| `github.pullRequests`   | None                              | [GitHub](skill://lody-automations/references/github.md): inspect associated PRs                    |
+| `github.workflowRuns`   | None                              | [GitHub](skill://lody-automations/references/github.md): evaluate CI results for current PR HEAD   |
+| `provider.capacity`     | None                              | [Capacity](skill://lody-automations/references/capacity.md): inspect an existing quota observation |
+| `events`                | `since?`, `limit?`                | [Events](skill://lody-automations/references/events.md): compose predicates over persisted facts   |
 
 For resources with no parameters, omit the argument or pass `{}`. Arbitrary resource
 names and extra parameters are rejected. For exact context, return and read parameter
@@ -52,7 +53,7 @@ async ({ ctx }) => {
   return result.exitCode === 0 && result.stdout.trim() === ''
     ? { resumeText: 'The working tree is clean. Continue.' }
     : false;
-}
+};
 ```
 
 The program has no direct Node, filesystem, shell, MCP tool call, import, or credential access. `ctx.exec` can run a shell and access files or the network through the invoked command. The registration tool runs outside the interpreter; its presence does not make it callable inside JS.

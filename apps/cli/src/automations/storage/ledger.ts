@@ -660,7 +660,8 @@ export class AutomationLedger {
   finishWait(
     wait: AutomationWait,
     result: AutomationResult,
-    now: number
+    now: number,
+    retryDelayMs?: number
   ): AutomationWait | undefined {
     result = automationResultSchema.parse(result);
     return this.connection.withImmediate(() => {
@@ -674,7 +675,9 @@ export class AutomationLedger {
           'checking',
           {
             state: 'waiting',
-            nextCheckAt: current.run?.exit ? now : now + wait.intervalMs,
+            nextCheckAt: current.run?.exit
+              ? now
+              : now + (retryDelayMs !== undefined ? Math.max(250, retryDelayMs) : wait.intervalMs),
             consecutiveErrors: 0,
             lastError: undefined,
           },
