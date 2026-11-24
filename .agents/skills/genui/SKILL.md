@@ -6,8 +6,9 @@ description: Author `genui` fenced blocks — declarative, stateful, interactive
 # GenUI surface authoring
 
 Emit one ```` ```genui ```` fence per interactive surface. The block is two regions:
-`{@state}` directives first, then JSX-like markup. Only a *committed* fence
-(closing ```` ``` ````) renders — a surface never half-mounts.
+`{@state}` directives first, then JSX-like markup. A fence mounts while it
+streams: each element appears once its open tag closes — so declare all state
+*before* the markup that reads it, or controls render with `undefined` values.
 
 ```genui
 {@state const [value, setValue] = useState(65)}

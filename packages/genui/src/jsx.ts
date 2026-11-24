@@ -89,7 +89,7 @@ function convertNode(node: AstNode): UiNode | undefined {
 }
 
 /** JSX text rules: drop lines that are all whitespace, collapse the rest. */
-function convertText(raw: string): UiText | undefined {
+export function convertText(raw: string): UiText | undefined {
   const lines = raw.split('\n').map((line) => line.trim());
   const text = lines.filter((line) => line !== '').join(' ');
   if (text === '') return undefined;

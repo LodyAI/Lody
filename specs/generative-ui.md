@@ -21,8 +21,10 @@ theme already in place.
 
 - **Surface source**: a fenced ```` ```genui ```` block inside assistant
   Markdown. The block contains JSX-subset markup plus `{@state}` directives.
-  An incomplete (still streaming) fence stays a plain code block; the surface
-  commits only when the fence closes.
+  A committed fence mounts as a live surface; a fence still streaming mounts
+  through the tolerant partial compile: elements appear as their open tags
+  close, children stream into open elements, and the truncated tail waits
+  offscreen — only closed constructs ever land.
 - **Inline tags**: leaf catalog tags (`GENUI_INLINE_TAGS`, currently `icon`
   and `badge`) may also appear directly in ordinary Markdown — inside a
   sentence or a table cell — as `<icon ... />` or `<badge ...>text</badge>`.
@@ -34,7 +36,9 @@ theme already in place.
 - **`@lody/genui` (packages/genui)**: the framework-free runtime — directive
   splitting, acorn/acorn-jsx parsing into a `UiNode` tree, a confined
   interpreter for `{expr}` holes and callbacks, and `SurfaceState`, the
-  versioned host-owned state store. No React, no DOM.
+  versioned host-owned state store. No React, no DOM. `compileSurfacePartial`
+  is the streaming counterpart: committed directives and nodes compile as
+  usual while the truncated tail returns as `pending` with no diagnostics.
 - **The React adapter** (`components/ai-gui/genui/`): `GenuiSurface` compiles
   the source, holds per-surface state across remounts, re-evaluates
   expressions on each committed state write, and maps tags through
@@ -77,9 +81,9 @@ theme already in place.
 
 ## Guarantees
 
-- State slots are addressed by `surfaceId` (falling back to the fence's
-  code), so a re-rendered or revised surface keeps committed user input; a
-  re-declared slot keeps its value — initializers run once.
+- State slots are addressed by `surfaceId` — the fence's document offset while
+  it streams — so a re-rendered or revised surface keeps committed user input;
+  a re-declared slot keeps its value — initializers run once.
 - Any failure — unparseable markup, bad directive, evaluation error, unknown
   tag — degrades to a diagnostic view, never a thrown render or a partial DOM.
 - The catalog is the contract: nothing outside it can reach the DOM, the
@@ -89,8 +93,9 @@ theme already in place.
 
 - Persisting surface state into the session document (Loro) so state
   survives restart, vs. session-scoped memory only.
-- Whether streaming *inside* a committed surface (token-level updates to an
-  already-rendered tree) is needed, or commit-on-fence-close suffices.
+- Whether revision patching (the agent updating an already-mounted surface
+  rather than appending) is needed — prefix streaming mounts new nodes, but
+  there is no protocol for editing a committed tree.
 - A `Slider` primitive belongs in `@lody/ui`; the catalog currently uses a
   styled native range input.
 - Action protocol for `lody.*` capabilities (submit message, open file) and
@@ -104,8 +109,9 @@ theme already in place.
 
 ## Evidence
 
-- Runtime: `packages/genui/src/` (`directives.ts`, `jsx.ts`, `evaluate.ts`,
-  `state.ts`, `surface.ts`); tests in `packages/genui/test/genui.test.ts`.
+- Runtime: `packages/genui/src/` (`directives.ts`, `jsx.ts`, `jsx-partial.ts`,
+  `evaluate.ts`, `state.ts`, `surface.ts`); tests in
+  `packages/genui/test/genui.test.ts`.
 - React adapter: `packages/components/src/components/ai-gui/genui/`.
 - Inline dispatch: `remark-genui-inline.ts` + the `genui-inline` entry in
   `markdown-renderer.tsx` `createMarkdownComponents`; tests in

@@ -5,10 +5,11 @@
  * current values plus setters.
  */
 import { Parser } from 'acorn';
-import { splitDirectives } from './directives.js';
+import { splitDirectives, splitDirectivesPartial } from './directives.js';
 import { diagnosticOf, type GenuiDiagnostic } from './errors.js';
 import { evaluate, type AstNode } from './evaluate.js';
 import { parseView, type UiNode } from './jsx.js';
+import { parseViewPartial } from './jsx-partial.js';
 import { parseStateDirective, SurfaceState, type StateDeclaration } from './state.js';
 
 export interface SurfaceProgram {
@@ -44,6 +45,43 @@ export function compileSurface(source: string): SurfaceProgram {
     tree = { kind: 'text', parts: [] };
   }
   return { declarations, view: tree, diagnostics };
+}
+
+/**
+ * Streaming counterpart: the source may end mid-construct. Committed directives
+ * and view nodes compile as usual; the truncated tail comes back as `pending`
+ * with no diagnostics, so a fence still being written renders its prefix.
+ */
+export interface PartialSurfaceProgram extends SurfaceProgram {
+  readonly pending: string;
+}
+
+export function compileSurfacePartial(source: string): PartialSurfaceProgram {
+  const { view, directives, pending: directivePending } = splitDirectivesPartial(source);
+  const diagnostics: GenuiDiagnostic[] = [];
+  const declarations: StateDeclaration[] = [];
+  for (const directive of directives) {
+    if (directive.name !== 'state') {
+      diagnostics.push({ phase: 'directives', message: `unknown directive '@${directive.name}'` });
+      continue;
+    }
+    try {
+      declarations.push(
+        ...parseStateDirective(directive.code, (src) =>
+          Parser.parse(src, { ecmaVersion: 'latest' })
+        )
+      );
+    } catch (error) {
+      diagnostics.push({ ...diagnosticOf(error, 'state'), offset: directive.offset });
+    }
+  }
+  const partial = parseViewPartial(view);
+  return {
+    declarations,
+    view: partial.node,
+    diagnostics: [...diagnostics, ...partial.diagnostics],
+    pending: partial.pending + directivePending,
+  };
 }
 
 export interface Surface {

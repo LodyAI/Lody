@@ -23,6 +23,29 @@ export interface SplitSource {
 const DIRECTIVE_HEAD = /\{@([a-zA-Z][a-zA-Z0-9_-]*)\s*/y;
 
 export function splitDirectives(source: string): SplitSource {
+  const { view, directives, pending } = split(source);
+  if (pending !== null) {
+    DIRECTIVE_HEAD.lastIndex = 0;
+    const name = DIRECTIVE_HEAD.exec(pending)?.[1] ?? '';
+    throw new GenuiError(
+      'directives',
+      `unclosed '{@${name}' directive`,
+      source.length - pending.length
+    );
+  }
+  return { view, directives };
+}
+
+/**
+ * Streaming variant: an unclosed `{@name` directive is held back as `pending`
+ * instead of failing, so a fence still being written parses what it has.
+ */
+export function splitDirectivesPartial(source: string): SplitSource & { pending: string } {
+  const { view, directives, pending } = split(source);
+  return { view, directives, pending: pending ?? '' };
+}
+
+function split(source: string): SplitSource & { pending: string | null } {
   const directives: SurfaceDirective[] = [];
   let view = '';
   let cursor = 0;
@@ -44,18 +67,19 @@ export function splitDirectives(source: string): SplitSource {
     const bodyStart = DIRECTIVE_HEAD.lastIndex;
     const end = scanBalanced(source, brace);
     if (end === -1) {
-      throw new GenuiError('directives', `unclosed '{@${name}' directive`, brace);
+      view += source.slice(cursor, brace);
+      return { view, directives, pending: source.slice(brace) };
     }
     view += source.slice(cursor, brace);
     directives.push({ name, code: source.slice(bodyStart, end - 1).trim(), offset: brace });
     cursor = end;
   }
 
-  return { view, directives };
+  return { view, directives, pending: null };
 }
 
 /** Return the index just past the `}` that closes the `{` at `open`, or -1. */
-function scanBalanced(source: string, open: number): number {
+export function scanBalanced(source: string, open: number): number {
   let depth = 0;
   let i = open;
   while (i < source.length) {

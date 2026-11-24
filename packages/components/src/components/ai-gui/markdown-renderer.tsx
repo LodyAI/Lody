@@ -1199,10 +1199,18 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
     return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
-  // An incomplete fence is still streaming: keep it as a code block until the
-  // commit boundary, so a half-written surface never renders.
-  if (block.language === 'genui' && !block.isIncomplete) {
-    return <GenuiSurface code={block.code} />;
+  // A committed ```genui fence mounts as a live surface; one still streaming
+  // mounts too, but through the tolerant partial compile so only closed
+  // constructs land — the fence's start offset keys its state across chunks.
+  if (block.language === 'genui') {
+    const offset = node?.position?.start.offset;
+    return (
+      <GenuiSurface
+        code={block.code}
+        streaming={block.isIncomplete}
+        surfaceId={offset === undefined ? undefined : `genui@${offset}`}
+      />
+    );
   }
   return <MarkdownFencedCodeBlock {...block} />;
 }

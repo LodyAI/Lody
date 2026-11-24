@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { compileSurface, createSurface, evaluate, evalValue, surfaceScope } from '../src/index.js';
+import {
+  compileSurface,
+  compileSurfacePartial,
+  createSurface,
+  evaluate,
+  evalValue,
+  surfaceScope,
+} from '../src/index.js';
+import type { UiElement, UiText } from '../src/index.js';
 import { Parser } from 'acorn';
 
 const expr = (src: string) =>
@@ -65,6 +73,73 @@ describe('compileSurface', () => {
   it('reports malformed markup instead of throwing', () => {
     const program = compileSurface('<card><oops');
     expect(program.diagnostics.length).toBeGreaterThan(0);
+  });
+});
+
+describe('compileSurfacePartial', () => {
+  const kids = (node: UiElement) => node.children;
+
+  it('compiles a complete source identically to compileSurface', () => {
+    const source = '{@state const [v, setV] = useState(65)}\n<card><text>{v}%</text></card>';
+    const partial = compileSurfacePartial(source);
+    expect(partial.pending).toBe('');
+    expect(partial.declarations).toHaveLength(1);
+    expect((kids(partial.view as UiElement)[0] as UiElement).tag).toBe('card');
+  });
+
+  it('mounts an element once its open tag closes and streams children in', () => {
+    const partial = compileSurfacePartial('<card><text>hello</text>');
+    expect(partial.pending).toBe('');
+    const card = kids(partial.view as UiElement)[0] as UiElement;
+    expect(card.tag).toBe('card');
+    expect((card.children[0] as UiElement).tag).toBe('text');
+  });
+
+  it('holds a truncated open tag as pending instead of mounting it', () => {
+    const partial = compileSurfacePartial('<card>done</card><slider value={v');
+    const card = kids(partial.view as UiElement)[0] as UiElement;
+    expect(card.tag).toBe('card');
+    expect(kids(partial.view as UiElement)).toHaveLength(1);
+    expect(partial.pending).toContain('<slider');
+  });
+
+  it('holds an unterminated attribute string and an unclosed {@state} as pending', () => {
+    const attr = compileSurfacePartial('<text label="abc');
+    expect(attr.pending).toContain('<text');
+    const directive = compileSurfacePartial('<text>ok</text>{@state const [v, setV] = useState(');
+    expect(directive.pending).toContain('{@state');
+    expect(directive.diagnostics).toEqual([]);
+    expect((kids(directive.view as UiElement)[0] as UiElement).tag).toBe('text');
+  });
+
+  it('holds a half-written {expr} hole but commits the closed ones', () => {
+    const partial = compileSurfacePartial('<text>{value * 2}</text>{valu');
+    expect(partial.pending).toBe('{valu');
+    const text = kids(partial.view as UiElement)[0] as UiElement;
+    const parts = (text.children[0] as UiText).parts;
+    expect(parts[0]).toMatchObject({ kind: 'expr' });
+  });
+
+  it('auto-closes inner elements when an outer close tag arrives', () => {
+    const partial = compileSurfacePartial('<card><text>hi</card>');
+    const card = kids(partial.view as UiElement)[0] as UiElement;
+    expect((card.children[0] as UiElement).tag).toBe('text');
+  });
+
+  it('parses expression props and event arrows inside braces', () => {
+    const partial = compileSurfacePartial('<slider value={v} onChange={(n) => setV(n + 1)} />');
+    const slider = kids(partial.view as UiElement)[0] as UiElement;
+    expect(slider.tag).toBe('slider');
+    expect(slider.props.map((p) => p.name)).toEqual(['value', 'onChange']);
+    expect(slider.props[1].value).toMatchObject({ kind: 'expr' });
+  });
+
+  it('keeps state already declared usable across partial recompiles', () => {
+    const early = compileSurfacePartial('{@state const [v, setV] = useState(1)}\n<te');
+    expect(early.declarations).toHaveLength(1);
+    const later = compileSurfacePartial('{@state const [v, setV] = useState(1)}\n<text>{v}</text>');
+    const surface = createSurface('s', later);
+    expect(surfaceScope(surface).v).toBe(1);
   });
 });
 

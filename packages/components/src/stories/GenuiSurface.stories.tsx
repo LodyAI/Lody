@@ -33,3 +33,19 @@ export const Interactive: Story = {
 export const Broken: Story = {
   args: { code: '<card><unclosed' },
 };
+
+const streaming = `{@state const [value, setValue] = useState(65)}
+<card>
+  <column gap={8}>
+    <row>
+      <heading level={4}>Progress</heading>
+      <badge tone="success">live</badge>
+    </row>
+    <slider value={value} min={0} max={100} onChange={(n) => setValue(n)} />
+    <row>
+      <button onClick={() => setValue(65)}>Re`;
+
+/** A fence still being written: committed nodes mount, the tail waits. */
+export const Streaming: Story = {
+  args: { code: streaming, streaming: true },
+};

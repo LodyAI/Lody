@@ -12,6 +12,7 @@ import stylex from '@stylexjs/stylex';
 import {
   callValue,
   compileSurface,
+  compileSurfacePartial,
   createSurface,
   evaluate,
   isInterpretedFunction,
@@ -57,6 +58,14 @@ const styles = stylex.create({
   unknownTag: {
     color: colors.tertiaryLabel,
     fontStyle: 'italic',
+  },
+  pending: {
+    color: colors.tertiaryLabel,
+    fontFamily: 'monospace',
+    fontSize: '0.75em',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
+    opacity: 0.6,
   },
 });
 
@@ -152,11 +161,19 @@ export interface GenuiSurfaceProps {
   surfaceId?: string;
   /** Host capabilities exposed under the `lody` namespace. */
   capabilities?: Record<string, unknown>;
+  /**
+   * The fence is still being written: tolerate a truncated tail and mount
+   * elements as their open tags commit instead of waiting for the fence.
+   */
+  streaming?: boolean;
 }
 
-export function GenuiSurface({ code, surfaceId, capabilities }: GenuiSurfaceProps) {
+export function GenuiSurface({ code, surfaceId, capabilities, streaming }: GenuiSurfaceProps) {
   const key = surfaceId ?? `code:${code}`;
-  const program = useMemo(() => compileSurface(code), [code]);
+  const program = useMemo(
+    () => (streaming ? compileSurfacePartial(code) : compileSurface(code)),
+    [code, streaming]
+  );
   const surface: Surface = useMemo(
     () => createSurface(key, program, { state: stateFor(key) }),
     [key, program]
@@ -180,11 +197,16 @@ export function GenuiSurface({ code, surfaceId, capabilities }: GenuiSurfaceProp
   };
   const body = renderUiNode(surface.program.view, ctx, 0);
   const diagnostics = [...surface.diagnostics, ...ctx.diagnostics, ...eventDiagnostics.current];
-  const fatal =
-    surface.program.view.kind === 'text' && (surface.program.view.parts?.length ?? 0) === 0;
+  const pending =
+    'pending' in program && typeof program.pending === 'string' ? program.pending : '';
+  const empty =
+    (surface.program.view.kind === 'text' && (surface.program.view.parts?.length ?? 0) === 0) ||
+    (surface.program.view.kind === 'element' && surface.program.view.children.length === 0);
+  const fatal = empty && !streaming;
   return (
     <div {...stylex.props(styles.surface)}>
       {fatal ? <GenuiErrorView diagnostics={diagnostics} /> : body}
+      {pending !== '' ? <div {...stylex.props(styles.pending)}>{pending}</div> : null}
       {!fatal && diagnostics.length > 0 ? (
         <GenuiErrorView diagnostics={diagnostics.slice(0, 3)} />
       ) : null}
