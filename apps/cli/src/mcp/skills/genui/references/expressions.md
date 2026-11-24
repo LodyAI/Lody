@@ -7,6 +7,22 @@
 - `prop={expr}` — a prop value; `prop="literal"` for strings; bare `prop` means `true`.
 - `prop={(args) => expr}` — event callbacks; the arrow body may also be `{ stmt; stmt }`.
 
+## Dynamic values in a fixed view
+
+Write tags directly in the markup. Inside `{expr}`, compute text or prop
+values. JSX elements and fragments inside expressions are unsupported, including
+in ternary branches and `map` callbacks.
+
+```genui
+{@state const [ready, setReady] = useState(false)}
+<switch checked={ready} onCheckedChange={(checked) => setReady(checked)} />
+<text muted={!ready}>{ready ? 'Ready' : 'Waiting'}</text>
+<text>{['alpha', 'beta', 'gamma'].filter((name) => name.includes('m')).map((name) => name.toUpperCase()).join(', ')}</text>
+```
+
+Use a ternary for alternate text or prop values. For a variable-length list,
+map to strings and join them inside a single `<text>` tag.
+
 ## The confined JS subset
 
 Supported: literals (numbers, strings, booleans, `null`, arrays, object literals),

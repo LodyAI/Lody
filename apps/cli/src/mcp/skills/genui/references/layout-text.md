@@ -38,11 +38,12 @@ Expands to fill remaining space in a `row`/`column`. `size` sets a minimum in px
 
 ## `text`
 
-Body copy. `muted` dims to secondary color. Literal text between tags renders
-as-is; dynamic content goes in `{expr}`:
+Body copy. `muted` dims to secondary color. Literal text chunks are trimmed
+around each `{expr}` hole. Put the whole sentence in one template literal to
+preserve spaces and punctuation around dynamic values.
 
 ```genui
-<text>Current value: {value}%</text>
+<text>{`Current value: ${value}%`}</text>
 <text muted>Secondary explanation</text>
 ```
 
