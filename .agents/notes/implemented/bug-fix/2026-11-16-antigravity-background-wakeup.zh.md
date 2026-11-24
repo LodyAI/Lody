@@ -35,9 +35,22 @@ background task with task id: ...`），任务完成时通过内部 `<SYSTEM_MES
 
 - **移除启发式 `sessionActivity` 合成。** `AgentClient.reportsSessionActivity()` 仅在
   agent 权威声明 Core `sessionActivity` v1 时返回 `true`。在 `agy` 未提供权威活动协议之前，
-  turn 在 `end_turn` 正常结束并沿用标准空闲 GC，与
+  turn 在 `end_turn` 正常结束并发送标准完成通知，与
   [Session GC 尊重原生 Agent 的工作](2026-10-18-gc-respects-native-agent-work.zh.md) 一致。
   若未来 `agy` 声明了 Core `sessionActivity` v1，`AgentClient` 会直接按权威协议消费。
+- **为异步唤醒的实时流输出提供有界短 TTL 活跃脉冲。** `agy` 1.5.10+ 在 `end_turn` 后被
+  后台子代理唤醒时，会持续向已结束的 turn 推送可见 ACP `session/update`（`tool_call`、
+  `tool_call_update`、`agent_thought_chunk`、`agent_message_chunk` 等）。对于未声明
+  Core `sessionActivity` 的 agent，`MessageHandler.enqueueACPUpdate` 仅在 `finalized_turn`
+  收到**可见**更新时刷新空闲 GC（`touchSession`）并调用
+  `SessionActivePresence.noteLateActivity(sessionId)`（忽略纯元数据通知）。
+  `SessionActivePresence` 复用既有的 1 秒定时协调器维护 30 秒滑动 TTL
+  （`DEFAULT_LATE_STREAM_ACTIVITY_TTL_MS`），在静默超时、新 Turn `hold()`、停止/清理
+  （`clearLateActivity`）或 `retire()` 时自动清除；在该短期租约有效且 agent 进程存活期间，
+  `MessageHandler.getNativeWork` 也会向 `SessionGCManager` 返回 `'running'`，避免空闲 GC
+  或内存压力驱逐把正在流式执行的唤醒会话误判为 idle 并 kill 掉。从而在不引入任务计数、轮询
+  或 24 小时卡死风险的前提下，让 UI 与 MCP 状态正确识别正在执行的异步唤醒；纯静默等待后台任务期
+  仍需上游实现 Core `sessionActivity` v1。
 - **保留确定性的 Antigravity 兼容逻辑。** `antigravity-background.ts` 保留
   `isAntigravityServer`（内置 `antigravity` 与自定义 `Antigravity ACP Server` 对齐，排除
   旧版 `antigravity-acp`），`AgentClient` 保留 `realpath` `cwd` 协商以避免符号链接工作目录

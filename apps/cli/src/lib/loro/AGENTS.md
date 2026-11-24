@@ -93,8 +93,8 @@ is retired even at registration. Online checks use `getMachinePresenceView`: a f
 heartbeat is online without a joined room, and absence is offline only when `synced`,
 otherwise unknown.
 
-`session-active-presence.ts` owns Turn leases, native agent activity, Clock heartbeats and
-latched stall signals. Only lease release retires a Turn; native activity can remain after it. Its Legacy entry owns execution/analytics. Intent:
+`session-active-presence.ts` owns Turn leases, native agent activity, bounded late-stream activity, Clock heartbeats and
+latched stall signals. Only lease release retires a Turn; native or bounded late-stream activity can remain after it. Its Legacy entry owns execution/analytics. Intent:
 `specs/session-initialization-deadline.md`.
 
 `workspace-presence.ts` owns Scopes; `presence-replica.ts` is synchronous.

@@ -5663,14 +5663,15 @@ export class MessageHandler {
       );
       return;
     }
+    const isVisible = this.isVisibleACPUpdate(update.update);
     if (target.source === 'finalized_turn') {
-      // Output inside a turn never touches the session: the turn keeps it from
-      // GC. Output after the turn means the model was woken by a finished
-      // background task, a ScheduleWakeup or a cron, so the idle timer restarts
-      // from it. Only agents that report `sessionActivity` get this; the others
-      // keep the old rule that only user actions and turn ends count.
-      if (this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity()) {
+      const reportsSessionActivity =
+        this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity() ?? false;
+      if (reportsSessionActivity || isVisible) {
         this.touchSession(sessionId);
+      }
+      if (!reportsSessionActivity && isVisible) {
+        this.sessionActivePresence.native.noteLateActivity(sessionId);
       }
       this.captureACPUpdateInvariant(
         'late_acp_update_routed_to_finalized_turn',
@@ -5683,7 +5684,7 @@ export class MessageHandler {
       );
     }
     const state = this.store.get(sessionId);
-    this.recordTurnEvent(sessionId, target.turnEpoch, this.isVisibleACPUpdate(update.update));
+    this.recordTurnEvent(sessionId, target.turnEpoch, isVisible);
     state.acpUpdateBuffer.push({
       operationId: uuidV4(),
       notification: update,
@@ -6943,6 +6944,7 @@ export class MessageHandler {
 
   private clearSessionActivePresence(sessionId: SessionId): void {
     this.sessionActivePresence.clearUnleased(sessionId);
+    this.sessionActivePresence.native.clearLateActivity(sessionId);
   }
 
   private createRuntimeDispatchContext(): MessageDispatchContext {
@@ -12933,7 +12935,10 @@ export class MessageHandler {
   getNativeWork(sessionId: SessionId): NativeAgentWork {
     const session = this.sessionManager.getSession(sessionId);
     if (!session || session.hasLiveAgentProcess?.() === false) return null;
-    return session.agentClient?.getNativeWork() ?? null;
+    return (
+      session.agentClient?.getNativeWork() ??
+      (this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null)
+    );
   }
 
   /**
