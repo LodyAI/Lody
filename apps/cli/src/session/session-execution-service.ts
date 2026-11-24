@@ -1286,6 +1286,10 @@ export class SessionExecutionService {
   isInboxInputCanceled(sessionId: SessionId, inputId: string): boolean {
     return this.operationInbox?.inputCanceled(this.deps.workspaceId, sessionId, inputId) ?? false;
   }
+  /** True once the input finished or was canceled; begin never admits it again. */
+  isInboxInputEnded(sessionId: SessionId, inputId: string): boolean {
+    return this.operationInbox?.inputEnded(this.deps.workspaceId, sessionId, inputId) ?? false;
+  }
   quiesceInboxExecutions(): void {
     this.shutdownAbort.abort();
     for (const runtime of this.turnRuntimeBySession.values()) {
