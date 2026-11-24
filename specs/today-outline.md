@@ -176,6 +176,10 @@ any time; when off it changes none of the app's existing behavior.
   one undo returns to the `@query` text. Pasting a resolvable same-workspace `lody://session` link (bare or
   Markdown) anywhere converts it to a mention. Dragging a conversation from the sidebar between two nodes creates
   a node holding just that mention.
+- Dragging out: a mention of an available conversation drags like its sidebar row. Dropped on an open conversation
+  or the new-chat page it becomes a mention in that composer; the open conversation itself is not a drop target.
+  Today ignores drags that started in Today, so releasing the mention inside the outline changes nothing. The status
+  icon only opens its menu and never starts a drag; a deleted or loading mention does not drag.
 - Caret: a mention takes one caret position. With the caret right after it, ← first selects the whole mention
   (highlighted); a second ← moves before it; → is symmetric. Backspace after it (Delete before it) first selects,
   the second press deletes; `Alt/⌘+Backspace` deletes at once. Enter on a selected mention opens the conversation,
