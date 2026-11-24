@@ -45,12 +45,13 @@ import {
   type WorktreeSetupScriptConfig,
   type WorktreeSetupShell,
 } from '@lody/shared';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { projectEditorRequestAtom } from '@/atoms/project-editor';
 import { canManageWorkspaceProject, useWorkspaceProjects } from '@/hooks/use-workspace-projects';
 import {
   currentWorkspaceIdAtom,
   currentWorkspaceSlugAtom,
+  settingsActionIntentAtom,
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
   userAtom,
@@ -193,6 +194,7 @@ export type ProjectSettingsViewProps = {
   githubProjectsLoading: boolean;
   initialMachineId?: MachineId | null;
   initialProjectKey?: string | null;
+  initialProjectPage?: ProjectWindowPage;
   onSharedWithTeamChange?: (row: ProjectSettingsRow, sharedWithTeam: boolean) => Promise<void>;
   onSyncHistory?: (row: ProjectSettingsRow, provider: LocalProjectHistoryProvider) => Promise<void>;
   onImportHistory?: (
@@ -934,6 +936,9 @@ export function ProjectSettingsComponent({
   const resolvedInitialProjectKey =
     initialProjectKey !== undefined ? initialProjectKey : modalProjectTarget;
   const [addLocalProjectDialogOpen, setAddLocalProjectDialogOpen] = useState(false);
+  const [requestedProjectPage, setRequestedProjectPage] = useState<ProjectWindowPage | undefined>(
+    undefined
+  );
   const requestProjectEditor = useSetAtom(projectEditorRequestAtom);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const { projects: workspaceProjects } = useWorkspaceProjects();
@@ -1083,6 +1088,22 @@ export function ProjectSettingsComponent({
     [removeLocalProject]
   );
 
+  const [actionIntent, setActionIntent] = useAtom(settingsActionIntentAtom);
+  useEffect(() => {
+    if (!actionIntent || actionIntent.action.tab !== 'projects') return;
+    const act = actionIntent.action;
+    setActionIntent(null);
+    if (act.add === 'local') {
+      handleAddLocalProject((act.machineId as MachineId | undefined) ?? null);
+      return;
+    }
+    if (act.add === 'group') {
+      requestProjectEditor({ kind: 'create' });
+      return;
+    }
+    setRequestedProjectPage(act.page);
+  }, [actionIntent, handleAddLocalProject, requestProjectEditor, setActionIntent]);
+
   return (
     <>
       <ProjectSettingsView
@@ -1092,6 +1113,7 @@ export function ProjectSettingsComponent({
         githubProjectsLoading={workspaceReposLoading}
         initialMachineId={resolvedInitialMachineId}
         initialProjectKey={resolvedInitialProjectKey}
+        initialProjectPage={requestedProjectPage}
         onSharedWithTeamChange={onSharedWithTeamChange}
         onSyncHistory={onSyncHistory}
         onImportHistory={onImportHistory}
@@ -1158,6 +1180,7 @@ function ProjectSettingsDesktop({
   localProjectRemovalStateByKey,
   initialMachineId,
   initialProjectKey,
+  initialProjectPage,
   multiRepoProjects = [],
   onCreateMultiRepoProject,
   onOpenMultiRepoProject,
@@ -1208,6 +1231,11 @@ function ProjectSettingsDesktop({
   const [editingProjectKey, setEditingProjectKey] = useState<string | null>(
     () => initialProjectKey ?? null
   );
+  useEffect(() => {
+    if (initialProjectKey !== undefined) {
+      setEditingProjectKey(initialProjectKey ?? null);
+    }
+  }, [initialProjectKey]);
   const rawEditingProject =
     allSelections.find((selection) => selection.key === editingProjectKey) ?? null;
   const editingProject = useMemo<ProjectSettingsSelection | null>(() => {
@@ -1448,6 +1476,7 @@ function ProjectSettingsDesktop({
             <ProjectWindow
               key={editingProject.key}
               selection={editingProject}
+              initialPage={initialProjectPage}
               {...detailHandlers}
             />
           ) : null}
@@ -1648,6 +1677,7 @@ function ProjectWindow({
   localProjectRemovalStateByKey,
   localMachineId,
   onlineMachineIds,
+  initialPage,
 }: {
   readonly selection: ProjectSettingsSelection;
 } & Omit<ProjectRowProps, 'row'> & {
@@ -1667,6 +1697,7 @@ function ProjectWindow({
     localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
     localMachineId?: MachineId | null;
     onlineMachineIds?: ReadonlySet<MachineId>;
+    initialPage?: ProjectWindowPage;
   }) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -1674,7 +1705,14 @@ function ProjectWindow({
   const isLocal = selection.kind === 'local';
   const localRow = selection.kind === 'local' ? selection.row : null;
   const githubRow = selection.kind === 'github' ? selection.row : null;
-  const [page, setPage] = useState<ProjectWindowPage>('general');
+  const [page, setPage] = useState<ProjectWindowPage>(
+    initialPage && (isLocal || initialPage !== 'conversations') ? initialPage : 'general'
+  );
+  useEffect(() => {
+    if (initialPage && (isLocal || initialPage !== 'conversations')) {
+      setPage(initialPage);
+    }
+  }, [initialPage, isLocal]);
   const viewedWorktreeProjectKey = page === 'worktree' ? (localRow?.key ?? null) : null;
   useEffect(() => {
     onWorktreeProjectViewChange?.(viewedWorktreeProjectKey);

@@ -1,4 +1,9 @@
-import { LODY_PROTOCOLS, SESSION_LINK_SCHEMES, parseSessionLink } from '@lody/shared/session-link'
+import {
+  LODY_PROTOCOLS,
+  SESSION_LINK_SCHEMES,
+  parseAppActionLink,
+  parseSessionLink
+} from '@lody/shared/session-link'
 
 /**
  * A channel-neutral destination that every supported installation can resolve.
@@ -15,7 +20,7 @@ export const MAX_DESKTOP_HANDOFF_BYTES = 8 * 1024
 export function toPortableDesktopDeepLink(raw: string): string | null {
   if (raw.length > MAX_DESKTOP_HANDOFF_BYTES) return null
 
-  if (parseSessionLink(raw)) {
+  if (parseSessionLink(raw) || parseAppActionLink(raw)) {
     // Legacy session:// stays in-app reading compatibility, not a cross-process address.
     if (raw.startsWith('session://')) return null
     let parsed: URL

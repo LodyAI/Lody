@@ -42,7 +42,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkMath from 'remark-math';
-import { Check, Copy, MessagesSquare } from 'lucide-react';
+import { CalendarClock, Check, Copy, MessagesSquare, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
@@ -71,8 +71,18 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 import { usePrLinkInterceptor } from './pr-link-context';
-import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
-import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  parseAppActionLinkHref,
+  parseSessionLinkHref,
+  useAppActionLinkNavigator,
+  useSessionLinkNavigator,
+} from './session-link-context';
+import {
+  buildAppActionLink,
+  parseSessionLink,
+  type AppActionLink,
+  type SessionLink,
+} from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
@@ -721,6 +731,55 @@ function MarkdownSessionLink({
   );
 }
 
+function MarkdownActionLink({
+  target,
+  children,
+  inert,
+}: {
+  target: AppActionLink;
+  children: ReactNode;
+  inert: boolean;
+}) {
+  const navigate = useAppActionLinkNavigator();
+  const canonicalHref = buildAppActionLink(target);
+  const title = markdownLinkText(children).trim() || canonicalHref;
+  const Icon = target.kind === 'schedules' ? CalendarClock : SlidersHorizontal;
+  const body = (
+    <>
+      <Icon {...stylex.props(markdownStyles.emLinkGlyph)} aria-hidden="true" />
+      <span {...stylex.props(markdownStyles.emText)}>{title}</span>
+    </>
+  );
+  if (!navigate || inert) {
+    return (
+      <span
+        data-action-link={canonicalHref}
+        title={title}
+        className={clsx(
+          SESSION_LINK_CHIP_CLASS_NAME,
+          stylex.props(markdownStyles.sessionChip).className
+        )}
+      >
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-action-link={canonicalHref}
+      title={title}
+      className={clsx(
+        SESSION_LINK_CHIP_CLASS_NAME,
+        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
+      )}
+      onClick={() => navigate(target)}
+    >
+      {body}
+    </button>
+  );
+}
+
 const AUTOLINK_PATTERN = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/giu;
 
 // Both autolinkers end a bare URL at whitespace, but CJK prose is written
@@ -1203,7 +1262,9 @@ const StreamingMarkdown = lazy<ComponentType<StreamdownProps>>(() =>
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
 const markdownUrlTransform: UrlTransform = (value) =>
-  isMarkdownAgentFileHref(value) || parseSessionLinkHref(value)
+  isMarkdownAgentFileHref(value) ||
+  parseSessionLinkHref(value) ||
+  parseAppActionLinkHref(value) !== null
     ? value
     : defaultUrlTransform(value);
 
@@ -1651,6 +1712,14 @@ const createMarkdownComponents = ({
         >
           {children}
         </MarkdownSessionLink>
+      );
+    }
+    const linkedAction = parseAppActionLinkHref(href);
+    if (linkedAction) {
+      return (
+        <MarkdownActionLink target={linkedAction} inert={readonly}>
+          {children}
+        </MarkdownActionLink>
       );
     }
     // Workspace resource links are display-only in a publication, not a second
