@@ -705,6 +705,25 @@ export type WorkspaceRuntime = {
           'method' | 'params'
         >
   ) => Promise<import('@lody/shared/local-machine-rpc').SorbetProvidersResult>;
+  /** Machine-wide Sorbet Host settings; machine-scoped, no configId. */
+  requestLocalSorbetHostSettings: (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/host-settings-get' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/host-settings-update' }
+          >,
+          'method' | 'params'
+        >
+  ) => Promise<import('@lody/shared/local-machine-rpc').SorbetHostSettingsResult>;
   requestLocalMcpAuthentication: (
     machineId: MachineId,
     params: Extract<

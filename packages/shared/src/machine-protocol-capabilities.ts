@@ -25,6 +25,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   sorbetCredentialsRemote: 'sorbetCredentialsRemote',
   sorbetProviders: 'sorbetProviders',
   sorbetProvidersRemote: 'sorbetProvidersRemote',
+  sorbetHostSettings: 'sorbetHostSettings',
+  sorbetHostSettingsRemote: 'sorbetHostSettingsRemote',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
   builtinPi: 'builtinPi',
@@ -115,6 +117,10 @@ export const SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION = 3;
  * method to the same owner-scoped handler, so the remote version tracks the local one.
  */
 export const SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION = SORBET_PROVIDERS_PROTOCOL_VERSION;
+/** `sorbet/host-settings-get`/`sorbet/host-settings-update` over Local Machine RPC. */
+export const SORBET_HOST_SETTINGS_PROTOCOL_VERSION = 1;
+/** The encrypted feature path forwards the same machine-wide host-settings methods. */
+export const SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION = SORBET_HOST_SETTINGS_PROTOCOL_VERSION;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
 export const E2EE_ACP_INTERACTION_PROTOCOL_VERSION = 1;

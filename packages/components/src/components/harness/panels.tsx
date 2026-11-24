@@ -52,6 +52,7 @@ import {
   spring,
 } from './primitives';
 import { useDeviceCapabilities, type HarnessModel } from './device-capabilities';
+import { useHostSettings } from './host-settings';
 import {
   useSessionDefaults,
   type SessionDefaultKey,
@@ -661,6 +662,20 @@ function DefaultsStatus({ defaults }: { defaults: SessionDefaults }) {
 export function ModelsPanel({ scope }: { scope: Scope }) {
   const capabilities = useDeviceCapabilities();
   const defaults = useSessionDefaults(scope);
+  const host = useHostSettings();
+  // The Host's child-agent default, drawn as the pool's `provider/model` id.
+  const childModelId = host.settings?.defaultChildModel
+    ? `${host.settings.defaultChildModel.providerId}/${host.settings.defaultChildModel.modelId}`
+    : '';
+  const setChildModel = (id: string) => {
+    const slash = id.indexOf('/');
+    void host.update({
+      defaultChildModel:
+        slash > 0
+          ? { providerId: id.slice(0, slash), modelId: id.slice(slash + 1) }
+          : { providerId: id, modelId: id },
+    });
+  };
   const effortOption =
     capabilities.effortOption?.type === 'select' && capabilities.effortOption.options.length
       ? capabilities.effortOption
@@ -700,10 +715,15 @@ export function ModelsPanel({ scope }: { scope: Scope }) {
         <div {...stylex.props(parts.listRuled)}>
           <Row
             title="Subagent model"
-            hint="Searches, summarises and runs parallel tasks."
-            badge={<Unsupported />}
+            hint="Searches, summarises and runs parallel tasks. Saved on this machine."
+            badge={!host.supported ? <Unsupported /> : undefined}
           >
-            <ModelSelect value="" placeholder="—" disabled onChange={() => {}} />
+            <ModelSelect
+              value={childModelId}
+              placeholder="Same as the main model"
+              disabled={!host.supported || !host.settings}
+              onChange={setChildModel}
+            />
           </Row>
         </div>
         <div {...stylex.props(parts.listRuled)}>
@@ -1000,6 +1020,7 @@ function AutonomyGlyph({ level, active }: { level: Autonomy; active: boolean }) 
 
 export function PermissionsPanel({ scope }: { scope: Scope }) {
   const defaults = useSessionDefaults(scope);
+  const host = useHostSettings();
   const current = defaults.values.autonomy;
   return (
     <div {...stylex.props(parts.panel)}>
@@ -1041,18 +1062,22 @@ export function PermissionsPanel({ scope }: { scope: Scope }) {
               <HardDrive size={13} {...stylex.props(parts.rowTitleGlyph)} /> File access
             </>
           }
-          hint="Where the agent can read and write."
-          badge={<Unsupported />}
+          hint="Where the agent can read and write. Saved on this machine."
+          badge={!host.supported ? <Unsupported /> : undefined}
         >
           <Segmented
             label="File access"
-            value="workspace"
-            disabled
-            onChange={() => {}}
+            value={host.settings?.sandboxMode ?? 'workspace-read'}
+            disabled={!host.supported || !host.settings}
+            onChange={(value) =>
+              void host.update({
+                sandboxMode: value as 'workspace-read' | 'workspace-write' | 'disabled',
+              })
+            }
             options={[
-              { id: 'workspace', label: 'Workspace' },
-              { id: 'home', label: 'Home' },
-              { id: 'full', label: 'Full disk' },
+              { id: 'workspace-read', label: 'Read only' },
+              { id: 'workspace-write', label: 'Read & write' },
+              { id: 'disabled', label: 'Off' },
             ]}
           />
         </Row>
@@ -1063,18 +1088,27 @@ export function PermissionsPanel({ scope }: { scope: Scope }) {
                 <Globe size={13} {...stylex.props(parts.rowTitleGlyph)} /> Network
               </>
             }
-            hint="Outbound requests from tools and shell."
-            badge={<Unsupported />}
+            hint="Outbound requests from tools and shell. Saved on this machine."
+            badge={!host.supported ? <Unsupported /> : undefined}
           >
             <Segmented
               label="Network"
-              value="allowlist"
-              disabled
-              onChange={() => {}}
+              value={host.settings?.network?.mode ?? 'allowlist'}
+              disabled={!host.supported || !host.settings}
+              onChange={(value) =>
+                void host.update({
+                  network: {
+                    mode: value as 'allowlist' | 'open',
+                    ...(host.settings?.network?.allowedDomains?.length
+                      ? { allowedDomains: host.settings.network.allowedDomains }
+                      : {}),
+                    allowLocalBinding: host.settings?.network?.allowLocalBinding ?? true,
+                  },
+                })
+              }
               options={[
-                { id: 'off', label: 'Off' },
                 { id: 'allowlist', label: 'Allowlist' },
-                { id: 'on', label: 'Open' },
+                { id: 'open', label: 'Open' },
               ]}
             />
           </Row>
