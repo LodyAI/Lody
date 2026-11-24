@@ -243,6 +243,7 @@ import SessionChatStream, {
   type UserMessageEditMentionContext,
   type UserMessageEditSubmission,
 } from '../ai-gui';
+import { GenuiCapabilitiesContext } from '../ai-gui/genui/genui-capabilities-context';
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
@@ -5366,6 +5367,23 @@ export const SessionChatInterface = memo(
       [dispatchInputBlocks]
     );
 
+    /**
+     * The `lody.*` manifest surfaces expose to genui programs. `sendPrompt`
+     * rides the ordinary send admission (queue/guide/dispatch routing), so a
+     * surface button behaves like the composer — fire-and-forget, since the
+     * confined evaluator cannot consume a promise.
+     */
+    const genuiCapabilities = useMemo<Record<string, unknown>>(
+      () => ({
+        sendPrompt: (prompt: unknown) => {
+          void dispatchPrompt(String(prompt)).catch((error: unknown) => {
+            console.warn('genui lody.sendPrompt failed', { sessionId: session.id, error });
+          });
+        },
+      }),
+      [dispatchPrompt, session.id]
+    );
+
     const capacityRetry = useCapacityAutoRetry({
       sessionId: session.id,
       history: sessionHistory,
@@ -7809,9 +7827,10 @@ export const SessionChatInterface = memo(
                               workspaceId={workspaceId}
                               isVisible={isVisible}
                             >
-                              <SessionChatStream
-                                key={session.id}
-                                ref={chatStreamRef}
+                              <GenuiCapabilitiesContext.Provider value={genuiCapabilities}>
+                                <SessionChatStream
+                                  key={session.id}
+                                  ref={chatStreamRef}
                                 sessionId={session?.id}
                                 workspaceId={workspaceId}
                                 showSenderIdentity={isMultiMember}
@@ -7911,6 +7930,7 @@ export const SessionChatInterface = memo(
                                 suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
                                 outlineOverlayRoot={outlineOverlayRoot}
                               />
+                              </GenuiCapabilitiesContext.Provider>
                             </SessionAgentFileLinkMenuProvider>
                           </MessageSelectionContext.Provider>
                         </MessageSendStatusContext.Provider>

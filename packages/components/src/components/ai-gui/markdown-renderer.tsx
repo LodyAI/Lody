@@ -82,6 +82,9 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
+import { GenuiSurface } from './genui/genui-surface';
+import { GENU_CATALOG } from './genui/genui-catalog';
+import { remarkGenuiInline } from './genui/remark-genui-inline';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { MarkdownMermaidBlock } from './markdown-mermaid-block';
 import {
@@ -1135,6 +1138,7 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkLinkifyFilePaths,
   remarkMarkUnclosedFences,
   [remarkMath, { singleDollarTextMath: false }],
+  remarkGenuiInline,
 ] satisfies StreamdownProps['remarkPlugins'];
 const INLINE_MATH_REMARK_PLUGINS = [
   ...MARKDOWN_REMARK_PLUGINS,
@@ -1229,6 +1233,17 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
     return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
+  if (block.language === 'genui') {
+    const offset = node?.position?.start.offset;
+    return (
+      <GenuiSurface
+        code={block.code}
+        streaming={block.isIncomplete}
+        surfaceId={offset === undefined ? undefined : `genui@${offset}`}
+        fallback={<MarkdownFencedCodeBlock {...block} />}
+      />
+    );
+  }
   return <MarkdownFencedCodeBlock {...block} />;
 }
 
@@ -1704,6 +1719,24 @@ const createMarkdownComponents = ({
   // <source> is suppressed since it's only meaningful inside a real browser <picture>.
   source: () => null,
   picture: (props: MarkdownPictureProps) => <>{props.children}</>,
+  ...({
+    'genui-inline': ({ node: hastNode }: { node?: { properties?: Record<string, unknown> } }) => {
+      const tag = hastNode?.properties?.['dataGenuiTag'];
+      const raw = hastNode?.properties?.['dataGenuiProps'];
+      const renderer = typeof tag === 'string' ? GENU_CATALOG[tag] : undefined;
+      let props: Record<string, unknown> | undefined;
+      try {
+        const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+        if (typeof parsed === 'object' && parsed !== null) {
+          props = parsed as Record<string, unknown>;
+        }
+      } catch {
+        props = undefined;
+      }
+      if (!renderer || !props) return null;
+      return <>{renderer(props)}</>;
+    },
+  } as Components),
 });
 
 function ConversationMarkdownImage(props: MarkdownImageProps) {

@@ -2836,6 +2836,7 @@
   "sessions.subagentTasks.toolCalls_one": "{{count}} 次工具调用",
   "sessions.subagentTasks.toolCalls_other": "{{count}} 次工具调用",
   "sessions.fixPrComment": "处理 PR 评论",
+  "sessions.genui.error": "无法渲染此内容块。",
   "sessions.goal.actions.clear": "清除",
   "sessions.goal.actions.dismiss": "关闭 Goal 横幅",
   "sessions.goal.actions.pause": "暂停",
