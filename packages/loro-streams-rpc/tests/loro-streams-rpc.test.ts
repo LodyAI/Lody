@@ -445,7 +445,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     const request = fake.appended[0]?.value as { id: string; replyTo: string; method: string };
     expect(request.method).toBe('machine/status');
     expect(fake.appended[0]?.streamId).toBe('workspace-1:rpc:req:machine-1');
-    expect(fake.ensured).toEqual([]);
+    expect(fake.ensured).toEqual([request.replyTo]);
 
     fake.pushBatch({
       messages: [
@@ -1026,7 +1026,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('appends first RPC without pre-ensuring streams from the Web client', async () => {
+  it('pre-ensures fresh random UUID response stream without pre-ensuring request stream', async () => {
     const events: string[] = [];
     const streamClient: LoroStreamsJsonStreamClient = {
       ensureJsonStream: vi.fn(async (streamId: string) => {
@@ -1057,7 +1057,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect(streamClient.appendJson).toHaveBeenCalled();
     });
 
-    expect(events).toEqual(['append:workspace-1:rpc:req:machine-1']);
+    expect(events).toEqual([
+      expect.stringMatching(/^ensure:workspace-1:rpc:res:machine-1:/),
+      'append:workspace-1:rpc:req:machine-1',
+    ]);
     expect(streamClient.appendJson).toHaveBeenCalledWith(
       'workspace-1:rpc:req:machine-1',
       expect.objectContaining({
@@ -3577,6 +3580,62 @@ describe('pending RPC deadline', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('pre-creates fresh random UUID responseStreamId with ensureJsonStream before readJsonLive', async () => {
+    const ops: string[] = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async (streamId) => {
+        ops.push(`ensure:${streamId}`);
+      }),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (streamId, state, _onBatch, options) => {
+        ops.push(`read:${streamId}:${state.nextOffset}`);
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+    });
+
+    await dispatcher.start();
+    await vi.waitFor(() => expect(ops.length).toBeGreaterThanOrEqual(2));
+    const responseStreamId = dispatcher.getResponseStreamId();
+    expect(ops).toEqual([`ensure:${responseStreamId}`, `read:${responseStreamId}:-1`]);
+    dispatcher.stop();
+  });
+
+  it('skips pre-creating when responseStreamId is caller-supplied', async () => {
+    const ops: string[] = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async (streamId) => {
+        ops.push(`ensure:${streamId}`);
+      }),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (streamId, state, _onBatch, options) => {
+        ops.push(`read:${streamId}:${state.nextOffset}`);
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res:explicit-1',
+    });
+
+    await dispatcher.start();
+    await vi.waitFor(() => expect(ops).toHaveLength(1));
+    expect(ops).toEqual(['read:workspace-1:rpc:res:explicit-1:-1']);
+    dispatcher.stop();
   });
 });
 

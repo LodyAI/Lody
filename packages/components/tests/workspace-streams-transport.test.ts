@@ -32,6 +32,11 @@ import { hashRecordBytes, recordSigningBytes, verifyLedger } from '@lody/e2ee-co
 import { encodeCbor } from '@lody/e2ee-core/protocol';
 import { encodeStreamsRoomAdditionalData } from 'loro-repo/transport/streams';
 import { InMemoryRemoteCursorStore, PayloadProtectionError } from '@loro-dev/streams-crdt';
+import {
+  getStreamsHttpFallbackCounts,
+  resetStreamsHttpFallbackCounts,
+} from '@lody/shared/streams-transport-diagnostics';
+import { createWorkspaceStreamsTransportAdapter } from '@lody/shared/workspace-streams-persistence';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
@@ -2734,4 +2739,147 @@ describe('named Flock initial catch-up timeout recovery', () => {
       source.unsubscribe();
     }
   );
+});
+
+describe('workspace Flock snapshot probe deduplication', () => {
+  it('executes snapshotIsCheaper HEAD at most once per URL per owner and coalesces concurrent cold probes', async () => {
+    resetStreamsHttpFallbackCounts();
+    let headCalls = 0;
+    const releaseHead = Promise.withResolvers<void>();
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('probe-once-stream') && (init?.method ?? 'GET') === 'HEAD') {
+        headCalls += 1;
+        await releaseHead.promise;
+        return new Response(null, {
+          status: 200,
+          headers: {
+            'Stream-Next-Offset': '00000000000000000100',
+            'Stream-Snapshot-Offset': '00000000000000000050',
+          },
+        });
+      }
+      return originalFetch(input, init);
+    });
+
+    const owner = {};
+    const targetUrl = 'https://streams.example.test/ds/bucket/probe-once-stream';
+    const baseCursor = {
+      streamUrl: targetUrl,
+      nextOffset: '00000000000000000000',
+      serverLowerBoundVersion: {},
+      updatedAtMs: 1,
+    };
+    const wrapped = createWorkspaceStreamsTransportAdapter(
+      (persistence) => ({
+        persistence,
+        joinFlockDocRoom: vi.fn(),
+        syncFlockDoc: vi.fn(),
+      }),
+      {
+        owner,
+        auth: 'token',
+        persistence: {
+          storageFor: vi.fn() as never,
+          cursorStoreFor: () => ({
+            load: async () => baseCursor,
+            save: async () => {},
+            delete: async () => {},
+          }),
+        },
+      }
+    ) as unknown as {
+      persistence: {
+        cursorStoreFor: (target: unknown) => { load: (url: string) => Promise<unknown> };
+      };
+    };
+
+    const store = wrapped.persistence.cursorStoreFor({
+      kind: 'flock',
+      flock: { version: () => ({}) },
+    });
+    const first = store.load(targetUrl);
+    const second = store.load(targetUrl);
+    await vi.waitFor(() => expect(headCalls).toBe(1));
+    releaseHead.resolve();
+    await Promise.all([first, second]);
+
+    await store.load(targetUrl);
+    await wrapped.persistence
+      .cursorStoreFor({ kind: 'flock', flock: { version: () => ({}) } })
+      .load(targetUrl);
+    expect(headCalls).toBe(1);
+    expect(getStreamsHttpFallbackCounts()['snapshot-probe']).toBe(1);
+  });
+
+  it('retries snapshotIsCheaper probe after inconclusive HEAD errors and caches once 200 settles', async () => {
+    resetStreamsHttpFallbackCounts();
+    let headCalls = 0;
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('probe-retry-stream') && (init?.method ?? 'GET') === 'HEAD') {
+        headCalls += 1;
+        if (headCalls === 1) {
+          return new Response(null, { status: 503 });
+        }
+        return new Response(null, {
+          status: 200,
+          headers: {
+            'Stream-Next-Offset': '00000000000000000100',
+            'Stream-Snapshot-Offset': '00000000000000000050',
+          },
+        });
+      }
+      return originalFetch(input, init);
+    });
+
+    const owner = {};
+    const targetUrl = 'https://streams.example.test/ds/bucket/probe-retry-stream';
+    const baseCursor = {
+      streamUrl: targetUrl,
+      nextOffset: '00000000000000000000',
+      serverLowerBoundVersion: {},
+      updatedAtMs: 1,
+    };
+    const wrapped = createWorkspaceStreamsTransportAdapter(
+      (persistence) => ({
+        persistence,
+        joinFlockDocRoom: vi.fn(),
+        syncFlockDoc: vi.fn(),
+      }),
+      {
+        owner,
+        auth: 'token',
+        persistence: {
+          storageFor: vi.fn() as never,
+          cursorStoreFor: () => ({
+            load: async () => baseCursor,
+            save: async () => {},
+            delete: async () => {},
+          }),
+        },
+      }
+    ) as unknown as {
+      persistence: {
+        cursorStoreFor: (target: unknown) => { load: (url: string) => Promise<unknown> };
+      };
+    };
+
+    const store = wrapped.persistence.cursorStoreFor({
+      kind: 'flock',
+      flock: { version: () => ({}) },
+    });
+
+    await expect(store.load(targetUrl)).resolves.toEqual(baseCursor);
+    expect(headCalls).toBe(1);
+
+    await expect(store.load(targetUrl)).resolves.toEqual(baseCursor);
+    expect(headCalls).toBe(2);
+
+    await expect(store.load(targetUrl)).resolves.toEqual(baseCursor);
+    expect(headCalls).toBe(2);
+    expect(getStreamsHttpFallbackCounts()['snapshot-probe']).toBe(2);
+  });
 });

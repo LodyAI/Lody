@@ -216,6 +216,17 @@ vi.mock('loro-repo/transport/streams', () => ({
   },
 }));
 
+vi.mock('@loro-dev/streams-crdt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-crdt')>();
+  return {
+    ...actual,
+    StreamsCrdt: class StreamsCrdt {
+      createStream = vi.fn(async () => ({ ok: true }));
+      close = vi.fn(async () => {});
+    },
+  };
+});
+
 vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();
   return {

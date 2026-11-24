@@ -5,7 +5,8 @@ import {
   getSessionRoomId,
   type MachineId,
   type SessionId,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { createE2eeContent } from '../src/providers/desktop-e2ee-content';
@@ -214,6 +215,17 @@ vi.mock('loro-repo/transport/streams', () => ({
     });
   },
 }));
+
+vi.mock('@loro-dev/streams-crdt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-crdt')>();
+  return {
+    ...actual,
+    StreamsCrdt: class StreamsCrdt {
+      createStream = vi.fn(async () => ({ ok: true }));
+      close = vi.fn(async () => {});
+    },
+  };
+});
 
 vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();

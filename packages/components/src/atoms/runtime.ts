@@ -243,6 +243,7 @@ export type WorkspaceRuntime = {
   readonly localDataScope?: import('../lib/e2ee-local-data').E2eeLocalDataScope;
   readonly shortcutRole?: { get(): 'read' | 'write'; subscribe(listener: () => void): () => void };
   readonly cloudStreamsEnabled?: boolean;
+  readonly streamsWebSocketEnabled?: boolean;
   readonly getWorkspaceStreamsGrant?: (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;

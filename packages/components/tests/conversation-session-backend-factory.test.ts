@@ -256,6 +256,11 @@ describe('createConversationSession backend seam', () => {
       baseUrl: 'https://streams.example.com',
       fetchImpl: async (input, init) => {
         const url = new URL(input);
+        if (init?.method === 'PUT')
+          return new Response(null, {
+            status: 201,
+            headers: { 'Content-Type': 'application/json', 'Stream-Next-Offset': '0' },
+          });
         if (init?.method === 'HEAD')
           return new Response(null, {
             headers: { 'Content-Type': 'application/json', 'Stream-Next-Offset': '42' },

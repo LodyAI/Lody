@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { useAtomValue } from 'jotai';
 import type { LoroRepo } from 'loro-repo';
+import type { LoroStreamsWebSocketAuthContext } from '@lody/shared';
 import type { PromptShortcutRuntime, ShortcutRuntimeSnapshot } from '@lody/shared/prompt-shortcuts';
 import { getShortcutResourceStreamId } from '@lody/shared/prompt-shortcuts/access';
 import { usePlatform, usePlatformSession } from '@lody/platform/react';
@@ -119,6 +120,7 @@ export function PromptShortcutProvider({
   const streamsContent = workspaceRuntime?.streamsContent;
   const localDataScope = workspaceRuntime?.localDataScope;
   const waitForContentAdmission = workspaceRuntime?.waitForContentAdmission;
+  const workspaceGrantProvider = workspaceRuntime?.getWorkspaceStreamsGrant;
   const shortcutRole = workspaceRuntime?.shortcutRole;
   const canWrite =
     useSyncExternalStore(
@@ -126,6 +128,7 @@ export function PromptShortcutProvider({
       shortcutRole?.get ?? (() => (encrypted ? 'read' : 'write'))
     ) === 'write';
   const cloudSyncEnabled = cloud && workspaceRuntime?.cloudStreamsEnabled !== false;
+  const streamsWebSocketEnabled = workspaceRuntime?.streamsWebSocketEnabled === true;
   const legacyStatus = useLegacyWorkspaceQueryStatus(scope.workspaceId);
   const auth = useOptionalAuthenticatedConvex();
   const tokenSession = useRef({ userId, id: auth?.authSessionId ?? null });
@@ -155,7 +158,7 @@ export function PromptShortcutProvider({
     attempt,
     auth,
     authSessionId,
-    getWorkspaceStreamsGrant: workspaceRuntime?.getWorkspaceStreamsGrant,
+    getWorkspaceStreamsGrant: workspaceGrantProvider,
     shortcutRole,
   });
   current.current = {
@@ -166,7 +169,7 @@ export function PromptShortcutProvider({
     attempt,
     auth,
     authSessionId,
-    getWorkspaceStreamsGrant: workspaceRuntime?.getWorkspaceStreamsGrant,
+    getWorkspaceStreamsGrant: workspaceGrantProvider,
     shortcutRole,
   };
   const [generation, setGeneration] = useState(0);
@@ -249,6 +252,22 @@ export function PromptShortcutProvider({
         deferredPostHog.captureException(diagnostic.error, diagnostic.properties);
       },
     });
+    let lastWsToken: string | undefined;
+    const webSocketAuth = workspaceGrantProvider
+      ? async (context: LoroStreamsWebSocketAuthContext) => {
+          const priorToken = context.previousToken ?? lastWsToken;
+          let token = (
+            await workspaceGrantProvider({
+              forceRefresh: context.reason === 'reauth',
+            })
+          ).token;
+          if (context.reason === 'renew' && token === priorToken) {
+            token = (await workspaceGrantProvider({ forceRefresh: true })).token;
+          }
+          lastWsToken = token;
+          return token;
+        }
+      : undefined;
     const opening = (async () => {
       await previousClose;
       if (encrypted) await waitForContentAdmission?.();
@@ -276,6 +295,9 @@ export function PromptShortcutProvider({
             content: encrypted ? streamsContent! : { mode: 'plaintext' },
             canWrite: () => !encrypted || current.current.shortcutRole?.get() === 'write',
             repo,
+            workspaceId,
+            webSocketEnabled: streamsWebSocketEnabled,
+            webSocketAuth,
             now: Date.now,
             grant: async (resource, write, force) => {
               check();
@@ -395,6 +417,8 @@ export function PromptShortcutProvider({
     userId,
     authSessionId,
     cloudSyncEnabled,
+    streamsWebSocketEnabled,
+    workspaceGrantProvider,
     platform,
     generation,
     encrypted,

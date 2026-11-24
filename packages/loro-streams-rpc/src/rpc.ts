@@ -2447,6 +2447,8 @@ export class LoroStreamsRpcResponseDispatcher {
   private lastReportedTransport: LoroStreamsLiveTransport | undefined;
   private startedPromise: Promise<void> | null = null;
   private stopped = false;
+  private readonly shouldPrecreateResponseStream: boolean;
+  private responseStreamEnsured = false;
   private responseRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private responseRecoveryAtMs: number | undefined;
 
@@ -2464,8 +2466,11 @@ export class LoroStreamsRpcResponseDispatcher {
        * keep the stream client's static `liveMode`.
        */
       liveModePolicy?: LoroStreamsLiveModePolicy;
+      precreateResponseStream?: boolean;
     }
   ) {
+    this.shouldPrecreateResponseStream =
+      options.responseStreamId === undefined || options.precreateResponseStream === true;
     this.responseStreamId =
       options.responseStreamId ??
       `${getLoroWorkspaceRpcResponseStreamId(options.workspaceId)}:${crypto.randomUUID()}`;
@@ -2739,6 +2744,13 @@ export class LoroStreamsRpcResponseDispatcher {
       this.stopController.signal.addEventListener('abort', onStop, { once: true });
       this.currentReadController = readController;
       try {
+        if (this.shouldPrecreateResponseStream && !this.responseStreamEnsured) {
+          await this.options.streamClient.ensureJsonStream(
+            this.responseStreamId,
+            this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+          );
+          this.responseStreamEnsured = true;
+        }
         await this.options.streamClient.readJsonLive(
           this.responseStreamId,
           this.responseState,
@@ -3038,6 +3050,7 @@ export class LoroStreamsMachineRpcClient {
         retentionSeconds: options.retentionSeconds,
         logLabel: options.machineId,
         trace: options.trace,
+        precreateResponseStream: options.streamClient !== undefined,
       });
     this.ownsResponseDispatcher = options.responseDispatcher === undefined;
   }
