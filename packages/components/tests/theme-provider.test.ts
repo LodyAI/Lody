@@ -10,7 +10,7 @@ import {
   useTheme,
 } from '../src/theme-provider';
 
-// The app now ships exactly two themes, pinned by the provider.
+import { activatePluginTheme, createPluginAppearance } from '../src/plugins/appearance';
 const FIXED_LIGHT_THEME_ID = 'lody-light';
 const FIXED_DARK_THEME_ID = 'vesper';
 
@@ -135,6 +135,61 @@ describe('ThemeProvider', () => {
       Object.defineProperty(window, 'matchMedia', originalMatchMediaDescriptor);
     } else {
       Reflect.deleteProperty(window, 'matchMedia');
+    }
+  });
+
+  it('restores the host palette and removes managed styles after every plugin replacement', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    flushSync(() =>
+      root?.render(
+        React.createElement(ThemeProvider, {
+          defaultTheme: 'light',
+          children: React.createElement(ThemeProbe),
+        })
+      )
+    );
+    const key = { workspaceId: 'w', sourceKey: 'machine:m', pluginId: 'example' };
+    const spec = {
+      id: 'saffron',
+      label: 'Saffron',
+      appearance: 'dark' as const,
+      seed: { bg: '#102030', fg: '#eeddaa', accent: '#fff' },
+      tokens: { radius: '12px' },
+    };
+    const manifest = {
+      id: 'example',
+      title: 'Example',
+      sdk: '^1.0.0' as const,
+      version: '1.0.0',
+      themes: [spec],
+      styles: ['panel.css'],
+    };
+    const rootStyle = document.documentElement.style;
+    const previousColor = rootStyle.getPropertyValue('--vscode-editor-background');
+    for (let n = 0; n < 20; n++) {
+      const owner = new AbortController();
+      try {
+        const appearance = createPluginAppearance(
+          key,
+          manifest,
+          () => new TextEncoder().encode('.panel { padding: 1em }'),
+          owner.signal
+        );
+        appearance.styles.add({ id: 'extra', css: '.extra {}' });
+        flushSync(() => activatePluginTheme(key, 'saffron'));
+        expect(rootStyle.getPropertyValue('--vscode-editor-background').toLowerCase()).toBe(
+          '#102030'
+        );
+        expect(rootStyle.getPropertyValue('--radius')).toBe('12px');
+        expect(document.querySelectorAll('style[data-lody-plugin="example"]')).toHaveLength(2);
+      } finally {
+        flushSync(() => owner.abort());
+      }
+      expect(document.querySelectorAll('style[data-lody-plugin="example"]')).toHaveLength(0);
+      expect(rootStyle.getPropertyValue('--vscode-editor-background')).toBe(previousColor);
+      expect(rootStyle.getPropertyValue('--radius')).not.toBe('12px');
     }
   });
 
