@@ -10,23 +10,10 @@ import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } 
 import { Button } from '@lody/ui/button';
 import { button } from '@lody/ui/button/button.tokens.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { Kbd } from '@lody/ui/kbd';
-import {
-  commands,
-  composerScopedKeybindings,
-  formatKeyBinding,
-  getCommandKeybindings,
-  useCommand,
-  useCommands,
-} from '@/lib/commands';
-
 import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeSpace } from '../../style/theme-scale.stylex';
-
-
-
 
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
 export interface AttachmentAddMenuMcp {
@@ -55,11 +42,7 @@ export interface AttachmentAddMenuProps {
   scheduleDisabledReason?: string;
   /** Omit (or pass an empty catalog) to hide the MCP entry entirely. */
   mcp?: AttachmentAddMenuMcp;
-  /** Register the `session.openAddMenu` command only while this surface owns
-   *  the composer's shortcuts (hidden retained panes pass `false`). */
-  commandsEnabled?: boolean;
 }
-
 
 const enterFromRight = stylex.keyframes({
   from: { opacity: 0, transform: 'translate3d(0.5rem, 0, 0)' },
@@ -71,7 +54,6 @@ const enterFromLeft = stylex.keyframes({
 });
 
 const styles = stylex.create({
-  tooltipRow: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
   trigger: {
     [button.ghostHover]: popup.highlight,
     backgroundColor: {
@@ -184,7 +166,6 @@ export function AttachmentAddMenu({
   onScheduleSend,
   scheduleDisabledReason,
   mcp,
-  commandsEnabled = true,
 }: AttachmentAddMenuProps) {
   const scheduleFeatureReason = useWorkspaceFeatureReason('schedules');
   const attachmentFeatureReason = useWorkspaceFeatureReason('attachments');
@@ -196,33 +177,11 @@ export function AttachmentAddMenu({
   // keyboard returns instead), so choosing the picker skips the composer
   // focus restore every other selection gets.
   const filePickerOpenedRef = useRef(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const triggerLabel = t('sessions.addAttachmentMenu', 'Add attachment');
 
   const mcpServers = mcp?.servers ?? [];
   const hasMcp = mcpServers.length > 0;
-  const hasMenuContent = Boolean(onAddAttachment || hasMcp || onScheduleSend);
-
-  useCommands();
-  const openAddMenuKey = commands.getKeybindingsFor('session.openAddMenu')[0];
-
-  useCommand(
-    {
-      id: 'session.openAddMenu',
-      titleKey: 'commands.session.openAddMenu',
-      title: t('commands.session.openAddMenu', 'Open Composer + Menu'),
-      category: 'Session',
-      keybindings: composerScopedKeybindings(
-        getCommandKeybindings('session.openAddMenu'),
-        () => triggerRef.current
-      ),
-      when: () => hasMenuContent && !disabled,
-      run: () => setOpen(true),
-    },
-    commandsEnabled
-  );
-
-  if (!hasMenuContent) {
+  if (!onAddAttachment && !hasMcp && !onScheduleSend) {
     return null;
   }
 
@@ -280,44 +239,35 @@ export function AttachmentAddMenu({
         if (!nextOpen) setView('root');
       }}
     >
-      <Tooltip.Root>
-        <Tooltip.Trigger
-          delay={500}
-          render={
-            <Menu.Trigger
-              ref={triggerRef}
-              render={
-                <Button
-                  type="button"
-                  variant={isSheet ? 'secondary' : 'ghost'}
-                  icon
-                  disabled={disabled}
-                  aria-label={triggerLabel}
-                  width={triggerSize} height={triggerSize} xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
-                >
-                  <Plus strokeWidth={1.5} className={plusClassName} />
-                </Button>
-              }
-            >
-              <Button
-                type="button"
-                variant={isSheet ? 'secondary' : 'ghost'}
-                icon
-                disabled={disabled}
-                aria-label={triggerLabel}
-                width={triggerSize} height={triggerSize} xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
-              >
-                <Plus strokeWidth={1.5} className={plusClassName} />
-              </Button>
-            </Menu.Trigger>
-          }
-        />
-        <Tooltip.Content side="top" {...stylex.props(styles.tooltipRow)}>
-          <span>{triggerLabel}</span>
-          {openAddMenuKey ? <Kbd>{formatKeyBinding(openAddMenuKey)}</Kbd> : null}
-        </Tooltip.Content>
-      </Tooltip.Root>
-
+      <Menu.Trigger
+        render={
+          <Button
+            type="button"
+            variant={isSheet ? 'secondary' : 'ghost'}
+            icon
+            disabled={disabled}
+            aria-label={triggerLabel}
+            width={triggerSize}
+            height={triggerSize}
+            xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
+          >
+            <Plus strokeWidth={1.5} className={plusClassName} />
+          </Button>
+        }
+      >
+        <Button
+          type="button"
+          variant={isSheet ? 'secondary' : 'ghost'}
+          icon
+          disabled={disabled}
+          aria-label={triggerLabel}
+          width={triggerSize}
+          height={triggerSize}
+          xstyle={[styles.trigger, isSheet && styles.sheetTrigger]}
+        >
+          <Plus strokeWidth={1.5} className={plusClassName} />
+        </Button>
+      </Menu.Trigger>
       <Menu.Content
         align="start"
         side="top"
@@ -394,11 +344,7 @@ export function AttachmentAddMenu({
                         trigger is the last row of a menu that opens upward;
                         `start` (the submenu default) hangs the description and
                         the footnote down onto the model row. */}
-                    <Menu.Content
-                      align="end"
-                      sideOffset={8}
-                      xstyle={styles.mcpContent}
-                    >
+                    <Menu.Content align="end" sideOffset={8} xstyle={styles.mcpContent}>
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
                     </Menu.Content>
                   </Menu.Submenu>
