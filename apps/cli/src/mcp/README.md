@@ -20,7 +20,11 @@ Selected HTTP servers receive per-runtime loopback connections. Agents get a loc
 capability rather than upstream credentials; Linux also verifies socket ownership.
 Unlike the built-in Lody MCP host, this relay preserves upstream GET/SSE streaming.
 It forwards only MCP protocol headers, rejects redirects, bounds requests/queues,
-and sanitizes failures. Session retirement and sign-out close these connections.
+and sanitizes failures. A runtime reuses its connection only for the same resolved
+URL and headers, and always reports the current server name; a changed target gets a
+new connection, and runtime release closes them all. Session retirement closes these
+connections; local configure and sign-out close only the CLI account's own, so
+another account's relay, which never carries those credentials, stays open.
 Stdio credentials go only to the selected local process environment. A requester
 change retires an MCP-bearing Session before another user can reuse its processes.
 

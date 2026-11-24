@@ -4,7 +4,12 @@ import { Effect, ManagedRuntime } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { McpAuthenticationLegacy } from './legacy';
 import type { WorkspaceMcpServerMeta } from '@lody/shared';
-import { McpAuthentication, mcpAuthenticationLayer, type McpCredentialStore } from './service';
+import {
+  McpAuthentication,
+  McpAuthenticationError,
+  mcpAuthenticationLayer,
+  type McpCredentialStore,
+} from './service';
 import {
   boundedMcpFetch,
   makeMcpAuthenticationIO,
@@ -36,9 +41,12 @@ function fixture() {
   const callbackWaiting = Promise.withResolvers<void>();
   const remoteHeaders: Headers[] = [];
   const refreshed = new Set<string>();
+  const credentialChanges: string[] = [];
   let offer: ((job: McpRelayRequest) => boolean) | undefined;
   let closedCallbacks = 0;
   let closedRelays = 0;
+  let vaultAvailable = true;
+  const unavailable = () => new McpAuthenticationError({ reason: 'storage_unavailable' });
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     expect(init?.redirect).toBe('error');
@@ -91,14 +99,18 @@ function fixture() {
   const store: McpCredentialStore = {
     read: (key) => Effect.sync(() => records.get(key)),
     write: (key, value) =>
-      Effect.sync(() => {
-        records.set(key, value);
-        saved.resolve();
-      }),
+      vaultAvailable
+        ? Effect.sync(() => {
+            records.set(key, value);
+            saved.resolve();
+          })
+        : Effect.fail(unavailable()),
     remove: (key) =>
-      Effect.sync(() => {
-        records.delete(key);
-      }),
+      vaultAvailable
+        ? Effect.sync(() => {
+            records.delete(key);
+          })
+        : Effect.fail(unavailable()),
   };
   const io = {
     ...makeMcpAuthenticationIO(fetcher),
@@ -131,7 +143,13 @@ function fixture() {
     },
   };
   const runtime = ManagedRuntime.make(
-    mcpAuthenticationLayer({ namespace: 'owner/machine/workspace', userId: 'owner', store, io })
+    mcpAuthenticationLayer({
+      namespace: 'owner/machine/workspace',
+      userId: 'owner',
+      store,
+      io,
+      onCredentialsChanged: (serverId) => credentialChanges.push(serverId),
+    })
   );
   const run = <A>(f: (service: McpAuthentication['Service']) => Effect.Effect<A, unknown>) =>
     runtime.runPromise(Effect.flatMap(McpAuthentication, f));
@@ -153,6 +171,7 @@ function fixture() {
     callbackWaiting,
     remoteHeaders,
     refreshed,
+    credentialChanges,
     store,
     io,
     runtime,
@@ -160,6 +179,9 @@ function fixture() {
     grant,
     closedCallbacks: () => closedCallbacks,
     closedRelays: () => closedRelays,
+    setVaultAvailable: (available: boolean) => {
+      vaultAvailable = available;
+    },
     offer: (job: McpRelayRequest) => offer?.(job),
   };
 }
@@ -211,6 +233,43 @@ describe('local MCP authentication', () => {
       expect(f.remoteHeaders).toEqual([]);
     } finally {
       vi.unstubAllEnvs();
+      await facade.close();
+      await f.runtime.dispose();
+    }
+  });
+  it('advances the in-memory credential revision only when local credentials change', async () => {
+    const f = fixture();
+    const facade = new McpAuthenticationLegacy({
+      machineId: 'machine',
+      workspaceId: 'workspace',
+      userId: 'owner',
+      store: f.store,
+      io: f.io,
+    });
+    const send = (action: 'configure' | 'signout' | 'status') =>
+      facade.request({
+        machineId: 'machine',
+        workspaceId: 'workspace',
+        method: 'mcp/authentication',
+        params: {
+          server: entry,
+          requesterUserId: 'owner',
+          action,
+          ...(action === 'configure'
+            ? { authentication: { mode: 'manual' as const, bearerToken: 'private-token' } }
+            : {}),
+        },
+      });
+    try {
+      expect(facade.getAuthRevision(entry.id)).toBe(0);
+      await send('configure');
+      expect(facade.getAuthRevision(entry.id)).toBe(1);
+      await send('status');
+      expect(facade.getAuthRevision(entry.id)).toBe(1);
+      await send('signout');
+      expect(facade.getAuthRevision(entry.id)).toBe(2);
+      expect(facade.getAuthRevision('other-server')).toBe(0);
+    } finally {
       await facade.close();
       await f.runtime.dispose();
     }
@@ -283,6 +342,8 @@ describe('local MCP authentication', () => {
       expect(
         [...f.records.values()].map((value) => JSON.parse(value).tokens.refresh_token)
       ).toEqual(['rotated-refresh']);
+      // Only the completed sign-in changes what a session mounts; refreshes keep it.
+      expect(f.credentialChanges).toEqual([entry.id]);
       expect(await f.run((service) => service.status(entry))).toMatchObject({
         status: 'authorized',
         hasCredentials: true,
@@ -433,9 +494,11 @@ describe('local MCP authentication', () => {
       expect(Buffer.concat(chunks).toString()).toContain('synthetic_tool');
       expect(f.remoteHeaders[0]?.get('authorization')).toBe('Bearer private-token');
       expect(f.remoteHeaders[0]?.get('cookie')).toBeNull();
+      expect(f.credentialChanges).toEqual([entry.id]);
       await f.run((service) => service.signout(entry));
       expect(f.closedRelays()).toBe(1);
       expect(f.records.size).toBe(0);
+      expect(f.credentialChanges.length).toBeGreaterThan(1);
       await f.run((service) => service.release('session-instance'));
       await expect(
         f.run((service) => service.prepare(entry, resolved, 'session-instance', 'owner'))
@@ -444,6 +507,124 @@ describe('local MCP authentication', () => {
       await f.runtime.dispose();
     }
   });
+
+  it.each(['configure', 'signout'] as const)(
+    'outdates mounted sessions when %s closes their relay but the vault write fails',
+    async (action) => {
+      const f = fixture();
+      const resolved = {
+        type: 'http' as const,
+        name: entry.name,
+        url: 'https://resource.example/mcp',
+        headers: [],
+      };
+      try {
+        await f.run((service) =>
+          service.configure(entry, { mode: 'manual', bearerToken: 'private-token' })
+        );
+        await f.run((service) => service.prepare(entry, resolved, 'session-instance', 'owner'));
+        const before = f.credentialChanges.length;
+        f.setVaultAvailable(false);
+        await expect(
+          f.run((service) =>
+            action === 'configure'
+              ? service.configure(entry, { mode: 'manual', bearerToken: 'rotated-token' })
+              : service.signout(entry)
+          )
+        ).rejects.toThrow('storage_unavailable');
+        expect(f.closedRelays()).toBe(1);
+        expect(f.credentialChanges.slice(before)).toEqual([entry.id]);
+        await expect(
+          f.run((service) => service.configure(entry, { mode: 'manual', bearerToken: 'again' }))
+        ).rejects.toThrow('storage_unavailable');
+        expect(f.credentialChanges.slice(before)).toEqual([entry.id]);
+      } finally {
+        await f.runtime.dispose();
+      }
+    }
+  );
+
+  const forward = async (f: ReturnType<typeof fixture>) => {
+    const request = Object.assign(Readable.from(['{}']), {
+      method: 'POST',
+      headers: { authorization: 'Bearer session-capability', 'content-type': 'application/json' },
+    }) as unknown as IncomingMessage;
+    const response = Object.assign(new PassThrough(), {
+      headersSent: false,
+      writeHead: () => response,
+    }) as unknown as ServerResponse;
+    response.resume();
+    const finished = Promise.withResolvers<void>();
+    response.once('finish', () => finished.resolve());
+    expect(f.offer({ request, response })).toBe(true);
+    await finished.promise;
+    return f.remoteHeaders.at(-1);
+  };
+
+  it('reports the current name and forwards the current headers from a reused relay', async () => {
+    const f = fixture();
+    const relay = vi.spyOn(f.io, 'relay');
+    const remote = {
+      ...entry,
+      connection: { transport: 'http' as const, url: entry.connection!.url! },
+    };
+    const resolved = (name: string, value: string) => ({
+      type: 'http' as const,
+      name,
+      url: 'https://resource.example/mcp',
+      headers: [{ name: 'x-api-key', value }],
+    });
+    try {
+      const prepare = (name: string, value: string) =>
+        f.run((service) =>
+          service.prepare({ ...remote, name }, resolved(name, value), 'session-instance', 'owner')
+        );
+      expect(await prepare('Before', 'key-1')).toMatchObject({ name: 'Before' });
+      expect(await prepare('After', 'key-1')).toMatchObject({ name: 'After' });
+      expect(relay).toHaveBeenCalledTimes(1);
+      expect(await prepare('After', 'key-2')).toMatchObject({ name: 'After' });
+      expect(relay).toHaveBeenCalledTimes(2);
+      expect((await forward(f))?.get('x-api-key')).toBe('key-2');
+      await f.run((service) => service.release('session-instance'));
+      expect(f.closedRelays()).toBe(2);
+    } finally {
+      await f.runtime.dispose();
+    }
+  });
+
+  it.each(['signout', 'configure'] as const)(
+    "keeps another account's relay open when the owner runs %s",
+    async (action) => {
+      const f = fixture();
+      const remote = {
+        ...entry,
+        connection: { transport: 'http' as const, url: entry.connection!.url! },
+      };
+      const resolved = {
+        type: 'http' as const,
+        name: remote.name,
+        url: 'https://resource.example/mcp',
+        headers: [],
+      };
+      try {
+        await f.run((service) => service.prepare(remote, resolved, 'owner-session', 'owner'));
+        await f.run((service) => service.prepare(remote, resolved, 'member-session', 'member'));
+        const before = f.credentialChanges.length;
+        await f.run((service) =>
+          action === 'signout'
+            ? service.signout(remote)
+            : service.configure(remote, { mode: 'manual', bearerToken: 'private-token' })
+        );
+        expect(f.closedRelays()).toBe(1);
+        expect(f.credentialChanges.length).toBeGreaterThan(before);
+        const viaLastCreatedMemberRelay = await forward(f);
+        expect(viaLastCreatedMemberRelay).toBeDefined();
+        expect(viaLastCreatedMemberRelay?.get('authorization')).toBeNull();
+      } finally {
+        await f.runtime.dispose();
+      }
+    }
+  );
 
   it('refuses credential-bearing redirects and insecure authorization endpoints', async () => {
     const visited: string[] = [];

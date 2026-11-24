@@ -49,6 +49,8 @@ export class McpAuthenticationLegacy {
   private readonly userId: string;
   private readonly io: McpAuthenticationIO;
   private readonly owner;
+  /** Process-local credential generations; they only decide whether a mounted ACP is stale. */
+  private readonly authRevisions = new Map<string, number>();
   constructor(options: {
     machineId: string;
     workspaceId: string;
@@ -64,6 +66,8 @@ export class McpAuthenticationLegacy {
         userId: options.userId,
         store: options.store ?? systemMcpCredentialStore(),
         io: this.io,
+        onCredentialsChanged: (serverId) =>
+          this.authRevisions.set(serverId, this.getAuthRevision(serverId) + 1),
       }),
       { recover: (cause) => Effect.failCause(cause), project: (cause) => Cause.squash(cause) }
     );
@@ -103,6 +107,9 @@ export class McpAuthenticationLegacy {
     if (!normalized.connection) throw new Error('MCP connection transport mismatch.');
     assertPublicMcpServer(normalized);
     return normalized;
+  }
+  getAuthRevision(serverId: string): number {
+    return this.authRevisions.get(serverId) ?? 0;
   }
   status(server: WorkspaceMcpServerMeta) {
     return this.run((service) => service.status(this.connectionTarget(server)));

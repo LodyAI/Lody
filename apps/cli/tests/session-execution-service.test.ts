@@ -980,10 +980,14 @@ describe('SessionExecutionService', () => {
     { selection: 'model', configPolicy: 'active' },
     { selection: 'MCP', configPolicy: 'active' },
     { selection: 'MCP', configPolicy: 'apply' },
+    { selection: 'MCP configuration', configPolicy: 'apply' },
   ] as const)(
     'promotes steer with changed $selection under $configPolicy policy',
     async ({ selection, configPolicy }) => {
       const upsertDocMeta = vi.fn(async () => {});
+      const editedConfiguration = selection === 'MCP configuration';
+      const mountedMcp = editedConfiguration ? ['server-a' as McpServerId] : [];
+      let currentMcpConfiguration = 'http-config';
       const deps = createBaseDeps({
         workspaceDocument: {
           repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
@@ -997,6 +1001,11 @@ describe('SessionExecutionService', () => {
       const findSteerConfigMismatch = vi.fn(() =>
         selection === 'model' ? 'model requested gpt-next, active gpt-current' : null
       );
+      Object.assign(deps.sessionManager, {
+        readMcpConfigurationFingerprint: async () => currentMcpConfiguration,
+        readMcpAuthRevisions: (ids: readonly string[]) =>
+          Object.fromEntries(ids.map((id) => [id, 0])),
+      });
       const runtime = {
         sessionId,
         turnId: 'assistant:user-1',
@@ -1009,8 +1018,11 @@ describe('SessionExecutionService', () => {
               configPolicy,
             })),
             findSteerConfigMismatch,
+            isCreated: () => true,
           },
           acpSessionId: 'acp-codex-steer-config' as ACPSessionId,
+          getMcpServerIds: () => mountedMcp,
+          getMcpMount: () => ({ fingerprint: 'stdio-config', authRevisions: {} }),
         },
         promptInFlight: true,
       };
@@ -1048,6 +1060,7 @@ describe('SessionExecutionService', () => {
       expect(deps.beginConversationTurn).not.toHaveBeenCalled();
 
       findSteerConfigMismatch.mockReturnValue(null);
+      currentMcpConfiguration = 'stdio-config';
       await expect(
         service.steerSession({
           sessionId,
@@ -1055,7 +1068,7 @@ describe('SessionExecutionService', () => {
           userTurnId: 'user-3',
           userId: 'user-1',
           timestamp: '2026-07-11T00:00:01.000Z',
-          inputConfig: { prompt: 'same configuration' },
+          inputConfig: { prompt: 'same configuration', mcpServerIds: mountedMcp },
         })
       ).resolves.toMatchObject({ applied: false, disposition: 'busy' });
       // Neither guide reached Codex, so both are handed back to dispatch instead
@@ -1161,6 +1174,148 @@ describe('SessionExecutionService', () => {
       );
       expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
       expect(deps.beginConversationTurn).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { ending: 'the prompt finishes', settles: 'promoted' },
+    { ending: 'Stop promotes pending input', settles: 'promoted' },
+    { ending: 'Stop preserves pending input', settles: 'preserved' },
+    { ending: 'Stop preserves before a changed MCP check returns', settles: 'preserved' },
+  ] as const)(
+    'settles a steer whose MCP configuration check outlives the turn when $ending',
+    async ({ ending, settles }) => {
+      let history: SessionHistoryInput[] = [
+        { id: 'user-1', role: 'user', status: 'handled', read: true } as SessionHistoryInput,
+        {
+          id: 'user-2',
+          role: 'user',
+          status: 'pending_apply',
+          read: false,
+          inputConfig: { prompt: 'do it differently' },
+        } as SessionHistoryInput,
+      ];
+      let lastOperation: unknown;
+      const sessionDoc = withHistoryPort({
+        setSteerOperationRecord: vi.fn(async (_operationId: string, record: unknown) => {
+          lastOperation = record;
+        }),
+        updateHistory: vi.fn(
+          async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+            history = update(history);
+          }
+        ),
+      });
+      const upsertDocMeta = vi.fn(async () => {});
+      const steerPrompt = vi.fn();
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        } as unknown as LoroDocumentManager,
+      });
+      const checkStarted = createDeferred<void>();
+      const catalogRead = createDeferred<string>();
+      Object.assign(deps.sessionManager, {
+        readMcpConfigurationFingerprint: () => {
+          checkStarted.resolve();
+          return catalogRead.promise;
+        },
+        readMcpAuthRevisions: (ids: readonly string[]) =>
+          Object.fromEntries(ids.map((id) => [id, 0])),
+      });
+      const service = new SessionExecutionService(deps);
+      const sessionId = 'session-steer-mcp-check' as SessionId;
+      const runtime: {
+        sessionId: SessionId;
+        turnId: string;
+        userTurnId: string;
+        session: unknown;
+        promptInFlight: boolean;
+        activePromptRun: { turnId: string };
+        cancelRequested: boolean;
+        pendingInputOnCancel: 'preserve' | 'promote';
+        steerWaitController?: AbortController;
+      } = {
+        sessionId,
+        turnId: 'assistant:user-1',
+        userTurnId: 'user-1',
+        session: {
+          agentClient: {
+            isCreated: vi.fn(() => true),
+            cancel: vi.fn(async () => {}),
+            pendingPromptCompletion: null,
+            getAcknowledgedSteerCapability: vi.fn(() => ({
+              provider: 'codex',
+              appliedNotificationMethod: 'codex/steerApplied',
+              upstreamTurn: 'same',
+              configPolicy: 'apply',
+            })),
+            findSteerConfigMismatch: vi.fn(() => null),
+            steerPrompt,
+          },
+          acpSessionId: 'acp-steer-mcp-check' as ACPSessionId,
+          getMcpServerIds: () => ['server-a'],
+          getMcpMount: () => ({ fingerprint: 'config-a', authRevisions: {} }),
+        },
+        promptInFlight: true,
+        activePromptRun: { turnId: 'assistant:user-1' },
+        cancelRequested: false,
+        pendingInputOnCancel: 'preserve',
+      };
+      (
+        service as unknown as { turnRuntimeBySession: Map<SessionId, typeof runtime> }
+      ).turnRuntimeBySession.set(sessionId, runtime);
+
+      const steering = service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-1',
+        userTurnId: 'user-2',
+        userId: 'user-1',
+        timestamp: '2026-11-25T00:00:00.000Z',
+        inputConfig: { prompt: 'do it differently', mcpServerIds: ['server-a' as McpServerId] },
+      });
+      await checkStarted.promise;
+      if (ending === 'the prompt finishes') {
+        runtime.promptInFlight = false;
+        runtime.steerWaitController?.abort();
+      } else if (ending === 'Stop preserves before a changed MCP check returns') {
+        runtime.cancelRequested = true;
+        catalogRead.resolve('config-b');
+      } else {
+        await service.cancelSession(
+          {
+            type: 'session/cancel',
+            sessionId,
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1' as WorkspaceId,
+            turnId: 'assistant:user-1',
+          },
+          { pendingInput: ending === 'Stop promotes pending input' ? 'promote' : 'preserve' }
+        );
+      }
+
+      const response = await steering;
+      expect(response).toMatchObject({ applied: false, recoveryOwned: true });
+      expect(steerPrompt).not.toHaveBeenCalled();
+      if (settles === 'promoted') {
+        expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
+          status: 'pending',
+        });
+        expect(upsertDocMeta).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ steerTurnStatuses: { 'user-2': 'pending' } })
+        );
+      } else {
+        expect(response.disposition).toBe('stale-turn');
+        expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
+          status: 'pending_apply',
+        });
+        expect(lastOperation).toMatchObject({
+          delivery: 'not_applied',
+          cancellationPolicy: 'preserve',
+        });
+      }
     }
   );
 

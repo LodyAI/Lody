@@ -22,6 +22,7 @@ import { Logger } from '@/utils/logger';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import * as fs from 'fs';
 import type { AcpStartupTimeoutOptions, AgentClient } from '@/agent/agent-client';
+import type { SessionMcpMount } from '@/agent/session-mcp-resolver';
 import { createAcpClient, prepareAcpProcessEnvironmentLegacy } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
 import {
@@ -132,6 +133,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   readonly sessionId: SessionId;
   private readonly config: SessionConfig;
+  /** In-memory identity of the mounted workspace MCP servers; never persisted or logged. */
+  private mcpMount: SessionMcpMount | undefined;
   private readonly logger: Logger;
   private fixedWorkdir?: string;
   private status: SessionStatus['status'] = 'created';
@@ -502,6 +505,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return [...this.config.mcpServerIds];
   }
 
+  getMcpMount(): SessionMcpMount | undefined {
+    return this.mcpMount;
+  }
+
   getMemoryBinding(): SessionConfig['memory'] {
     return this.config.memory;
   }
@@ -847,6 +854,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           },
           onAgentWarning: callbacks.onAgentWarning,
           loadExternalMcpServers: callbacks.loadExternalMcpServers,
+          onExternalMcpServersMounted: (mount) => {
+            this.mcpMount = mount;
+          },
           onImageGenerationBegin: callbacks.onImageGenerationBegin,
           onImageGenerationEnd: callbacks.onImageGenerationEnd,
           onWriteTextFile: callbacks.onWriteTextFile,

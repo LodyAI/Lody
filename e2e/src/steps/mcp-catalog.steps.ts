@@ -30,3 +30,24 @@ Then('目录项已删除且已完成 Turn 的 MCP 启动选择保持不变', asy
   await this.mcpPage!.deleteSessionAndReleaseAgent(this.mcpSessionEvent!);
   await this.harness!.capturePostGcSnapshot();
 });
+
+When('用户编辑该已选中的 MCP 服务器配置', async function (this: LodyWorld) {
+  await this.mcpPage!.editSyntheticServerConfiguration();
+});
+
+When('用户在同一 Session 发送后续 Turn', async function (this: LodyWorld) {
+  this.mcpFollowUpSessionEvent = await this.mcpPage!.sendFollowUpTurnInSameSession();
+});
+
+Then(
+  'bundled CLI 退役旧 ACP 并在新 ACP 启动时传入更新后的 MCP 配置',
+  async function (this: LodyWorld) {
+    await this.mcpPage!.expectReconfiguredServerAtNextAcpStartup(
+      this.mcpSessionEvent!,
+      this.mcpFollowUpSessionEvent!
+    );
+    await this.mcpPage!.deleteSyntheticServer(this.mcpFixture!.editedServerName);
+    await this.mcpPage!.deleteSessionAndReleaseAgent(this.mcpFollowUpSessionEvent!);
+    await this.harness!.capturePostGcSnapshot();
+  }
+);

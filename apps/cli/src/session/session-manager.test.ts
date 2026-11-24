@@ -34,6 +34,7 @@ import {
 } from './worktree/worktree-manager';
 import { createLocalCloudPort } from '@lody/platform';
 import * as codexProfiles from '../agent/codex-profile-store';
+import { sessionMcpAuthRevisionsChanged } from '../agent/session-mcp-resolver';
 
 vi.mock('./worktree/worktree-setup-runner', () => ({
   runWorktreeSetup: vi.fn(async () => undefined),
@@ -756,6 +757,39 @@ describe('SessionManager cleanup phases', () => {
     await manager.cleanUp();
     expect(events).toEqual(['session', 'mcp', 'workspace', 'broker']);
     expect(manager.getSession(sessionId)).toBeNull();
+  });
+});
+
+describe('SessionManager MCP credential revisions', () => {
+  it('lets only the CLI account observe local credential changes', () => {
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    let revision = 1;
+    Object.assign(manager, { mcpAuthentication: { getAuthRevision: () => revision } });
+    const ids = ['server-a' as McpServerId];
+    const mountFor = (userId: string) => ({
+      fingerprint: 'same-config',
+      authRevisions: manager.readMcpAuthRevisions(ids, userId),
+    });
+    const owner = mountFor('user-1');
+    const member = mountFor('member-1');
+    expect(owner.authRevisions).toEqual({ 'server-a': 1 });
+    revision = 2;
+    expect(sessionMcpAuthRevisionsChanged(owner, manager.readMcpAuthRevisions(ids, 'user-1'))).toBe(
+      true
+    );
+    expect(
+      sessionMcpAuthRevisionsChanged(member, manager.readMcpAuthRevisions(ids, 'member-1'))
+    ).toBe(false);
   });
 });
 
