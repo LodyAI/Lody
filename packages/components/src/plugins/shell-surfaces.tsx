@@ -44,6 +44,7 @@ type Slot = {
   kind: string;
   title?: string;
   machineId?: string;
+  pluginId?: string;
   render: (props: unknown, onCrash?: (stack: string) => void) => ReactNode;
 };
 let slots: Slot[] = [];
@@ -62,7 +63,8 @@ export function scopedSlots(
   bindings: ClientHostBindings,
   signal: AbortSignal,
   machineId?: string,
-  report?: (stack: string) => void
+  report?: (stack: string) => void,
+  pluginId?: string
 ) {
   const owned = new Set<Slot>();
   signal.addEventListener(
@@ -83,6 +85,7 @@ export function scopedSlots(
       source,
       workspaceId,
       machineId,
+      pluginId,
       key,
       kind,
       title,
@@ -108,7 +111,12 @@ export function scopedSlots(
 export function PluginRowDecorations(props: SessionRowSlotProps & { kind: string }) {
   return useSyncExternalStore(subscribe, snapshot, snapshot)
     .filter((s) => s.workspaceId === props.workspace.workspaceId && s.kind === props.kind)
-    .map((s) => s.render(props));
+    .map((s) => {
+      if (props.session.businessKey === undefined || s.pluginId === props.session.createdByPluginId)
+        return s.render(props);
+      const { businessKey: _, ...session } = props.session;
+      return s.render({ ...props, session });
+    });
 }
 export function PluginSidebar({
   workspaceId,

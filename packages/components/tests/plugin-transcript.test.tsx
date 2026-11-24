@@ -121,3 +121,79 @@ it('restores the native tool row when a winning matcher crashes and reveals the 
     high.abort();
   }
 });
+
+it('keeps raw identity isolated, secrets absent and selection stable across unrelated updates', async () => {
+  const { snapshotBindings } = await import('../src/plugins/raw-snapshots');
+  const scope = new AbortController();
+  let update = () => {},
+    reads = 0;
+  const raw = {
+    createdByPluginId: 'owner',
+    businessKey: 'job',
+    title: 'a',
+    nested: {
+      authorization: 'private',
+      client_secret: 'private',
+      businessKey: 'fake',
+      createdByPluginId: 'foreign',
+    },
+  };
+  const source = {
+    identity: () => [raw],
+    async open(_target: unknown, notify: () => void) {
+      update = notify;
+      return {
+        identity: [raw],
+        read() {
+          reads++;
+          return raw;
+        },
+      };
+    },
+  };
+  const bindings = snapshotBindings(
+    'w',
+    'foreign',
+    scope.signal,
+    () => source,
+    () => () => {}
+  );
+  const target = {
+    kind: 'session-meta',
+    session: { workspaceId: 'w', machineId: 'm', sessionId: 's' },
+  } as import('@lody/plugin-sdk').RawSnapshotTarget;
+  expect(reads).toBe(0);
+  const snap = await bindings.readSnapshot(target);
+  expect(snap.doc).not.toHaveProperty('businessKey');
+  expect(snap.doc.nested).toEqual({ createdByPluginId: 'foreign' });
+  expect(Object.isFrozen(snap.doc.nested)).toBe(true);
+  raw.title = 'b';
+  expect(snap.doc.title).toBe('a');
+  const el = document.createElement('div'),
+    root = createRoot(el);
+  let renders = 0;
+  function Consumer() {
+    const q = bindings.useLodySnapshot(target, (s) => s.doc.title);
+    renders++;
+    return <>{q.status === 'ready' ? String(q.data) : q.status}</>;
+  }
+  await act(async () => root.render(<Consumer />));
+  expect(el.textContent).toBe('b');
+  const previous = renders;
+  await act(async () => {
+    raw.nested.authorization = 'rotated';
+    update();
+  });
+  expect(renders).toBe(previous);
+  await act(async () => {
+    raw.title = 'c';
+    update();
+  });
+  expect(el.textContent).toBe('c');
+  act(() => root.unmount());
+  const count = reads;
+  update();
+  expect(reads).toBe(count);
+  scope.abort();
+  await expect(bindings.readSnapshot(target)).rejects.toThrow();
+});
