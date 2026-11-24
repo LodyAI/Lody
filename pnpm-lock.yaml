@@ -67,8 +67,8 @@ catalogs:
       specifier: 0.3.1
       version: 0.3.1
     '@loro-dev/streams-client':
-      specifier: 0.15.0
-      version: 0.15.0
+      specifier: 0.16.0
+      version: 0.16.0
     '@loro-dev/streams-crdt':
       specifier: 0.24.0
       version: 0.24.0
@@ -175,6 +175,7 @@ overrides:
   '@storybook/react-dom-shim@>=10.6.0 <10.6.2': 10.6.2
   '@storybook/builder-vite@>=10.6.0 <10.6.2': 10.6.2
   '@loro-dev/streams-crdt>@loro-dev/flock-wasm': ^0.5.0
+  '@loro-dev/streams-crdt>@loro-dev/streams-client': 0.16.0
   loro-repo>@loro-dev/flock-wasm: ^0.5.0
   loro-repo>@loro-dev/streams-crdt: 0.24.0
   '@loro-dev/sqlite-riverrun>better-sqlite3': 13.0.3
@@ -362,7 +363,7 @@ importers:
         version: 0.3.1
       '@loro-dev/streams-client':
         specifier: 'catalog:'
-        version: 0.15.0(effect@4.0.2)
+        version: 0.16.0(effect@4.0.2)
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.24.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)
@@ -1935,7 +1936,7 @@ importers:
     devDependencies:
       '@loro-dev/streams-client':
         specifier: 'catalog:'
-        version: 0.15.0(effect@4.0.2)
+        version: 0.16.0(effect@4.0.2)
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.24.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)
@@ -1977,7 +1978,7 @@ importers:
         version: 0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)
       '@loro-dev/streams-client':
         specifier: 'catalog:'
-        version: 0.15.0(effect@4.0.2)
+        version: 0.16.0(effect@4.0.2)
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.24.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)
@@ -2107,7 +2108,7 @@ importers:
         version: link:../shared
       '@loro-dev/streams-client':
         specifier: 'catalog:'
-        version: 0.15.0(effect@4.0.2)
+        version: 0.16.0(effect@4.0.2)
       '@noble/hashes':
         specifier: 2.2.0
         version: 2.2.0
@@ -4686,8 +4687,8 @@ packages:
     resolution: {integrity: sha512-UGolSlUDMfaRSGzhvwFmqC5HnM5Vs9mGEA8d6xyAB/pO9La+HPDhUCYdQ/wO2XJZVxiNVglIdT5W5iHO+FTr5Q==}
     engines: {node: '>=22'}
 
-  '@loro-dev/streams-client@0.15.0':
-    resolution: {integrity: sha512-DdqdcPqPxPxHmkeMPSWoIIpHv5k+LuYiGaJf6jhrLPgmT/1VEPiAQcbaQYywKyFFx7qbg2hbWccOnzhOl9RnSA==}
+  '@loro-dev/streams-client@0.16.0':
+    resolution: {integrity: sha512-+NWjig5iZ0FamC6dtdVwHUy0cr1VZZVvj6xWR98yCKjrBNk5mL1Q/SgzJo1FKhpwpDy0LkdLVXUwshg6H8ZsAA==}
     engines: {node: '>=18'}
     peerDependencies:
       effect: 4.0.2
@@ -17306,7 +17307,7 @@ snapshots:
       better-sqlite3: 13.0.3
       loro-crdt: 1.17.0
 
-  '@loro-dev/streams-client@0.15.0(effect@4.0.2)':
+  '@loro-dev/streams-client@0.16.0(effect@4.0.2)':
     optionalDependencies:
       effect: 4.0.2
 
@@ -17316,7 +17317,7 @@ snapshots:
 
   '@loro-dev/streams-crdt@0.24.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.17.0)':
     dependencies:
-      '@loro-dev/streams-client': 0.15.0(effect@4.0.2)
+      '@loro-dev/streams-client': 0.16.0(effect@4.0.2)
       effect: 4.0.2
     optionalDependencies:
       '@loro-dev/flock-wasm': 0.5.0
