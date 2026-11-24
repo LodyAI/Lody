@@ -506,7 +506,6 @@ const viewStyles = stylex.create({
   turnConfigTooltip: { [tooltip.maxWidth]: '20rem' },
   forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
-  /* ── The live status row ──────────────────────────────────────────────── */
   agentActivityRow: {
     paddingBottom: {
       default: themeSpace[2],
@@ -541,7 +540,6 @@ const viewStyles = stylex.create({
     fontWeight: themeFontWeight.normal,
   },
 
-  /* ── The empty conversation ───────────────────────────────────────────── */
   emptyState: {
     display: 'flex',
     justifyContent: 'center',
@@ -558,7 +556,6 @@ const viewStyles = stylex.create({
     color: themeColors.mutedForeground,
   },
 
-  /* ── The stream's shell ───────────────────────────────────────────────── */
   streamRoot: {
     position: 'relative',
     backgroundColor: themeColors.background,
@@ -623,7 +620,6 @@ const viewStyles = stylex.create({
   },
   justifyEnd: { display: 'flex', justifyContent: 'flex-end' },
 
-  /* ── Operation status ─────────────────────────────────────────────────── */
   columnGap2: { display: 'flex', flexDirection: 'column', gap: themeSpace[2] },
   columnGap1_5: { display: 'flex', flexDirection: 'column', gap: themeSpace[1.5] },
   columnGap1: { display: 'flex', flexDirection: 'column', gap: themeSpace[1] },
@@ -680,7 +676,6 @@ const viewStyles = stylex.create({
     opacity: 0.6,
   },
 
-  /* ── The agent notice banner ──────────────────────────────────────────── */
   noticeFrame: {
     width: '100%',
     overflow: 'hidden',
@@ -737,7 +732,6 @@ const viewStyles = stylex.create({
     },
   },
 
-  /* ── The capacity retry control ───────────────────────────────────────── */
   retryButton: {
     position: 'relative',
     isolation: 'isolate',
@@ -798,7 +792,6 @@ const viewStyles = stylex.create({
   },
   relativeZ10: { position: 'relative', zIndex: 10 },
 
-  /* ── The system notice rows ───────────────────────────────────────────── */
   noticeStack: { paddingBlock: themeSpace[1] },
   /** A notice that sits on its own row is indented to sit apart from the
    *  conversation; inside a turn that same indent is a broken left edge. */
@@ -807,7 +800,6 @@ const viewStyles = stylex.create({
     '@container (min-width: 640px)': { paddingLeft: themeSpace[3] },
   },
 
-  /* ── The worktree script notice ───────────────────────────────────────── */
   iconSmFlexNone: {
     height: themeSpace[3.5],
     width: themeSpace[3.5],
@@ -821,7 +813,6 @@ const viewStyles = stylex.create({
     fontWeight: themeFontWeight.medium,
   },
 
-  /* ── The user's message row ───────────────────────────────────────────── */
   userName: {
     maxWidth: 'calc(var(--spacing) * 40)',
     overflow: 'hidden',
@@ -1207,16 +1198,13 @@ const viewStyles = stylex.create({
     objectFit: 'contain',
   },
 
-  /* ── The file group ───────────────────────────────────────────────────── */
   fileOverflow: {
     paddingInline: themeSpace[1],
     color: themeColors.mutedForeground,
   },
 
-  /* ── The tool verb ────────────────────────────────────────────────────── */
   toolVerb: { color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)' },
 
-  /* ── The plan ─────────────────────────────────────────────────────────── */
   planCard: {
     borderRadius: themeRadius.lg,
     borderWidth: '1px',
@@ -1993,11 +1981,10 @@ const AgentActivityStatus = ({
 type ModelProvider = 'anthropic' | 'openai' | 'unknown';
 
 const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): ModelProvider => {
-  if (!modelInfo) return 'anthropic'; // Default to Anthropic
+  if (!modelInfo) return 'anthropic';
   const modelId = modelInfo.modelId?.toLowerCase() ?? '';
   const name = modelInfo.name?.toLowerCase() ?? '';
 
-  // Check for OpenAI/GPT models
   if (
     modelId.includes('gpt') ||
     modelId.includes('codex') ||
@@ -2007,7 +1994,6 @@ const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): Mode
     return 'openai';
   }
 
-  // Check for Anthropic/Claude models
   if (
     modelId.includes('claude') ||
     modelId.includes('sonnet') ||
@@ -2021,7 +2007,6 @@ const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): Mode
     return 'anthropic';
   }
 
-  // Default to Anthropic for unknown models
   return 'anthropic';
 };
 
