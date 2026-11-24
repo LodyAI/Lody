@@ -60,7 +60,8 @@ type MessageHandlerInternals = {
   codeCollabV2DiffStore: { close: () => Promise<void> };
   diffBlobStoreReader: { close: () => Promise<void> };
   sessionActivePresence: SessionActivePresenceControllerLegacy;
-  handleSessionArchived: (sessionId: SessionId) => Promise<void>;
+  setupSessionLifecycleWatchers: () => void;
+  handleSessionArchiveChanged: (sessionId: SessionId) => Promise<void>;
   readWorktreeOwnerState: (sessionId: SessionId) => Promise<WorktreeOwnerState>;
   handleSessionDeleted: (sessionId: SessionId) => Promise<void>;
   discardLegacySessionCommands: () => Promise<void>;
@@ -139,7 +140,9 @@ function createHarness(options?: {
     setLastMessageAt: vi.fn(async () => {}),
   });
   const repo = {
-    watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+    watch: vi.fn((..._args: Parameters<LoroDocumentManager['repo']['watch']>) => ({
+      unsubscribe: vi.fn(),
+    })),
     getDocMeta: vi.fn(async (roomId: string) => {
       const localSessionMeta = sessionMetas.get(roomId);
       if (localSessionMeta) {
@@ -225,6 +228,7 @@ function createHarness(options?: {
     terminateSession: vi.fn(async (id: SessionId) => {
       activeSessionIds.delete(id);
     }),
+    isArchiveInFlight: () => false,
     archiveSession: vi.fn(async () => {}),
     cleanUp: vi.fn(async () => {}),
     setSessionError: vi.fn(async () => {}),
@@ -271,6 +275,36 @@ function createHarness(options?: {
 }
 
 describe('MessageHandler terminal cleanup', () => {
+  it('keeps newly discovered imported history archived until an explicit restore', async () => {
+    const { repo, handler, sessionManager, sessionId } = createHarness();
+    let nativeArchived = true;
+    let transition: Promise<void> | undefined;
+    Object.assign(sessionManager, {
+      observeArchiveChange: (_id: SessionId, run: () => Promise<void>) => (transition = run()),
+      syncNativeSessionArchive: async (_id: SessionId, archived: boolean) => {
+        nativeArchived = archived;
+      },
+    });
+    const meta = { isArchived: false, createdAt: '2026-01-01', machineId: 'machine-1' };
+    repo.getDocMeta.mockResolvedValue({ meta });
+    handler.setupSessionLifecycleWatchers();
+    const watch = repo.watch.mock.calls.find(([, filter]) =>
+      filter?.metadataFields?.includes('isArchived')
+    )?.[0];
+    if (!watch) throw new Error('Archive subscription missing');
+    const event = {
+      kind: 'doc-metadata' as const,
+      by: 'live' as const,
+      docId: getSessionRoomId(sessionId),
+    };
+    watch({ ...event, patch: meta });
+    await transition;
+    expect(nativeArchived).toBe(true);
+    watch({ ...event, patch: { isArchived: false } });
+    await transition;
+    expect(nativeArchived).toBe(false);
+  });
+
   it('reads the completed assistant entry even after a newer reply exists', async () => {
     const history: SessionEntry[] = ['completed', 'newer'].map((id) => ({
       id,
@@ -330,7 +364,7 @@ describe('MessageHandler terminal cleanup', () => {
     await Effect.runPromise(
       Scope.provide(handler.sessionActivePresence.native.hold(sessionId), lease)
     );
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
     expect(presenceEntries.get(sessionId)).toEqual({ type: 'running' });
     expect(handler.sessionActivePresence.has(sessionId)).toBe(true);
     await Effect.runPromise(Scope.close(lease, Exit.void));
@@ -430,11 +464,14 @@ describe('MessageHandler terminal cleanup', () => {
   it('releases the runtime when a session becomes archived, even without an active session', async () => {
     const { handler, sessionId, closeSessionTerminals, sessionManager } = createHarness();
 
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
     expect(sessionManager.terminateSession).not.toHaveBeenCalled();
-    expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.archiveSession).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ releaseFailure: undefined })
+    );
   });
 
   it('releases only contained runtimes and keeps independently opened worktree owners active', async () => {
@@ -495,7 +532,7 @@ describe('MessageHandler terminal cleanup', () => {
     // This test reads GC eligibility directly and must never scan the host data directory.
     handler.worktreeGc = { schedule: async () => ({ removed: [] }) };
 
-    await handler.handleSessionArchived(root.id);
+    await handler.handleSessionArchiveChanged(root.id);
 
     expect(isSessionActive(root.id)).toBe(false);
     expect(isSessionActive(child.id)).toBe(false);
@@ -533,10 +570,13 @@ describe('MessageHandler terminal cleanup', () => {
       new Error('process group 4321 was still running 5000ms after SIGKILL')
     );
 
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
 
     expect(getSessionMeta(sessionId)).toMatchObject({ status: SessionStatusFactory.idle() });
-    expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.archiveSession).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ releaseFailure: expect.stringContaining('SIGKILL') })
+    );
   });
 
   it('removes the worktree of an archived local-project session and keeps its branch', async () => {
@@ -576,7 +616,7 @@ describe('MessageHandler terminal cleanup', () => {
       const renamed = `${worktree.branch}-renamed`;
       runGit(worktree.hostPath, ['branch', '-m', renamed]);
 
-      await handler.handleSessionArchived(sessionId);
+      await handler.handleSessionArchiveChanged(sessionId);
       await handler.worktreeGc.schedule();
 
       expect(fs.existsSync(worktree.hostPath)).toBe(false);
@@ -612,7 +652,7 @@ describe('MessageHandler terminal cleanup', () => {
       ],
     });
 
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
     await handler.handleSessionDeleted(sessionId);
 
     expect(closeSessionTerminals).not.toHaveBeenCalled();

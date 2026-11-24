@@ -896,10 +896,9 @@ export class MessageHandler {
   private readonly cancelledHistorySubscriptions = new Map<string, number>();
   private sessionActivePresence!: SessionActivePresenceControllerLegacy;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
-  // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
+  // Note: titleGenerationInFlight is self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
-  private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
   /**
    * Latest output time and running tool title per Session, for on-demand live
@@ -3831,7 +3830,11 @@ export class MessageHandler {
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
       recordNativeWorkInterrupted: async (sessionId, turnId) => {
-        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
+        if (
+          this.deletedSessionIds.has(sessionId) ||
+          this.sessionManager.isArchiveInFlight(sessionId)
+        )
+          return;
         await this.recordAgentWarning(
           sessionId,
           {
@@ -3907,7 +3910,8 @@ export class MessageHandler {
         this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
       readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
       isRuntimeActive: (sessionId) =>
-        this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
+        this.sessionManager.isArchiveInFlight(sessionId) ||
+        this.sessionManager.hasSession(sessionId),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
       archiveProjectGroup: (input) =>
         archiveProjectGroup({
@@ -5041,11 +5045,17 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
-          if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
-          // Revoke media before unrelated ACP/Browser cleanup can fail.
-          void this.iosSimulatorService.closeSession(sessionId);
-          void this.androidEmulatorService.closeSession(sessionId);
-          void this.handleSessionArchived(sessionId);
+          const { isArchived: archived, createdAt } = event.patch as Partial<SessionMeta>;
+          const initialActiveMetadata = archived === false && createdAt !== undefined;
+          if (typeof archived !== 'boolean' || initialActiveMetadata) return;
+          if (archived) {
+            // Revoke media before unrelated ACP/Browser cleanup can fail.
+            void this.iosSimulatorService.closeSession(sessionId);
+            void this.androidEmulatorService.closeSession(sessionId);
+          }
+          void this.sessionManager.observeArchiveChange(sessionId, () =>
+            this.handleSessionArchiveChanged(sessionId)
+          );
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
       ),
@@ -5174,22 +5184,24 @@ export class MessageHandler {
     return (snapshot?.meta as SessionMeta | undefined)?.machineId === this.machineId;
   }
 
-  private async handleSessionArchived(sessionId: SessionId): Promise<void> {
-    if (this.archiveInFlight.has(sessionId)) {
-      return;
-    }
-    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
-      return;
-    }
-    this.archiveInFlight.add(sessionId);
+  private async handleSessionArchiveChanged(sessionId: SessionId): Promise<void> {
     try {
-      await this.releaseArchivedSessionRuntime(sessionId);
+      if (!(await this.isSessionOwnedByThisMachine(sessionId))) return;
+      const current = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+      if (!current?.meta || isLoroRepoDocDeleted(current)) return;
+      if ((current.meta as SessionMeta).isArchived === true) {
+        await this.releaseArchivedSessionRuntime(sessionId);
+      } else {
+        try {
+          await this.sessionManager.syncNativeSessionArchive(sessionId, false);
+        } catch (error) {
+          this.sessionManager.reportNativeArchiveFailure(sessionId, error);
+        }
+      }
     } catch (error) {
       this.logger.error(
-        `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
+        `[${sessionId}] Archive state reconciliation failed: ${formatErrorMessage(error)}`
       );
-    } finally {
-      this.archiveInFlight.delete(sessionId);
     }
     void this.worktreeGc.schedule();
   }
@@ -5218,9 +5230,10 @@ export class MessageHandler {
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
 
+    let releaseFailure: string | undefined;
     if (this.sessionManager.hasSession(sessionId)) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.terminateSessionForRelease(sessionId);
+      releaseFailure = await this.terminateSessionForRelease(sessionId);
       if (options.writeIdleStatus !== false) {
         await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
           status: SessionStatusFactory.idle(),
@@ -5228,7 +5241,10 @@ export class MessageHandler {
       }
     }
 
-    await this.sessionManager.archiveSession(sessionId);
+    await this.sessionManager.archiveSession(sessionId, {
+      releaseFailure,
+      recordWarning: (warning) => this.recordAgentWarning(sessionId, warning),
+    });
     this.store.get(sessionId).logger = null;
     this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }
@@ -5537,14 +5553,16 @@ export class MessageHandler {
    * could be proven gone: the Session is not reused, so a survivor is an
    * orphan to report, not a reason to leave the archive half done.
    */
-  private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+  private async terminateSessionForRelease(sessionId: SessionId): Promise<string | undefined> {
     this.executionService.withdrawNativeWorkCompletion(sessionId);
     try {
       await this.sessionManager.terminateSession(sessionId, true);
+      return undefined;
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Releasing the session although its processes could not all be terminated: ${formatErrorMessage(error)}`
       );
+      return `Session processes could not all be terminated: ${formatErrorMessage(error)}`;
     }
   }
 
@@ -12966,7 +12984,7 @@ export class MessageHandler {
    * Check if a session is currently being archived.
    */
   isArchiveInFlight(sessionId: SessionId): boolean {
-    return this.archiveInFlight.has(sessionId);
+    return this.sessionManager.isArchiveInFlight(sessionId);
   }
 
   /**

@@ -93,6 +93,8 @@ and the isolation of Roost reads alongside authorization and execution boundarie
 
 ## Lifecycle
 
+- Only committed archive transitions authorize [native synchronization](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
+
 - Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
   Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.
 
