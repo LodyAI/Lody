@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import type { MachineId, SessionMeta, SessionStatus } from '@lody/shared';
+import type {
+  MachineId,
+  SessionCoordinatorDiagnosticsResponse,
+  SessionHistoryParsed,
+  SessionId,
+  SessionMeta,
+  SessionStatus,
+  WorkspaceId,
+} from '@lody/shared';
+import { buildCoordinatorObservabilitySnapshot } from '../src/components/project-mode/coordinator-observability-model';
 import {
   buildProjectBoard,
   coordinatorProjectKeyId,
@@ -371,5 +380,221 @@ describe('project board', () => {
     expect(
       resolveOwnerSessionForPullRequest(grouped, 'https://github.com/LodyAI/lody/pull/2702')
     ).toBe('review-partner');
+  });
+
+  it('builds a full coordinator observability snapshot across blackboard, causal cards, cursors, and Wake Gate', () => {
+    const nowMs = 100_000;
+    const directLead = session('direct-lead', {
+      openedBySessionId: coordinator.id as SessionId,
+      workItemId: 'direct-lead',
+      workItemRole: 'implement',
+      title: 'Direct UI Co-Design',
+      createdAt: '2026-11-12T00:01:00.000Z',
+      lastMessageAt: nowMs - 10_000,
+      latestUserMsgId: 'child-turn-2',
+      pullRequests: [
+        {
+          url: 'https://github.com/LodyAI/lody/pull/2801',
+          repoFullName: 'LodyAI/lody',
+          number: 2801,
+          status: 'open',
+          state: { s: 'pass', m: 'clean' },
+        },
+      ],
+    });
+    const delegatedWorker = session('delegated-worker', {
+      openedBySessionId: coordinator.id as SessionId,
+      workItemId: 'delegated-worker',
+      workItemRole: 'verify',
+      title: 'Run Integration Suite',
+      createdAt: '2026-11-12T00:02:00.000Z',
+      lastMessageAt: nowMs - 20_000,
+      latestUserMsgId: 'worker-turn-1',
+    });
+
+    const rawWorkItems = {
+      'direct-lead': {
+        id: 'direct-lead',
+        title: 'Split-pane co-design',
+        mode: 'direct',
+        createdAt: 1_000,
+        updatedAt: 5_000,
+      },
+    };
+    const allSessions = [coordinator, directLead, delegatedWorker];
+    const boardResult = buildProjectBoard({
+      sessions: allSessions,
+      childSessionsByParent: buildChildSessionsByParent(allSessions),
+      project,
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      liveSessionStatuses: new Map([['delegated-worker', { type: 'running' }]]),
+      sendStates: {},
+      workItems: rawWorkItems,
+    });
+    const tasksById = new Map<string, (typeof boardResult.working)[number]>();
+    for (const row of Object.values(boardResult).flat()) {
+      tasksById.set(row.workItemId, row);
+      for (const member of row.members) {
+        tasksById.set(member.session.id, row);
+      }
+    }
+
+    const history: SessionHistoryParsed[] = [
+      {
+        id: 'u-1',
+        role: 'user',
+        timestamp: new Date(nowMs - 30_000).toISOString(),
+        items: [{ type: 'text', text: 'Coordinate UI split-pane and tests' }],
+      },
+      {
+        id: 'a-1',
+        role: 'assistant',
+        timestamp: new Date(nowMs - 25_000).toISOString(),
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'tc-1',
+            title: 'lody_coordinator_work_item',
+            status: 'completed',
+            rawInput: {
+              workItemId: 'direct-lead',
+              mode: 'direct',
+              title: 'Split-pane co-design',
+            },
+          } as SessionHistoryParsed['items'][number],
+          {
+            type: 'coordinator_message',
+            id: 'b-handoff',
+            body: 'Opened direct session for UI co-design.',
+            card: {
+              kind: 'handoff',
+              title: 'Co-design in direct session',
+              workItemId: 'direct-lead',
+              snapshotTurnBySession: { 'direct-lead': 'child-turn-1' },
+              actions: [
+                {
+                  id: 'act-open',
+                  label: 'Open direct session',
+                  intent: {
+                    kind: 'client_command',
+                    command: 'panel.open',
+                    params: { sessionId: 'direct-lead', target: 'session' },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+
+    const diagnostics: SessionCoordinatorDiagnosticsResponse = {
+      type: 'session/coordinator-diagnostics_response',
+      sessionId: coordinator.id as SessionId,
+      observedAt: nowMs,
+      cursors: [
+        {
+          targetSessionId: 'direct-lead',
+          latestUserMsgId: 'child-turn-1',
+          lastMessageAt: nowMs - 40_000,
+          statusSignature: 'idle',
+          prSignature: '',
+          updatedAt: nowMs - 35_000,
+        },
+        {
+          targetSessionId: 'delegated-worker',
+          latestUserMsgId: 'worker-turn-1',
+          lastMessageAt: nowMs - 20_000,
+          statusSignature: 'running',
+          prSignature: '',
+          updatedAt: nowMs - 19_000,
+        },
+      ],
+      lastTurnDelta: {
+        userTurnId: 'u-1',
+        deltaText:
+          '<project_facts_delta>\n<work_item id="direct-lead" task="T1" />\n</project_facts_delta>',
+        updatedAt: nowMs - 29_000,
+      },
+      operations: [],
+      waits: [
+        {
+          id: 'watch-ci',
+          state: 'waiting',
+          checks: 3,
+          consecutiveErrors: 0,
+          nextCheckAt: nowMs + 5_000,
+          reason: 'Wait for PR #2801 CI',
+          program: 'return await coordinator.workItems();',
+          continuation: { state: 'pending' },
+        },
+      ],
+    };
+
+    const snapshot = buildCoordinatorObservabilitySnapshot({
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      history,
+      tasksById,
+      rawWorkItems,
+      presenceStates: {
+        viewer: {
+          kind: 'session-viewing',
+          userId: 'user-1',
+          sessionId: 'direct-lead' as SessionId,
+          updatedAt: nowMs - 1_000,
+        },
+        runner: {
+          kind: 'session-status',
+          sessionId: 'delegated-worker' as SessionId,
+          status: { type: 'running' },
+          updatedAt: nowMs - 500,
+        },
+      },
+      diagnostics,
+      nowMs,
+    });
+
+    expect(snapshot.diagnosticsConnected).toBe(true);
+    expect(snapshot.metrics).toMatchObject({
+      workItemCount: 2,
+      directWorkItemCount: 1,
+      activeWorkerCount: 1,
+      pullRequestCount: 1,
+      openCardCount: 0,
+      supersededCardCount: 1,
+      pendingDeltaCount: 1,
+      activeWatchCount: 1,
+      suppressedWatchCount: 1,
+    });
+    expect(snapshot.viewedChildSessionIds.has('direct-lead')).toBe(true);
+    expect(snapshot.liveActiveNodes.has('workers')).toBe(true);
+    expect(snapshot.liveActiveEdges.has('workers_to_store')).toBe(true);
+    expect(snapshot.cards[0]?.verdict).toBe('superseded_by_child');
+    expect(snapshot.cards[0]?.snapshotChecks[0]).toMatchObject({
+      sessionId: 'direct-lead',
+      frozenTurnId: 'child-turn-1',
+      currentTurnId: 'child-turn-2',
+      diverged: true,
+    });
+    expect(snapshot.watches[0]?.gateVerdict).toBe('suppressed_focus');
+    expect(snapshot.cursorAudits.find((c) => c.sessionId === 'direct-lead')?.status).toBe(
+      'pending_turn_delta'
+    );
+    expect(snapshot.cursorAudits.find((c) => c.sessionId === 'delegated-worker')?.status).toBe(
+      'synced'
+    );
+    expect(snapshot.events.map((e) => e.kind)).toEqual(
+      expect.arrayContaining([
+        'user_turn',
+        'work_item_tool',
+        'proactive_card',
+        'card_superseded',
+        'cursor_delta_injected',
+        'cursor_lag_pending',
+        'watch_gate_status',
+      ])
+    );
   });
 });

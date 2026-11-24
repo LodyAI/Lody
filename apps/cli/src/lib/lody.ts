@@ -638,6 +638,10 @@ export class Lody {
     return responses as LocalSessionControlResponse[];
   }
 
+  readCoordinatorStoreDiagnostics(sessionId: SessionId) {
+    return this.runtime.readCoordinatorStoreDiagnostics(sessionId);
+  }
+
   async dispatchLocalMachineRpc(
     message: LocalMachineRpcRequestValidated,
     signal?: AbortSignal

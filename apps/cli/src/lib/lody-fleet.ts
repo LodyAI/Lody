@@ -2038,6 +2038,46 @@ export class LodyFleet {
       throw new Error(`workspace_runtime_unavailable:${workspaceId}`);
     }
 
+    if (message.type === 'session/coordinator-diagnostics') {
+      const storeDiag = runtime.lody.readCoordinatorStoreDiagnostics(message.sessionId);
+      const ledger = runtime.automations?.ledger;
+      const rawWaits = ledger ? ledger.waits(undefined, message.sessionId) : [];
+      const waits = rawWaits.slice(0, 24).map((wait) => {
+        const receipt = wait.invocationId && ledger ? ledger.receipt(wait.invocationId) : undefined;
+        return {
+          id: wait.id,
+          ...(wait.reason ? { reason: wait.reason } : {}),
+          ...(wait.program ? { program: wait.program.slice(0, 4096) } : {}),
+          state: wait.state,
+          checks: wait.checks,
+          consecutiveErrors: wait.consecutiveErrors,
+          ...(wait.lastError ? { lastError: wait.lastError } : {}),
+          nextCheckAt: wait.nextCheckAt,
+          ...(wait.expiresAt !== undefined ? { expiresAt: wait.expiresAt } : {}),
+          ...(wait.reads ? { reads: wait.reads } : {}),
+          ...(receipt
+            ? {
+                continuation: {
+                  state: receipt.state,
+                  ...(receipt.reason ? { reason: receipt.reason } : {}),
+                },
+              }
+            : {}),
+        };
+      });
+      const response: LocalSessionControlResponse = {
+        type: 'session/coordinator-diagnostics_response',
+        sessionId: message.sessionId,
+        observedAt: Date.now(),
+        cursors: storeDiag.cursors,
+        ...(storeDiag.lastTurnDelta ? { lastTurnDelta: storeDiag.lastTurnDelta } : {}),
+        operations: storeDiag.operations,
+        waits,
+      };
+      options.onResponse?.(response);
+      return [response];
+    }
+
     return await runtime.lody.dispatchLocalControl(message, options);
   }
 

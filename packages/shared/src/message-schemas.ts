@@ -2471,6 +2471,14 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionPreviewCreateRequestSchema,
   SessionPreviewRevokeRequestSchema,
   SessionPreviewStatusRequestSchema,
+  z
+    .object({
+      type: z.literal('session/coordinator-diagnostics'),
+      machineId: MachineIdSchema,
+      workspaceId: WorkspaceIdSchema,
+      sessionId: SessionIdSchema,
+    })
+    .strict(),
 ]);
 
 export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
@@ -2511,6 +2519,75 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
   SessionPreviewStatusResponseSchema,
+  z
+    .object({
+      type: z.literal('session/coordinator-diagnostics_response'),
+      sessionId: SessionIdSchema,
+      observedAt: z.number(),
+      cursors: z.array(
+        z
+          .object({
+            targetSessionId: z.string(),
+            latestUserMsgId: z.string().optional(),
+            lastMessageAt: z.number(),
+            statusSignature: z.string(),
+            prSignature: z.string(),
+            updatedAt: z.number(),
+          })
+          .strict()
+      ),
+      lastTurnDelta: z
+        .object({
+          userTurnId: z.string(),
+          deltaText: z.string(),
+          updatedAt: z.number(),
+        })
+        .strict()
+        .optional(),
+      operations: z.array(
+        z
+          .object({
+            operationId: z.string(),
+            kind: z.string(),
+            state: z.enum(['active', 'finished']),
+            createdAt: z.string(),
+            finishedAt: z.string().optional(),
+            targets: z.array(
+              z
+                .object({
+                  sessionId: z.string().optional(),
+                  status: z.string(),
+                })
+                .strict()
+            ),
+          })
+          .strict()
+      ),
+      waits: z.array(
+        z
+          .object({
+            id: z.string(),
+            reason: z.string().optional(),
+            program: z.string().optional(),
+            state: z.string(),
+            checks: z.number(),
+            consecutiveErrors: z.number(),
+            lastError: z.string().optional(),
+            nextCheckAt: z.number(),
+            expiresAt: z.number().optional(),
+            reads: z.array(z.string()).optional(),
+            continuation: z
+              .object({
+                state: z.string(),
+                reason: z.string().optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+      ),
+    })
+    .strict(),
 ]);
 
 export const LocalProjectAddRequestSchema = z

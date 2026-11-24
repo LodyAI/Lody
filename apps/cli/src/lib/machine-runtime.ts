@@ -443,6 +443,12 @@ export class MachineRuntime {
     return await handler.handleLocalMachineRpc(message, signal);
   }
 
+  readCoordinatorStoreDiagnostics(sessionId: SessionId) {
+    const handler = this.handler;
+    if (!handler) return { cursors: [], operations: [] };
+    return handler.readCoordinatorStoreDiagnostics(sessionId);
+  }
+
   private initializeGCManager(): void {
     if (!this.handler) {
       return;

@@ -2782,6 +2782,10 @@ export class MessageHandler {
     }
   }
 
+  readCoordinatorStoreDiagnostics(sessionId: SessionId) {
+    return this.operationCoordinator.readCoordinatorStoreDiagnostics(sessionId);
+  }
+
   private async readProjectFactsDeltaHeader(
     workspaceId: WorkspaceId,
     sessionId: SessionId,

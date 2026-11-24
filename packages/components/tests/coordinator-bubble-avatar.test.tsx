@@ -16,6 +16,7 @@ import {
   loadCoordinatorAvatarMoodData,
 } from '../src/components/project-mode/coordinator-bubble-avatar';
 import { CoordinatorProactiveCard } from '../src/components/project-mode/coordinator-action-bar';
+import { CoordinatorObservabilityHeaderButton } from '../src/components/project-mode/coordinator-observability-panel';
 import { initI18n } from '../src/i18n';
 import {
   mountCoordinatorLottieOnce,
@@ -53,48 +54,51 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     ['confused', confusedJson],
     ['sad', sadJson],
     ['angry', angryJson],
-  ] as const)('renders %s vector Lottie frames at 32x32 and fires onComplete once', (_mood, raw) => {
-    const host = document.createElement('div');
-    let currentMs = 1000;
-    let pendingFrame: ((ts: number) => void) | null = null;
-    let completed = 0;
+  ] as const)(
+    'renders %s vector Lottie frames at 32x32 and fires onComplete once',
+    (_mood, raw) => {
+      const host = document.createElement('div');
+      let currentMs = 1000;
+      let pendingFrame: ((ts: number) => void) | null = null;
+      let completed = 0;
 
-    const dispose = mountCoordinatorLottieOnce({
-      container: host,
-      data: raw as unknown as CoordinatorLottieData,
-      size: 32,
-      now: () => currentMs,
-      requestFrame: (cb) => {
-        pendingFrame = cb;
-        return 1;
-      },
-      cancelFrame: () => {
-        pendingFrame = null;
-      },
-      onComplete: () => {
-        completed += 1;
-      },
-    });
+      const dispose = mountCoordinatorLottieOnce({
+        container: host,
+        data: raw as unknown as CoordinatorLottieData,
+        size: 32,
+        now: () => currentMs,
+        requestFrame: (cb) => {
+          pendingFrame = cb;
+          return 1;
+        },
+        cancelFrame: () => {
+          pendingFrame = null;
+        },
+        onComplete: () => {
+          completed += 1;
+        },
+      });
 
-    const svg = host.querySelector('svg');
-    expect(svg).not.toBeNull();
-    expect(svg?.getAttribute('width')).toBe('32');
-    expect(svg?.getAttribute('height')).toBe('32');
-    expect(svg?.getAttribute('viewBox')).toBe('0 0 160 160');
-    expect(svg?.querySelectorAll('path').length).toBeGreaterThan(0);
-    expect(svg?.querySelectorAll('linearGradient').length).toBeGreaterThan(0);
+      const svg = host.querySelector('svg');
+      expect(svg).not.toBeNull();
+      expect(svg?.getAttribute('width')).toBe('32');
+      expect(svg?.getAttribute('height')).toBe('32');
+      expect(svg?.getAttribute('viewBox')).toBe('0 0 160 160');
+      expect(svg?.querySelectorAll('path').length).toBeGreaterThan(0);
+      expect(svg?.querySelectorAll('linearGradient').length).toBeGreaterThan(0);
 
-    currentMs = 1400;
-    pendingFrame?.(currentMs);
-    expect(completed).toBe(0);
+      currentMs = 1400;
+      pendingFrame?.(currentMs);
+      expect(completed).toBe(0);
 
-    currentMs = 4000;
-    pendingFrame?.(currentMs);
-    expect(completed).toBe(1);
+      currentMs = 4000;
+      pendingFrame?.(currentMs);
+      expect(completed).toBe(1);
 
-    dispose();
-    expect(host.querySelector('svg')).toBeNull();
-  });
+      dispose();
+      expect(host.querySelector('svg')).toBeNull();
+    }
+  );
 
   it('plays once on a fresh message event, returns to idle.png on completion, and stays idle on remount', async () => {
     const rafQueue: Array<(ts: number) => void> = [];
@@ -178,7 +182,11 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
             id: 'act-preview',
             label: '检查小尺寸效果',
             tone: 'primary' as const,
-            intent: { kind: 'coordinator_prompt' as const, prompt: '检查小尺寸效果', mode: 'send' as const },
+            intent: {
+              kind: 'coordinator_prompt' as const,
+              prompt: '检查小尺寸效果',
+              mode: 'send' as const,
+            },
           },
           dedupKey: 'act-preview',
           liveState: 'ready' as const,
@@ -199,7 +207,9 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
       );
     });
 
-    const dismissBtn = container!.querySelector<HTMLButtonElement>('[data-coordinator-card-dismiss]');
+    const dismissBtn = container!.querySelector<HTMLButtonElement>(
+      '[data-coordinator-card-dismiss]'
+    );
     expect(dismissBtn).not.toBeNull();
 
     await act(async () => {
@@ -225,5 +235,56 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     });
 
     expect(container!.querySelector('[data-coordinator-proactive-card]')).toBeNull();
+  });
+
+  it('mounts the top-right observability trigger lazily and opens the animated topology observatory on click', async () => {
+    await initI18n('zh_CN');
+    const history = [
+      {
+        id: 'u-obs-1',
+        role: 'user' as const,
+        timestamp: '2026-11-24T00:00:00.000Z',
+        items: [{ type: 'text' as const, text: '帮我拆解前端和后端 PR' }],
+      },
+      {
+        id: 'a-obs-1',
+        role: 'assistant' as const,
+        timestamp: '2026-11-24T00:00:05.000Z',
+        items: [
+          {
+            type: 'coordinator_message' as const,
+            id: 'b-obs-1',
+            body: '已启动小队并挂载监听。',
+          },
+        ],
+      },
+    ];
+
+    await act(async () => {
+      root!.render(
+        React.createElement(CoordinatorObservabilityHeaderButton, {
+          coordinatorSessionId: 'coord-session-1',
+          history,
+        })
+      );
+    });
+
+    const trigger = container!.querySelector<HTMLButtonElement>(
+      '[data-coordinator-observability-trigger]'
+    );
+    expect(trigger).not.toBeNull();
+    expect(document.querySelector('[data-testid="coordinator-observability-dialog"]')).toBeNull();
+
+    await act(async () => {
+      trigger!.click();
+    });
+
+    const dialog = document.querySelector('[data-testid="coordinator-observability-dialog"]');
+    expect(dialog).not.toBeNull();
+    const topology = dialog!.querySelector('[data-coordinator-observability-topology]');
+    expect(topology).not.toBeNull();
+    expect(topology!.querySelectorAll('animateMotion').length).toBeGreaterThan(0);
+    expect(dialog!.textContent).toContain('Project Store');
+    expect(dialog!.textContent).toContain('已启动小队并挂载监听');
   });
 });

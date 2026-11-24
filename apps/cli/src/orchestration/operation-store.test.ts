@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   LODY_OPERATION_COMPLETION_MAX_BYTES,
+  LocalSessionControlResponseSchema,
   type AcpCapabilityCacheEntry,
   type MachineId,
   type SessionId,
@@ -1687,6 +1688,12 @@ describe('coordinator read cursors and <project_facts_delta>', () => {
       });
       expect(retrySameTurn).toBe(deltaTurn2);
 
+      const storeDiagOnTurn2 = store2.readCoordinatorStoreDiagnostics(coordinatorId);
+      expect(storeDiagOnTurn2.lastTurnDelta).toMatchObject({
+        userTurnId: 'coord-user-turn-2',
+        deltaText: deltaTurn2,
+      });
+
       const quietTurn3 = await resolveCoordinatorProjectFactsDelta({
         workspaceId,
         coordinatorSessionId: coordinatorId,
@@ -1698,6 +1705,60 @@ describe('coordinator read cursors and <project_facts_delta>', () => {
         readChildTail: readTail,
       });
       expect(quietTurn3).toBeUndefined();
+
+      store2.accept({
+        ...baseInput(),
+        operationId: 'diag-op-1',
+        workspaceId,
+        requesterSessionId: coordinatorId,
+        requesterUserId: 'user-owner',
+        items: [
+          {
+            status: 'active',
+            target: { sessionId: directChildId, userTurnId: 'child-turn-op' },
+            inputDurable: true,
+          },
+        ],
+      });
+
+      const storeDiag = store2.readCoordinatorStoreDiagnostics(coordinatorId);
+      expect(storeDiag.cursors.map((c) => c.targetSessionId).sort()).toEqual(
+        [delegatedChildId, directChildId].sort()
+      );
+      expect(storeDiag.lastTurnDelta).toMatchObject({
+        userTurnId: 'coord-user-turn-3',
+        deltaText: '',
+      });
+      expect(storeDiag.operations).toMatchObject([
+        {
+          operationId: 'diag-op-1',
+          kind: 'session_chat',
+          state: 'active',
+          targets: [{ sessionId: directChildId, status: 'active' }],
+        },
+      ]);
+
+      const parsedResponse = LocalSessionControlResponseSchema.safeParse({
+        type: 'session/coordinator-diagnostics_response',
+        sessionId: coordinatorId,
+        observedAt: 20_000,
+        cursors: storeDiag.cursors,
+        lastTurnDelta: storeDiag.lastTurnDelta,
+        operations: storeDiag.operations,
+        waits: [
+          {
+            id: 'wait-1',
+            state: 'waiting',
+            checks: 2,
+            consecutiveErrors: 0,
+            nextCheckAt: 24_000,
+            reason: 'Await T2 PR CI',
+            program: 'return await coordinator.workItems();',
+            continuation: { state: 'pending' },
+          },
+        ],
+      });
+      expect(parsedResponse.success).toBe(true);
 
       store2.deleteRequesterSession(coordinatorId);
       expect(store2.readCoordinatorCursors(coordinatorId).size).toBe(0);

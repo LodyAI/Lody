@@ -1066,6 +1066,93 @@ export class LodyOperationStore {
     }).immediate();
   }
 
+  readCoordinatorStoreDiagnostics(coordinatorSessionId: SessionId): {
+    cursors: CoordinatorReadCursorRow[];
+    lastTurnDelta?: { userTurnId: string; deltaText: string; updatedAt: number };
+    operations: Array<{
+      operationId: string;
+      kind: string;
+      state: 'active' | 'finished';
+      createdAt: string;
+      finishedAt?: string;
+      targets: Array<{ sessionId?: string; status: string }>;
+    }>;
+  } {
+    const cursors = [...this.readCoordinatorCursors(coordinatorSessionId).values()].sort(
+      (a, b) =>
+        b.lastMessageAt - a.lastMessageAt || a.targetSessionId.localeCompare(b.targetSessionId)
+    );
+    const deltaRow = this.db
+      .prepare(
+        'SELECT user_turn_id, delta_text, updated_at FROM coordinator_turn_deltas WHERE coordinator_session_id = ?'
+      )
+      .get(coordinatorSessionId) as
+      | { user_turn_id: string; delta_text: string; updated_at: number }
+      | undefined;
+    const opRows = this.db
+      .prepare(
+        `SELECT operation_id, kind, state, created_at, finished_at, items_json
+         FROM operations
+         WHERE requester_session_id = ?
+         ORDER BY created_at DESC, operation_id DESC
+         LIMIT 20`
+      )
+      .all(coordinatorSessionId) as Array<{
+      operation_id: string;
+      kind: string;
+      state: 'active' | 'finished';
+      created_at: string;
+      finished_at: string | null;
+      items_json: string;
+    }>;
+    const operations = opRows.map((row) => {
+      let parsedItems: Array<Record<string, unknown>> = [];
+      try {
+        const decoded = JSON.parse(row.items_json);
+        if (Array.isArray(decoded)) parsedItems = decoded as Array<Record<string, unknown>>;
+      } catch {
+        parsedItems = [];
+      }
+      const targets = parsedItems.map((item) => {
+        const target =
+          item.target && typeof item.target === 'object'
+            ? (item.target as Record<string, unknown>)
+            : undefined;
+        const sid =
+          typeof target?.sessionId === 'string'
+            ? target.sessionId
+            : typeof item.sessionId === 'string'
+              ? item.sessionId
+              : undefined;
+        return {
+          ...(sid ? { sessionId: sid } : {}),
+          status: typeof item.status === 'string' ? item.status : 'unknown',
+        };
+      });
+      return {
+        operationId: row.operation_id,
+        kind: row.kind,
+        state: row.state,
+        createdAt: row.created_at,
+        ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+        targets,
+      };
+    });
+    return {
+      cursors,
+      ...(deltaRow
+        ? {
+            lastTurnDelta: {
+              userTurnId: deltaRow.user_turn_id,
+              deltaText: deltaRow.delta_text,
+              updatedAt: deltaRow.updated_at,
+            },
+          }
+        : {}),
+      operations,
+    };
+  }
+
   snapshot(operation: StoredLodyOperation): LodyOperationSnapshot {
     if (operation.state === 'finished') {
       if (!operation.completion || !operation.finishedAt) {

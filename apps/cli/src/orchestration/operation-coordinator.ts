@@ -437,6 +437,13 @@ export class LodyOperationCoordinator {
     return this.started && this.store ? this.store : undefined;
   }
 
+  readCoordinatorStoreDiagnostics(coordinatorSessionId: SessionId) {
+    if (!this.started || !this.store) {
+      return { cursors: [], operations: [] };
+    }
+    return this.store.readCoordinatorStoreDiagnostics(coordinatorSessionId);
+  }
+
   wake(reason: string): Promise<void> {
     if (!this.started)
       return this.startupFailure

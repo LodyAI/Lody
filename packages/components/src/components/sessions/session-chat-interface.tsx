@@ -9,6 +9,7 @@ import {
   buildCoordinatorThreadDirectoryIndex,
   type CoordinatorThreadDirectoryIndex,
 } from '@/components/project-mode/coordinator-thread-model';
+import { CoordinatorObservabilityHeaderButton } from '@/components/project-mode/coordinator-observability-panel';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
@@ -1937,9 +1938,7 @@ export function SessionHeaderMenu({
                           >
                             <span {...stylex.props(themeStyles.row)}>
                               <span>{label}</span>
-                              <span {...stylex.props(themeStyles.hint)}>
-                                {preset.countdown}
-                              </span>
+                              <span {...stylex.props(themeStyles.hint)}>{preset.countdown}</span>
                             </span>
                           </Menu.Item>
                         );
@@ -4844,7 +4843,11 @@ export const SessionChatInterface = memo(
       [conversationIndexRows, isCoordinatorConversation]
     );
     useEffect(() => {
-      if (!isCoordinatorConversation || !coordinatorThreadIndex || !onCoordinatorThreadHostStateChange) {
+      if (
+        !isCoordinatorConversation ||
+        !coordinatorThreadIndex ||
+        !onCoordinatorThreadHostStateChange
+      ) {
         return;
       }
       onCoordinatorThreadHostStateChange({
@@ -6270,7 +6273,10 @@ export const SessionChatInterface = memo(
     const coordinatorConversation = useCoordinatorConversation();
     const handleSessionLinkNavigate = useCallback(
       (target: SessionNavigationTarget & { workspaceId?: string }) => {
-        if (!coordinatorConversation || (target.workspaceId && target.workspaceId !== workspaceId)) {
+        if (
+          !coordinatorConversation ||
+          (target.workspaceId && target.workspaceId !== workspaceId)
+        ) {
           openSessionDeepLink(target);
           return;
         }
@@ -7768,10 +7774,21 @@ export const SessionChatInterface = memo(
         </div>
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
+    const coordinatorObservabilityNode =
+      coordinatorConversation || isCoordinatorSession(session) ? (
+        <CoordinatorObservabilityHeaderButton
+          coordinatorSessionId={session.id}
+          machineId={session.machineId}
+          history={sessionHistory}
+          conversationView={conversationView ?? null}
+          conversationVersion={conversationVersion}
+        />
+      ) : null;
 
     const toolbarNode = (
       <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
         <div {...stylex.props(styles.toolbarHeader)}>
+          {coordinatorObservabilityNode}
           {headerLauncherActions}
           {headerArchivedNode}
           {headerAccessNode}
@@ -7861,6 +7878,7 @@ export const SessionChatInterface = memo(
                           isMobile && styles.hiddenHeaderActions
                         )}
                       >
+                        {coordinatorObservabilityNode}
                         {headerLauncherActions}
                         {headerGitHubActions}
                         {headerArchivedNode}
@@ -8440,6 +8458,17 @@ SessionChatInterface.displayName = 'SessionChatInterface';
 const themeStyles = stylex.create({
   glyph: { width: '290px', padding: themeSpace[3] },
   glyph2: { minWidth: '200px' },
-  row: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: themeSpace[4] },
-  hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+  row: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[4],
+  },
+  hint: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    fontVariantNumeric: 'tabular-nums',
+    color: uiColors.secondaryLabel,
+  },
 });

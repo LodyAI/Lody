@@ -1014,7 +1014,67 @@ export type LocalSessionControlRequest =
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
   | SessionPreviewRevokeRequest
-  | SessionPreviewStatusRequest;
+  | SessionPreviewStatusRequest
+  | SessionCoordinatorDiagnosticsRequest;
+
+export type SessionCoordinatorDiagnosticsRequest = {
+  type: 'session/coordinator-diagnostics';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+};
+
+export type CoordinatorDiagnosticsCursorEntry = {
+  targetSessionId: string;
+  latestUserMsgId?: string;
+  lastMessageAt: number;
+  statusSignature: string;
+  prSignature: string;
+  updatedAt: number;
+};
+
+export type CoordinatorDiagnosticsOperationEntry = {
+  operationId: string;
+  kind: string;
+  state: 'active' | 'finished';
+  createdAt: string;
+  finishedAt?: string;
+  targets: Array<{
+    sessionId?: string;
+    status: string;
+  }>;
+};
+
+export type CoordinatorDiagnosticsWaitEntry = {
+  id: string;
+  reason?: string;
+  program?: string;
+  state: string;
+  checks: number;
+  consecutiveErrors: number;
+  lastError?: string;
+  nextCheckAt: number;
+  expiresAt?: number;
+  reads?: string[];
+  continuation?: {
+    state: string;
+    reason?: string;
+  };
+};
+
+export type SessionCoordinatorDiagnosticsResponse = {
+  type: 'session/coordinator-diagnostics_response';
+  sessionId: SessionId;
+  observedAt: number;
+  cursors: CoordinatorDiagnosticsCursorEntry[];
+  lastTurnDelta?: {
+    userTurnId: string;
+    deltaText: string;
+    updatedAt: number;
+  };
+  operations: CoordinatorDiagnosticsOperationEntry[];
+  waits: CoordinatorDiagnosticsWaitEntry[];
+};
 
 export type LocalSessionControlResponse =
   | DshProvidersResponse
@@ -1048,7 +1108,8 @@ export type LocalSessionControlResponse =
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
-  | SessionPreviewStatusResponse;
+  | SessionPreviewStatusResponse
+  | SessionCoordinatorDiagnosticsResponse;
 
 export type LocalProjectFileListResult = {
   paths: string[];
