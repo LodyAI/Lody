@@ -638,7 +638,10 @@ const styles = stylex.create({
     paddingInline: space[3],
     // `Collapsible.Panel` clips overflow, and `focus.ringWidth` collapses to 0px
     // on pointer modality while text controls still paint their ring on focus.
-    paddingBlockStart: space[1],
+    // A wider top clearance keeps the first control's 1px edge away from the clip
+    // line: a fractional measured panel height on Retina lands that edge on a
+    // subpixel boundary and the top of it is covered (issue #3017).
+    paddingBlockStart: space[2],
     paddingBottom: space[3],
   },
   sectionHint: {
