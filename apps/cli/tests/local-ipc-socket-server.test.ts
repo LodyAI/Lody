@@ -179,6 +179,68 @@ describe('local IPC socket server', () => {
     );
     expect(reply.payload).toEqual({ ok: true, received: command });
   });
+  it('updates and rolls back verified releases over authenticated owner IPC without replacing installation data', async () => {
+    const { PluginDaemon } = await import('../src/plugins/plugin-host-legacy');
+    const { packPlugin } = await import('../src/plugins/plugin-package');
+    const root = makeTempDir(),
+      source = makeTempDir(),
+      paths = makePaths(),
+      config = makeServerConfig(paths);
+    const daemon = new PluginDaemon(root, 'workspace', 'machine', () => {});
+    try {
+      await daemon.start();
+      await startLocalIpcSocketServers({
+        ...config,
+        control: { ...config.control, dispatchPlugin: (raw) => daemon.dispatch(raw) },
+      });
+      const send = async (command: unknown) => {
+        const response = await Effect.runPromise(
+          requestLocalPluginControl(command, { runFilePath: paths.runFilePath })
+        );
+        expect(response.response.status).toBe(200);
+        return response.payload;
+      };
+      const release = async (version: string) => {
+        await fs.promises.writeFile(
+          path.join(source, 'lody.plugin.json'),
+          JSON.stringify({ id: 'demo', sdk: '^1.0.0', version, title: 'Demo', client: 'client.ts' })
+        );
+        await fs.promises.writeFile(
+          path.join(source, 'client.ts'),
+          `export default ${JSON.stringify(version)}`
+        );
+        const pkg = await packPlugin(source, path.join(root, version + '.lodypkg'));
+        return { action: 'install', ...pkg };
+      };
+      const first = await release('1.0.0');
+      const denied = await Effect.runPromise(
+        requestLocalPluginControl(first, {
+          socketPath: paths.controlSocketPath,
+          token: '0'.repeat(64),
+        }).pipe(Effect.flip)
+      );
+      expect(denied).toMatchObject({ status: 401 });
+      const initial = await send(first);
+      const journal = path.join(root, 'data', 'demo', 'journal');
+      await fs.promises.writeFile(journal, 'keep');
+      const second = await release('2.0.0');
+      const updated = await send(second);
+      expect(updated).not.toEqual(initial);
+      await fs.promises.unlink(first.path);
+      await fs.promises.unlink(second.path);
+      expect(await send({ action: 'rollback', pluginId: 'demo' })).toEqual(initial);
+      const [item] = JSON.parse(
+        await fs.promises.readFile(path.join(root, 'catalog.json'), 'utf8')
+      );
+      expect(item.current.packageSha256).toBe(first.sha256);
+      expect(
+        await fs.promises.readFile(path.join(item.current.directory, 'client.js'), 'utf8')
+      ).toContain('1.0.0');
+      expect(await fs.promises.readFile(journal, 'utf8')).toBe('keep');
+    } finally {
+      await daemon.dispose();
+    }
+  });
   afterEach(async () => {
     await stopLocalIpcSocketServers();
     for (const tempDir of tempDirs.splice(0)) {

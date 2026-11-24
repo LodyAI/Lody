@@ -40,7 +40,7 @@ export function createWorkspacePluginRegistry(
   reads: WorkspacePluginReads,
   storageNamespace: string
 ): ClientCatalogInstallation['registry'] {
-  return (files, signal, queries) => {
+  return (files, signal, queries, primary = true) => {
     const assets = createPluginAssets(entry.dev.manifest.assets ?? [], files, signal);
     const readConfig = (project?: ProjectRef) => {
       if (
@@ -67,53 +67,79 @@ export function createWorkspacePluginRegistry(
       machineId: entry.dev.machineId,
       signal,
     });
-    return {
-      ...createProductionSurfaces(
-        entry,
-        signal,
-        {
-          storage: clientStorage(
-            storageNamespace,
-            JSON.stringify([entry.sourceKey, entry.pluginId]),
-            signal
-          ),
-          port,
-          ...hooks,
-          ...reads.bindings(
+    const surfaces = createProductionSurfaces(
+      entry,
+      signal,
+      {
+        storage: clientStorage(
+          storageNamespace,
+          JSON.stringify([entry.sourceKey, entry.pluginId]),
+          signal
+        ),
+        port,
+        ...hooks,
+        ...reads.bindings(
+          signal,
+          entry.pluginId,
+          entry.dev.manifest.permissions?.includes('unstable.rawState')
+        ),
+        useNavigation: () => useWorkspaceNavigation(entry.workspaceId, entry.dev.machineId, signal),
+        useExecute: () =>
+          usePluginCommandBindings(
+            entry.workspaceId,
+            entry.dev.machineId,
             signal,
-            entry.pluginId,
-            entry.dev.manifest.permissions?.includes('unstable.rawState')
-          ),
-          useNavigation: () =>
-            useWorkspaceNavigation(entry.workspaceId, entry.dev.machineId, signal),
-          useExecute: () =>
-            usePluginCommandBindings(
-              entry.workspaceId,
-              entry.dev.machineId,
-              signal,
-              entry.dev.manifest.permissions ?? [],
-              entry.reserveSession,
-              entry.pluginId
-            ).execute,
-          useLodyCommand(target, command) {
-            return usePluginCommandBindings(
-              entry.workspaceId,
-              entry.dev.machineId,
-              signal,
-              entry.dev.manifest.permissions ?? [],
-              entry.reserveSession,
-              entry.pluginId
-            ).useLodyCommand(target, command);
-          },
+            entry.dev.manifest.permissions ?? [],
+            entry.reserveSession,
+            entry.pluginId
+          ).execute,
+        useLodyCommand(target, command) {
+          return usePluginCommandBindings(
+            entry.workspaceId,
+            entry.dev.machineId,
+            signal,
+            entry.dev.manifest.permissions ?? [],
+            entry.reserveSession,
+            entry.pluginId
+          ).useLodyCommand(target, command);
         },
-        assets
-      ),
-      ...createPluginAppearance(entry, entry.dev.manifest, files, signal),
+      },
+      assets
+    );
+    const ignore = () => {};
+    return {
+      ...surfaces,
+      ...(primary
+        ? createPluginAppearance(entry, entry.dev.manifest, files, signal)
+        : {
+            commands: { register: ignore },
+            composer: {
+              ...surfaces.composer,
+              actions: { add: ignore },
+              slashCommands: { add: ignore },
+              beforeSend: ignore,
+            },
+            tools: { ...surfaces.tools, matchRender: ignore },
+            messages: { actions: { add: ignore }, renderBlock: ignore },
+            statusBar: { items: { add: ignore } },
+            session: { ...surfaces.session, headerActions: { add: ignore } },
+            sidebar: {
+              headerItems: { add: ignore },
+              footerItems: { add: ignore },
+              views: { add: ignore },
+              sessionRow: { decorate: ignore },
+            },
+            screens: { add: ignore },
+            themes: { add: ignore },
+            styles: { add: ignore },
+          }),
       signal,
       assets,
-      events: clientPluginEvents.subscribe(entry.workspaceId, signal, (e) =>
-        clientDiagnostics.report(entry, 'event_handler_failed', String(e))
-      ),
+      events: !primary
+        ? { on: () => ignore }
+        : clientPluginEvents.subscribe(entry.workspaceId, signal, (e) =>
+            clientDiagnostics.report(entry, 'event_handler_failed', String(e))
+          ),
       config: {
         get: <T extends Readonly<Record<string, ReadonlyJsonPrimitive>>>(project?: ProjectRef) =>
           readConfig(project) as T,

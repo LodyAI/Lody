@@ -18,6 +18,7 @@ import { MachineRuntime } from '@/lib/machine-runtime';
 import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
 import { Logger } from '@/utils/logger';
 import {
+  getServerNow,
   CliType,
   getScheduleRoomId,
   getSessionRoomId,
@@ -443,6 +444,66 @@ export class Lody {
           )
             throw new Error('Plugin host unavailable');
           signal?.throwIfAborted();
+          if (request.method === 'plugin/proposal-decision') {
+            if (
+              !actor.machineOwner ||
+              !actor.userId ||
+              request.workspaceId !== this.workspaceId ||
+              request.machineId !== this.machineId
+            )
+              throw Error('Owner required');
+            const { decidePluginProposal, proposalLedgerDir } =
+              await import('./plugin-proposal-decision');
+            const { pluginProposalMetaSchema } = await import('@lody/shared/plugins/proposal');
+            const session = await documentManager.getOrCreateSessionDoc(
+              request.params.sessionId as import('@lody/shared').SessionId
+            );
+            const { createSessionBackend } = await import('../session/session-backend');
+            const backend = await createSessionBackend(session);
+            if (backend.kind !== 'loro')
+              throw Error('Proposal decision unavailable for history backend');
+            const turnId = `plugin-proposal-${request.params.requestId}`;
+            const read = async () => {
+              const row = await backend.readTurn(turnId);
+              if (
+                row.state !== 'ready' ||
+                row.turn.role !== 'system' ||
+                row.turn.items?.length !== 1
+              )
+                throw Error('Proposal card missing');
+              const item = row.turn.items[0];
+              if (
+                !item ||
+                typeof item !== 'object' ||
+                !('name' in item) ||
+                item.name !== 'plugin_proposal' ||
+                !('type' in item) ||
+                item.type !== 'system_notice' ||
+                !('meta' in item)
+              )
+                throw Error('Invalid proposal card');
+              return { turn: row.turn, meta: pluginProposalMetaSchema.parse(item.meta) };
+            };
+            return decidePluginProposal({
+              root: proposalLedgerDir(),
+              workspaceId: request.workspaceId,
+              machineId: request.machineId,
+              actor,
+              params: request.params,
+              signal,
+              now: getServerNow,
+              readCard: async () => (await read()).meta,
+              updateCard: async (meta) => {
+                const { turn } = await read();
+                await session.sessionData.commands.replaceTurn(turnId, {
+                  ...turn,
+                  items: [{ type: 'system_notice', name: 'plugin_proposal', meta }],
+                });
+                await documentManager.repo.flush();
+              },
+              activate: (meta, path) => daemon.activateProposal(meta, path, signal),
+            });
+          }
           const identity = this.encryptedWorkspace;
           if (request.method === 'plugin/declared-workflow-grant')
             actor = await bindDeclaredGrantActor({

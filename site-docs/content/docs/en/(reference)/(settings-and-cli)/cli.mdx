@@ -828,6 +828,12 @@ lody plugin reload demo
 lody plugin disable demo
 ```
 
+`lody plugin remove demo` keeps the data directory, stored values, and event cursors for reinstallation. Add `--purge-data` to delete them after the plugin processes stop. This does not delete other plugins’ data or the shared event log.
+
+`lody plugin pack ./demo` writes `demo.tgz`, an npm-compatible tarball containing the declared plugin files and their SHA-256 integrity manifest. An optional `.lodypkg` suffix denotes the same gzip-compressed tar format. From an interactive owner terminal, run `lody plugin install ./demo.tgz` and confirm the capabilities and SHA-256. Installing another release with the same ID updates it; `lody plugin rollback demo` restores the previous generation without reverting plugin data. `install` also accepts a local source directory. Archive integrity is not a publisher signature.
+
+Run `lody plugin preview ./demo.tgz` to verify and preview the release without the source checkout, or `lody plugin preview ./demo` to preview source. Both open synthetic tool, message and session fixtures. Switch between Desktop, Web and Compact mobile; change the command or fence language to exercise renderer matching. The standalone page runs client code in a sandbox, without activating the plugin or connecting to a workspace. Use `--no-open --output demo.html` to save a new file instead.
+
 To develop against a running encrypted workspace on this machine, pass its ID to `link` and to each subsequent control command:
 
 ```sh

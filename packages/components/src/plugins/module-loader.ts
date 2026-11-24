@@ -47,6 +47,7 @@ export async function evaluateClientModule(
     workspaceId: string;
     pluginId: string;
     digest: string;
+    workspace?: {manifest:import('@lody/shared/plugins/manifest-schema').PluginManifest;local:boolean;bytes:()=>Uint8Array};
     packed?: () => Uint8Array;
   }
 ): Promise<client.ClientPluginDefinition> {
@@ -57,7 +58,7 @@ export async function evaluateClientModule(
       Object.defineProperty(globalThis, Symbol.for('lody.client.external.' + name), { value: ns });
       exports[name] = Object.keys(ns).filter((k) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k));
     }
-    const url = local.packed
+    const url = local.workspace ? await (local.workspace.local ? ipc.machineRpc : ipc.e2ee).workspacePluginModule(local.workspaceId,local.machineId,local.workspace.manifest,local.digest,{action:'open',bytes:local.workspace.bytes(),names:exports}) : local.packed
       ? await ipc.e2ee.openRemotePluginModule(
           local.workspaceId,
           local.machineId,
@@ -73,6 +74,7 @@ export async function evaluateClientModule(
           local.digest,
           exports
         );
+    if (!url) throw Error('Plugin module unavailable');
     try {
       signal.throwIfAborted();
       const { default: plugin } = await import(/* @vite-ignore */ url);

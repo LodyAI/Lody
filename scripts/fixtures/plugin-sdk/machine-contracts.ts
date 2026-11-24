@@ -81,6 +81,14 @@ export const machineWorkflowEventChecks = defineMachinePlugin((machine) => {
   machine.events.on('session.tool.completed', async (ctx, event) => {
     const completedTool: string = event.toolCall.toolName;
     void completedTool;
+    const persisted: boolean = await ctx.storage.update(
+      'completed',
+      undefined,
+      event.toolCall.toolCallId
+    );
+    void persisted;
+    // @ts-expect-error Machine snapshot access is explicitly unstable.
+    void ctx.lody.readSnapshot;
     const raw = await ctx.lody.unstable.readSnapshot({
       kind: 'session-meta',
       session: event.session,

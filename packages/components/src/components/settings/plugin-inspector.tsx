@@ -1,3 +1,4 @@
+import {pluginCapabilities} from '@lody/shared/plugins/capabilities';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import type { WorkspaceId } from '@lody/shared';
 import type { ClientCatalogInstallation } from '../../plugins/client-host-provider';
@@ -40,12 +41,14 @@ export function PluginInspector({
   inspection: p,
   projects,
   canControl,
+  clientConfig,
   chooseTheme,
   perform,
 }: {
   inspection: PluginInspection;
   projects?: readonly { id: string; name: string }[];
   canControl: boolean;
+  clientConfig?: boolean;
   chooseTheme?: (themeId: string) => void;
   perform: (
     action: InspectorAction,
@@ -58,6 +61,7 @@ export function PluginInspector({
       key={JSON.stringify([p.manifest.id, p.clientDigest, p.devSessionNonce])}
       projects={projects}
       inspection={p}
+      clientConfig={clientConfig}
       canControl={canControl}
       chooseTheme={chooseTheme}
       perform={perform}
@@ -68,6 +72,7 @@ function Inspection({
   inspection: p,
   projects,
   canControl,
+  clientConfig,
   chooseTheme,
   perform,
 }: Parameters<typeof PluginInspector>[0]) {
@@ -81,7 +86,8 @@ function Inspection({
   const preferences = activeProject ? (p.projectPreferences?.[activeProject] ?? {}) : p.preferences;
   const configured = activeProject ? Object.keys(preferences) : p.configured;
   const fields = Object.entries(p.manifest.config ?? {}).filter(
-    ([, f]) => (f.scope === 'project') === Boolean(activeProject)
+    ([, f]) =>
+      (!clientConfig || f.scope === 'client') && (f.scope === 'project') === Boolean(activeProject)
   );
   const shown = fields.filter(
     ([k, f]) =>
@@ -136,16 +142,10 @@ function Inspection({
       </p>
       <p>
         {t('settings.plugins.caps')}{' '}
-        {[
-          ...(p.manifest.permissions ?? []),
-          p.manifest.client && t('settings.plugins.client'),
-          p.manifest.machine && t('settings.plugins.machine'),
-          p.manifest.mcpServers?.length && t('settings.plugins.mcp'),
-          p.manifest.acpProviders?.length && t('settings.plugins.acp'),
-          fields.some(([, f]) => f.type === 'secret') && t('settings.plugins.secrets'),
-        ]
-          .filter(Boolean)
-          .join(', ') || t('settings.plugins.declarative')}
+        {pluginCapabilities(p.manifest).map(cap=>{
+          const label=({client:'client',machine:'machine',mcpServers:'mcp',acpProviders:'acp',secrets:'secrets'} as Record<string,string>)[cap];
+          return label?t(`settings.plugins.${label}`):cap;
+        }).join(', ') || t('settings.plugins.declarative')}
       </p>
       <fieldset disabled={busy || pluginSafeMode()}>
         {chooseTheme &&
@@ -206,9 +206,28 @@ function Inspection({
             </Button>
           </>
         ) : (
-          <p>{t('settings.plugins.localControl')}</p>
+          <>
+            <p>{t('settings.plugins.localControl')}</p>
+            <dl>
+              {fields.flatMap(([key, field]) =>
+                field.type === 'secret' || field.scope === 'machine'
+                  ? []
+                  : [
+                      <div key={key}>
+                        <dt>{field.label}</dt>
+                        <dd>{String(p.preferences[key] ?? field.default ?? '—')}</dd>
+                      </div>,
+                    ]
+              )}
+            </dl>
+          </>
         )}
-        {canControl && form && (
+        {clientConfig && fields.length > 0 && (
+          <Button variant="secondary" onClick={() => setForm('configure')}>
+            {t('settings.plugins.configure')}
+          </Button>
+        )}
+        {(canControl || clientConfig) && form && (
           <Dialog.Root
             open
             onOpenChange={(open) => {
@@ -328,7 +347,7 @@ function Inspection({
   );
 }
 
-function WorkflowApproval({ entry }: { entry: ClientCatalogInstallation }) {
+export function WorkflowApproval({ entry }: { entry: ClientCatalogInstallation }) {
   const { t } = useTranslation();
   const owner = useWorkspaceClientPlugins();
   const { projects } = useVisibleLocalProjects({ workspaceId: entry.workspaceId as WorkspaceId });
@@ -500,6 +519,7 @@ export function PluginsSettings() {
               projects={[...projects.values()]
                 .filter((p) => p.machine.id === i.machineId)
                 .map((p) => p.project)}
+              clientConfig={!!i.configureClient}
               canControl={!!i.control}
               inspection={{
                 lifecycle: i.enabled ? 'Enabled' : 'Disabled',
@@ -518,6 +538,8 @@ export function PluginsSettings() {
                 if (action === 'approve-dev') return owner.trustDev(i);
                 if (action === 'approve-release') return owner.trustRelease(i);
                 if (action === 'revoke') return owner.revoke(i);
+                if (action === 'configure' && i.configureClient)
+                  return i.configureClient(changes ?? {});
                 if (!i.control) throw new Error('Plugin control unavailable on this machine');
                 await i.control(action, changes, projectId);
               }}

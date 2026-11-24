@@ -100,9 +100,16 @@ export function createPluginAppearance(
     if (styles.has(id)) throw Error('Duplicate plugin stylesheet');
     const node = document.createElement('style');
     node.dataset.lodyPlugin = key.pluginId;
-    node.textContent = css;
-    styles.set(id, node);
     document.head.appendChild(node);
+    try {
+      if (!node.sheet) throw Error('Plugin stylesheet unavailable');
+      // insertRule accepts one rule, so a closing brace cannot inject an unlayered sibling.
+      node.sheet.insertRule('@layer lody-plugin {' + css + '\n}');
+      styles.set(id, node);
+    } catch (error) {
+      node.remove();
+      throw error;
+    }
   }
   for (const theme of manifest.themes ?? []) addTheme(theme);
   for (const path of manifest.styles ?? [])

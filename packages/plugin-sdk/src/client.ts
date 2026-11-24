@@ -351,7 +351,9 @@ export interface ClientPluginRegistry {
       readonly Component: ComponentType<MatchedToolRenderProps>;
     }): void;
   };
+  readonly statusBar: { readonly items: { add(spec: {readonly id: string; readonly Component: ComponentType<{workspace: WorkspaceRef}>}): void } };
   readonly messages: {
+    readonly actions: { add(spec: {readonly id:string; readonly Component: ComponentType<{session: SessionRef; turnId:string}>}): void };
     /**
      * Renders structured assistant fenced code blocks / custom artifacts inline with stable
      * `blockId` mount identity across streaming updates, paired with a host-owned
@@ -364,7 +366,14 @@ export interface ClientPluginRegistry {
       readonly Component: ComponentType<MessageBlockRenderProps>;
     }): void;
   };
+  readonly commands: {
+    register(action: { readonly id: string; readonly title: string; readonly shortcut?: string; readonly when?: () => boolean; readonly run: () => void | Promise<void> }): void;
+  };
   readonly composer: {
+    readonly slashCommands: {
+      add(command: { readonly name: string; readonly description: string; readonly run: (args: string) => void | string | Promise<void | string> }): void;
+    };
+    beforeSend(handler: (draft: { readonly text: string; readonly signal: AbortSignal }) => void | string | Promise<void | string>): void;
     readonly attachments: {
       add<TMeta extends z.ZodType>(
         source: AttachmentSourceDescriptor<TMeta>,
@@ -380,6 +389,7 @@ export interface ClientPluginRegistry {
     };
   };
   readonly session: {
+    readonly headerActions: {add(spec: {readonly id:string; readonly Component: ComponentType<{session:SessionRef}>}):void};
     readonly panels: {
       add(spec: {
         readonly id: string;
@@ -460,6 +470,12 @@ export interface ClientPluginRegistry {
 }
 
 export interface LodyClient {
+  readonly ui: {
+    toast(message: string): void;
+    confirm(message: string): Promise<boolean>;
+    openExternalUrl(url: string): Promise<boolean>;
+    copyToClipboard(text: string): Promise<void>;
+  };
   readonly storage: import('./index.js').PluginStorage;
   read<S extends PluginScope, TInput, TOutput>(
     target: ScopeTarget<S>,

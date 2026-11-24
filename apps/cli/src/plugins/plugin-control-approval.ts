@@ -4,9 +4,19 @@ import { runCommandTextLegacy } from '@lody/shared/node/process';
 import { z } from 'zod';
 
 const command = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('install'),
+    path: z.string().min(1),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
   z.strictObject({ action: z.literal('link'), path: z.string().min(1), dev: z.literal(true) }),
   z.strictObject({
-    action: z.enum(['reload', 'disable', 'remove', 'rollback', 'logs']),
+    action: z.literal('remove'),
+    pluginId: z.string().min(1),
+    purgeData: z.literal(true).optional(),
+  }),
+  z.strictObject({
+    action: z.enum(['reload', 'disable', 'rollback', 'logs']),
     pluginId: z.string().min(1),
   }),
 ]);

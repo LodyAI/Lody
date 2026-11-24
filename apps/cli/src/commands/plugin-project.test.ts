@@ -54,5 +54,23 @@ test('registered CLI creates and checks source but rejects activation in an agen
   await invoke('create', 'sample', '--template', 'workflow');
   const path = join(cwd, 'sample');
   expect(await readFile(join(path, 'machine/index.ts'), 'utf8')).toContain('defineMachinePlugin');
+  const { path: renderer } = await createPlugin('renderer', 'renderer', cwd);
+  const output = join(cwd, 'preview.html');
+  await invoke('preview', renderer, '--no-open', '--output', output);
+  await expect(invoke('preview', renderer, '--no-open', '--output', output)).rejects.toMatchObject({
+    code: 'EEXIST',
+  });
+  await invoke('pack', renderer);
+  const archive = join(cwd, 'renderer.tgz');
+  await rm(renderer, { recursive: true });
+  const releasePreview = join(cwd, 'release.html');
+  await invoke('preview', archive, '--no-open', '--output', releasePreview);
+  expect(await readFile(releasePreview, 'utf8')).toContain('sandbox="allow-scripts"');
+  await expect(invoke('install', archive)).rejects.toThrow('interactive owner terminal');
+  await expect(invoke('rollback', 'renderer')).rejects.toThrow('interactive owner terminal');
+  await writeFile(archive, 'LODYPKG1\n');
+  const invalid = join(cwd, 'invalid.html');
+  await expect(invoke('preview', archive, '--no-open', '--output', invalid)).rejects.toThrow();
+  await expect(readFile(invalid)).rejects.toMatchObject({ code: 'ENOENT' });
   await expect(invoke('link', '--dev', path)).rejects.toThrow('interactive owner terminal');
 });

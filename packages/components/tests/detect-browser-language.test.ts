@@ -12,6 +12,7 @@ type GlobalWindow = typeof window & {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   const w = window as GlobalWindow;
   delete w.__LODY_ELECTRON__;
@@ -19,17 +20,8 @@ afterEach(() => {
 });
 
 function setLanguages(languages: string[] | undefined, language?: string) {
-  // jsdom provides navigator.language by default; replace it per test.
-  Object.defineProperty(navigator, 'languages', {
-    configurable: true,
-    value: languages,
-  });
-  if (language !== undefined) {
-    Object.defineProperty(navigator, 'language', {
-      configurable: true,
-      value: language,
-    });
-  }
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(languages ?? []);
+  if (language !== undefined) vi.spyOn(navigator, 'language', 'get').mockReturnValue(language);
 }
 
 describe('detectBrowserLanguage', () => {

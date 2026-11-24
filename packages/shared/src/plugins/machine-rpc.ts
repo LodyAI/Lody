@@ -1,3 +1,4 @@
+import { pluginDecisionResult } from './proposal';
 import { AgentRoleSnapshotSchema } from '../message-author';
 import { MemoryBindingSchema } from '../memory-provider';
 import { z } from 'zod';
@@ -111,6 +112,7 @@ export const pluginSessionCreateParams = z.strictObject({
   }),
 });
 export const pluginRpcResultSchema = z.discriminatedUnion('type', [
+  pluginDecisionResult,
   z.strictObject({
     type: z.literal('plugin/session-create'),
     sessionId: z.string().uuid(),
@@ -132,6 +134,7 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
         enabled: z.boolean(),
         inspection: pluginInspectionSchema.optional(),
         workflowPrompts: z.record(descriptorIdSchema, z.string()).optional(),
+        packageSha256:digest.optional(),
         workflowInstallation: z
           .strictObject({
             installationId: z.string().uuid(),
@@ -173,6 +176,7 @@ export function isPluginMachineRequest(
   return pluginMethods.has(request.method);
 }
 export const pluginMethods: ReadonlySet<string> = new Set([
+  'plugin/proposal-decision',
   'plugin/control',
   'plugin/declared-workflow-grant',
   'plugin/catalog',

@@ -316,8 +316,7 @@ describe('Lody MCP tool catalog', () => {
     }
   });
 
-  // Guards the published names: every name costs eager context in each Lody-started Agent,
-  // and paired single/batch or get/list tools are merged into one tool per job.
+  // Each published tool name consumes context in every Lody-started Agent.
   it('publishes exactly the merged Lody tool catalog, with no Task family', async () => {
     const names = await listPublishedToolNames();
     expect([...names].sort()).toEqual([
@@ -329,6 +328,7 @@ describe('Lody MCP tool catalog', () => {
       'lody_mcp_configure',
       'lody_operation',
       'lody_operation_cancel',
+      'lody_plugin',
       'lody_report_preview_candidate',
       'lody_schedule',
       'lody_session_cancel',

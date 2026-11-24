@@ -1,3 +1,4 @@
+import { PluginProposalNotice } from './plugin-proposal-notice';
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { downloadBytesAsFile } from '@/lib/download-file';
@@ -346,6 +347,7 @@ import {
   getThoughtSearchBlockId,
 } from '@/lib/session-chat-search';
 
+import { PluginSessionActions } from '../../plugins/shell-surfaces';
 import { fences, TranscriptMarkdown, TranscriptTool } from '../../plugins/transcript-surfaces';
 import { eventRefs, toolFact } from '../../plugins/session-events';
 import type { ObservedToolCall } from '@lody/plugin-sdk';
@@ -353,6 +355,10 @@ function useTranscriptTarget(sessionId: SessionId) {
   const workspaceId = useSessionCopyWorkspaceId();
   const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   return workspaceId && meta ? eventRefs(workspaceId, meta) : undefined;
+}
+function PluginTurnActions({sessionId,turnId}:{sessionId:SessionId;turnId:string}) {
+  const target=useTranscriptTarget(sessionId);
+  return target ? <PluginSessionActions session={target.session} turnId={turnId}/> : null;
 }
 function PluginMarkdown({
   sessionId,
@@ -2926,7 +2932,14 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
+        item.type === 'system_notice' && item.name === 'plugin_proposal' && item.meta ? (
+          <PluginProposalNotice
+            key={`plugin-${itemIndex}`}
+            meta={item.meta}
+            sessionId={sessionId}
+            entryId={message.id}
+          />
+        ) : item.type === 'system_notice' && item.name === 'agent_role_proposal' && item.meta ? (
           <AgentRoleProposalNotice
             key={`role-proposal-${itemIndex}`}
             meta={item.meta as AgentRoleProposalMeta}
@@ -6288,6 +6301,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
+            <PluginTurnActions sessionId={row.item.sessionId} turnId={message.id} />
             <AssistantTurnFooter
               message={message}
               sessionId={row.item.sessionId}

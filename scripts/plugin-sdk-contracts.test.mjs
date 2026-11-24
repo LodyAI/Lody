@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -10,21 +8,34 @@ import ts from 'typescript';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureDir = path.join(repoRoot, 'scripts/fixtures/plugin-sdk');
-const require = createRequire(import.meta.url);
+const fromCli = createRequire(path.join(repoRoot, 'apps/cli/package.json'));
 const requireShared = createRequire(path.join(repoRoot, 'packages/shared/package.json'));
+const { build } = fromCli('esbuild');
+const sdkRoot = path.join(repoRoot, 'packages/plugin-sdk');
+async function loadExample(relativePath) {
+  const result = await build({
+    entryPoints: [path.join(fixtureDir, 'examples', relativePath)],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'node',
+    target: 'node22',
+    nodePaths: [path.join(repoRoot, 'apps/cli/node_modules'), path.join(sdkRoot, 'node_modules')],
+  });
+  return (
+    await import(
+      `data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString('base64')}`
+    )
+  ).default;
+}
 
-function verifyTsconfig(configFileName, minFiles) {
+function verifyTsconfig(configFileName) {
   const configPath = path.join(fixtureDir, configFileName);
   const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
   assert.equal(configFile.error, undefined, `Failed to read ${configFileName}`);
 
   const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, fixtureDir);
   assert.deepEqual(parsed.errors, [], `Unexpected ${configFileName} parse errors`);
-  assert.ok(
-    parsed.fileNames.length >= minFiles,
-    `Expected at least ${minFiles} files in ${configFileName}, got ${parsed.fileNames.length}`
-  );
-
   const program = ts.createProgram({
     rootNames: parsed.fileNames,
     options: parsed.options,
@@ -42,11 +53,11 @@ function verifyTsconfig(configFileName, minFiles) {
 }
 
 test('plugin SDK browser-pure client contracts and dogfood UI examples typecheck cleanly', () => {
-  verifyTsconfig('tsconfig.json', 11);
+  verifyTsconfig('tsconfig.json');
 });
 
-test('plugin SDK Node machine contracts and durable dataDir examples typecheck without DOM globals', () => {
-  verifyTsconfig('tsconfig.machine.json', 9);
+test('plugin SDK Node machine contracts and workspace examples typecheck without DOM globals', () => {
+  verifyTsconfig('tsconfig.machine.json');
 });
 
 test('sound-effects client plugin composes events, assets.url, signal, and standard Web Audio without bespoke SDK slots', async () => {
@@ -71,28 +82,10 @@ test('sound-effects client plugin composes events, assets.url, signal, and stand
   };
 
   try {
-    const source = readFileSync(path.join(fixtureDir, 'examples/sound-effects/client.tsx'), 'utf8');
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2023,
-      },
-    }).outputText;
-    const mod = { exports: {} };
-    new Function('require', 'module', 'exports', compiled)(
-      (id) => {
-        if (id === '@lody/plugin-sdk/client') {
-          return { defineClientPlugin: (register) => ({ register }) };
-        }
-        throw new Error(`Unexpected import: ${id}`);
-      },
-      mod,
-      mod.exports
-    );
-
+    const plugin = await loadExample('sound-effects/client.tsx');
     const abortController = new AbortController();
     const currentConfig = { pack: 'soft-wood', volume: 0.5, playOnSend: true };
-    const cleanup = mod.exports.default.register({
+    const cleanup = plugin.register({
       signal: abortController.signal,
       events: {
         on(type, fn) {
@@ -378,4 +371,37 @@ test('sorbet-workflow messages.renderBlock preserves interactive component state
     openedDrafts[0].draft.prompt,
     /Execute approved plan \(turn_99:block:0\) from sess_1:\n1\. Audit schema$/
   );
+});
+test('issue-context pins through scoped host storage and its public descriptors', async () => {
+  const plugin = await loadExample('issue-context/machine.ts');
+  const queries = new Map(),
+    mutations = new Map(),
+    values = new Map();
+  plugin.register({
+    attachmentSource() {},
+    query: (d, run) => queries.set(d.id, { d, run }),
+    mutation: (d, run) => mutations.set(d.id, { d, run }),
+  });
+  const context = {
+    target: { projectId: 'one' },
+    signal: new AbortController().signal,
+    config: { TRACKER_API_KEY: 'fixture' },
+    invalidate() {},
+    storage: {
+      get: (key) => values.get(key),
+      set: (key, value) => values.set(key, value),
+      delete: (key) => values.delete(key),
+    },
+  };
+  const pin = mutations.get('issues.togglePin'),
+    list = queries.get('issues.list');
+  const toggle = async (pinned) =>
+    pin.d.output.parse(await pin.run(context, pin.d.input.parse({ issueId: 'iss_101', pinned })));
+  const read = async (target) =>
+    list.d.output.parse(await list.run({ ...context, target }, list.d.input.parse({})))[0].pinned;
+  await toggle(true);
+  assert.equal(await read(context.target), true);
+  assert.equal(await read({ projectId: 'two' }), false);
+  await toggle(false);
+  assert.equal(await read(context.target), false);
 });

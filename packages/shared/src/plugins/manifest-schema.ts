@@ -1,4 +1,5 @@
-/// <reference path="./semver.d.ts" />
+import compare from 'semver/functions/compare.js';
+export const comparePluginVersions = compare;
 import satisfies from 'semver/functions/satisfies.js';
 import sdkPackage from '../../../plugin-sdk/package.json' with { type: 'json' };
 import { z } from 'zod';

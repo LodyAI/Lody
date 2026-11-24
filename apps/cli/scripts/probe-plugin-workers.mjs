@@ -62,11 +62,12 @@ try {
         instanceId: 1,
         dataDir: root,
         config: {},
+        permissions: [],
       })
     ).type,
     'ready'
   );
-  assert.equal((await exchange(worker, { type: 'start' })).ok, true);
+  assert.equal((await exchange(worker, { type: 'start', contextId: 'startup' })).ok, true);
   assert.equal(
     (
       await exchange(worker, {

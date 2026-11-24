@@ -32,7 +32,7 @@
     "test:sea:native": "node scripts/sea/native-acceptance.mjs",
     "prepare:publish": "node prepare-publish.js",
     "test:release": "node --test *.test.mjs",
-    "prepare:plugin-sdk": "pnpm --filter @lody/plugin-sdk build"
+    "prepare:plugin-sdk": "pnpm --filter @lody/plugin-sdk build && node scripts/plugin-preview/build.mjs"
   },
   "keywords": [
     "cli",

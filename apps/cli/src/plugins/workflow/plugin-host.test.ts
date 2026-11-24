@@ -588,3 +588,53 @@ it('skips a permanently rejected journal event and reports machine invalidations
     await rm(root, { recursive: true, force: true });
   }
 });
+it('reload drains a SIGTERM-resistant worker before its successor opens the same data file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-drain-'));
+  const worker = join(root, 'worker.mjs');
+  const entry = join(root, 'machine.mjs');
+  const ledger = join(root, 'generation.json');
+  try {
+    await build({
+      entryPoints: [fileURLToPath(new URL('../plugin-worker-entry.ts', import.meta.url))],
+      outfile: worker,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+    });
+    await writeFile(
+      entry,
+      `import {existsSync,readFileSync,writeFileSync} from 'node:fs';
+      const ledger=${JSON.stringify(ledger)};
+      export default {kind:'machine-plugin',register(){
+        process.on('SIGTERM',()=>{});
+        const history=existsSync(ledger)?JSON.parse(readFileSync(ledger,'utf8')):[];
+        for(const pid of history){try{process.kill(pid,0);throw Error('Overlapping workers')}catch(err){if(err.code!=='ESRCH')throw err}}
+        writeFileSync(ledger,JSON.stringify([...history,process.pid]));
+        return ()=>{for(;;){}};
+      }};`
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        const spec = {
+          pluginId: 'drain',
+          workspaceId: 'workspace',
+          machineId: 'machine',
+          dataDir: root,
+          machineEntry: entry,
+          config: {},
+        };
+        const first = yield* host.reload({ ...spec, machineDigest: 'one' });
+        const start = performance.now();
+        const second = yield* host.reload({ ...spec, machineDigest: 'two' });
+        expect(performance.now() - start).toBeLessThanOrEqual(4500);
+        expect(JSON.parse(yield* Effect.promise(() => readFile(ledger, 'utf8')))).toEqual([
+          first.pid,
+          second.pid,
+        ]);
+      }).pipe(Effect.provide(makePluginHostLayer(worker).pipe(Layer.provide(processLayer({})))))
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15000);

@@ -106,6 +106,8 @@ import {
   type DraftSessionSendPayload,
 } from '@/components/sessions/draft-session-chat-interface';
 import { SessionMentionDropLayer } from '@/components/sessions/session-mention-drop-layer';
+import { PluginSessionActions } from '../../plugins/shell-surfaces';
+import { eventRefs } from '../../plugins/session-events';
 import { BaseHeader } from '@/components/page-headers/base-header';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { usePublishSessionViewing } from '@/hooks/use-publish-session-viewing';
@@ -1002,6 +1004,7 @@ const MobileProjectInfo = memo(function MobileProjectInfo({
 });
 
 function AdaptiveMobileSessionHeader({
+  pluginActions,
   inset,
   title,
   hasUnread,
@@ -1009,6 +1012,7 @@ function AdaptiveMobileSessionHeader({
   onTabs,
   onMore,
 }: {
+  pluginActions: ReactNode;
   inset: string;
   title: ReactNode;
   hasUnread: boolean;
@@ -1039,6 +1043,7 @@ function AdaptiveMobileSessionHeader({
       title={title}
       actions={
         <div {...stylex.props(detailStyles.mobileHeaderRight)}>
+          {pluginActions}
           <MobileSessionTabButton hasUnread={hasUnread} onOpen={onTabs} />
           {!sideRailVisible && (
             <GlassIconButton label={t('sessions.moreActions', 'More actions')} onClick={onMore}>
@@ -6482,6 +6487,7 @@ const SessionDetail = ({
         )}
       >
         <AdaptiveMobileSessionHeader
+          pluginActions={currentWorkspaceId && <PluginSessionActions session={eventRefs(currentWorkspaceId,activeSession).session} />}
           inset={mobileHeaderInset}
           onBack={handleMobileSessionBack}
           onTabs={() => setMobileTabSheetOpen(true)}
@@ -7262,7 +7268,7 @@ const SessionDetail = ({
     <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
   ) : null;
 
-  const desktopHeaderToolbar = <div ref={setDesktopToolbarContainer} />;
+  const desktopHeaderToolbar = <><div ref={setDesktopToolbarContainer} />{currentWorkspaceId && <PluginSessionActions session={eventRefs(currentWorkspaceId,activeSession).session}/>}</>;
 
   /* Single-row desktop top bar: [sidebar expand] [session tabs …] [toolbar].
      Replaces the old two-row header (repo title row + tab bar) — repo identity

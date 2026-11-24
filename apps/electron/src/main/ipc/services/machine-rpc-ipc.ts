@@ -5,7 +5,9 @@ import { pluginRpcResultSchema } from '@lody/shared/plugins/machine-rpc'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { join } from 'node:path'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
-import { mainPlatformKind } from '../../platform'
+import { workspaceModuleProof, scopeHash, type WorkspaceModuleOperation } from '../../services/workspace-plugin-proof'
+import type { PluginManifest } from '@lody/shared/plugins/manifest-schema'
+import { mainPlatformKind, isLocalPlatform, readLocalPlatformSnapshot } from '../../platform'
 import {
   LocalFilePreviewRequestSchema,
   previewLocalFile,
@@ -75,6 +77,17 @@ export class MachineRpcIpc extends ProductWindowIpcService {
     return openLocalHtmlPreview(localHtmlPreviewSites, generation, parsed, machineId)
   }
 
+  @IpcMethod()
+  async workspacePluginModule(workspaceId:string,machineId:string,manifest:PluginManifest,digest:string,op:WorkspaceModuleOperation){
+    const {event}=getIpcContext();assertProductWindowSender(event);const generation=getResourceOwner(event.sender)
+    if(process.argv.includes('--safe-mode')||new URL(event.senderFrame!.url).searchParams.getAll('safeMode').includes('1'))throw Error('Plugins disabled in safe mode')
+    // Only the native implicit local workspace can use the unencrypted proof store.
+    const local=isLocalPlatform()?await readLocalPlatformSnapshot():null
+    if(!local||local.workspace.workspaceId!==workspaceId)throw Error('Local workspace unavailable')
+    const directory=join(getLodyDataDir(mainPlatformKind),'plugins','workspace-releases',scopeHash([local.userId,workspaceId]));const current=()=>isCurrentResourceOwner(event.sender,generation)
+    const source=await workspaceModuleProof(directory,manifest,digest,op,async()=>{const reply=await getIpcServiceDeps().cliService.sendLocalMachineRpc({workspaceId,machineId,method:'plugin/catalog',params:{}});if(!reply.ok)throw Error('Local catalog unavailable');const result=pluginRpcResultSchema.parse(reply.result);const row=result.type==='plugin/catalog'&&result.installations.find(i=>i.enabled&&i.manifest.id===manifest.id);if(!row)throw Error('Workspace release unavailable');return {manifest:row.manifest,digest:row.clientDigest,dev:!!row.devSessionNonce}},current)
+    if(source===null||op.action!=='open')return null;const url=await publishPluginModule(generation,source,op.names);if(!current()){releasePluginGraph(generation,url);throw Error('Plugin document retired')}return url
+  }
   @IpcMethod()
   async openPluginModule(
     machineId: string,

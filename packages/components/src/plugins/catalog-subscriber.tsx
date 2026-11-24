@@ -322,7 +322,10 @@ export function PluginCatalogSubscriber() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const snapshots = new Map<string, Awaited<ReturnType<typeof readPluginCatalog>>>();
     for (const i of owner.installations()) {
-      if (targets.some((t) => t.machineId === i.dev.machineId && t.owner === i.dev.owner)) {
+      if (
+        i.sourceKey !== 'workspace' &&
+        targets.some((t) => t.machineId === i.dev.machineId && t.owner === i.dev.owner)
+      ) {
         const group = snapshots.get(i.dev.machineId) ?? [];
         group.push(i);
         snapshots.set(i.dev.machineId, group);
@@ -355,7 +358,25 @@ export function PluginCatalogSubscriber() {
     void owner
       .update([...snapshots.values()].flat())
       .catch((e) => console.error('Plugin cleanup failed', e));
-    void refresh();
+    void owner
+      .restore((entry) =>
+        createWorkspacePluginRegistry(
+          entry,
+          {
+            call: async () => {
+              throw Error('Workspace plugin has no machine port');
+            },
+          },
+          reads,
+          owner.storageNamespace
+        )
+      )
+      .catch((e) => {
+        if (active) console.error('Workspace plugin restore failed', e);
+      })
+      .finally(() => {
+        if (active) void refresh();
+      });
     return () => {
       active = false;
       clearTimeout(timer);

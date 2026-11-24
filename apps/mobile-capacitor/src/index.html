@@ -56,6 +56,19 @@
           };
         }
 
+        function appendPluginRecovery(parent) {
+          var safe = document.createElement('button');
+          safe.type = 'button';
+          safe.className = 'bf-button bf-secondary';
+          safe.textContent = 'Reload without plugins';
+          safe.addEventListener('click', function () {
+            var url = new URL(window.location.href);
+            url.searchParams.set('safeMode', '1');
+            window.location.replace(url.href);
+          });
+          parent.appendChild(safe);
+        }
+
         function appendResetButton(parent, styled) {
           if (!parent || !window.__LODY_NATIVE_RESET__) return;
           var reset = document.createElement('button');
@@ -170,6 +183,7 @@
             copy.textContent = 'Copied';
           });
           row.appendChild(reload);
+          appendPluginRecovery(row);
           row.appendChild(copy);
           appendResetButton(row);
           wrap.appendChild(title);
@@ -216,8 +230,9 @@
           if (controller && typeof controller.render === 'function') {
             try {
               controller.render(resolveRoot(), err);
+              var actions = resolveRoot().querySelector('.bf-actions');
+              if (actions) appendPluginRecovery(actions);
               if (window.__LODY_NATIVE_RESET__) {
-                var actions = resolveRoot().querySelector('.bf-actions');
                 if (!actions) throw new Error('Boot recovery actions unavailable');
                 appendResetButton(actions, true);
               }

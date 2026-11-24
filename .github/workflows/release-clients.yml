@@ -42,7 +42,10 @@ concurrency:
     }}
   cancel-in-progress: false
 jobs:
+  plugin-integration:
+    uses: ./.github/workflows/plugin-integration.yml
   release:
+    needs: plugin-integration
     runs-on: ubuntu-latest
     permissions:
       actions: read

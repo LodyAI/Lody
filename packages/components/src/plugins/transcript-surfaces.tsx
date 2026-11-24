@@ -9,7 +9,7 @@ import {
   type MatchedToolRenderProps,
 } from '@lody/plugin-sdk/client';
 import type { SurfaceFactory } from './workspace-plugin-registry';
-import { SurfaceErrorBoundary } from './shell-surfaces';
+import { SurfaceErrorBoundary } from './surface-error-boundary';
 
 type Scope = Parameters<SurfaceFactory>[0];
 type Slot = { entry: Scope; id: string; priority: number; bindings: ClientHostBindings } & (
@@ -34,7 +34,7 @@ export function createTranscriptSurfaces(
   entry: Scope,
   signal: AbortSignal,
   bindings: ClientHostBindings
-): Pick<ClientPluginRegistry, 'tools' | 'messages'> {
+): { tools: ClientPluginRegistry['tools']; messages: Pick<ClientPluginRegistry['messages'], 'renderBlock'> } {
   const owned = new Set<Slot>();
   const add = (slot: Slot) => {
     signal.throwIfAborted();
@@ -189,10 +189,7 @@ export function TranscriptMarkdown({
   render: (text: string, prose: boolean) => ReactNode;
 }) {
   const available = useTranscriptSlots().filter(
-    (s) =>
-      s.kind === 'block' &&
-      s.entry.workspaceId === target?.session.workspaceId &&
-      s.entry.dev.machineId === target.session.machineId
+    (s) => s.kind === 'block' && s.entry.workspaceId === target?.session.workspaceId
   );
   if (!target || !available.length) return render(text, true);
   let last = 0;
@@ -281,7 +278,7 @@ export function TranscriptTool({
     if (!target) return false;
     if (
       s.entry.workspaceId !== target.session.workspaceId ||
-      s.entry.dev.machineId !== target.session.machineId
+      (s.kind === 'own' && s.entry.dev.machineId !== target.session.machineId)
     )
       return false;
     if (s.kind === 'own') return call.toolName === `plugin__${s.entry.pluginId}__${s.id}`;
@@ -302,29 +299,35 @@ export function TranscriptTool({
       return false;
     }
   });
-  const slot = matches[0];
+  const replacements = matches.filter(s => s.kind !== 'match' || s.spec.mode !== 'enhance');
+  const enhancements = matches.filter(s => s.kind === 'match' && s.spec.mode === 'enhance');
+  const slot = replacements[0];
   useEffect(() => {
     if (!slot) return;
-    for (const loser of matches.slice(1))
-      clientDiagnostics.report(
-        loser.entry,
-        'matcher_shadowed',
-        `${loser.id}: ${slot.entry.pluginId}:${slot.id} priority ${slot.priority}`
-      );
-  }, [matches, slot]);
-  if (!slot || !target) return raw;
-  const key = JSON.stringify([call.toolCallId, slot.id, slot.entry.pluginId, slot.entry.digest]);
-  if (rawKey === key)
-    return (
-      <>
-        <button onClick={() => setRaw('')}>View rendered</button>
-        {raw}
-      </>
-    );
+    for (const loser of replacements.slice(1)) {
+      clientDiagnostics.report(loser.entry, 'matcher_shadowed',
+        `${loser.id}: ${slot.entry.pluginId}:${slot.id} priority ${slot.priority}`);
+    }
+  }, [replacements, slot]);
+  if (!target || !matches.length) return raw;
+  const key = JSON.stringify([target.session.workspaceId, target.session.sessionId, call.toolCallId]);
+  if (rawKey === key) return <><button onClick={() => setRaw('')}>View rendered</button>{raw}</>;
+  const content = (item: Slot, fallback: ReactNode) => (
+    <SurfaceErrorBoundary
+      key={JSON.stringify([key, item.entry.sourceKey, item.entry.pluginId, item.id, item.entry.digest])}
+      fallback={fallback}
+      onCrash={(stack) => clientDiagnostics.report(item.entry, 'surface_render_crashed', stack)}
+    >
+      <ClientHostProvider value={item.bindings}>
+        <ToolContent slot={item} target={target} call={call} raw={fallback} showRaw={() => setRaw(key)} />
+      </ClientHostProvider>
+    </SurfaceErrorBoundary>
+  );
   return (
-    <TranscriptSurface key={key} slot={slot} raw={raw} label="View Raw Output">
-      <ToolContent slot={slot} target={target} call={call} raw={raw} showRaw={() => setRaw(key)} />
-      {slot.kind === 'match' && slot.spec.mode === 'enhance' ? raw : null}
-    </TranscriptSurface>
+    <>
+      <button onClick={() => setRaw(key)}>View Raw Output</button>
+      {slot ? content(slot, raw) : raw}
+      {enhancements.map(item => content(item, null))}
+    </>
   );
 }

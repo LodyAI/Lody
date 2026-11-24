@@ -625,3 +625,102 @@ it('serializes competing preference CAS across plugin instances and fences a ret
   life.abort();
   await expect(a.delete('key')).rejects.toThrow();
 });
+it('elects one SemVer primary while keeping the other companion registrations alive', async () => {
+  const { WorkspaceClientPlugins } = await import('../src/plugins/client-host-provider');
+  const owner = new WorkspaceClientPlugins('w', 'identity');
+  const active = new Map<string, boolean>();
+  const read = async () => new TextEncoder().encode('body{}');
+  const make = async (machineId: string, version: string) => {
+    const m = pluginManifestSchema.parse({
+      id: 'companion',
+      sdk: '^1.0.0',
+      version,
+      title: 'Companion',
+      machine: 'machine.js',
+      styles: ['style.css'],
+    });
+    const bytes = (await packClientBundle(m, read))!;
+    return {
+      workspaceId: 'w',
+      pluginId: m.id,
+      sourceKey: `machine:${machineId}`,
+      digest: (await computeClientDigest(m, read))!,
+      enabled: true,
+      dev: { workspaceId: 'w', machineId, manifest: m, owner: true, devMode: false },
+      page: async () => ({ bytes, totalBytes: bytes.length }),
+      registry: (_: unknown, signal: AbortSignal, _queries: unknown, primary = true) => {
+        active.set(machineId, primary);
+        signal.addEventListener('abort', () => active.delete(machineId), { once: true });
+        return {} as never;
+      },
+    } as const;
+  };
+  const a = await make('a', '2.0.0-beta.2'),
+    b = await make('b', '2.0.0-beta.10'),
+    c = await make('c', '2.0.0-beta.10');
+  try {
+    await owner.update([c, b, a]);
+    for (const entry of [c, b, a]) await owner.trustRelease(entry);
+    expect(Object.fromEntries(active)).toEqual({ a: false, b: true, c: false });
+    await owner.update([a, c]);
+    expect(Object.fromEntries(active)).toEqual({ a: false, c: true });
+  } finally {
+    await owner.close();
+  }
+  expect(active.size).toBe(0);
+});
+
+it('restores an approved workspace release and its client preferences without a machine catalog', async () => {
+  const { IDBFactory } = await import('fake-indexeddb');
+  const { vi } = await import('vitest');
+  const { WorkspaceClientPlugins } = await import('../src/plugins/client-host-provider');
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const manifest = pluginManifestSchema.parse({
+    id: 'offline',
+    sdk: '^1.0.0',
+    version: '1.0.0',
+    title: 'Offline',
+    styles: ['style.css'],
+    config: { enabled: { type: 'boolean', scope: 'client', label: 'Enabled' } },
+  });
+  const read = async () => new TextEncoder().encode('article{}');
+  const bytes = (await packClientBundle(manifest, read))!;
+  const digest = (await computeClientDigest(manifest, read))!;
+  const entry = {
+    workspaceId: 'w',
+    sourceKey: 'machine:m',
+    pluginId: 'offline',
+    enabled: true,
+    digest,
+    dev: { workspaceId: 'w', machineId: 'm', owner: true, devMode: false, manifest },
+    page: async () => ({ bytes, totalBytes: bytes.length }),
+    registry: () => ({}) as never,
+  } as const;
+  const owner = new WorkspaceClientPlugins('w', 'identity');
+  const reopened = new WorkspaceClientPlugins('w', 'identity');
+  let loaded = '';
+  const factory = () => (files: (path: string) => Uint8Array) => {
+    loaded = new TextDecoder().decode(files('style.css'));
+    return {} as never;
+  };
+  try {
+    await owner.restore(factory);
+    await owner.update([entry]);
+    await owner.trustRelease(entry);
+    await owner.installations()[0]!.configureClient!({ enabled: false });
+    await owner.close();
+    loaded = '';
+    await reopened.restore(factory);
+    await reopened.update([]);
+    expect(loaded).toBe('article{}');
+    expect(reopened.installations()).toMatchObject([
+      { sourceKey: 'workspace', inspection: { preferences: { enabled: false } } },
+    ]);
+    await reopened.revoke(reopened.installations()[0]!);
+    expect(reopened.installations()).toEqual([]);
+  } finally {
+    await reopened.close();
+    await owner.close();
+    vi.unstubAllGlobals();
+  }
+});

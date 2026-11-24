@@ -4,7 +4,7 @@ import { unpackClientBundle, MAX_PACKED_CLIENT_BUNDLE_BYTES } from '@lody/shared
 
 const catalogs = new WeakMap<
   object,
-  WeakMap<object, Map<string, Map<string, { digest: string; client: string }>>>
+  WeakMap<object, Map<string, Map<string, { digest: string; client: string; manifest:import('@lody/shared/plugins/manifest-schema').PluginManifest; dev:boolean }>>>
 >()
 export function observePluginCatalog(
   reader: object,
@@ -29,12 +29,13 @@ export function observePluginCatalog(
     new Map(
       reply.installations.flatMap((i) =>
         i.enabled && i.clientDigest && i.manifest.client
-          ? [[i.manifest.id, { digest: i.clientDigest, client: i.manifest.client }]]
+          ? [[i.manifest.id, { digest: i.clientDigest, client: i.manifest.client, manifest:i.manifest, dev:!!i.devSessionNonce }]]
           : []
       )
     )
   )
 }
+export function nativeReleaseEvidence(reader:object,document:object,machine:string,id:string){const row=catalogs.get(reader)?.get(document)?.get(machine)?.get(id);if(!row)throw Error('Missing native release evidence');return row}
 export function openAuthenticatedPluginSource(
   reader: object,
   document: object,

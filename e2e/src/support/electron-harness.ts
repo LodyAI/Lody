@@ -94,6 +94,7 @@ export type BootProfileSnapshot = {
 };
 
 export type ElectronLaunchOptions = {
+  safeMode?: boolean;
   reuseRoot?: string;
   forceOnboarding?: boolean;
   remoteDebuggingPort?: number;
@@ -219,6 +220,7 @@ export class ElectronHarness {
     });
     const instanceArgs = [
       ...appConfig.args,
+      ...(options.safeMode ? ['--safe-mode'] : []),
       // An external app directory is launched as an app (its package.json `main`), so
       // app.getAppPath() is that directory and its own resources/cli is the bundled CLI.
       process.env.LODY_E2E_APP_DIR ? ELECTRON_DIR : MAIN_ENTRY,
@@ -285,10 +287,13 @@ export class ElectronHarness {
     // firstWindow can still expose about:blank before Electron's loadFile commits.
     // Wait for the application document, not the placeholder's readyState.
     const rendererUrl = pathToFileURL(join(ELECTRON_DIR, 'out', 'renderer', 'index.html'));
-    await this.page.waitForURL((url) => url.href.split('#')[0] === rendererUrl.href, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60_000,
-    });
+    await this.page.waitForURL(
+      (url) => url.origin === rendererUrl.origin && url.pathname === rendererUrl.pathname,
+      {
+        waitUntil: 'domcontentloaded',
+        timeout: 60_000,
+      }
+    );
     this.bootProfile = await this.readBootProfile();
     await this.markBootPoint('document-ready-observed');
     await this.page.evaluate(

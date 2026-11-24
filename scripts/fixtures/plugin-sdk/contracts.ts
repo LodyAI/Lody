@@ -134,6 +134,15 @@ export const legacyEnvManifest: PluginManifest = {
 };
 
 export const minimalShellPlugin = defineClientPlugin((lody) => {
+  lody.commands.register({ id: 'inspect', title: 'Inspect selection', run: () => {} });
+  lody.composer.slashCommands.add({
+    name: 'outline',
+    description: 'Draft an outline',
+    run: (args) => `Outline: ${args}`,
+  });
+  lody.composer.beforeSend(({ text, signal }) => (signal.aborted ? undefined : text.trim()));
+  // @ts-expect-error A beforeSend hook cannot replace a signed execution envelope.
+  lody.composer.beforeSend(() => ({ signature: 'replacement' }));
   const signal: AbortSignal = lody.signal;
   void signal;
 
@@ -449,6 +458,9 @@ export async function verifyExtensibilityAndRawSnapshots(
     void nestedTurnCount;
   }
 
+  await lody.storage.update('selection', undefined, { turn: 'turn_1' });
+  // @ts-expect-error Raw reads are not part of the stable host query port.
+  void lody.readSnapshot;
   const rawSnap = await lody.unstable.readSnapshot({
     kind: 'session-transcript',
     session,

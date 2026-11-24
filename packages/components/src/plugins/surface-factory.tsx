@@ -1,11 +1,13 @@
+import { pluginUi } from './plugin-ui';
 import { clientDiagnostics } from './client-diagnostics';
+import { composerContributions } from './composer-contributions';
 import { AttachmentAction } from './attachment-action';
 import type { ComposerActionProps } from '@lody/plugin-sdk/client';
 import { lodyCommands } from '@lody/plugin-sdk';
 import { isNativeAppShell } from '../lib/native-platform';
 import { SidebarHoverCard } from '../components/session-info-hover-card';
 import { NavButton } from '../components/loro-sidebar';
-import { useIsMobile } from '../hooks/use-mobile';
+import { useIsMobile, useIsCompactDesktop } from '../hooks/use-mobile';
 import type { ClientHostBindings, WorkspaceRef } from '@lody/plugin-sdk/client';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { scopedSlots, PluginRowDecorations, openPluginScreen } from './shell-surfaces';
@@ -16,6 +18,7 @@ const unavailable = (): never => {
   throw Error('Plugin operation unavailable on this host');
 };
 export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, assets) => {
+  const contributions = composerContributions(entry.workspaceId, entry.pluginId, signal);
   const source = JSON.stringify([entry.pluginId, entry.sourceKey, entry.digest]);
   const workspace = { workspaceId: entry.workspaceId } as WorkspaceRef;
 
@@ -82,6 +85,11 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         ) as never,
         set: async (k, v) => {
           signal.throwIfAborted();
+          if (entry.configureClient) {
+            if (typeof k !== 'string' || v === null) unavailable();
+            await entry.configureClient({ [String(k)]: v as string | number | boolean });
+            return;
+          }
           const field = entry.dev.manifest.config?.[String(k)];
           if (
             !entry.control ||
@@ -101,15 +109,25 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         },
       };
     },
-    useHostCapabilities: () => ({
-      platform: getIpcServices() ? 'desktop' : isNativeAppShell() ? 'mobile' : 'web',
-      formFactor: matchMedia('(max-width: 700px)').matches ? 'compact' : 'wide',
-      containers: { sidebarViews: true, screens: true, sessionPanels: true, projectPages: true },
-    }),
+    useHostCapabilities() {
+      const mobileLayout = useIsMobile();
+      const compactDesktop = useIsCompactDesktop();
+      return {
+        platform: getIpcServices() ? 'desktop' : isNativeAppShell() ? 'mobile' : 'web',
+        formFactor: mobileLayout || compactDesktop ? 'compact' : 'wide',
+        containers: {
+          sidebarViews: !isNativeAppShell(),
+          screens: true,
+          sessionPanels: true,
+          projectPages: true,
+        },
+      };
+    },
     useLody() {
       const nav = hooks.useNavigation();
       const execute = hooks.useExecute();
       return {
+        ui: pluginUi(entry.dev.manifest.title, signal),
         storage: hooks.storage,
         read: hooks.read,
         execute,
@@ -173,12 +191,24 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     (stack) => clientDiagnostics.report(entry, 'surface_render_crashed', stack),
     entry.pluginId
   );
+  const transcript = createTranscriptSurfaces(entry, signal, bindings);
   return {
-    ...createTranscriptSurfaces(entry, signal, bindings),
+    ...transcript,
+    messages: {...transcript.messages, actions: {add: s=>add('messageAction',s.id,s.Component)}},
+    statusBar: {items: {add: s=>isNativeAppShell() ? clientDiagnostics.report(entry,'capability_unavailable_on_platform','statusBar.items:'+s.id) : add('statusItem',s.id,s.Component)}},
     sidebar: {
       headerItems: { add: (s) => add('header', s.id, s.Component) },
       footerItems: { add: (s) => add('footer', s.id, s.Component) },
-      views: { add: (s) => add('view', s.id, s.Component, s.title) },
+      views: {
+        add: (s) =>
+          isNativeAppShell()
+            ? clientDiagnostics.report(
+                entry,
+                'capability_unavailable_on_platform',
+                `sidebar.views:${s.id}`
+              )
+            : add('view', s.id, s.Component, s.title),
+      },
       sessionRow: {
         decorate: (s) => {
           if (s.trailing) add('trailing', s.id, s.trailing);
@@ -188,7 +218,7 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     },
     screens: { add: (s) => add('screen', s.id, s.Component, s.title) },
     project: { pages: { add: (s) => add('project', s.id, s.Component, s.title) } },
-    session: { panels: { add: (s) => add('panel', s.id, s.Component, s.title) } },
+    session: {headerActions: {add: s=>add('sessionHeader',s.id,s.Component)}, panels: { add: (s) => add('panel', s.id, s.Component, s.title) } },
     settings: {
       pages: {
         add: (s) => {
@@ -197,7 +227,10 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         },
       },
     },
+    commands: contributions.commands,
     composer: {
+      slashCommands: contributions.slashCommands,
+      beforeSend: contributions.beforeSend,
       actions: { add: (s) => add('action', s.id, s.Component, s.title) },
       attachments: {
         add: (source, options) =>

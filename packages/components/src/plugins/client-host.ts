@@ -15,7 +15,7 @@ import { pluginSafeMode } from './safe-mode';
 
 export interface InstallationKey {
   workspaceId: string;
-  sourceKey: 'local' | `machine:${string}`;
+  sourceKey: 'workspace' | 'local' | `machine:${string}`;
   pluginId: string;
 }
 export interface ClientInstallation extends InstallationKey {
@@ -23,6 +23,9 @@ export interface ClientInstallation extends InstallationKey {
   /** Machine-side nonce bumped by `ctx.invalidate`; a change refreshes this plugin's queries. */
   invalidations?: number;
   machineId?: string;
+  localModule?: boolean;
+  workspaceManifest?: import('@lody/shared/plugins/manifest-schema').PluginManifest;
+  primary?: boolean;
   admissionKey?: string;
   configurationKey?: string;
   client?: string;
@@ -30,7 +33,8 @@ export interface ClientInstallation extends InstallationKey {
   registry: (
     files: VerifiedBundle,
     signal: AbortSignal,
-    queries: PluginQueryRegistry
+    queries: PluginQueryRegistry,
+    primary?: boolean
   ) => ClientPluginRegistry;
 }
 interface Slot {
@@ -118,8 +122,18 @@ export class ClientPluginHost {
                   workspaceId: install.workspaceId,
                   pluginId: install.pluginId,
                   digest: install.digest,
+                  workspace:
+                    install.sourceKey === 'workspace'
+                      ? {
+                          manifest: install.workspaceManifest!,
+                          local: !!install.localModule,
+                          bytes: () => verifiedPackedBytes(files),
+                        }
+                      : undefined,
                   packed:
-                    install.sourceKey === 'local' ? undefined : () => verifiedPackedBytes(files),
+                    install.sourceKey === 'local' || install.localModule
+                      ? undefined
+                      : () => verifiedPackedBytes(files),
                 }
               : undefined
           )
@@ -131,7 +145,7 @@ export class ClientPluginHost {
         return;
       }
       const queries = new PluginQueryRegistry(signal);
-      const registry = install.registry(files, signal, queries);
+      const registry = install.registry(files, signal, queries, install.primary);
       slot.queries = queries;
       slot.cleanup = definition?.register(registry) || undefined;
       finishShellGeneration(signal);

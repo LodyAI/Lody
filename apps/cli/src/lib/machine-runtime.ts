@@ -63,7 +63,8 @@ export class MachineRuntime {
       request.machineId !== config.machineId
     )
       throw new Error('e2ee_feature_scope');
-    if (request.method === 'plugin/control') throw Error('Local plugin control required');
+    if (request.method === 'plugin/control' || request.method === 'plugin/proposal-decision')
+      throw Error('Local plugin control required');
     if (request.method === 'plugin/declared-workflow-grant') {
       if (
         !context?.pluginMachineOwner ||

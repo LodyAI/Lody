@@ -63,6 +63,7 @@ export async function removeEncryptedWorkspaceLocalData(input: E2eeLocalDataScop
   };
   const results = await Promise.allSettled([
     removeInputs(),
+    remove('lody-plugin-releases:' + encryptedLocalInstance(input)),
     remove('lody-plugin-storage:' + encryptedLocalInstance(input)),
     remove(`lody-loro-repo-db-${namespace}`),
     remove(`lody-loro-stream-cursors-${namespace}`),

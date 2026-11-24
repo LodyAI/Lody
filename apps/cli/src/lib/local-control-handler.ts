@@ -316,6 +316,7 @@ async function handleMachineRpcRequest(
   try {
     if (
       (message.method === 'plugin/control' && message.params.action !== 'inspect') ||
+      message.method === 'plugin/proposal-decision' ||
       message.method === 'plugin/declared-workflow-grant'
     ) {
       if (!(await config.approvePluginAction?.(message, signal)) || signal?.aborted)

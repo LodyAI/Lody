@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'nonce-PREVIEW_NONCE' blob:; style-src 'unsafe-inline'; frame-src about:; img-src blob: data:; media-src blob: data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Lody plugin preview</title>
+    <style>
+      body {
+        font: 16px system-ui;
+        background: #eee;
+      }
+      iframe {
+        display: block;
+        background: white;
+        max-width: 100%;
+        height: 80vh;
+        margin: 12px auto;
+        border: 1px solid #aaa;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Plugin preview</h1>
+    <label
+      >Viewport
+      <select>
+        <option value="desktop">Desktop</option>
+        <option value="web">Web</option>
+        <option value="mobile">Compact mobile</option>
+      </select></label
+    >
+    <p>Synthetic fixtures only. No workspace or machine connection.</p>
+    <iframe title="Plugin preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+    <script nonce="PREVIEW_NONCE">
+      const decode = (s) =>
+        new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
+      const template = decode('FRAME_TEMPLATE');
+      const data = JSON.parse(decode('PLUGIN_DATA'));
+      const select = document.querySelector('select'),
+        view = document.querySelector('iframe');
+      function show() {
+        const platform = select.value;
+        view.width = { desktop: 1280, web: 960, mobile: 375 }[platform];
+        const json = JSON.stringify({ ...data, platform }).replaceAll('<', '\\u003c');
+        view.srcdoc = template.replace('FIXTURE_DATA', () => json);
+      }
+      select.onchange = show;
+      show();
+    </script>
+  </body>
+</html>

@@ -792,6 +792,12 @@ lody plugin reload demo
 lody plugin disable demo
 ```
 
+`lody plugin remove demo` 默认保留数据目录、存储值和事件游标，供重装后继续使用。加上 `--purge-data` 会在插件进程停止后删除这些数据；其他插件的数据和共享事件日志不受影响。
+
+使用 `lody plugin pack ./demo` 生成 npm 兼容的 `demo.tgz`，内含插件声明的文件和 SHA-256 完整性清单。可选后缀 `.lodypkg` 表示相同的 gzip 压缩 tar 格式。在所有者的交互终端运行 `lody plugin install ./demo.tgz`，核对能力与 SHA-256 后确认安装。同 ID 的新包会更新现有安装；`lody plugin rollback demo` 恢复上一代代码，不回退插件数据。`install` 也接受本地源码目录。完整性校验不代表发布者签名。
+
+使用 `lody plugin preview ./demo.tgz` 可在没有源码的情况下校验并预览发布包；也可用 `lody plugin preview ./demo` 预览源码。浏览器中会显示合成的工具调用、消息和会话。切换桌面、Web 或紧凑移动视口，修改命令或代码块语言以测试渲染器匹配。独立页面只在沙箱内运行客户端代码，不激活插件，也不连接工作区。使用 `--no-open --output demo.html` 可保存到新文件。
+
 如果插件要在本机正在运行的加密工作区中开发，链接时以及后续管理操作都要指定该工作区的 ID：
 
 ```sh

@@ -161,7 +161,7 @@ flowchart TB
 
 ### 5.2 清单 Schema、声明式配置、显式权限与工作流贡献（`lody.plugin.json`）
 
-`lody.plugin.json` **MUST** 是符合 [`PluginManifest`](../scripts/fixtures/plugin-sdk/sdk/manifest.d.ts) 的严格 UTF-8 JSON：
+`lody.plugin.json` **MUST** 是符合 [`PluginManifest`](../packages/plugin-sdk/src/manifest.ts) 的严格 UTF-8 JSON：
 
 - **必填项：** `id`、`version`（合法 SemVer）、`sdk`（按标准 SemVer 范围与宿主 SDK 版本匹配——如预览期 `"^0.1.0"`、稳定后 `"^1.0.0"`，严禁硬编码单一字面量）、`title`，且至少声明一项贡献（`client`、`machine`、`skills`、`agentRoles`、`mcpServers`、`acpProviders`、`themes` 或 `styles`）。未知顶层字段 **MUST** 校验失败。
 - **显式能力权限声明（`manifest.permissions`）：**
@@ -190,7 +190,7 @@ flowchart TB
 
 ### 5.4 SDK 模块导出与双向 Schema 校验
 
-合规宿主 **MUST** 公开与 [`scripts/fixtures/plugin-sdk/sdk/`](../scripts/fixtures/plugin-sdk/sdk/shared.d.ts) 一致的 `@lody/plugin-sdk`、`@lody/plugin-sdk/client`、`@lody/plugin-sdk/machine` 与 `@lody/plugin-sdk/manifest`。所有 `defineQuery`、`defineMutation`、`defineTool` 与 `defineAttachmentSource` 调用在输入与输出两端均 **MUST** 执行 Zod `safeParse`；校验失败返回 `validation_failed`，绝不导致子进程崩溃。
+合规宿主 **MUST** 公开与 [`@lody/plugin-sdk`](../packages/plugin-sdk/src/index.ts) 一致的 `@lody/plugin-sdk`、`@lody/plugin-sdk/client`、`@lody/plugin-sdk/machine` 与 `@lody/plugin-sdk/manifest`。所有 `defineQuery`、`defineMutation`、`defineTool` 与 `defineAttachmentSource` 调用在输入与输出两端均 **MUST** 执行 Zod `safeParse`；校验失败返回 `validation_failed`，绝不导致子进程崩溃。
 
 ---
 
@@ -859,7 +859,7 @@ function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, calle
 
 ### 17.4 仓库证据与当前实现状态（Repository Evidence & Current Implementation Status）
 
-- **规范性文档与 SDK 契约：** 本文档、[插件架构收敛与 E2EE 工作区边界](../.agents/notes/proposed/architecture/2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md)、[插件系统实施设计与分层 PR 落地计划](../.agents/notes/proposed/architecture/2026-11-23-plugin-system-implementation-design.zh.md)、[`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts) 以及原型契约 [`scripts/fixtures/plugin-sdk/sdk/`](../scripts/fixtures/plugin-sdk/sdk/shared.d.ts)。
+- **规范性文档与 SDK 契约：** 本文档、[插件架构收敛与 E2EE 工作区边界](../.agents/notes/proposed/architecture/2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md)、[插件系统实施设计与分层 PR 落地计划](../.agents/notes/proposed/architecture/2026-11-23-plugin-system-implementation-design.zh.md)、[`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts)。
 - **已核查宿主模块所有者与边界：** [`packages/ui/src/index.ts`](../packages/ui/src/index.ts)、[`packages/components/src/components/loro-app-sidebar.tsx`](../packages/components/src/components/loro-app-sidebar.tsx)、[`packages/components/src/components/sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)、[`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md)、[`packages/components/src/hooks/use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-dom.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-dom.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-css.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-css.ts)、[`packages/components/src/providers/workspace-machine-rpc-facade.ts`](../packages/components/src/providers/workspace-machine-rpc-facade.ts)、[`packages/shared/src/schema.ts`](../packages/shared/src/schema.ts)、[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)、[`packages/shared/src/acp/ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts)、[`packages/shared/src/acp/history-apply.ts`](../packages/shared/src/acp/history-apply.ts)、[`packages/shared/src/acp/tool-call-history.ts`](../packages/shared/src/acp/tool-call-history.ts)、[`packages/shared/src/e2ee-rpc.ts`](../packages/shared/src/e2ee-rpc.ts)、[`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)、[`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md)、[`apps/cli/src/lib/acp/AGENTS.md`](../apps/cli/src/lib/acp/AGENTS.md)、[`apps/cli/src/lib/schedules/AGENTS.md`](../apps/cli/src/lib/schedules/AGENTS.md)、[`apps/cli/src/lib/e2ee/AGENTS.md`](../apps/cli/src/lib/e2ee/AGENTS.md)、[`apps/cli/src/mcp/AGENTS.md`](../apps/cli/src/mcp/AGENTS.md)、[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)、[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md)、[`packages/e2ee-machine-sharing/AGENTS.md`](../packages/e2ee-machine-sharing/AGENTS.md) 与 [`.agents/docs/failure-containment.md`](../.agents/docs/failure-containment.md)。
 - **已执行验证与当前规范-实现差异：**
   - `PR-1` 与 `PR-2` 基础层已落于 [`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts)、[`packages/shared/src/plugins/`](../packages/shared/src/plugins/manifest-schema.ts)、[`apps/cli/src/plugins/`](../apps/cli/src/plugins/workflow/plugin-host.ts) 与 [`packages/components/src/plugins/`](../packages/components/src/plugins/client-host.ts)。[`scripts/plugin-sdk-contracts.test.mjs`](../scripts/plugin-sdk-contracts.test.mjs) 与 [`scripts/plugin-dev-acceptance.py`](../scripts/plugin-dev-acceptance.py) 验证了基础 SDK 契约、子进程生命周期与本地 CLI 开发闭环。

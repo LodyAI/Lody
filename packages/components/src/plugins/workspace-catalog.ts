@@ -50,6 +50,7 @@ export async function readPluginCatalog(
       },
     };
     const entry: ClientCatalogInstallation = {
+      packageSha256: row.packageSha256,
       ...(row.enabled &&
       row.manifest.permissions?.includes('workflow.autonomous') &&
       row.manifest.permissions.some((p) => p === 'sessions.write' || p === 'sessions.approve') &&

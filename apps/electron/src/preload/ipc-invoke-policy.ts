@@ -62,6 +62,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'prepareFeatureRpc',
       'acceptFeatureRpcResponse',
       'openRemotePluginModule',
+      'workspacePluginModule',
       'prepareDispatch',
       'signScheduleDeclaration',
       'irohReady',

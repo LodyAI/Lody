@@ -1,3 +1,4 @@
+import { pluginDecisionParams } from './plugins/proposal';
 import {
   pluginSessionCreateParams,
   workflowGrantRequest,
@@ -286,6 +287,10 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('plugin/declared-workflow-grant'),
     params: workflowGrantRequest,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/proposal-decision'),
+    params: pluginDecisionParams,
   }),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('plugin/session-create'),
