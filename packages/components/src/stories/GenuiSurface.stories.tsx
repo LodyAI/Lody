@@ -77,3 +77,17 @@ export const InMarkdownClosed: Story = {
   args: { code: closedFence },
   render: () => <MarkdownRenderer text={closedFence} />,
 };
+
+const brokenFence = `前文。
+
+\`\`\`genui
+<card><slider value={v
+\`\`\`
+
+后文。`;
+
+/** A fence that cannot mount degrades to its own code block, never an error. */
+export const InMarkdownBroken: Story = {
+  args: { code: brokenFence },
+  render: () => <MarkdownRenderer text={brokenFence} />,
+};

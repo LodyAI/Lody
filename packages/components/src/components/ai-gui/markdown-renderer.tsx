@@ -1209,6 +1209,7 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
         code={block.code}
         streaming={block.isIncomplete}
         surfaceId={offset === undefined ? undefined : `genui@${offset}`}
+        fallback={<MarkdownFencedCodeBlock {...block} />}
       />
     );
   }

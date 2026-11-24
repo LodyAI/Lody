@@ -166,9 +166,21 @@ export interface GenuiSurfaceProps {
    * elements as their open tags commit instead of waiting for the fence.
    */
   streaming?: boolean;
+  /**
+   * Rendered instead of the diagnostics panel when the surface cannot mount,
+   * e.g. the fenced code block it came from. When set, diagnostics never
+   * reach the reader: they describe the author's mistake, not content.
+   */
+  fallback?: ReactNode;
 }
 
-export function GenuiSurface({ code, surfaceId, capabilities, streaming }: GenuiSurfaceProps) {
+export function GenuiSurface({
+  code,
+  surfaceId,
+  capabilities,
+  streaming,
+  fallback,
+}: GenuiSurfaceProps) {
   const key = surfaceId ?? `code:${code}`;
   const program = useMemo(
     () => (streaming ? compileSurfacePartial(code) : compileSurface(code)),
@@ -205,9 +217,9 @@ export function GenuiSurface({ code, surfaceId, capabilities, streaming }: Genui
   const fatal = empty && !streaming;
   return (
     <div {...stylex.props(styles.surface)}>
-      {fatal ? <GenuiErrorView diagnostics={diagnostics} /> : body}
+      {fatal ? (fallback ?? <GenuiErrorView diagnostics={diagnostics} />) : body}
       {pending !== '' ? <div {...stylex.props(styles.pending)}>{pending}</div> : null}
-      {!fatal && diagnostics.length > 0 ? (
+      {!fatal && fallback === undefined && diagnostics.length > 0 ? (
         <GenuiErrorView diagnostics={diagnostics.slice(0, 3)} />
       ) : null}
     </div>

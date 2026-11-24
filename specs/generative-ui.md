@@ -85,7 +85,10 @@ theme already in place.
   it streams — so a re-rendered or revised surface keeps committed user input;
   a re-declared slot keeps its value — initializers run once.
 - Any failure — unparseable markup, bad directive, evaluation error, unknown
-  tag — degrades to a diagnostic view, never a thrown render or a partial DOM.
+  tag — degrades, never a thrown render or a partial DOM. A surface that
+  cannot mount at all falls back to its own fenced code block: parse
+  diagnostics are model-facing (the error feedback loop below), never
+  reader-facing.
 - The catalog is the contract: nothing outside it can reach the DOM, the
   network, or host APIs.
 
