@@ -185,6 +185,7 @@ jobs:
       VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
       VITE_ELECTRON_UPDATE_CHANNEL: nightly
       ELECTRON_UPDATE_CHANNEL: nightly
+      LODY_LORO_STREAMS_WS_ENABLED: '1'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
@@ -376,6 +377,7 @@ jobs:
       VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
       VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
       VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      VITE_LORO_STREAMS_WS_ENABLED: '1'
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
@@ -646,6 +648,7 @@ jobs:
       LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
       LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
       SITE_URL: ${{ vars.SITE_URL }}
+      LODY_LORO_STREAMS_WS_ENABLED: '1'
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
