@@ -2437,15 +2437,14 @@ export class MessageHandler {
 
     const tempPath = `${args.destPath}.${uuidV4()}.part`;
     const hash = crypto.createHash('sha256');
-    let source: fs.ReadStream;
-    try {
-      source = fs.createReadStream(blobPath);
-    } catch {
-      return false;
-    }
     const fileHandle = await fs.promises.open(tempPath, 'wx');
     try {
-      for await (const chunk of source) {
+      // The blob can be renamed into the backfilled store between handoff and
+      // prompt construction. createReadStream reports a missing path through
+      // the async 'error' event, so it must be created inside the awaited
+      // iteration: subscribing the iterator before any other I/O callback runs
+      // turns that error into this catch's `false`, not an uncaught exception.
+      for await (const chunk of fs.createReadStream(blobPath)) {
         const buf = chunk as Buffer;
         hash.update(buf);
         await fileHandle.write(buf);

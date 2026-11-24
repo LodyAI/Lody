@@ -207,6 +207,70 @@ describe('MessageHandler session file ACP prompt blocks', () => {
     }
   });
 
+  it('falls back to the relay download when a local blob was backfilled away', async () => {
+    // Regression: backfill renames the canonical blob before prompt construction,
+    // so createReadStream's missing-path 'error' arrives asynchronously. If the
+    // stream is awaited before its consumer subscribes, that error escapes as an
+    // uncaught exception that kills the CLI process instead of returning false.
+    const fileBytes = new TextEncoder().encode('{"backfilled":true}\n');
+    const fileBlock = {
+      type: 'file',
+      fileId: 'file-backfill1',
+      fileName: 'report.json',
+      mimeType: 'application/json',
+      sizeBytes: fileBytes.byteLength,
+      sha256: sha256Hex(fileBytes),
+      textPreview: true,
+      transport: 'local',
+      machineId: 'machine-1',
+      uploadedAt: 123,
+    } satisfies Extract<SessionInputBlock, { type: 'file' }>;
+
+    // Point the blob store at a data dir that never received the file: the blob
+    // path exists by construction but the file itself is absent.
+    const dataDir = path.join(tmpDir, 'lody-data');
+    fs.mkdirSync(path.join(dataDir, 'session-files', workspaceId, sessionId), {
+      recursive: true,
+    });
+    vi.stubEnv('LODY_DATA_DIR', dataDir);
+
+    const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+    // The relay fallback must be reachable for the local miss to matter.
+    (handler as unknown as { cloudPort: unknown }).cloudPort = createTestCloudPort({
+      attachmentUpload: { serverBaseUrl: 'https://relay.test' },
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(fileBytes, {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const promptBlocks = await handler.buildAcpPromptBlocks({
+        workspaceId,
+        sessionId,
+        inputBlocks: [{ type: 'text', text: 'read it' }, fileBlock],
+      });
+
+      expect(fetchMock).toHaveBeenCalled();
+      const attachmentName = buildAttachmentFileName(fileBlock.fileId, fileBlock.fileName);
+      const attachmentPath = path.join(tmpDir, ATTACHMENTS_DIR_RELATIVE, attachmentName);
+      expect(fs.readFileSync(attachmentPath)).toEqual(Buffer.from(fileBytes));
+      expect(promptBlocks).toContainEqual(
+        expect.objectContaining({
+          type: 'resource_link',
+          uri: pathToFileURL(attachmentPath).href,
+          name: 'report.json',
+        })
+      );
+    } finally {
+      await handler.cleanup();
+    }
+  });
+
   describe('sender provenance', () => {
     const agentAuthor = {
       v: 1,
