@@ -27,12 +27,14 @@ describes the shared parsing and persistence boundary. Question text renders as
 Markdown without loading images; this also renders the plan-review detail carried
 in a DSH form. See the [DSH question decision](../../../../../.agents/notes/implemented/feature/2026-09-20-dsh-user-questions.md).
 
-| File                                         | Responsibility                                                              |
-| -------------------------------------------- | --------------------------------------------------------------------------- |
-| `session-detail.tsx`                         | Outer session shell: top tabs, side panel, session-switch reset, tab closer |
-| `desktop-session-detail-layout.tsx`          | Desktop two-column layout and the side-panel expand/collapse animation      |
-| `session-conversation-page.tsx`              | Shared full-page composition used by `SessionConversationPage.stories.tsx`  |
-| `session-tab-bar.tsx`                        | Desktop merged top row: session tab pills, status slot, drag sources        |
+| File                                                                          | Responsibility                                                                                               |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `session-conversation-workspace.tsx`                                           | Desktop route host: up to three session columns, focused-column navigation and per-column tab searches       |
+| `conversation-split.ts`, `split-conversation-layout.tsx`, `conversation-pane-context.tsx` | Column state transitions, resizable presentation and per-column session controls                            |
+| `session-detail.tsx`                                                           | Outer session shell: top tabs, side panel, session-switch reset, tab closer                                  |
+| `desktop-session-detail-layout.tsx`, `seam-grip.tsx`                           | Session and conversation split dividers, side-panel expand/collapse animation                                |
+| `session-conversation-page.tsx`                                                | Shared full-page composition used by `SessionConversationPage.stories.tsx`                                   |
+| `session-tab-bar.tsx`                                                          | Desktop merged top row: session tab pills, status slot, drag sources and column actions                      |
 | `adaptive-tab-strip.tsx`                     | Width sharing for the tab pills                                             |
 | `session-side-panel-tab-bar.tsx`             | Right-panel tab strip (fixed panels, side chats, viewers)                   |
 | `session-tab-close-target.ts`                | Resolve the focused tab or last-tab window close target                     |

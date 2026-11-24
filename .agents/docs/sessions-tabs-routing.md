@@ -7,6 +7,18 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+- [`SessionConversationWorkspace`](../../packages/components/src/components/sessions/session-conversation-workspace.tsx)
+  mounts the desktop session route in up to three resizable columns. The split button
+  lives in each real `SessionTabBar`; empty columns offer recent visible root sessions
+  or the existing `ChatLanding` composer. Its accepted first send fills that column.
+  Sidebar navigation replaces the focused column; choosing an already shown root
+  focuses its existing column. Column membership lasts for the mounted session route;
+  leaving it or reloading returns to one column. Widths are device-local.
+  The focused column owns the route's `?tab`; background tab selections live in this
+  host and are transferred to the URL on focus. `ConversationPaneContext` routes each
+  page's tab writes to its own column and rejects writes after replacement or closure.
+  Only the focused page publishes application commands, document title, favicon, Zen
+  controls and terminal controls. List keyboard scopes are distinct across columns.
 - Desktop top bar is ONE merged row (no repo-title header row): `SessionTabBar`
   with `leftSlot` (sidebar expand + macOS traffic-light inset via `className`)
   and `rightSlot` receives a portal from the existing root chat controller
@@ -196,5 +208,6 @@ this page is the full text of the rules summarised there.
   — an absent parent write would be re-restored. Cross-surface "go to session"
   links keep `formatSessionTabSearch` (parent → absent → restore). Every
   `session-detail.tsx` URL writer goes through `writeSessionUrlTab`, which
-  drops a write whose captured session no longer matches the current route —
+  delegates to the column host on desktop, or drops a write whose captured
+  session no longer matches the current route on mobile —
   an async caller resolving after a switch must not yank the router back.

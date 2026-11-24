@@ -2,7 +2,8 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Read parent rules and linked context.
+Read parent rules and linked context. The 1300-word ceiling keeps column focus,
+URL and window ownership together because their callers share this directory.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
@@ -12,7 +13,8 @@ Read parent rules and linked context.
   `--tab-active`/`--tab-inactive` (both collapse onto `--background` in dark).
 - One leading status slot per tab, `waiting > working > unread > agent icon`;
   Test `isWaiting` first; use `sessionHasUnreadMessages` to exclude closed/archived output.
-- `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
+- `?tab` owns the focused column selection; `SessionConversationWorkspace` retains
+  background selections and transfers them to the URL on focus. Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive/delete; reopen clears only it, never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
@@ -30,7 +32,13 @@ Read parent rules and linked context.
 ## [Shell, side panel, side chats](../../../../../.agents/docs/sessions-side-panel.md)
 
 - Desktop file/diff/browser/PR viewers are closeable right-panel tabs; never split
-  the conversation. `sidePanelTabs` owns order and close fallback neighbours.
+  the conversation for them. `sidePanelTabs` owns order and close fallback neighbours.
+- Split conversation (`conversation-split.ts`, `split-conversation-layout.tsx`) shows up
+  to three whole session pages side by side, each with its own tab row and selection.
+  One root session is open in at most one column; opening it again focuses that column.
+  Only the focused column publishes window commands, title, favicon, Zen and terminal
+  controls. Namespace keyboard scopes per column; stale tab writes cannot select a
+  closed or replaced column.
 - Side Chat is a durable child Session (`childSessionPlacement: 'side-panel'`):
   no top tab or sidebar row; rolls up into the parent row. Only tab close deletes it;
   mount lazily.

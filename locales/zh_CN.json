@@ -7088,5 +7088,12 @@
   "settings.promptShortcuts.anyMachine": "任意机器",
   "settings.promptShortcuts.anyAgent": "任意 Agent",
   "settings.promptShortcuts.nameRequired": "请给这个 Prompt 起个名字。",
-  "settings.agentRoles.form.addMachine": "添加机器"
+  "settings.agentRoles.form.addMachine": "添加机器",
+  "sessions.split.splitRight": "向右分栏",
+  "sessions.split.full": "最多并排 {{count}} 栏",
+  "sessions.split.close": "关闭此栏",
+  "sessions.split.emptyTitle": "在这里打开一个对话",
+  "sessions.split.emptyHint": "从下面选一个，或在此栏获得焦点时点击侧边栏中的对话。",
+  "sessions.split.alreadyOpen": "已在其他栏打开",
+  "sessions.split.newChat": "在此栏新建对话"
 }

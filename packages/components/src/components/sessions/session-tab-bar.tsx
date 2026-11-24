@@ -1,4 +1,5 @@
 import { clsx } from 'clsx';
+import { useConversationFocusScope } from './conversation-pane-context';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space, radius } from '@lody/ui/tokens/scales.stylex';
@@ -809,7 +810,9 @@ export const SessionTabBar = memo(function SessionTabBar({
 }: SessionTabBarProps) {
   const { t } = useTranslation();
   const windowDragClass = useWindowDragRegionClass();
-  useListKeyboardNavigation({ scopeId: WORKSPACE_FOCUS_SCOPES.sessionConversation });
+  useListKeyboardNavigation({
+    scopeId: useConversationFocusScope(WORKSPACE_FOCUS_SCOPES.sessionConversation),
+  });
   const defaultTitle = t('sessions.untitled', 'Untitled session');
   const showSessionTabs = variant !== 'viewer';
   const workspaceArchived = parentSession.isArchived === true;

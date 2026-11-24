@@ -2,6 +2,7 @@ import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-g
 import { clsx } from 'clsx';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
+import { useConversationPane } from './conversation-pane-context';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { machineSupportsAndroidEmulatorProtocol } from '@lody/shared';
 import { copyTextToClipboard, writeTextToClipboard } from '@/lib/clipboard';
@@ -234,7 +235,7 @@ import {
 } from '@/components/files/mobile-project-file-browser';
 import { buildSessionLink } from '@lody/shared/session-link';
 import { buildAppSessionUrl } from '@/lib/session-app-url';
-import { getCommandKeybindings, useCommand } from '@/lib/commands';
+import { getCommandKeybindings, useCommand as useGlobalCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
 import type { SemanticActionRouter } from '@/lib/commands/semantic-action-router';
@@ -1079,12 +1080,13 @@ function AdaptiveMobileSessionHeader({
 // just this button, not the large SessionDetail tree. The controller is read
 // imperatively at click time, per the guidance in terminal-controller.ts.
 const TerminalDockToggleButton = memo(function TerminalDockToggleButton() {
+  const pane = useConversationPane();
   const { t } = useTranslation();
   const store = useStore();
   const isOpen = useAtomValue(terminalDockOpenAtom);
   const isAvailable = useAtomValue(terminalDockAvailableAtom);
   const canCreate = useAtomValue(terminalDockCanCreateAtom);
-  if (!isElectronRenderer() || !isAvailable) return null;
+  if (!isElectronRenderer() || !isAvailable || pane?.focused === false) return null;
   // Visible for any local session, but disabled until a terminal can actually be
   // created (the local daemon is still starting right after launch) so the toggle
   // never silently dead-ends.
@@ -1176,6 +1178,11 @@ function SessionChatSurface({
   );
 }
 
+function useSessionCommand(command: Parameters<typeof useGlobalCommand>[0]) {
+  const pane = useConversationPane();
+  useGlobalCommand(command, pane?.focused ?? true);
+}
+
 const SessionDetail = ({
   sessionId,
   urlTab,
@@ -1194,6 +1201,8 @@ const SessionDetail = ({
   onMobilePresented?: (sessionId: string) => void;
 }) => {
   const { t } = useTranslation();
+  const pane = useConversationPane();
+  const paneFocused = pane?.focused ?? true;
   const router = useRouter();
   const preparingWindow = useAtomValue(windowPreparationAtom);
   const claimNavigationFocus = useComposerNavigationFocus(sessionId);
@@ -2204,8 +2213,7 @@ const SessionDetail = ({
     [postHog]
   );
 
-  // Set document title based on session title
-  useDocumentTitle(activeSession?.title);
+  useDocumentTitle(activeSession?.title, paneFocused);
 
   useEffect(() => {
     attemptedExternalHistoryRefreshKeysRef.current.clear();
@@ -2302,7 +2310,7 @@ const SessionDetail = ({
     if (hasUnread) return 'unread';
     return 'idle';
   }, [activeSession, activeSessionLiveStatus]);
-  useTabStatus(tabStatus);
+  useTabStatus(tabStatus, paneFocused);
   // The Repositories panel in the conversation selects a Member; the PR tab,
   // URL target and header must describe that same repository.
   const projectMemberOwnerSession = workspaceOwnerSession ?? activeTabSession;
@@ -2336,6 +2344,10 @@ const SessionDetail = ({
 
   const writeSessionUrlTab = useCallback(
     (nextTab: string | undefined, { push = false }: { push?: boolean } = {}) => {
+      if (pane) {
+        pane.setTab(nextTab, { push });
+        return;
+      }
       if (!workspaceSlug) {
         return;
       }
@@ -2374,7 +2386,7 @@ const SessionDetail = ({
         replace: !push,
       });
     },
-    [router, sessionId, workspaceSlug]
+    [router, sessionId, workspaceSlug, pane]
   );
 
   /* Activating a tab IS a navigation: the handlers below write the `?tab`
@@ -2405,7 +2417,7 @@ const SessionDetail = ({
     )
       return;
     if (!isArchivedDraftChoice && !closedConversationIds.has(requestedTabSessionId)) return;
-    if (router.state.location.search.tab !== urlTab) return;
+    if (!pane && router.state.location.search.tab !== urlTab) return;
     navigateToSessionTab(activeTabSessionId);
   }, [
     docMetaCacheReady,
@@ -2423,6 +2435,10 @@ const SessionDetail = ({
 
   const replaceSessionUrlPr = useCallback(
     (nextPrNumber: number | undefined, { push = false }: { push?: boolean } = {}) => {
+      if (pane) {
+        pane.setSearch({ pr: nextPrNumber }, { push });
+        return;
+      }
       if (!workspaceSlug) {
         return;
       }
@@ -2447,11 +2463,15 @@ const SessionDetail = ({
         replace: !push,
       });
     },
-    [router, sessionId, workspaceSlug]
+    [router, sessionId, workspaceSlug, pane]
   );
 
   const replaceSessionUrlBrowser = useCallback(
     (nextBrowser: boolean, { push = false }: { push?: boolean } = {}) => {
+      if (pane) {
+        pane.setSearch({ browser: nextBrowser || undefined }, { push });
+        return;
+      }
       if (!workspaceSlug) {
         return;
       }
@@ -2477,11 +2497,15 @@ const SessionDetail = ({
         replace: !push,
       });
     },
-    [router, sessionId, workspaceSlug]
+    [router, sessionId, workspaceSlug, pane]
   );
 
   const replaceSessionUrlSimulator = useCallback(
     (nextSimulator: boolean, { push = false }: { push?: boolean } = {}) => {
+      if (pane) {
+        pane.setSearch({ simulator: nextSimulator || undefined }, { push });
+        return;
+      }
       if (!workspaceSlug) {
         return;
       }
@@ -2503,7 +2527,7 @@ const SessionDetail = ({
         replace: !push,
       });
     },
-    [router, sessionId, workspaceSlug]
+    [router, sessionId, workspaceSlug, pane]
   );
   // Multi-tab: create a new child session
   const {
@@ -2757,7 +2781,7 @@ const SessionDetail = ({
       setTabOrderState((prev) => appendTabOrderId(prev, sessionGroupIds, draft.id));
     },
     onSelect: (draftId) => {
-      if (router.state.location.search.tab !== urlTab) return;
+      if (!pane && router.state.location.search.tab !== urlTab) return;
       // Replace the empty sentinel without deactivating a mobile tool viewer.
       navigateToSessionTab(draftId);
     },
@@ -3092,7 +3116,7 @@ const SessionDetail = ({
           if (
             docMetaCacheReady &&
             tabSessionId === activeTabSessionId &&
-            router.state.location.search.tab === urlTab
+            (pane || router.state.location.search.tab === urlTab)
           ) {
             navigateToSessionTab(
               getSessionTabFallback(
@@ -3140,7 +3164,7 @@ const SessionDetail = ({
         requestId,
         tabSessionId,
         sourceSessionId: sessionId,
-        sourceUrlTab: router.state.location.search.tab,
+        sourceUrlTab: urlTab,
         writeCompleted: false,
       });
       captureSessionDetailEvent('session/tab_restore_requested', {
@@ -4435,7 +4459,7 @@ const SessionDetail = ({
   }, []);
 
   useEffect(() => {
-    if (!activeSession) {
+    if (!activeSession || !paneFocused) {
       return undefined;
     }
 
@@ -4453,7 +4477,7 @@ const SessionDetail = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeSession, handleFileQuickOpenChange]);
+  }, [activeSession, handleFileQuickOpenChange, paneFocused]);
 
   // Session tabs and viewer tabs are independent on desktop; mobile keeps one active surface.
   const handleSessionTabSelect = useCallback(
@@ -5106,7 +5130,7 @@ const SessionDetail = ({
     [activeTabSessionId, handleSessionTabSelect, orderedSessionTabIds]
   );
 
-  useCommand({
+  useSessionCommand({
     id: 'session.archiveCurrent',
     title: t('commands.session.archiveCurrent', 'Archive Current Chat'),
     category: 'Session',
@@ -5118,7 +5142,7 @@ const SessionDetail = ({
     },
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.toggleCurrentPinned',
     title: t('commands.session.toggleCurrentPinned', 'Toggle Current Chat Pinned'),
     category: 'Session',
@@ -5134,7 +5158,7 @@ const SessionDetail = ({
     run: handleToggleCurrentSessionPinned,
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.searchCurrent',
     title: t('commands.session.searchCurrent', 'Find in Current Chat'),
     category: 'Session',
@@ -5143,7 +5167,7 @@ const SessionDetail = ({
     run: handleOpenSearch,
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.focusInput',
     title: t('commands.session.focusInput', 'Focus Current Input'),
     category: 'Editor',
@@ -5152,7 +5176,7 @@ const SessionDetail = ({
     run: handleFocusActiveInput,
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.saveCurrentFile',
     title: t('commands.session.saveCurrentFile', 'Save Current File'),
     category: 'Editor',
@@ -5161,7 +5185,7 @@ const SessionDetail = ({
     run: handleSaveCurrentFile,
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.toggleExplorerSidebar',
     title: t('commands.session.toggleExplorerSidebar', 'Toggle Files and Changes Sidebar'),
     category: 'View',
@@ -5172,7 +5196,7 @@ const SessionDetail = ({
 
   const jotaiStore = useStore();
   useLayoutEffect(() => {
-    if (isMobile) return undefined;
+    if (isMobile || !paneFocused) return undefined;
     const panel = { open: isSidebarOpen, reveal: revealRightSidebar };
     jotaiStore.set(zenRightPanelAtom, panel);
     return () => {
@@ -5180,8 +5204,8 @@ const SessionDetail = ({
         jotaiStore.set(zenRightPanelAtom, null);
       }
     };
-  }, [isMobile, isSidebarOpen, jotaiStore, revealRightSidebar, sessionId]);
-  useCommand({
+  }, [isMobile, isSidebarOpen, jotaiStore, revealRightSidebar, sessionId, paneFocused]);
+  useSessionCommand({
     id: 'session.newTabOrTerminal',
     title: t('commands.session.newTabOrTerminal', 'New Tab or Terminal'),
     category: 'Session',
@@ -5201,7 +5225,7 @@ const SessionDetail = ({
     },
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.toggleTerminal',
     title: t('commands.session.toggleTerminal', 'Toggle Terminal'),
     category: 'View',
@@ -5211,7 +5235,7 @@ const SessionDetail = ({
     run: () => jotaiStore.get(terminalControllerAtom)?.toggleOpen(),
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.copyCurrentBranch',
     title: t('commands.session.copyCurrentBranch', 'Copy Current Branch'),
     category: 'Session',
@@ -5220,7 +5244,7 @@ const SessionDetail = ({
     run: handleCopyCurrentBranch,
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.copyUrl',
     title: t('commands.session.copyUrl', 'Copy Current URL'),
     category: 'Session',
@@ -5231,7 +5255,7 @@ const SessionDetail = ({
     },
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.renameCurrent',
     title: t('commands.session.renameCurrent', 'Rename Current Chat'),
     category: 'Session',
@@ -5240,7 +5264,7 @@ const SessionDetail = ({
     run: handleRenameCurrentSession,
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.nextTab',
     title: t('commands.session.nextTab', 'Switch to Next Tab'),
     category: 'Navigation',
@@ -5249,7 +5273,7 @@ const SessionDetail = ({
     run: () => handleSwitchSessionTab(1),
   });
 
-  useCommand({
+  useSessionCommand({
     id: 'session.previousTab',
     title: t('commands.session.previousTab', 'Switch to Previous Tab'),
     category: 'Navigation',
@@ -5437,7 +5461,11 @@ const SessionDetail = ({
   );
 
   const semanticCloseEnabled =
-    semanticShortcutsEnabled && isElectronRenderer() && !isMobile && Boolean(activeSession);
+    paneFocused &&
+    semanticShortcutsEnabled &&
+    isElectronRenderer() &&
+    !isMobile &&
+    Boolean(activeSession);
   useSemanticActionRouter({
     routerRef: semanticRouterRef,
     rootRef: desktopActionRootRef,
@@ -5500,7 +5528,7 @@ const SessionDetail = ({
       void handleTabClose(target.tabId);
       return 'handled';
     },
-    !isMobile && Boolean(activeSession)
+    paneFocused && !isMobile && Boolean(activeSession)
   );
 
   useEffect(() => {
@@ -7379,7 +7407,12 @@ const SessionDetail = ({
       onTabReorder={handleSessionTabReorder}
       onMentionSession={handleInsertDroppedSessionMention}
       leftSlot={leftSidebarExpandButton}
-      rightSlot={desktopHeaderToolbar}
+      rightSlot={
+        <>
+          {pane?.actions}
+          {desktopHeaderToolbar}
+        </>
+      }
       className={clsx(
         stylex.props(
           detailStyles.topBarHeight,
@@ -7680,7 +7713,7 @@ const SessionDetail = ({
         defaultSizes={defaultSizes}
         topBar={tabBar}
         chatSurfaces={desktopChatSurfaces}
-        terminalDock={<TerminalDockHost />}
+        terminalDock={<TerminalDockHost sessionId={sessionId} focused={paneFocused} />}
         secondaryPanel={desktopSecondaryPanel}
         sidebarOpen={isSidebarVisible}
         onSidebarCollapse={handleToggleSidebar}

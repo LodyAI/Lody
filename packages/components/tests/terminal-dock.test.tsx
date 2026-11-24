@@ -154,6 +154,52 @@ describe('TerminalDock', () => {
     container = undefined;
   });
 
+  it('window terminal commands act only on the focused conversation column', async () => {
+    const channel = new StaticTerminalChannel({
+      'column-a': [{ terminalId: 'terminal-a', title: 'Column A terminal' }],
+      'column-b': [{ terminalId: 'terminal-b', title: 'Column B terminal' }],
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const renderColumns = async (focused: 'a' | 'b', showB = true) => {
+      await act(async () =>
+        root?.render(
+          <>
+            <div data-column="a">
+              <TerminalDock
+                channel={channel}
+                sessionId="column-a"
+                controllerEnabled={focused === 'a'}
+              />
+            </div>
+            {showB ? (
+              <div data-column="b">
+                <TerminalDock
+                  channel={channel}
+                  sessionId="column-b"
+                  controllerEnabled={focused === 'b'}
+                />
+              </div>
+            ) : null}
+          </>
+        )
+      );
+    };
+    await renderColumns('a');
+    await toggleDock();
+    expect(hasOpenPanel(container.querySelector('[data-column="a"]') as HTMLElement)).toBe(true);
+    expect(hasOpenPanel(container.querySelector('[data-column="b"]') as HTMLElement)).toBe(false);
+    await renderColumns('b');
+    await toggleDock();
+    expect(hasOpenPanel(container.querySelector('[data-column="a"]') as HTMLElement)).toBe(true);
+    expect(hasOpenPanel(container.querySelector('[data-column="b"]') as HTMLElement)).toBe(true);
+    await renderColumns('a');
+    await renderColumns('a', false);
+    await toggleDock();
+    expect(hasOpenPanel(container.querySelector('[data-column="a"]') as HTMLElement)).toBe(false);
+  });
+
   it('collapses the terminal panel after a session lists no terminals', async () => {
     const channel = new EmptyTerminalChannel();
     container = document.createElement('div');

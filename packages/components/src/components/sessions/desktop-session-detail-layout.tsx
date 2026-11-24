@@ -1,3 +1,4 @@
+import { useConversationFocusScope } from './conversation-pane-context';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -156,6 +157,8 @@ export function DesktopSessionDetailLayout({
   sidebarMinWidthRequest,
   sidebarRestoreSeq = 0,
 }: DesktopSessionDetailLayoutProps) {
+  const conversationScope = useConversationFocusScope(WORKSPACE_FOCUS_SCOPES.sessionConversation);
+  const sidePanelScope = useConversationFocusScope(WORKSPACE_FOCUS_SCOPES.sessionSidePanel);
   const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
   const groupWrapperRef = useRef<HTMLDivElement>(null);
   const lastSidebarSizeRef = useRef(defaultSizes.sidebar);
@@ -256,7 +259,7 @@ export function DesktopSessionDetailLayout({
           className={stylex.props(styles.chatPanel).className}
         >
           <FocusScope
-            id={WORKSPACE_FOCUS_SCOPES.sessionConversation}
+            id={conversationScope}
             data-lody-action-scope="conversation"
             className={cn(
               'group/close-scope',
@@ -274,7 +277,7 @@ export function DesktopSessionDetailLayout({
               {compact && sidebarOpen && (
                 <div {...stylex.props(styles.compactOverlay)}>
                   <FocusScope
-                    id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel}
+                    id={sidePanelScope}
                     className={stylex.props(styles.fullHeight).className}
                   >
                     {secondaryPanel}
@@ -348,10 +351,7 @@ export function DesktopSessionDetailLayout({
                 ease: [0.32, 0.72, 0, 1],
               }}
             >
-              <FocusScope
-                id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel}
-                className={stylex.props(styles.fullHeight).className}
-              >
+              <FocusScope id={sidePanelScope} className={stylex.props(styles.fullHeight).className}>
                 {secondaryPanel}
               </FocusScope>
             </motion.div>

@@ -39,15 +39,19 @@ function canUseTerminalCliState(state: ElectronCliState | null, workspaceId?: st
  * the ⌃`/⌘J command appear (via the dock controller). The daemon status +
  * restart/terminate controls now live in Settings → General → Startup.
  */
-export function TerminalDockHost() {
+export function TerminalDockHost({
+  sessionId,
+  focused = true,
+}: { sessionId?: SessionId; focused?: boolean } = {}) {
   const params = useParams({ strict: false });
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
   const localMachineId = useAtomValue(localMachineIdAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const routeSessionId =
-    typeof params.sessionId === 'string' && params.sessionId.trim()
+    sessionId ??
+    (typeof params.sessionId === 'string' && params.sessionId.trim()
       ? (params.sessionId as SessionId)
-      : null;
+      : null);
   const routeSessionRoomId = getSessionRoomId((routeSessionId ?? '__no_session__') as SessionId);
   const routeSession = useAtomValue(sessionMetaAtomFamily(routeSessionRoomId));
   const routeSessionLiveStatus = useAtomValue(
@@ -80,6 +84,7 @@ export function TerminalDockHost() {
         channel={terminalChannel}
         sessionId={terminalSessionId}
         canCreateTerminal={canCreateTerminal}
+        controllerEnabled={focused}
       />
     </Suspense>
   );

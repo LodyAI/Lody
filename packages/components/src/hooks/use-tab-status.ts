@@ -13,9 +13,9 @@ const DEBOUNCE_MS = 100;
  * favicon thrash. The Electron dock badge is driven separately by
  * `useWorkspaceBadge` (workspace-scoped, not per-tab) — see that hook.
  */
-export function useTabStatus(status: TabStatus): void {
+export function useTabStatus(status: TabStatus, enabled = true): void {
   useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
+    if (!enabled || typeof window === 'undefined') return undefined;
 
     let cleanup: (() => void) | null = null;
     const handle = window.setTimeout(() => {
@@ -26,5 +26,5 @@ export function useTabStatus(status: TabStatus): void {
       window.clearTimeout(handle);
       if (cleanup) cleanup();
     };
-  }, [status]);
+  }, [status, enabled]);
 }
