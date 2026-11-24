@@ -1,7 +1,11 @@
 import { LOCAL_E2EE_PAIRING_PATH, LOCAL_E2EE_RESET_PATH } from '@lody/shared/e2ee-local-pairing';
 import type * as http from 'http';
 import { AUTOMATION_CONTROL_PATH } from '@lody/shared/automations';
-import { LOCAL_MACHINE_RPC_PATH, LOCAL_SCHEDULE_CONTROL_PATH } from '@lody/shared';
+import {
+  LOCAL_MACHINE_RPC_PATH,
+  LOCAL_SCHEDULE_CONTROL_PATH,
+  LOCAL_WORKSPACE_BUNDLE_PATH,
+} from '@lody/shared';
 import { LOCAL_PROJECT_CONTROL_PATH } from '@lody/shared/node/local-project-control';
 import {
   LOCAL_CONTROL_HEADER,
@@ -11,7 +15,8 @@ import {
 import type { LocalSessionControlResponse } from '@lody/shared';
 import { LocalControlHandler, type LocalSessionControlConfig } from '@/lib/local-control-handler';
 
-export const MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
+// Accommodate a 20 MiB image encoded as base64, plus its JSON envelope.
+export const MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 let nextControlRequestId = 1;
 export type { LocalSessionControlConfig } from '@/lib/local-control-handler';
 
@@ -98,6 +103,7 @@ export function createLocalSessionControlRequestHandler(
 
     if (
       requestPath !== LOCAL_SCHEDULE_CONTROL_PATH &&
+      requestPath !== LOCAL_WORKSPACE_BUNDLE_PATH &&
       requestPath !== AUTOMATION_CONTROL_PATH &&
       requestPath !== LOCAL_SESSION_CONTROL_PATH &&
       requestPath !== LOCAL_MACHINE_RPC_PATH &&
@@ -147,16 +153,23 @@ export function createLocalSessionControlRequestHandler(
           `[local-control:${requestId}] request body received: bytes=${Buffer.byteLength(raw, 'utf8')} path=${requestPath}`
         );
         const streamResponses = wantsSessionControlStream(req, requestPath);
+        const disconnected = new AbortController();
+        const onClose = () => {
+          if (!res.writableFinished) disconnected.abort();
+        };
+        res.once('close', onClose);
         const response = await handler.handle({
           path: requestPath,
           rawBody: raw,
           requestId,
+          signal: disconnected.signal,
           onSessionResponse: streamResponses
             ? (message: LocalSessionControlResponse) => {
                 writeSessionControlStreamFrame(res, { kind: 'response', response: message });
               }
             : undefined,
         });
+        res.off('close', onClose);
         if (streamResponses && response.status === 200 && response.payload.ok === true) {
           writeSessionControlStreamFrame(res, { kind: 'complete' });
           if (!res.writableEnded && !res.destroyed) {

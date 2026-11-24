@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type LocalProjectId,
@@ -7,6 +10,8 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
+import * as machineLifecycle from '../src/lib/machine-lifecycle';
+import type { MachineProcessLifecycleAction } from '../src/lib/machine-lifecycle';
 import { MessageHandler } from '../src/lib/message-handler';
 import { getHostMachineProtocolCapabilities } from '../src/agent/managed-agent-runtime';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
@@ -125,122 +130,168 @@ describe('MessageHandler machine registration', () => {
     await handler.cleanup();
   });
 
-  it('writes machine rpc version when the machine rpc server is enabled', async () => {
-    const logger = createSilentLogger();
-    const machineId = 'machine-rpc' as MachineId;
-    let storedMeta: MachineMeta | undefined;
-    const workspaceDocument = {
-      sessions: new Map<SessionId, unknown>(),
-      restoreMachineDocument: vi.fn(async () => {}),
-      watchMachineDocumentExistence: vi.fn(() => {}),
-      registerMachine: async (_id: MachineId, meta: MachineMeta) => {
-        storedMeta = structuredClone(meta);
-      },
-      repo: {
-        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
-        getDocMeta: async () => (storedMeta ? { meta: storedMeta } : undefined),
-      },
-    };
+  it.each([false, true])(
+    'writes machine rpc version and workspace capabilities (encrypted=%s)',
+    async (encryptedWorkspace) => {
+      const logger = createSilentLogger();
+      const machineId = 'machine-rpc' as MachineId;
+      let storedMeta: MachineMeta | undefined;
+      const workspaceDocument = {
+        sessions: new Map<SessionId, unknown>(),
+        restoreMachineDocument: vi.fn(async () => {}),
+        watchMachineDocumentExistence: vi.fn(() => {}),
+        registerMachine: async (_id: MachineId, meta: MachineMeta) => {
+          storedMeta = structuredClone(meta);
+        },
+        repo: {
+          watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+          getDocMeta: async () => (storedMeta ? { meta: storedMeta } : undefined),
+        },
+      };
 
-    const sessionManager = {
-      on: vi.fn(),
-      setRequestPermissionHandler: vi.fn(),
-      getSession: vi.fn(),
-      finishSession: vi.fn(),
-      cleanUp: vi.fn(async () => {}),
-      setSessionError: vi.fn(),
-      terminateSession: vi.fn(),
-      hasSession: vi.fn(),
-      initialize: vi.fn(),
-      createSession: vi.fn(),
-      releaseGitHubRepoOwner: vi.fn(),
-    };
+      const sessionManager = {
+        on: vi.fn(),
+        setRequestPermissionHandler: vi.fn(),
+        getSession: vi.fn(),
+        finishSession: vi.fn(),
+        cleanUp: vi.fn(async () => {}),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        hasSession: vi.fn(),
+        initialize: vi.fn(),
+        createSession: vi.fn(),
+        releaseGitHubRepoOwner: vi.fn(),
+      };
 
-    const handler = new MessageHandler(
-      sessionManager as unknown as SessionManager,
-      workspaceDocument as unknown as LoroDocumentManager,
-      logger,
-      {
-        token: 'token',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        userId: 'user-1',
-        machineId,
-        machineName: 'machine-name',
-        cliVersion: '1.2.3',
-        cloudPort: createTestCloudPort(),
-      }
-    );
+      const handler = new MessageHandler(
+        sessionManager as unknown as SessionManager,
+        workspaceDocument as unknown as LoroDocumentManager,
+        logger,
+        {
+          token: 'token',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          userId: 'user-1',
+          machineId,
+          machineName: 'machine-name',
+          cliVersion: '1.2.3',
+          encryptedWorkspace,
+          cloudPort: createTestCloudPort(),
+        }
+      );
 
-    (handler as unknown as { machineRpcServer: { stop: () => void } | null }).machineRpcServer = {
-      stop: () => {},
-    };
+      (handler as unknown as { machineRpcServer: { stop: () => void } | null }).machineRpcServer = {
+        stop: () => {},
+      };
 
-    await handler.registerMachine();
+      await handler.registerMachine();
 
-    const registeredMeta = (await workspaceDocument.repo.getDocMeta())!.meta;
+      const registeredMeta = (await workspaceDocument.repo.getDocMeta())!.meta;
 
-    expect(registeredMeta.rpcVersion).toBe('1');
-    expect(registeredMeta.name).toBe('machine-name');
-    // Exhaustive on purpose: registration is where a capability key and its
-    // version reach every client, so adding one must be acknowledged here.
-    const hostCapabilities = getHostMachineProtocolCapabilities();
-    expect(registeredMeta.protocolCapabilities).toEqual({
-      multiRepoProject: 1,
-      machineDiskStatus: 1,
-      projectFileRoots: 1,
-      projectRepositoryMembers: 1,
-      projectFolderSelection: 1,
-      operationInbox: 2,
-      providerRateLimitsRefresh: 1,
-      codeCollabAllChangesScope: 1,
-      magpieImport: 1,
-      dshProviderIsolation: 1,
-      terminalNotifications: 1,
-      memoryProviders: 1,
-      sessionHistory: 3,
-      sessionHistoryIncremental: 1,
-      sessionHistoryInspection: 2,
-      sessionHistoryWatch: 1,
-      sessionHistoryPatches: 1,
-      sessionInputAcceptance: 1,
-      sessionInputDispatch: 1,
-      mcpToolDiscovery: 1,
-      mcpLocalAuthentication: 1,
-      codexAuthProfiles: 1,
-      sessionInputWithdraw: 1,
-      ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
-      ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
-      acpAuthenticationInteractions: 2,
-      acpAuthenticationMethodSelection: 1,
-      previewControl: 1,
-      androidEmulator: 1,
-      androidEmulatorQuality: 1,
-      iosSimulator: 1,
-      iosSimulatorControls: 1,
-      iosSimulatorExterior: 1,
-      localProjectRemoval: 1,
-      localProjectCreateDirectory: 1,
-      localProjectHistoryProvider: 1,
-      localFileResources: 1,
-      fileDownload: 1,
-      markdownFileLinks: 1,
-      providerSetup: 1,
-      acpProtocolAuthentication: 2,
-      acpCapabilityRefreshCache: 1,
-      subagentCancellation: 1,
-      subagentEvents: 1,
-      schedules: 3,
-      sessionAutomations: 1,
-      preparedSessionInput: 1,
-      messageQuotes: 1,
-      sessionInputAttachments: 1,
-      sessionCollaborationControl: 1,
-      bugReportClientLog: 1,
-      sessionLiveActivity: 1,
-    });
+      expect(registeredMeta.rpcVersion).toBe('1');
+      expect(registeredMeta.name).toBe('machine-name');
+      await expect(
+        handler.handleEncryptedAcpInteraction(
+          {
+            workspaceId: 'workspace-1',
+            machineId,
+            method: 'machine/acp-interaction',
+            params: { action: 'poll', interactionRequestId: 'a'.repeat(32) },
+          },
+          {
+            requestId: 'b'.repeat(32),
+            requesterDevice: 'c'.repeat(64),
+            expiresAt: Date.now() + 60_000,
+            signal: new AbortController().signal,
+          }
+        )
+      ).rejects.toThrow('e2ee_feature_unavailable');
+      expect(registeredMeta.protocolCapabilities?.e2eeAcpInteraction).toBe(
+        encryptedWorkspace ? 1 : undefined
+      );
+      // Exhaustive on purpose: registration is where a capability key and its
+      // version reach every client, so adding one must be acknowledged here.
+      const hostCapabilities = getHostMachineProtocolCapabilities();
+      expect(registeredMeta.protocolCapabilities).toEqual({
+        multiRepoProject: 1,
+        machineDiskStatus: 1,
+        managedDaemonUpdates: 1,
+        machineIdentityRestore: 1,
+        projectFileRoots: 1,
+        projectRepositoryMembers: 1,
+        projectFolderSelection: 1,
+        operationInbox: 2,
+        providerRateLimitsRefresh: 1,
+        codeCollabAllChangesScope: 1,
+        codeCollabDiffBlobs: 1,
+        magpieImport: 1,
+        magpieCodexSkills: 1,
+        dshProviderIsolation: 1,
+        terminalNotifications: 1,
+        memoryProviders: 2,
+        sessionHistory: 4,
+        sessionHistoryIncremental: 1,
+        sessionHistoryInspection: 2,
+        sessionHistorySubscription: 1,
+        sessionHistoryPatches: 1,
+        sessionInputAcceptance: 1,
+        localAttachmentDownload: 1,
+        sessionInputDispatch: 1,
+        mcpToolDiscovery: 1,
+        mcpLocalAuthentication: 1,
+        codexAuthProfiles: 1,
+        sessionInputWithdraw: 1,
+        ...(hostCapabilities.builtinPi ? { builtinPi: 1 } : {}),
+        ...(hostCapabilities.piExtensions ? { piExtensions: 1 } : {}),
+        acpAuthenticationInteractions: 2,
+        acpAuthenticationMethodSelection: 1,
+        ...(encryptedWorkspace
+          ? {
+              e2eeAcpInteraction: 1,
+              e2eeSessionFork: 1,
+              e2eeSessionEditAndResend: 1,
+              e2eeRemoteControl: 1,
+              e2eeRoostHistory: 1,
+            }
+          : {}),
+        previewControl: 1,
+        previewStopProcess: 1,
+        androidEmulator: 1,
+        androidEmulatorQuality: 1,
+        androidEmulatorShutdown: 1,
+        iosSimulator: 1,
+        iosSimulatorControls: 2,
+        iosSimulatorExterior: 1,
+        iosSimulatorShutdown: 1,
+        localProjectRemoval: 1,
+        localProjectCreateDirectory: 1,
+        localProjectBranchListing: 1,
+        localProjectHistoryProvider: 1,
+        localFileResources: 1,
+        fileDownload: 1,
+        markdownFileLinks: 1,
+        providerSetup: 1,
+        acpProtocolAuthentication: 2,
+        acpCapabilityRefreshCache: 1,
+        acpModelOptionsRead: 1,
+        antigravitySkipPermissions: 1,
+        subagentCancellation: 1,
+        subagentEvents: 1,
+        schedules: 3,
+        sessionAutomations: 1,
+        preparedSessionInput: 1,
+        messageQuotes: 1,
+        sessionInputAttachments: 1,
+        sessionCollaborationControl: 1,
+        sessionDirectoryListing: 1,
+        bugReportClientLog: 1,
+        sessionLiveActivity: 1,
+        localProjectFileSearch: 1,
+        localProjectSkillsFingerprint: 1,
+      });
 
-    await handler.cleanup();
-  });
+      await handler.cleanup();
+    }
+  );
 
   it('contains backend access registration failures after remote services activate', async () => {
     const registerMachineAccess = vi.fn(async () => {
@@ -294,5 +345,104 @@ describe('MessageHandler machine registration', () => {
     expect(registerMachineAccess).toHaveBeenCalledTimes(1);
 
     await handler.cleanup();
+  });
+});
+
+describe('MessageHandler canceled managed update', () => {
+  it('releases only the abandoned operation so later owner actions can be accepted', async () => {
+    const dataDirectory = mkdtempSync(path.join(tmpdir(), 'lody-managed-lifecycle-test-'));
+    vi.stubEnv('LODY_DATA_DIR', dataDirectory);
+    const verification = vi
+      .spyOn(machineLifecycle, 'verifyMachineLifecycleRequest')
+      .mockResolvedValue({
+        ok: true,
+        executionToken: 'execution-fixture',
+        executionExpiresAtMs: 1_750_000_000_000,
+      });
+    const logger = createSilentLogger();
+    const workspaceDocument = {
+      sessions: new Map(),
+      repo: {
+        watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+        getDocMeta: vi.fn(async () => undefined),
+      },
+    };
+    const sessionManager = {
+      on: vi.fn(),
+      setRequestPermissionHandler: vi.fn(),
+      getSession: vi.fn(),
+      finishSession: vi.fn(),
+      cleanUp: vi.fn(async () => {}),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      hasSession: vi.fn(),
+      initialize: vi.fn(),
+      createSession: vi.fn(),
+      releaseGitHubRepoOwner: vi.fn(),
+    };
+    const actions: MachineProcessLifecycleAction[] = [];
+    const handler = new MessageHandler(
+      sessionManager as unknown as SessionManager,
+      workspaceDocument as unknown as LoroDocumentManager,
+      logger,
+      {
+        token: 'synthetic-token',
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        userId: 'synthetic-owner',
+        machineId: 'synthetic-machine' as MachineId,
+        machineName: 'Synthetic machine',
+        cliVersion: '1.2.3',
+        cloudPort: createTestCloudPort(),
+        machineLifecycleCapability: {
+          launchMode: 'daemon',
+          canRemoteRestart: true,
+          canRemoteUpgrade: true,
+        },
+        prepareManagedUpgrade: async () => '1.2.4',
+        onProcessLifecycleAction: (action) => {
+          actions.push(action);
+        },
+      }
+    );
+    const lifecycle = handler as unknown as {
+      prepareMachineUpgrade(args: {
+        requesterUserId: string;
+        requestToken: string;
+        requestId: string;
+        targetVersion: string;
+      }): Promise<{ accepted?: boolean; disposition?: string }>;
+      triggerPendingProcessLifecycleAction(requestId: string): void;
+    };
+    const request = (requestId: string) =>
+      lifecycle.prepareMachineUpgrade({
+        requesterUserId: 'synthetic-owner',
+        requestToken: 'signed-fixture',
+        requestId,
+        targetVersion: '1.2.4',
+      });
+    try {
+      expect((await request('first')).accepted).toBe(true);
+      lifecycle.triggerPendingProcessLifecycleAction('first');
+      const first = actions[0];
+      if (first?.action !== 'upgrade') throw new Error('Expected the first managed update');
+      expect((await request('second')).disposition).toBe('already_pending');
+      // The process owner invokes this for expiry, authority refusal or a canceled switch.
+      first.onAbandoned?.();
+      expect((await request('second')).accepted).toBe(true);
+      lifecycle.triggerPendingProcessLifecycleAction('second');
+      first.onAbandoned?.(); // A delayed old cancellation must not release the new fence.
+      expect((await request('third')).disposition).toBe('already_pending');
+      const second = actions[1];
+      if (second?.action !== 'upgrade') throw new Error('Expected the second managed update');
+      second.onAbandoned?.();
+      expect((await request('third')).accepted).toBe(true);
+      lifecycle.triggerPendingProcessLifecycleAction('first'); // A late ACK cannot replay it.
+      expect(actions.map((action) => action.requestId)).toEqual(['first', 'second']);
+    } finally {
+      verification.mockRestore();
+      await handler.cleanup();
+      vi.unstubAllEnvs();
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
   });
 });

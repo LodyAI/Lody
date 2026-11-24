@@ -4,16 +4,18 @@
 Root rules apply. For `src/**`, read module, IPC and window contracts in
 [`src/AGENTS.md`](src/AGENTS.md).
 
-## Local OSS composition
+## Build composition
 
-- The public desktop composition is local-only. It must not discover deployment env
-  files, initialize authenticated product-cloud behavior, or enable telemetry.
+- The default desktop composition is local-only and ignores deployment values and telemetry.
+  Explicit `VITE_LODY_PLATFORM=cloud` requires caller cloud endpoints; it never discovers env files.
+- Resolve Streams WebSocket once in the Cloud build. Main must pass the resolved
+  value to the bundled daemon even when disabled, overriding the login shell.
 - The build-time `mainPlatformKind` is the source of truth for data directories,
   sockets, run/lock files, host leases, and workspace catalogs. Pass it explicitly;
   never infer it from an inherited `LODY_PLATFORM` value.
 - The Vite toolchain mode is named `oss`, while the injected product platform remains
-  `VITE_LODY_PLATFORM=local`. `electron.vite.config.ts` owns this mapping and must
-  clear caller-provided `VITE_*` values before injecting audited local constants.
+  `VITE_LODY_PLATFORM=local`. `electron.vite.config.ts` owns platform selection; local mode clears caller
+  `VITE_*` values before injecting audited local constants.
 - Run desktop development from the repository root with `pnpm start:local`. It must
   rebuild the embedded CLI and local renderer before launching the bundled CLI; do
   not reuse production/cloud artifacts.

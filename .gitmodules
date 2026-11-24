@@ -22,3 +22,9 @@
 [submodule "packages/acp-extension-devin"]
 	path = packages/acp-extension-devin
 	url = https://github.com/LodyAI/acp-extension-devin.git
+[submodule "apps/mobile/ios"]
+	path = apps/mobile/ios
+	url = https://github.com/LodyAI/lody-ios.git
+[submodule "apps/mobile/android"]
+	path = apps/mobile/android
+	url = https://github.com/LodyAI/lody-android.git

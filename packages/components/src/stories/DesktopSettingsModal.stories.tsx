@@ -1,19 +1,57 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import type { ReactNode } from 'react';
-import { Provider } from 'jotai';
+import { useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { Provider, createStore } from 'jotai';
 import { useHydrateAtoms } from 'jotai/utils';
-import { settingsActiveTabAtom, settingsDialogOpenAtom, userAtom } from '@/atoms';
+import {
+  settingsActiveTabAtom,
+  settingsDialogOpenAtom,
+  settingsSelectedMachineIdAtom,
+  userAtom,
+  currentWorkspaceIdAtom,
+  currentWorkspaceSlugAtom,
+} from '@/atoms';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { AGENT_ROLE_VERSION, workspaceFlockKeys, type AgentRole } from '@lody/shared';
+import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '@/atoms/settings';
+import { installCloudHttpPort } from '@/lib/cloud-http-port';
+import {
+  AGENT_ROLE_VERSION,
+  workspaceFlockKeys,
+  getMachineRoomId,
+  getLodyMachinePresenceKey,
+  getServerNow,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  type AgentRole,
+  type MachineId,
+  type WorkspaceId,
+  type MachineMeta,
+  type MachineMonitorSnapshot,
+  type LodyPresenceInstanceId,
+} from '@lody/shared';
+import { type CloudApi } from '@lody/platform';
+import { PlatformContext, usePlatform } from '@lody/platform/react';
+import { machineMetaCacheAtom } from '@/atoms/doc-meta';
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
+import {
+  lodyPresenceStatesAtom,
+  lodyPresenceSyncStateAtom,
+  lodyPresenceNowMsAtom,
+} from '@/atoms/presence';
+
 import type { SettingsTabId } from '@/components/settings/settings-tabs';
 import { DesktopSettingsModal } from '@/components/settings/desktop-settings-modal';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
+import { PromptShortcutRuntimeProvider } from '@/providers/prompt-shortcut-provider';
+import type {
+  PromptShortcut,
+  PromptShortcutIndexEntry,
+  PromptShortcutRuntime,
+} from '@lody/shared/prompt-shortcuts';
 
 /**
  * Desktop settings modal — the overlay that replaces the full-page settings route on
  * non-mobile viewports. These stories open it at low-dependency tabs (General / About);
- * Agent Roles uses a read-only catalog fixture; runtime-heavy tabs (Account, Stats,
- * Agent config, GitHub) need a live workspace and are exercised in the app.
+ * Agent Roles uses a read-only catalog fixture; Machines uses an isolated runtime
+ * fixture with the real page. Other runtime-heavy tabs need a live workspace.
  */
 function OpenModalAt({ tab, children }: { tab: SettingsTabId; children: ReactNode }) {
   useHydrateAtoms([
@@ -40,46 +78,405 @@ const storyRole: AgentRole = {
 };
 
 // A read-only catalog fixture: no transport or real workspace writes.
-const rolesStoryRuntime = {
-  workspaceId: 'settings-story-workspace',
-  workspaceSlug: 'lody',
-  repo: {
-    openFlockDoc: async () => ({
-      flock: {
-        scan: (options?: { prefix?: readonly unknown[] }) =>
-          options?.prefix?.[0] === 'agentRole'
-            ? [{ key: workspaceFlockKeys.agentRole(storyRole.id), value: storyRole }]
-            : [],
-        subscribe: () => () => {},
-      },
-      joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
-    }),
-  },
-} as unknown as WorkspaceRuntime;
+const rolesStoryRuntime = (roles: readonly AgentRole[]) =>
+  ({
+    workspaceId: 'settings-story-workspace',
+    workspaceSlug: 'lody',
+    repo: {
+      openFlockDoc: async () => ({
+        flock: {
+          scan: (options?: { prefix?: readonly unknown[] }) =>
+            options?.prefix?.[0] === 'agentRole'
+              ? roles.map((role) => ({ key: workspaceFlockKeys.agentRole(role.id), value: role }))
+              : [],
+          subscribe: () => () => {},
+        },
+        joinRoom: async () => ({ unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() }),
+      }),
+    },
+  }) as unknown as WorkspaceRuntime;
 
-function RolesCatalogFixture({ children }: { children: ReactNode }) {
+function RolesCatalogFixture({
+  roles,
+  children,
+}: {
+  roles: readonly AgentRole[];
+  children: ReactNode;
+}) {
   useHydrateAtoms([
-    [runtimeAtom, rolesStoryRuntime],
+    [runtimeAtom, rolesStoryRuntime(roles)],
     [userAtom, { id: storyRole.ownerUserId, name: 'Example user', email: 'user@example.com' }],
   ]);
   return <>{children}</>;
 }
 
-function SettingsModalStory({ tab }: { tab: SettingsTabId }) {
+const storyPrompt = (patch: Partial<PromptShortcut>): PromptShortcut => ({
+  v: 1,
+  id: `story-prompt-${patch.slug ?? 'review-pr'}`,
+  workspaceId: 'settings-story-workspace',
+  ownerUserId: storyRole.ownerUserId,
+  name: 'Review PR',
+  slug: 'review-pr',
+  description: 'Review the current diff as a pull request.',
+  prompt: 'Review the current diff. Report correctness issues first, then style.',
+  mentions: [],
+  scope: {},
+  revision: 'rev-1',
+  createdAt: 0,
+  updatedAt: 0,
+  ...patch,
+});
+
+const storyPrompts: PromptShortcut[] = [
+  storyPrompt({}),
+  storyPrompt({
+    name: 'Release notes',
+    slug: 'release-notes',
+    description: 'Draft release notes from merged PRs since the last tag.',
+    scope: { project: { kind: 'github', repository: 'lodyai/lody' } },
+  }),
+  storyPrompt({ name: 'Fix lint', slug: 'fix-lint', description: undefined }),
+  storyPrompt({
+    name: 'Team standup summary',
+    slug: 'standup',
+    ownerUserId: 'settings-story-teammate',
+    description: 'Summarize yesterday’s merged work for the standup.',
+  }),
+  storyPrompt({
+    name: 'Translate copy to Chinese',
+    slug: 'translate-zh',
+    description: 'Translate the selected UI strings, keeping product names in English.',
+  }),
+];
+
+/**
+ * The catalog boundary only: the real Prompts page, its list, the editor
+ * dialog and the read-only view render on top of these entries.
+ */
+function PromptsCatalogFixture({
+  prompts,
+  children,
+}: {
+  prompts: readonly PromptShortcut[];
+  children: ReactNode;
+}) {
+  useHydrateAtoms([
+    [userAtom, { id: storyRole.ownerUserId, name: 'Example user', email: 'user@example.com' }],
+  ]);
+  const runtime = useMemo(() => {
+    const entries: PromptShortcutIndexEntry[] = prompts.map(
+      ({ prompt: _prompt, mentions: _mentions, ...entry }) => ({
+        ...entry,
+        bodyDocId: entry.id,
+        dependencySummary: [],
+      })
+    );
+    const snapshot = { entries, pendingIds: [], errors: {}, loading: false };
+    return {
+      workspaceId: 'settings-story-workspace',
+      userId: storyRole.ownerUserId,
+      subscribe: () => () => {},
+      getSnapshot: () => snapshot,
+      read: async (entry: PromptShortcutIndexEntry) =>
+        prompts.find((prompt) => prompt.id === entry.id)!,
+      save: async () => {},
+      remove: async () => {},
+      retry: async () => {},
+      prefetch: async () => {},
+    } as unknown as PromptShortcutRuntime;
+  }, [prompts]);
+  return <PromptShortcutRuntimeProvider runtime={runtime}>{children}</PromptShortcutRuntimeProvider>;
+}
+
+// Only data/transport boundaries are synthetic. The modal, navigation, machines
+// page, accordion, monitor, recovery form and nested dialog are production components.
+const previewWorkspaceId = 'settings-story-workspace' as WorkspaceId;
+const previewOwnerId = 'settings-story-user';
+const previewSourceId = 'windows-daemon-current' as MachineId;
+const previewMachines: MachineMeta[] = [
+  {
+    id: previewSourceId,
+    name: 'Windows 工作机',
+    ownerUserId: previewOwnerId,
+    os: 'Windows 11',
+    cliVersion: '0.104.0',
+    sessions: [],
+    protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  },
+  {
+    id: 'windows-daemon-retired' as MachineId,
+    name: 'Windows 工作机（重装前）',
+    ownerUserId: previewOwnerId,
+    os: 'Windows 11',
+    cliVersion: '0.103.0',
+    sessions: [],
+  },
+  {
+    id: 'macbook-development' as MachineId,
+    name: '开发用 MacBook',
+    ownerUserId: previewOwnerId,
+    os: 'macOS',
+    cliVersion: '0.104.0',
+    sessions: [],
+  },
+];
+const previewAccess = previewMachines.map((machine) => ({
+  machineId: machine.id,
+  ownerUserId: previewOwnerId,
+  sharedWithTeam: machine.id !== 'windows-daemon-retired',
+  updatedAt: 1,
+}));
+const previewQueries: Record<string, unknown> = {
+  'machines:listVisibleMachines': previewAccess,
+  'localProjects:listVisibleLocalProjects': [],
+  'machineCredentials:getMachineCredentialState': { revocableCount: 1 },
+  'machinePairing:listPendingMachinePairings': [],
+};
+/** Nothing is shared: every machine is the owner's private machine. */
+const privatePreviewQueries: Record<string, unknown> = {
+  ...previewQueries,
+  'machines:listVisibleMachines': previewAccess.map((access) => ({
+    ...access,
+    sharedWithTeam: false,
+  })),
+};
+const createPreviewCloudApi = (queries: Record<string, unknown>): CloudApi => ({
+  useQuery: (operation, args) => (args === 'skip' ? undefined : (queries[operation.name] as never)),
+  useMutation: () => async () => {
+    throw new Error('预览不会更改真实机器。');
+  },
+  useAction: () => async () => {
+    throw new Error('预览不会更改真实机器。');
+  },
+});
+const previewCloudApi = createPreviewCloudApi(previewQueries);
+const privatePreviewCloudApi = createPreviewCloudApi(privatePreviewQueries);
+
+function MachinesCatalogFixture({ allPrivate = false }: { allPrivate?: boolean }) {
+  useLayoutEffect(() => {
+    const originalFetch = window.fetch;
+    const previewFetch: typeof fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith('https://settings-preview.invalid/')) {
+        return Promise.resolve(
+          url.endsWith('/api/cli/latest-version')
+            ? Response.json({ packageName: 'lody', latestVersion: '0.104.0' })
+            : Response.json(
+                { error: 'Preview only: no real machine is connected.' },
+                { status: 503 }
+              )
+        );
+      }
+      return originalFetch(input, init);
+    };
+    const release = installCloudHttpPort({
+      authBaseUrl: 'https://settings-preview.invalid',
+      serverBaseUrl: null,
+    });
+    window.fetch = previewFetch;
+    return () => {
+      if (window.fetch === previewFetch) window.fetch = originalFetch;
+      release();
+    };
+  }, []);
+  const parent = usePlatform();
+  const platform = useMemo(
+    () => ({
+      ...parent,
+      kind: 'cloud' as const,
+      cloudApi: allPrivate ? privatePreviewCloudApi : previewCloudApi,
+    }),
+    [parent, allPrivate]
+  );
+  const [store] = useState(() => {
+    const next = createStore();
+    const snapshot = (machineId: MachineId): MachineMonitorSnapshot => ({
+      kind: 'snapshot',
+      protocolVersion: 1,
+      machineId,
+      instanceId: 'storybook',
+      updatedAtMs: getServerNow(),
+      sampleWindowMs: 2000,
+      platform: 'win32',
+      cpuLogicalCores: 12,
+      deviceCpuCores: 0.12,
+      effectiveMemoryBytes: 32 * 1024 ** 3,
+      availableMemoryBytes: 24 * 1024 ** 3,
+      sessionAccounting: 'process-tree',
+      cliControlPlane: {
+        memoryBytes: 184 * 1024 ** 2,
+        cpuCores: 0.08,
+        cpuPercentOfMachine: 0.7,
+        processCount: 1,
+        memoryKind: 'physical-footprint',
+        quality: 'exact-process',
+      },
+      sessionsAggregate: {
+        memoryBytes: 0,
+        cpuCores: 0,
+        cpuPercentOfMachine: 0,
+        processCount: 0,
+        memoryKind: 'physical-footprint-sum',
+        quality: 'estimated-tree',
+      },
+      sessions: [],
+      sessionsTruncated: false,
+      warnings: [],
+    });
+    const binding = {
+      firstSyncedWithRemote: Promise.resolve(),
+      getSyncState: () => 'synced',
+      subscribeSyncState: () => () => {},
+    };
+    const runtime = {
+      workspaceId: previewWorkspaceId,
+      workspaceSlug: 'lody',
+      contentMode: 'plaintext',
+      accountId: previewOwnerId,
+      repo: {
+        openFlockDoc: async () => ({
+          flock: { scan: () => [], subscribe: () => () => {} },
+          joinRoom: async () => ({
+            unsubscribe: () => {},
+            transportIds: () => ['local'],
+            subscription: () => binding,
+          }),
+        }),
+        getDocMeta: async (id: string) => {
+          const meta = next.get(machineMetaCacheAtom)[id];
+          return meta ? { meta } : undefined;
+        },
+      },
+      writer: {
+        upsertDocMeta: async (id: string, patch: Partial<MachineMeta>) =>
+          next.set(machineMetaCacheAtom, (cache) => ({
+            ...cache,
+            [id]: { ...cache[id], ...patch } as MachineMeta,
+          })),
+        deleteDoc: async (id: string) =>
+          next.set(machineMetaCacheAtom, (cache) =>
+            Object.fromEntries(Object.entries(cache).filter(([key]) => key !== id))
+          ),
+      },
+      sendControl: () => {},
+      waitForMachineStatusResponse: async (machineId: MachineId) => ({
+        type: 'machine/status_response',
+        machineId,
+        success: true,
+        lifecycle: { launchMode: 'daemon', canRemoteRestart: true, canRemoteUpgrade: false },
+      }),
+      subscribeMachineMonitor: (
+        machineId: MachineId,
+        listener: (value: MachineMonitorSnapshot) => void
+      ) => {
+        listener(snapshot(machineId));
+        return () => {};
+      },
+      forceMachineMonitorSample: () => {},
+    } as unknown as WorkspaceRuntime;
+    next.set(runtimeAtom, runtime);
+    next.set(currentWorkspaceIdAtom, previewWorkspaceId);
+    next.set(currentWorkspaceSlugAtom, 'lody');
+    next.set(workspaceContentModeAtom, {
+      accountId: previewOwnerId,
+      workspaceId: previewWorkspaceId,
+      workspaceSlug: 'lody',
+      descriptor: {
+        workspaceId: previewWorkspaceId,
+        contentMode: 'plaintext',
+        contentModeVersion: 1,
+      },
+    });
+    next.set(userAtom, { id: previewOwnerId, name: '示例用户', email: 'preview@example.com' });
+    next.set(settingsDialogOpenAtom, true);
+    next.set(settingsActiveTabAtom, 'machines');
+    next.set(settingsSelectedMachineIdAtom, previewSourceId);
+    next.set(
+      machineMetaCacheAtom,
+      Object.fromEntries(previewMachines.map((machine) => [getMachineRoomId(machine.id), machine]))
+    );
+    next.set(lodyPresenceSyncStateAtom, 'synced');
+    next.set(lodyPresenceNowMsAtom, getServerNow());
+    next.set(
+      lodyPresenceStatesAtom,
+      Object.fromEntries(
+        [previewSourceId, 'macbook-development' as MachineId].map((machineId) => [
+          getLodyMachinePresenceKey(machineId, 'preview' as LodyPresenceInstanceId),
+          {
+            kind: 'machine',
+            machineId,
+            instanceId: 'preview' as LodyPresenceInstanceId,
+            updatedAt: getServerNow(),
+          },
+        ])
+      )
+    );
+    return next;
+  });
   return (
-    <SettingsStoryProviders capabilities={['cloudAccount']}>
+    <PlatformContext.Provider value={platform}>
+      <Provider store={store}>
+        <DesktopSettingsModal />
+      </Provider>
+    </PlatformContext.Provider>
+  );
+}
+
+/** The Lody Agent page only exists while the Lody Agent feature is on. */
+function LodyAgentEnabled({ children }: { children: ReactNode }) {
+  useHydrateAtoms([
+    [developerModeEnabledAtom, true],
+    [lodyAgentBetaEnabledAtom, true],
+  ]);
+  return <>{children}</>;
+}
+
+function SettingsModalStory({
+  tab,
+  roles = [storyRole],
+  prompts = storyPrompts,
+  solo = false,
+  noneShared = false,
+}: {
+  tab: SettingsTabId;
+  roles?: readonly AgentRole[];
+  prompts?: readonly PromptShortcut[];
+  /** The workspace has no other members. */
+  solo?: boolean;
+  /** No machine is shared with the workspace. */
+  noneShared?: boolean;
+}) {
+  return (
+    <SettingsStoryProviders
+      multiMember={tab === 'machines' && !solo}
+      capabilities={
+        tab === 'machines' ? ['cloudAccount', 'remoteMachines', 'teamSharing'] : ['cloudAccount']
+      }
+    >
       <RoutedStory>
-        <Provider>
-          <OpenModalAt tab={tab}>
-            {tab === 'agent-roles' ? (
-              <RolesCatalogFixture>
+        {tab === 'machines' ? (
+          <MachinesCatalogFixture allPrivate={solo || noneShared} />
+        ) : (
+          <Provider>
+            <OpenModalAt tab={tab}>
+              {tab === 'agent-roles' ? (
+                <RolesCatalogFixture roles={roles}>
+                  <DesktopSettingsModal />
+                </RolesCatalogFixture>
+              ) : tab === 'prompt-shortcuts' ? (
+                <PromptsCatalogFixture prompts={prompts}>
+                  <DesktopSettingsModal />
+                </PromptsCatalogFixture>
+              ) : tab === 'lody-agent' ? (
+                <LodyAgentEnabled>
+                  <DesktopSettingsModal />
+                </LodyAgentEnabled>
+              ) : (
                 <DesktopSettingsModal />
-              </RolesCatalogFixture>
-            ) : (
-              <DesktopSettingsModal />
-            )}
-          </OpenModalAt>
-        </Provider>
+              )}
+            </OpenModalAt>
+          </Provider>
+        )}
       </RoutedStory>
     </SettingsStoryProviders>
   );
@@ -109,7 +506,7 @@ export const KeyboardShortcutsTab: Story = {
   render: () => <SettingsModalStory tab="keyboard-shortcuts" />,
 };
 
-/** An empty catalog: the list's own card with one quiet line. */
+/** An empty catalog: what is missing, what a server is for, and the add action. */
 export const McpEmptyTab: Story = {
   render: () => <SettingsModalStory tab="mcp" />,
 };
@@ -118,10 +515,45 @@ export const AgentRolesTab: Story = {
   render: () => <SettingsModalStory tab="agent-roles" />,
 };
 
+/** No Roles yet: the list names what is missing, what a Role is for, and the add action. */
+export const AgentRolesEmptyTab: Story = {
+  render: () => <SettingsModalStory tab="agent-roles" roles={[]} />,
+};
+
+/** Settings → Lody Agent, drawn with the Harness controls. */
+export const LodyAgentTab: Story = {
+  render: () => <SettingsModalStory tab="lody-agent" />,
+};
+
 export const DarkModePreferencesTab: Story = {
   render: () => (
     <div className="dark">
       <SettingsModalStory tab="preferences" />
     </div>
   ),
+};
+
+/** Full production modal with synthetic data; run Storybook with VITE_LODY_PLATFORM=cloud. */
+export const MachinesIdentityRecovery: Story = {
+  render: () => <SettingsModalStory tab="machines" />,
+};
+
+/** A workspace without other members: every machine is private, and all of them are
+ * listed on the page rather than set apart as "your private machines". */
+export const MachinesSoloWorkspace: Story = {
+  render: () => <SettingsModalStory tab="machines" solo />,
+};
+
+/** A team workspace where the owner has shared nothing yet: the list says so rather
+ * than claiming no machine is connected. */
+export const MachinesNoneShared: Story = {
+  render: () => <SettingsModalStory tab="machines" noneShared />,
+};
+
+export const PromptsTab: Story = {
+  render: () => <SettingsModalStory tab="prompt-shortcuts" />,
+};
+
+export const PromptsEmptyTab: Story = {
+  render: () => <SettingsModalStory tab="prompt-shortcuts" prompts={[]} />,
 };

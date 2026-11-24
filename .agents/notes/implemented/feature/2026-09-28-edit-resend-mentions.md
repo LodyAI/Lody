@@ -39,6 +39,7 @@ re-anchors spans after trim, so `handleEditLastUser` in
 send produces and writes them onto the replacement text block. Surfaces without
 a mention source (share page, tour) omit `editMentionContext` and the editor
 degrades to a plain textarea.
+Prompt Shortcuts use the composer's `useWorkspaceFeature('shortcuts')` gate.
 
 The editor's menu uses `anchor="caret"` (new prop on `MentionTwoLevelMenu` /
 `CombinedMentionTextarea`) instead of the composer's frame dock, because an

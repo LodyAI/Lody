@@ -298,6 +298,9 @@ const toImagePayload = (
 
   return {
     imageId: block.imageId,
+    transport: block.transport,
+    machineId: block.machineId,
+    localImageId: block.localImageId,
     ...(block.encryption ? { encryption: block.encryption } : {}),
     mimeType: block.mimeType,
     fileName,
@@ -468,6 +471,17 @@ export const normalizeSessionInputBlocks = (
   fallbackPrompt: string
 ): SessionInputBlock[] => {
   const parsedInputBlocks = SessionInputBlocksSchema.safeParse(inputBlocks);
+  if (
+    !parsedInputBlocks.success &&
+    Array.isArray(inputBlocks) &&
+    inputBlocks.some(
+      (block) =>
+        block?.type === 'local_attachment' ||
+        (block?.type === 'image' && block?.transport === 'local')
+    )
+  ) {
+    throw new Error('Invalid or unsupported local attachment input');
+  }
   if (parsedInputBlocks.success && parsedInputBlocks.data.length > 0) {
     const normalized: SessionInputBlock[] = [];
     for (const block of parsedInputBlocks.data) {
@@ -571,6 +585,11 @@ export const inputBlocksToHistoryItems = (
       continue;
     }
 
+    if (block.type === 'local_attachment') {
+      items.push({ ...block });
+      continue;
+    }
+
     if (block.type === 'file') {
       items.push({
         text: undefined,
@@ -602,6 +621,17 @@ export const historyItemsToInputBlocks = (
   const blocks: SessionInputBlock[] = [];
 
   for (const item of items) {
+    if (
+      typeof item === 'object' &&
+      item !== null &&
+      'type' in item &&
+      item.type === 'local_attachment'
+    ) {
+      const parsed = SessionInputBlocksSchema.safeParse([item]);
+      if (!parsed.success) throw new Error('Invalid local attachment');
+      blocks.push(...parsed.data);
+      continue;
+    }
     if (isTextHistoryItem(item)) {
       // `item` came out of the session document, where spans ride an untyped
       // catchall — whatever wrote them, including an older or newer client,
@@ -707,6 +737,40 @@ export const buildSessionTurnInputConfig = (args: {
   };
 };
 
+const sortedJson = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(sortedJson)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.entries(value)
+            .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+            .map(([key, item]) => [key, sortedJson(item)])
+        )
+      : value;
+
+/**
+ * Canonical bytes of what a queued input's author chose, comparable across the
+ * composer's config and the promoted history row. Promotion replaces `resume`
+ * from Session metadata; absent and empty MCP selections mean the same input.
+ */
+export const queuedInputEvidence = (config: unknown): string | undefined => {
+  const input = normalizeSessionTurnInputConfig(config);
+  const cliType = input?.cliType;
+  const agentType = input?.agentType;
+  if (!input || !cliType || !agentType) return undefined;
+  const inputBlocks = normalizeSessionInputBlocks(input.inputBlocks, input.prompt ?? '');
+  if (inputBlocks.length === 0) return undefined;
+  const { resume: _resume, ...chosen } = buildSessionTurnInputConfig({
+    ...input,
+    cliType,
+    agentType,
+    inputBlocks,
+    mcpServerIds: input.mcpServerIds?.length ? input.mcpServerIds : undefined,
+  });
+  const evidence = { ...chosen, _lodyAutomation: input._lodyAutomation };
+  return JSON.stringify(sortedJson(JSON.parse(JSON.stringify(evidence))));
+};
+
 export const buildInitialSessionTurnInputConfig = (args: {
   prompt: string | undefined;
   cliType: string;
@@ -726,6 +790,46 @@ export const buildInitialSessionTurnInputConfig = (args: {
     cliType: cliType.data,
     agentType,
   });
+};
+
+/**
+ * Omits `inputConfig.inputBlocks` on persisted user turns when the turn has a
+ * single plain-text block whose trimmed text equals `inputConfig.prompt.trim()`.
+ * The prompt and `items` already preserve that text, and `queuedInputEvidence`
+ * reconstructs the identical `inputBlocks` from `prompt`, keeping E2EE digests exact.
+ */
+export const compactRedundantUserTurnInputBlocks = (
+  inputConfig: SessionTurnInputConfig | undefined,
+  inputBlocks: readonly SessionInputBlock[]
+): SessionTurnInputConfig | undefined => {
+  if (!inputConfig?.inputBlocks || inputConfig.inputBlocks.length === 0) {
+    return inputConfig;
+  }
+  if (typeof inputConfig.prompt !== 'string') {
+    return inputConfig;
+  }
+  const normalized = normalizeSessionInputBlocks(inputBlocks, '');
+  if (normalized.length !== 1) return inputConfig;
+  const [onlyBlock] = normalized;
+  if (!onlyBlock || onlyBlock.type !== 'text' || onlyBlock.spans?.length) {
+    return inputConfig;
+  }
+  const configNormalized = normalizeSessionInputBlocks(inputConfig.inputBlocks, '');
+  if (configNormalized.length !== 1) return inputConfig;
+  const [onlyConfigBlock] = configNormalized;
+  if (
+    !onlyConfigBlock ||
+    onlyConfigBlock.type !== 'text' ||
+    onlyConfigBlock.spans?.length ||
+    onlyConfigBlock.text !== onlyBlock.text
+  ) {
+    return inputConfig;
+  }
+  if (inputConfig.prompt.trim() !== onlyConfigBlock.text) {
+    return inputConfig;
+  }
+  const { inputBlocks: _omitted, ...compacted } = inputConfig;
+  return compacted;
 };
 
 export const buildPendingUserHistoryEntry = (args: {
@@ -752,7 +856,7 @@ export const buildPendingUserHistoryEntry = (args: {
     items,
     timestamp: args.timestamp,
     status: args.status ?? 'pending',
-    inputConfig: args.inputConfig,
+    inputConfig: compactRedundantUserTurnInputBlocks(args.inputConfig, args.inputBlocks),
     read: false,
     fileDiff: [],
     finished: true,

@@ -1,5 +1,5 @@
 import { installRendererUnloadConfirmation } from './renderer-unload'
-import { parseSessionLink } from '@lody/shared/session-link'
+import { isAppResourceLink } from '@lody/shared/session-link'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
@@ -12,6 +12,8 @@ import {
   isAppQuitting,
   isWindowsTrayAvailable,
   setMainWindow,
+  setPendingDeepLink,
+  markCompanionWindow,
   registerProductWindow,
   unmarkWarmWindow
 } from './window-state'
@@ -38,6 +40,7 @@ import { E2EE_CLIENT_LOSS_PROBE, type ElectronWindowTarget } from '@lody/shared/
 import { clientLossProbeEnabled } from './services/e2ee-client-loss-gate'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import { isDevbarRendererEnabled } from './services/devbar/service'
+import { blocksHtmlPreviewFrameNavigation } from './services/local-html-preview'
 import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
@@ -58,6 +61,8 @@ type CreateMainWindowOptions = {
   icon?: string
   initialPath?: string
   auxiliary?: boolean
+  /** A single-surface companion window: its own size, centred, never the primary window. */
+  companion?: { width: number; height: number; minWidth: number; minHeight: number }
   hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
   /**
@@ -237,7 +242,7 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
     if (isTrustedNavigation(event.url, targets)) return
 
     event.preventDefault()
-    if (parseSessionLink(event.url)) {
+    if (isAppResourceLink(event.url)) {
       window.webContents.send('app.deepLink', event.url)
       return
     }
@@ -250,6 +255,14 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
 
   window.webContents.on('will-navigate', preventUntrustedNavigation)
   window.webContents.on('will-redirect', preventUntrustedNavigation)
+  // A local HTML preview frame must not turn itself into a live web page
+  // inside the product window; its own preview origin stays navigable.
+  window.webContents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame || event.isSameDocument) return
+    if (!blocksHtmlPreviewFrameNavigation(event.frame?.url, event.url)) return
+    event.preventDefault()
+    console.warn('[Electron] Blocked HTML preview frame navigation')
+  })
 }
 
 function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: ReloadTarget): void {
@@ -384,8 +397,12 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     )
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
-    ...getMainWindowConstructorOptions(),
-    ...(options.auxiliary ? { width: 1000, height: 760 } : {}),
+    ...(options.companion
+      ? { ...options.companion, center: true }
+      : {
+          ...getMainWindowConstructorOptions(),
+          ...(options.auxiliary ? { width: 1000, height: 760 } : {})
+        }),
     show: false,
     backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
     autoHideMenuBar: true,
@@ -423,6 +440,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     pendingInitialMaximize.add(window)
   }
   registerProductWindow(window, options.warm ?? false)
+  if (options.companion) markCompanionWindow(window)
   installRendererUnloadConfirmation(window)
   if (!options.auxiliary) trackMainWindowState(window)
   const initialDevbarEnabled = isDevbarRendererEnabled()
@@ -471,7 +489,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   })
 
   window.webContents.setWindowOpenHandler((details) => {
-    if (parseSessionLink(details.url)) {
+    if (isAppResourceLink(details.url)) {
       window.webContents.send('app.deepLink', details.url)
       return { action: 'deny' }
     }
@@ -606,6 +624,20 @@ export function setMainWindowOnboardingReloadTarget(window: BrowserWindow): void
   nativeTheme.themeSource = 'light'
   applyResolvedWindowTheme(window, 'light', process.platform)
   setReloadTarget(window, resolveMainRendererTarget('/onboarding', false))
+}
+
+/**
+ * Opens an app resource link in the primary window, raising it or reopening one
+ * when only companion windows remain. A window still loading receives it from
+ * its own did-finish-load handoff.
+ */
+export function openLinkInMainWindow(url: string): void {
+  const window = openOrFocusMainWindow({ icon: productWindowIcon })
+  if (window.webContents.isLoading() || !window.webContents.getURL()) {
+    setPendingDeepLink(url)
+    return
+  }
+  window.webContents.send('app.deepLink', url)
 }
 
 export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWindow {

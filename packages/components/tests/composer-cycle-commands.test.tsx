@@ -6,10 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useComposerCycleCommands } from '../src/hooks/use-composer-cycle-commands';
 import { commands } from '../src/lib/commands';
 import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -99,23 +98,26 @@ describe('composer cycle command ownership', () => {
 
     const render = (active: 'first' | 'second') => {
       root.render(
-        <>
-          <CommandShortcutHost />
-          <CycleCommandProbe
-            id="first"
-            enabled={active === 'first'}
-            onModeSelect={first.mode}
-            onModelSelect={first.model}
-            onThinkEffortSelect={first.thinkEffort}
-          />
-          <CycleCommandProbe
-            id="second"
-            enabled={active === 'second'}
-            onModeSelect={second.mode}
-            onModelSelect={second.model}
-            onThinkEffortSelect={second.thinkEffort}
-          />
-        </>
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="first"
+              enabled={active === 'first'}
+              onModeSelect={first.mode}
+              onModelSelect={first.model}
+              onThinkEffortSelect={first.thinkEffort}
+            />
+            <CycleCommandProbe
+              id="second"
+              enabled={active === 'second'}
+              onModeSelect={second.mode}
+              onModelSelect={second.model}
+              onThinkEffortSelect={second.thinkEffort}
+            />
+          </>,
+          testI18n
+        )
       );
     };
 
@@ -142,20 +144,55 @@ describe('composer cycle command ownership', () => {
     expect(first.thinkEffort).toHaveBeenCalledTimes(1);
   });
 
+  it("cycles thinking effort on ⌘' only while the composer is focused", () => {
+    const thinkEffort = vi.fn();
+    act(() => {
+      root.render(
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="composer"
+              enabled
+              onModeSelect={vi.fn()}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={thinkEffort}
+            />
+          </>,
+          testI18n
+        )
+      );
+    });
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(thinkEffort).not.toHaveBeenCalled();
+
+    const composer = container.querySelector<HTMLTextAreaElement>('#composer');
+    composer?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: "'", code: 'Quote', ctrlKey: true, bubbles: true })
+    );
+    expect(thinkEffort).toHaveBeenCalledWith('high');
+  });
+
   it('lets a custom mode binding run outside the composer while keeping default Shift+Tab scoped', () => {
     const mode = vi.fn();
     act(() => {
       root.render(
-        <>
-          <CommandShortcutHost />
-          <CycleCommandProbe
-            id="composer"
-            enabled
-            onModeSelect={mode}
-            onModelSelect={vi.fn()}
-            onThinkEffortSelect={vi.fn()}
-          />
-        </>
+        withTestI18n(
+          <>
+            <CommandShortcutHost />
+            <CycleCommandProbe
+              id="composer"
+              enabled
+              onModeSelect={mode}
+              onModelSelect={vi.fn()}
+              onThinkEffortSelect={vi.fn()}
+            />
+          </>,
+          testI18n
+        )
       );
     });
 

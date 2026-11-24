@@ -9,7 +9,6 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms';
-import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Bot } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -62,7 +61,6 @@ interface AgentSelectorProps {
   className?: string;
   showIcon?: boolean;
   align?: 'left' | 'center';
-  tone?: 'light' | 'dark';
   /** Restrict selectable agents to these machine IDs. */
   allowedMachineIds?: MachineId[];
   /** Hide machine name from options (useful when machine is selected separately). */
@@ -89,7 +87,6 @@ export function AgentSelector({
   className,
   showIcon = true,
   align = 'left',
-  tone = 'light',
   allowedMachineIds,
   hideMachineDescription = false,
   validateItem,
@@ -143,13 +140,13 @@ export function AgentSelector({
       placeholderIcon={showIcon ? Bot : undefined}
       appearance="field"
       size="lg"
-      className={cn('w-full', className)}
-      contentClassName="w-64"
+      className={className}
+      xstyle={styles.fill}
+      contentWidth="calc(var(--spacing) * 64)"
       disabled={disabled || loading}
       searchable={!loading && agentOptions.length > 5}
       searchPlaceholder={t('sessions.filter.selectAgent')}
       emptyText={t('agents.noAgents')}
-      tone={tone}
       open={open}
       onOpenChange={onOpenChange}
       renderTriggerValue={(option) => (

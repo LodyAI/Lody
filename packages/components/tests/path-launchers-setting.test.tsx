@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,7 +10,7 @@ import {
   writeStoredPathLauncherPreference,
 } from '../src/lib/session-path-launchers';
 
-vi.mock('@posthog/react', () => ({
+vi.mock('@/lib/posthog-context', () => ({
   usePostHog: () => null,
 }));
 

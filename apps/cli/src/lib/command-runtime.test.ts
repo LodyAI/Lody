@@ -13,10 +13,15 @@ import {
   listWorkspaceCandidates,
   resolveWorkspaceOrThrow,
   selectWorkspaceSummary,
+  checkEncryptedCommandAccess,
+  describeEncryptedCommandFailure,
+  withMachineRpcClient,
 } from './command-runtime';
+import { runWithDaemonWorkspace } from './session-command-environment';
+import type { LoroStreamsMachineRpcClient } from '@lody/loro-streams-rpc';
 import { makeWorkspaceCommandManagers } from './workspace-command-manager';
 import { Effect } from 'effect';
-import type { MachineId } from '@lody/shared';
+import { getMachineRoomId, type MachineId, type WorkspaceId } from '@lody/shared';
 import * as workspaceApi from './workspace';
 import {
   makeLocalWorkspaceCatalog,
@@ -404,5 +409,137 @@ describe('command runtime helpers', () => {
         meta: { id: 'real', latestUserMsgId: 'turn-1' },
       },
     ]);
+  });
+});
+
+describe('encrypted one-shot commands', () => {
+  const manager = (allowed: boolean) => {
+    const asked: unknown[][] = [];
+    return {
+      asked,
+      value: {
+        authorizeEncryptedMachine: async (...args: unknown[]) => {
+          asked.push(args);
+          return allowed;
+        },
+      } as never,
+    };
+  };
+
+  it('decides machine access from the local replica', async () => {
+    const allowed = manager(true);
+    await expect(
+      checkEncryptedCommandAccess(allowed.value, 'account', {
+        machineId: 'machine',
+        requesterUserId: 'account',
+        localProjectId: 'project',
+      })
+    ).resolves.toEqual({ allowed: true });
+    expect(allowed.asked).toEqual([['machine', 'project']]);
+    await expect(
+      checkEncryptedCommandAccess(manager(false).value, 'account', {
+        machineId: 'machine',
+        requesterUserId: 'account',
+        localProjectId: 'project',
+      })
+    ).resolves.toEqual({ allowed: false, reason: 'project_not_shared' });
+  });
+
+  it('refuses another requester without reading the ledger', async () => {
+    const other = manager(true);
+    await expect(
+      checkEncryptedCommandAccess(other.value, 'account', {
+        machineId: 'machine',
+        requesterUserId: 'someone-else',
+      })
+    ).resolves.toEqual({ allowed: false, reason: 'requester_not_member' });
+    expect(other.asked).toEqual([]);
+  });
+
+  it('sends Machine RPC of an encrypted daemon workspace only as signed features its target reads', async () => {
+    const sent: unknown[] = [];
+    const capabilities: Record<string, Record<string, number>> = {
+      [getMachineRoomId('machine-new')]: { e2eeRemoteControl: 1 },
+      [getMachineRoomId('machine-old')]: {},
+    };
+    let reply = true;
+    const manager = {
+      isEncryptedWorkspace: () => true,
+      repo: {
+        getDocMeta: async (roomId: string) => ({
+          meta: { protocolCapabilities: capabilities[roomId] },
+        }),
+      },
+      requestEncryptedFeature: async (request: unknown) => {
+        sent.push(request);
+        return reply
+          ? {
+              ok: true as const,
+              result: {
+                type: 'session/cancel_response' as const,
+                sessionId: 'session-1',
+                success: true,
+              },
+            }
+          : null;
+      },
+    } as never;
+    const daemon = {
+      workspaceId: 'workspace-1' as WorkspaceId,
+      userId: 'account',
+      machineId: 'machine-self' as MachineId,
+      manager,
+      readInvocation: () => ({ found: false }) as never,
+    };
+    const call = <T>(machineId: string, fn: (client: LoroStreamsMachineRpcClient) => Promise<T>) =>
+      runWithDaemonWorkspace(daemon, () =>
+        withMachineRpcClient(
+          {
+            auth: {} as never,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            machineId: machineId as MachineId,
+          },
+          fn
+        )
+      );
+    const cancel = (client: LoroStreamsMachineRpcClient) =>
+      client.requestSessionCancel({ sessionId: 'session-1', turnId: 'turn-1', timeoutMs: 5_000 });
+    await expect(call('machine-new', cancel)).resolves.toMatchObject({ success: true });
+    expect(sent).toEqual([
+      {
+        workspaceId: 'workspace-1',
+        machineId: 'machine-new',
+        method: 'session/cancel',
+        params: { sessionId: 'session-1', turnId: 'turn-1' },
+        timeoutMs: 5_000,
+      },
+    ]);
+    await expect(call('machine-old', cancel)).resolves.toMatchObject({ success: false });
+    await expect(
+      call('machine-new', (client) =>
+        client.requestSessionDispatchTurn({
+          sessionId: 'session-1',
+          userTurnId: 'user-1',
+          userId: 'account',
+          timestamp: '2026-11-13T00:00:00.000Z',
+          inputConfig: { prompt: 'SYNTHETIC' } as never,
+          timeoutMs: 5_000,
+        })
+      )
+    ).rejects.toThrow('e2ee_rpc_unavailable');
+    expect(sent).toHaveLength(1);
+    reply = false;
+    await expect(call('machine-new', cancel)).resolves.toMatchObject({ success: false });
+    expect(sent).toHaveLength(2);
+  });
+
+  it('explains a machine with no local ledger for the workspace', () => {
+    const failure = describeEncryptedCommandFailure(
+      'workspace',
+      new Error('e2ee_pairing_required')
+    );
+    expect(failure.message).toContain('Pair this machine');
+    const other = new Error('e2ee_binding_conflict');
+    expect(describeEncryptedCommandFailure('workspace', other)).toBe(other);
   });
 });

@@ -1,15 +1,6 @@
-import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import {
-  control,
-  corner,
-  duration,
-  ease,
-  focus,
-  radius,
-  space,
-  text,
-} from '@lody/ui/tokens/scales.stylex';
+import { control, corner, duration, ease, focus, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';
 
@@ -87,6 +78,7 @@ export const settingsSurface = stylex.create({
     fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
   },
+  sectionAsideUnclipped: { overflow: 'visible' },
   sectionActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
 
   /**
@@ -337,6 +329,33 @@ export const settingsSurface = stylex.create({
     gap: space[4],
     paddingBlock: space[2],
   },
+  /**
+   * An empty catalog that teaches its way in: what the list will hold, one line
+   * on what a record is for, and the page's add action, which leaves the header
+   * while the list is empty so it is never offered twice.
+   */
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[1],
+    paddingInline: space[4],
+    paddingBlock: space[6],
+  },
+  emptyStateTitle: {
+    margin: 0,
+    fontSize: text.bodySize,
+    fontWeight: type.headingWeight,
+    lineHeight: type.leading,
+    color: colors.label,
+  },
+  emptyStateDescription: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+  },
+  emptyStateAction: { marginTop: space[3] },
   /** A row whose control cannot be used here: its name steps back with it. */
   rowLabelDisabled: { color: colors.tertiaryLabel },
   /**
@@ -489,7 +508,7 @@ export const settingsCatalog = stylex.create({
     cornerShape: corner.shape,
     backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 5%)`,
     color: colors.secondaryLabel,
-    fontSize: '14px',
+    fontSize: text.bodySize,
     lineHeight: 1,
   },
   body: { display: 'flex', flexDirection: 'column', flexGrow: 1, gap: '2px', minWidth: 0 },
@@ -577,7 +596,7 @@ export const settingsCatalog = stylex.create({
     gap: space[4],
   },
   blockText: { minWidth: 0 },
-  blockTitle: { margin: 0, fontSize: '14px', lineHeight: 1.375, color: colors.label },
+  blockTitle: { margin: 0, fontSize: text.bodySize, lineHeight: 1.375, color: colors.label },
   blockHint: {
     margin: 0,
     marginTop: '2px',
@@ -591,8 +610,10 @@ export const settingsCatalog = stylex.create({
  * The size of a settings editor dialog (MCP server, Agent Role, Prompt
  * Shortcut). The width rides `Dialog.Content`'s `width` prop — the panel's own
  * width is a StyleX declaration, and a second one on the same element is
- * ordered by the stylesheet rather than the caller. This class keeps only the
- * height cap.
+ * ordered by the stylesheet rather than the caller. The height cap composes
+ * through the panel's typed StyleX input.
  */
 export const SETTINGS_EDITOR_DIALOG_WIDTH = '620px';
-export const SETTINGS_EDITOR_DIALOG_LAYOUT = 'max-h-[min(680px,88dvh)]';
+export const settingsEditorDialogStyles = stylex.create({
+  panel: { maxHeight: 'min(680px, 88dvh)' },
+});

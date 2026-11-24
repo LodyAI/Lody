@@ -8,18 +8,70 @@
  * same rail.
  */
 import { useEffect, useRef, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistory, SessionId } from '@lody/shared';
+import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import type { SessionChatStreamHandle } from '@/components/ai-gui/view';
+import { ForceDesktopLayoutProvider, ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import {
   createConversationSession,
   createConversationDerivation,
   type ConversationView,
 } from '@/lib/conversation-view';
+const sceneStyles = stylex.create({
+  fill: { height: '100%' },
+});
+
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    'border-radius': '0.25rem',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+  },
+  element: {
+    'border-style': 'solid',
+    'border-width': '1px',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    height: '720px',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  stack: {
+    display: 'flex',
+    height: '100vh',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  row: {
+    display: 'flex',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+  frame2: {
+    'min-height': 'calc(var(--spacing) * 0)',
+    flex: '1',
+  },
+  row2: {
+    display: 'flex',
+    gap: 'calc(var(--spacing) * 3)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 
 const meta = {
   title: 'Sessions/ConversationView',
@@ -166,13 +218,13 @@ function WindowedStream({
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
-    <div className="h-[720px] w-full bg-background">
+    <div {...stylex.props(storyLayout.frame)}>
       <SessionChatStreamView
         conversationView={view}
         initialWindowReady={initialWindowReady}
         items={items}
         sessionId={streamSessionId}
-        className="h-full"
+        xstyle={sceneStyles.fill}
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
         lastAssistantMessageId={lastAssistantMessageId}
@@ -217,13 +269,13 @@ function OpenFlickerStory({
     return () => next.dispose();
   }, [rounds]);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         <button
           type="button"
           data-testid="open-conversation"
           disabled={!view}
-          className="rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setOpenId((n) => n + 1)}
         >
           Open conversation
@@ -231,7 +283,7 @@ function OpenFlickerStory({
         <button
           type="button"
           data-testid="close-conversation"
-          className="rounded border px-3 py-1 text-sm"
+          {...stylex.props(storyLayoutStyles.canvas)}
           onClick={() => setOpenId(0)}
         >
           Close
@@ -239,7 +291,7 @@ function OpenFlickerStory({
         <span data-testid="view-ready">{view ? 'view-ready' : 'building'}</span>
         {backgroundFacts && view && <BackgroundFactControls view={view} />}
       </div>
-      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="conversation-slot">
         {view && openId > 0 && <OpenedStream key={openId} view={view} />}
       </div>
     </div>
@@ -274,7 +326,7 @@ function OpenedStream({
       initialWindowReady={initialWindowReady}
       items={items}
       sessionId={streamSessionId}
-      className="h-full"
+      xstyle={sceneStyles.fill}
       // The session page always supplies a non-null fragment here, even when it
       // renders no DOM, so it counts as a Virtua row. Anything deriving "is
       // there anything to virtualize" from the item count must survive that.
@@ -376,15 +428,15 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
     if (documentPending) setDocumentPending(false);
   }, [documentPending]);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex shrink-0 items-center gap-2 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row)}>
         {[0, 1].map((index) => (
           <button
             key={index}
             type="button"
             data-testid={`select-conversation-${index}`}
             disabled={!views}
-            className="rounded border px-3 py-1 text-sm"
+            {...stylex.props(storyLayoutStyles.canvas)}
             onClick={() => {
               setDocumentPending(true);
               setCurrent(index);
@@ -395,7 +447,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
         ))}
         <span data-testid="view-ready">{views ? 'view-ready' : 'building'}</span>
       </div>
-      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="conversation-slot">
         {views && (
           <OpenedStream
             key={current}
@@ -487,6 +539,75 @@ export const WorkedGroupExpandJump: Story = {
   ),
 };
 
+const disclosureStyles = stylex.create({
+  stage: { height: '100dvh', backgroundColor: colors.background },
+});
+const disclosureSessionId = 'synthetic-command-disclosure' as SessionId;
+const disclosureMessages: SessionHistoryParsed[] = [
+  ...Array.from({ length: 12 }, (_, index) => ({
+    id: `synthetic-disclosure-context-${index}`,
+    role: 'assistant' as const,
+    timestamp: at(index),
+    read: true,
+    finished: true,
+    items: [{ type: 'text' as const, text: paragraphs(2, index) }],
+  })),
+  {
+    id: 'synthetic-disclosure-turn',
+    role: 'assistant',
+    timestamp: at(12),
+    read: true,
+    finished: false,
+    items: [
+      { type: 'text', text: 'Inspect the completed command without losing the reading position.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'synthetic-long-command',
+        kind: 'execute',
+        status: 'completed',
+        title: 'Run synthetic long command',
+        content: [
+          { type: 'terminal_command', command: 'printf synthetic-output' },
+          {
+            type: 'terminal_output',
+            output: Array.from({ length: 100 }, (_, i) => `Synthetic output line ${i + 1}`).join(
+              '\n'
+            ),
+            stream: 'combined',
+          },
+        ],
+      },
+      { type: 'text', text: 'The command completed. Its details remain available for inspection.' },
+    ],
+  },
+];
+const disclosureItems: SessionChatStreamViewProps['items'] = disclosureMessages.map(
+  (message, turnIndex) => ({ type: 'message', sessionId: disclosureSessionId, message, turnIndex })
+);
+
+function CommandDisclosurePreview({ mobile = false }: { mobile?: boolean }) {
+  const stream = (
+    <div {...stylex.props(disclosureStyles.stage)}>
+      <SessionChatStreamView
+        sessionId={disclosureSessionId}
+        items={disclosureItems}
+        lastAssistantMessageId="synthetic-disclosure-turn"
+        renderMessageRow={({ message, sessionId: id }) => (
+          <MessageRowView message={message} sessionId={id} />
+        )}
+      />
+    </div>
+  );
+  return mobile ? (
+    <ForceMobileLayoutProvider force>{stream}</ForceMobileLayoutProvider>
+  ) : (
+    <ForceDesktopLayoutProvider>{stream}</ForceDesktopLayoutProvider>
+  );
+}
+
+export const CommandDisclosureDesktop: Story = { render: () => <CommandDisclosurePreview /> };
+export const CommandDisclosureMobile: Story = { render: () => <CommandDisclosurePreview mobile /> };
+
 const SELECTION_SESSION_ID = 'native-text-selection-story' as SessionId;
 const selectionHistory = Array.from({ length: 120 }, (_, index) => ({
   id: `selection-${index}`,
@@ -535,8 +656,8 @@ function NativeTextSelectionStory() {
   }, []);
   const stream = useConversationStreamItems(session?.history ?? null, SELECTION_SESSION_ID);
   return (
-    <div className="flex h-screen flex-col bg-background">
-      <div className="flex gap-3 p-2">
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.row2)}>
         <button
           data-testid="selection-start"
           onClick={() => streamRef.current?.scrollToIndex(0, false)}
@@ -576,9 +697,13 @@ function NativeTextSelectionStory() {
         >
           Finish first turn
         </button>
-        <textarea data-testid="selection-paste" aria-label="Paste copied text" className="border" />
+        <textarea
+          data-testid="selection-paste"
+          aria-label="Paste copied text"
+          {...stylex.props(storyLayoutStyles.element)}
+        />
       </div>
-      <div className="min-h-0 flex-1" data-testid="native-selection-story">
+      <div {...stylex.props(storyLayout.frame2)} data-testid="native-selection-story">
         <SessionChatStreamView
           ref={streamRef}
           conversationView={session?.history}
@@ -592,7 +717,7 @@ function NativeTextSelectionStory() {
           onOutlinePreviewRound={stream.onOutlinePreviewRound}
           leadingContent={<div>Selection regression fixture</div>}
           renderMessageRow={renderMessageRow}
-          className="h-full"
+          xstyle={sceneStyles.fill}
         />
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -9,12 +9,15 @@ import {
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
 } from 'acp-extension-dsh/profile';
 import { REGISTRY_ACP_AGENTS, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { spawn } from 'node:child_process';
 
 import {
+  expandHomePath,
   getAcpCapabilitySourceVersion,
   mergeACPProcessEnv,
   mergeLoginShellEnv,
+  normalizeAgentProcessEnv,
   resolveACPSetting,
   resolveExpectedAcpCapabilitySourceVersion,
   resolveBuiltinAuthenticationProcessLaunch,
@@ -46,6 +49,44 @@ function getRegistryAgent(agentType: string) {
     throw new Error(`Missing registry agent fixture: ${agentType}`);
   }
   return agent;
+}
+
+/**
+ * Isolate both npx cache roots (the configured cache and `~/.npm/_npx`) so the source
+ * version a Sorbet launch stamps never depends on what this machine happens to have
+ * installed.
+ */
+async function withIsolatedNpxCache<T>(body: (cacheDir: string) => Promise<T>): Promise<T> {
+  const home = await mkdtemp(join(tmpdir(), 'lody-sorbet-npx-home-'));
+  const cacheDir = join(home, 'npm-cache');
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('npm_config_cache', cacheDir);
+  try {
+    return await body(cacheDir);
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+/** The cache layout npx materializes for `npx -y @sorbetai/acp@alpha`. */
+async function writeTaggedSorbetInstall(cacheDir: string, version: string): Promise<void> {
+  const hashDir = join(cacheDir, '_npx', 'aa11');
+  const packageDir = join(hashDir, 'node_modules', '@sorbetai', 'acp');
+  await mkdir(join(packageDir, 'dist'), { recursive: true });
+  await writeFile(
+    join(hashDir, 'package.json'),
+    JSON.stringify({ _npx: { packages: ['@sorbetai/acp@alpha'] } })
+  );
+  await writeFile(
+    join(packageDir, 'package.json'),
+    JSON.stringify({
+      name: '@sorbetai/acp',
+      version,
+      bin: { 'sorbet-acp': 'dist/stdio-cli.js' },
+    })
+  );
+  await writeFile(join(packageDir, 'dist', 'stdio-cli.js'), '');
 }
 
 describe('resolveBuiltinACPSetting', () => {
@@ -323,6 +364,69 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
+  it('launches the floating Sorbet ACP package with bounded registry requests', async () => {
+    await withIsolatedNpxCache(async () => {
+      const launch = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        extraArgs: ['--example'],
+      });
+      expect(launch).toEqual({
+        command: 'npx',
+        args: ['-y', '@sorbetai/acp@alpha', '--no-session-title', '--example'],
+        env: {
+          npm_config_fetch_retries: '0',
+          npm_config_fetch_timeout: '5000',
+          SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+          SORBET_OBSERVABILITY_RECORDING: 'false',
+          SORBET_OBSERVABILITY_CONFIG: '',
+        },
+        // No install to name on a cold cache: the tag is the only known build.
+        capabilitySourceVersion: 'builtin-sorbet:@sorbetai/acp@alpha+auth-discovery:1',
+      });
+      expect(
+        await resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })
+      ).toBeUndefined();
+    });
+  });
+
+  it('names the installed Sorbet build in the capability source version', async () => {
+    await withIsolatedNpxCache(async (cacheDir) => {
+      await writeTaggedSorbetInstall(cacheDir, '0.1.0-alpha.6');
+      const launch = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+      });
+      expect(launch.capabilitySourceVersion).toBe(
+        'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.6+auth-discovery:1'
+      );
+      // Naming the build never becomes a cache-hit key: a moved tag must re-probe.
+      expect(
+        await resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })
+      ).toBeUndefined();
+    });
+  });
+
+  it('shares Sorbet state across launches within the selected Lody data directory', async () => {
+    const previous = process.env.LODY_DATA_DIR;
+    try {
+      process.env.LODY_DATA_DIR = join(tmpdir(), 'lody-sorbet-profile-a');
+      const first = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'sorbet' });
+      const second = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'sorbet',
+      });
+      expect(first.env?.SORBET_DATA_DIR).toBe(join(tmpdir(), 'lody-sorbet-profile-a', 'sorbet'));
+      expect(second.env?.SORBET_DATA_DIR).toBe(first.env?.SORBET_DATA_DIR);
+      process.env.LODY_DATA_DIR = join(tmpdir(), 'lody-sorbet-profile-b');
+      const other = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'sorbet' });
+      expect(other.env?.SORBET_DATA_DIR).toBe(join(tmpdir(), 'lody-sorbet-profile-b', 'sorbet'));
+    } finally {
+      if (previous === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previous;
+    }
+  });
+
   it('launches the user-installed Dimcode without npx or automatic updates', async () => {
     for (const extraArgs of [undefined, ['--verbose']]) {
       const input = { cliType: 'builtin' as const, agentType: 'dimcode', extraArgs };
@@ -472,7 +576,7 @@ describe('resolveBuiltinACPSetting', () => {
       resolveRuntimeForLaunch: async () => ({
         runtimeName: 'devin',
         version: '3000.11.1',
-        targetVersion: '3000.11.3',
+        targetVersion: '3000.12.28',
         platformArch: 'darwin-arm64',
         command: '/managed/devin/bin/devin',
         updateAvailable: false,
@@ -970,6 +1074,49 @@ describe('custom ACP resolution', () => {
   });
 });
 
+describe('expandHomePath and normalizeAgentProcessEnv', () => {
+  it('expands ~, $HOME, and ${HOME} prefixes in path values', () => {
+    expect(expandHomePath('~/.claude-work', '/Users/test')).toBe(
+      join('/Users/test', '.claude-work')
+    );
+    expect(expandHomePath('$HOME/.claude-work', '/Users/test')).toBe(
+      join('/Users/test', '.claude-work')
+    );
+    expect(expandHomePath('${HOME}/.claude-work', '/Users/test')).toBe(
+      join('/Users/test', '.claude-work')
+    );
+    expect(expandHomePath('~', '/Users/test')).toBe('/Users/test');
+    expect(expandHomePath('/abs/path', '/Users/test')).toBe('/abs/path');
+  });
+
+  it('normalizes CLAUDE_CONFIG_DIR and strips empty CLAUDE_CONFIG_DIR values', () => {
+    expect(
+      normalizeAgentProcessEnv(
+        {
+          CLAUDE_CONFIG_DIR: ' ~/.claude-profile-a ',
+          CODEX_HOME: '$HOME/.codex-work',
+        },
+        '/Users/test'
+      )
+    ).toEqual({
+      CLAUDE_CONFIG_DIR: join('/Users/test', '.claude-profile-a'),
+      CODEX_HOME: join('/Users/test', '.codex-work'),
+    });
+
+    expect(
+      normalizeAgentProcessEnv(
+        {
+          CLAUDE_CONFIG_DIR: '   ',
+          PATH: '/usr/bin',
+        },
+        '/Users/test'
+      )
+    ).toEqual({
+      PATH: '/usr/bin',
+    });
+  });
+});
+
 describe('withDefaultAcpPathEntries', () => {
   it('prepends user-local bin directories to PATH', () => {
     const result = withDefaultAcpPathEntries({ PATH: '/usr/bin' });
@@ -980,6 +1127,15 @@ describe('withDefaultAcpPathEntries', () => {
       join(homedir(), '.claude/local'),
       '/usr/bin',
     ]);
+  });
+
+  it('normalizes CLAUDE_CONFIG_DIR when preparing ACP PATH entries', () => {
+    const result = withDefaultAcpPathEntries({
+      PATH: '/usr/bin',
+      CLAUDE_CONFIG_DIR: '~/.claude-custom',
+    });
+
+    expect(result.CLAUDE_CONFIG_DIR).toBe(join(homedir(), '.claude-custom'));
   });
 
   it.each(['kimi', 'kimi-code'])('prepends the Kimi Code bin directory for %s', (agentType) => {
@@ -1018,9 +1174,14 @@ describe('mergeLoginShellEnv', () => {
 
   it('returns the base unchanged when the shell env is empty or missing', () => {
     const base = { PATH: '/usr/bin', HOME: '/home/u' };
-    expect(mergeLoginShellEnv(base, null)).toBe(base);
-    expect(mergeLoginShellEnv(base, undefined)).toBe(base);
-    expect(mergeLoginShellEnv(base, {})).toBe(base);
+    expect(mergeLoginShellEnv(base, null)).toEqual(base);
+    expect(mergeLoginShellEnv(base, undefined)).toEqual(base);
+    expect(mergeLoginShellEnv(base, {})).toEqual(base);
+  });
+
+  it('expands ~ and $HOME in CLAUDE_CONFIG_DIR even when login shell env is empty', () => {
+    const base = { PATH: '/usr/bin', HOME: '/home/u', CLAUDE_CONFIG_DIR: '$HOME/.claude-work' };
+    expect(mergeLoginShellEnv(base, null).CLAUDE_CONFIG_DIR).toBe('/home/u/.claude-work');
   });
 
   it('prepends login-shell PATH entries so user-installed tools resolve first', () => {
@@ -1118,5 +1279,89 @@ describe('mergeLoginShellEnv', () => {
     expect(merged.LODY_E2E).toBe('1');
     // ...while vars only the login shell defines are added.
     expect(merged.LANG).toBe('en_US.UTF-8');
+  });
+});
+
+describe('managed Antigravity', () => {
+  it('launches agy directly with HTTP MCP isolation and controlled updates', async () => {
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        action: 'status',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        runtimeOverrides: { antigravityPath: '/test/agy' },
+        action: 'login',
+      })
+    ).resolves.toEqual({
+      command: '/test/agy',
+      args: ['acp', '--login', '--disable-telemetry'],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+    });
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'antigravity',
+        version: '1.5.9',
+        targetVersion: '1.5.9',
+        platformArch: 'darwin-arm64',
+        command: '/managed/agy',
+        updateAvailable: false,
+      }),
+    } as never);
+    try {
+      expect(
+        await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'antigravity' })
+      ).toEqual({
+        command: '/managed/agy',
+        args: ['acp', '--process-per-session', '--disable-telemetry'],
+        env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+        capabilitySourceVersion: 'builtin-antigravity:1.5.9',
+      });
+      const overridden = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'antigravity',
+        runtimeOverrides: { antigravityPath: '/user/agy' },
+      });
+      expect(overridden.command).toBe('/user/agy');
+      expect(overridden.capabilitySourceVersion).toContain('+override:');
+      // Skipping permissions keeps the managed runtime and its capability cache.
+      expect(
+        await resolveACPProcessLaunchAsync({
+          cliType: 'builtin',
+          agentType: 'antigravity',
+          runtimeOverrides: { antigravitySkipPermissions: true },
+        })
+      ).toEqual({
+        command: '/managed/agy',
+        args: [
+          'acp',
+          '--process-per-session',
+          '--disable-telemetry',
+          '--dangerously-skip-permissions',
+        ],
+        env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+        capabilitySourceVersion: 'builtin-antigravity:1.5.9',
+      });
+      expect(
+        (
+          await resolveACPProcessLaunchAsync({
+            cliType: 'builtin',
+            agentType: 'antigravity',
+            runtimeOverrides: { antigravitySkipPermissions: false },
+          })
+        ).args
+      ).toEqual(['acp', '--process-per-session', '--disable-telemetry']);
+      expect(REGISTRY_ACP_AGENTS.some((a) => a.id === 'antigravity-acp')).toBe(false);
+      expect(
+        getAcpCapabilitySourceVersion({ cliType: 'registry', agentType: 'antigravity-acp' })
+      ).toBe('antigravity-acp@1.5.0');
+    } finally {
+      manager.mockRestore();
+    }
   });
 });

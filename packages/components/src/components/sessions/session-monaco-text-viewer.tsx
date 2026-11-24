@@ -1,11 +1,11 @@
+import { clsx } from 'clsx';
 import 'monaco-editor/min/vs/editor/editor.main.css';
 import './session-monaco-text-viewer.css';
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
+import * as stylex from '@stylexjs/stylex';
 import { extendedCodeLanguagesEnabledAtom, fileViewerWordWrapAtom } from '@/atoms/settings';
-import { cn } from '@/lib/utils';
 import { configureSessionMonacoWorkers } from '@/lib/session-monaco-workers';
 import { ensureSessionMonacoLanguages } from '@/lib/session-monaco-languages';
 import {
@@ -26,6 +26,11 @@ import type { LodyResolvedVSCodeTheme } from '@/lib/vscode-theme';
 import { useKeyScope } from '@/lib/commands';
 
 configureSessionMonacoWorkers();
+
+const styles = stylex.create({
+  root: { height: '100%', width: '100%', minHeight: '240px', overflow: 'hidden' },
+  editorContainer: { height: '100%', width: '100%' },
+});
 
 export type SessionMonacoExternalTextUpdate = {
   // Monotonic counter; the viewer fires when this changes, even when
@@ -101,13 +106,15 @@ export function SessionMonacoTextViewer({
     readonly character: number;
   }) => void;
   readonly onScrollChange?: (state: { readonly scrollTop: number }) => void;
-  // Optional Monaco model URI. When provided the viewer creates the
+  // Optional serialized Monaco model URI (e.g. from
+  // `buildCodeCollabMonacoUri`). When provided the viewer creates the
   // model under this URI, which lets Monaco's globally-registered
   // Code Collab definition/reference providers (see
   // `lib/session-monaco-language-providers`) attach via the
   // `code-collab://<fileId>` scheme. Defaults to Monaco's auto-generated
   // URI so non-collab callers (story/diff viewer) keep working unchanged.
-  readonly modelUri?: monaco.Uri;
+  // Serialized so callers can build it without importing `monaco-editor`.
+  readonly modelUri?: string;
   readonly className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -255,10 +262,8 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div
-      className={cn('lody-session-monaco h-full min-h-[240px] w-full overflow-hidden', className)}
-    >
-      <div ref={containerRef} className="h-full w-full" />
+    <div className={clsx(stylex.props(styles.root).className, 'lody-session-monaco', className)}>
+      <div ref={containerRef} {...stylex.props(styles.editorContainer)} />
     </div>
   );
 }

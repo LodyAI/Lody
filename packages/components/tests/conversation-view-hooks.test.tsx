@@ -1,19 +1,16 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+// @vitest-environment jsdom
 import { TestCloudPlatformProvider } from './test-platform';
-import { openReaderView, flushReaderChanges } from './conversation-view-fixtures';
-// @vitest-environment jsdom
-// @vitest-environment jsdom
+import { openReaderView, flushReaderChanges, writeStoredField } from './conversation-view-fixtures';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
-import {
-  createHistoryWriter,
-  resolveSessionAcpRuntimeConfig,
-  resolveSessionConversationConfig,
-} from '@lody/shared';
+import { resolveSessionAcpRuntimeConfig, resolveSessionConversationConfig } from '@lody/shared';
 import {
   useConversationVersion,
+  useConversationIndexRows,
   useConversationTail,
   useTurnRange,
 } from '../src/hooks/use-conversation-view';
@@ -79,6 +76,90 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it.each(['surface', 'document'] as const)(
+    'holds optional history work while %s is hidden and refreshes facts on return',
+    async (hiddenBy) => {
+      const doc = buildSessionDoc(buildFixtureHistory(30));
+      const data = createLoroSessionData({ doc, sessionId: FIXTURE_SESSION_ID });
+      const view = createConversationViewFromReader(data.history, {
+        sessionId: FIXTURE_SESSION_ID,
+        tailKeep: 2,
+        maxHydrated: 4,
+      });
+      views.push(view);
+      let facts!: ReturnType<typeof useSessionTurnFacts>;
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      function Probe({ visible }: { visible: boolean }) {
+        facts = useSessionTurnFacts(view, visible);
+        const rows = useConversationIndexRows(view, {
+          includeSummary: false,
+          enabled: visible && document.visibilityState !== 'hidden',
+        });
+        return (
+          <span data-rows={rows.length}>
+            {facts.ordered.find((fact) => fact.id === 'a-0')?.fileDiff?.length ?? 0}
+          </span>
+        );
+      }
+      try {
+        await act(async () => root.render(<Probe visible />));
+        await flush();
+        expect(facts.complete).toBe(true);
+        expect(view.turn(view.indexOf('a-0'))).toBeUndefined();
+        const retained = facts.ordered.find((fact) => fact.id === 'a-1');
+        await act(async () => {
+          if (hiddenBy === 'surface') root.render(<Probe visible={false} />);
+          else {
+            visibility.mockReturnValue('hidden');
+            document.dispatchEvent(new Event('visibilitychange'));
+          }
+        });
+        await act(async () => {
+          await writeStoredField(data, 'a-0', 'fileDiff', {
+            kind: 'set',
+            value: [{ filePath: 'changed-while-away.ts', add: 1, del: 0 }],
+          });
+        });
+        await flush();
+        await act(async () => root.render(<Probe visible={hiddenBy !== 'surface'} />));
+        expect(container.querySelector('span')?.getAttribute('data-rows')).toBe('60');
+        expect(view.turn(view.indexOf('a-0'))).toBeUndefined();
+        await act(async () => {
+          if (hiddenBy === 'surface') root.render(<Probe visible />);
+          else {
+            visibility.mockReturnValue('visible');
+            document.dispatchEvent(new Event('visibilitychange'));
+          }
+        });
+        await flush();
+        expect(facts.complete).toBe(true);
+        expect(container.textContent).toBe('1');
+        expect(facts.ordered.find((fact) => fact.id === 'a-1')).toBe(retained);
+        await act(async () => root.render(<Probe visible={false} />));
+        await act(async () => {
+          data.writer.append({
+            id: 'while-away',
+            role: 'user',
+            timestamp: 'synthetic',
+            items: [{ type: 'text', text: 'Synthetic update while away' }],
+          });
+          doc.commit();
+        });
+        await flush();
+        await act(async () => root.render(<Probe visible={false} />));
+        expect(container.querySelector('span')?.getAttribute('data-rows')).toBe('60');
+        await act(async () => root.render(<Probe visible />));
+        await flush();
+        expect(container.querySelector('span')?.getAttribute('data-rows')).toBe('61');
+      } finally {
+        visibility.mockRestore();
+        await act(async () => root.render(null));
+        view.dispose();
+        data.dispose();
+        doc.free();
+      }
+    }
+  );
   it.each([false, true])(
     'shows a synced Core question while older history is blocked (existing tool: %s)',
     async (existingTool) => {

@@ -1,9 +1,11 @@
+import { clsx } from 'clsx';
+import * as stylex from '@stylexjs/stylex';
+import { control } from '@lody/ui/tokens/scales.stylex';
 import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import {
   type MentionFileSourceKind,
   type MentionSurface,
@@ -57,6 +59,7 @@ import {
   SKILL_MENTION_TRIGGER_ALIASES,
   SkillMentionHydrator,
   getAllowedSkillMentionDirs,
+  hasProjectSkillSource,
   type SkillMentionAgent,
   type SkillMentionItem,
   useMentionProjectSkills,
@@ -65,14 +68,11 @@ import { getAgentRoleEmoji, type AcpCommandSummary, type MachineId } from '@lody
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
+import type { ComposerInputElement } from '@/ui/mention/composer-input';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
 import { shortcutTemplateCategories } from './mention-shortcut-template';
-
-// ============================================================================
-// Two-level `@` menu
-// ============================================================================
 
 /**
  * Whether a lazy source has nothing to show yet. `idle` is "nobody has asked",
@@ -92,6 +92,8 @@ function TwoLevelMentionMenu({
   fileSourceKind,
   enableFileMentions,
   onLazyDirectoryOpen,
+  onFilesActivate,
+  searchRemoteFiles,
   enableIssueMentions,
   repoFullName,
   issuePrData,
@@ -120,6 +122,10 @@ function TwoLevelMentionMenu({
   fileSourceKind: MentionFileSourceKind;
   enableFileMentions: boolean;
   onLazyDirectoryOpen?: (directoryId: string) => void;
+  /** Starts the file index; the composer keeps it off until something asks. */
+  onFilesActivate: () => void;
+  /** Present when the host searches files: called with each typed file term. */
+  searchRemoteFiles?: (term: string) => void;
   enableIssueMentions: boolean;
   repoFullName?: string;
   issuePrData: ReturnType<typeof useKnownIssuePrItems>['issuePrData'];
@@ -210,10 +216,11 @@ function TwoLevelMentionMenu({
               'Project is very large; local file list was truncated.'
             )
         : undefined,
+      onActivate: onFilesActivate,
       // Attach worker results after resolving the registered namespaces.
       getCandidates: () => [],
     }),
-    [enableFileMentions, fileData, fileSourceKind, t]
+    [enableFileMentions, fileData, fileSourceKind, onFilesActivate, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -377,6 +384,9 @@ function TwoLevelMentionMenu({
           : null
         : context.filterStore.search || null
       : null;
+  React.useEffect(() => {
+    if (fileTerm !== null) searchRemoteFiles?.(fileTerm);
+  }, [fileTerm, searchRemoteFiles]);
   const fileSearch = useMentionFileSearch(fileData.entry, fileTerm);
   const searchedCategories = React.useMemo(
     () =>
@@ -461,10 +471,6 @@ function TwoLevelMentionMenu({
     />
   );
 }
-
-// ============================================================================
-// Hydrators
-// ============================================================================
 
 function FileMentionHydrator({
   text,
@@ -591,10 +597,6 @@ function AgentRoleMentionHydrator({
   return null;
 }
 
-// ============================================================================
-// Imperative insertion
-// ============================================================================
-
 /**
  * What a surface outside the composer may write into it.
  *
@@ -606,7 +608,13 @@ function AgentRoleMentionHydrator({
  */
 export type CombinedMentionTextareaHandle = {
   /** Insert an externally owned atom through the same splice as menu/drop edits. */
-  insertExternalMention: (request: { text: string; id: string; at: number }) => boolean;
+  insertExternalMention: (request: {
+    text: string;
+    id: string;
+    at: number;
+    /** Plain text written right after the atom in the same transaction. */
+    suffix?: string;
+  }) => boolean;
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
@@ -645,9 +653,9 @@ function MentionActionsBridge({
   React.useImperativeHandle(
     actionsRef,
     () => ({
-      insertExternalMention: ({ text, id, at }) => {
+      insertExternalMention: ({ text, id, at, suffix }) => {
         if (context.disabled || context.readonly || !text) return false;
-        onMentionInsert({ text, value: id, kind: 'pasted_text', at });
+        onMentionInsert({ text, value: id, kind: 'pasted_text', at, suffix });
         return true;
       },
       insertSessionMention: (sessionId, options) => {
@@ -685,14 +693,25 @@ function MentionActionsBridge({
   return null;
 }
 
-// ============================================================================
-// Main Component
-// ============================================================================
+/** Handlers a composer accepts; they receive the mention editor or, without
+ * mention sources, the plain textarea. */
+type ComposerEventProps = {
+  onKeyDown?: React.KeyboardEventHandler<ComposerInputElement>;
+  onPaste?: React.ClipboardEventHandler<ComposerInputElement>;
+  onCopy?: React.ClipboardEventHandler<ComposerInputElement>;
+  onCut?: React.ClipboardEventHandler<ComposerInputElement>;
+  onBeforeInput?: React.FormEventHandler<ComposerInputElement>;
+  onCompositionStart?: React.CompositionEventHandler<ComposerInputElement>;
+  onCompositionEnd?: React.CompositionEventHandler<ComposerInputElement>;
+  onFocus?: React.FocusEventHandler<ComposerInputElement>;
+  onBlur?: React.FocusEventHandler<ComposerInputElement>;
+  onClick?: React.MouseEventHandler<ComposerInputElement>;
+};
 
-export interface CombinedMentionTextareaProps extends Omit<
-  TextareaProps,
-  'value' | 'defaultValue' | 'onChange'
-> {
+export interface CombinedMentionTextareaProps
+  extends
+    Omit<TextareaProps, 'value' | 'defaultValue' | 'onChange' | keyof ComposerEventProps>,
+    ComposerEventProps {
   /** Explicit template scope. Disables token hydration and context-dependent session/command mentions. */
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
@@ -721,6 +740,7 @@ export interface CombinedMentionTextareaProps extends Omit<
   value: string;
   onValueChange: (value: string) => void;
   containerClassName?: string;
+  containerXstyle?: stylex.StyleXStyles;
   /** Let the input fill a flex-column parent (the full-height chat sheet). */
   fillHeight?: boolean;
   /** Full-height composers dock the mobile mention panel above their footer. */
@@ -773,7 +793,7 @@ export interface CombinedMentionTextareaProps extends Omit<
 }
 
 export const CombinedMentionTextarea = React.forwardRef<
-  HTMLTextAreaElement,
+  ComposerInputElement,
   CombinedMentionTextareaProps
 >(
   (
@@ -793,6 +813,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       value,
       onValueChange,
       containerClassName,
+      containerXstyle,
       mentionValues: mentionValuesProp,
       onMentionValuesChange,
       label = 'Message',
@@ -808,6 +829,9 @@ export const CombinedMentionTextarea = React.forwardRef<
       draftKey,
       mentionActionsRef,
       className,
+      xstyle,
+      focusRing,
+      appearance = 'well',
       fillHeight = false,
       mentionPanelPlacement,
       ...props
@@ -830,9 +854,19 @@ export const CombinedMentionTextarea = React.forwardRef<
             ? mentionSource.githubRepoFullName
             : undefined;
     const githubRepoIsPublic =
-      mentionSource?.kind === 'github' || mentionSource?.kind === 'provider'
+      mentionSource?.kind === 'github' ||
+      mentionSource?.kind === 'local' ||
+      mentionSource?.kind === 'provider'
         ? mentionSource.isPublic
         : undefined;
+    const issuePrAllowedBySource =
+      mentionSource?.kind === 'github' || mentionSource?.kind === 'provider'
+        ? mentionSource.issuePrEnabled !== false
+        : true;
+    const { knownItems: knownIssuePrItems, issuePrData } = useKnownIssuePrItems(
+      issuePrAllowedBySource ? githubRepoFullName : undefined,
+      githubRepoIsPublic
+    );
     // Resolve the analytics source_kind: worktree (live session FS) wins over the
     // project/github source, mirroring useMentionProjectFiles' source resolution.
     const usesWorktreeSource =
@@ -849,25 +883,16 @@ export const CombinedMentionTextarea = React.forwardRef<
         : mentionSource?.kind === 'local'
           ? Boolean(mentionSource.localProjectId)
           : Boolean(githubRepoFullName);
-    const enableIssueMentions = Boolean(githubRepoFullName);
+    const enableIssueMentions =
+      Boolean(githubRepoFullName) && issuePrAllowedBySource && issuePrData.status !== 'unavailable';
     // The machine the chat runs on (selected agent's machine). Lets the `$` menu
     // list that machine's global skills even when the chat has no local project
     // (GitHub / plain-agent chats) — see useMentionProjectSkills.
     const skillGlobalMachineId = skillAgent?.machineId;
-    const hasProjectSkillSource =
-      mentionSource?.kind === 'local'
-        ? Boolean(
-            mentionSource.localProjectId && mentionSource.workspaceId && mentionSource.machineId
-          )
-        : mentionSource?.kind === 'github'
-          ? Boolean(mentionSource.repoFullName)
-          : mentionSource?.kind === 'provider'
-            ? Boolean(mentionSource.githubRepoFullName)
-            : false;
     // Enable `$` when there are project skills OR a known machine whose global
     // skills we can list (so GitHub / plain-agent chats still offer skills).
     const enableSkillMentions =
-      (hasProjectSkillSource || Boolean(skillGlobalMachineId)) &&
+      (hasProjectSkillSource(mentionSource) || Boolean(skillGlobalMachineId)) &&
       (!templateScope || (!!templateScope.providerKey && !!skillAgent));
     // Only scan/fetch skills once they are actually asked for, so the composer
     // doesn't kick a skills RPC on every mount. Two things ask: the menu, when a
@@ -881,8 +906,11 @@ export const CombinedMentionTextarea = React.forwardRef<
       enableSkillMentions &&
       (skillsRequested || (!templateScope && value.includes(SKILL_MENTION_TRIGGER)));
 
-    const { fileData, initializeLazyDirectory, getKnownFileTokens } =
-      useMentionProjectFiles(mentionSource);
+    const [filesRequested, setFilesRequested] = React.useState(false);
+    const activateFiles = React.useCallback(() => setFilesRequested(true), []);
+    const filesActive = filesRequested || value.includes(MENTION_TRIGGER);
+    const { fileData, initializeLazyDirectory, getKnownFileTokens, searchRemoteFiles } =
+      useMentionProjectFiles(mentionSource, { active: filesActive, hydrationText: value });
     // `initializeLazyDirectory` is async, but the menu's `onLazyDirectoryOpen`
     // is fire-and-forget (`=> void`). Wrap once so the promise is explicitly
     // discarded while keeping a stable identity — the consumer effect lists it
@@ -921,20 +949,13 @@ export const CombinedMentionTextarea = React.forwardRef<
     const { skillState, skillItems, knownSkillTokens } = useMentionProjectSkills(
       mentionSource,
       skillsActive,
-      skillGlobalMachineId
+      skillAgent
     );
     // Limit the `$` menu to the selected provider's project + global skill directories.
     // Null when no provider is selected.
-    const skillAgentCliType = skillAgent?.cliType;
-    const skillAgentAgentType = skillAgent?.agentType;
     const allowedSkillDirs = React.useMemo(
-      () =>
-        getAllowedSkillMentionDirs({ cliType: skillAgentCliType, agentType: skillAgentAgentType }),
-      [skillAgentAgentType, skillAgentCliType]
-    );
-    const { knownItems: knownIssuePrItems, issuePrData } = useKnownIssuePrItems(
-      githubRepoFullName,
-      githubRepoIsPublic
+      () => getAllowedSkillMentionDirs(skillAgent),
+      [skillAgent]
     );
 
     const [uncontrolledMentionValues, setUncontrolledMentionValues] = React.useState<string[]>([]);
@@ -1067,7 +1088,7 @@ export const CombinedMentionTextarea = React.forwardRef<
     if (!enableMentions) {
       const textarea = (
         <Textarea
-          ref={ref}
+          ref={ref as React.Ref<HTMLTextAreaElement>}
           // Marks the message composer so the ⇧Tab "cycle mode" command can scope
           // itself to the composer and not hijack reverse-Tab elsewhere.
           data-lody-composer-input=""
@@ -1075,13 +1096,29 @@ export const CombinedMentionTextarea = React.forwardRef<
           onChange={(event) => {
             onValueChange(event.target.value);
           }}
-          className={cn('resize-none', fillHeight && 'min-h-0 flex-1', className)}
+          className={className}
+          focusRing={focusRing}
+          appearance={appearance}
+          xstyle={[
+            styles.input,
+            appearance === 'bare' && styles.bareDisabled,
+            fillHeight && styles.fillRoot,
+            xstyle,
+          ]}
           aria-label={props['aria-label'] ?? label}
           {...props}
+          resize="none"
         />
       );
 
-      return containerClassName ? <div className={containerClassName}>{textarea}</div> : textarea;
+      const wrapper = stylex.props(containerXstyle);
+      return containerClassName || containerXstyle ? (
+        <div className={clsx(wrapper.className, containerClassName)} style={wrapper.style}>
+          {textarea}
+        </div>
+      ) : (
+        textarea
+      );
     }
 
     return (
@@ -1108,7 +1145,7 @@ export const CombinedMentionTextarea = React.forwardRef<
         onFilter={(options) => options}
         autoCloseOnEmpty={false}
         loop
-        className={cn('w-full', fillHeight && 'min-h-0 flex-1')}
+        {...stylex.props(styles.root, fillHeight && styles.fillRoot)}
       >
         <React.Fragment key={hydrationKey}>
           <FileMentionHydrator
@@ -1156,15 +1193,19 @@ export const CombinedMentionTextarea = React.forwardRef<
             </>
           ) : null}
         </React.Fragment>
-        <MentionLabel className="sr-only">{label}</MentionLabel>
+        <MentionLabel xstyle={styles.label}>{label}</MentionLabel>
         <MentionInput
-          ref={ref}
+          ref={ref as React.Ref<HTMLDivElement>}
           // See the data attribute note above — scopes the ⇧Tab mode cycle.
           data-lody-composer-input=""
           value={value}
-          containerClassName={cn(containerClassName, fillHeight && 'h-full')}
-          className={cn('resize-none', fillHeight && 'h-full', className)}
-          {...props}
+          containerClassName={containerClassName}
+          containerXstyle={[fillHeight && styles.fillHeight, containerXstyle]}
+          className={className}
+          appearance={appearance}
+          focusRing={focusRing}
+          xstyle={[styles.input, fillHeight && styles.fillHeight, xstyle]}
+          {...(props as Omit<React.ComponentProps<typeof MentionInput>, 'ref'>)}
         />
         <TwoLevelMentionMenu
           templateScope={templateScope}
@@ -1173,6 +1214,8 @@ export const CombinedMentionTextarea = React.forwardRef<
           fileSourceKind={fileSourceKind}
           enableFileMentions={enableFileMentions}
           onLazyDirectoryOpen={handleLazyDirectoryOpen}
+          onFilesActivate={activateFiles}
+          searchRemoteFiles={searchRemoteFiles}
           enableIssueMentions={enableIssueMentions}
           repoFullName={githubRepoFullName}
           issuePrData={issuePrData}
@@ -1201,3 +1244,21 @@ export const CombinedMentionTextarea = React.forwardRef<
 );
 
 CombinedMentionTextarea.displayName = 'CombinedMentionTextarea';
+
+const styles = stylex.create({
+  fillRoot: { minHeight: 0, flex: '1 1 0%' },
+  fillHeight: { height: '100%' },
+  input: { resize: 'none' },
+  bareDisabled: { opacity: { default: 1, ':disabled': control.disabledOpacity } },
+  root: { width: '100%' },
+  label: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});

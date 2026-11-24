@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo, useState } from 'react';
 import { fn } from 'storybook/test';
@@ -25,6 +26,83 @@ import {
   type WorkspaceMachineAccordionMeta,
 } from '@/components/settings/workspace-machine-accordion';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
+const sceneStyles = stylex.create({
+  list: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 3)',
+    },
+  },
+  privateSection: { paddingTop: 'calc(var(--spacing) * 3)' },
+  overview: {
+    ':is(*) > :not(:last-child)': {
+      'margin-block-start': 0,
+      'margin-block-end': 'calc(var(--spacing) * 4)',
+    },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-base)',
+    'line-height': 'var(--text-base--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 0.5)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  caption3: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  label: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '100%',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+  },
+  section: {
+    'min-width': 'calc(var(--spacing) * 0)',
+  },
+  row: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 1)',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 6)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  section2: {
+    'margin-inline': 'auto',
+    'max-width': '64rem',
+  },
+});
 
 /**
  * Composed preview of the desktop Machines settings tab: every machine owns a
@@ -393,29 +471,29 @@ function DevicesDesktopLayout({
   };
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
-          <h2 className="text-base font-semibold text-foreground">Machines</h2>
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayout.section)}>
+        <div {...stylex.props(storyLayout.row)}>
+          <h2 {...stylex.props(storyLayoutStyles.caption)}>Machines</h2>
           <MachineListFilterButton filter={filter} onFilterChange={setFilter} />
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p {...stylex.props(storyLayoutStyles.caption2)}>
           View workspace machines and manage the machines you own.
         </p>
       </div>
-      <div className="space-y-3">{sharedItems.map(renderMachine)}</div>
-      <section className="space-y-3 pt-3">
-        <div className="px-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold">Your private machines</h3>
-            <span className="text-xs text-muted-foreground">{privateItems.length}</span>
+      <div {...stylex.props(sceneStyles.list)}>{sharedItems.map(renderMachine)}</div>
+      <section {...stylex.props(sceneStyles.list, sceneStyles.privateSection)}>
+        <div {...stylex.props(storyLayout.canvas)}>
+          <div {...stylex.props(storyLayout.row2)}>
+            <h3 {...stylex.props(storyLayoutStyles.caption3)}>Your private machines</h3>
+            <span {...stylex.props(storyLayoutStyles.label)}>{privateItems.length}</span>
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+          <p {...stylex.props(storyLayoutStyles.caption2)}>
             These machines are not available to other workspace members. Select one to manage
             sharing.
           </p>
         </div>
-        <div className="space-y-3">{privateItems.map(renderMachine)}</div>
+        <div {...stylex.props(sceneStyles.list)}>{privateItems.map(renderMachine)}</div>
       </section>
     </div>
   );
@@ -427,8 +505,8 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="min-h-screen bg-background px-6 py-6 text-foreground">
-        <div className="mx-auto max-w-5xl">
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.section2)}>
           <Story />
         </div>
       </div>
@@ -473,7 +551,7 @@ function MachineOnlineStatusPreview() {
     agentCount: 3,
   };
   return (
-    <div className="space-y-4">
+    <div {...stylex.props(sceneStyles.overview)}>
       <WorkspaceMachineCollapsedRow meta={previewMeta} onExpand={fn()} />
       <Button variant="secondary" size="small" onClick={() => setIsOnline((online) => !online)}>
         Toggle online status

@@ -8,6 +8,9 @@ import type {
   WorkspaceId,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
+import { ACP_INPUT_OUTCOME_UNKNOWN } from '../providers/acp-interaction-client';
+
+export class AcpInputOutcomeUnknownError extends Error {}
 
 export type MachineAcpAuthenticationArgs = {
   machineId: MachineId;
@@ -40,6 +43,7 @@ export type MachineAcpAuthenticationInputArgs = {
 type ActiveMachineAcpAuthentication = {
   machineId: MachineId;
   authenticationRequestId: string;
+  finish?: (response: MachineAcpAuthenticateResponse) => void;
 };
 
 export function useMachineAcpAuthentication(
@@ -52,11 +56,33 @@ export function useMachineAcpAuthentication(
   const cancelAuthentication = useCallback(
     (args: ActiveMachineAcpAuthentication): void => {
       if (!runtime || workspaceId == null) return;
+      const requestId = crypto.randomUUID();
+      const response = runtime.waitForMachineAcpAuthenticateResponse(args.machineId, requestId, {
+        timeoutMs: 10000,
+      });
+      void response
+        .then((result) => {
+          if (
+            result?.success &&
+            (result.disposition === 'cancelled' || result.disposition === 'not-running')
+          ) {
+            activeAuthenticationsRef.current
+              .get(args.authenticationRequestId)
+              ?.finish?.({
+                ...result,
+                requestId: args.authenticationRequestId,
+                disposition: 'cancelled',
+              });
+          }
+        })
+        .catch(() => {
+          /* Cancellation remains unconfirmed; retain the original owner. */
+        });
       runtime.sendControl({
         type: 'machine/acp-authenticate',
         machineId: args.machineId,
         workspaceId,
-        requestId: crypto.randomUUID(),
+        requestId,
         action: 'cancel',
         authenticationRequestId: args.authenticationRequestId,
       });
@@ -86,16 +112,24 @@ export function useMachineAcpAuthentication(
         if (!runtime || workspaceId == null) {
           throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
         }
+        let finish!: (response: MachineAcpAuthenticateResponse) => void;
+        const cancelled = new Promise<MachineAcpAuthenticateResponse>((resolve) => {
+          finish = resolve;
+        });
         const activeAuthentication: ActiveMachineAcpAuthentication = {
           machineId: args.machineId,
           authenticationRequestId: requestId,
+          finish,
         };
         activeAuthenticationsRef.current.set(requestId, activeAuthentication);
         const unsubscribe = args.onProgress
           ? runtime.subscribeMachineAcpAuthenticationProgress(
               args.machineId,
               requestId,
-              args.onProgress
+              (message) => {
+                if (activeAuthenticationsRef.current.get(requestId) === activeAuthentication)
+                  args.onProgress?.(message);
+              }
             )
           : undefined;
         const responsePromise = runtime.waitForMachineAcpAuthenticateResponse(
@@ -113,7 +147,7 @@ export function useMachineAcpAuthentication(
             configId: args.configId,
             ...(args.methodId ? { methodId: args.methodId } : {}),
           });
-          const response = await responsePromise;
+          const response = await Promise.race([responsePromise, cancelled]);
           if (!response) {
             throw new Error(
               t('agents.authentication.timeout', 'Authentication timed out. Please try again.')
@@ -176,7 +210,19 @@ export function useMachineAcpAuthentication(
         authorizationCode: args.authorizationCode,
       });
       const response = await responsePromise;
-      if (!response || !response.success || response.disposition !== 'input-accepted') {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
+        throw new AcpInputOutcomeUnknownError(
+          t(
+            'agents.authentication.inputOutcomeUnknown',
+            'The response may have been received. Wait for sign-in to finish or cancel and start again.'
+          )
+        );
+      }
+      if (!response.success || response.disposition !== 'input-accepted') {
         throw new Error(
           response?.error ??
             t(
@@ -211,7 +257,19 @@ export function useMachineAcpAuthentication(
         authenticationInput: JSON.stringify(args.input),
       });
       const response = await responsePromise;
-      if (!response || !response.success || response.disposition !== 'input-accepted') {
+      if (
+        !response ||
+        response.error === ACP_INPUT_OUTCOME_UNKNOWN ||
+        response.disposition === 'not-running'
+      ) {
+        throw new AcpInputOutcomeUnknownError(
+          t(
+            'agents.authentication.inputOutcomeUnknown',
+            'The response may have been received. Wait for sign-in to finish or cancel and start again.'
+          )
+        );
+      }
+      if (!response.success || response.disposition !== 'input-accepted') {
         throw new Error(
           response?.error ??
             t(

@@ -1,4 +1,88 @@
 import { expect, test } from '@playwright/test';
+import { composerText, expectComposerText } from './composer-text';
+
+for (const theme of ['light', 'dark']) {
+  for (const width of [900, 360]) {
+    test(`session reference keeps one look across caret positions (${theme}, ${width}px)`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 700 });
+      await page.goto(
+        `/iframe.html?id=mentions-mentiontwolevelmenu--session-mention-rendering&viewMode=story&globals=theme:${theme}`
+      );
+      const input = page.getByRole('combobox', { name: 'Message' });
+      const frame = page.getByTestId('session-mention-rendering');
+      const reference = frame.locator('[data-mention-kind="session"]');
+      await expect(input).toBeVisible();
+      await input.focus();
+      const value = await composerText(input);
+      const start = value.indexOf('@');
+      const end = value.indexOf(' 后续文字');
+      const home = process.platform === 'darwin' ? 'Meta+ArrowUp' : 'Control+Home';
+      const endKey = process.platform === 'darwin' ? 'Meta+ArrowDown' : 'Control+End';
+      const shot = () => reference.screenshot({ caret: 'hide', animations: 'disabled' });
+      // Caret at the end, at the reference's start and at its end: one look.
+      await page.keyboard.press(endKey);
+      const after = await shot();
+      await reference.screenshot({ path: test.info().outputPath('reference.png'), caret: 'hide' });
+      await page.keyboard.press(home);
+      for (let index = 0; index < start; index += 1) await page.keyboard.press('ArrowRight');
+      expect((await shot()).equals(after)).toBe(true);
+      await page.keyboard.press('ArrowRight');
+      expect((await shot()).equals(after)).toBe(true);
+      await input.blur();
+      expect((await shot()).equals(after)).toBe(true);
+
+      // A selection spanning prose and the reference paints the reference as
+      // selected, and replacing it keeps only the text after the selection.
+      await input.focus();
+      await page.keyboard.press(home);
+      for (let index = 0; index < start; index += 1) await page.keyboard.press('Shift+ArrowRight');
+      await page.keyboard.press('Shift+ArrowRight');
+      await expect(reference).toHaveAttribute('data-selected', '');
+      await expect(reference).toHaveCSS(
+        'color',
+        await page.evaluate(() => {
+          const probe = document.createElement('span');
+          probe.style.color = 'HighlightText';
+          document.body.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return color;
+        })
+      );
+      await page.keyboard.press('X');
+      await expectComposerText(input, `X${value.slice(end)}`);
+      await expect(reference).toHaveCount(0);
+
+      // Reset through a fresh mount, as a persisted draft would be restored.
+      await page.reload();
+      await expect(reference).toHaveCount(1);
+      // Boundary insertion must preserve the reference and recolour it as one unit.
+      await input.focus();
+      await page.keyboard.press(home);
+      for (let index = 0; index < start; index += 1) await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('X');
+      await expectComposerText(input, `${value.slice(0, start)}X${value.slice(start)}`);
+      await expect(reference).toHaveCount(1);
+      await expect(reference).toHaveAttribute('data-mention-start', String(start + 1));
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Backspace');
+      await expectComposerText(input, `${value.slice(0, start)}X${value.slice(end + 1)}`);
+      await expect(reference).toHaveCount(0);
+      // Empty drafts show the placeholder in its textarea colour.
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
+      await page.keyboard.press('Backspace');
+      await expectComposerText(input, '');
+      const placeholder = await input.evaluate((node) => {
+        const style = getComputedStyle(node, '::before');
+        return { content: style.content, color: style.color };
+      });
+      expect(placeholder.content).toBe('"Message"');
+      expect(placeholder.color).not.toBe('rgba(0, 0, 0, 0)');
+    });
+  }
+}
 
 for (const { trigger, query, count } of [
   { trigger: '/', query: 'review', count: 2 },
@@ -13,18 +97,16 @@ for (const { trigger, query, count } of [
     );
     const input = page.getByRole('combobox');
     await expect(input).toBeVisible();
+    // Measuring the caret must not touch the document's top level: a node
+    // added beside <body> changes body's positional selectors and restyles the app.
     await page.evaluate(() => {
-      const samples: boolean[] = [];
-      // Observe the synchronous layout boundary: a MutationObserver runs too late,
-      // after the temporary mirror has already been removed. Keep real geometry.
-      const original = Element.prototype.getBoundingClientRect;
-      Element.prototype.getBoundingClientRect = function () {
-        if (this.parentElement === document.documentElement && this.tagName === 'DIV') {
-          samples.push(document.body.matches(':last-child'));
+      const added: string[] = [];
+      new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) added.push(node.nodeName);
         }
-        return original.call(this);
-      };
-      Object.assign(window, { caretBodyTailSamples: samples });
+      }).observe(document.documentElement, { childList: true });
+      Object.assign(window, { caretTopLevelAdditions: added });
     });
 
     await input.fill(trigger);
@@ -34,7 +116,7 @@ for (const { trigger, query, count } of [
     await expect(page.getByRole('option')).toHaveCount(1);
     await input.press('Enter');
     await expect(menu).toBeHidden();
-    await expect(input).toHaveValue(`${trigger}${query} `);
+    await expectComposerText(input, `${trigger}${query} `);
     await expect(input).toBeFocused();
     await input.fill('');
     await input.pressSequentially(trigger);
@@ -42,11 +124,10 @@ for (const { trigger, query, count } of [
     await input.press('Escape');
     await expect(menu).toBeHidden();
 
-    const samples = await page.evaluate(
-      () => (window as typeof window & { caretBodyTailSamples: boolean[] }).caretBodyTailSamples
+    const added = await page.evaluate(
+      () => (window as typeof window & { caretTopLevelAdditions: string[] }).caretTopLevelAdditions
     );
-    expect(samples.length).toBeGreaterThan(0);
-    expect(samples.every(Boolean)).toBe(true);
+    expect(added).toEqual([]);
     await expect(page.locator('html > div')).toHaveCount(0);
   });
 }
@@ -114,7 +195,7 @@ test('caret geometry survives soft wraps, textarea scroll, transform and zoom', 
     await assertCaret(9, 6);
   }
   await input.press('Enter');
-  await expect(input).toHaveValue(/\$imagegen $/);
+  await expectComposerText(input, /\$imagegen $/);
   await expect(menu).toBeHidden();
   await expect(input).toBeFocused();
 });
@@ -155,7 +236,7 @@ test('No project session searches preserve candidates and report query misses', 
   const input = page.getByRole('combobox', { name: 'Message' });
   await input.fill('@');
   await page.getByRole('option', { name: 'Sessions', exact: true }).click();
-  await expect(input).toHaveValue('@session:');
+  await expectComposerText(input, '@session:');
   await expect(page.getByRole('option')).toHaveCount(14);
   await expect(page.getByRole('button', { name: 'No project', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -189,7 +270,7 @@ test('No project session searches preserve candidates and report query misses', 
 
   await input.fill('@session:elsewhere');
   await page.getByRole('button', { name: 'All projects', exact: true }).click();
-  await expect(input).toHaveValue('@session:elsewhere');
+  await expectComposerText(input, '@session:elsewhere');
   await expect(input).toBeFocused();
   await expect(page.getByRole('option', { name: /Elsewhere parser work/ })).toHaveCount(1);
   await input.fill('@session:');
@@ -424,11 +505,11 @@ test('inline editor keeps a floating menu and focus through category selection',
   expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   await page.getByRole('option', { name: 'Sessions' }).click();
   await expect(input).toBeFocused();
-  await expect(input).toHaveValue(/@session:$/);
+  await expectComposerText(input, /@session:$/);
   await page.getByRole('option', { name: /Fix flaky scroll tests/ }).click();
   await expect(menu).toBeHidden();
   await expect(input).toBeFocused();
-  await expect(input).toHaveValue(/@Fix-flaky-scroll-tests /);
+  await expectComposerText(input, /@Fix-flaky-scroll-tests /);
 });
 
 test('skill descriptions use remaining height while the path stays visible without scrolling', async ({
@@ -531,19 +612,19 @@ for (const width of [960, 650]) {
     await expect(last).toHaveAttribute('data-highlighted');
     await expectStableHeight();
     await input.press('ArrowDown');
-    await expect(input).toHaveValue('@role:');
+    await expectComposerText(input, '@role:');
     await expectStableHeight();
 
     await input.fill('@role:Offline');
     await expect(page.getByRole('option')).toHaveCount(1);
     await expect(page.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
     await input.press('Enter');
-    await expect(input).toHaveValue('@role:Offline');
+    await expectComposerText(input, '@role:Offline');
 
     await input.fill('@role:Release');
     await expect(page.getByRole('option')).toHaveCount(1);
     await page.getByRole('option').click();
-    await expect(input).toHaveValue('@Release-Notes ');
+    await expectComposerText(input, '@Release-Notes ');
   });
 }
 
@@ -559,7 +640,7 @@ test.describe('prepared shortcut touch selection', () => {
       const input = page.getByRole('combobox', { name: 'composer' });
       await input.fill('/review');
       await page.getByRole('option').tap();
-      await expect(input).toHaveValue('Review this change');
+      await expectComposerText(input, 'Review this change');
       await expect(input).toBeFocused();
       await expect(input).toHaveAttribute('aria-expanded', 'false');
     });

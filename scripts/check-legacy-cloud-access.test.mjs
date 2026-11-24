@@ -20,6 +20,32 @@ test('rejects ordinary hooks, imperative calls, and escaped references to new le
   }
 });
 
+test('permits the encrypted numeric usage and own activity endpoints without opening other legacy APIs', () => {
+  for (const name of [
+    'getWorkspaceUsageCalendar',
+    'getWorkspaceUsageDay',
+    'getWorkspaceUsageSummary',
+    'getWorkspaceUsageTimeline',
+  ]) {
+    const result = auditLegacyCloudSource(
+      file,
+      `import { cloudOperations } from '@/lib/cloud-api-operations'; useCloudQuery(cloudOperations.usage.${name}, { workspaceId });`
+    );
+    assert.deepEqual(result.errors, []);
+    assert.match(result.rows[0].protection, /Numeric accounting/);
+  }
+  const activity = auditLegacyCloudSource(
+    file,
+    `import { cloudOperations } from '@/lib/cloud-api-operations'; useCloudMutation(cloudOperations.activity.recordMyWorkspaceDailyActiveUser);`
+  );
+  assert.deepEqual(activity.errors, []);
+  const unknown = auditLegacyCloudSource(
+    file,
+    `import { cloudOperations } from '@/lib/cloud-api-operations'; useCloudMutation(cloudOperations.activity.otherMutation);`
+  );
+  assert.equal(unknown.errors.length, 1);
+});
+
 test('accepts only the owning admission wrappers, including real import aliases', () => {
   const result = auditLegacyCloudSource(
     file,
@@ -136,4 +162,89 @@ test('rejects legacy references constructed through renamed Convex factories', (
   );
   assert.deepEqual(control.errors, []);
   assert.deepEqual(control.rows, []);
+});
+
+test('limits the imperative session-access composition exception to its owner and exact endpoints', () => {
+  for (const endpoint of ['listSessionAccess', 'setSessionReadSharedWithTeam']) {
+    const source = `import { cloudOperations } from '@/lib/cloud-api-operations'; client.query(cloudOperations.machines.${endpoint}, input);`;
+    assert.deepEqual(
+      auditLegacyCloudSource('packages/components/src/providers/cloud-session-access.ts', source)
+        .errors,
+      []
+    );
+    assert.equal(auditLegacyCloudSource(file, source).errors.length, 1);
+    assert.equal(
+      auditLegacyCloudSource(
+        'packages/components/src/providers/cloud-session-access.ts',
+        source.replace(endpoint, 'unreviewedMachineOperation')
+      ).errors.length,
+      1
+    );
+  }
+});
+
+test('GitHub metadata wrappers never admit hosted PR caches or legacy identity repair', () => {
+  for (const [name, allowed] of [
+    ['getWorkspaceRepositories', true],
+    ['createGitHubInstallState', true],
+    ['getPrCacheVersions', false],
+    ['resolveLegacyPrRepositoryIdentity', false],
+  ]) {
+    const result = auditLegacyCloudSource(
+      file,
+      `
+      import { cloudOperations } from '@/lib/cloud-api-operations';
+      import { useGithubWorkspaceQuery as read } from '@/hooks/use-github-workspace';
+      read(cloudOperations.github.${name}, { workspaceId });
+    `
+    );
+    assert.equal(result.errors.length, allowed ? 0 : 1);
+  }
+});
+
+test('notification admission permits only the exact GA inbox and registration operations', () => {
+  const preamble = `import { cloudOperations as api } from '@/lib/cloud-api-operations';
+    import { useWorkspaceNotificationQuery as read, useWorkspaceNotificationMutation as write } from '@/hooks/use-workspace-notifications';`;
+  for (const [method, names] of [
+    ['read', ['inbox.listMine', 'inbox.getSharingReviewState']],
+    [
+      'write',
+      [
+        'inbox.markRead',
+        'inbox.dismiss',
+        'inbox.reconcileSharingReview',
+        'inbox.suppressSharingReview',
+        'pushSubscriptions.register',
+      ],
+    ],
+  ])
+    for (const name of names) {
+      assert.deepEqual(
+        auditLegacyCloudSource(file, `${preamble} ${method}(api.${name});`).errors,
+        []
+      );
+      assert.equal(
+        auditLegacyCloudSource(file, `${preamble} useCloudMutation(api.${name});`).errors.length,
+        1
+      );
+    }
+  for (const name of [
+    'inbox.newEndpoint',
+    'github.getWorkspaceRepositories',
+    'machines.listVisibleMachines',
+    'notifications.syncLiveActivitySummary',
+    'pushSubscriptions.registerActivity',
+  ])
+    assert.equal(auditLegacyCloudSource(file, `${preamble} write(api.${name});`).errors.length, 1);
+  assert.equal(
+    auditLegacyCloudSource(
+      file,
+      `
+    import { cloudOperations } from '@/lib/cloud-api-operations';
+    import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
+    useGithubWorkspaceQuery(cloudOperations.inbox.listMine, { workspaceId });
+  `
+    ).errors.length,
+    1
+  );
 });

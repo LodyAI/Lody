@@ -25,7 +25,7 @@ Translation: current
 
 ## 限制与产品缺口
 
-- 桌面端把服务端的 `e2ee_device_revoked` 映射为通用的 `unauthorized` 后端错误，也没有针对设备撤销的门禁。因此 J08/client 找不到权威的 `e2ee_device_revoked` 记录，会一直停在 `removal_not_authoritatively_confirmed`，直到产品为该错误码定类型并加上门禁。CLI 已有对应类型（`CloudE2eeDeviceRevoked`）。
+- 切断之后的拒绝带有记录下的精确原因，派发在返回帧之前会确认设备凭据；见[运行中 reader 的切断](../architecture/2026-10-30-e2ee-desktop-device-revocation.zh.md#运行中-reader-的切断)。
 - `turnStarts` 统计的是客户端实际追加的 turn 派发，不是 daemon 进程里的 ACP 启动；daemon 侧的执行由 CLI 自行防护和测试。
 - 打包运行（私有 harness 的 `LODY_ACCEPT_CLIENT_LOSS=1`）无法使用该端口。
 - 单元和组件测试覆盖了计数、作用域、上限、provider、派发追加和运行时关闭路径。尚未在真实 Electron 旅程中运行。

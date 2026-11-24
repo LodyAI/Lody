@@ -3,14 +3,18 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-options.ts`.
+StyleX rules must land in the initial renderer stylesheet: `index` for Web and
+`main` for Electron, including hashed filenames, never a lazy feature chunk.
 
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
   `@source` scanning here. Component props own visual variants, sizes, tones and
   shapes. A caller's `className` may carry layout or interaction constraints,
-  never the deleted component's visual design.
+  never the deleted component's design. `xstyle` composes inside the primitive
+  after defaults; forward dynamic variables and preserve caller style callbacks.
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
   `@lody/components`, `@lody/platform` or a cloud package.
-- No border token: use wells, shadows and focus rings; read `src/tokens/RULES.md`.
+- No border token. Disabled: `control.disabledOpacity` (45%).
+  `media` contrast is image-only. Read `src/tokens/RULES.md`.
 - Text sizes/leading derive from document `--ui-font-size` (14px fallback), not nested `em`.
 - A focus or invalid ring is a `box-shadow` composed with the control's own
   shadow, never an `outline` (the shell resets outlines with `!important`); a
@@ -43,10 +47,8 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
 - `Menu`, `ContextMenu` and `Menubar` share `src/popup/surface.ts` rows.
   Menu labels use weight 400; group headings retain emphasis. Menus use their
   own width floor rather than `--anchor-width`.
-- Whatever holds a glyph gives it a box — StyleX has no descendant selector:
-  a menu row's, a badge's, an avatar's, an icon-only `Button`'s. A menu `icon`
-  takes the component — the box mounts it at 100%; the element form keeps a
-  stated size for glyphs carrying props. Other boxes' glyphs state 100%.
+- Glyphs have sized boxes. A menu `icon` component fills its box; an element
+  carrying props states its size. Other boxes' glyphs state 100%.
 - Triggers use Base UI `render` for an existing element. Only default context-menu
   wrappers use `display: contents`; rendered triggers keep their box. A nested
   menu root goes inside the outer item's `render`. Product owns `finalFocus`.
@@ -72,6 +74,8 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   is a tint and a mark, never a fill — mark in `tone.ts`, tint in `surface.ts`;
   `disabled` is Base UI state. A Spinner's turn rides an HTML wrapper — svg
   can't composite at DPR≠1 (crbug 1186312) — and `className` lands on that box.
+- Toast presses must not dismiss underlying drawers. Touch release and cancellation
+  resume auto-dismiss; compatibility mouse events must not pause it as hover.
 - `Table` and `Pagination` are one `table` family. **A column is stated once**:
   `Table` takes `columns` and owns width, ordering, selection (a `Checkbox`,
   never `aria-selected`), the empty row's span, the sticky head and the narrow
@@ -118,3 +122,6 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
   superellipse; round is the non-Chromium fallback.
 - `ScrollArea` exposes its native viewport ref. Delete obsolete Radix files once
   all in-repo callers migrate; private consumers sync on typecheck.
+- Scrollbars are hidden at rest. Native thumbs paint only under the attributes
+  `installScrollbarPresence` publishes, which a host mounts once at its root;
+  never reveal a bar on container hover.

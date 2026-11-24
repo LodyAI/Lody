@@ -1,9 +1,7 @@
-import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import { uploadProtectedAttachment } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import { type WorkspaceStreamsMode } from '@lody/shared/workspace-streams-content';
-import type { MachineId, SessionFilePayload, SessionId, WorkspaceId } from '@lody/shared';
-import { sendSessionFileToLocalRuntime } from './electron-session-file-sender';
+import type { SessionFilePayload, SessionId, WorkspaceId } from '@lody/shared';
 import {
   computeSha256Hex,
   computeTextPreviewable,
@@ -28,8 +26,6 @@ export function prepareSessionFile(
     attachmentToken?: () => Promise<string>;
     workspaceId: WorkspaceId;
     sessionId: SessionId;
-    machineId: MachineId | null;
-    canSendLocally: boolean;
     token: string | null;
     file: File;
     signal?: AbortSignal;
@@ -37,27 +33,8 @@ export function prepareSessionFile(
   }
 ): Promise<SessionFilePayload> {
   return resources.run(async (signal) => {
-    if (args.content.mode !== 'protected')
-      await authorizePlaintextAttachmentPreparation(args.workspaceId, signal, args.accountId);
-    if (args.content.mode !== 'protected' && args.canSendLocally && args.machineId) {
-      try {
-        const result = await sendSessionFileToLocalRuntime({
-          ...args,
-          machineId: args.machineId,
-          signal,
-        });
-        throwIfSendAborted(signal);
-        if (result?.ok && result.files[0]) return result.files[0];
-      } catch (error) {
-        // Preserve the existing transport fallback, but cancellation never
-        // authorizes a second transfer after a late local handoff.
-        throwIfSendAborted(signal);
-        if (error instanceof DOMException && error.name === 'AbortError') throw error;
-      }
-    }
     throwIfSendAborted(signal);
     requireWorkspaceFeature(args.content, 'attachments');
-    if (!args.token) throw new SessionFilePreparationAuthError();
     const progress = (value: SessionFileUploadProgress) => {
       if (!signal.aborted) args.onProgress?.(value);
     };
@@ -89,6 +66,7 @@ export function prepareSessionFile(
         encryption,
       };
     }
+    if (!args.token) throw new SessionFilePreparationAuthError();
     const [hash, preview] = await Promise.allSettled([
       computeSha256Hex(args.file, { signal, onProgress: progress }),
       computeTextPreviewable(args.file),

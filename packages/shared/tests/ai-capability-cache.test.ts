@@ -6,6 +6,7 @@ import {
   getAcpCapabilityCacheStaleReason,
   getReadableAcpCapabilityCacheEntry,
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
+  hasEmptyModelSelectOption,
   isAcpCapabilityCacheEntryCurrent,
   type AcpCapabilityCacheEntry,
 } from '../src/ai';
@@ -33,6 +34,31 @@ describe('ACP capability cache compatibility', () => {
       availableCommands: [],
     };
     expect(getReadableAcpCapabilityCacheEntry(preview)).toBe(preview);
+  });
+
+  it('retires only the Sorbet builds that could not discover methods', () => {
+    const stale = {
+      ...entry(ACP_CAPABILITY_CACHE_VERSION),
+      agentType: 'sorbet',
+      sourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0-alpha.4',
+      authMethods: [],
+    };
+    const { authMethods: _methods, ...retained } = stale;
+    // Both the bare build and a suffixed source version name the same bad build.
+    expect(getReadableAcpCapabilityCacheEntry(stale)).toEqual(retained);
+    const suffixed = { ...stale, sourceVersion: `${stale.sourceVersion}+auth-discovery:1` };
+    const { authMethods: _suffixedMethods, ...suffixedRetained } = suffixed;
+    expect(getReadableAcpCapabilityCacheEntry(suffixed)).toEqual(suffixedRetained);
+    // Later builds, and entries whose build the npx cache could not name, keep the list.
+    for (const version of ['0.1.0-alpha.5', '0.1.0-alpha.6', 'alpha']) {
+      const current = {
+        ...stale,
+        sourceVersion: `builtin-sorbet:@sorbetai/acp@${version}+auth-discovery:1`,
+      };
+      expect(getReadableAcpCapabilityCacheEntry(current)).toEqual(current);
+    }
+    const other = { ...stale, agentType: 'devin' };
+    expect(getReadableAcpCapabilityCacheEntry(other)).toEqual(other);
   });
 
   it('invalidates Pi plugin catalogs when selections change or become empty', () => {
@@ -161,6 +187,62 @@ describe('ACP capability refresh cache decision', () => {
         ...args,
       })
     ).toEqual({ hit: false, reason });
+  });
+
+  it('misses with empty-model-catalog when the persisted select has no options', () => {
+    const degraded = currentEntry({
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [],
+        },
+      ],
+    });
+    expect(getAcpCapabilityCacheStaleReason(degraded, expectedSourceVersion!)).toBe(
+      'empty-model-catalog'
+    );
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: degraded,
+        expectedSourceVersion,
+        launchInputs: 'matching',
+        nowMs: degraded.fetchedAt + 1000,
+      })
+    ).toEqual({ hit: false, reason: 'empty-model-catalog' });
+    expect(getAcpCapabilityCacheEntryAuthority(degraded, undefined)).toBe('degraded');
+  });
+
+  it('does not flag empty non-model selects or non-empty model selects', () => {
+    expect(
+      hasEmptyModelSelectOption([
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'agent',
+          options: [],
+        },
+      ])
+    ).toBe(false);
+    expect(
+      hasEmptyModelSelectOption([
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [{ value: 'model-a', name: 'Model A' }],
+        },
+      ])
+    ).toBe(false);
+    expect(hasEmptyModelSelectOption(undefined)).toBe(false);
   });
 
   it('never answers a refresh with an entry no probe produced', () => {

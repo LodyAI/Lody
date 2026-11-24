@@ -31,6 +31,7 @@ export interface SelectTriggerProps extends Omit<TriggerBaseProps, 'className' |
   size?: SelectSize;
   children?: ReactNode;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 }
 
 export interface SelectValueProps extends Omit<ValueBaseProps, 'className'> {
@@ -74,14 +75,33 @@ export interface SelectSeparatorProps extends Omit<SeparatorBaseProps, 'classNam
  * does, and renders the chevron itself so a caller never draws one.
  */
 export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
-  function SelectTrigger({ size = 'medium', className, children, onKeyDownCapture, ...rest }, ref) {
+  function SelectTrigger(
+    { size = 'medium', className, xstyle, style, children, onKeyDownCapture, ...rest },
+    ref
+  ) {
     const ariaInvalid = rest['aria-invalid'];
+    const stylesForState = (state: BaseSelect.Trigger.State) =>
+      stylex.props(
+        well.base,
+        trigger.base,
+        triggerSizes[size],
+        isInvalid(state.valid, ariaInvalid) && well.invalid,
+        xstyle
+      );
     return (
       <BaseSelect.Trigger
         ref={ref}
         nativeButton
         data-size={size}
         {...rest}
+        style={
+          xstyle
+            ? (state) => ({
+                ...stylesForState(state).style,
+                ...(typeof style === 'function' ? style(state) : style),
+              })
+            : style
+        }
         onKeyDownCapture={(event) => {
           onKeyDownCapture?.(event);
           if (
@@ -110,17 +130,7 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
                 : list?.querySelector<HTMLElement>('[role="option"][data-highlighted]');
           target?.focus({ preventScroll: true });
         }}
-        className={(state) =>
-          appendClassName(
-            stylex.props(
-              well.base,
-              trigger.base,
-              triggerSizes[size],
-              isInvalid(state.valid, ariaInvalid) && well.invalid
-            ).className,
-            className
-          )
-        }
+        className={(state) => appendClassName(stylesForState(state).className, className)}
       >
         {children}
         <BaseSelect.Icon className={stylex.props(trigger.icon).className}>

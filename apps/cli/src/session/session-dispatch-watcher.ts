@@ -1,3 +1,4 @@
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { createDaemonLossTasks } from '@/lib/e2ee/client-loss-observer';
 import { turnNotificationAudience } from '@/lib/notifications/turn-notification-audience';
 import { MemoryBindingSchema } from '@lody/shared';
@@ -7,6 +8,7 @@ import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  getServerNow,
   normalizeSessionTurnInputConfig,
   getSessionRoomId,
   isSessionCancelRequestMarker,
@@ -50,6 +52,7 @@ import {
   resolveDispatchAcpSessionId,
   resolveResumableAcpSessionId,
   resolveSessionCancelAction,
+  isImportFencedQueueItem,
   resolveSessionDispatchAction,
   shouldWatchSession,
   type SessionDispatchSnapshot,
@@ -71,8 +74,25 @@ const SESSION_RECONCILE_CONCURRENCY = 4;
 type SessionUserResolverLike = Pick<SessionUserResolver, 'resolve' | 'clear'>;
 
 type SessionDispatchWatcherDeps = {
+  reconcileLocalImages?: (
+    sessionId: SessionId,
+    doc: SessionDocumentHandle,
+    turnId: string | undefined
+  ) => Promise<void>;
   /** Encrypted turn execution is admitted only by its verified-device gate. */
   encryptedWorkspace?: boolean;
+  /** Encrypted only: who this turn runs as. A row's `userId` stays display data. */
+  resolveEncryptedRequester?: (intent: {
+    workspaceId: string;
+    sessionId: string;
+    userTurnId: string;
+    inputConfig?: unknown;
+  }) => Promise<{ state: 'pending' | 'denied' } | { userId?: string }>;
+  /** Encrypted only: new execution evidence arrived, for one session document
+   * (its room ID) or, without one, for every waiting turn (ledger or key update). */
+  subscribeExecutionEvidence?: (listener: (roomId?: string) => void) => () => void;
+  /** Encrypted only: a message cancelled before it started must never start later. */
+  retireEncryptedInput?: (intent: { sessionId: string; userTurnId: string }) => Promise<void>;
   logger: Logger;
   machineId: MachineId;
   workspaceId: WorkspaceId;
@@ -135,7 +155,22 @@ type SessionDispatchWatcherDeps = {
 type AccessRetryHandle = {
   turnId: string;
   fiber: Fiber.Fiber<void, never>;
+  /** A turn waiting for execution evidence, which new evidence wakes at once. */
+  evidence?: true;
+  /** The session document's version when the wait began; any later change ends it. */
+  version?: string;
 };
+/** Comparable document version; undefined when the handle exposes none. */
+const sessionDocVersion = (sessionDoc: SessionDocumentHandle): string | undefined => {
+  const doc = (
+    sessionDoc as { handle?: { doc?: { version(): { toJSON(): Map<unknown, unknown> } } } }
+  ).handle?.doc;
+  return doc ? JSON.stringify([...doc.version().toJSON()].sort()) : undefined;
+};
+/** Fallback recheck for a waiting encrypted turn: doubles from 1 s, capped at 5 min
+ * (owner decision 2026-11-10). Evidence events are the primary trigger. */
+const EVIDENCE_RETRY_FIRST_MS = 1_000;
+const EVIDENCE_RETRY_MAX_MS = 5 * 60_000;
 
 type WatchedSession = {
   unsubscribe: () => void;
@@ -363,7 +398,7 @@ const isConfigOptionValueRecord = (
  *
  * If the five-minute window expires, we mark dispatch recovery unhealthy,
  * preserve the producer/executor pointers and `lastHandledUserMsgId`, record the
- * exact id in `lastMissingHistoryUserMsgId`, and unload the session doc. Watch
+ * exact id in the retained missing-history acknowledgement map, and unload the session doc. Watch
  * activation and turn selection ignore a pointer only while it equals that
  * negative acknowledgement. A future send publishes a different id (and clears
  * the marker), which naturally wakes dispatch again. Preserving the pointers is
@@ -438,6 +473,13 @@ export class SessionDispatchWatcher {
    * when the session stops needing an active watch.
    */
   private readonly accessFibers = new Map<SessionId, AccessRetryHandle>();
+  private readonly evidenceRetryAttempts = new Map<
+    SessionId,
+    { turnId: string; attempts: number }
+  >();
+  private detachExecutionEvidence: (() => void) | null = null;
+  /** Canceled inputs already recorded as retired in the execution journal. */
+  private readonly retiredInputs = new Set<string>();
 
   private metadataWatchHandle: RepoWatchHandle | null = null;
   private readonly userResolver: SessionUserResolverLike;
@@ -536,6 +578,9 @@ export class SessionDispatchWatcher {
     for (const sessionId of [...this.accessFibers.keys()]) {
       this.interruptAccessRetry(sessionId);
     }
+    this.detachExecutionEvidence?.();
+    this.detachExecutionEvidence = null;
+    this.evidenceRetryAttempts.clear();
     this.userResolver.clear();
   }
 
@@ -760,7 +805,8 @@ export class SessionDispatchWatcher {
         return finish('error');
       }
 
-      if (offer.inputOrigin === 'human') {
+      // An encrypted offer's `userId` is a label; dispatch accepts it under the verified one.
+      if (offer.inputOrigin === 'human' && !this.deps.encryptedWorkspace) {
         await this.deps.executionService.acceptInboxHumanInput?.({
           sessionId,
           inputId: userTurnId,
@@ -830,9 +876,9 @@ export class SessionDispatchWatcher {
    * e.g. the renderer superseding an undelivered turn to `canceled` when its
    * content is resent as a new message.
    *
-   * An entry whose id matches `lastMissingHistoryUserMsgId` stays stashed but
+   * An entry with a retained missing-history acknowledgement stays stashed but
    * is never returned: the negative acknowledgement is PERMANENT for that
-   * exact turn while it stands, so no turn source may dispatch it — a
+   * exact turn, including after another timeout, so no turn source may dispatch it — a
    * duplicate RPC offer must not resurrect the turn. Recovery is a fresh send
    * with a new turn id (the conversation's resend entry), never a revival.
    */
@@ -858,7 +904,7 @@ export class SessionDispatchWatcher {
         stash.delete(userTurnId);
         continue;
       }
-      if (userTurnId === meta.lastMissingHistoryUserMsgId) {
+      if (isMissingHistoryUserTurn(meta, userTurnId)) {
         continue;
       }
       this.turnSourceHints.set(`${sessionId}:${userTurnId}`, 'rpc');
@@ -1390,16 +1436,21 @@ export class SessionDispatchWatcher {
         return;
       }
 
-      // ── Gather snapshot ──
+      await this.deps.reconcileLocalImages?.(sessionId, sessionDoc, meta.latestUserMsgId);
+      ensureActive();
+
       const snapshot = {
         meta,
         history: [] as SessionHistoryInput[], // deferred — only needed after guard checks
         ...this.deps.executionService.getExecutionSnapshot(sessionId),
       };
 
-      const guardAction = resolveSessionDispatchAction(snapshot, this.deps.machineId);
+      const guardAction = resolveSessionDispatchAction(
+        snapshot,
+        this.deps.machineId,
+        this.deps.workspaceId
+      );
 
-      // ── Handle guard/stale-status results (no history needed) ──
       if (guardAction.type === 'noop') {
         outcome = `guard-noop-${guardAction.reason}`;
         if (guardAction.reason === 'release-blocked') {
@@ -1439,7 +1490,6 @@ export class SessionDispatchWatcher {
         // Fall through to turn-finding below (status is now idle)
       }
 
-      // ── Find dispatchable turn (with bounded history sync wait) ──
       const nextUserTurn = await traceAsync(
         this.deps.logger,
         'dispatch.find_or_await_turn',
@@ -1462,7 +1512,6 @@ export class SessionDispatchWatcher {
         }
         return;
       }
-      // ── Re-read state and re-evaluate before dispatching ──
       // The wait above can take up to 5 minutes. Session state may have changed
       // (archived, reassigned, another path created a session, etc.).
       const freshMeta = await traceAsync(
@@ -1484,7 +1533,11 @@ export class SessionDispatchWatcher {
         history: [nextUserTurn],
         ...this.deps.executionService.getExecutionSnapshot(sessionId),
       };
-      const dispatchAction = resolveSessionDispatchAction(dispatchSnapshot, this.deps.machineId);
+      const dispatchAction = resolveSessionDispatchAction(
+        dispatchSnapshot,
+        this.deps.machineId,
+        this.deps.workspaceId
+      );
 
       if (dispatchAction.type !== 'dispatch') {
         outcome = `fresh-action-${dispatchAction.type}`;
@@ -1494,13 +1547,46 @@ export class SessionDispatchWatcher {
       const requesterUserId = nextUserTurn.userId ?? freshMeta.userId;
       const localProjectId =
         freshMeta.project?.kind === 'local' ? freshMeta.project.localProjectId : undefined;
+      const encryptedRequester = await this.deps.resolveEncryptedRequester?.({
+        workspaceId: this.deps.workspaceId,
+        sessionId,
+        userTurnId: nextUserTurn.id,
+        inputConfig: nextUserTurn.inputConfig,
+      });
+      ensureActive();
+      if (encryptedRequester && 'state' in encryptedRequester) {
+        if (encryptedRequester.state === 'pending') {
+          outcome = 'execution-deferred';
+          this.forkExecutionEvidenceRetry(
+            sessionId,
+            nextUserTurn.id,
+            sessionDocVersion(sessionDoc)
+          );
+          return;
+        }
+      }
+      const verifiedRequesterUserId =
+        encryptedRequester && 'userId' in encryptedRequester
+          ? encryptedRequester.userId
+          : undefined;
 
       // A background verify-with-retry fiber already owns this turn (from a prior
       // indeterminate result). Don't re-verify on every mirror tick — the fiber
       // re-enqueues a dispatch check once it reaches a definitive answer.
-      if (this.accessFibers.get(sessionId)?.turnId === nextUserTurn.id) {
-        outcome = 'access-retry-in-flight';
-        return;
+      const inFlight = this.accessFibers.get(sessionId);
+      if (inFlight?.turnId === nextUserTurn.id) {
+        // A turn waiting for evidence rechecks now once its document changed since the
+        // wait began (owner decision 2026-11-10). Its own writes precede that version, so
+        // an unchanged document cannot loop; an access verification keeps its owner.
+        const changed =
+          inFlight.evidence &&
+          inFlight.version !== undefined &&
+          inFlight.version !== sessionDocVersion(sessionDoc);
+        if (!changed) {
+          outcome = 'access-retry-in-flight';
+          return;
+        }
+        this.interruptAccessRetry(sessionId);
       }
 
       // Access verification, launch-config resolution, user resolution, and
@@ -1553,7 +1639,8 @@ export class SessionDispatchWatcher {
                   turn.freshMeta,
                   turn.nextUserTurn,
                   launchConfig,
-                  user
+                  user,
+                  verifiedRequesterUserId
                 )
             ),
           };
@@ -1571,7 +1658,8 @@ export class SessionDispatchWatcher {
                 turn.freshMeta,
                 turn.nextUserTurn,
                 launchConfig,
-                user
+                user,
+                verifiedRequesterUserId
               )
           ),
         };
@@ -1668,7 +1756,7 @@ export class SessionDispatchWatcher {
             userTurnId: nextUserTurn.id,
             invocation: {
               sourceTurnId: nextUserTurn.id,
-              requesterUserId: nextUserTurn.userId,
+              requesterUserId: verifiedRequesterUserId ?? nextUserTurn.userId,
               inputConfig: nextUserTurn.inputConfig ?? {},
               notificationAudience:
                 dispatchSource === 'rpc'
@@ -1679,7 +1767,12 @@ export class SessionDispatchWatcher {
             accessPromise: executionAccessPromise,
             requestPromise,
             onExecutionDeferred: () => {
-              if (isActive()) this.forkExecutionEvidenceRetry(sessionId, nextUserTurn.id);
+              if (isActive())
+                this.forkExecutionEvidenceRetry(
+                  sessionId,
+                  nextUserTurn.id,
+                  sessionDocVersion(sessionDoc)
+                );
             },
             onAccessAllowed: async () => {
               ensureActive();
@@ -1807,9 +1900,17 @@ export class SessionDispatchWatcher {
     });
   }
 
-  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string): void {
+  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string, version?: string): void {
     this.interruptAccessRetry(sessionId);
-    const program = Effect.sleep('1 second').pipe(
+    const previous = this.evidenceRetryAttempts.get(sessionId);
+    const attempts = previous?.turnId === turnId ? Math.min(previous.attempts + 1, 16) : 0;
+    this.evidenceRetryAttempts.set(sessionId, { turnId, attempts });
+    if (!this.detachExecutionEvidence && this.deps.subscribeExecutionEvidence)
+      this.detachExecutionEvidence = this.deps.subscribeExecutionEvidence((roomId) =>
+        this.wakeExecutionEvidence(roomId)
+      );
+    const delay = Math.min(EVIDENCE_RETRY_FIRST_MS * 2 ** attempts, EVIDENCE_RETRY_MAX_MS);
+    const program = Effect.sleep(delay).pipe(
       Effect.andThen(
         Effect.sync(() => {
           this.clearAccessFiberIf(sessionId, turnId);
@@ -1819,7 +1920,22 @@ export class SessionDispatchWatcher {
     );
     // Share the existing per-session admission-retry owner and its lifecycle
     // cancellation. Never wake the withdrawn Inbox in a tight release loop.
-    this.accessFibers.set(sessionId, { turnId, fiber: Effect.runFork(program) });
+    this.accessFibers.set(sessionId, {
+      turnId,
+      fiber: Effect.runFork(program),
+      evidence: true,
+      ...(version !== undefined ? { version } : {}),
+    });
+  }
+
+  /** Recheck waiting turns now instead of at their fallback timer. */
+  private wakeExecutionEvidence(roomId?: string): void {
+    for (const [sessionId, handle] of [...this.accessFibers]) {
+      if (!handle.evidence) continue;
+      if (roomId !== undefined && roomId !== getSessionRoomId(sessionId)) continue;
+      this.interruptAccessRetry(sessionId);
+      void this.enqueueSessionCheck(sessionId);
+    }
   }
 
   /**
@@ -1996,6 +2112,7 @@ export class SessionDispatchWatcher {
 
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(sessionId), {
       lastHandledUserMsgId: userTurnId,
+      lastFailedUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     } satisfies Partial<SessionMeta>);
     await this.deps.executionService.acknowledgeSteerTurn(sessionId, userTurnId);
@@ -2133,7 +2250,8 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     entry: SessionHistoryInput,
     launchConfig: SessionLaunchConfig | undefined,
-    user: SessionUserProfile
+    user: SessionUserProfile,
+    requesterUserId?: string
   ): Promise<SessionChatRequestValidated> {
     const project: ProjectRef | undefined = meta.project;
     const { inputBlocks, prompt } = this.resolveDispatchInput(entry);
@@ -2161,10 +2279,14 @@ export class SessionDispatchWatcher {
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
-        resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
+        // Encrypted inputs never choose their resume target: the signature leaves out the
+        // `resume` that promotion supplies, so it comes from this Session's metadata.
+        resume: this.deps.encryptedWorkspace
+          ? resolveDispatchAcpSessionId(meta)
+          : (entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta)),
       },
       userTurnId: entry.id,
-      userId: entry.userId ?? meta.userId,
+      userId: requesterUserId ?? entry.userId ?? meta.userId,
       userName: user.name,
       userEmail: user.email,
     };
@@ -2174,7 +2296,8 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     entry: SessionHistoryInput,
     launchConfig: SessionLaunchConfig | undefined,
-    user: SessionUserProfile
+    user: SessionUserProfile,
+    requesterUserId?: string
   ): Promise<SessionCreateRequestValidated> {
     const project: ProjectRef | undefined = meta.project;
     const { inputBlocks, prompt } = this.resolveDispatchInput(entry);
@@ -2207,13 +2330,14 @@ export class SessionDispatchWatcher {
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
-        resume: entry.inputConfig?.resume,
+        // As above: an encrypted row's unsigned `resume` is never a requested target.
+        resume: this.deps.encryptedWorkspace ? undefined : entry.inputConfig?.resume,
       },
       worktreeSetup: launchConfig?.worktreeSetup,
       worktreeCleanup: launchConfig?.worktreeCleanup,
       env: launchConfig?.env,
       userTurnId: entry.id,
-      userId: entry.userId ?? meta.userId,
+      userId: requesterUserId ?? entry.userId ?? meta.userId,
       userName: user.name,
       userEmail: user.email,
       parentSessionId: meta.parentSessionId,
@@ -2239,13 +2363,14 @@ export class SessionDispatchWatcher {
     inputBlocks: ReturnType<typeof resolveDispatchTurnInput>['inputBlocks'];
     prompt: string;
   } {
-    return resolveDispatchTurnInput(entry);
+    return resolveDispatchTurnInput(entry, { signedInputOnly: this.deps.encryptedWorkspace });
   }
 
   private buildQueuedMessageEntry(
     queuedItem: Awaited<ReturnType<SessionBackend['getMessageQueue']>>[number],
     meta: SessionMeta,
-    queuedTurnId: string
+    queuedTurnId: string,
+    timestamp = new Date(getServerNow()).toISOString()
   ): SessionHistoryInput | null {
     const inputBlocks = normalizeSessionInputBlocks(
       queuedItem.acpSessionConfig?.inputBlocks,
@@ -2280,7 +2405,7 @@ export class SessionDispatchWatcher {
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
       inputBlocks,
-      timestamp: queuedItem.timestamp,
+      timestamp,
       inputConfig: { ...inputConfig, ...(automation ? { _lodyAutomation: automation } : {}) },
     });
     return pendingEntry
@@ -2288,6 +2413,11 @@ export class SessionDispatchWatcher {
           ...pendingEntry,
           id: queuedTurnId,
           ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
+          ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
+          // The author's signed intent covers this content without the `resume` added above.
+          ...(this.deps.encryptedWorkspace && queuedItem.e2eeIntent
+            ? { e2eeIntent: queuedItem.e2eeIntent }
+            : {}),
         }
       : null;
   }
@@ -2318,6 +2448,14 @@ export class SessionDispatchWatcher {
       for (const [operationId] of pending) {
         const record = await backend.getQueuePromotionRecord(operationId);
         if (!record || record.state === 'queue_consumed') continue;
+        // A promotion carried in by a workspace import never runs here.
+        if (
+          isImportFencedQueueItem(currentMeta, this.deps.workspaceId, {
+            $cid: record.queueCid,
+            userTurnId: record.userTurnId,
+          })
+        )
+          continue;
 
         // A previous receipt may have consumed the head. Re-read both the row
         // and the head for every operation so a later receipt can recover in
@@ -2332,6 +2470,24 @@ export class SessionDispatchWatcher {
           read.state === 'ready' && read.turn.role === 'user'
             ? (read.turn as SessionHistoryInput)
             : undefined;
+
+        if (queuedItem?.paused) {
+          // Stop can arrive between history acceptance and queue removal.
+          // Close the old input, retaining the draft for an explicit new send.
+          if (existingEntry)
+            await backend.applyHistoryAction({
+              kind: 'user-status',
+              turnId: record.userTurnId,
+              status: 'canceled',
+              onlyAwaitingStart: true,
+            });
+          await backend.setQueuePromotionRecord(operationId, {
+            ...record,
+            state: 'queue_consumed',
+            updatedAt: Date.now(),
+          });
+          continue;
+        }
 
         const latestMeta = await backend.getMetaState();
         if (!latestMeta) continue;
@@ -2444,31 +2600,28 @@ export class SessionDispatchWatcher {
     }
     try {
       const backend = await createSessionBackend(sessionDoc, meta);
-      const queuedItem = await backend.peekReadyMessageQueue();
+      let queuedItem = await backend.peekReadyMessageQueue();
+      // Stop retires execution eligibility, not the user's queued draft. Repair
+      // missing display markers after a crash before selecting later input.
+      while (
+        queuedItem &&
+        this.deps.executionService.isInboxInputCanceled?.(
+          meta.id,
+          queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`
+        )
+      ) {
+        const cid = queuedItem.$cid;
+        await sessionDoc.pauseMessageQueueItems([cid]);
+        queuedItem = await backend.peekReadyMessageQueue();
+        if (queuedItem?.$cid === cid) return null;
+      }
       if (!queuedItem) {
         return null;
       }
+      // Queued input carried in by a workspace import is held, never promoted here.
+      if (isImportFencedQueueItem(meta, this.deps.workspaceId, queuedItem)) return null;
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
-      if (this.deps.executionService.isInboxInputCanceled?.(meta.id, queuedTurnId)) {
-        const canceled = this.buildQueuedMessageEntry(queuedItem, meta, queuedTurnId);
-        if (canceled) {
-          await backend.applyHistoryAction({
-            kind: 'upsert-turn',
-            turn: {
-              ...canceled,
-              status: 'canceled',
-              read: true,
-              cancellationReason: this.deps.executionService.getInboxInputCancellationReason?.(
-                meta.id,
-                queuedTurnId
-              ),
-            },
-          });
-          await backend.removeMessageQueueItem(queuedItem.$cid);
-        }
-        return null;
-      }
       const operationId = backend.getQueueOperationId(queuedItem);
       // The queue can acquire a different head after the dispatch observation.
       // Refresh its exact identity and completion evidence before promotion.
@@ -2576,7 +2729,7 @@ export class SessionDispatchWatcher {
     return (
       meta.lastHandledUserMsgId === turnId ||
       meta.settledActivationUserMsgId === turnId ||
-      meta.lastMissingHistoryUserMsgId === turnId ||
+      isMissingHistoryUserTurn(meta, turnId) ||
       this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(meta.id, turnId) !==
         undefined ||
       history.some((entry) => {
@@ -2693,7 +2846,7 @@ export class SessionDispatchWatcher {
    * activation entirely, going unwatched and silently unrun. `settledActivationUserMsgId`
    * suppresses only a matching pointer, and the turn it names is already
    * terminal, so a later settlement may replace it freely — unlike
-   * `lastMissingHistoryUserMsgId`, whose eviction would revive a pending turn.
+   * missing-history acknowledgement IDs, whose eviction would revive pending turns.
    *
    * `processingUserMsgId` is different: it is execution-owned, dispatch is
    * serialized per session, and we only reach here with no active turn, so
@@ -3049,7 +3202,8 @@ export class SessionDispatchWatcher {
     if (
       meta.machineId !== this.deps.machineId ||
       meta.isArchived ||
-      !hasPendingUserTurnActivation(meta)
+      !hasPendingUserTurnActivation(meta) ||
+      getPendingUserTurnActivationId(meta) !== getPendingUserTurnActivationId(previousMeta)
     ) {
       return;
     }
@@ -3063,6 +3217,13 @@ export class SessionDispatchWatcher {
     };
     if (pendingUserMsgId) {
       recoveryPatch.lastMissingHistoryUserMsgId = pendingUserMsgId;
+      recoveryPatch.missingHistoryUserMsgIds = {
+        ...meta.missingHistoryUserMsgIds,
+        ...(meta.lastMissingHistoryUserMsgId
+          ? { [meta.lastMissingHistoryUserMsgId]: true as const }
+          : {}),
+        [pendingUserMsgId]: true,
+      };
     }
     this.deps.logger.warn(
       `[${sessionId}] Marking missing-history recovery for user turn ${pendingUserMsgId ?? 'unknown'} (message_delivery_failed)`
@@ -3119,20 +3280,28 @@ export class SessionDispatchWatcher {
       await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
       const backend = await createSessionBackend(sessionDoc, meta);
       await this.recoverIncompleteQueuePromotions(sessionDoc, meta);
+      const pausedQueueIds = new Set(
+        (await backend.getMessageQueue())
+          .filter((item) => item.paused)
+          .map((item) => item.userTurnId?.trim() || `queued-${item.$cid}`)
+      );
       const queued = await backend.peekReadyMessageQueue();
       let preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
       const requestedIds = () =>
         [
           meta.latestUserMsgId,
           meta.processingUserMsgId,
+          meta.lastHandledUserMsgId,
           getPendingUserTurnActivationId(meta),
           preferred,
           queued ? queued.userTurnId?.trim() || `queued-${queued.$cid}` : undefined,
           ...Object.keys(meta.steerTurnStatuses ?? {}),
           ...(this.rpcTurnStash.get(meta.id)?.keys() ?? []),
+          ...pausedQueueIds,
         ].filter((id): id is string => typeof id === 'string' && id.length > 0);
       const select = (entries: readonly SessionDispatchEntry[]): string | undefined => {
-        if (!preferred) return findNextDispatchableUserTurn(entries, meta)?.id;
+        if (!preferred)
+          return findNextDispatchableUserTurn(entries, meta, this.deps.workspaceId)?.id;
         const last = findLastHistoryEntry(entries, preferred);
         return last?.role === 'user' && ['pending', 'seen', 'prepared'].includes(last.status ?? '')
           ? last.id
@@ -3140,15 +3309,73 @@ export class SessionDispatchWatcher {
       };
       let selection = await backend.readDispatchSelection(requestedIds(), select);
       let history = selection.history;
+      if (!isActive()) return { turn: null, history };
+      if (
+        this.deps.encryptedWorkspace &&
+        this.deps.executionService.recoverUncertainEncryptedTurn
+      ) {
+        let recovered = false;
+        for (const entry of selection.history) {
+          if (!isActive()) return { turn: null, history };
+          if (entry.role !== 'user' || repairedTurnIds.has(entry.id)) continue;
+          if (
+            ['handled', 'failed', 'canceled', 'delivery_unknown'].includes(entry.status ?? '') &&
+            meta.processingUserMsgId !== entry.id
+          )
+            continue;
+          try {
+            if (
+              await this.deps.executionService.recoverUncertainEncryptedTurn(
+                meta.id,
+                sessionDoc,
+                entry.id
+              )
+            ) {
+              repairedTurnIds.add(entry.id);
+              recovered = true;
+            }
+          } catch (error) {
+            // Unknown evidence for the selected input still fences that
+            // input. An unrelated historical failure cannot block new work.
+            if (entry.id === selection.turnId) throw error;
+            this.deps.logger.debug(
+              `[${meta.id}] Could not recover historical encrypted turn ${entry.id}: ${formatErrorMessage(error)}`
+            );
+          }
+        }
+        if (recovered) {
+          selection = await backend.readDispatchSelection(requestedIds(), select);
+          history = selection.history;
+        }
+      }
+
       if (!isActive()) {
         return { turn: null, history };
       }
       let canceledInput = false;
       for (const entry of history) {
         if (
+          this.deps.retireEncryptedInput &&
+          entry.role === 'user' &&
+          entry.status === 'canceled' &&
+          !this.retiredInputs.has(entry.id)
+        ) {
+          this.retiredInputs.add(entry.id);
+          await this.deps
+            .retireEncryptedInput({ sessionId: meta.id, userTurnId: entry.id })
+            .catch((error: unknown) => {
+              // A later observation retries; nothing has started either way.
+              this.retiredInputs.delete(entry.id);
+              this.deps.logger.debug(
+                `[${meta.id}] Could not retire canceled input ${entry.id}: ${formatErrorMessage(error)}`
+              );
+            });
+        }
+        if (
           entry.role === 'user' &&
           ['pending', 'seen', 'prepared', 'pending_apply'].includes(entry.status ?? '') &&
-          this.deps.executionService.isInboxInputCanceled?.(meta.id, entry.id)
+          (pausedQueueIds.has(entry.id) ||
+            this.deps.executionService.isInboxInputCanceled?.(meta.id, entry.id))
         ) {
           await backend.applyHistoryAction({
             kind: 'user-status',
@@ -3167,7 +3394,7 @@ export class SessionDispatchWatcher {
       preferred = this.deps.executionService.getPreferredInboxHumanInput?.(meta.id);
       if (
         preferred &&
-        (meta.lastMissingHistoryUserMsgId === preferred ||
+        (isMissingHistoryUserTurn(meta, preferred) ||
           meta.lastHandledUserMsgId === preferred ||
           history.some(
             (e) =>
@@ -3241,8 +3468,8 @@ export class SessionDispatchWatcher {
    * that case, repair the entry to its recorded terminal status (also fixing
    * the sender's delivery indicator), and skip dispatch.
    *
-   * `processingUserMsgId === turn.id` always wins: that is crash-mid-turn
-   * recovery, which must re-dispatch and reuses the same assistant entry.
+   * Ordinary crash-mid-turn recovery re-dispatches processingUserMsgId and
+   * reuses the same assistant entry. Encrypted uncertain starts settle before selection.
    */
   private async maybeRepairAlreadyHandledTurn(
     sessionDoc: SessionDocumentHandle,
@@ -3281,9 +3508,9 @@ export class SessionDispatchWatcher {
         // with no completed assistant entry it did NOT finish successfully
         // (denied access, cancel, or pre-prompt failure whose exact kind was
         // lost on restart). Repair to 'failed' — a safe non-success terminal
-        // that prevents re-dispatch without falsely reporting success. A
-        // chat_failed notice was already surfaced when the terminal write
-        // happened, so the user still sees the real outcome.
+        // that prevents re-dispatch without falsely reporting success.
+        // Encrypted uncertain starts are reconciled before selection, including
+        // their durable interruption notice.
         terminalStatus = 'failed';
       }
     }

@@ -1,13 +1,70 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
-import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
+import {
+  MessageRowView,
+  SessionChatStreamView,
+  type ChatStreamItem,
+} from '@/components/ai-gui/view';
+import { applyTextRewrites, type MessageTextSpan, type SessionId } from '@lody/shared';
+import { SettingsStoryProviders } from './settings-story-shell';
 import { cn } from '@/lib/utils';
 import {
   conversationReadingFontSizeStyle,
   userTextCollapsedStyle,
 } from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
+const textStory = stylex.create({
+  bubble: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 'calc(var(--spacing) * 1.5)',
+  },
+  text: { minWidth: 0, maxWidth: '100%', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  collapsed: { overflow: 'hidden' },
+  path: { maxWidth: '20rem', alignSelf: 'flex-end' },
+  narrow: { maxWidth: '16rem', alignSelf: 'flex-end' },
+});
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  canvas: {
+    'max-width': '100%',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--foreground) / 1) 5%, transparent)',
+    'padding-inline': 'calc(var(--spacing) * 4)',
+    'padding-block': 'calc(var(--spacing) * 2.5)',
+  },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '42rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+  stack2: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    'max-width': '48rem',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 8)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * Chips in a sent message.
@@ -66,8 +123,7 @@ const SENT = applyTextRewrites(COMPOSER_TEXT, [
   },
   {
     ...at('@Code-Reviewer'),
-    replacement:
-      'use lody mcp to create a session with agent role[id: role-1, name: Code Reviewer]',
+    replacement: '[Agent Role: Code Reviewer (agentRoleId: role-1)]',
     // An Agent Role freezes its emoji into the span, so the bubble paints the
     // same mark the composer did without reading the catalog.
     span: { kind: 'agent_role', label: 'Code-Reviewer', target: 'role-1', mark: '🔍' },
@@ -79,7 +135,7 @@ function Bubble({
   text,
   spans,
   collapsed = false,
-  className,
+  xstyle,
   fontSize = 14,
 }: {
   title: string;
@@ -88,7 +144,7 @@ function Bubble({
   /** Runs the production collapse: its real slice helper and its real height. */
   collapsed?: boolean;
   /** Narrows the column, the way a phone or a split pane does. */
-  className?: string;
+  xstyle?: stylex.StyleXStyles;
   fontSize?: number;
 }) {
   // `getUserTextRenderSlice` is what production truncates with, so the story
@@ -97,14 +153,11 @@ function Bubble({
   // never exercised the character budget that dropped the span.
   const slice = collapsed ? getUserTextRenderSlice(text, spans) : undefined;
   return (
-    <div className={cn('flex flex-col items-end gap-1.5', className)}>
-      <div className="font-medium text-muted-foreground text-xs">{title}</div>
-      <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
+    <div {...stylex.props(textStory.bubble, xstyle)}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>
+      <div {...stylex.props(storyLayout.canvas)}>
         <div
-          className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]',
-            collapsed && 'overflow-hidden'
-          )}
+          {...stylex.props(textStory.text, collapsed && textStory.collapsed)}
           style={{
             ...conversationReadingFontSizeStyle(fontSize),
             ...(collapsed ? userTextCollapsedStyle(fontSize) : {}),
@@ -163,7 +216,7 @@ const LONG_PATH = applyTextRewrites(LONG_PATH_SOURCE, [
 
 function Board({ withSpans }: { withSpans: boolean }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-8 bg-background p-8">
+    <div {...stylex.props(storyLayout.stack)}>
       <Bubble
         title={withSpans ? 'With chips' : 'Raw text the agent receives'}
         text={SENT.text}
@@ -179,7 +232,7 @@ function Board({ withSpans }: { withSpans: boolean }) {
         title="A path wider than the column"
         text={LONG_PATH.text}
         spans={withSpans ? LONG_PATH.spans : undefined}
-        className="max-w-[20rem] self-end"
+        xstyle={textStory.path}
       />
     </div>
   );
@@ -222,7 +275,7 @@ export const PastedTextAlignment: Story = {
       },
     ]);
     return (
-      <div className="mx-auto flex max-w-3xl flex-col gap-8 bg-background p-8">
+      <div {...stylex.props(storyLayout.stack2)}>
         {[12, 14, 18].map((fontSize) => (
           <Bubble
             key={fontSize}
@@ -236,7 +289,7 @@ export const PastedTextAlignment: Story = {
           title="Narrow column"
           text={pasted.text}
           spans={pasted.spans}
-          className="max-w-[16rem] self-end"
+          xstyle={textStory.narrow}
         />
       </div>
     );
@@ -247,3 +300,94 @@ export const PastedTextAlignmentDark: Story = {
   ...PastedTextAlignment,
   globals: { theme: 'dark' },
 };
+
+const rowsSessionId = 'message-text-chips-rows' as SessionId;
+const MIXED_SOURCE =
+  '先看 @src/ui/mention/mention-highlighter.tsx 里 `getComposerMentionChip()` 的实现，再对比 #482 ✅\n\n' +
+  'Then run $review-diff and summarise for @session:crdt-metadata-cleanup — 长中文段落和 English words 混排，'.repeat(
+    4
+  ) +
+  'https://example.com/a/very/long/url/' +
+  'segment'.repeat(30);
+const MIXED = applyTextRewrites(
+  MIXED_SOURCE,
+  (
+    [
+      [
+        '@src/ui/mention/mention-highlighter.tsx',
+        { kind: 'file', target: 'mention-highlighter.tsx' },
+      ],
+      ['#482', { kind: 'issue', target: '482' }],
+      ['$review-diff', { kind: 'skill', target: 'review-diff' }],
+      ['@session:crdt-metadata-cleanup', { kind: 'session', target: '9f2c-4a11' }],
+    ] as const
+  ).map(([token, span]) => {
+    const start = MIXED_SOURCE.indexOf(token);
+    return { start, end: start + token.length, span: { ...span, label: token } };
+  })
+);
+
+/** Sent user rows as the conversation renders them, one per bubble shape. */
+const SENT_ROWS: ChatStreamItem[] = (
+  [
+    { text: '好的' },
+    { text: SENT.text, spans: SENT.spans },
+    {
+      text: '@src/ui/mention/mention-highlighter.tsx',
+      spans: [
+        {
+          start: 0,
+          end: 39,
+          kind: 'file',
+          label: '@src/ui/mention/mention-highlighter.tsx',
+          target: 'a.tsx',
+        },
+      ],
+    },
+    { text: LONG.text, spans: LONG.spans },
+    { text: LONG_PATH.text, spans: LONG_PATH.spans },
+    { text: 'A long steering message that wraps across several lines. '.repeat(14) },
+    { text: '一条很长的中文引导消息，用来检查气泡在不同宽度下的位置。'.repeat(10) },
+    { text: `https://example.com/${'unbreakable'.repeat(40)}` },
+    { text: MIXED.text, spans: MIXED.spans },
+  ] satisfies { text: string; spans?: MessageTextSpan[] }[]
+).map((item, index) => ({
+  type: 'message',
+  sessionId: rowsSessionId,
+  turnIndex: index,
+  message: {
+    id: `layout-user-${index}`,
+    role: 'user',
+    timestamp: '2026-11-01T00:00:00Z',
+    items: [{ type: 'text', ...item }],
+  },
+}));
+
+/**
+ * The same chips inside real conversation rows: every bubble must hug the
+ * avatar's side of its column, at any column width, without touching the avatar.
+ */
+export const SentRows: Story = {
+  args: { withSpans: true },
+  render: () => (
+    <SettingsStoryProviders>
+      <div {...stylex.props(themeStyles.column)}>
+        <SessionChatStreamView
+          sessionId={rowsSessionId}
+          items={SENT_ROWS}
+          renderMessageRow={({ message, sessionId: id }) => (
+            <MessageRowView
+              message={message}
+              sessionId={id}
+              user={{ name: 'Story User', email: 'story@example.com' }}
+            />
+          )}
+        />
+      </div>
+    </SettingsStoryProviders>
+  ),
+};
+
+const themeStyles = stylex.create({
+  column: { display: 'flex', height: '100dvh', flexDirection: 'column', backgroundColor: uiColors.background },
+});

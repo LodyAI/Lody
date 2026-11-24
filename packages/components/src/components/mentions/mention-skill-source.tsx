@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import {
+  MAGPIE_CODEX_SKILLS,
   compareProjectSkillScope,
   getRegisteredGlobalSkillDirs,
   getRegisteredSkillDirs,
@@ -49,6 +50,7 @@ export type SkillMentionAgent = {
   cliType: AgentConfigCliType;
   agentType: string;
   machineId?: string;
+  magpieGatewayUrl?: string;
 };
 
 export type SkillMentionItem = {
@@ -180,7 +182,7 @@ function isSkillMentionDirAllowed(dir: string, allowedDirs: ReadonlySet<string>)
 }
 
 export function getAllowedSkillMentionDirs(
-  skillAgent: { cliType?: AgentConfigCliType; agentType?: string } | undefined
+  skillAgent: Partial<SkillMentionAgent> | undefined
 ): ReadonlySet<string> | null {
   if (!skillAgent?.cliType || !skillAgent.agentType) {
     return null;
@@ -192,6 +194,9 @@ export function getAllowedSkillMentionDirs(
   }
   const agent = { cliType: skillAgent.cliType, agentType: skillAgent.agentType };
   return new Set([
+    ...(agent.cliType === 'builtin' && agent.agentType === 'codex' && skillAgent.magpieGatewayUrl
+      ? MAGPIE_CODEX_SKILLS.map((name) => '~/.codex/skills/' + name)
+      : []),
     ...getRegisteredSkillDirs([agent]),
     ...getRegisteredGlobalSkillDirs([agent]),
     ...getRegisteredSystemSkillDirs([agent]),
@@ -298,7 +303,7 @@ export function buildSkillMentionRewrites(
   return rewrites;
 }
 
-function hasProjectSkillSource(source: MentionProjectSource | undefined): boolean {
+export function hasProjectSkillSource(source: MentionProjectSource | undefined): boolean {
   if (source?.kind === 'local') {
     return Boolean(source.localProjectId && source.workspaceId && source.machineId);
   }
@@ -306,6 +311,13 @@ function hasProjectSkillSource(source: MentionProjectSource | undefined): boolea
     return Boolean(source.repoFullName);
   }
   if (source?.kind === 'provider') {
+    if (source.localProject) {
+      return Boolean(
+        source.localProject.localProjectId &&
+        source.localProject.workspaceId &&
+        source.localProject.machineId
+      );
+    }
     return Boolean(source.githubRepoFullName);
   }
   return false;
@@ -319,14 +331,8 @@ export function useSkillMentionRewrites(
 ): (text: string) => TextRewrite[] {
   const enableSkillMentions = hasProjectSkillSource(source) || Boolean(skillAgent?.machineId);
   const enabled = enableSkillMentions && promptValue.includes(SKILL_MENTION_TRIGGER);
-  const { skillItems } = useMentionProjectSkills(source, enabled, skillAgent?.machineId);
-  const skillAgentCliType = skillAgent?.cliType;
-  const skillAgentAgentType = skillAgent?.agentType;
-  const allowedDirs = React.useMemo(
-    () =>
-      getAllowedSkillMentionDirs({ cliType: skillAgentCliType, agentType: skillAgentAgentType }),
-    [skillAgentAgentType, skillAgentCliType]
-  );
+  const { skillItems } = useMentionProjectSkills(source, enabled, skillAgent);
+  const allowedDirs = React.useMemo(() => getAllowedSkillMentionDirs(skillAgent), [skillAgent]);
 
   return React.useCallback(
     (text: string) => buildSkillMentionRewrites(text, skillItems, allowedDirs),
@@ -397,17 +403,27 @@ export function mergeMentionSkillState(
 export function useMentionProjectSkills(
   source: MentionProjectSource | undefined,
   enabled: boolean,
-  globalMachineId?: string | null
+  skillAgent?: SkillMentionAgent
 ) {
+  const globalMachineId = skillAgent?.machineId;
+  const gateway =
+    skillAgent?.cliType === 'builtin' && skillAgent.agentType === 'codex'
+      ? skillAgent.magpieGatewayUrl
+      : undefined;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const kind = source?.kind;
-  const localWorkspaceId = source?.kind === 'local' ? source.workspaceId : undefined;
-  const machineId = source?.kind === 'local' ? source.machineId : undefined;
-  const localProjectId = source?.kind === 'local' ? source.localProjectId : undefined;
+  const localProject =
+    source?.kind === 'local'
+      ? source
+      : source?.kind === 'provider'
+        ? source.localProject
+        : undefined;
+  const localWorkspaceId = localProject?.workspaceId;
+  const machineId = localProject?.machineId;
+  const localProjectId = localProject?.localProjectId;
   const repoFullName =
     source?.kind === 'github'
       ? source.repoFullName
-      : source?.kind === 'provider'
+      : source?.kind === 'provider' && !source.localProject
         ? source.githubRepoFullName
         : undefined;
 
@@ -415,7 +431,7 @@ export function useMentionProjectSkills(
     if (!enabled) {
       return null;
     }
-    if (kind === 'local') {
+    if (localProject) {
       if (!localWorkspaceId || !machineId || !localProjectId) {
         return null;
       }
@@ -425,14 +441,22 @@ export function useMentionProjectSkills(
       return null;
     }
     return { kind: 'github', workspaceId, repoFullName };
-  }, [enabled, kind, localWorkspaceId, machineId, localProjectId, repoFullName, workspaceId]);
+  }, [
+    enabled,
+    localProject,
+    localWorkspaceId,
+    machineId,
+    localProjectId,
+    repoFullName,
+    workspaceId,
+  ]);
 
   const globalSkillsSource = React.useMemo<ProjectSkillsSource | null>(() => {
     if (!enabled) {
       return null;
     }
     // A local source's own scan already lists its machine's global skills.
-    if (kind === 'local') {
+    if (localProject && (!gateway || machineId === globalMachineId)) {
       return null;
     }
     const normalizedMachineId = globalMachineId?.trim();
@@ -440,14 +464,22 @@ export function useMentionProjectSkills(
       return null;
     }
     return { kind: 'global', workspaceId, machineId: normalizedMachineId };
-  }, [enabled, kind, globalMachineId, workspaceId]);
+  }, [enabled, localProject, machineId, gateway, globalMachineId, workspaceId]);
 
-  const projectSkillState = useProjectSkills(skillsSource);
-  const globalSkillState = useProjectSkills(globalSkillsSource);
+  const projectSkillState = useProjectSkills(
+    skillsSource,
+    machineId === globalMachineId ? gateway : undefined
+  );
+  const globalSkillState = useProjectSkills(globalSkillsSource, gateway);
 
   const groups = React.useMemo(
-    () => [...projectSkillState.groups, ...globalSkillState.groups],
-    [projectSkillState.groups, globalSkillState.groups]
+    () => [
+      ...projectSkillState.groups.filter(
+        (group) => !localProject || !globalSkillsSource || group.scope === 'project'
+      ),
+      ...globalSkillState.groups,
+    ],
+    [localProject, globalSkillsSource, projectSkillState.groups, globalSkillState.groups]
   );
   const skillState = React.useMemo(
     () => mergeMentionSkillState([projectSkillState, globalSkillState]),
@@ -462,10 +494,6 @@ export function useMentionProjectSkills(
   );
   return { skillState, skillItems, knownSkillTokens };
 }
-
-// ============================================================================
-// Hydrator
-// ============================================================================
 
 export function SkillMentionHydrator({
   text,

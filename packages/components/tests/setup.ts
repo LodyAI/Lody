@@ -38,13 +38,32 @@ class MemoryStorage implements Storage {
   }
 }
 
+function readJsdomStorage(name: 'localStorage' | 'sessionStorage'): Storage | undefined {
+  const jsdomWindow = (globalThis as { jsdom?: { window: Window } }).jsdom?.window;
+  try {
+    return jsdomWindow?.[name];
+  } catch {
+    // A jsdom origin without storage access throws here; tests still need the
+    // same deterministic browser boundary as Node-only suites.
+    return undefined;
+  }
+}
+
 function installStorage(name: 'localStorage' | 'sessionStorage'): void {
+  // Node 26 ships its own Web Storage globals, which Vitest's jsdom environment
+  // leaves in place. They are not jsdom `Storage` instances, so StorageEvent,
+  // `Storage.prototype` spies and quota behavior break unless jsdom's own wins.
+  const jsdomStorage = readJsdomStorage(name);
+  if (jsdomStorage !== undefined) {
+    Object.defineProperty(globalThis, name, { configurable: true, value: jsdomStorage });
+    return;
+  }
+
   let storage: Storage | undefined;
   try {
     storage = globalThis[name];
   } catch {
-    // A jsdom origin without storage access throws here; tests still need the
-    // same deterministic browser boundary as Node-only suites.
+    // Accessing Node's localStorage without a backing file can throw.
   }
   if (storage != null) return;
 
@@ -56,6 +75,16 @@ function installStorage(name: 'localStorage' | 'sessionStorage'): void {
 
 installStorage('localStorage');
 installStorage('sessionStorage');
+
+if (typeof document !== 'undefined' && typeof document.elementFromPoint !== 'function') {
+  // jsdom has no layout or hit testing. Tests with drop targets provide their
+  // own hit results; ordinary pointer movement hits no target.
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    writable: true,
+    value: (): Element | null => null,
+  });
+}
 
 if (typeof Element !== 'undefined' && typeof Element.prototype.getAnimations !== 'function') {
   // jsdom does not run Web Animations. Base UI waits for subtree animations
@@ -112,4 +141,12 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
         dispatchEvent: () => true,
       }) as MediaQueryList,
   });
+}
+
+// jsdom has no layout, so Range carries no geometry; the composer editor
+// (Lexical) measures the caret to keep it scrolled into view.
+if (typeof Range !== 'undefined' && typeof Range.prototype.getBoundingClientRect !== 'function') {
+  Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+  Range.prototype.getClientRects = () =>
+    Object.assign([] as DOMRect[], { item: () => null }) as unknown as DOMRectList;
 }

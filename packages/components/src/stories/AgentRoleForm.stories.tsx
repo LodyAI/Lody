@@ -1,8 +1,10 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { Button } from '@lody/ui/button';
+import { userEvent } from 'storybook/test';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { AgentRoleForm, type AgentRoleFormProps } from '@/components/settings/agent-role-form';
+import { SettingsEditorDialogFrame } from './settings-editor-dialog-frame';
 import type { AcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import {
   createAgentRoleTargetFormValue,
@@ -10,11 +12,34 @@ import {
   type AgentRoleFormValue,
   type AgentRoleTargetFormValue,
 } from '@/lib/agent-role-form';
+const storyLayout = stylex.create({
+  form: { minHeight: 0, flex: '1 1 0%' },
+  stack: {
+    'margin-inline': 'auto',
+    display: 'flex',
+    height: '620px',
+    width: '620px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 4)',
+    overflow: 'hidden',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 const machines = [
   { machineId: 'machine-1' as MachineId, label: 'Studio', online: true },
   { machineId: 'machine-2' as MachineId, label: 'Build box', online: false },
+  { machineId: 'machine-3' as MachineId, label: 'Linux runner', online: true },
 ];
+
+const targetAgentLabels = {
+  ['machine-1' as MachineId]: 'Codex',
+  ['machine-2' as MachineId]: 'Claude',
+};
 
 const agentConfigs = [
   { agentConfigId: 'config-1' as AgentConfigId, label: 'Codex' },
@@ -62,13 +87,16 @@ const studio: AgentRoleTargetFormValue = {
   ...createAgentRoleTargetFormValue('machine-1' as MachineId),
   agentConfigId: 'config-1' as AgentConfigId,
   modelId: 'gpt-5.6-sol',
-  configOptionValues: { thought_level: 'high' },
+  modeId: 'default',
+  configOptionValues: { thought_level: 'high', 'fast-mode': false },
 };
 
 const buildBox: AgentRoleTargetFormValue = {
   ...createAgentRoleTargetFormValue('machine-2' as MachineId),
   agentConfigId: 'config-2' as AgentConfigId,
   modelId: 'gpt-5.6-luna',
+  modeId: 'plan',
+  configOptionValues: { thought_level: 'medium', 'fast-mode': true },
 };
 
 const configured: AgentRoleFormValue = {
@@ -81,22 +109,6 @@ const configured: AgentRoleFormValue = {
   activeMachineId: 'machine-1' as MachineId,
 };
 
-/**
- * What a machine tab without the Role shows. The dialog's own panel also reads
- * that machine's agents and memories, which a story has no workspace for.
- */
-const addTargetPanel = (
-  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
-    <p style={{ margin: 0, fontSize: 12 }}>
-      This role does not run on Build box yet. Adding it starts from Codex, the same agent, with the
-      current settings.
-    </p>
-    <Button type="button" size="small" variant="secondary">
-      Add to this machine
-    </Button>
-  </div>
-);
-
 /** The dialog owns the value in the product; the story owns it here. */
 function StatefulAgentRoleForm(props: AgentRoleFormProps) {
   const [value, setValue] = useState(props.value);
@@ -107,6 +119,7 @@ const meta = {
   title: 'Settings/AgentRoleForm',
   component: StatefulAgentRoleForm,
   args: {
+    xstyle: storyLayout.form,
     value: configured,
     onChange: () => undefined,
     machines,
@@ -116,17 +129,20 @@ const meta = {
     errors: [],
     onSubmit: () => undefined,
     onCancel: () => undefined,
-    addTargetPanel,
-    className: 'min-h-0 flex-1',
+    targetAgentLabels,
+
   },
+  parameters: { layout: 'fullscreen' },
   decorators: [
-    // Mirrors the settings dialog that hosts the form: a fixed-height panel the
-    // form's own scroll body and sticky footer size themselves against. The
-    // panel pads its content; the form has no padding of its own.
-    (Story) => (
-      <div className="mx-auto flex h-[620px] w-[620px] flex-col gap-4 overflow-hidden rounded-lg border bg-background p-4">
+    (Story, { args }) => (
+      <SettingsEditorDialogFrame
+        title={args.isEditing ? 'Edit Agent Role' : 'New Agent Role'}
+        description="A Role never stores API keys or MCP selections."
+        height="min(680px, 88dvh)"
+      >
+
         <Story />
-      </div>
+      </SettingsEditorDialogFrame>
     ),
   ],
 } satisfies Meta<typeof StatefulAgentRoleForm>;
@@ -202,25 +218,42 @@ export const SavedLocallyNotSynced: Story = {
 };
 
 /**
- * Runs on two machines. Each tab is that machine's own agent, model and memory;
- * the alias field appears once there is more than one.
+ * Runs on two machines. Each row is one machine and shows the `@` token that
+ * runs the Role there; the open row holds that machine's own agent, model and
+ * memory, and the `@` name field appears once there is more than one machine.
  */
 export const TwoMachines: Story = {
   args: {
-    value: { ...configured, targets: [studio, { ...buildBox, alias: 'Reviewer-CI' }] },
+    value: {
+      ...configured,
+      targets: [studio, { ...buildBox, alias: 'Reviewer-CI' }],
+      activeMachineId: 'machine-2' as MachineId,
+    },
     isEditing: true,
   },
 };
 
-/** A machine the Role does not run on yet: one action adds it. */
-export const MachineNotAdded: Story = {
+/** Every machine row closed: the list alone says where the Role runs. */
+export const AllMachinesCollapsed: Story = {
   args: {
-    value: { ...configured, activeMachineId: 'machine-2' as MachineId },
+    value: { ...configured, targets: [studio, buildBox], activeMachineId: null },
     isEditing: true,
   },
 };
 
-/** Overflow belongs to the machine tabs, leaving the fields and footer in place. */
+/** Machines the Role does not run on yet are one menu away, added in one step. */
+export const AddMachineMenu: Story = {
+  args: { isEditing: true },
+  play: async ({ canvasElement }) => {
+    const add = [...canvasElement.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Add machine')
+    );
+    if (!add) throw new Error('Add machine button missing');
+    await userEvent.click(add);
+  },
+};
+
+/** Many machines stay a short menu rather than a strip of tabs. */
 export const ManyMachines: Story = {
   args: {
     machines: [
@@ -233,4 +266,5 @@ export const ManyMachines: Story = {
     ],
     isEditing: true,
   },
+  play: AddMachineMenu.play,
 };

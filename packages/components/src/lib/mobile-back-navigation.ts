@@ -1,39 +1,82 @@
 /**
- * Single-shot module-level flag that suppresses the iOS-style "slide
- * in from the right" enter animation on the *next* mount of a mobile
- * detail layout, so we don't replay a forward-push animation on a
- * back-pop navigation.
- *
- * Why: layouts like `MobileProjectScreen` and `MobileSettingsLayout`
- * run a framer-motion `initial={{ x: '100%' }} animate={{ x: 0 }}`
- * slide on every mount. That's correct on a forward navigation
- * (home → project), but on a back navigation from session detail the
- * destination *also* re-mounts, so the user sees the chat slide off
- * to the right and then the destination slide *in* from the right —
- * i.e. an iOS push visual on a pop navigation.
- *
- * `MobileDrillPageLayout` calls `markMobileBackNavigation()`
- * right before triggering the actual route change. Each destination
- * page calls `consumeMobileBackNavigation()` once on mount, in a
- * `useState` initializer so the value is stable across re-renders.
- * The flag is consumed (cleared) on read so a subsequent forward
- * navigation to the same page still gets its enter slide.
- *
- * Module-level boolean instead of jotai/context because the lifetime
- * is intentionally one-shot and synchronous — a Provider would just
- * add render-tree plumbing for a flag that only matters during the
- * navigation tick itself.
+ * Single-shot flag telling the next mounted mobile page it is a back
+ * destination, plus the layered back handler stack for Android's Back bridge.
  */
 let suppressNextEnter = false;
 
+function clearOnNextPress(): void {
+  suppressNextEnter = false;
+}
+
 export function markMobileBackNavigation(): void {
   suppressNextEnter = true;
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointerdown', clearOnNextPress, { capture: true, once: true });
+  }
 }
 
 export function consumeMobileBackNavigation(): boolean {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pointerdown', clearOnNextPress, { capture: true });
+  }
   if (suppressNextEnter) {
     suppressNextEnter = false;
     return true;
+  }
+  return false;
+}
+
+export type MobileBackLayer = 'page' | 'drawer' | 'modal';
+
+export type MobileBackHandler = () => boolean | void;
+
+const LAYER_BASE_PRIORITY: Record<MobileBackLayer, number> = {
+  page: 0,
+  drawer: 100,
+  modal: 200,
+};
+
+type BackHandlerEntry = {
+  readonly id: number;
+  readonly priority: number;
+  readonly handler: MobileBackHandler;
+};
+
+let nextBackHandlerId = 1;
+const backHandlers: BackHandlerEntry[] = [];
+
+export function registerMobileBackHandler(
+  handler: MobileBackHandler,
+  options?: { layer?: MobileBackLayer; depth?: number }
+): () => void {
+  const layer = options?.layer ?? 'page';
+  const depth = Math.max(0, options?.depth ?? 0);
+  const entry: BackHandlerEntry = {
+    id: nextBackHandlerId++,
+    priority: LAYER_BASE_PRIORITY[layer] + depth,
+    handler,
+  };
+  backHandlers.push(entry);
+
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    const index = backHandlers.indexOf(entry);
+    if (index !== -1) {
+      backHandlers.splice(index, 1);
+    }
+  };
+}
+
+export function dispatchMobileBack(): boolean {
+  if (backHandlers.length === 0) return false;
+  const ordered = [...backHandlers].sort((a, b) => b.priority - a.priority || b.id - a.id);
+  for (const entry of ordered) {
+    if (!backHandlers.includes(entry)) continue;
+    if (entry.handler() !== false) {
+      return true;
+    }
   }
   return false;
 }

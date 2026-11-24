@@ -23,8 +23,8 @@ interface ProcessorEvents {
 export class MessageProcessor extends EventEmitter<ProcessorEvents> {
   private readonly queue: ConcurrentQueue<MessageQueueKey>;
   private readonly historyReads: ConcurrentQueue<MessageQueueKey>;
-  private readonly historyWatches = new ConcurrentQueue<MessageQueueKey>(128);
-  private historyWatchOrdinal = 0;
+  private readonly historySubscriptions = new ConcurrentQueue<MessageQueueKey>(128);
+  private historySubscriptionOrdinal = 0;
   private isStopped = false;
   private readonly clientLossTasks = createDaemonLossTasks();
   inspectClientLoss() {
@@ -86,11 +86,11 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
     );
 
     const queue =
-      message.type === 'session/history-read'
-        ? message.query.kind === 'watchChanges'
-          ? this.historyWatches
-          : this.historyReads
-        : this.queue;
+      message.type === 'session/history-subscription' && message.subscription.action === 'open'
+        ? this.historySubscriptions
+        : message.type === 'session/history-read' || message.type === 'session/history-subscription'
+          ? this.historyReads
+          : this.queue;
     const queued = queue.enqueue(queueKey, async () => {
       const startTime = Date.now();
       started = true;
@@ -148,14 +148,14 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    * 获取当前活跃的 session 数量
    */
   getActiveSessions(): number {
-    return this.queue.active + this.historyReads.active + this.historyWatches.active;
+    return this.queue.active + this.historyReads.active + this.historySubscriptions.active;
   }
 
   /**
    * 获取队列中等待的任务数量
    */
   getQueueSize(): number {
-    return this.queue.waiting + this.historyReads.waiting + this.historyWatches.waiting;
+    return this.queue.waiting + this.historyReads.waiting + this.historySubscriptions.waiting;
   }
 
   /**
@@ -174,7 +174,11 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       `Draining MessageProcessor: active=${this.queue.active} waiting=${this.queue.waiting}`
     );
 
-    await Promise.all([this.queue.drain(), this.historyReads.drain(), this.historyWatches.drain()]);
+    await Promise.all([
+      this.queue.drain(),
+      this.historyReads.drain(),
+      this.historySubscriptions.drain(),
+    ]);
     this.emit('queue:drained');
   }
 
@@ -191,7 +195,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       await Promise.all([
         this.queue.drainWithTimeout(timeoutMs),
         this.historyReads.drainWithTimeout(timeoutMs),
-        this.historyWatches.drainWithTimeout(timeoutMs),
+        this.historySubscriptions.drainWithTimeout(timeoutMs),
       ])
     ).every(Boolean);
 
@@ -212,7 +216,7 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       case 'session/image-upload':
       case 'session/history-read':
       case 'session/history-write':
-      case 'session/code-collab-host-start':
+      case 'session/history-subscription':
       case 'session/preview-candidate-report':
       case 'session/preview-create':
       case 'session/preview-revoke':
@@ -241,9 +245,9 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
       case 'session/create':
       case 'session/chat':
         return `session:${message.sessionId}:main`;
+      case 'session/history-subscription':
+        return `history-subscription:${this.historySubscriptionOrdinal++}`;
       case 'session/history-read':
-        if (message.query.kind === 'watchChanges')
-          return `history-watch:${this.historyWatchOrdinal++}`;
         return `session:${message.sessionId}:history-read`;
       case 'session/history-write':
         // History requests must not wait behind a long-running ACP prompt.
@@ -252,8 +256,6 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
         return `session:${message.sessionId}:history`;
       case 'session/image-upload':
         return `session:${message.sessionId}:image-upload`;
-      case 'session/code-collab-host-start':
-        return `session:${message.sessionId}:code-collab`;
       case 'session/preview-candidate-report':
       case 'session/preview-create':
       case 'session/preview-revoke':

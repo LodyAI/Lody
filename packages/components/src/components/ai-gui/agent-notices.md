@@ -24,8 +24,7 @@ agent's answer and the agent's own warning about it.
 - With no assistant turn to attach to — a notice that opens a session, or one
   following a user turn — it stays exactly where it is.
 - A folded notice trails the answer the way an attachment does, so it must stay
-  outside the work region. Only thoughts and tool calls fold, so a turn ending in
-  one keeps its reply visible next to "Worked for …".
+  outside the work region, keeping the notice visible next to the reply.
 - Merging mutates the host item, so its cache entry is dropped: the host entry
   itself is unchanged, and a reused copy would come back without the notice.
 

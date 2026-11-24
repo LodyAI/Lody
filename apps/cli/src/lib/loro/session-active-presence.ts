@@ -203,6 +203,7 @@ export interface SessionActivePresenceService {
     phase?: SessionActivePresencePhase | null,
     detail?: string
   ) => Effect.Effect<SessionActivePresenceLease, SessionPresenceUnavailable, Scope.Scope>;
+  readonly setNativeWork: (sessionId: SessionId, work: 'running' | 'background' | null) => void;
   readonly setPhase: (
     sessionId: SessionId,
     phase: SessionActivePresencePhase | null,
@@ -230,6 +231,8 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
   const clock = yield* Clock.Clock;
   const parent = yield* Scope.Scope;
   const active = new Map<SessionId, ActivePresenceState>();
+  const nativeWork = new Map<SessionId, 'running' | 'background'>();
+  const nativePublished = new Map<SessionId, number>();
   let idle = yield* Deferred.make<void>();
   yield* Deferred.succeed(idle, undefined);
   let retired = false;
@@ -284,7 +287,13 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
   const clear = (sessionId: SessionId, state: ActivePresenceState) =>
     Effect.sync(() => {
       if (active.get(sessionId) !== state) return;
-      host.clear(sessionId);
+      if (nativeWork.has(sessionId) && !retired) {
+        host.publish(sessionId, SessionStatusFactory.running());
+        nativePublished.set(sessionId, now());
+      } else {
+        host.clear(sessionId);
+        nativePublished.delete(sessionId);
+      }
       active.delete(sessionId);
       if (active.size === 0) Deferred.doneUnsafe(idle, Effect.void);
     });
@@ -356,6 +365,36 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
     return { awaitInitializationStall: Deferred.await(leaseState.stall) };
   });
 
+  // Reconcile at a fixed rate: activity notifications are not a presence write budget.
+  yield* Effect.forkIn(
+    Effect.sync(() => {
+      for (const sessionId of new Set([...nativeWork.keys(), ...nativePublished.keys()])) {
+        if (active.has(sessionId)) continue;
+        try {
+          const lastPublished = nativePublished.get(sessionId);
+          if (!nativeWork.has(sessionId)) {
+            if (lastPublished !== undefined) host.clear(sessionId);
+            nativePublished.delete(sessionId);
+          } else if (
+            lastPublished === undefined ||
+            now() - lastPublished >= (options.intervalMs ?? LODY_PRESENCE_HEARTBEAT_MS)
+          ) {
+            host.publish(sessionId, SessionStatusFactory.running());
+            nativePublished.set(sessionId, now());
+          }
+        } catch (error) {
+          host.report({ kind: 'heartbeat-failed', sessionId, cause: Cause.die(error) });
+        }
+      }
+    }).pipe(
+      Effect.repeat({ schedule: Schedule.spaced(1_000) }),
+      Effect.asVoid,
+      Effect.delay(1_000)
+    ),
+    parent,
+    { startImmediately: true, uninterruptible: false }
+  );
+
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
       retired = true;
@@ -363,6 +402,11 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
   );
   return SessionActivePresence.of({
     hold,
+    setNativeWork: (sessionId, work) => {
+      if (retired) return;
+      if (work) nativeWork.set(sessionId, work);
+      else nativeWork.delete(sessionId);
+    },
     setPhase: (sessionId, phase, detail) => {
       const state = active.get(sessionId);
       if (
@@ -380,11 +424,20 @@ export const makeSessionActivePresence = Effect.fnUntraced(function* (
     has: (sessionId) => active.has(sessionId),
     getStatus: (sessionId) => {
       const state = active.get(sessionId);
-      return state ? phaseToStatus(state.phase, state.detail) : null;
+      return state
+        ? phaseToStatus(state.phase, state.detail)
+        : nativeWork.has(sessionId)
+          ? SessionStatusFactory.running()
+          : null;
     },
-    activeSessionCount: () => active.size,
+    activeSessionCount: () => new Set([...active.keys(), ...nativeWork.keys()]).size,
     retire: () => {
       retired = true;
+      for (const sessionId of nativePublished.keys()) {
+        if (!active.has(sessionId)) host.clear(sessionId);
+      }
+      nativeWork.clear();
+      nativePublished.clear();
     },
     retryRelease: (sessionId) =>
       Effect.suspend(() => {

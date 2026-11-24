@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
+import type { SessionSharingState } from '../src/lib/session-sharing';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -89,10 +88,13 @@ describe('sidebar local project row', () => {
     onNewChatInProject: (machineId: MachineId, localProjectId: string) => void;
     removalState?: 'waiting_for_device' | 'removing' | null;
     sessions?: SessionMeta[];
-    whetherShowFullList?: boolean;
-    onToggleFullList?: (groupKey: string) => void;
+    revealedRows?: number;
+    onShowMore?: (groupKey: string) => void;
+    onShowLess?: (groupKey: string) => void;
     collapsed?: boolean;
     liveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
+    sessionSharingById?: Map<string, SessionSharingState>;
+    onRenameSession?: (id: string, title: string) => void;
   }) {
     act(() => {
       root?.render(
@@ -105,7 +107,7 @@ describe('sidebar local project row', () => {
             canRemoveProject={false}
             removalState={options.removalState ?? null}
             collapsed={options.collapsed ?? false}
-            whetherShowFullList={options.whetherShowFullList ?? false}
+            revealedRows={options.revealedRows ?? 0}
             isSelected={false}
             sessionsForProject={options.sessions ?? []}
             childSessionsByParent={new Map()}
@@ -124,10 +126,13 @@ describe('sidebar local project row', () => {
             onNewChatInProject={options.onNewChatInProject}
             onNavigateSession={() => undefined}
             onArchive={() => undefined}
+            onRenameSession={options.onRenameSession}
+            sessionSharingById={options.sessionSharingById}
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => undefined}
             onToggleCollapsed={() => undefined}
-            onToggleFullList={options.onToggleFullList ?? (() => undefined)}
+            onShowMore={options.onShowMore ?? (() => undefined)}
+            onShowLess={options.onShowLess ?? (() => undefined)}
             onRequestRemoval={() => undefined}
           />
         </Tooltip.Provider>
@@ -135,6 +140,45 @@ describe('sidebar local project row', () => {
     });
     return container?.querySelector<HTMLElement>(`[data-id="project:${machineId}:${project.id}"]`);
   }
+
+  it('hides management and inline archive controls for a read-only local conversation', async () => {
+    const id = 'read-only-local';
+    render({
+      onNavigateProject: () => {},
+      onNewChatInProject: () => {},
+      sessions: [localSession(id)],
+      onRenameSession: () => {
+        throw new Error('rename must stay hidden');
+      },
+      sessionSharingById: new Map([
+        [
+          id,
+          {
+            visibility: 'team',
+            access: 'read',
+            canManage: false,
+            machineId,
+            localProjectId: project.id,
+            machineName: null,
+            projectName: null,
+          },
+        ],
+      ]),
+    });
+    const row = container!.querySelector(`[data-sidebar-session-id="${id}"]`)!;
+    expect(row).not.toBeNull();
+    expect(row.querySelector('[aria-label="Archive session"]')).toBeNull();
+    await act(async () =>
+      row.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })
+      )
+    );
+    expect(
+      [...document.querySelectorAll('[role="menuitem"]')].some((item) =>
+        /Rename|Archive|Delete/.test(item.textContent ?? '')
+      )
+    ).toBe(false);
+  });
 
   it('activates the project on the landing and offers a new chat for a shared machine', () => {
     const onNavigateProject = vi.fn();
@@ -168,38 +212,54 @@ describe('sidebar local project row', () => {
     expect(row?.querySelector('button[aria-label="New chat"]')).toBeNull();
   });
 
-  it('previews five sessions and can reveal the full local project history', () => {
-    const sessions: SessionMeta[] = Array.from({ length: 7 }, (_, index) => ({
+  it('previews five sessions and reveals the project history one page at a time', () => {
+    const sessions: SessionMeta[] = Array.from({ length: 12 }, (_, index) => ({
       id: `session-${index}` as SessionId,
       machineId,
       createdAt: '2026-09-17T00:00:00.000Z',
-      lastMessageAt: 7 - index,
+      lastMessageAt: 12 - index,
       userId: 'user-1',
       cliType: 'builtin',
       agentType: 'codex',
       title: `Session ${index}`,
     }));
-    const onToggleFullList = vi.fn();
+    const onShowMore = vi.fn();
+    const onShowLess = vi.fn();
+    const groupKey = 'local-project:machine-teammate:project-shared';
     const baseOptions = {
       onNavigateProject: vi.fn(),
       onNewChatInProject: vi.fn(),
       sessions,
-      onToggleFullList,
+      onShowMore,
+      onShowLess,
     };
 
     render(baseOptions);
     expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(5);
-    const showAll = container?.querySelector<HTMLButtonElement>(
-      '[data-sidebar-show-more="local-project:machine-teammate:project-shared"]'
+    const showMore = container?.querySelector<HTMLButtonElement>(
+      `[data-sidebar-show-more="${groupKey}"]`
     );
-    expect(showAll?.textContent).toBe('Show all (7)');
+    expect(showMore?.textContent).toBe('Show more');
+    expect(container?.querySelector('[data-sidebar-show-less]')).toBeNull();
 
-    act(() => showAll?.click());
-    expect(onToggleFullList).toHaveBeenCalledWith('local-project:machine-teammate:project-shared');
+    act(() => showMore?.click());
+    expect(onShowMore).toHaveBeenCalledWith(groupKey);
 
-    render({ ...baseOptions, whetherShowFullList: true });
-    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(7);
-    expect(container?.querySelector('[data-sidebar-show-more]')?.textContent).toBe('Show less');
+    render({ ...baseOptions, revealedRows: 5 });
+    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(10);
+    expect(container?.querySelector('[data-sidebar-show-more]')).not.toBeNull();
+    const showLess = container?.querySelector<HTMLButtonElement>(
+      `[data-sidebar-show-less="${groupKey}"]`
+    );
+    expect(showLess?.textContent).toBe('Show less');
+
+    act(() => showLess?.click());
+    expect(onShowLess).toHaveBeenCalledWith(groupKey);
+
+    render({ ...baseOptions, revealedRows: 10 });
+    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(12);
+    expect(container?.querySelector('[data-sidebar-show-more]')).toBeNull();
+    expect(container?.querySelector('[data-sidebar-show-less]')?.textContent).toBe('Show less');
   });
 
   it('keeps the status of the Sessions a folded project hides on its header', () => {

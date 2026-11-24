@@ -8,7 +8,7 @@ PR: https://github.com/LodyAI/Lody/pull/992
 
 ## 摘要
 
-`Tests` job 要跑 6–11 分钟。其中大部分时间是在同一台 4 vCPU runner 上先跑 `@lody/components`（约 351 秒），再跑 `apps/cli`（约 158 秒）。在同一个 job 里让两者重叠（`pnpm -r --no-sort`）没有效果：runner 的 CPU 已经跑满，重叠后两套测试分别变成 509 秒和 252 秒。现在 `Tests` 改成了矩阵：components 分成三个 Vitest 分片，cli 一组，其余的包一组，每组各占一台 runner，再由一个聚合 job 保留必需检查名 `Tests`。另外，`setup-node` 的 pnpm 缓存只匹配精确的 lockfile key，而且每个 PR 都会各自写一份约 800 MB 的缓存。现在改由一个复合 action 恢复 store，精确 key 不命中时按前缀回退，并且只有 `main` 会写入缓存。预热安装在 prune 前使用硬链接导入，让 macOS 保留已安装的包。
+`Tests` job 要跑 6–11 分钟。其中大部分时间是在同一台 4 vCPU runner 上先跑 `@lody/components`（约 351 秒），再跑 `apps/cli`（约 158 秒）。在同一个 job 里让两者重叠（`pnpm -r --no-sort`）没有效果：runner 的 CPU 已经跑满，重叠后两套测试分别变成 509 秒和 252 秒。现在 `Tests` 改成了七台 runner 的矩阵：components 分成两个 Vitest 分片，cli 分成两个 Vitest 分片，其余的包一组，e2ee-lab 一组，electron 一组，每组各占一台 runner，再由一个聚合 job 保留必需检查名 `Tests`。另外，`setup-node` 的 pnpm 缓存只匹配精确的 lockfile key，而且每个 PR 都会各自写一份约 800 MB 的缓存。现在改由一个复合 action 恢复 store，精确 key 不命中时按前缀回退，并且只有 `main` 会写入缓存。预热安装在 prune 前使用硬链接导入，让 macOS 保留已安装的包。
 
 ## 改动前的证据
 
@@ -31,11 +31,13 @@ PR: https://github.com/LodyAI/Lody/pull/992
 ## 决定
 
 1. **把 `Tests` 按 runner 拆成几组**（`.github/scripts/run-ci-tests.mjs` 的 `--group`）：
-   - `components`：分成三个分片，执行 `vitest --shard=k/3 --maxWorkers=4`。
-   - `cli`：`--maxWorkers=4`。
-   - `rest`：先跑 `test:scripts`，再跑其余所有包，最后跑 electron。
+   - `components`：分成两个分片，执行 `vitest --shard=k/2 --maxWorkers=4`。
+   - `cli`：分成两个分片，执行 `vitest --shard=k/2 --maxWorkers=4`。
+   - `rest`：先跑 `test:scripts` 与 `@lody/site-docs`，再用单次启动的 `test:rest --maxWorkers=4` 聚合运行除 e2ee-lab 以外的其余 Vitest 工作区包。
+   - `e2ee-lab`：同样单次启动 `test:rest`，只运行 `--project=e2ee-lab:*`。CI 运行 `45172325099` 中，聚合 Vitest 用时 165 秒，各文件耗时合计 534 秒：e2ee-lab 251 秒、e2ee-core 186 秒、其余 97 秒。Vitest 的 `--shard` 按哈希排序后按文件数切分，4 核下两片为 74 秒 / 39 秒；按 project 拆分则为 46 秒（e2ee-lab）和 55 秒（其余）。
+   - `electron`：单独运行 `@lody/electron`。2026-11-23 的 PR 运行中，`rest` 是最长的 job（p50 280 秒）：145 秒的 Vitest 之后，同一个 job 还要再跑约 60 秒的 electron `node:test` 测试和 `test:release`。
 
-   每组根据受影响范围自己规划要执行的命令，名单里没有本组的包时就连安装都跳过。scope 输出缺失或无效时，仍然回退为全量。CI 定义文件有改动时，YAML 覆盖逻辑会传入 `--full`。最后的 `Tests` job `needs` 整个矩阵，只有矩阵全部成功它才成功，因此必需检查名保持不变。
+   每组先在 `.github/actions/setup-workspace` 之前完成受影响范围计算、YAML fail-open 覆盖检查和 `--plan`，名单里没有本组的包时连 store 恢复、`pnpm install` 和 adapter 准备都一起跳过。scope 输出缺失或无效时，仍然回退为全量。CI 定义文件有改动时，YAML 覆盖逻辑会传入 `--full`。需要执行的 `cli` 组准备全部 CLI ACP adapter，其他组只构建 `acp-extension-dsh`（`acp-extension-core` 在 `pnpm install` 时构建），根级测试和类型检查过滤掉嵌套 `acp-extension-*` 子模块。最后的 `Tests` job `needs` 整个矩阵，只有矩阵全部成功它才成功，因此必需检查名保持不变。
 
 2. **新增 `.github/actions/setup-workspace`**，替换 `ci.yml` 和各 Desktop E2E workflow 里的 `pnpm/action-setup` 加 `setup-node` `cache: pnpm`。它用 `actions/cache/restore` 恢复缓存，key 为 `pnpm-store-v2-<os>-<arch>-<lockfile hash>`，先按 `pnpm-store-v2-<os>-<arch>-` 前缀回退，再按 v1 前缀回退。即使恢复到的是旧 store，pnpm 也只需下载缺少的包。
 3. **`.github/workflows/pnpm-store-cache.yml` 是唯一的写入者。** 它在 `main` 上 lockfile 或缓存定义有变动的 push 时运行，也可以手动触发。它覆盖 Linux、macOS 和 Windows，通过 `--package-import-method=hardlink` 安装，保存前会先 prune。它不是必需检查，所以它的 `paths` 过滤和 `ci.yml` 不用 `paths` 的规则并不冲突。
@@ -58,13 +60,14 @@ v2 key 绕开旧 key 的精确命中保护，让 `main` 重新填充已有的空
 
 ## 取舍与其他方案
 
-- 测试 runner 从 1 台变成 5 台。每台都要花约 70 秒做 checkout、缓存恢复、安装和 adapter 准备，所以 runner 总分钟数会上升。本仓库是公开仓库，标准 runner 不收费。不受影响的组会跳过安装。
-- **降低 components 每个文件的固定开销**（`isolate: false`、精简 setup）。这仍是最大的 CPU 开销，还没有处理，而且有测试文件之间共享状态的风险。参见 [components test module graph](2026-09-10-components-test-module-graph.zh.md)。
+- 测试 runner 从 1 台变成 7 台。实际运行的组需要各自完成 checkout、缓存恢复、安装和 adapter 准备，因此全量运行时 runner 总分钟数会上升。本仓库是公开仓库，标准 runner 不收费。不受影响的组在 checkout 和 `--plan` 后直接结束，不再恢复 pnpm store 或安装依赖。
+- **降低 components 每个文件的固定开销**（`isolate: false`、精简 setup）。Vitest 5 projects 现已复用安全模块图并缓存磁盘转换结果，模块 mock 和长期资源持有者继续隔离；共享状态仍需清理。参见 [components test module graph](2026-09-10-components-test-module-graph.zh.md)。
 - **缓存 `node_modules`。** 没有做：store 热的时候安装只要 16–40 秒。
+- **`cpu-features` 的原生构建。** 它从 `onlyBuiltDependencies` 移到了 `ignoredBuiltDependencies`，因为每次安装都要用 node-gyp 编译约 17 秒。它只经由 `@lody/shared` → `dockerode` → `ssh2` 进入工作区；ssh2 在 `try`/`catch` 中加载它来调整加密算法顺序，加载失败时保持默认顺序。CLI 打包产物不引用它。
 
 ## 验证
 
-- 本地逐组用 `--full` 运行，全部通过。三个分片各覆盖 168 个文件；`rest` 跑的正好是原来的包集合去掉 components 和 cli。
+- 本地逐组用 `--full` 运行，全部通过。`components` 与 `cli` 各拆为两个 Vitest 分片，`rest` 依次运行 `test:scripts`、`@lody/site-docs` 与单次启动的 `test:rest` 聚合项目（不含 e2ee-lab），`e2ee-lab` 运行该项目，`electron` 运行 `@lody/electron`。rest 与 e2ee-lab 两组合计运行的 210 个文件与不拆分时相同。`run-ci-tests.test.mjs` 断言全量运行时每个包恰好属于一个组。
 - 拆分和缓存恢复在 CI 上的耗时记录在 PR #992 中。
 
 ## 限制

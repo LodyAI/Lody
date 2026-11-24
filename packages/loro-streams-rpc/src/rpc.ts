@@ -1,3 +1,12 @@
+import { ManagedDaemonUpgradeOptionsSchema, type ManagedDaemonUpgradeOptions } from '@lody/shared';
+import {
+  CodeCollabOpenDiffManifestResponseSchema,
+  CodeCollabReadBlobResponseSchema,
+  type CodeCollabOpenDiffManifestRequest,
+  type CodeCollabOpenDiffManifestResponse,
+  type CodeCollabReadBlobRequest,
+  type CodeCollabReadBlobResponse,
+} from '@lody/shared';
 import {
   AndroidEmulatorRequestSchema,
   AndroidEmulatorResponseSchema,
@@ -7,12 +16,21 @@ import {
   type AndroidEmulatorRemoteResponse,
 } from '@lody/shared';
 import { getAndroidEmulatorViewerSecretContext } from './rpc-secret';
-import { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+import {
+  LocalProjectGitStateRpcResponseSchema,
+  LocalProjectListBranchesRpcResponseSchema as LoroLocalProjectListBranchesRpcResponseSchema,
+  SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema,
+  type LocalProjectListBranchesRpcResponse,
+} from '@lody/shared/local-machine-rpc';
 import {
   SessionWithdrawInputResponseSchema,
   type SessionWithdrawInputResponse,
 } from '@lody/shared/local-machine-rpc';
-import { isE2eeReadQuery, type E2eeQueryResult } from '@lody/shared/e2ee-rpc';
+import {
+  isE2eeReadQuery,
+  isE2eeRemoteControlMethod,
+  type E2eeQueryResult,
+} from '@lody/shared/e2ee-rpc';
 import {
   SessionFileRootIdSchema,
   FileDownloadResponseSchema,
@@ -109,10 +127,6 @@ import type {
   SessionCancelResponse,
   SessionGoalAction,
   SessionGoalResponse,
-  SessionPreparationCancelSpec,
-  SessionPreparationSpec,
-  SessionPrepareCancelResponse,
-  SessionPrepareResponse,
   SessionTerminateResponse,
   SessionDispatchTurnResponse,
   SessionEditAndResendResponse,
@@ -127,10 +141,15 @@ import type {
   SessionPreviewStatusResponse,
   SessionTurnInputConfig,
   SessionHistoryReadResponse,
+  SessionHistoryPublication,
+  SessionHistorySubscription,
+  SessionHistorySubscriptionResponse,
   SessionHistoryWriteOperation,
   SessionHistoryWriteResponse,
   FilePreviewV3Request,
   FilePreviewV3Response,
+  SessionDirectoryListRequest,
+  SessionDirectoryListResponse,
 } from '@lody/shared';
 import {
   AgentConfigIdSchema,
@@ -142,11 +161,11 @@ import {
   FilePreviewV3ErrorCodeSchema,
   FilePreviewV3ErrorSchema,
   FilePreviewV3ResponseSchema,
+  SessionDirectoryListResponseSchema,
   deriveCodeCollabV2ContentKeyBytes,
   deriveCodeCollabV2ContentKeyId,
   LocalProjectControlRequestSchema,
   LocalProjectControlResponseSchema,
-  LocalProjectGitStateSchema,
   MachineAcpBinaryInstallResponseSchema,
   MachineAcpBinaryProgressMessageSchema,
   MachineAcpBinaryStatusResponseSchema,
@@ -164,10 +183,6 @@ import {
   MachinePreviewControlResponseSchema,
   MachineUpgradeResponseSchema,
   SessionCancelResponseSchema,
-  SessionPreparationCancelSpecSchema,
-  SessionPreparationSpecSchema,
-  SessionPrepareCancelResponseSchema,
-  SessionPrepareResponseSchema,
   SessionTerminateResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -184,6 +199,9 @@ import {
   SessionPreviewRevokeResponseSchema,
   SessionPreviewStatusResponseSchema,
   SessionHistoryReadResponseSchema,
+  SessionHistorySubscriptionSchema,
+  SessionHistorySubscriptionResponseSchema,
+  SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS,
   SessionHistoryReadQuerySchema,
   SessionHistoryWriteResponseSchema,
   SessionHistoryWriteOperationSchema,
@@ -293,6 +311,8 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'code-collab/open-text',
   'code-collab/refresh-text',
   'code-collab/save-text',
+  'code-collab/open-diff-manifest',
+  'code-collab/read-blob',
   'code-collab/open-current-diff',
   'code-collab/open-all-changes-diff',
   'code-collab/open-turn-diff',
@@ -303,6 +323,8 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   // plain read and must never activate Code Collab on the machine.
   'file/preview',
   'file/download-chunk',
+  // One folder of the session's own workspace; same envelope and owner check as file/preview.
+  'file/list-dir',
   'session/cancel',
   'session/live-status',
   'session/withdraw-input',
@@ -312,16 +334,16 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/fork',
   'session/edit-and-resend',
   'session/dispatch-turn',
-  'session/prepare',
-  'session/prepare-cancel',
   'session/history-read',
-  'session/history-watch',
+  'session/history-subscribe',
+  'session/history-unsubscribe',
   'session/history-write',
   'session/preview-create',
   'session/preview-revoke',
   'session/preview-status',
   'project/probe-local-member',
   'local-project/git-state',
+  'local-project/list-branches',
   'local-project/control',
 ]);
 
@@ -352,7 +374,12 @@ const BaseRpcRequestSchema = z
 
 export const LoroMachineStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/status'),
-  params: z.object({ includeDisk: z.literal(true).optional() }).strict(),
+  params: z
+    .object({
+      includeDisk: z.literal(true).optional(),
+      includeDaemonUpdate: z.literal(true).optional(),
+    })
+    .strict(),
 }).strict();
 
 export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -392,6 +419,7 @@ export const LoroMachineRestartRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/restart'),
   params: z
     .object({
+      restoreMachineId: z.string().trim().min(1).optional(),
       requesterUserId: z.string().trim().min(1),
       requestToken: z.string().trim().min(1),
       requestId: z.string().trim().min(1),
@@ -407,6 +435,7 @@ export const LoroMachineUpgradeRpcRequestSchema = BaseRpcRequestSchema.extend({
       requestToken: z.string().trim().min(1),
       requestId: z.string().trim().min(1),
       targetVersion: z.string().trim().min(1).optional(),
+      upgrade: ManagedDaemonUpgradeOptionsSchema.optional(),
     })
     .strict(),
 }).strict();
@@ -422,6 +451,7 @@ export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestS
     .object({
       configId: AgentConfigIdSchema,
       force: z.boolean().optional(),
+      readModelOptions: z.literal(true).optional(),
     })
     .strict(),
 }).strict();
@@ -443,6 +473,7 @@ export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.e
         requestId: z.string().trim().min(1).max(1024),
         action: z.literal('start'),
         configId: AgentConfigIdSchema,
+        methodId: z.string().trim().min(1).max(1024).optional(),
       })
       .strict(),
     z
@@ -531,6 +562,16 @@ export const LoroCodeCollabV2SaveTextRpcRequestSchema = BaseRpcRequestSchema.ext
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
+export const LoroCodeCollabOpenDiffManifestRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('code-collab/open-diff-manifest'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
+export const LoroCodeCollabReadBlobRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('code-collab/read-blob'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
 export const LoroCodeCollabV2OpenCurrentDiffRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('code-collab/open-current-diff'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
@@ -587,6 +628,11 @@ export const LoroFilePreviewRpcRequestSchema = BaseRpcRequestSchema.extend({
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
+export const LoroFileListDirRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('file/list-dir'),
+  params: CodeCollabV2RpcContentEnvelopeSchema,
+}).strict();
+
 /**
  * Methods whose params/results travel inside the encrypted owner-session
  * envelope. Every encrypt, decrypt, and error-decode site must consult this —
@@ -598,8 +644,10 @@ export const isOwnerScopedEncryptedRpcMethod = (method: string): boolean =>
   method === 'session/automation-control' ||
   method === 'file/preview' ||
   method === 'file/download-chunk' ||
+  method === 'file/list-dir' ||
   method === 'session/history-read' ||
-  method === 'session/history-watch' ||
+  method === 'session/history-subscribe' ||
+  method === 'session/history-unsubscribe' ||
   method === 'session/history-write';
 
 export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -707,24 +755,14 @@ export const LoroSessionDispatchTurnRpcRequestSchema = BaseRpcRequestSchema.exte
     .strict(),
 }).strict();
 
-export const LoroSessionPrepareRpcRequestSchema = BaseRpcRequestSchema.extend({
-  method: z.literal('session/prepare'),
-  params: SessionPreparationSpecSchema,
-}).strict();
-
-export const LoroSessionPrepareCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
-  method: z.literal('session/prepare-cancel'),
-  params: SessionPreparationCancelSpecSchema,
-}).strict();
-
 /** Roost history payloads are encrypted with the owner-session envelope. */
 export const LoroSessionHistoryReadRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/history-read'),
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
-export const LoroSessionHistoryWatchRpcRequestSchema = BaseRpcRequestSchema.extend({
-  method: z.literal('session/history-watch'),
+const LoroSessionHistorySubscriptionRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.enum(['session/history-subscribe', 'session/history-unsubscribe']),
   params: CodeCollabV2RpcContentEnvelopeSchema,
 }).strict();
 
@@ -734,12 +772,25 @@ export const LoroSessionHistoryWriteRpcRequestSchema = BaseRpcRequestSchema.exte
 }).strict();
 
 export const SessionHistoryReadRpcPayloadSchema = z
-  .object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema })
+  .object({
+    sessionId: SessionIdSchema,
+    query: SessionHistoryReadQuerySchema,
+    readProof: z.string().min(1).max(8192).optional(),
+  })
+  .strict();
+
+export const SessionHistorySubscriptionRpcPayloadSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    readProof: z.string().min(1).max(8192),
+    subscription: SessionHistorySubscriptionSchema,
+  })
   .strict();
 
 export const SessionHistoryWriteRpcPayloadSchema = z
   .object({
     sessionId: SessionIdSchema,
+    writeProof: z.string().min(1).max(8192).optional(),
     operation: SessionHistoryWriteOperationSchema,
     payload: z.record(z.string(), z.unknown()),
   })
@@ -803,6 +854,7 @@ export const LoroSessionPreviewRevokeRpcRequestSchema = BaseRpcRequestSchema.ext
       requestedByUserId: z.string().trim().min(1),
       proof: PreviewControlProofSchema,
       reason: z.string().trim().min(1).optional(),
+      stopProcess: z.boolean().optional(),
     })
     .strict(),
 }).strict();
@@ -823,6 +875,19 @@ export const LoroLocalProjectGitStateRpcRequestSchema = BaseRpcRequestSchema.ext
     .object({
       localProjectId: z.string().trim().min(1),
       requestedByUserId: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
+export const LoroLocalProjectListBranchesRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('local-project/list-branches'),
+  params: z
+    .object({
+      localProjectId: z.string().trim().min(1),
+      requestedByUserId: z.string().trim().min(1),
+      query: z.string().max(256).optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+      cursor: z.string().trim().min(1).max(512).optional(),
     })
     .strict(),
 }).strict();
@@ -856,6 +921,8 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2OpenTextRpcRequestSchema,
   LoroCodeCollabV2RefreshTextRpcRequestSchema,
   LoroCodeCollabV2SaveTextRpcRequestSchema,
+  LoroCodeCollabOpenDiffManifestRpcRequestSchema,
+  LoroCodeCollabReadBlobRpcRequestSchema,
   LoroCodeCollabV2OpenCurrentDiffRpcRequestSchema,
   LoroCodeCollabV2OpenAllChangesDiffRpcRequestSchema,
   LoroCodeCollabV2OpenTurnDiffRpcRequestSchema,
@@ -864,6 +931,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroCodeCollabV2LspReferencesRpcRequestSchema,
   LoroFilePreviewRpcRequestSchema,
   LoroFileDownloadRpcRequestSchema,
+  LoroFileListDirRpcRequestSchema,
   LoroSessionCancelRpcRequestSchema,
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionWithdrawInputRpcRequestSchema,
@@ -873,10 +941,8 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionForkRpcRequestSchema,
   LoroSessionEditAndResendRpcRequestSchema,
   LoroSessionDispatchTurnRpcRequestSchema,
-  LoroSessionPrepareRpcRequestSchema,
-  LoroSessionPrepareCancelRpcRequestSchema,
   LoroSessionHistoryReadRpcRequestSchema,
-  LoroSessionHistoryWatchRpcRequestSchema,
+  LoroSessionHistorySubscriptionRpcRequestSchema,
   LoroSessionHistoryWriteRpcRequestSchema,
   LoroSessionPreviewCreateRpcRequestSchema,
   LoroSessionPreviewRevokeRpcRequestSchema,
@@ -885,35 +951,17 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroAndroidEmulatorRpcRequestSchema,
   LoroProjectProbeLocalMemberRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
+  LoroLocalProjectListBranchesRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
 ]);
 
-export { SessionLiveStatusResponseSchema as LoroSessionLiveStatusRpcResponseSchema } from '@lody/shared/local-machine-rpc';
+export {
+  LoroLocalProjectListBranchesRpcResponseSchema,
+  LoroSessionLiveStatusRpcResponseSchema,
+  type LocalProjectListBranchesRpcResponse,
+};
 
-export const LoroLocalProjectGitStateRpcResponseSchema = z.discriminatedUnion('success', [
-  z
-    .object({
-      type: z.literal('local-project/git-state_response'),
-      machineId: z.string().trim().min(1),
-      workspaceId: z.string().trim().min(1),
-      localProjectId: z.string().trim().min(1),
-      success: z.literal(true),
-      state: LocalProjectGitStateSchema,
-      observedAtMs: z.number().nonnegative(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('local-project/git-state_response'),
-      machineId: z.string().trim().min(1),
-      workspaceId: z.string().trim().min(1),
-      localProjectId: z.string().trim().min(1),
-      success: z.literal(false),
-      error: z.string().trim().min(1),
-      message: z.string().trim().min(1).optional(),
-    })
-    .strict(),
-]);
+export const LoroLocalProjectGitStateRpcResponseSchema = LocalProjectGitStateRpcResponseSchema;
 
 const BaseRpcResponseSchema = z
   .object({
@@ -998,10 +1046,6 @@ export type LoroSessionForkRpcRequest = z.infer<typeof LoroSessionForkRpcRequest
 export type LoroSessionEditAndResendRpcRequest = z.infer<
   typeof LoroSessionEditAndResendRpcRequestSchema
 >;
-export type LoroSessionPrepareRpcRequest = z.infer<typeof LoroSessionPrepareRpcRequestSchema>;
-export type LoroSessionPrepareCancelRpcRequest = z.infer<
-  typeof LoroSessionPrepareCancelRpcRequestSchema
->;
 export type LoroSessionHistoryReadRpcRequest = z.infer<
   typeof LoroSessionHistoryReadRpcRequestSchema
 >;
@@ -1016,6 +1060,9 @@ export type LoroSessionPreviewRevokeRpcRequest = z.infer<
 >;
 export type LoroLocalProjectGitStateRpcRequest = z.infer<
   typeof LoroLocalProjectGitStateRpcRequestSchema
+>;
+export type LoroLocalProjectListBranchesRpcRequest = z.infer<
+  typeof LoroLocalProjectListBranchesRpcRequestSchema
 >;
 export type LoroLocalProjectControlRpcRequest = z.infer<
   typeof LoroLocalProjectControlRpcRequestSchema
@@ -1697,6 +1744,8 @@ const base64UrlToBytes = (value: string): Uint8Array => {
 };
 
 export type LoroMachineRpcResult =
+  | CodeCollabOpenDiffManifestResponse
+  | CodeCollabReadBlobResponse
   | RemoteAutomationHandshake
   | RemoteAutomationRpcResult
   | RemoteAutomationEncryptedResponse
@@ -1709,6 +1758,7 @@ export type LoroMachineRpcResult =
   | CodeCollabV2Error
   | FilePreviewV3Response
   | FileDownloadResponse
+  | SessionDirectoryListResponse
   | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
@@ -1728,9 +1778,8 @@ export type LoroMachineRpcResult =
   | SessionForkResponse
   | SessionEditAndResendResponse
   | SessionDispatchTurnResponse
-  | SessionPrepareResponse
-  | SessionPrepareCancelResponse
   | SessionHistoryReadResponse
+  | SessionHistorySubscriptionResponse
   | SessionHistoryWriteResponse
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
@@ -1739,10 +1788,11 @@ export type LoroMachineRpcResult =
   | AndroidEmulatorRemoteResponse
   | ProjectProbeLocalMemberResult
   | LocalProjectGitStateRpcResponse
+  | LocalProjectListBranchesRpcResponse
   | LocalProjectControlResponse;
 
 const historyRpcFailureResponse = (
-  method: 'session/history-read' | 'session/history-watch' | 'session/history-write',
+  method: 'session/history-read' | 'session/history-write',
   context: { sessionId: string; operation?: SessionHistoryWriteOperation } | undefined,
   error: LoroStreamsRpcError,
   failure?: SessionHistoryRpcFailure
@@ -1753,7 +1803,7 @@ const historyRpcFailureResponse = (
     error: `${error.code}: ${error.message}`,
     ...(failure ? { rpcFailure: failure } : {}),
   };
-  return method === 'session/history-read' || method === 'session/history-watch'
+  return method === 'session/history-read'
     ? { ...common, type: 'session/history-read_response' }
     : {
         ...common,
@@ -1786,7 +1836,6 @@ const toLegacyRpcErrorResponse = (
     type?: LocalProjectControlRequest['type'];
   },
   dispatchContext?: { sessionId: string; userTurnId: string },
-  preparationContext?: { preparationId: string; sessionId: string },
   historyContext?: { sessionId: string; operation?: SessionHistoryWriteOperation },
   historyFailure?: SessionHistoryRpcFailure
 ): LoroMachineRpcResult => {
@@ -2006,33 +2055,7 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
-  if (method === 'session/prepare') {
-    return {
-      type: 'session/prepare_response',
-      preparationId: preparationContext?.preparationId ?? '',
-      sessionId: (preparationContext?.sessionId ?? '') as SessionPrepareResponse['sessionId'],
-      accepted: false,
-      disposition: 'error',
-      error: `${error.code}: ${error.message}`,
-    };
-  }
-
-  if (method === 'session/prepare-cancel') {
-    return {
-      type: 'session/prepare-cancel_response',
-      preparationId: preparationContext?.preparationId ?? '',
-      sessionId: (preparationContext?.sessionId ?? '') as SessionPrepareCancelResponse['sessionId'],
-      cancelled: false,
-      disposition: 'error',
-      error: `${error.code}: ${error.message}`,
-    };
-  }
-
-  if (
-    method === 'session/history-read' ||
-    method === 'session/history-watch' ||
-    method === 'session/history-write'
-  ) {
+  if (method === 'session/history-read' || method === 'session/history-write') {
     return historyRpcFailureResponse(method, historyContext, error, historyFailure);
   }
 
@@ -2041,7 +2064,7 @@ const toLegacyRpcErrorResponse = (
     return parsed.success ? parsed.data : { status: 'error', code: 'transient_io' };
   }
 
-  if (method === 'file/preview') {
+  if (method === 'file/preview' || method === 'file/list-dir') {
     const parsedData = FilePreviewV3ErrorSchema.safeParse(error.data);
     if (parsedData.success) {
       return {
@@ -2116,6 +2139,18 @@ const toLegacyRpcErrorResponse = (
   if (method === 'local-project/git-state') {
     return {
       type: 'local-project/git-state_response',
+      machineId,
+      workspaceId: localProjectContext?.workspaceId ?? '',
+      localProjectId: (localProjectContext?.localProjectId ?? '') as LocalProjectId,
+      success: false,
+      error: error.code,
+      message: error.message,
+    };
+  }
+
+  if (method === 'local-project/list-branches') {
+    return {
+      type: 'local-project/list-branches_response',
       machineId,
       workspaceId: localProjectContext?.workspaceId ?? '',
       localProjectId: (localProjectContext?.localProjectId ?? '') as LocalProjectId,
@@ -2254,14 +2289,6 @@ const parseRpcSuccessResult = async (
     const parsed = SessionDispatchTurnResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionDispatchTurnResponse) : null;
   }
-  if (response.method === 'session/prepare') {
-    const parsed = SessionPrepareResponseSchema.safeParse(response.result);
-    return parsed.success ? (parsed.data as SessionPrepareResponse) : null;
-  }
-  if (response.method === 'session/prepare-cancel') {
-    const parsed = SessionPrepareCancelResponseSchema.safeParse(response.result);
-    return parsed.success ? (parsed.data as SessionPrepareCancelResponse) : null;
-  }
   if (isOwnerScopedEncryptedRpcMethod(response.method)) {
     const envelope = CodeCollabV2RpcContentEnvelopeSchema.safeParse(response.result);
     if (!envelope.success) {
@@ -2275,9 +2302,16 @@ const parseRpcSuccessResult = async (
       const parsed = remoteAutomationEncryptedResponseSchema.safeParse(decrypted);
       return parsed.success ? parsed.data : null;
     }
-    if (response.method === 'session/history-read' || response.method === 'session/history-watch') {
+    if (response.method === 'session/history-read') {
       const parsed = SessionHistoryReadResponseSchema.safeParse(decrypted);
       return parsed.success ? (parsed.data as SessionHistoryReadResponse) : null;
+    }
+    if (
+      response.method === 'session/history-subscribe' ||
+      response.method === 'session/history-unsubscribe'
+    ) {
+      const parsed = SessionHistorySubscriptionResponseSchema.safeParse(decrypted);
+      return parsed.success ? (parsed.data as SessionHistorySubscriptionResponse) : null;
     }
     if (response.method === 'session/history-write') {
       const parsed = SessionHistoryWriteResponseSchema.safeParse(decrypted);
@@ -2290,6 +2324,23 @@ const parseRpcSuccessResult = async (
     if (response.method === 'file/preview') {
       const previewParsed = FilePreviewV3ResponseSchema.safeParse(decrypted);
       return previewParsed.success ? previewParsed.data : null;
+    }
+    if (response.method === 'file/list-dir') {
+      const listParsed = SessionDirectoryListResponseSchema.safeParse(decrypted);
+      return listParsed.success ? listParsed.data : null;
+    }
+    if (
+      response.method === 'code-collab/open-diff-manifest' ||
+      response.method === 'code-collab/read-blob'
+    ) {
+      const schema =
+        response.method === 'code-collab/read-blob'
+          ? CodeCollabReadBlobResponseSchema
+          : CodeCollabOpenDiffManifestResponseSchema;
+      const parsed = schema.safeParse(decrypted);
+      if (parsed.success) return parsed.data;
+      const error = CodeCollabV2ErrorSchema.safeParse(decrypted);
+      return error.success ? error.data : null;
     }
     const parsed = CodeCollabV2RpcResponseSchema.safeParse(decrypted);
     return parsed.success ? parsed.data : null;
@@ -2317,6 +2368,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'local-project/git-state') {
     const parsed = LoroLocalProjectGitStateRpcResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as LocalProjectGitStateRpcResponse) : null;
+  }
+  if (response.method === 'local-project/list-branches') {
+    const parsed = LoroLocalProjectListBranchesRpcResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as LocalProjectListBranchesRpcResponse) : null;
   }
   if (response.method === 'local-project/control') {
     const parsed = LocalProjectControlResponseSchema.safeParse(response.result);
@@ -2351,11 +2406,15 @@ export type LoroStreamsRpcPendingRegistration = {
     type?: LocalProjectControlRequest['type'];
   };
   dispatchContext?: { sessionId: string; userTurnId: string };
-  preparationContext?: { preparationId: string; sessionId: string };
   historyContext?: { sessionId: string; operation?: SessionHistoryWriteOperation };
   codeCollabOwnerSessionId?: string;
   onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   onAcpAuthenticationProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
+  historySubscription?: {
+    sessionId: SessionId;
+    id: string;
+    onPublication?: (publication: SessionHistoryPublication) => void;
+  };
   startedAtMs: number;
 };
 
@@ -2388,6 +2447,8 @@ export class LoroStreamsRpcResponseDispatcher {
   private lastReportedTransport: LoroStreamsLiveTransport | undefined;
   private startedPromise: Promise<void> | null = null;
   private stopped = false;
+  private readonly shouldPrecreateResponseStream: boolean;
+  private responseStreamEnsured = false;
   private responseRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
   private responseRecoveryAtMs: number | undefined;
 
@@ -2405,8 +2466,11 @@ export class LoroStreamsRpcResponseDispatcher {
        * keep the stream client's static `liveMode`.
        */
       liveModePolicy?: LoroStreamsLiveModePolicy;
+      precreateResponseStream?: boolean;
     }
   ) {
+    this.shouldPrecreateResponseStream =
+      options.responseStreamId === undefined || options.precreateResponseStream === true;
     this.responseStreamId =
       options.responseStreamId ??
       `${getLoroWorkspaceRpcResponseStreamId(options.workspaceId)}:${crypto.randomUUID()}`;
@@ -2494,7 +2558,6 @@ export class LoroStreamsRpcResponseDispatcher {
       if (
         pending?.historyContext &&
         (registration.method === 'session/history-read' ||
-          registration.method === 'session/history-watch' ||
           registration.method === 'session/history-write')
       ) {
         pending.resolve(
@@ -2681,6 +2744,13 @@ export class LoroStreamsRpcResponseDispatcher {
       this.stopController.signal.addEventListener('abort', onStop, { once: true });
       this.currentReadController = readController;
       try {
+        if (this.shouldPrecreateResponseStream && !this.responseStreamEnsured) {
+          await this.options.streamClient.ensureJsonStream(
+            this.responseStreamId,
+            this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+          );
+          this.responseStreamEnsured = true;
+        }
         await this.options.streamClient.readJsonLive(
           this.responseStreamId,
           this.responseState,
@@ -2754,6 +2824,12 @@ export class LoroStreamsRpcResponseDispatcher {
       return;
     }
 
+    if (
+      pending.historySubscription &&
+      (pending.method !== parsed.data.method || pending.machineId !== parsed.data.machineId)
+    )
+      return;
+
     // The live stream is delivering responses; clear the starvation counter.
     this.liveModePolicy?.noteResponseReceived();
 
@@ -2770,6 +2846,36 @@ export class LoroStreamsRpcResponseDispatcher {
           : receivedAtMs - pending.appendFinishedAtMs,
       responseStreamId: this.responseStreamId,
     });
+
+    if (pending.historySubscription) {
+      const subscription = pending.historySubscription;
+      const result = parsed.data.error
+        ? ({
+            type: 'session/history-subscription_response',
+            sessionId: subscription.sessionId,
+            subscriptionId: subscription.id,
+            event: 'closed',
+            error: parsed.data.error.code,
+          } as const)
+        : await parseRpcSuccessResult(parsed.data, pending.codeCollabOwnerSessionId).catch(
+            () => null
+          );
+      if (
+        this.pending.get(parsed.data.id) !== pending ||
+        !result ||
+        !('type' in result) ||
+        result.type !== 'session/history-subscription_response' ||
+        result.sessionId !== subscription.sessionId ||
+        result.subscriptionId !== subscription.id
+      )
+        return;
+      if (result.event === 'publication') {
+        subscription.onPublication?.(result.publication);
+      } else {
+        this.takePending(parsed.data.id)?.resolve(result);
+      }
+      return;
+    }
 
     if (!parsed.data.error) {
       const progress = MachineAcpBinaryProgressMessageSchema.safeParse(parsed.data.result);
@@ -2838,7 +2944,6 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
-          finalPending.preparationContext,
           finalPending.historyContext,
           {
             source: error === parsed.data.error ? 'remote' : 'protocol',
@@ -2878,7 +2983,6 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
-          finalPending.preparationContext,
           finalPending.historyContext,
           {
             source: 'protocol',
@@ -2946,6 +3050,7 @@ export class LoroStreamsMachineRpcClient {
         retentionSeconds: options.retentionSeconds,
         logLabel: options.machineId,
         trace: options.trace,
+        precreateResponseStream: options.streamClient !== undefined,
       });
     this.ownsResponseDispatcher = options.responseDispatcher === undefined;
   }
@@ -2970,11 +3075,15 @@ export class LoroStreamsMachineRpcClient {
     timeoutMs?: number;
     /** Only for daemons advertising `machineDiskStatus`; older ones reject it. */
     includeDisk?: boolean;
+    includeDaemonUpdate?: boolean;
   }): Promise<MachineStatusResponse | null> {
     return (await this.sendRequest({
       method: 'machine/status',
       timeoutMs: options?.timeoutMs ?? 30_000,
-      params: options?.includeDisk ? { includeDisk: true as const } : {},
+      params: {
+        ...(options?.includeDisk ? { includeDisk: true as const } : {}),
+        ...(options?.includeDaemonUpdate ? { includeDaemonUpdate: true as const } : {}),
+      },
     })) as MachineStatusResponse | null;
   }
 
@@ -3044,6 +3153,7 @@ export class LoroStreamsMachineRpcClient {
   }
 
   async requestMachineRestart(options: {
+    restoreMachineId?: string;
     requesterUserId: string;
     requestToken: string;
     requestId: string;
@@ -3056,6 +3166,7 @@ export class LoroStreamsMachineRpcClient {
         requesterUserId: options.requesterUserId,
         requestToken: options.requestToken,
         requestId: options.requestId,
+        ...(options.restoreMachineId ? { restoreMachineId: options.restoreMachineId } : {}),
       },
     })) as MachineRestartResponse | null;
   }
@@ -3065,16 +3176,18 @@ export class LoroStreamsMachineRpcClient {
     requestToken: string;
     requestId: string;
     targetVersion?: string;
+    upgrade?: ManagedDaemonUpgradeOptions;
     timeoutMs?: number;
   }): Promise<MachineUpgradeResponse | null> {
     return (await this.sendRequest({
       method: 'machine/upgrade',
-      timeoutMs: options.timeoutMs ?? 30_000,
+      timeoutMs: options.timeoutMs ?? (options.upgrade ? 12 * 60_000 : 30_000),
       params: {
         requesterUserId: options.requesterUserId,
         requestToken: options.requestToken,
         requestId: options.requestId,
         targetVersion: options.targetVersion,
+        upgrade: options.upgrade,
       },
     })) as MachineUpgradeResponse | null;
   }
@@ -3092,6 +3205,8 @@ export class LoroStreamsMachineRpcClient {
   async requestMachineAcpCapabilitiesRefresh(options: {
     configId: AgentConfigId;
     force?: boolean;
+    /** Only for a daemon that advertised `acpModelOptionsRead`; its params are strict. */
+    readModelOptions?: true;
     onProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -3104,6 +3219,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         configId: options.configId,
         ...(options.force ? { force: true } : {}),
+        ...(options.readModelOptions ? { readModelOptions: true } : {}),
       },
     })) as MachineAcpCapabilitiesRefreshResponse | null;
   }
@@ -3496,21 +3612,49 @@ export class LoroStreamsMachineRpcClient {
 
   async requestSessionHistoryRead(options: {
     sessionId: SessionId;
+    readProof?: string;
     query: SessionHistoryReadQuery;
     ownerSessionId?: string;
     timeoutMs?: number;
   }): Promise<SessionHistoryRpcReadResponse | null> {
     return (await this.sendRequest({
-      method:
-        options.query.kind === 'watchChanges' ? 'session/history-watch' : 'session/history-read',
-      timeoutMs: options.timeoutMs ?? (options.query.kind === 'watchChanges' ? 45_000 : 30_000),
+      method: 'session/history-read',
+      timeoutMs: options.timeoutMs ?? 30_000,
       ownerSessionId: options.ownerSessionId ?? options.sessionId,
-      params: { sessionId: options.sessionId, query: options.query },
+      params: {
+        sessionId: options.sessionId,
+        query: options.query,
+        ...(options.readProof ? { readProof: options.readProof } : {}),
+      },
     })) as SessionHistoryRpcReadResponse | null;
+  }
+
+  async requestSessionHistorySubscription(options: {
+    sessionId: SessionId;
+    readProof: string;
+    subscription: SessionHistorySubscription;
+    ownerSessionId?: string;
+    signal?: AbortSignal;
+    onPublication?: (publication: SessionHistoryPublication) => void;
+  }): Promise<SessionHistorySubscriptionResponse | null> {
+    const { sessionId, readProof, subscription, signal, onPublication } = options;
+    return (await this.sendRequest({
+      method:
+        subscription.action === 'open'
+          ? 'session/history-subscribe'
+          : 'session/history-unsubscribe',
+      timeoutMs: subscription.action === 'open' ? SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS : 10_000,
+      ownerSessionId: options.ownerSessionId ?? sessionId,
+      params: { sessionId, readProof, subscription },
+      signal,
+      onPublication,
+    })) as SessionHistorySubscriptionResponse | null;
   }
 
   async requestSessionHistoryWrite(options: {
     sessionId: SessionId;
+    writeProof?: string;
+    requestId?: string;
     ownerSessionId?: string;
     operation: SessionHistoryWriteOperation;
     payload: Record<string, unknown>;
@@ -3518,10 +3662,12 @@ export class LoroStreamsMachineRpcClient {
   }): Promise<SessionHistoryRpcWriteResponse | null> {
     return (await this.sendRequest({
       method: 'session/history-write',
+      requestId: options.requestId,
       timeoutMs: options.timeoutMs ?? 30_000,
       ownerSessionId: options.ownerSessionId ?? options.sessionId,
       params: {
         sessionId: options.sessionId,
+        ...(options.writeProof ? { writeProof: options.writeProof } : {}),
         operation: options.operation,
         payload: options.payload,
       },
@@ -3557,6 +3703,26 @@ export class LoroStreamsMachineRpcClient {
       ownerSessionId: ownerSessionId ?? options.sessionId,
       params,
     })) as FileDownloadResponse | null;
+  }
+
+  /** One folder of the session's own workspace (capability `sessionDirectoryListing`). */
+  async requestSessionDirectoryList(
+    options: Omit<SessionDirectoryListRequest, 'v'> & {
+      ownerSessionId?: string;
+      timeoutMs?: number;
+    }
+  ): Promise<SessionDirectoryListResponse | null> {
+    return (await this.sendRequest({
+      method: 'file/list-dir',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      ownerSessionId: options.ownerSessionId ?? options.sessionId,
+      params: {
+        v: FILE_PREVIEW_PROTOCOL_VERSION,
+        sessionId: options.sessionId,
+        path: options.path,
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+      },
+    })) as SessionDirectoryListResponse | null;
   }
 
   async requestFilePreview(
@@ -3611,6 +3777,30 @@ export class LoroStreamsMachineRpcClient {
         ...(options.format === undefined ? {} : { format: options.format }),
       },
     })) as CodeCollabV2SaveTextResponse | CodeCollabV2Error | null;
+  }
+
+  async requestCodeCollabOpenDiffManifest(
+    options: CodeCollabOpenDiffManifestRequest & { ownerSessionId?: string; timeoutMs?: number }
+  ): Promise<CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null> {
+    const { ownerSessionId, timeoutMs, ...params } = options;
+    return (await this.sendRequest({
+      method: 'code-collab/open-diff-manifest',
+      ownerSessionId: ownerSessionId ?? options.sessionId,
+      params,
+      timeoutMs: timeoutMs ?? 30_000,
+    })) as CodeCollabOpenDiffManifestResponse | CodeCollabV2Error | null;
+  }
+
+  async requestCodeCollabReadBlob(
+    options: CodeCollabReadBlobRequest & { ownerSessionId?: string; timeoutMs?: number }
+  ): Promise<CodeCollabReadBlobResponse | CodeCollabV2Error | null> {
+    const { ownerSessionId, timeoutMs, ...params } = options;
+    return (await this.sendRequest({
+      method: 'code-collab/read-blob',
+      ownerSessionId: ownerSessionId ?? options.sessionId,
+      params,
+      timeoutMs: timeoutMs ?? 30_000,
+    })) as CodeCollabReadBlobResponse | CodeCollabV2Error | null;
   }
 
   async requestCodeCollabOpenCurrentDiff(
@@ -3825,6 +4015,7 @@ export class LoroStreamsMachineRpcClient {
     requestedByUserId: string;
     proof: PreviewControlProof;
     reason?: string;
+    stopProcess?: boolean;
     timeoutMs?: number;
   }): Promise<SessionPreviewRevokeResponse | null> {
     return (await this.sendRequest({
@@ -3835,6 +4026,7 @@ export class LoroStreamsMachineRpcClient {
         requestedByUserId: options.requestedByUserId,
         proof: options.proof,
         reason: options.reason,
+        ...(options.stopProcess ? { stopProcess: true } : {}),
       },
     })) as SessionPreviewRevokeResponse | null;
   }
@@ -3867,6 +4059,29 @@ export class LoroStreamsMachineRpcClient {
         requestedByUserId: options.requestedByUserId,
       },
     })) as LocalProjectGitStateRpcResponse | null;
+  }
+
+  async requestLocalProjectBranches(options: {
+    localProjectId: LocalProjectId;
+    requestedByUserId: string;
+    query?: string;
+    limit?: number;
+    cursor?: string;
+    timeoutMs?: number;
+  }): Promise<LocalProjectListBranchesRpcResponse | null> {
+    const trimmedQuery = options.query?.trim();
+    const trimmedCursor = options.cursor?.trim();
+    return (await this.sendRequest({
+      method: 'local-project/list-branches',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: {
+        localProjectId: options.localProjectId,
+        requestedByUserId: options.requestedByUserId,
+        ...(trimmedQuery ? { query: trimmedQuery } : {}),
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+        ...(trimmedCursor ? { cursor: trimmedCursor } : {}),
+      },
+    })) as LocalProjectListBranchesRpcResponse | null;
   }
 
   async requestLocalProjectControl(options: {
@@ -3905,7 +4120,7 @@ export class LoroStreamsMachineRpcClient {
       | {
           method: 'machine/status';
           timeoutMs: number;
-          params: { includeDisk?: true };
+          params: { includeDisk?: true; includeDaemonUpdate?: true };
         }
       | {
           method: 'machine/preview-control' | 'machine/automation-control';
@@ -3936,6 +4151,7 @@ export class LoroStreamsMachineRpcClient {
             requestToken: string;
             requestId: string;
             targetVersion?: string;
+            upgrade?: ManagedDaemonUpgradeOptions;
           };
         }
       | {
@@ -4084,23 +4300,26 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
-          method: 'session/prepare';
-          timeoutMs: number;
-          params: SessionPreparationSpec;
-        }
-      | {
-          method: 'session/prepare-cancel';
-          timeoutMs: number;
-          params: SessionPreparationCancelSpec;
-        }
-      | {
-          method: 'session/history-read' | 'session/history-watch';
+          method: 'session/history-read';
           timeoutMs: number;
           ownerSessionId: string;
-          params: { sessionId: SessionId; query: SessionHistoryReadQuery };
+          params: { sessionId: SessionId; readProof?: string; query: SessionHistoryReadQuery };
+        }
+      | {
+          method: 'session/history-subscribe' | 'session/history-unsubscribe';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: {
+            sessionId: SessionId;
+            readProof: string;
+            subscription: SessionHistorySubscription;
+          };
+          signal?: AbortSignal;
+          onPublication?: (publication: SessionHistoryPublication) => void;
         }
       | {
           method: 'session/history-write';
+          requestId?: string;
           timeoutMs: number;
           ownerSessionId: string;
           params: {
@@ -4126,6 +4345,18 @@ export class LoroStreamsMachineRpcClient {
           timeoutMs: number;
           ownerSessionId: string;
           params: CodeCollabV2SaveTextRequest;
+        }
+      | {
+          method: 'code-collab/open-diff-manifest';
+          params: CodeCollabOpenDiffManifestRequest;
+          ownerSessionId: string;
+          timeoutMs: number;
+        }
+      | {
+          method: 'code-collab/read-blob';
+          params: CodeCollabReadBlobRequest;
+          ownerSessionId: string;
+          timeoutMs: number;
         }
       | {
           method: 'code-collab/open-current-diff';
@@ -4174,6 +4405,12 @@ export class LoroStreamsMachineRpcClient {
           timeoutMs: number;
           ownerSessionId: string;
           params: FilePreviewV3Request;
+        }
+      | {
+          method: 'file/list-dir';
+          timeoutMs: number;
+          ownerSessionId: string;
+          params: SessionDirectoryListRequest;
         }
       | {
           method: 'session/automation-control';
@@ -4244,6 +4481,17 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'local-project/list-branches';
+          timeoutMs: number;
+          params: {
+            localProjectId: LocalProjectId;
+            requestedByUserId: string;
+            query?: string;
+            limit?: number;
+            cursor?: string;
+          };
+        }
+      | {
           method: 'local-project/control';
           timeoutMs: number;
           params: {
@@ -4252,16 +4500,29 @@ export class LoroStreamsMachineRpcClient {
         }
   ): Promise<LoroMachineRpcResult | null> {
     if (this.stopped) return null;
-    if (this.options.encryptedQuery && !isE2eeReadQuery(args.method, args.params))
+    if (
+      this.options.encryptedQuery &&
+      !isE2eeReadQuery(args.method, args.params) &&
+      !isE2eeRemoteControlMethod(args.method)
+    )
       throw new Error('e2ee_rpc_unavailable');
     await this.start();
     if (this.stopped) return null;
 
     const abortSignal =
-      args.method === 'machine/acp-capabilities-refresh' ? args.signal : undefined;
+      args.method === 'machine/acp-capabilities-refresh' ||
+      args.method === 'session/history-subscribe'
+        ? args.signal
+        : undefined;
+    const cancellable =
+      args.method === 'machine/acp-capabilities-refresh' ||
+      args.method === 'session/history-subscribe';
     if (abortSignal?.aborted) return null;
 
-    const requestId = crypto.randomUUID();
+    const requestId =
+      args.method === 'session/history-write'
+        ? (args.requestId ?? crypto.randomUUID())
+        : crypto.randomUUID();
     const timeoutMs = Math.max(0, args.timeoutMs);
     const now = Math.round(this.options.now?.() ?? Date.now());
     const startedAtMs = Date.now();
@@ -4270,6 +4531,8 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/open-text' ||
       args.method === 'code-collab/refresh-text' ||
       args.method === 'code-collab/save-text' ||
+      args.method === 'code-collab/open-diff-manifest' ||
+      args.method === 'code-collab/read-blob' ||
       args.method === 'code-collab/open-current-diff' ||
       args.method === 'code-collab/open-all-changes-diff' ||
       args.method === 'code-collab/open-turn-diff' ||
@@ -4278,8 +4541,10 @@ export class LoroStreamsMachineRpcClient {
       args.method === 'code-collab/lsp-references' ||
       args.method === 'file/preview' ||
       args.method === 'file/download-chunk' ||
+      args.method === 'file/list-dir' ||
       args.method === 'session/history-read' ||
-      args.method === 'session/history-watch' ||
+      args.method === 'session/history-subscribe' ||
+      args.method === 'session/history-unsubscribe' ||
       args.method === 'session/automation-control' ||
       args.method === 'session/history-write'
         ? args.ownerSessionId
@@ -4346,13 +4611,6 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'session/dispatch-turn'
           ? { sessionId: args.params.sessionId, userTurnId: args.params.userTurnId }
           : undefined,
-      preparationContext:
-        args.method === 'session/prepare' || args.method === 'session/prepare-cancel'
-          ? {
-              preparationId: args.params.preparationId,
-              sessionId: args.params.sessionId,
-            }
-          : undefined,
       previewContext:
         args.method === 'session/preview-create' ||
         args.method === 'session/preview-revoke' ||
@@ -4363,15 +4621,13 @@ export class LoroStreamsMachineRpcClient {
           ? { sessionId: args.params.sessionId }
           : undefined,
       localProjectContext:
-        args.method === 'local-project/git-state'
+        args.method === 'local-project/git-state' || args.method === 'local-project/list-branches'
           ? { workspaceId: this.options.workspaceId, localProjectId: args.params.localProjectId }
           : args.method === 'local-project/control'
             ? { type: args.params.request.type }
             : undefined,
       historyContext:
-        args.method === 'session/history-read' ||
-        args.method === 'session/history-watch' ||
-        args.method === 'session/history-write'
+        args.method === 'session/history-read' || args.method === 'session/history-write'
           ? {
               sessionId: args.params.sessionId,
               ...(args.method === 'session/history-write'
@@ -4380,6 +4636,14 @@ export class LoroStreamsMachineRpcClient {
             }
           : undefined,
       codeCollabOwnerSessionId,
+      historySubscription:
+        args.method === 'session/history-subscribe' || args.method === 'session/history-unsubscribe'
+          ? {
+              sessionId: args.params.sessionId,
+              id: args.params.subscription.id,
+              onPublication: args.onPublication,
+            }
+          : undefined,
       onAcpBinaryProgress:
         args.method === 'machine/acp-capabilities-refresh' ||
         args.method === 'machine/acp-binary-install'
@@ -4396,7 +4660,15 @@ export class LoroStreamsMachineRpcClient {
     const appendCancellation = (): void => {
       if (cancellationAppended) return;
       cancellationAppended = true;
-      void this.appendMachineAcpCapabilitiesRefreshCancel(requestId).catch(() => undefined);
+      if (args.method === 'session/history-subscribe') {
+        void this.requestSessionHistorySubscription({
+          ...args.params,
+          ownerSessionId: args.ownerSessionId,
+          subscription: { action: 'close', id: args.params.subscription.id },
+        }).catch(() => undefined);
+      } else {
+        void this.appendMachineAcpCapabilitiesRefreshCancel(requestId).catch(() => undefined);
+      }
     };
     const handleAbort = (): void => {
       const pending = this.responseDispatcher.takePending(requestId);
@@ -4435,7 +4707,7 @@ export class LoroStreamsMachineRpcClient {
           request = {
             ...envelope,
             method: args.method,
-            params: args.params.includeDisk ? { includeDisk: true } : {},
+            params: args.params,
           };
           break;
         case 'machine/preview-control':
@@ -4500,14 +4772,9 @@ export class LoroStreamsMachineRpcClient {
         case 'session/dispatch-turn':
           request = { ...envelope, method: args.method, params: args.params };
           break;
-        case 'session/prepare':
-          request = { ...envelope, method: args.method, params: args.params };
-          break;
-        case 'session/prepare-cancel':
-          request = { ...envelope, method: args.method, params: args.params };
-          break;
         case 'session/history-read':
-        case 'session/history-watch':
+        case 'session/history-subscribe':
+        case 'session/history-unsubscribe':
         case 'session/history-write':
           request = {
             ...envelope,
@@ -4536,6 +4803,8 @@ export class LoroStreamsMachineRpcClient {
             params: await encryptCodeCollabV2RpcPayload(args.ownerSessionId, args.params),
           };
           break;
+        case 'code-collab/open-diff-manifest':
+        case 'code-collab/read-blob':
         case 'code-collab/open-current-diff':
           request = {
             ...envelope,
@@ -4580,6 +4849,7 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'file/download-chunk':
         case 'file/preview':
+        case 'file/list-dir':
           request = {
             ...envelope,
             method: args.method,
@@ -4608,6 +4878,7 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'project/probe-local-member':
         case 'local-project/git-state':
+        case 'local-project/list-branches':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'local-project/control':
@@ -4660,7 +4931,7 @@ export class LoroStreamsMachineRpcClient {
         promise.then((result) => ({ type: 'response' as const, result })),
       ]);
       if (firstSettled.type === 'response') {
-        if (firstSettled.result === null && args.method === 'machine/acp-capabilities-refresh') {
+        if (firstSettled.result === null && cancellable) {
           cancellationRequested = true;
           if (requestAppended) {
             appendCancellation();
@@ -4677,11 +4948,7 @@ export class LoroStreamsMachineRpcClient {
       }
 
       const result = await promise;
-      if (
-        result === null &&
-        requestAppended &&
-        args.method === 'machine/acp-capabilities-refresh'
-      ) {
+      if (result === null && requestAppended && cancellable) {
         cancellationRequested = true;
         appendCancellation();
       }
@@ -4723,7 +4990,6 @@ export class LoroStreamsMachineRpcClient {
         pending.previewContext,
         pending.localProjectContext,
         pending.dispatchContext,
-        pending.preparationContext,
         pending.historyContext,
         {
           source: 'transport',

@@ -8,6 +8,8 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   verification and existing genuine-view proof/permission gates. Proof is consent,
   not account identity or admission. Producer genesis bytes do not prove publication,
   endpoint freshness, key durability or recovery backup.
+- A ledger user ID is the frozen `accountUserId` encoding of an account ID; never change its
+  layout. See [the decision](../../../../../.agents/notes/implemented/architecture/2026-11-06-e2ee-ledger-user-id.md).
 - Preserve nullable join expiry; no new strict deadline claim or ordinary tolerance
   change. Reject obsolete RemoveMember/tag2; tag8 retains Owner-personal atomic removal/rotation. Capability 1 declares tag10
   removal: Owner removes non-Owner; Admin removes only Member/Guest. Preserve epoch,
@@ -37,7 +39,7 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   historical replay and rollback protection remain mandatory.
 
 - I/O owners use cooperative fixed-native verification; the same pure replay owns
-  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v4 origin restores without replay. SQL is not authority;
+  authority. Persisted suffix bytes are reverified on open; a caller-owned retained v5 origin restores without replay. SQL is not authority;
   compare the verified head/count pin and current metadata point without scanning
   old rows or SQLite schema/write counters on every operation. Local OS/database
   tampering is outside the whitepaper threat model. Shared SQLite helpers own file
@@ -51,20 +53,30 @@ Follow the package [boundary](../../../AGENTS.md) and [record/replay contract](R
   caller's own export: no signature or curve-point recheck, no acceptance from
   another party, no unretained fact invented. A supplied `stateDigest` is
   recomputed from the bytes after decoding. Restore results equal full replay.
-- State formats (retained envelope, snapshot body, digest body and domain) are
-  versioned and current-only; changing `S` or an envelope bumps them together.
+- State formats are versioned and current-only. Local retained v5 preserves existing
+  verified hashes and publication originals through compaction; it never invents
+  pre-snapshot evidence. Snapshot bodies, digests and local retained envelopes use v5.
+  Changing authorization state `S` bumps its wire formats together; local evidence
+  changes only the retained envelope.
 - `VerifiedLedger` is the single rollback guard: genuine view, same workspace,
   continuation of the newest observed view, containment of the durable pin.
   Unchanged pins are not rewritten; failed pin writes keep the in-memory view.
+- A genuine view may classify a signing key from current plus retained device
+  history for an exact local refusal. Classification is not authority and never
+  replaces signature/policy verification.
 
 Retained origins include their source locator. A pin ahead of the restored view
-must be proved by the suffix; a cache ahead of the pin is rebuildable. Equal
+must be proved by the suffix; a cache ahead of the pin must prove it. Equal
 positions require equal heads. Rebase CAS compares the full tail and removes
-covered records atomically. Verification provenance is never upgraded.
+covered records atomically. Reopen discovers the committed local origin. Cache
+rebuild proves the highest tail and independent pin before atomic replacement;
+it never clears pins or workflow journals. Verification provenance is never upgraded.
 
 - Owner-approved pre-freeze machine tag4 binds strict UTF-8 machineId (1..256 bytes,
   no normalization) in both record and possession. No session ID/capability is added.
   Only a same-member personal device can atomically replace its exact active machine;
   retain old keys/history. rotationRequired advises key updates; it must not block sends.
   Current-only, no legacy
-  machine record reader. Snapshot/retained/digest v4 preserve every historical binding.
+  machine record reader. Snapshot/retained/digest v5 preserve every historical binding.
+
+- Capability 2 enables Owner-personal tag11 abandonment and per-membership 32-active/128-lifetime device limits. Preserve earlier replay rules; retain abandoned keys and author history, but refuse new seals in abandoned epochs. Snapshot/retained/digest v5 retain every explicit base-epoch link.

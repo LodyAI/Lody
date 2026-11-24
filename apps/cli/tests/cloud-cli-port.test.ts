@@ -1,4 +1,13 @@
-import { isCloudE2eeMemberRemoved, isCloudE2eeDeviceRevoked } from '../src/lib/cloud-e2ee-errors';
+import { createLocalCloudPort, type CloudNotificationsPort } from '@lody/platform';
+import type { CloudPort, CloudGithubTokenManager } from '@lody/platform';
+import { StreamsClient } from '@loro-dev/streams-client';
+import { createLoroStreamsTokenProviderLegacy } from '@lody/shared';
+import * as httpTransport from '../src/utils/http-transport';
+import {
+  CloudE2eeDeviceRevoked,
+  isCloudE2eeMemberRemoved,
+  isCloudE2eeDeviceRevoked,
+} from '../src/lib/cloud-e2ee-errors';
 import { Effect, Exit, Scope } from 'effect';
 import type { Logger } from '../src/utils/logger';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,14 +23,64 @@ import {
 } from '@lody/shared';
 import { SessionAttachmentTransfer } from '../src/lib/session-attachment-transfer';
 import { downloadSessionImageForPrompt } from '../src/lib/session-image-download';
+import { encryptedRuntimeCloudPort } from '../src/lib/e2ee/runtime-cloud-port';
 import {
   createCommandAttachmentTransfer,
+  mintCliSessionHistoryReadProof,
+  canReadSessionForCliRequester,
   createCloudE2eePort,
   createCloudSessionSharingPort,
   createCloudStreamsTokenPort,
 } from '../src/lib/cloud-cli-port';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+it('blocks StreamsClient HTTP on credential denial and resumes authenticated reads after rotation', async () => {
+  let credential: string | null = null;
+  const issuerCredentials: Array<string | null> = [];
+  const gatewayCredentials: Array<string | null> = [];
+  const provider = createLoroStreamsTokenProviderLegacy({
+    endpoint: 'https://fixture.convex.cloud/api/loro-streams/token',
+    workspaceId: 'workspace',
+    authToken: () => credential,
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    fetchImpl: async (_url, init) => {
+      const auth = new Headers(init?.headers).get('Authorization');
+      issuerCredentials.push(auth);
+      return auth === 'Bearer denied'
+        ? new Response(null, { status: 401 })
+        : Response.json({ token: 'valid-jwt', expiresIn: 900 });
+    },
+  });
+  const client = new StreamsClient({
+    url: 'https://streams.example.com/ds/bucket/stream',
+    auth: provider.createAuthCallback(),
+    retry: { maxAttempts: 0 },
+    fetch: async (_url, init) => {
+      gatewayCredentials.push(new Headers(init?.headers).get('Authorization'));
+      return new Response(null, {
+        headers: { 'Content-Type': 'application/octet-stream', 'Stream-Next-Offset': '0' },
+      });
+    },
+  });
+  try {
+    expect((await client.head()).ok).toBe(false);
+    expect(issuerCredentials).toEqual([]);
+    credential = 'denied';
+    expect((await client.head()).ok).toBe(false);
+    expect((await client.head()).ok).toBe(false);
+    expect(issuerCredentials).toEqual(['Bearer denied']);
+    expect(gatewayCredentials).toEqual([]);
+    credential = 'valid';
+    expect((await client.head()).ok).toBe(true);
+    expect(gatewayCredentials).toEqual(['Bearer valid-jwt']);
+  } finally {
+    await provider.close();
+  }
+});
 
 it('preserves the client retry key and separate server ID through the real HTTP result parser', async () => {
   const requests = new Map<string, string>();
@@ -644,6 +703,10 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     ] as const)
       expect(port[name]).toBeNull();
     expect(port.attachmentUpload).toEqual({ serverBaseUrl: relayBase });
+    // The encrypted workspace runtime keeps only the relay URL its encrypted attachments need.
+    const runtimePort = encryptedRuntimeCloudPort(port);
+    expect(runtimePort.attachmentUpload).toEqual({ serverBaseUrl: relayBase });
+    expect(runtimePort.githubTokens).toBeNull();
     const authorized = {
       status: 'authorized',
       userId: account,
@@ -661,12 +724,30 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     deliver?.(authorized);
     expect(states).toEqual([authorized]);
     expect(await port.e2ee!.getHistory({ workspaceId, credential })).toMatchObject({ workspaceId });
-    expect(packets).toEqual([
-      expect.objectContaining({
-        path: 'e2eeWorkspaces:history',
-        args: [expect.objectContaining({ workspaceId, credential })],
-      }),
-    ]);
+    expect(packets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'e2eeWorkspaces:history',
+          args: [expect.objectContaining({ workspaceId, credential })],
+        }),
+        expect.objectContaining({
+          path: 'e2eeWorkspaces:reportDeviceProfile',
+          args: [
+            expect.objectContaining({
+              workspaceId,
+              credential,
+              profile: expect.objectContaining({
+                client: 'daemon',
+                name: expect.any(String),
+                os: expect.any(String),
+                osVersion: expect.any(String),
+                appVersion: expect.any(String),
+              }),
+            }),
+          ],
+        }),
+      ])
+    );
     await port.e2ee!.readEpochGroup!({
       workspaceId,
       credential,
@@ -704,7 +785,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
     };
     const transfer = new SessionAttachmentTransfer(
       credential,
-      port.attachmentUpload!.serverBaseUrl,
+      runtimePort.attachmentUpload!.serverBaseUrl,
       { token }
     );
     const scope = {
@@ -729,16 +810,18 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
               encryptedAttachmentPath(
                 getSessionFileDownloadApiPath(scope.workspaceId, scope.sessionId, id)
               ),
-              port.attachmentUpload!.serverBaseUrl
+              runtimePort.attachmentUpload!.serverBaseUrl
             ),
             { headers: { Authorization: `Bearer ${await token()}` } }
           ),
       }))
         received.push(bytes);
-      expect(Buffer.concat(received)).toEqual(plaintext);
-      expect(Buffer.from(objects.get(uploaded.fileId)!)).not.toEqual(
-        plaintext.subarray(0, 4 * 1024 * 1024)
-      );
+      // Compare multi-megabyte payloads byte-for-byte without the generic matcher
+      // traversing millions of individual Buffer entries on CI.
+      expect(Buffer.concat(received).equals(plaintext)).toBe(true);
+      expect(
+        Buffer.from(objects.get(uploaded.fileId)!).equals(plaintext.subarray(0, 4 * 1024 * 1024))
+      ).toBe(false);
       const imageBytes = Buffer.from([137, 80, 78, 71, 1, 2, 3]);
       const imagePath = path.join(directory, 'private.png');
       await fs.writeFile(imagePath, imageBytes);
@@ -752,7 +835,7 @@ it('runs the paired machine port with only one encrypted workspace and a revocab
           imageId: image.imageId,
           encryption: image.encryption,
           expectedMimeType: image.mimeType,
-          serverBaseUrl: port.attachmentUpload!.serverBaseUrl,
+          serverBaseUrl: runtimePort.attachmentUpload!.serverBaseUrl,
           token: credential,
           attachmentToken: token,
         });
@@ -890,3 +973,622 @@ it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failur
     }
   }
 );
+
+it.each(['e2ee_member_removed', 'e2ee_device_revoked', 'temporary_network_failure'] as const)(
+  'brands exact ledger history refusals (%s)',
+  async (code) => {
+    vi.stubEnv('LODY_HTTP_TRANSPORT', 'default');
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      trace: () => {},
+      success: () => {},
+      setLevel: () => {},
+      child: () => logger,
+      close: async () => {},
+    };
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      expect(body.path).toBe('e2eeWorkspaces:history');
+      expect(body.args[0]).toMatchObject({
+        workspaceId: 'workspace',
+        credential: 'synthetic-device-credential',
+      });
+      return Response.json({
+        status: 'error',
+        errorMessage: 'e2ee_device_revoked',
+        errorData: { code },
+      });
+    });
+    const e2ee = createCloudE2eePort({
+      authBaseUrl: 'https://history-fixture.convex.cloud',
+      logger,
+    });
+    const failure = await e2ee
+      .getHistory({ workspaceId: 'workspace', credential: 'synthetic-device-credential' })
+      .catch((cause: unknown) => cause);
+    try {
+      expect(isCloudE2eeMemberRemoved(failure)).toBe(code === 'e2ee_member_removed');
+      expect(isCloudE2eeDeviceRevoked(failure)).toBe(code === 'e2ee_device_revoked');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+);
+
+it.each([false, true])(
+  'carries the source machine and exact target scope only over authenticated HTTPS (edit=%s)',
+  async (edit) => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
+    const input = {
+      token: 'synthetic-cli',
+      authBaseUrl: 'https://fixture.convex.cloud',
+      logger: { info() {}, warn() {}, error() {}, debug() {} } as unknown as Logger,
+      workspaceId: 'workspace',
+      machineId: 'target',
+      sessionId: 'tab',
+      sourceMachineId: 'source',
+      rootSessionId: 'root',
+      sessionOwnerUserId: 'owner',
+      localProjectId: 'project',
+      requester: { userId: 'reader', machineId: 'source' },
+      edit,
+      requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      intentDigest: 'ab'.repeat(32),
+    };
+    vi.stubGlobal('fetch', async (url: unknown, init: RequestInit) => {
+      expect(String(url)).toContain(edit ? '/request-edit-token-cli' : '/request-token-cli');
+      expect(init.headers).toMatchObject({ Authorization: 'Bearer synthetic-cli' });
+      expect(JSON.parse(init.body as string)).toEqual({
+        workspaceId: 'workspace',
+        machineId: 'target',
+        sessionId: 'tab',
+        sourceMachineId: 'source',
+        rootSessionId: 'root',
+        sessionOwnerUserId: 'owner',
+        localProjectId: 'project',
+        requester: input.requester,
+        ...(edit ? { requestId: input.requestId, intentDigest: input.intentDigest } : {}),
+      });
+      return Response.json({ requestToken: 'signed-dual-principal-proof' });
+    });
+    expect(await mintCliSessionHistoryReadProof(input)).toBe('signed-dual-principal-proof');
+  }
+);
+
+it('refuses remote history authorization without an injected endpoint before any network work', async () => {
+  vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => {
+    throw new Error('Missing configuration must not start HTTP');
+  });
+  const target = {
+    token: 'synthetic-cli',
+    workspaceId: 'workspace',
+    machineId: 'remote',
+    sessionId: 'session',
+    rootSessionId: 'session',
+    sourceMachineId: 'source',
+    requester: { userId: 'reader', machineId: 'source' },
+  };
+  expect(await canReadSessionForCliRequester(target)).toBe(false);
+  await expect(mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger })).rejects.toThrow(
+    'Cloud history authorization is unavailable'
+  );
+  await expect(
+    mintCliSessionHistoryReadProof({ ...target, logger: {} as Logger, edit: true })
+  ).rejects.toThrow('Cloud history authorization is unavailable');
+});
+
+describe('CLI E2EE Round 2 optimizations', () => {
+  const logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    trace: () => {},
+    success: () => {},
+    setLevel: () => {},
+    child: () => logger,
+    close: async () => {},
+  } as unknown as Logger;
+  const genesis = '11'.repeat(32);
+  const recipient = '22'.repeat(32);
+  const sender = '33'.repeat(32);
+  const slot = { genesis, epoch: 1, recipient };
+
+  it('primes self mailbox status from fetch(includeSlot), invalidates on report, coalesces batchStatus, and falls back on older backends', async () => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
+    for (const deployed of [true, false]) {
+      const calls: Array<{ path: string; args: Record<string, unknown> }> = [];
+      let reported = false;
+      const slotStatus = { ...slot, revision: 1, status: 'EnvelopeStored' as const };
+      const afterReport = { ...slot, revision: 2, status: 'InstallationReported' as const };
+      vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          path: string;
+          args: [Record<string, unknown>];
+        };
+        const args = body.args[0] ?? {};
+        calls.push({ path: body.path, args });
+        if (body.path === 'e2eeMailbox:fetch') {
+          if (args.includeSlot && !deployed) {
+            return Response.json({
+              status: 'error',
+              errorMessage:
+                'ArgumentValidationError: Object contains extra field `includeSlot` that is not in the validator.',
+            });
+          }
+          return Response.json({
+            status: 'success',
+            value: {
+              items: [{ sender, frameHex: '01020304' }],
+              next: null,
+              ...(deployed ? { slot: slotStatus } : {}),
+            },
+          });
+        }
+        if (body.path === 'e2eeMailbox:batchStatus') {
+          if (!deployed) {
+            return Response.json({
+              status: 'error',
+              errorMessage: 'Could not find public function for "e2eeMailbox:batchStatus"',
+            });
+          }
+          const slots = args.slots as Array<typeof slot>;
+          return Response.json({
+            status: 'success',
+            value: slots.map((item) => ({ ...item, revision: 1, status: 'NeedsEnvelope' })),
+          });
+        }
+        if (body.path === 'e2eeMailbox:status') {
+          const item = args.slot as typeof slot;
+          if (item.recipient === recipient) {
+            return Response.json({ status: 'success', value: reported ? afterReport : slotStatus });
+          }
+          return Response.json({
+            status: 'success',
+            value: { ...item, revision: 1, status: 'NeedsEnvelope' },
+          });
+        }
+        if (body.path === 'e2eeMailbox:report') {
+          reported = true;
+          return Response.json({ status: 'success', value: null });
+        }
+        throw new Error(`unexpected path ${body.path}`);
+      });
+
+      const e2ee = createCloudE2eePort({
+        authBaseUrl: 'https://mailbox-round2.convex.cloud',
+        logger,
+      });
+      const fetched = await e2ee.mailboxCall('fetch', {
+        workspaceId: 'ws',
+        credential: 'cred',
+        epoch: 1,
+        cursor: null,
+        limit: 10,
+      });
+      expect(fetched.items).toHaveLength(1);
+      for (let i = 0; i < 4; i++) {
+        expect(
+          await e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot })
+        ).toEqual(slotStatus);
+      }
+      await e2ee.mailboxCall('report', {
+        workspaceId: 'ws',
+        credential: 'cred',
+        reportHex: '0a0b',
+      });
+      expect(
+        await e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot })
+      ).toEqual(afterReport);
+
+      const peerA = { genesis, epoch: 2, recipient: 'aa'.repeat(32) };
+      const peerB = { genesis, epoch: 2, recipient: 'bb'.repeat(32) };
+      const [statusA, statusB] = await Promise.all([
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerA }),
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerB }),
+      ]);
+      expect(statusA.recipient).toBe(peerA.recipient);
+      expect(statusB.recipient).toBe(peerB.recipient);
+
+      // Next fetch/batch after fallback does not resend includeSlot or batchStatus.
+      await e2ee.mailboxCall('fetch', {
+        workspaceId: 'ws',
+        credential: 'cred',
+        epoch: 1,
+        cursor: null,
+        limit: 10,
+      });
+      const peerC = { genesis, epoch: 3, recipient: 'cc'.repeat(32) };
+      const peerD = { genesis, epoch: 3, recipient: 'dd'.repeat(32) };
+      await Promise.all([
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerC }),
+        e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot: peerD }),
+      ]);
+
+      if (deployed) {
+        expect(calls.map((c) => c.path)).toEqual([
+          'e2eeMailbox:fetch',
+          'e2eeMailbox:report',
+          'e2eeMailbox:status',
+          'e2eeMailbox:batchStatus',
+          'e2eeMailbox:fetch',
+          'e2eeMailbox:batchStatus',
+        ]);
+      } else {
+        expect(
+          calls.filter((c) => c.path === 'e2eeMailbox:fetch').map((c) => c.args.includeSlot ?? null)
+        ).toEqual([true, null, null]);
+        expect(calls.filter((c) => c.path === 'e2eeMailbox:batchStatus')).toHaveLength(1);
+        expect(calls.filter((c) => c.path === 'e2eeMailbox:status')).toHaveLength(6);
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('consumes inline bootstrap from completeMachinePairing inside registerMachineAccess and falls back when unsupported', async () => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(() => globalThis.fetch);
+    vi.stubEnv('LODY_PLATFORM', 'cloud');
+    try {
+      const { createCloudE2eeMachinePort } = await import('../src/lib/cloud-cli-port');
+      type Client = NonNullable<Parameters<typeof createCloudE2eeMachinePort>[0]['client']>;
+      const bootstrapSnapshot = {
+        status: 'authorized' as const,
+        userId: 'acc1',
+        workspaces: [
+          {
+            id: 'ws1',
+            name: 'Workspace',
+            slug: null,
+            role: 'member',
+            contentMode: 'e2ee' as const,
+            genesisHash: genesis,
+          },
+        ],
+      };
+      const mutationFlags: Array<boolean | null> = [];
+      vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          path: string;
+          args: [Record<string, unknown>];
+        };
+        const args = body.args[0] ?? {};
+        expect(body.path).toBe('e2eeMachinePairing:complete');
+        mutationFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
+        return Response.json({
+          status: 'success',
+          value: {
+            pairingSessionId: 'ab'.repeat(16),
+            status: 'ready',
+            expiresAt: Date.now() + 60_000,
+            material: null,
+            location: null,
+            bootstrap: bootstrapSnapshot,
+          },
+        });
+      });
+
+      const queryCalls: unknown[] = [];
+      const fakeClient: Client = {
+        onUpdate: () => Object.assign(() => {}, { getCallCount: () => 0 }) as never,
+        query: async (ref, args) => {
+          queryCalls.push({ ref, args });
+          return bootstrapSnapshot;
+        },
+        close: async () => {},
+      };
+
+      const e2ee = createCloudE2eePort({
+        authBaseUrl: 'https://pairing-round2.convex.cloud',
+        logger,
+      });
+      await e2ee.completeMachinePairing!({
+        workspaceId: 'ws1',
+        credential: 'cred-1',
+        pairingSessionId: 'ab'.repeat(16),
+      });
+      const machinePort = createCloudE2eeMachinePort({
+        accountId: 'acc1',
+        workspaceId: 'ws1',
+        genesisHash: genesis,
+        machineId: 'machine-1',
+        credential: 'cred-1',
+        authBaseUrl: 'https://pairing-round2.convex.cloud',
+        serverBaseUrl: 'https://server-round2.example',
+        logger,
+        client: fakeClient,
+      });
+      // First registerMachineAccess uses the inline bootstrap snapshot -> 0 queries.
+      await machinePort.access.registerMachineAccess({
+        workspaceId: 'ws1',
+        machineId: 'machine-1',
+      });
+      expect(queryCalls).toHaveLength(0);
+      // Single-use cache: a subsequent registerMachineAccess queries bootstrap normally.
+      await machinePort.access.registerMachineAccess({
+        workspaceId: 'ws1',
+        machineId: 'machine-1',
+      });
+      expect(queryCalls).toHaveLength(1);
+      expect(mutationFlags).toEqual([true]);
+
+      // Fallback test on older backend rejecting includeBootstrap.
+      const legacyFlags: Array<boolean | null> = [];
+      vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as {
+          path: string;
+          args: [Record<string, unknown>];
+        };
+        const args = body.args[0] ?? {};
+        legacyFlags.push((args.includeBootstrap as boolean | undefined) ?? null);
+        if (args.includeBootstrap) {
+          return Response.json({
+            status: 'error',
+            errorMessage:
+              'ArgumentValidationError: Object contains extra field `includeBootstrap` that is not in the validator.',
+          });
+        }
+        return Response.json({ status: 'success', value: null });
+      });
+      const legacyE2ee = createCloudE2eePort({
+        authBaseUrl: 'https://pairing-legacy.convex.cloud',
+        logger,
+      });
+      await legacyE2ee.completeMachinePairing!({
+        workspaceId: 'ws1',
+        credential: 'cred-2',
+        pairingSessionId: 'cd'.repeat(16),
+      });
+      await legacyE2ee.completeMachinePairing!({
+        workspaceId: 'ws1',
+        credential: 'cred-2',
+        pairingSessionId: 'cd'.repeat(16),
+      });
+      expect(legacyFlags).toEqual([true, null, null]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('recovers from transient HTTP 502/503/504 gateway blips while immediately surfacing 401/403/560 and e2ee_* refusals without retry', async () => {
+    vi.spyOn(httpTransport, 'getCliHttpFetch').mockImplementation(
+      () => ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) as typeof fetch
+    );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const e2ee = createCloudE2eePort({
+        authBaseUrl: 'https://retry-test.convex.cloud',
+        logger,
+      });
+
+      // Recovers after 2 transient 502/503 blips.
+      let attempts = 0;
+      vi.stubGlobal('fetch', async () => {
+        attempts += 1;
+        if (attempts === 1) return new Response('bad gateway', { status: 502 });
+        if (attempts === 2) return new Response('service unavailable', { status: 503 });
+        return Response.json({
+          status: 'success',
+          value: { ...slot, revision: 1, status: 'NeedsEnvelope' },
+        });
+      });
+      const pending = e2ee.mailboxCall('status', { workspaceId: 'ws', credential: 'cred', slot });
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.advanceTimersByTimeAsync(150);
+      await expect(pending).resolves.toMatchObject({ status: 'NeedsEnvelope', revision: 1 });
+      expect(attempts).toBe(3);
+
+      // Immediately surfaces 401, 403, 560 (device revoked), and e2ee_* bodies inside 503 without retrying.
+      const nonRetryable: Array<{ status: number; body: string; expectedError: unknown }> = [
+        { status: 401, body: 'unauthorized', expectedError: /unauthorized/i },
+        { status: 403, body: 'forbidden', expectedError: /forbidden/i },
+        {
+          status: 560,
+          body: JSON.stringify({
+            status: 'error',
+            errorMessage: 'device revoked',
+            errorData: { code: 'e2ee_device_revoked' },
+          }),
+          expectedError: CloudE2eeDeviceRevoked,
+        },
+        {
+          status: 503,
+          body: JSON.stringify({ code: 'e2ee_device_unauthorized' }),
+          expectedError: /e2ee_device_unauthorized/i,
+        },
+      ];
+      for (const [index, testCase] of nonRetryable.entries()) {
+        let count = 0;
+        vi.stubGlobal('fetch', async () => {
+          count += 1;
+          return new Response(testCase.body, { status: testCase.status });
+        });
+        const freshSlot = { genesis, epoch: 1, recipient: String(index + 4).repeat(64) };
+        const call =
+          testCase.status === 560
+            ? e2ee.getHistory({ workspaceId: 'ws', credential: 'cred' })
+            : e2ee.mailboxCall('status', {
+                workspaceId: 'ws',
+                credential: 'cred',
+                slot: freshSlot,
+              });
+        if (typeof testCase.expectedError === 'function') {
+          await expect(call).rejects.toBeInstanceOf(testCase.expectedError as never);
+        } else {
+          await expect(call).rejects.toThrow(testCase.expectedError as RegExp);
+        }
+        expect(count).toBe(1);
+      }
+
+      // Caller abort stops retry immediately without waiting for second attempt.
+      let abortedAttempts = 0;
+      const controller = new AbortController();
+      vi.stubGlobal('fetch', async () => {
+        abortedAttempts += 1;
+        return new Response('gateway timeout', { status: 504 });
+      });
+      const abortedCall = e2ee.readExecutionOriginPage(
+        { workspaceId: 'ws', credential: 'cred', docId: 'doc-1' },
+        controller.signal
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      controller.abort(new Error('caller_aborted'));
+      await expect(abortedCall).rejects.toBeDefined();
+      expect(abortedAttempts).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it('keeps E2EE GitHub tokens account-bound while removing hosted PR/session sinks', async () => {
+  const requests: unknown[] = [];
+  const app = {
+    token: 'fixture-app-token',
+    tokenSource: 'app' as const,
+    rateLimitScope: 'github:installation:7',
+  };
+  const manager = {
+    getAppTokenInfoForRepo: async (repo: string) => {
+      requests.push({ kind: 'app', repo });
+      return app;
+    },
+    getAppTokenForRepo: async (repo: string) => {
+      requests.push({ kind: 'app', repo });
+      return app.token;
+    },
+    getWriteTokenInfoForRepo: async (repo: string, context: { requesterUserId: string }) => {
+      if (context.requesterUserId !== 'account') throw new Error('cross-account delegation');
+      requests.push({ kind: 'operation', repo, context });
+      return app;
+    },
+    shutdown: async () => {},
+  } as unknown as CloudGithubTokenManager;
+  const port = encryptedRuntimeCloudPort(
+    {
+      ...createLocalCloudPort({ identity: { userId: 'account' }, workspaces: [] }),
+      githubTokens: { createTokenManager: () => manager },
+      prAssociation: {
+        associatePullRequest: async () => {
+          throw new Error('decrypted PR egress');
+        },
+      },
+      sessionSharing: {},
+      notifications: null,
+    } as unknown as CloudPort,
+    'account'
+  );
+  expect(port.prAssociation).toBeNull();
+  expect(port.sessionSharing).toBeNull();
+  expect(port.notifications).toBeNull();
+  const tokens = port.githubTokens!.createTokenManager('workspace');
+  await expect(
+    tokens.getWriteTokenInfoForRepo('owner/repo', {
+      requesterUserId: 'account',
+      machineId: 'machine',
+    })
+  ).resolves.toEqual(app);
+  const foreign = { requesterUserId: 'other-account', machineId: 'machine' };
+  await expect(tokens.getCredentialPolicy(foreign)).resolves.toEqual({ personalEnabled: false });
+  await expect(
+    tokens.getCredentialCandidate('owner/repo', foreign, 'personal')
+  ).resolves.toMatchObject({ available: false });
+  await expect(tokens.getWriteTokenInfoForRepo('owner/repo', foreign)).resolves.toEqual(app);
+  expect(requests).toEqual([
+    {
+      kind: 'operation',
+      repo: 'owner/repo',
+      context: { requesterUserId: 'account', machineId: 'machine' },
+    },
+    { kind: 'app', repo: 'owner/repo' },
+  ]);
+  await tokens.shutdown();
+});
+
+it('encrypted runtime notifications deliver only to their own account and keep HTTP approvals closed', async () => {
+  const delivered: Array<{ method: string; userId: string; items?: unknown }> = [];
+  const notifications: CloudNotificationsPort = {
+    notifySessionCompleted: async (input) => {
+      delivered.push({ method: 'completed', ...input });
+    },
+    notifyPermissionRequested: async (input) => {
+      delivered.push({ method: 'permission', ...input });
+    },
+    recordPermissionRequested: async (input) => {
+      delivered.push({ method: 'record', ...input });
+    },
+    resolvePermissionRequested: async (input) => {
+      delivered.push({ method: 'resolve', ...input });
+    },
+    syncLiveActivitySummary: async (input) => {
+      delivered.push({ method: 'summary', ...input });
+      return { sent: true, ended: false };
+    },
+  };
+  const port = encryptedRuntimeCloudPort({
+    ...createLocalCloudPort({ identity: { userId: 'account' }, workspaces: [] }),
+    notifications,
+  });
+  const input = {
+    userId: 'account',
+    sessionId: 'session' as SessionId,
+    occurrenceId: 'turn',
+    workspaceId: 'workspace' as WorkspaceId,
+    workspaceSlug: 'workspace',
+    requestId: 'request',
+    toolCallId: 'tool',
+  };
+  for (const userId of ['other', 'account']) {
+    const target = { ...input, userId };
+    await port.notifications!.notifySessionCompleted(target);
+    await port.notifications!.notifyPermissionRequested(target);
+    await port.notifications!.recordPermissionRequested(target);
+    await port.notifications!.resolvePermissionRequested(target);
+    const result = await port.notifications!.syncLiveActivitySummary({
+      ...target,
+      activityId: 'activity',
+      totalCount: 1,
+      updatedAt: 1,
+      statusCounts: { permission: 1, question: 0, running: 0, unread: 0 },
+      items: [
+        {
+          id: 'session',
+          title: 'Task',
+          status: 'permission',
+          statusLabel: 'Approval',
+          updatedAt: 1,
+          updatedAtLabel: 'now',
+          agentLogoKind: 'codex',
+          agentLogoText: 'Codex',
+          permissionRequestId: 'request',
+        },
+      ],
+    });
+    expect(result.sent).toBe(userId === 'account');
+  }
+  expect(delivered.map(({ method, userId }) => [method, userId])).toEqual([
+    ['completed', 'account'],
+    ['permission', 'account'],
+    ['record', 'account'],
+    ['resolve', 'account'],
+    ['summary', 'account'],
+  ]);
+  expect(delivered.at(-1)?.items).toEqual([
+    {
+      id: 'session',
+      title: 'Task',
+      status: 'permission',
+      statusLabel: 'Approval',
+      updatedAt: 1,
+      updatedAtLabel: 'now',
+      agentLogoKind: 'codex',
+      agentLogoText: 'Codex',
+    },
+  ]);
+  expect(port.streamsTokens).toBeNull();
+  expect(port.prAssociation).toBeNull();
+  expect(port.sessionSharing).toBeNull();
+  await expect(port.remotePreview!.verifyControl({} as never)).rejects.toThrow('unavailable');
+});

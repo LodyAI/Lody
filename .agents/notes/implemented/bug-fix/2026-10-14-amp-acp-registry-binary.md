@@ -8,7 +8,7 @@ Translation: current
 ## Abstract
 
 Lody launched the registry Amp Provider through a local override, `npx -y amp-acp`,
-with no version, while every npx launch adds `--prefer-offline`. npm then reuses the
+with no version, while npx launches at the time added `--prefer-offline`. npm then reuses the
 first cached install indefinitely, so users stayed on an old adapter while the
 catalog showed the registry's current version. The override is removed and Amp uses
 the ACP Registry's binary distribution, which the ACP binary manager caches per

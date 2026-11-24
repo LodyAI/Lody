@@ -86,7 +86,7 @@ function fixture(): ResourceDiscovery {
     userId: 'user',
     machines: async () => [{ id: 'machine', name: 'Workstation' } as MachineMeta],
     canAccess: async () => true,
-    onlineMachineIds: async () => new Set(['machine'] as MachineId[]),
+    machinePresence: async () => ({ online: new Set(['machine'] as MachineId[]), synced: true }),
     configs: async () => [],
     capabilities: async () => ({}),
     projects: async () => [],

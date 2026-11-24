@@ -91,7 +91,7 @@ relay pages can only confirm the existing verified feed, never replace its curso
 
 `PersonalHostPlatform.contentToken` runs inside the approved session with its
 captured device credential and full binding. Product callers receive only dedicated
-short-lived content/attachment grants. Rejected tokens, snapshot repair hints and
+short-lived content/attachment grants. Rejected tokens and
 RPC-only requests are forwarded exactly. RPC methods exist only with the real RPC
 original store. Optional `machineSharing` builds a `PersonalMachineSharing` policy
 Layer with the fixed identity/scope, verified ledger source and installed-key history;
@@ -152,7 +152,7 @@ Control-page continuity checks use the genuine ledger view, including its verifi
 prefix hashes. Runtime exports merge retained approval originals with the local suffix;
 each absolute position is checked against the host's genuine view. When complete
 originals are available, the renderer replays them against the same exported head and
-state digest because retained-state serialization omits older hashes. Sparse exports
+state digest when an endorsed snapshot lacks older hashes. Sparse exports
 do not invent a prefix. Reset history position only clears renderer
 observations; it neither supplies missing proof nor removes the host's durable pin.
 
@@ -162,8 +162,10 @@ injected `LedgerFeedStore`, `LedgerPinStore`, `SubmissionJournal`, `LedgerLog`,
 use a separate submission slot per incarnation. Refresh is bounded and verifies
 every suffix before persisting its position. An installed full-history approval can
 reopen offline when the locally re-verified feed already contains its checkpoint.
-A valid older prefix must refresh; a conflicting prefix is rejected. No corrupt row
-is reset or rebased.
+A valid older prefix must refresh; a conflicting prefix is rejected. The feed receives
+both independent pins and the source so an old or corrupt cache can be rebuilt only
+after full replay proves its highest checkpoint. Identity, pins and pending journals
+are preserved; a cache reset never grants admission.
 
 Explicit `prepare(offer, true)` prepares a wrapped replacement candidate while the
 old pointer remains current. A second unresolved candidate is refused. Replacement
@@ -186,7 +188,27 @@ Core retains and verifies receive/report/distribution originals; the shared fini
 maintenance owner acknowledges only observed terminal results, including a
 successful sibling when another phase failed. There is no plaintext fallback.
 
+Management rotation checks the locally installed current key before receiving.
+It confirms and installs the staged publication before returning; mailbox distribution
+runs afterwards under the existing session, reports failures, and cannot reopen a
+closed reader. Automatic pairing borrows its own temporary reader when activation
+has already closed, then releases only that reader after checking or receiving keys.
+
 ## Account-wide pairing workflow
+
+Upgraded hosts use one batch ledger append, one relay publication with locally
+prepared outbox envelopes, and one claim with live mailbox previews. Member-only
+approvals also batch their required full-history reads. With stable heads and
+single-page histories, the approval-to-current-key path uses three requests for
+snapshot approvals, or four when full history is required, for 1–64 workspaces.
+Long histories, conflicts and retries retain ordinary pagination and may need more
+requests. Advisory checkpoint equality skips a refresh without advancing a pin.
+Verified request bytes are cached in memory, bounded and expiry-checked; every
+signature still rechecks their MAC. Inline admission originals must match the
+MAC-authenticated record hash and cached verified genesis/member before snapshot
+acceptance. KeyReceiver verifies each preview frame and installs the actual key.
+Absent capabilities, unusable previews and older relays retain ordinary reads and
+idempotent original delivery. No key material is added to the relay.
 
 `@lody/e2ee-client/account-pairing` is the shared account-wide personal device pairing
 workflow ([foundations Spec](../../specs/e2ee-foundations.md#account-wide-personal-device-pairing-owner-approved-2026-11-01)).
@@ -237,7 +259,8 @@ workflow's.
     background (`deliverKeys`) so the new device receives the current epoch key, which
     the invitation does not carry. Approval does not wait for it. Each attempt ends
     with mailbox evidence (`keyDeliveryEvidence`); anything short of `delivered` is
-    retried on a bounded backoff. Each attempt acquires the session, releases it when
+    retried on a bounded backoff, and a retry first refreshes the ledger, for at most
+    30 seconds, because the mailbox refuses a sender behind it. Each attempt acquires the session, releases it when
     done (so no reader stays open across the backoff), and ends if the session
     belongs to another device (another account); the journal stores the same envelope
     id and bytes. The workflow releases the sessions it listed when it finishes. `onKeyDelivery` reports `running`,
@@ -248,6 +271,103 @@ workflow's.
   accurate.
 
 Identity protection comes from each host's platform (`PersonalHostPlatform.protection`).
+
+## Automatic device verification
+
+`./automatic-pairing` owns a ten-minute, current-workspace verification attempt.
+A personal device first verifies its retained local identity, then commits its
+P-256 ephemeral key and nonce before the new device reveals its own key. Both
+devices derive the same six-digit SAS: the new device shows it, and the approver
+signs only after the person types a matching code (`approveAutomaticPairing(id,
+code)`; the review DTO omits it). The third wrong entry declines the request on
+that approver. Lockout never waits for the relay (the hosted client queues mutations
+while offline): the native decline is bounded to five seconds, one `declined` write is
+kept outstanding, and a failed one is resent on later discovery rounds until delivered
+or expired. A restarted approver cannot regain attempts: its new
+commitment differs from the relay's frozen first responder, so the request is no
+longer approvable anywhere. Separate HKDF labels derive the
+128-bit secret used by the existing account request/approval HMAC workflow;
+neither private ephemeral keys nor the secret reach the relay. The short code is
+for comparison, never a login token or a truncated pairing secret.
+
+The application owns this coordinator independently of content readers. Leaving a
+page or choosing Later retains the attempt in that owner; account replacement or
+shutdown disposes it. Restart loses the ephemeral secret and requires a new attempt,
+while retaining the device identity. The first responding foreground device is
+frozen for the attempt; use the help action to cancel and start again with another
+device if that responder quits. Transient errors retry exact originals. Approval
+means verified admission; the content route still opens its reader and installs the
+current key before use. Public relay terminal state cannot grant access.
+
+Syncing is not authority either. A request reaches `syncing` from verified admission
+or from a retained personal credential, and keeps retrying while key reception or
+status fails for ordinary reasons (offline, timeouts, other refusals); slow delivery
+never expires it. It ends as `revoked` or `removed` only when the application's
+injected `accessLoss` recognizer (the product's `e2eeAccessLoss`) classifies a
+`status`, `open` or receive `refresh` failure as this device's exact loss for that
+workspace. A completed (`joined`) request stays retained, but each page read or start
+asks the host's `status` once more, without a key round or a request, and an exact
+loss found there replaces `joined`; other failures keep it. A start whose first
+`status` reports the exact loss shows it instead of requesting approval. That outcome is terminal for the request: expiry, polling, a credential
+that still reads as present and a late key cannot turn it back into an admission,
+and other workspaces are unaffected. Only an explicit new start pairs a revoked
+device again, as a fresh request without the retained-credential shortcut; a
+removed member needs a new invitation, and a new start only re-verifies.
+
+A renderer reload can lose its automatic exchange while the native account owner
+still holds the previous request. Recovery shows that request's workspace names
+and expiry, then requires a separate confirmation to end it. Hosts expose the
+public `lookupId` only with exact-ID cancellation support. Recovery cancels only
+that displayed original, rechecks for a replacement, and requires fresh consent
+if another window created one. A completed admission is kept. Older hosts without
+this capability require an update or the existing manual route; automatic recovery
+never calls unscoped cancellation. Retired advisory discovery rows expire naturally;
+the server's indexed cleanup owns erasure, so an unavailable cleanup write cannot
+undo native cancellation or prevent a fresh safe request.
+
+See the [pairing decision and protocol review limit](../../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10).
+
+## Restore from a vault
+
+`prepareVaultRestore` builds a restore plan from an unlocked vault on a device that knows
+nothing about the workspace. The genesis comes only from the authenticated package, and
+the platform's ports open after that. Core then verifies the ledger, the package checkpoint
+and a committed epoch commitment before R admits the new device. No product flow calls it
+yet. [Spec](../../specs/e2ee/recovery-vault.md).
+
+## Replace a whole vault
+
+`replaceAccountVault` proves a new R for every workspace before revoking any old R, and
+makes the new vault current last. Every step resumes from its own journal, so rerunning is
+safe. `abandonVaultReplacement` gives up on the device that started, and
+`planVaultReplacement` names workspaces the device cannot act on.
+`recoverySubmitOriginal` and `recoveryFetchEnvelope` adapt the service to core.
+[Spec](../../specs/e2ee/recovery-vault.md).
+
+## Recovery service locator
+
+`recoveryServiceLocator` (`./recovery-locator`) turns the product site URL into the
+`serviceLocator` that every host writes into recovery files and passes to core's open:
+its canonical origin, `https://lody.ai` for Lody Cloud and the `SITE_URL` origin for a
+self-hosted deployment. HTTPS is required, except HTTP on loopback hosts. A missing or
+unusable URL returns `null` and the host refuses recovery as `disabled`; a backend
+deployment URL or account ID is never a locator. Desktop reads `VITE_SITE_URL`, mobile reads
+`VITE_SITE_URL` with the Lody Cloud default, and Web passes its site origin, so one file
+opens on all three. Core rejects a file naming another locator as `locator-mismatch`, which
+hosts report as `e2ee_recovery_authentication` (the wrong-file message).
+[Spec](../../specs/e2ee/recovery-vault.md#recovery-material-and-ciphertext).
+
+## Browser passkeys
+
+`browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
+It reports what the browser returned and decides nothing: a browser without PRF reports
+`prfEnabled: false` and no result, and `passkey-unlock` refuses it. `available()` is true
+only when `PublicKeyCredential.getClientCapabilities()` reports `extension:prf`; WebAuthn
+alone is not enough (Safari 16.4–17.x and older Firefox create passkeys without PRF), and a
+missing or failing capability API counts as unavailable. Its test runs real Chromium on the
+`lody.ai` origin with a CDP virtual authenticator, including replaced capability reports.
+Browser-shaped hosts inject it as the recovery engine's `passkey`; the iOS shell injects
+its native port (`apps/mobile-capacitor/src/e2ee/passkey.ts`) instead.
 
 ## Verification and limits
 
@@ -260,3 +380,52 @@ establish iOS 16.4 device, native plugin, hardware or power-loss acceptance.
 IndexedDB `strict` is a durability hint. Web trusts the code served to the page
 with private-key use, as the [approved custody Spec](../../specs/e2ee/client-custody.md)
 requires. The runtime factory is opt-in; no product composition is enabled by its export. [Ownership rationale](../../.agents/notes/implemented/architecture/2026-10-16-e2ee-core-service-architecture.md#personal-device-product-composition).
+
+Automatic requests never replace another window's pending native request. Each request fixes its workspace before identity preparation; automatic cancellation and expiry cleanup carry the original lookup ID, so a refused or stale window cannot cancel a different request. Explicit manual cancellation keeps its existing account-wide behavior.
+
+## Vault admission
+
+The host's explicit `restoreRecovery` command authenticates a vault package before
+preparing a personal identity, checks its pinned genesis and account membership,
+and runs existing R admission with durable originals. It replays signed history
+and installs recovered opaque keys through the normal `InstalledEpochKeys`
+commitment/protection/readback boundary. Failed installation remains retryable on
+the same identity. No signer, private key, R or V is returned. The application owns
+vault session lifetime, transports, account guards, entry pins and product rollout.
+Recovery remains opt-in; opening an existing identity does not trigger it. A missing or invalid current envelope permits recovery through the highest available committed key and its verified history; epoch zero also permits authenticated admission without a key. `partialEpochKey` reports newer keys still needing repair or abandonment. Governance admission does not establish current-key readiness. The restore journal stays `partial` until R supplies the current key; another restore resumes the admitted identity without another admission. Epoch-zero delivery still in flight stays `Pending`.
+
+An admitted session exposes explicit `setupRecovery`: signing and installed keys
+stay inside its owned boundary, and the result is recoverable only after core's
+real recovery test. Its key maintenance reads the latest verified epoch after setup
+advances the ledger. Recovery history rejects empty/incomplete pages and verifies
+the first page's declared checkpoint against the complete signed history. `restoreRecovery` accepts an exact retained offer for a device
+whose protected identity remains but workspace keys are missing; package pins still
+must match. An account-pairing offer, retained or derived from the package, always
+restores through the account identity, so an interrupted replacement resumes and one
+the verified history shows revoked restores as its replacement. A retained ordinary
+offer whose identity that history shows lost fails as access loss: the caller cancels
+its pin and restores with the account offer.
+
+`personalRuntimeAccountRequester` and `personalRuntimeRecovery` adapt the existing
+runtime owner for account pairing and closed recovery commands. They do not create a
+second host or export private keys. Recovery setup borrows an approved session;
+its caller releases only its own reader after completion. Web's optional
+`openBrowserRecovery(workspaceId)` opens an in-app surface after personal-computer
+consent and returns true only for a ready workspace. It never starts account pairing.
+Other-device approval remains a separate choice.
+
+The personal-device session exposes `abandonEpoch(baseEpoch)` through the same Owner-only staged publisher after declaring capability 2, without requiring the current epoch key. Callers own evidence display and explicit confirmation; exact-original retries and history recovery remain in core.
+
+Management rechecks the verified ledger before signing: ownership transfer requires a personal device of the target, and removing the last personal device requires `{ confirmedRecoveryOnly: true }`. The management view exposes `requiresRecoveryConfirmation` for the device dialog; an unconfirmed programmatic call fails with `recovery-only-confirmation-required`.
+
+## Remote CLI pairing
+
+The optional `PersonalHostPlatform.remoteMachine` supplies persistent originals,
+bounded authenticated relay calls and local verified records for one installation.
+Official cloud composition advertises the four platform methods explicitly through
+`remoteMachinePairing`. The session retains its signer/credential and native-call
+lifetime; the workflow serializes pairing operations separately, using the existing
+session permit only for local signing/storage and ledger/key rounds. Interrupted
+network work preserves its signed originals. Guests and lost personal devices fail
+before signing; key delivery follows verified admission, and terminal cancellation
+archives rather than deletes evidence. See the [shared cloud composition](../client-e2ee/README.md#remote-cli-machines).

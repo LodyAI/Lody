@@ -38,7 +38,7 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
   workspaceId: 'workspace',
   userId: 'user',
   machines: async () => [machine('one'), machine('two'), machine('hidden')],
-  onlineMachineIds: async () => new Set(['one'] as MachineId[]),
+  machinePresence: async () => ({ online: new Set(['one'] as MachineId[]), synced: true }),
   canAccess: async (id) => id !== 'hidden',
   configs: async (id) => (id === 'one' ? [config('agent')] : []),
   capabilities: async () => ({
@@ -65,6 +65,40 @@ const source = (overrides: Partial<DiscoverySource> = {}): DiscoverySource => ({
 });
 
 describe('resource discovery across MCP and CLI', () => {
+  it('marks an Agent config unavailable until its scoped quota resets', async () => {
+    const resetsAtEpochSeconds = 4_102_444_800;
+    const discovery = new ResourceDiscovery(
+      source({
+        rateLimits: async () => ({
+          'provider::agent::builtin::weekly': {
+            limitId: 'weekly',
+            scope: { providerId: 'codex' },
+            windows: [{ usedPercent: 100, windowDurationSeconds: 604800, resetsAtEpochSeconds }],
+          },
+        }),
+      })
+    );
+
+    const listed = await discovery.list('agent_config', {});
+    expect(listed.items[0]).toMatchObject({
+      id: 'agent',
+      availability: {
+        state: 'unavailable',
+        reason: 'quota_exhausted',
+        availableAt: new Date(resetsAtEpochSeconds * 1000).toISOString(),
+      },
+    });
+
+    const machines = await discovery.list('machine', {});
+    expect(machines.items[0]?.quota).toEqual([
+      expect.objectContaining({
+        agentConfigId: 'agent',
+        exhausted: true,
+        unavailableUntil: new Date(resetsAtEpochSeconds * 1000).toISOString(),
+      }),
+    ]);
+  });
+
   it('reports quota windows and opt-in machine resources without failing on an unavailable machine', async () => {
     const discovery = new ResourceDiscovery(
       source({
@@ -87,7 +121,10 @@ describe('resource discovery across MCP and CLI', () => {
                 legacy: { limitId: 'legacy', usedPercent: 80, resetsAt: 1 } as never,
               }
             : Promise.reject(new Error('Synthetic flock read failure')),
-        onlineMachineIds: async () => new Set(['one', 'two'] as MachineId[]),
+        machinePresence: async () => ({
+          online: new Set(['one', 'two'] as MachineId[]),
+          synced: true,
+        }),
         machineResources: async (target) => {
           if (target.id === 'two') throw new Error('Synthetic RPC timeout');
           return { disk: { totalGB: 100, freeGB: 1, usedPercent: 99 } };
@@ -221,7 +258,7 @@ describe('resource discovery across MCP and CLI', () => {
       ['two', 'offline'],
     ]);
     const unknown = await new ResourceDiscovery(
-      source({ onlineMachineIds: async () => null })
+      source({ machinePresence: async () => ({ online: new Set<MachineId>(), synced: false }) })
     ).list('machine', { onlineStatus: 'unknown' });
     expect(unknown.items).toHaveLength(2);
     expect(unknown.items.every((row) => row.availability?.state === 'unknown')).toBe(true);
@@ -285,7 +322,10 @@ describe('resource discovery across MCP and CLI', () => {
     await expect(discovery.get('agent_role', 'private')).rejects.toThrow('RESOURCE_NOT_FOUND');
     await expect(discovery.get('agent_role', 'absent')).rejects.toThrow('RESOURCE_NOT_FOUND');
     const unknown = new ResourceDiscovery(
-      source({ roles: async () => [role('bound')], onlineMachineIds: async () => null })
+      source({
+        roles: async () => [role('bound')],
+        machinePresence: async () => ({ online: new Set<MachineId>(), synced: false }),
+      })
     );
     expect((await unknown.get('agent_role', 'bound')).item.availability).toEqual({
       state: 'unknown',

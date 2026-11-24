@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { logDiffPerfLazy } from '@/lib/diff-perf';
 
 /** Keep file shells for navigation; only nearby bodies acquire data and mount code. */
@@ -6,12 +6,12 @@ export function useDiffViewport({
   active,
   paths,
   priorityPath,
-  scrollContainerRef,
+  scrollContainer,
 }: {
   active: boolean;
   paths: readonly string[];
   priorityPath: string | null;
-  scrollContainerRef: RefObject<HTMLDivElement | null>;
+  scrollContainer: HTMLDivElement | null;
 }) {
   const nodes = useRef(new Map<string, HTMLDivElement>());
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -35,13 +35,8 @@ export function useDiffViewport({
   }, []);
 
   useEffect(() => {
-    if (!active || !scrollContainerRef.current) return undefined;
-    if (typeof IntersectionObserver === 'undefined') {
-      // Browsers without an observer must still make every file reachable.
-      setNearbyPaths(new Set(paths));
-      setObserving(true);
-      return undefined;
-    }
+    if (!active || !scrollContainer) return undefined;
+    if (typeof IntersectionObserver === 'undefined') return undefined;
     const observer = new IntersectionObserver(
       (entries) => {
         setNearbyPaths((previous) => {
@@ -58,11 +53,12 @@ export function useDiffViewport({
         });
         setObserving(true);
       },
-      { root: scrollContainerRef.current, rootMargin: '600px 0px' }
+      { root: scrollContainer, rootMargin: '600px 0px' }
     );
     observerRef.current = observer;
-    const viewport = scrollContainerRef.current;
+    const viewport = scrollContainer;
     let anchor: { node: HTMLElement; offset: number } | undefined;
+    let fallbackAnchors: { node: HTMLElement; offset: number }[] = [];
     let adjustedScrollTop: number | undefined;
     let measuredScrollHeight = viewport.scrollHeight;
     anchorTargetRef.current = (node) => {
@@ -86,11 +82,13 @@ export function useDiffViewport({
       const rect = viewport.getBoundingClientRect();
       const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 4;
       anchor = undefined;
+      fallbackAnchors = [];
       for (const node of nodes.current.values()) {
         const bounds = node.getBoundingClientRect();
         if (bounds.bottom > rect.top && bounds.top < rect.bottom) {
-          anchor = { node, offset: bounds.top - rect.top };
-          if (!atBottom) break;
+          const candidate = { node, offset: bounds.top - rect.top };
+          fallbackAnchors.push(candidate);
+          if (!anchor || atBottom) anchor = candidate;
         }
       }
       logDiffPerfLazy('viewport:anchor', () => ({
@@ -110,7 +108,11 @@ export function useDiffViewport({
       typeof ResizeObserver === 'undefined'
         ? null
         : new ResizeObserver(() => {
-            if (!anchor?.node.isConnected) return;
+            // A refreshed manifest may remove the file at the reading anchor.
+            // Keep the position of another previously visible surviving file.
+            if (!anchor?.node.isConnected)
+              anchor = fallbackAnchors.find((candidate) => candidate.node.isConnected);
+            if (!anchor) return;
             const delta =
               anchor.node.getBoundingClientRect().top -
               viewport.getBoundingClientRect().top -
@@ -140,7 +142,14 @@ export function useDiffViewport({
       resizeObserverRef.current = null;
       anchorTargetRef.current = null;
     };
-  }, [active, paths, scrollContainerRef]);
+  }, [active, scrollContainer]);
+
+  useEffect(() => {
+    if (active && typeof IntersectionObserver === 'undefined') {
+      setNearbyPaths(new Set(paths));
+      setObserving(true);
+    }
+  }, [active, paths]);
 
   const loadPaths = useMemo(
     () =>

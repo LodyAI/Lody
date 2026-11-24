@@ -1,15 +1,27 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useState } from 'react';
 import { fn } from 'storybook/test';
 import { InviteScreenView, OnboardingBackdrop, type InviteEntry } from '@/components/onboarding';
 
+const storyStyles = stylex.create({
+  stage: { position: 'relative', minHeight: 760, width: '100%' },
+  content: {
+    position: 'relative',
+    zIndex: 10,
+    display: 'flex',
+    minHeight: 760,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
+
 function InvitePreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-[760px] w-full">
+    <div {...stylex.props(storyStyles.stage)}>
       <OnboardingBackdrop />
-      <div className="relative z-10 flex min-h-[760px] items-center justify-center p-8">
-        {children}
-      </div>
+      <div {...stylex.props(storyStyles.content)}>{children}</div>
     </div>
   );
 }
@@ -50,6 +62,7 @@ function InteractiveInviteScreen({ initial }: { initial?: InviteEntry[] } = {}) 
 
   return (
     <InviteScreenView
+      seatPreview={{ status: 'not_billed', reason: 'free' }}
       email={email}
       onEmailChange={setEmail}
       onAdd={handleAdd}
@@ -72,6 +85,7 @@ const meta = {
   },
   tags: ['autodocs'],
   args: {
+    seatPreview: { status: 'not_billed', reason: 'free' },
     onEmailChange: fn(),
     onAdd: fn(),
     onRemove: fn(),
@@ -99,7 +113,12 @@ const sample: InviteEntry[] = [
 const mixed: InviteEntry[] = [
   { id: '1', email: 'alice@team.dev', status: 'sent' },
   { id: '2', email: 'bob@team.dev', status: 'sending' },
-  { id: '3', email: 'charlie@team.dev', status: 'failed', errorMessage: 'Email rejected by upstream' },
+  {
+    id: '3',
+    email: 'charlie@team.dev',
+    status: 'failed',
+    errorMessage: 'Email rejected by upstream',
+  },
   { id: '4', email: 'dana@team.dev', status: 'pending' },
 ];
 
@@ -169,4 +188,27 @@ export const Interactive: Story = {
     inputError: null,
   },
   render: () => <InteractiveInviteScreen />,
+};
+
+export const PaidBatch: Story = {
+  globals: { locale: 'zh_CN' },
+  args: {
+    email: '',
+    invites: sample,
+    sending: false,
+    inputError: null,
+    seatPreview: {
+      status: 'billed',
+      interval: 'year',
+      addedSeats: 2,
+      unitAmount: 9600,
+      proratedAmount: 16938,
+      invoiceAt: Date.UTC(2026, 10, 24),
+      currentPeriodEnd: Date.UTC(2027, 8, 24),
+      seatCount: 3,
+      nextSeatCount: 5,
+      nextRenewalAmount: 48000,
+      currency: 'usd',
+    },
+  },
 };

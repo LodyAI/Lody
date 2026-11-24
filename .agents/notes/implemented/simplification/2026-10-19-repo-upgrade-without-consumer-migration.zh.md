@@ -22,7 +22,7 @@ PR: [#1713](https://github.com/LodyAI/Lody/pull/1713)
 
 既有 workspace 启动、房间加入、缓存卸载、重连和关闭入口触发恢复后的 Promise 工作流。原先的 Repo/transport 与应用 owner 再次负责持久化和订阅。恢复其既有取消、交接和失败行为，不再叠加原生释放重试或隔离状态。局部等待不能作为服务端确认或持久化回执。撤回 residency 后，缓存 Session 不再受它保护以避免并发 GC；原有竞态需要在恢复后的所有权下另行处理。
 
-[原生所有权记录](../../proposed/architecture/2026-10-16-native-workspace-repo.zh.md)与 [Session residency 记录](../../proposed/architecture/2026-10-17-session-residency.zh.md)保留当时实现及验证历史，不是当前消费者合同。[纯升级记录](../architecture/2026-10-16-streams-repo-release-adoption.zh.md)仍解释保留的依赖升级。
+[原生所有权记录](../../rejected/architecture/2026-10-16-native-workspace-repo.zh.md)与 [Session residency 记录](../../rejected/architecture/2026-10-17-session-residency.zh.md)保留当时实现及验证历史，不是当前消费者合同。[纯升级记录](../architecture/2026-10-16-streams-repo-release-adoption.zh.md)仍解释保留的依赖升级。
 
 ## 验证
 

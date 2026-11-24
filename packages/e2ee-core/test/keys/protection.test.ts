@@ -10,10 +10,14 @@ import { execNativeChild } from '../native-child';
 import { fileURLToPath } from 'node:url';
 import { makeHostEpochProtection, type NativeEpochProtector } from './harness';
 import { makeInstalledEpochHistory } from './harness';
+import { InstalledKeyError } from '../../src/internal/keys/installed-keys';
+import { disposeEpochKey } from '../../src/internal/foundation/epoch-key';
 import { Bytes } from '@lody/e2ee-core/protocol';
 import { commitEpochKey, sealHistoryPacket } from '../../src/internal/keys/history';
 import { contentPermissions } from '@lody/e2ee-core/protocol';
 import { envelopeFixture } from './fixture';
+import { extendLedger } from '@lody/e2ee-core/protocol';
+import { issueWorkspaceInvitation, verifyWorkspaceInvitationSnapshot } from '@lody/e2ee-core';
 const ok = Result.getOrThrow;
 const dirs: string[] = [];
 const file = () => {
@@ -504,6 +508,261 @@ it('recovers and durably reloads all old keys from only installed latest K, vali
   );
   wiped(native.plains);
 });
+function rotatedHistoryFixture() {
+  const f = envelopeFixture();
+  const keys = [f.secret];
+  for (let epoch = 1; epoch <= 5; epoch++) {
+    const key = ok(Bytes.epochKey(new Uint8Array(32).fill(180 + epoch)));
+    f.append([
+      7,
+      epoch,
+      ok(commitEpochKey(f.context.genesis, epoch, key)).toBytes(),
+      ok(
+        sealHistoryPacket({
+          genesis: f.context.genesis,
+          epoch,
+          currentKey: key,
+          previousKey: keys[epoch - 1]!,
+        })
+      ),
+    ]);
+    keys.push(key);
+  }
+  return { f, keys };
+}
+
+it.each(['read', 'recover'] as const)(
+  '%s recovers K0..K3 with only K4 installed while the ledger is at epoch 5',
+  async (method) => {
+    const { f, keys } = rotatedHistoryFixture();
+    const native = synthetic(),
+      pathName = file();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* makeSqliteProtectedEpochKeys({
+            ...config(f, native.protector),
+            path: pathName,
+            mode: 'create',
+          });
+          yield* store.saveAndReload(4, keys[4]!);
+          const history = yield* makeInstalledEpochHistory({
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+            installed: store,
+          });
+          const db = new Database(pathName, { readonly: true, fileMustExist: true });
+          try {
+            expect(db.prepare('SELECT epoch FROM installed_epoch_keys').all()).toEqual([
+              { epoch: 4 },
+            ]);
+            if (method === 'read') {
+              const restored = yield* history.read(2);
+              expect(ok(commitEpochKey(f.context.genesis, 2, restored))).toEqual(
+                ok(commitEpochKey(f.context.genesis, 2, keys[2]!))
+              );
+              disposeEpochKey(restored);
+            } else {
+              expect(yield* history.recover()).toEqual([4, 3, 2, 1, 0]);
+            }
+            expect(
+              db.prepare('SELECT epoch FROM installed_epoch_keys ORDER BY epoch').all()
+            ).toEqual([0, 1, 2, 3, 4].map((epoch) => ({ epoch })));
+            for (let epoch = 0; epoch < 4; epoch++) {
+              const restored = yield* store.read(epoch);
+              expect(ok(commitEpochKey(f.context.genesis, epoch, restored))).toEqual(
+                ok(commitEpochKey(f.context.genesis, epoch, keys[epoch]!))
+              );
+              disposeEpochKey(restored);
+            }
+            expect((yield* Effect.flip(store.read(5))).reason).toBe('missing-key');
+          } finally {
+            db.close();
+          }
+        })
+      )
+    );
+    wiped(native.plains);
+  }
+);
+
+it('separates a missing pre-snapshot key from an unauthorized device on an endorsed snapshot', async () => {
+  const { f, keys } = rotatedHistoryFixture();
+  const before = f.view();
+  let saved: Effect.Success<ReturnType<typeof issueWorkspaceInvitation>>['receipt'] | null = null;
+  const issued = await Effect.runPromise(
+    issueWorkspaceInvitation({
+      workspaceId: 'workspace-A',
+      signer: f.owner.signer,
+      ledger: () => Effect.succeed(before),
+      offset: () => Effect.succeed('opaque-origin'),
+      requestId: ok(Bytes.requestId(new Uint8Array(16).fill(9))),
+      mailbox: {
+        put: (_id, receipt) =>
+          Effect.sync(() => {
+            saved = { ...receipt, snapshot: new Uint8Array(receipt.snapshot) };
+          }),
+        read: () => Effect.succeed(saved),
+      },
+    })
+  );
+  const snapshot = ok(verifyWorkspaceInvitationSnapshot(issued.pin, issued.receipt)).view;
+  expect(snapshot.verification).toBe('endorsed-snapshot');
+  let selected = snapshot;
+  const ledger = () => Effect.succeed(selected);
+  const native = synthetic();
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* makeSqliteProtectedEpochKeys({
+          ...config(f, native.protector),
+          ledger,
+          path: file(),
+          mode: 'create',
+        });
+        const history = yield* makeInstalledEpochHistory({
+          genesis: f.context.genesis,
+          ledger,
+          installed: store,
+        });
+        expect(yield* Effect.flip(history.read(1))).toMatchObject({ reason: 'missing-key' });
+        yield* store.saveAndReload(5, keys[5]!);
+        const restored = yield* history.read(1);
+        expect(ok(commitEpochKey(f.context.genesis, 1, restored))).toEqual(
+          ok(commitEpochKey(f.context.genesis, 1, keys[1]!))
+        );
+        disposeEpochKey(restored);
+        f.append([5, f.phone.raw]);
+        const after = f.view();
+        selected = ok(
+          extendLedger(snapshot, f.records().slice(before.length), {
+            head: after.head,
+            length: after.length,
+          })
+        );
+        expect(yield* Effect.flip(history.read(1))).toMatchObject({ reason: 'unauthorized' });
+      })
+    )
+  );
+  wiped(native.plains);
+});
+
+it.each([5, 4, 2])(
+  'does not skip a corrupt installed K%s to recover from a lower key',
+  async (damagedEpoch) => {
+    const { f, keys } = rotatedHistoryFixture();
+    const native = synthetic(),
+      pathName = file();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* makeSqliteProtectedEpochKeys({
+            ...config(f, native.protector),
+            path: pathName,
+            mode: 'create',
+          });
+          yield* store.saveAndReload(3, keys[3]!);
+          yield* store.saveAndReload(damagedEpoch, keys[damagedEpoch]!);
+          const history = yield* makeInstalledEpochHistory({
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+            installed: store,
+          });
+          const db = new Database(pathName, { fileMustExist: true });
+          try {
+            db.pragma('ignore_check_constraints = ON');
+            db.prepare('UPDATE installed_epoch_keys SET blob=? WHERE epoch=?').run(
+              new Uint8Array(),
+              damagedEpoch
+            );
+            expect(yield* Effect.flip(history.read(2))).toMatchObject({ reason: 'corrupt' });
+            if (damagedEpoch > 2)
+              expect(yield* Effect.flip(history.recover())).toMatchObject({ reason: 'corrupt' });
+            expect(
+              db.prepare('SELECT epoch FROM installed_epoch_keys ORDER BY epoch').all()
+            ).toEqual([3, damagedEpoch].sort((a, b) => a - b).map((epoch) => ({ epoch })));
+          } finally {
+            db.close();
+          }
+        })
+      )
+    );
+  }
+);
+
+it.each(['storage', 'unauthorized', 'native-failed'] as const)(
+  'propagates %s unchanged when searching past a missing latest epoch',
+  async (reason) => {
+    const { f, keys } = rotatedHistoryFixture();
+    const native = synthetic(),
+      pathName = file();
+    const fault = new InstalledKeyError({ reason });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* makeSqliteProtectedEpochKeys({
+            ...config(f, native.protector),
+            path: pathName,
+            mode: 'create',
+          });
+          yield* store.saveAndReload(3, keys[3]!);
+          const history = yield* makeInstalledEpochHistory({
+            genesis: f.context.genesis,
+            ledger: f.ledger,
+            installed: {
+              ...store,
+              read: (epoch) => (epoch === 4 ? Effect.fail(fault) : store.read(epoch)),
+            },
+          });
+          expect(yield* Effect.flip(history.read(2))).toBe(fault);
+          expect(yield* Effect.flip(history.recover())).toBe(fault);
+          expect((yield* Effect.flip(store.read(2))).reason).toBe('missing-key');
+        })
+      )
+    );
+  }
+);
+
+it('keeps missing-key when only lower keys are installed, and preserves epoch-zero recovery', async () => {
+  const { f, keys } = rotatedHistoryFixture();
+  const native = synthetic();
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* makeSqliteProtectedEpochKeys({
+          ...config(f, native.protector),
+          path: file(),
+          mode: 'create',
+        });
+        const history = yield* makeInstalledEpochHistory({
+          genesis: f.context.genesis,
+          ledger: f.ledger,
+          installed: store,
+        });
+        yield* store.saveAndReload(0, keys[0]!);
+        expect(yield* Effect.flip(history.recover())).toMatchObject({ reason: 'missing-key' });
+        yield* store.saveAndReload(1, keys[1]!);
+        expect(yield* Effect.flip(history.read(2))).toMatchObject({ reason: 'missing-key' });
+        expect(yield* Effect.flip(history.read(5))).toMatchObject({ reason: 'missing-key' });
+
+        const genesis = envelopeFixture();
+        const genesisStore = yield* makeSqliteProtectedEpochKeys({
+          ...config(genesis, native.protector),
+          path: file(),
+          mode: 'create',
+        });
+        yield* genesisStore.saveAndReload(0, genesis.secret);
+        const genesisHistory = yield* makeInstalledEpochHistory({
+          genesis: genesis.context.genesis,
+          ledger: genesis.ledger,
+          installed: genesisStore,
+        });
+        expect(yield* genesisHistory.recover()).toEqual([0]);
+      })
+    )
+  );
+});
+
 it('bad signed history produces no partial older durable keys, and retries after native storage ABORT recover original commitments', async () => {
   for (const corrupt of [true, false]) {
     const f = envelopeFixture(),

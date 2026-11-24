@@ -13,6 +13,22 @@ export const CODE_COLLAB_LIMITS = {
   maxRealtimeLineUtf16CodeUnits: 200_000,
   binarySniffPrefixBytes: 8 * 1024,
 } as const;
+/**
+ * Bound on the whole publishable file-index state (`<workspace>:fi:<owner>`
+ * Flock): at most `maxEntries` rows and `maxBytes` of estimated Flock JSON
+ * bundle bytes (UTF-8, path keys, clocks, values and punctuation; see
+ * `estimateCodeCollabFileIndexRowBytes`). Every single Flock commit made by the
+ * publisher, including tombstones, stays within `maxBytes` too.
+ */
+export const CODE_COLLAB_FILE_INDEX_LIMITS = {
+  maxEntries: 1_000,
+  maxBytes: 100 * 1024,
+} as const;
+export type CodeCollabFileIndexBudget = {
+  readonly maxEntries: number;
+  readonly maxBytes: number;
+};
+
 export type CodeCollabLimits = {
   maxSupportedFiles: number;
   maxRealtimeTextBytes: number;
@@ -199,6 +215,7 @@ export const CodeCollabV2EncodedTextPayloadSchema = z.discriminatedUnion('encodi
 export type CodeCollabV2EncodedTextPayload = z.infer<typeof CodeCollabV2EncodedTextPayloadSchema>;
 
 export const CodeCollabV2ErrorCodeSchema = z.enum([
+  'stale',
   'invalid_path',
   'session_not_found',
   'workspace_root_unavailable',
@@ -651,8 +668,8 @@ export type CodeCollabFileIndexReadableFlock = {
 };
 
 export type CodeCollabFileIndexWritableFlock = CodeCollabFileIndexReadableFlock & {
-  set(key: [string], value: unknown, timestamp?: number): void;
-  delete(key: [string], timestamp?: number): void;
+  set(key: [string] | [string, 'v'], value: unknown, timestamp?: number): void;
+  delete(key: [string] | [string, 'v'], timestamp?: number): void;
   commit(): void;
 };
 
@@ -822,14 +839,27 @@ const isCorruptedCodeCollabWorkspacePath = (workspacePath: string): boolean =>
 function scanCodeCollabFileIndexFlock(flock: CodeCollabFileIndexReadableFlock): {
   fileIndex: CodeCollabV2FileIndexState;
   corruptedPaths: string[];
+  generations: CodeCollabFileGenerations;
 } {
   const fileIndex: CodeCollabV2FileIndexState = {};
   const corruptedPaths: string[] = [];
+  const generations: Record<string, string> = {};
   for (const row of flock.scan()) {
     if (row.value === undefined) {
       continue;
     }
     const [workspacePath, ...extra] = row.key;
+    if (
+      extra.length === 1 &&
+      extra[0] === 'v' &&
+      typeof workspacePath === 'string' &&
+      isCodeCollabRecord(row.value) &&
+      typeof row.value.g === 'string' &&
+      row.value.g.length > 0
+    ) {
+      generations[workspacePath] = row.value.g;
+      continue;
+    }
     if (typeof workspacePath !== 'string' || workspacePath.length === 0 || extra.length > 0) {
       continue;
     }
@@ -843,7 +873,55 @@ function scanCodeCollabFileIndexFlock(flock: CodeCollabFileIndexReadableFlock): 
     }
     fileIndex[workspacePath] = parsed;
   }
-  return { fileIndex, corruptedPaths };
+  return { fileIndex, corruptedPaths, generations };
+}
+
+export type CodeCollabFileGenerations = Readonly<Record<string, string>>;
+
+export function readCodeCollabFileGenerations(
+  flock: CodeCollabFileIndexReadableFlock
+): CodeCollabFileGenerations {
+  const result: Record<string, string> = {};
+  for (const row of flock.scan()) {
+    if (
+      row.key.length !== 2 ||
+      row.key[1] !== 'v' ||
+      typeof row.key[0] !== 'string' ||
+      !isCodeCollabRecord(row.value)
+    )
+      continue;
+    if (typeof row.value.g === 'string' && row.value.g.length > 0) result[row.key[0]] = row.value.g;
+  }
+  return result;
+}
+
+export function applyCodeCollabFileGenerationEvents(
+  previous: CodeCollabFileGenerations,
+  events: readonly CodeCollabFileIndexFlockEvent[]
+): CodeCollabFileGenerations {
+  let next: Record<string, string> | undefined;
+  for (const event of events) {
+    if (event.key.length !== 2 || event.key[1] !== 'v' || typeof event.key[0] !== 'string')
+      continue;
+    const token =
+      isCodeCollabRecord(event.value) && typeof event.value.g === 'string'
+        ? event.value.g
+        : undefined;
+    const path = event.key[0];
+    if ((next ?? previous)[path] === token) continue;
+    next ??= { ...previous };
+    if (token === undefined) delete next[path];
+    else next[path] = token;
+  }
+  return next ?? previous;
+}
+
+export function readCodeCollabFileIndexSnapshotFromFlock(flock: CodeCollabFileIndexReadableFlock): {
+  fileIndex: CodeCollabV2FileIndexState;
+  generations: CodeCollabFileGenerations;
+} {
+  const { fileIndex, generations } = scanCodeCollabFileIndexFlock(flock);
+  return { fileIndex, generations };
 }
 
 export function readCodeCollabFileIndexFromFlock(
@@ -886,40 +964,188 @@ export function writeCodeCollabFileIndexSignalToFlock(
   return true;
 }
 
+// Upper bound of what one Flock JSON bundle entry adds around its escaped key and
+// value: `:{"c":"<physical ≤16>,<logical ≤16>,<64-hex peer>","d":` + `},`.
+// Calibrated against `Flock.exportJson`; packages/shared tests pin it.
+const CODE_COLLAB_FILE_INDEX_FLOCK_ROW_OVERHEAD_BYTES = 113;
+// `{"version":<≤16>,"entries":{}}`
+const CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES = 40;
+
+// Reserve enough encoded token bytes for UUID/counter generations. Publication
+// renews an older token whose JSON string exceeds this reservation.
+export const CODE_COLLAB_FILE_GENERATION_MAX_BYTES = 64;
+
+function estimateCodeCollabFlockRowBytes(key: readonly string[], value?: unknown): number {
+  return (
+    utf8ByteLength(JSON.stringify(JSON.stringify(key))) +
+    (value === undefined ? 0 : utf8ByteLength(JSON.stringify(value))) +
+    CODE_COLLAB_FILE_INDEX_FLOCK_ROW_OVERHEAD_BYTES
+  );
+}
+
+/** Estimated Flock JSON bundle bytes of one row; omit `value` for a tombstone. */
+export function estimateCodeCollabFileIndexRowBytes(
+  workspacePath: string,
+  value?: CodeCollabV2FileIndexValue
+): number {
+  return estimateCodeCollabFlockRowBytes(codeCollabFileIndexKeyForWorkspacePath(workspacePath), value);
+}
+
+const codeCollabFileIndexRowCount = (value: CodeCollabV2FileIndexValue): number =>
+  codeCollabFileIndexValueChange(value) === undefined ? 1 : 2;
+
+function estimateCodeCollabFileIndexPathBytes(
+  workspacePath: string,
+  value: CodeCollabV2FileIndexValue
+): number {
+  return (
+    estimateCodeCollabFileIndexRowBytes(workspacePath, value) +
+    (codeCollabFileIndexValueChange(value) === undefined
+      ? 0
+      : estimateCodeCollabFlockRowBytes([workspacePath, 'v'], {
+          g: 'x'.repeat(CODE_COLLAB_FILE_GENERATION_MAX_BYTES),
+        }))
+  );
+}
+
+/** Estimated bytes including the generation sibling reserved for every changed path. */
+export function estimateCodeCollabFileIndexStateBytes(
+  fileIndex: CodeCollabV2FileIndexState
+): number {
+  let total = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
+  for (const [workspacePath, value] of Object.entries(fileIndex)) {
+    total += estimateCodeCollabFileIndexPathBytes(workspacePath, value);
+  }
+  return total;
+}
+
+export type CodeCollabFileIndexFlockWriteBatch = {
+  readonly sets: ReadonlyArray<readonly [string, CodeCollabV2FileIndexValue]>;
+  readonly deletes: readonly string[];
+  readonly generationSets: ReadonlyArray<readonly [string, string]>;
+  readonly generationDeletes: readonly string[];
+};
+
+/**
+ * Plans file and generation mutations in commits within `maxBatchBytes`.
+ * New and changed rows precede cleanup so the current tree is visible first.
+ */
+export function planCodeCollabFileIndexFlockWrite(
+  flock: CodeCollabFileIndexReadableFlock,
+  next: CodeCollabV2FileIndexState,
+  options: {
+    readonly maxBatchBytes?: number;
+    readonly generations?: CodeCollabFileGenerations;
+  } = {}
+): CodeCollabFileIndexFlockWriteBatch[] {
+  const maxBatchBytes = options.maxBatchBytes ?? CODE_COLLAB_FILE_INDEX_LIMITS.maxBytes;
+  const {
+    fileIndex: previous,
+    corruptedPaths,
+    generations: previousGenerations,
+  } = scanCodeCollabFileIndexFlock(flock);
+  const batches: CodeCollabFileIndexFlockWriteBatch[] = [];
+  let batch: {
+    sets: Array<readonly [string, CodeCollabV2FileIndexValue]>;
+    deletes: string[];
+    generationSets: Array<readonly [string, string]>;
+    generationDeletes: string[];
+  } = { sets: [], deletes: [], generationSets: [], generationDeletes: [] };
+  let batchBytes = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
+  const hasWrites = () =>
+    batch.sets.length +
+      batch.deletes.length +
+      batch.generationSets.length +
+      batch.generationDeletes.length >
+    0;
+  const push = (rowBytes: number, add: () => void) => {
+    if (hasWrites() && batchBytes + rowBytes > maxBatchBytes) {
+      batches.push(batch);
+      batch = { sets: [], deletes: [], generationSets: [], generationDeletes: [] };
+      batchBytes = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
+    }
+    batchBytes += rowBytes;
+    add();
+  };
+  for (const [workspacePath, value] of Object.entries(next)) {
+    const normalized = normalizeCodeCollabFileIndexValue(value);
+    if (!normalized || codeCollabFileIndexValuesEqual(previous[workspacePath], normalized))
+      continue;
+    push(estimateCodeCollabFileIndexRowBytes(workspacePath, normalized), () =>
+      batch.sets.push([workspacePath, normalized])
+    );
+  }
+  if (options.generations) {
+    for (const [workspacePath, g] of Object.entries(options.generations)) {
+      if (
+        !Object.prototype.hasOwnProperty.call(next, workspacePath) ||
+        previousGenerations[workspacePath] === g
+      )
+        continue;
+      push(estimateCodeCollabFlockRowBytes([workspacePath, 'v'], { g }), () =>
+        batch.generationSets.push([workspacePath, g])
+      );
+    }
+  }
+  const stalePaths = [
+    ...corruptedPaths,
+    ...Object.keys(previous).filter(
+      (workspacePath) => !Object.prototype.hasOwnProperty.call(next, workspacePath)
+    ),
+  ];
+  for (const workspacePath of stalePaths) {
+    push(estimateCodeCollabFileIndexRowBytes(workspacePath), () =>
+      batch.deletes.push(workspacePath)
+    );
+  }
+  for (const workspacePath of Object.keys(previousGenerations)) {
+    if (
+      Object.prototype.hasOwnProperty.call(next, workspacePath) &&
+      (options.generations === undefined || options.generations[workspacePath] !== undefined)
+    )
+      continue;
+    push(estimateCodeCollabFlockRowBytes([workspacePath, 'v']), () =>
+      batch.generationDeletes.push(workspacePath)
+    );
+  }
+  if (hasWrites()) batches.push(batch);
+  return batches;
+}
+
+/** Applies one planned batch as exactly one Flock commit. */
+export function applyCodeCollabFileIndexFlockWriteBatch(
+  flock: CodeCollabFileIndexWritableFlock,
+  batch: CodeCollabFileIndexFlockWriteBatch,
+  nowMs: number
+): void {
+  for (const [workspacePath, value] of batch.sets) {
+    flock.set(codeCollabFileIndexKeyForWorkspacePath(workspacePath), value, nowMs);
+  }
+  for (const [workspacePath, g] of batch.generationSets) {
+    flock.set([workspacePath, 'v'], { g }, nowMs);
+  }
+  for (const workspacePath of batch.deletes) {
+    flock.delete(codeCollabFileIndexKeyForWorkspacePath(workspacePath), nowMs);
+  }
+  for (const workspacePath of batch.generationDeletes) {
+    flock.delete([workspacePath, 'v'], nowMs);
+  }
+  flock.commit();
+}
+
+/**
+ * Synchronous whole write. The CLI publisher additionally flushes/syncs each
+ * batch so the Streams adapter cannot combine them into one oversized append.
+ */
 export function writeCodeCollabFileIndexToFlock(
   flock: CodeCollabFileIndexWritableFlock,
   next: CodeCollabV2FileIndexState,
-  nowMs: number
+  nowMs: number,
+  generations?: CodeCollabFileGenerations
 ): boolean {
-  const { fileIndex: previous, corruptedPaths } = scanCodeCollabFileIndexFlock(flock);
-  let changed = false;
-
-  for (const workspacePath of corruptedPaths) {
-    flock.delete(codeCollabFileIndexKeyForWorkspacePath(workspacePath), nowMs);
-    changed = true;
-  }
-
-  for (const workspacePath of Object.keys(previous)) {
-    if (Object.prototype.hasOwnProperty.call(next, workspacePath)) {
-      continue;
-    }
-    flock.delete(codeCollabFileIndexKeyForWorkspacePath(workspacePath), nowMs);
-    changed = true;
-  }
-
-  for (const [workspacePath, value] of Object.entries(next)) {
-    const normalized = normalizeCodeCollabFileIndexValue(value);
-    if (!normalized || codeCollabFileIndexValuesEqual(previous[workspacePath], normalized)) {
-      continue;
-    }
-    flock.set(codeCollabFileIndexKeyForWorkspacePath(workspacePath), normalized, nowMs);
-    changed = true;
-  }
-
-  if (changed) {
-    flock.commit();
-  }
-  return changed;
+  const batches = planCodeCollabFileIndexFlockWrite(flock, next, { generations });
+  for (const batch of batches) applyCodeCollabFileIndexFlockWriteBatch(flock, batch, nowMs);
+  return batches.length > 0;
 }
 
 export function applyCodeCollabFileIndexSignalFlockEvents(
@@ -1103,24 +1329,183 @@ export function codeCollabFileIndexValueChange(
   return 'change' in value ? value.change : undefined;
 }
 
-export function buildCodeCollabFileIndexState(
+const isCodeCollabDeletionChange = (change: CodeCollabV2AllChangesValue): boolean =>
+  change !== true && change.del === true;
+
+const codeCollabParentWorkspacePath = (workspacePath: string): string => {
+  const index = workspacePath.lastIndexOf('/');
+  return index < 0 ? '' : workspacePath.slice(0, index);
+};
+
+const codeCollabWorkspacePathDepth = (workspacePath: string): number => {
+  let depth = 1;
+  for (let index = 0; index < workspacePath.length; index += 1) {
+    if (workspacePath.charCodeAt(index) === 47) depth += 1;
+  }
+  return depth;
+};
+
+const compareCodeCollabWorkspacePathsBreadthFirst = (left: string, right: string): number => {
+  const depthOrder = codeCollabWorkspacePathDepth(left) - codeCollabWorkspacePathDepth(right);
+  if (depthOrder !== 0) return depthOrder;
+  return left < right ? -1 : left > right ? 1 : 0;
+};
+
+export type CodeCollabFileIndexBuildOptions = {
+  /** Defaults to `CODE_COLLAB_FILE_INDEX_LIMITS`. */
+  readonly budget?: CodeCollabFileIndexBudget;
+  /**
+   * Directories the user explicitly expanded, most recent first. Their
+   * immediate children are kept ahead of the ordinary breadth-first order so an
+   * expansion stays visible under the budget.
+   */
+  readonly priorityDirectories?: readonly string[];
+};
+
+export type CodeCollabBoundedFileIndex = {
+  readonly fileIndex: CodeCollabV2FileIndexState;
+  /** Rows of the complete state left out by the budget. */
+  readonly omittedPaths: number;
+  readonly estimatedBytes: number;
+};
+
+/**
+ * Merges the file tree and All Changes into the publishable file index, bounded
+ * by `CODE_COLLAB_FILE_INDEX_LIMITS`.
+ *
+ * Only a change that records a deletion becomes a `deleted` row. A changed path
+ * missing from a (budget-truncated) tree is still an existing file, with lazy
+ * ancestors so the tree can load it. Over budget, rows are kept in this order:
+ * root children, children of expanded directories, changed rows, then
+ * breadth-first; omitted rows stay behind their `lazy` parent directory, which
+ * loads on expansion. Truncation never invents deletions.
+ */
+export function buildBoundedCodeCollabFileIndexState(
   fileTree: CodeCollabV2FileTreeState,
-  allChanges: CodeCollabV2AllChangesState
-): CodeCollabV2FileIndexState {
-  const fileIndex: CodeCollabV2FileIndexState = {};
+  allChanges: CodeCollabV2AllChangesState,
+  options: CodeCollabFileIndexBuildOptions = {}
+): CodeCollabBoundedFileIndex {
+  const budget = options.budget ?? CODE_COLLAB_FILE_INDEX_LIMITS;
+  const complete = new Map<string, CodeCollabV2FileIndexValue>();
   for (const [workspacePath, value] of Object.entries(fileTree)) {
-    fileIndex[workspacePath] = codeCollabFileTreeValueToFileIndexValue(
-      value,
-      allChanges[workspacePath]
+    complete.set(
+      workspacePath,
+      codeCollabFileTreeValueToFileIndexValue(value, allChanges[workspacePath])
     );
   }
+  const changedPaths: string[] = [];
   for (const [workspacePath, change] of Object.entries(allChanges)) {
-    if (fileIndex[workspacePath] !== undefined) {
+    changedPaths.push(workspacePath);
+    if (complete.has(workspacePath)) continue;
+    if (isCodeCollabDeletionChange(change)) {
+      complete.set(workspacePath, { kind: 'deleted', change });
       continue;
     }
-    fileIndex[workspacePath] = { kind: 'deleted', change };
+    complete.set(workspacePath, { kind: 'file', change });
+    for (
+      let parent = codeCollabParentWorkspacePath(workspacePath);
+      parent && !complete.has(parent);
+      parent = codeCollabParentWorkspacePath(parent)
+    ) {
+      complete.set(parent, { kind: 'lazy' });
+    }
   }
-  return fileIndex;
+
+  let completeRows = 0;
+  let completeBytes = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
+  for (const [workspacePath, value] of complete) {
+    completeRows += codeCollabFileIndexRowCount(value);
+    completeBytes += estimateCodeCollabFileIndexPathBytes(workspacePath, value);
+  }
+  if (completeRows <= budget.maxEntries && completeBytes <= budget.maxBytes) {
+    return {
+      fileIndex: Object.fromEntries(complete),
+      omittedPaths: 0,
+      estimatedBytes: completeBytes,
+    };
+  }
+
+  const selected = new Map<string, CodeCollabV2FileIndexValue>();
+  let selectedRows = 0;
+  let selectedBytes = CODE_COLLAB_FILE_INDEX_FLOCK_BUNDLE_OVERHEAD_BYTES;
+  let full = false;
+  // Adds a row together with its missing ancestors, or nothing when they do not fit.
+  const take = (workspacePath: string): void => {
+    if (full || selected.has(workspacePath) || !complete.has(workspacePath)) return;
+    const chain: string[] = [];
+    for (
+      let current = workspacePath;
+      current && !selected.has(current);
+      current = codeCollabParentWorkspacePath(current)
+    ) {
+      if (complete.has(current)) chain.push(current);
+    }
+    let chainRows = 0;
+    let chainBytes = 0;
+    for (const path of chain) {
+      const value = complete.get(path);
+      if (value !== undefined) {
+        chainRows += codeCollabFileIndexRowCount(value);
+        chainBytes += estimateCodeCollabFileIndexPathBytes(path, value);
+      }
+    }
+    if (
+      selectedRows + chainRows > budget.maxEntries ||
+      selectedBytes + chainBytes > budget.maxBytes
+    ) {
+      full = true;
+      return;
+    }
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      const path = chain[index];
+      const value = path === undefined ? undefined : complete.get(path);
+      if (path !== undefined && value !== undefined) selected.set(path, value);
+    }
+    selectedRows += chainRows;
+    selectedBytes += chainBytes;
+  };
+
+  const breadthFirst = [...complete.keys()].sort(compareCodeCollabWorkspacePathsBreadthFirst);
+  for (const workspacePath of breadthFirst) {
+    if (full || codeCollabWorkspacePathDepth(workspacePath) > 1) break;
+    take(workspacePath);
+  }
+  const priorityDirectories = options.priorityDirectories ?? [];
+  if (!full && priorityDirectories.length > 0) {
+    const priorityRank = new Map<string, number>();
+    priorityDirectories.forEach((directory, index) => {
+      if (!priorityRank.has(directory)) priorityRank.set(directory, index);
+    });
+    const priorityChildren = breadthFirst
+      .filter((workspacePath) => priorityRank.has(codeCollabParentWorkspacePath(workspacePath)))
+      .sort(
+        (left, right) =>
+          (priorityRank.get(codeCollabParentWorkspacePath(left)) ?? 0) -
+            (priorityRank.get(codeCollabParentWorkspacePath(right)) ?? 0) ||
+          compareCodeCollabWorkspacePathsBreadthFirst(left, right)
+      );
+    for (const directory of priorityDirectories) take(directory);
+    for (const workspacePath of priorityChildren) take(workspacePath);
+  }
+  for (const workspacePath of changedPaths.sort(compareCodeCollabWorkspacePathsBreadthFirst)) {
+    take(workspacePath);
+  }
+  for (const workspacePath of breadthFirst) take(workspacePath);
+
+  return {
+    fileIndex: Object.fromEntries(selected),
+    omittedPaths: complete.size - selected.size,
+    estimatedBytes: selectedBytes,
+  };
+}
+
+/** The bounded publishable file index; see `buildBoundedCodeCollabFileIndexState`. */
+export function buildCodeCollabFileIndexState(
+  fileTree: CodeCollabV2FileTreeState,
+  allChanges: CodeCollabV2AllChangesState,
+  options: CodeCollabFileIndexBuildOptions = {}
+): CodeCollabV2FileIndexState {
+  return buildBoundedCodeCollabFileIndexState(fileTree, allChanges, options).fileIndex;
 }
 
 export function codeCollabFileIndexToSharedState(fileIndex: CodeCollabV2FileIndexState): {
@@ -1606,7 +1991,23 @@ export type LongLineCheckResult =
       lineUtf16CodeUnits: number;
     };
 
-const utf8ByteLength = (value: string): number => new TextEncoder().encode(value).length;
+function utf8ByteLength(value: string): number {
+  // Allocation-free: file-index budgeting measures every row on each publish.
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 export const checkRealtimeTextLineLimits = (
   text: string,

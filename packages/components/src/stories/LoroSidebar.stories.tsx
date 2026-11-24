@@ -1,8 +1,24 @@
+import * as stylex from '@stylexjs/stylex';
+import {
+  commands,
+  getCommandKeybindings,
+  registerBuiltInCommands,
+  unregisterBuiltInCommands,
+} from '@/lib/commands';
+import { __resetPlatformCacheForTests } from '@/lib/commands/platform';
 import type { Meta, StoryObj } from '@storybook/react';
+import { TodayColumnSash, TodayPinnedCard } from '@/components/today/today-pinned-column';
+import todayDayStreamMeta, {
+  PinnedTodayToolbar,
+  TodayWithEarlierDay,
+} from './TodayDayStream.stories';
+
+const TodayDayStreamDemo = todayDayStreamMeta.component!;
+import { E2eeOfflineSummaryText } from '@/components/e2ee-offline-window';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
 import { FolderPlus } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
 import type {
   LoroSidebarChatScope,
   LoroSidebarNavKey,
@@ -11,6 +27,8 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { WorkspaceCard } from '@/components/workspace-frame';
+import { sidebarLastWidthAtom } from '@/atoms/sidebar-state';
+import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
@@ -36,6 +54,140 @@ import type {
   SessionMeta,
   SessionStatus,
 } from '@lody/shared';
+const sidebarStory = stylex.create({
+  section: { marginBottom: 'calc(var(--spacing) * 3)' },
+  collapsed: { marginBottom: 'calc(var(--spacing) * 1)' },
+  group: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * .5)',
+    },
+  },
+});
+const storySpacing = stylex.create({
+  children: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 1)',
+    },
+  },
+  children1: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 0.5)',
+    },
+  },
+  children2: {
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 0.5)',
+    },
+  },
+});
+
+const storyLayoutStylesStylesStyles = stylex.create({
+  frame: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  canvas: {
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--card-foreground) / 1)',
+    'box-shadow': '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  caption: {
+    'font-size': 'var(--text-lg)',
+    'line-height': 'var(--text-lg--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  frame: {
+    height: '360px',
+    width: '280px',
+    'overflow-y': 'auto',
+    'border-radius': 'var(--radius-xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--sidebar-border) / 1) 60%, transparent)',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  frame2: {
+    height: '100vh',
+    width: '100%',
+  },
+  canvas: {
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  row: {
+    display: 'flex',
+    height: '100dvh',
+    width: '100%',
+    overflow: 'hidden',
+    'background-color': 'hsl(var(--sidebar-background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  element: {
+    'min-width': 'calc(var(--spacing) * 0)',
+    flex: '1',
+    overflow: 'hidden',
+  },
+  row2: {
+    display: 'flex',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 1)',
+  },
+  frame3: {
+    'min-height': '100vh',
+    width: '100%',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  row3: {
+    display: 'flex',
+    height: 'calc(100vh - 5rem)',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 8)',
+  },
+  section: {
+    flex: '1',
+  },
+  row4: {
+    display: 'flex',
+    'min-height': '100vh',
+    width: '100%',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+  },
+});
 
 const NOW = Date.now();
 const EMPTY_LIVE_SESSION_STATUSES = new Map<string, SessionStatus>();
@@ -283,10 +435,12 @@ type Story = StoryObj<typeof meta>;
 
 type StoryLayoutProps = Parameters<typeof LoroSidebar>[0] & {
   storyContent?: ReactNode;
+  /** Between the sidebar and the page card, as the shell places pinned Today. */
+  besideSidebar?: ReactNode;
   fullApp?: boolean;
 };
 
-function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProps) {
+function StoryLayout({ storyContent, besideSidebar, fullApp = false, ...args }: StoryLayoutProps) {
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
@@ -440,8 +594,8 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   // desktop column with truncated labels.
   if (isMobile) {
     return (
-      <div className="min-h-screen w-full bg-background text-foreground">
-        <div className="h-screen w-full">{sidebar}</div>
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.frame2)}>{sidebar}</div>
       </div>
     );
   }
@@ -449,9 +603,9 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
   // The window is the sidebar's ground and the page is a card set into it: the same
   // `WorkspaceCard` the shell uses (`web-workspace-layout.tsx`), so this shows the shell.
   const content = storyContent ?? (
-    <div className="p-6">
-      <div className="text-lg font-semibold">Content</div>
-      <div className="mt-2 text-sm text-muted-foreground">
+    <div {...stylex.props(storyLayout.canvas)}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>Content</div>
+      <div {...stylex.props(storyLayoutStyles.caption2)}>
         Use the filter button at the bottom-right of the sidebar to switch between Workspace and
         Updated organize modes, toggle My Tasks vs All Tasks, and control the row detail lines
         (project and branch) in the Details group.
@@ -459,10 +613,11 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
     </div>
   );
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+    <div {...stylex.props(storyLayout.row)}>
       {sidebar}
+      {besideSidebar}
       <WorkspaceCard>
-        {fullApp ? <main className="min-w-0 flex-1 overflow-hidden">{content}</main> : content}
+        {fullApp ? <main {...stylex.props(storyLayout.element)}>{content}</main> : content}
       </WorkspaceCard>
     </div>
   );
@@ -580,6 +735,103 @@ export const Default: Story = {
   },
 };
 
+/** The current workspace is end-to-end encrypted: a lock beside its name, explained on hover. */
+export const EncryptedWorkspace: Story = {
+  ...Default,
+  args: {
+    ...Default.args,
+    workspaceName: 'Cipher Lab',
+    workspaces: [
+      { id: 'ws-e2ee', name: 'Cipher Lab', memberCount: 3, encrypted: true },
+      { id: 'ws-1', name: 'Loro', planTier: 'plus' },
+      { id: 'ws-2', name: 'Lody' },
+    ],
+    currentWorkspaceId: 'ws-e2ee',
+  },
+};
+
+/** The encrypted workspace cannot reach the server: hover "离线" for how long, and how
+ * long this machine can keep working from its outage window. */
+export const EncryptedWorkspaceOffline: Story = {
+  ...EncryptedWorkspace,
+  args: {
+    ...EncryptedWorkspace.args,
+    connectionUiState: 'offline',
+    offlineDetail: (
+      <E2eeOfflineSummaryText
+        window={{ executionUntilMs: 3 * 3_600_000 + 12 * 60_000, offlineSinceMs: -48 * 60_000 }}
+        now={0}
+      />
+    ),
+  },
+};
+
+function NarrowThreeColumnLayout(args: Parameters<typeof LoroSidebar>[0]) {
+  const [width, setWidth] = useAtom(sidebarLastWidthAtom);
+  return (
+    <div {...stylex.props(themeStyles.glyph)}>
+      <WorkspaceSidebarHarness
+        {...args}
+        fullApp
+        defaultWidth={width || undefined}
+        onWidthChange={setWidth}
+        storyContent={
+          <DesktopSessionDetailLayout
+            defaultSizes={{ main: 50, sidebar: 50 }}
+            topBar={null}
+            chatSurfaces={
+              <section aria-label="Conversation" {...stylex.props(themeStyles.glyph2)}>
+                Conversation
+              </section>
+            }
+            secondaryPanel={
+              <section aria-label="iOS Simulator" {...stylex.props(themeStyles.glyph2)}>
+                iOS Simulator
+              </section>
+            }
+            terminalDock={null}
+            sidebarOpen
+            onSidebarCollapse={() => {}}
+            deleteConfirmDialog={null}
+          />
+        }
+      />
+    </div>
+  );
+}
+
+export const NarrowThreeColumn: Story = {
+  render: (args) => <NarrowThreeColumnLayout {...args} />,
+  args: Default.args,
+};
+
+/**
+ * Today pinned beside the sidebar: its own page card, set into the window
+ * ground like the main card, with 4px of ground between the two.
+ */
+export const PinnedToday: Story = {
+  render: (args) => (
+    <StoryLayout
+      {...args}
+      besideSidebar={
+        <TodayPinnedCard
+          width={360}
+          anchored
+          label="Today"
+          sash={<TodayColumnSash width={360} onWidthChange={() => {}} label="Resize Today" />}
+        >
+          <PinnedTodayToolbar />
+          <TodayDayStreamDemo dates={TodayWithEarlierDay.args!.dates!} />
+        </TodayPinnedCard>
+      }
+    />
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
+  },
+};
+
 export const WorkspaceSyncing: Story = {
   render: (args) => <StoryLayout {...args} />,
   args: {
@@ -636,6 +888,55 @@ export const ElectronMacOSCollapseToggle: Story = {
     // Pins the collapse toggle to the macOS traffic-light centerline (y=23,
     // see `trafficLightPosition` in apps/electron/src/main/window.ts).
     isElectronMacOS: true,
+  },
+};
+
+/**
+ * Desktop macOS with the registry's built-in commands, so navigation rows have
+ * live bindings: hover New chat, Today or Search to see the shortcut pill.
+ */
+function WithDesktopCommands(props: { children: ReactNode }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const host = window as {
+      __LODY_ELECTRON__?: boolean;
+      __LODY_PLATFORM__?: { os?: string };
+    };
+    const previous = { electron: host.__LODY_ELECTRON__, platform: host.__LODY_PLATFORM__ };
+    host.__LODY_ELECTRON__ = true;
+    host.__LODY_PLATFORM__ = { os: 'darwin' };
+    __resetPlatformCacheForTests();
+    registerBuiltInCommands();
+    // As TodayCommandPlaceholder does with the experiment on.
+    const releaseToday = commands.register({
+      id: 'today.open',
+      title: 'Open Today',
+      category: 'Navigation',
+      keybindings: getCommandKeybindings('today.open'),
+      when: () => false,
+      run: () => {},
+    });
+    setReady(true);
+    return () => {
+      releaseToday();
+      unregisterBuiltInCommands();
+      host.__LODY_ELECTRON__ = previous.electron;
+      host.__LODY_PLATFORM__ = previous.platform;
+      __resetPlatformCacheForTests();
+    };
+  }, []);
+  return ready ? props.children : null;
+}
+
+export const NavigationShortcuts: Story = {
+  render: (args) => (
+    <WithDesktopCommands>
+      <WithProjectsLayout {...args} />
+    </WithDesktopCommands>
+  ),
+  args: {
+    ...Default.args!,
+    onTodayClicked: () => {},
   },
 };
 
@@ -849,6 +1150,19 @@ export const UpdatedMode: Story = {
     organizeMode: 'updated',
     chatScope: 'my',
     sessionListProps: demoUpdatedTaskListProps,
+  },
+};
+
+/**
+ * The "Status" organize mode: the Updated rows split into Needs you, Just
+ * finished, Open pull requests, Running and Idle, as on mobile Home. Empty
+ * groups are skipped; only Idle folds behind "Show more".
+ */
+export const StatusMode: Story = {
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...UpdatedMode.args!,
+    organizeMode: 'status',
   },
 };
 
@@ -1166,7 +1480,7 @@ function ProductionLikeTopContent({
     <div>
       {chatSessions.length > 0 ? (
         <SessionList
-          className={chatsCollapsed ? 'mb-1' : 'mb-3'}
+          {...stylex.props(sidebarStory.section, chatsCollapsed && sidebarStory.collapsed)}
           sessions={chatSessions}
           repos={[]}
           chatsCollapsed={chatsCollapsed}
@@ -1184,12 +1498,15 @@ function ProductionLikeTopContent({
           return (
             <div
               key={group.machineId}
-              className={cn('space-y-0.5', groupCollapsed ? 'mb-1' : 'mb-3')}
+              {...stylex.props(
+                sidebarStory.section,
+                sidebarStory.group,
+                groupCollapsed && sidebarStory.collapsed
+              )}
             >
               <SidebarSectionHeader
                 label={group.label}
                 collapsed={groupCollapsed}
-                count={group.projects.length}
                 isMobile={isMobile}
                 toggleLabel="Toggle"
                 onToggleCollapsed={() =>
@@ -1200,7 +1517,7 @@ function ProductionLikeTopContent({
                 }
                 action={
                   groupIndex === 0 ? (
-                    <div className="flex items-center gap-1">
+                    <div {...stylex.props(storyLayout.row2)}>
                       <Button
                         type="button"
                         variant="ghost"
@@ -1208,7 +1525,10 @@ function ProductionLikeTopContent({
                         icon
                         aria-label="Import local project folder"
                       >
-                        <FolderPlus className="h-4 w-4" strokeWidth={1.5} />
+                        <FolderPlus
+                          {...stylex.props(storyLayoutStylesStylesStyles.frame)}
+                          strokeWidth={1.5}
+                        />
                       </Button>
                       {filterAction}
                     </div>
@@ -1216,7 +1536,7 @@ function ProductionLikeTopContent({
                 }
               />
               {groupCollapsed ? null : (
-                <div className="space-y-1">
+                <div {...stylex.props(storySpacing.children)}>
                   {group.projects.map((project) => {
                     const key = `${group.machineId}:${project.id}`;
                     const collapsed = collapsedProjects[key] ?? false;
@@ -1228,7 +1548,7 @@ function ProductionLikeTopContent({
                         project={project}
                         canRemoveProject
                         collapsed={collapsed}
-                        whetherShowFullList={false}
+                        revealedRows={0}
                         isSelected={false}
                         sessionsForProject={
                           localProjectSessionsByKey?.[key] ??
@@ -1260,7 +1580,8 @@ function ProductionLikeTopContent({
                             [key]: !(previous[key] ?? false),
                           }))
                         }
-                        onToggleFullList={() => {}}
+                        onShowMore={() => {}}
+                        onShowLess={() => {}}
                         onRequestRemoval={() => {}}
                       />
                     );
@@ -1276,7 +1597,6 @@ function ProductionLikeTopContent({
         <SidebarSectionHeader
           label="GitHub Worktrees"
           collapsed={githubCollapsed}
-          count={githubWorktreeCount}
           isMobile={isMobile}
           toggleLabel="Toggle"
           onToggleCollapsed={() => setGithubCollapsed((v) => !v)}
@@ -1421,8 +1741,8 @@ export function WorkspaceSidebarHarness({
 
   if (isMobile) {
     return (
-      <div className="min-h-screen w-full bg-background text-foreground">
-        <div className="h-screen w-full">{sidebar}</div>
+      <div {...stylex.props(storyLayout.frame)}>
+        <div {...stylex.props(storyLayout.frame2)}>{sidebar}</div>
       </div>
     );
   }
@@ -1430,16 +1750,16 @@ export function WorkspaceSidebarHarness({
   const content =
     storyContent ??
     (fullApp ? (
-      <div className="p-6">
-        <div className="text-lg font-semibold">Content</div>
-        <div className="mt-2 text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayout.canvas)}>
+        <div {...stylex.props(storyLayoutStyles.caption)}>Content</div>
+        <div {...stylex.props(storyLayoutStyles.caption2)}>
           This area is intentionally left minimal for the component preview.
         </div>
       </div>
     ) : (
-      <div className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-xs">
-        <div className="text-lg font-semibold">Content</div>
-        <div className="mt-2 text-sm text-muted-foreground">
+      <div {...stylex.props(storyLayoutStylesStyles.canvas)}>
+        <div {...stylex.props(storyLayoutStyles.caption)}>Content</div>
+        <div {...stylex.props(storyLayoutStyles.caption2)}>
           This area is intentionally left minimal for the component preview.
         </div>
       </div>
@@ -1447,20 +1767,20 @@ export function WorkspaceSidebarHarness({
 
   if (fullApp) {
     return (
-      <div className="flex h-dvh w-full overflow-hidden bg-sidebar text-foreground">
+      <div {...stylex.props(storyLayout.row)}>
         {sidebar}
         <WorkspaceCard>
-          <main className="min-w-0 flex-1 overflow-hidden">{content}</main>
+          <main {...stylex.props(storyLayout.element)}>{content}</main>
         </WorkspaceCard>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen w-full bg-background p-10 text-foreground">
-      <div className="flex h-[calc(100vh-5rem)] items-start gap-8">
+    <div {...stylex.props(storyLayout.frame3)}>
+      <div {...stylex.props(storyLayout.row3)}>
         {sidebar}
-        <div className="flex-1">{content}</div>
+        <div {...stylex.props(storyLayout.section)}>{content}</div>
       </div>
     </div>
   );
@@ -1521,6 +1841,19 @@ export const WithProjects: Story = {
   args: {
     ...Default.args!,
   },
+};
+
+export const LongProjectPathTooltip: Story = {
+  args: { ...Default.args! },
+  render: (args) => (
+    <WorkspaceSidebarHarness
+      {...args}
+      localProjects={demoProjects.map((project) => ({
+        ...project,
+        rootPath: `/synthetic/${'long-project-directory-segment-'.repeat(12)}${project.name}`,
+      }))}
+    />
+  ),
 };
 
 /** 180 conversations across chats and eight worktree repositories for scrolling and density checks. */
@@ -1604,13 +1937,10 @@ function MachineGroupScrollFixture() {
     []
   );
   return (
-    <div className="flex min-h-screen w-full items-start justify-center bg-background p-10">
-      <div
-        data-testid="machine-group-scrollbox"
-        className="h-[360px] w-[280px] overflow-y-auto rounded-xl border border-sidebar-border/60 bg-sidebar p-2"
-      >
+    <div {...stylex.props(storyLayout.row4)}>
+      <div data-testid="machine-group-scrollbox" {...stylex.props(storyLayoutStyles.frame)}>
         {/* Production section wrapper: loro-app-sidebar.tsx localProjectsTopContent. */}
-        <div className="space-y-0.5">
+        <div {...stylex.props(storySpacing.children1)}>
           <div>
             <SidebarSectionHeader
               label="LAPTOP-PP66IJ89"
@@ -1620,7 +1950,7 @@ function MachineGroupScrollFixture() {
               onToggleCollapsed={() => {}}
             />
           </div>
-          <div className="space-y-0.5">
+          <div {...stylex.props(storySpacing.children2)}>
             {projects.map((project, index) => {
               const key = `${demoMachineId}:${project.id}`;
               return (
@@ -1631,7 +1961,7 @@ function MachineGroupScrollFixture() {
                   project={project}
                   canRemoveProject
                   collapsed={collapsedProjects[key] ?? true}
-                  whetherShowFullList={false}
+                  revealedRows={0}
                   isSelected={index === 0}
                   sessionsForProject={[]}
                   childSessionsByParent={new Map()}
@@ -1653,7 +1983,8 @@ function MachineGroupScrollFixture() {
                   onToggleCollapsed={() =>
                     setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? true) }))
                   }
-                  onToggleFullList={() => {}}
+                  onShowMore={() => {}}
+                  onShowLess={() => {}}
                   onRequestRemoval={() => {}}
                 />
               );
@@ -1670,3 +2001,8 @@ export const MachineGroupScrollingHeader: Story = {
   render: () => <MachineGroupScrollFixture />,
   args: { ...Default.args! },
 };
+
+const themeStyles = stylex.create({
+  glyph: { maxWidth: '867px' },
+  glyph2: { height: '100%', padding: 'calc(var(--spacing) * 4)' },
+});

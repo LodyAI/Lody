@@ -239,6 +239,11 @@ export type LoroStreamsTokenProviderEvent =
       error: unknown;
     }
   | {
+      /** Confirmed owner shutdown, after producer I/O finalizers settled. */
+      type: 'fetch-cancelled';
+      reason: 'owner_released';
+    }
+  | {
       type: 'in-flight-reuse';
       workspaceId: string;
     }
@@ -255,9 +260,8 @@ export const buildLoroStreamsTokenEndpoint = (baseUrl: string): string =>
  * Thrown when `/api/loro-streams/token` rejects the caller's long-lived
  * credentials as 401/403. Direct `getToken()` callers should treat this as
  * fatal: the CLI token has been revoked (or was never valid for this
- * workspace) and no amount of retrying will recover it. Transport auth
- * callbacks convert this to `undefined` so streams-crdt can surface
- * `auth_failed` instead of retryable `auth_provider_error`.
+ * workspace). Reads and transport callbacks reject until credentials change
+ * or the provider is invalidated; returning undefined permits anonymous HTTP.
  */
 export class LoroStreamsTokenAuthError extends Error {
   readonly _tag = 'LoroStreamsTokenAuthError';

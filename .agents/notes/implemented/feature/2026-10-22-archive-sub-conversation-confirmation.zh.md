@@ -42,4 +42,3 @@ opened-by 关系向下遍历，与停止协作使用相同的去重和防循环�
 `use-session-actions.test.ts` 通过 Repo 快照驱动真实的 hook 与弹窗：数量与工作中文案、“全部归档”
 归档开启的 Session 及其 Tab、“仅归档此对话”与取消、无弹窗路径，以及始终确认路径只出现一个弹窗。
 `session-operation-targets.test.ts` 覆盖 `archive-tree` 目标，并确认不包含开启者。
-components 与 shared 类型检查、type-aware lint 通过；CLI 类型检查仅报告未构建的 ACP adapter 模块。

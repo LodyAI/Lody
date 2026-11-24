@@ -24,6 +24,6 @@ Translation: current
 分享操作。
 
 实现与验证证据见
-[提案记录](../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.zh.md)。
+[提案记录](../.agents/notes/implemented/feature/2026-10-11-composer-machine-info-card.zh.md)。
 [撤回记录](../.agents/notes/implemented/simplification/2026-10-11-revert-composer-machine-owner.zh.md)
 保留先前决策。真实团队会话验证仍待完成。

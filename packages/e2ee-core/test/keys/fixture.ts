@@ -19,7 +19,11 @@ export async function recipientPair(): Promise<CryptoKeyPair> {
     publicKey: await kem.deserializePublicKey(bytes(v.pkR)),
   };
 }
-export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
+export function envelopeFixture(
+  kind: 0 | 1 | 2 = 0,
+  org = 100,
+  ownerUser: Uint8Array = new Uint8Array(32).fill(10)
+) {
   const ed = (n: number) => {
     const privateKey = createPrivateKey({
       key: Buffer.concat([
@@ -54,9 +58,22 @@ export function envelopeFixture(kind: 0 | 1 | 2 = 0, org = 100) {
     signed([
       1,
       owner.raw,
-      new Uint8Array(32).fill(10),
+      ownerUser,
       member,
-      new Uint8Array(32).fill(org),
+      new Uint8Array(
+        createPublicKey(
+          createPrivateKey({
+            key: Buffer.concat([
+              Buffer.from('302e020100300506032b656e04220420', 'hex'),
+              Buffer.alloc(32, org),
+            ]),
+            format: 'der',
+            type: 'pkcs8',
+          })
+        )
+          .export({ format: 'der', type: 'spki' })
+          .subarray(-32)
+      ),
       commitment.toBytes(),
     ]),
   ];

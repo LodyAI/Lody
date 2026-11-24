@@ -16,6 +16,13 @@ const testLogger = (): Logger =>
     child: vi.fn(),
   }) as unknown as Logger;
 
+const machineSource = (effective: { name?: string; email?: string }) => ({
+  effective,
+  untrustedRepositoryIdentity: false,
+  repositoryIdentity: false,
+  userLevel: () => ({}),
+});
+
 type ProfileQuery = ConstructorParameters<typeof SessionUserResolver>[2];
 
 const createResolver = (queryProfile: ProfileQuery) =>
@@ -32,19 +39,19 @@ describe('SessionUserResolver', () => {
     expect(
       resolveSessionGitIdentity(owner, {
         preferMachineIdentity: true,
-        machineIdentity: { name: 'Local Owner', email: 'local@example.com' },
+        machine: machineSource({ name: 'Local Owner', email: 'local@example.com' }),
       })
-    ).toEqual({ name: 'Local Owner', email: 'local@example.com' });
+    ).toEqual({ name: 'Local Owner', email: 'local@example.com', inject: false });
     expect(
       resolveSessionGitIdentity(owner, {
         preferMachineIdentity: true,
-        machineIdentity: {},
+        machine: machineSource({}),
       })
-    ).toEqual({ name: 'LodyAI', email: 'agent@lody.ai' });
+    ).toEqual({ name: 'LodyAI', email: 'agent@lody.ai', inject: true });
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('still resolves a non-owner profile and never attributes it to the machine owner', async () => {
+  it('resolves an approved non-owner profile and never attributes it to the machine owner', async () => {
     const resolver = new SessionUserResolver(
       testLogger(),
       WORKSPACE_ID,
@@ -55,9 +62,10 @@ describe('SessionUserResolver', () => {
     expect(
       resolveSessionGitIdentity(guest, {
         preferMachineIdentity: false,
-        machineIdentity: { name: 'Owner', email: 'owner@example.com' },
+        personalIdentityEnabled: true,
+        machine: machineSource({ name: 'Owner', email: 'owner@example.com' }),
       })
-    ).toEqual({ name: 'Guest', email: 'guest@example.com' });
+    ).toEqual({ name: 'Guest', email: 'guest@example.com', inject: true });
   });
 
   it('bounds a hung query to one minute, retries, and ignores late results', async () => {
@@ -81,9 +89,10 @@ describe('SessionUserResolver', () => {
     expect(
       resolveSessionGitIdentity(fallback, {
         preferMachineIdentity: false,
-        machineIdentity: { name: 'Owner', email: 'owner@example.com' },
+        personalIdentityEnabled: true,
+        machine: machineSource({ name: 'Owner', email: 'owner@example.com' }),
       })
-    ).toEqual({ name: 'LodyAI', email: 'agent@lody.ai' });
+    ).toEqual({ name: 'LodyAI', email: 'agent@lody.ai', inject: true });
     expect(vi.getTimerCount()).toBe(0);
     await expect(resolver.resolve('guest')).resolves.toEqual(fresh);
     finishOld({ id: 'guest', name: 'Old', email: 'old@example.com' });

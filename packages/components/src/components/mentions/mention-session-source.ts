@@ -176,10 +176,6 @@ export function selectSessionMentionCandidates(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Insertion from outside the menu (drag and drop)
-// ---------------------------------------------------------------------------
-
 /**
  * The edit that adds a session mention to a draft nobody is typing in.
  *
@@ -220,10 +216,6 @@ export function buildSessionMentionInsertion(
     suffix: ' ',
   };
 }
-
-// ---------------------------------------------------------------------------
-// Slug -> id resolution
-// ---------------------------------------------------------------------------
 
 /**
  * Persistent slug -> id map.
@@ -357,10 +349,6 @@ export function resolveSessionMentionIds(
   for (const item of items) resolved.set(item.slug, item.sessionId);
   return resolved;
 }
-
-// ---------------------------------------------------------------------------
-// Text: hydration and before-send expansion
-// ---------------------------------------------------------------------------
 
 export type SessionMentionPromptFields = {
   sessionId: string;

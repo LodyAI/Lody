@@ -49,7 +49,7 @@ Home/app switcher/lock, rotation, shake, supported volume/Action buttons, explic
 Unicode input, appearance and simulator deep links. Capture saves a PNG or stages a
 composer attachment without sending. Fit/expanded view and the dependency-free device
 shell stay local; the shell preserves actual screen bounds and adds no duplicate island
-or Home bar. DeviceKit assets are loaded privately from the target Mac; illustrative CSS is only a missing-asset fallback.
+or Home bar. DeviceKit assets are loaded privately from the target Mac; missing assets show content without a drawn shell.
 
 Controls require `iosSimulatorControls: 1` independently of basic preview support.
 Text and deep links can contain credentials, so device actions use exact-origin
@@ -122,7 +122,7 @@ A lazily started Baguette process captures and injects input on the Mac. Each ac
 
 ## RPC and authorization
 
-`lody_ios_simulator_preview` exposes list/start/status/stop separately from web
+`lody_simulator_preview` (`platform: "ios"`, formerly `lody_ios_simulator_preview`) exposes list/start/status/stop separately from web
 preview. Its strict input has no identity selectors. The local-only
 `ios-simulator/agent-control` route derives the active invocation user and reuses
 service authorization. Results exclude viewer URLs and free-form preview diagnostics.
@@ -170,7 +170,7 @@ Inspected OSS `b83e2fdec0f7bc871243c138486c6fb1ce5c1007`:
 - `session-browser-panel.tsx` owns navigation/address/annotation; `managed-preview-surface.tsx` depends on annotation and Browser postMessage, so neither should become the simulator player. General status presentation can be extracted from `preview-connection-status.tsx`, removing address-specific language.
 - `apps/cli/src/preview/preview-service.ts` keys activeTunnels, operations, cancellation and publication by SessionId, allowing one remote owner today.
 - `local-preview-proxy.ts` calls `onActivity(true)` for WS messages in both directions. Video requires an explicit renewal policy.
-- Related decisions: [Quick Tunnel](../../proposed/architecture/2026-09-21-quick-tunnel-preview.md), [optional annotation](../../implemented/bug-fix/2026-09-15-preview-optional-annotation.md). Simulator integration does not remove existing proxy security boundaries.
+- Related decisions: [Quick Tunnel](../../implemented/architecture/2026-09-21-quick-tunnel-preview.md), [optional annotation](../../implemented/bug-fix/2026-09-15-preview-optional-annotation.md). Simulator integration does not remove existing proxy security boundaries.
 
 ## Verification and limits
 
@@ -204,7 +204,7 @@ processes were removed. This checks native command acceptance and selected readb
 it does not prove every visible button effect or remote/mobile end-to-end behavior.
 
 The controls UI adds a responsive second toolbar row, mobile More menu, model-aware
-DeviceKit hardware exterior (with a CSS fallback) and draft-only screenshot attachment. It adds no dependency.
+DeviceKit hardware exterior (content-only while artwork is unavailable) and draft-only screenshot attachment. It adds no dependency.
 The final bridge tests cover exact reply identity, serial controls, timeout and
 navigation/unmount cancellation, and state-before-ack rotation without a double turn.
 The viewer's acknowledged absolute angle is the only orientation authority. The UI
@@ -218,7 +218,7 @@ fixed Baguette routes, normalizes geometry/button hit regions and drops upstream
 The private gateway caches bounded geometry/PNG bytes; the initialized viewer transfers
 them to its exact parent. The renderer checks identity, geometry and PNG dimensions,
 creates a revocable object URL and rotates the exterior independently of screen pixels.
-Missing assets retain the drawn fallback. No asset is bundled or publicly published.
+Missing assets show content without a drawn shell. No asset is bundled or publicly published.
 
 For iPhone/iPad, the owned worker writes device-local
 `com.apple.Preferences AutomaticMinimizationEnabled=false` and posts

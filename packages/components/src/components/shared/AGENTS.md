@@ -25,6 +25,8 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 - The shared image viewer is modal: trap focus, isolate the background, use named
   native buttons, and restore the opener without replacing the image gesture engine.
   [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-30-image-viewer-modal-focus.md).
+  A stationary touch hold opens its copy/save menu inside that boundary; never add a private
+  native clipboard bridge. [Decision](../../../../../.agents/notes/implemented/feature/2026-10-08-image-preview-touch-actions.md).
 - Desktop image preview copy/save (`lib/image-preview-export.ts`) is Electron-only and splits by
   what each process can reach: main owns the native menu, clipboard, and save dialog;
   the renderer owns the `blob:` bytes and sends them only after the user picks an

@@ -4,9 +4,8 @@ import {
   bindAgentRoleTarget,
   formatAgentRoleMentionValue,
   getAgentRoleEmoji,
-  getAgentRoleMentionSlug,
+  getAgentRoleTargetMentionSlug,
   getAgentRoleTargets,
-  normalizeAgentRoleMentionSlug,
   type AgentRole,
   type AgentRoleAvailability,
   type MachineId,
@@ -67,10 +66,6 @@ export type AgentRoleMentionItem = {
   machine?: Pick<MachineViewMeta, 'acpCapabilities' | 'name'> | null;
 };
 
-// ---------------------------------------------------------------------------
-// Candidates
-// ---------------------------------------------------------------------------
-
 /** Available matches precede disabled matches, even when the latter score higher. */
 export const selectAgentRoleMentionCandidates = (
   items: readonly AgentRoleMentionItem[],
@@ -85,10 +80,6 @@ export const selectAgentRoleMentionCandidates = (
     );
   return [...rank(true), ...rank(false)].slice(0, limit);
 };
-
-// ---------------------------------------------------------------------------
-// Items
-// ---------------------------------------------------------------------------
 
 /**
  * One item per machine a Role runs on. A single-target Role is one item, named
@@ -125,10 +116,12 @@ export const buildAgentRoleMentionItems = (
         return [
           {
             // `@Reviewer-MacBook`: the separator dot is for reading, not typing.
-            slug: multi
-              ? normalizeAgentRoleMentionSlug(target.alias || `${role.name} ${machineName}`) ||
-                getAgentRoleMentionSlug(role)
-              : getAgentRoleMentionSlug(role),
+            slug: getAgentRoleTargetMentionSlug({
+              roleName: role.name,
+              alias: target.alias,
+              machineName,
+              multiTarget: multi,
+            }),
             value: formatAgentRoleMentionValue(role.id, multi ? target.machineId : undefined),
             label,
             role: bound,
@@ -177,12 +170,9 @@ export function useAgentRoleMentionItems(
   }, [agentConfigs, machines, preferredMachineId, resolve, roles]);
 }
 
-// ---------------------------------------------------------------------------
-// Text: hydration and before-send expansion
-// ---------------------------------------------------------------------------
-
 /**
- * The instruction the current agent receives in place of the chip.
+ * The reference the current agent receives in place of the chip. It names the
+ * Role, not an action: the user's own words say what to do with it.
  *
  * Carries the Role id and nothing else that matters: the machine, agent config,
  * model, reasoning, and prompt prefix come from the workspace catalog, so the
@@ -195,8 +185,8 @@ export const buildAgentRoleMentionPrompt = (
   machineId?: string
 ): string =>
   machineId
-    ? `use lody mcp to create a session with agent role[id: ${role.id}, agentRoleMachineId: ${machineId}, name: ${role.name}]`
-    : `use lody mcp to create a session with agent role[id: ${role.id}, name: ${role.name}]`;
+    ? `[Agent Role: ${role.name} (agentRoleId: ${role.id}, agentRoleMachineId: ${machineId})]`
+    : `[Agent Role: ${role.name} (agentRoleId: ${role.id})]`;
 
 export const buildAgentRoleMentionRewrites = (
   text: string,

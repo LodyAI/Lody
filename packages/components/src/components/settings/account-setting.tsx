@@ -1,14 +1,24 @@
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { settingsDialogOpenAtom } from '@/atoms';
+import { Button } from '@lody/ui/button';
+import { CompactRow } from './compact-layout';
 import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  deleteAccountWorkspace,
+  hasEncryptedContentMode,
+} from '@/lib/workspace-removal-transition';
 import { usePlatform } from '@lody/platform/react';
 import { E2eeTeamSettingsHost } from './e2ee-team-settings';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, useCloudAction } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
 import { toast } from '@/lib/toast';
 import type { AvatarKind, CliApiKeyRecord, WorkspaceId } from '@lody/shared';
@@ -32,13 +42,15 @@ import {
 } from '@/lib/organization-member-role';
 import {
   AccountSettingsPure,
+  deriveWorkspaceDeleteBillingGuard,
   type AccountSettingsSurface,
-  type WorkspaceDeleteBillingGuard,
 } from './account-setting-pure';
+import { useE2eeRecoverySection } from './e2ee/recovery-host';
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { DeletedWorkspaceBilling } from './deleted-workspace-billing';
 import { AccountMachinesOverview } from './account-machines-overview';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const styles = stylex.create({
   empty: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
@@ -69,8 +81,17 @@ export async function persistUserAvatar({
 
 export function AccountSettingsComponent({
   surface = 'account',
+  encryptedTeamManagement = true,
+  onOpenEncryptionConsole,
+  workspaceSecuritySlot,
 }: {
   surface?: AccountSettingsSurface;
+  /** Desktop General leaves encrypted invitations to the encryption console. */
+  encryptedTeamManagement?: boolean;
+  /** Opens the encryption console on its members page, where encrypted ownership moves. */
+  onOpenEncryptionConsole?: () => void;
+  /** The encrypted workspace's security entry, laid out as the page's first section. */
+  workspaceSecuritySlot?: ReactNode;
 }) {
   // Personal account and workspace administration are cloud-account surfaces.
   // Registry-level gating hides their tabs without `cloudAccount`; this is the
@@ -79,10 +100,27 @@ export function AccountSettingsComponent({
   if (!cloudAccountAvailable) {
     return null;
   }
-  return <CloudAccountSettings surface={surface} />;
+  return (
+    <CloudAccountSettings
+      surface={surface}
+      encryptedTeamManagement={encryptedTeamManagement}
+      onOpenEncryptionConsole={onOpenEncryptionConsole}
+      workspaceSecuritySlot={workspaceSecuritySlot}
+    />
+  );
 }
 
-function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) {
+function CloudAccountSettings({
+  surface,
+  encryptedTeamManagement,
+  onOpenEncryptionConsole,
+  workspaceSecuritySlot,
+}: {
+  surface: AccountSettingsSurface;
+  encryptedTeamManagement: boolean;
+  onOpenEncryptionConsole: (() => void) | undefined;
+  workspaceSecuritySlot: ReactNode;
+}) {
   const { t } = useTranslation();
   const authClient = useAuthClient();
   const transferOwnership = useLegacyWorkspaceMutation(
@@ -90,6 +128,8 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   );
   const signOut = useAuthSignOut();
   const router = useRouter();
+  const closeSettings = useSetAtom(settingsDialogOpenAtom);
+  const recoverySection = useE2eeRecoverySection();
   const {
     activeOrganization,
     organizations,
@@ -105,52 +145,39 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   const currentUser = session?.user ?? null;
   const currentUserId = currentUser?.id ?? null;
   const activeOrganizationId = activeOrganization?.id;
-  const encrypted = Boolean(
-    activeOrganization &&
-    'contentMode' in activeOrganization &&
-    activeOrganization.contentMode === 'e2ee'
-  );
+  const encrypted = hasEncryptedContentMode(activeOrganization);
+  const recoveryPage = router?.options?.context?.recoveryPage;
+  const handleOpenRecovery = useMemo(() => {
+    if (surface !== 'account' || !encrypted || !recoverySection || !recoveryPage) {
+      return undefined;
+    }
+    return () => {
+      closeSettings(false);
+      void router.navigate({ to: '/recovery' });
+    };
+  }, [closeSettings, encrypted, recoveryPage, recoverySection, router, surface]);
   const platform = usePlatform();
   const memberLimitState = useCloudQuery(
     cloudOperations.billing.getWorkspaceMemberLimitState,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
   // Admission accrues any additional seat fee; collection is deferred to the billing date.
+  const refreshAdmissionBilling = useCloudAction(
+    cloudOperations.billing.purchaseWorkspaceMemberSeat
+  );
   const seatInvitePreview = useCloudQuery(
     cloudOperations.billing.getWorkspaceSeatInvitePreview,
     activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  // Deleting a paid workspace needs a billing-aware guard: a live subscription
-  // blocks deletion (cancel first); a cancel-scheduled one gets a warning that
-  // deletion preserves its scheduled end and any accrued charges.
+  // Not skipped for encrypted workspaces: the subscription guard on deletion still applies.
   const billingOverview = useCloudQuery(
     cloudOperations.billing.getBillingOverview,
-    activeOrganizationId && !encrypted ? { workspaceId: activeOrganizationId } : 'skip'
+    activeOrganizationId ? { workspaceId: activeOrganizationId } : 'skip'
   );
-  const deleteBillingGuard: WorkspaceDeleteBillingGuard | null = useMemo(() => {
-    if (
-      !billingOverview ||
-      billingOverview.effectivePlanTier === 'free' ||
-      (billingOverview.entitlementSource === 'stripe_gift' && !billingOverview.autoRenewAfterGift)
-    ) {
-      return null;
-    }
-    if (billingOverview.cancelAtPeriodEnd) {
-      const entitlementEnd =
-        billingOverview.giftEndsAt && billingOverview.giftEndsAt > Date.now()
-          ? billingOverview.giftEndsAt
-          : billingOverview.currentPeriodEnd;
-      return {
-        kind: 'cancel-scheduled',
-        formattedPeriodEnd: entitlementEnd
-          ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(
-              new Date(entitlementEnd)
-            )
-          : null,
-      };
-    }
-    return { kind: 'active-subscription' };
-  }, [billingOverview]);
+  const deleteBillingGuard = useMemo(
+    () => deriveWorkspaceDeleteBillingGuard(billingOverview, Date.now()),
+    [billingOverview]
+  );
 
   const sortedMembers = useMemo(() => {
     const members = activeOrganization?.members ?? [];
@@ -187,7 +214,27 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
   const sessionToken = rawSession?.session?.token ?? session?.session?.token ?? null;
   const authBaseUrl = import.meta.env.VITE_CONVEX_SITE_URL;
   const canGenerateCliApiKey = Boolean(authBaseUrl && sessionToken);
+  // Names the machines each CLI token signs in, and marks this computer's.
+  const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const cliApiKeyMachineNames = useMemo(
+    () =>
+      new Map(
+        Array.from(machineMetaMap.values(), (machine) => [machine.id, machine.name || machine.id])
+      ),
+    [machineMetaMap]
+  );
   const billingUiAvailable = !isNativeAppShell();
+  const openAdmissionBilling = billingUiAvailable
+    ? () => {
+        if (!activeOrganization?.slug) return;
+        void router.navigate({
+          to: '/$workspaceName/settings/billing',
+          params: { workspaceName: activeOrganization.slug },
+        });
+      }
+    : undefined;
+
   // OAuth account linking uses a same-origin redirect that only works in a real
   // web browser. The Electron/native OAuth proxy only supports sign-in (not
   // linkSocial), so the flow would dead-end on a one-time-token page. Gate the
@@ -506,7 +553,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
 
   const handleCopyInviteLink = async (link: string) => {
     try {
-      await navigator.clipboard.writeText(link);
+      await copyTextToClipboard(link);
     } catch (error) {
       console.error('Failed to copy link:', error);
       toast.error(t('workspace.invite.linkCopyError', 'Failed to copy invite link'));
@@ -544,7 +591,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
         }
 
         try {
-          await navigator.clipboard.writeText(result.apiKey);
+          await copyTextToClipboard(result.apiKey);
           toast.success(t('settings.account.cliAuth.generated'), {
             description: t('settings.account.cliAuth.copiedToClipboard'),
           });
@@ -570,7 +617,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
     if (!generatedCliApiKey) return;
 
     try {
-      await navigator.clipboard.writeText(generatedCliApiKey);
+      await copyTextToClipboard(generatedCliApiKey);
       toast.success(t('settings.account.cliAuth.copied'));
     } catch (error) {
       console.error('Failed to copy CLI API key:', error);
@@ -645,17 +692,17 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
 
   const handleDeleteAccount = useCallback(async () => {
     try {
-      // Per product decision, deleting your account deletes every workspace you
-      // own (including shared/team workspaces). Run the deletes in parallel.
-      // `organization.delete` is best-effort: it is only permitted for
-      // workspaces you own, so it fails harmlessly for workspaces where you are
-      // a non-owner member (those memberships are cleared when `deleteUser`
-      // removes your account below). A workspace that fails to delete must not
-      // block account deletion — removing the account is the critical step — so
-      // failures are logged, not thrown.
+      // Each service checks ownership. A refused workspace must not block account deletion.
       const ownedOrgs = organizations ?? [];
       const orgResults = await Promise.allSettled(
-        ownedOrgs.map((org) => authClient.organization.delete({ organizationId: org.id }))
+        ownedOrgs.map((org) =>
+          deleteAccountWorkspace(
+            org.id,
+            hasEncryptedContentMode(org),
+            authClient,
+            platform.e2eeWorkspaces
+          )
+        )
       );
       orgResults.forEach((result, index) => {
         if (result.status === 'rejected') {
@@ -681,13 +728,14 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       });
       throw error;
     }
-  }, [authClient, organizations, signOut, t]);
+  }, [authClient, organizations, platform.e2eeWorkspaces, signOut, t]);
 
   if (orgLoading) {
     return (
       <AccountSettingsPure
         surface={surface}
         loading
+        workspaceSecuritySlot={workspaceSecuritySlot}
         currentUser={currentUser}
         organization={{ id: '', name: '' }}
         role="member"
@@ -749,14 +797,36 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
               toast.success(t('workspace.transfer.success'));
             }}
           />
+        ) : encrypted && role === 'owner' && onOpenEncryptionConsole ? (
+          <CompactRow
+            label={t('workspace.transfer.title')}
+            helper={t('workspace.transfer.encryptedHelper')}
+          >
+            <Button
+              variant="secondary"
+              size="small"
+              tone="destructive"
+              data-testid="e2ee-danger-transfer"
+              onClick={onOpenEncryptionConsole}
+            >
+              {t('workspace.transfer.encryptedButton')}
+            </Button>
+          </CompactRow>
         ) : undefined
       }
+      encryptedWorkspace={encrypted}
+      workspaceSecuritySlot={workspaceSecuritySlot}
       workspaceJoinRequestsSlot={
-        encrypted && platform.e2eeWorkspaces?.runtime && currentUserId ? (
+        encrypted &&
+        encryptedTeamManagement &&
+        platform.e2eeWorkspaces?.runtime &&
+        currentUserId ? (
           <E2eeTeamSettingsHost
             runtime={platform.e2eeWorkspaces.runtime}
             workspaceId={activeOrganization.id}
             accountId={currentUserId}
+            onOpenBilling={openAdmissionBilling}
+            onRefreshBilling={() => refreshAdmissionBilling({ workspaceId: activeOrganization.id })}
             labels={
               new Map(
                 activeOrganization.members.map(
@@ -766,7 +836,12 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
             }
           />
         ) : role === 'owner' && !encrypted ? (
-          <WorkspaceJoinRequestsSettings workspaceId={activeOrganization.id} />
+          <WorkspaceJoinRequestsSettings
+            key={`${currentUserId}:${activeOrganization.id}`}
+            workspaceId={activeOrganization.id}
+            onOpenBilling={openAdmissionBilling}
+            onMembersChanged={refetchActiveOrganization}
+          />
         ) : undefined
       }
       memberLimit={memberLimitState?.memberLimit ?? null}
@@ -797,6 +872,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
             }
           : undefined
       }
+      onOpenRecovery={handleOpenRecovery}
       getInviteLink={getInviteLink}
       onUpdateUserName={handleUpdateUserName}
       onUploadAvatar={handleUploadAvatar}
@@ -810,6 +886,8 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
       onSetupPassword={handleSetupPassword}
       canGenerateCliApiKey={canGenerateCliApiKey}
       cliApiKeys={cliApiKeys}
+      cliApiKeyMachineNames={cliApiKeyMachineNames}
+      currentMachineId={localMachineId}
       isLoadingCliApiKeys={isLoadingCliApiKeys}
       isCreatingCliApiKey={isCreatingCliApiKey}
       hasGeneratedCliApiKey={Boolean(generatedCliApiKey)}

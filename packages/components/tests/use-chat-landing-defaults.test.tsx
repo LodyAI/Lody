@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentConfigId, MachineId } from '@lody/shared';
+import type { AgentConfigId, AgentConfigMeta, MachineId, MachineViewMeta } from '@lody/shared';
+import type { AgentSelection } from '../src/components/shared';
 import type { AcpSelectorOptions } from '../src/components/shared/acp-selector-options';
 import {
   useAcpSessionConfigSelectionState,
@@ -14,8 +13,13 @@ import { useChatLandingDefaults } from '../src/hooks/use-chat-landing-defaults';
 import {
   readChatLandingDefaults,
   recordChatLandingProjectUse,
+  writeChatLandingDefaults,
 } from '../src/lib/chat-landing-defaults';
-import { agentDefaultsCache, persistAgentSessionDefaults } from '../src/lib/local-storage-cache';
+import {
+  agentDefaultsCache,
+  persistAgentSessionDefaults,
+  readAgentStartDefaults,
+} from '../src/lib/local-storage-cache';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -111,6 +115,69 @@ describe('chat landing agent session defaults', () => {
     });
     expect(container.querySelector('output')?.dataset.model).toBe('gpt-5.5');
   });
+
+  it('persists and restores independent per-model effort and speed across model switches', () => {
+    persistAgentSessionDefaults(agentId, {
+      modeId: 'agent',
+      modelId: 'gpt-6.2-sol',
+      configOptionValues: {
+        reasoning_effort: 'xhigh',
+        'fast-mode': 'ultrafast',
+        plan_mode: true,
+      },
+    });
+    persistAgentSessionDefaults(agentId, {
+      modeId: 'agent',
+      modelId: 'gpt-6-luna',
+      configOptionValues: {
+        reasoning_effort: 'low',
+        'fast-mode': false,
+        plan_mode: false,
+      },
+    });
+
+    const cached = agentDefaultsCache.get(agentId);
+    expect(cached).toEqual({
+      modeId: 'agent',
+      modelId: 'gpt-6-luna',
+      configOptionValues: { plan_mode: false },
+      modelConfigOptionValues: {
+        'gpt-6.2-sol': { reasoning_effort: 'xhigh', 'fast-mode': 'ultrafast' },
+        'gpt-6-luna': { reasoning_effort: 'low', 'fast-mode': false },
+      },
+    });
+
+    const merged = readAgentStartDefaults({
+      id: agentId,
+      sessionDefaults: {
+        modelId: 'gpt-6.2-sol',
+        configOptionValues: { reasoning_effort: 'high' },
+      },
+    });
+    expect(merged?.modelConfigOptionValues).toEqual({
+      'gpt-6.2-sol': { reasoning_effort: 'high', 'fast-mode': 'ultrafast' },
+      'gpt-6-luna': { reasoning_effort: 'low', 'fast-mode': false },
+    });
+  });
+
+  it('migrates legacy flat effort onto the previous model before saving a new model selection', () => {
+    agentDefaultsCache.set(agentId, {
+      modeId: 'agent',
+      modelId: 'legacy-model',
+      configOptionValues: { reasoning_effort: 'max', plan_mode: true },
+    });
+
+    persistAgentSessionDefaults(agentId, {
+      modeId: 'agent',
+      modelId: 'next-model',
+      configOptionValues: { reasoning_effort: 'low', plan_mode: true },
+    });
+
+    expect(agentDefaultsCache.get(agentId)?.modelConfigOptionValues).toEqual({
+      'legacy-model': { reasoning_effort: 'max' },
+      'next-model': { reasoning_effort: 'low' },
+    });
+  });
 });
 
 describe('accepted project survives browsing/default persistence', () => {
@@ -129,6 +196,7 @@ describe('accepted project survives browsing/default persistence', () => {
         executorConfigs: [],
         machines: new Map(),
         selectableMachines: new Map(),
+        presenceSynced: false,
         visibleMachinesLoading: false,
         docMetaCacheReady: true,
         repositories: [],
@@ -164,5 +232,141 @@ describe('accepted project survives browsing/default persistence', () => {
       container.remove();
       localStorage.clear();
     }
+  });
+});
+
+describe('selected machine survives presence changes', () => {
+  const workspaceId = 'selection-liveness-test';
+  const local = 'machine-local' as MachineId;
+  const remote = 'machine-remote' as MachineId;
+  const other = 'machine-other' as MachineId;
+  const localSelection = { agentId: 'config-local', machineId: local } as AgentSelection;
+  const remoteSelection = { agentId: 'config-remote', machineId: remote } as AgentSelection;
+  const otherSelection = { agentId: 'config-other', machineId: other } as AgentSelection;
+  const allMachineIds = [local, remote, other];
+  const noop = () => {};
+
+  const configsFor = (machineIds: MachineId[]) =>
+    machineIds.map((id) => ({
+      id: id.replace('machine-', 'config-'),
+      machineId: id,
+      agentType: 'codex',
+    })) as unknown as AgentConfigMeta[];
+  const machinesFor = (machineIds: MachineId[]) =>
+    new Map(machineIds.map((id) => [id, { id } as MachineViewMeta]));
+
+  type ProbeProps = {
+    online: MachineId[];
+    presenceSynced: boolean;
+    machineIds?: MachineId[];
+  };
+  let selected: AgentSelection | null = null;
+  let select: (selection: AgentSelection) => void = noop;
+
+  function Probe({ online, presenceSynced, machineIds = allMachineIds }: ProbeProps) {
+    const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
+    selected = selectedAgent;
+    select = setSelectedAgent;
+    useChatLandingDefaults({
+      workspaceId,
+      shouldRestoreContextType: false,
+      contextType: 'chat',
+      setContextType: noop,
+      executorConfigs: configsFor(machineIds),
+      machines: machinesFor(machineIds),
+      selectableMachines: machinesFor(
+        machineIds.filter((id) => id === local || online.includes(id))
+      ),
+      presenceSynced,
+      visibleMachinesLoading: false,
+      docMetaCacheReady: true,
+      repositories: [],
+      selectedAgent,
+      setSelectedAgent,
+      selectedMachineId: selectedAgent?.machineId ?? null,
+      selectedRepo: undefined,
+      setSelectedRepo: noop,
+      selectedBranch: null,
+      setSelectedBranch: noop,
+      selectedLocalProject: null,
+      setSelectedLocalProject: noop,
+      selectedLocalBranch: null,
+      setSelectedLocalBranch: noop,
+    });
+    return null;
+  }
+
+  let container: HTMLDivElement;
+  let root: Root;
+  const render = (props: ProbeProps) => act(() => root.render(<Probe {...props} />));
+  const storedTarget = () => {
+    const stored = readChatLandingDefaults(workspaceId);
+    return { agentId: stored?.agentId, machineId: stored?.machineId };
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    writeChatLandingDefaults(workspaceId, { ...remoteSelection });
+    selected = null;
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    localStorage.clear();
+  });
+
+  it('keeps a confirmed remote selection when the machine leaves the online set', () => {
+    render({ online: [remote], presenceSynced: true });
+    expect(selected).toEqual(remoteSelection);
+
+    render({ online: [], presenceSynced: true });
+    expect(selected).toEqual(remoteSelection);
+    expect(storedTarget()).toEqual(remoteSelection);
+
+    render({ online: [], presenceSynced: false });
+    expect(selected).toEqual(remoteSelection);
+    expect(storedTarget()).toEqual(remoteSelection);
+  });
+
+  it('keeps a stored remote selection while presence cannot answer yet', () => {
+    render({ online: [], presenceSynced: false });
+
+    expect(selected).toEqual(remoteSelection);
+    expect(storedTarget()).toEqual(remoteSelection);
+  });
+
+  it('falls back from a stored machine that is offline at startup and returns to it', () => {
+    render({ online: [], presenceSynced: false });
+    render({ online: [], presenceSynced: true });
+    expect(selected).toEqual(localSelection);
+    expect(storedTarget()).toEqual(remoteSelection);
+
+    render({ online: [remote], presenceSynced: true });
+    expect(selected).toEqual(remoteSelection);
+    expect(storedTarget()).toEqual(remoteSelection);
+  });
+
+  it('gives up the remembered machine once the user chooses during a fallback', () => {
+    render({ online: [other], presenceSynced: true });
+    expect(selected).toEqual(localSelection);
+
+    act(() => select(otherSelection));
+    expect(storedTarget()).toEqual(otherSelection);
+
+    render({ online: [other, remote], presenceSynced: true });
+    expect(selected).toEqual(otherSelection);
+    expect(storedTarget()).toEqual(otherSelection);
+  });
+
+  it('still replaces a selection whose machine no longer exists', () => {
+    render({ online: [remote], presenceSynced: true });
+    expect(selected).toEqual(remoteSelection);
+
+    render({ online: [], presenceSynced: true, machineIds: [local] });
+    expect(selected).toEqual(localSelection);
   });
 });

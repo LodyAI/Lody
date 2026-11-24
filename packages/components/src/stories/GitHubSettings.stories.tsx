@@ -1,14 +1,22 @@
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ComponentProps } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { settingsFlat } from '@/components/settings/material.stylex';
-import { withClassName } from '@/lib/stylex';
 import { GitHubSettingsView } from '@/components/settings/github-settings-view';
 import type { SettingsWorkspaceRepoWithStatus } from '@/components/settings/settings-data-cache';
 
 /* Settings > GitHub, as the desktop overlay's right pane draws it: inside the
    `data-settings-surface` scope and the pane's flat material (`settingsFlat`).
    `boxed` drops the flat theme, to see the card the mobile screens keep. */
+
+const sceneStyles = stylex.create({
+  frame: {
+    minHeight: '100vh',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    paddingBlock: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const repo = (
   repoFullName: string,
@@ -49,7 +57,7 @@ function Harness({ boxed = false, ...props }: Partial<ViewProps> & { boxed?: boo
   return (
     <div
       data-settings-surface=""
-      {...withClassName(stylex.props(!boxed && settingsFlat), 'min-h-screen bg-background py-6')}
+      {...stylex.props(!boxed && settingsFlat, sceneStyles.frame)}
       style={{ width: 860, paddingInline: 24 }}
     >
       <GitHubSettingsView
@@ -119,3 +127,20 @@ export const IdentityOff: Story = {
 export const NotInstalled: Story = { args: { repos: [] } };
 
 export const Loading: Story = { args: { repos: [], reposLoading: true } };
+
+export const InstallationNeedsPersonalAuthorization: Story = {
+  render: () => (
+    <Harness
+      repos={[]}
+      identity={{
+        enabled: false,
+        authorizationState: 'missing',
+        onToggle: () => {},
+        onAuthorize: () => {},
+      }}
+      installationNotice={
+        <GitHubInstallationNotice needsAuthorization authorized={false} onAuthorize={() => {}} />
+      }
+    />
+  ),
+};

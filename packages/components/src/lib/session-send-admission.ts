@@ -1,3 +1,4 @@
+import { requireEncryptedRoostOwner } from './encrypted-roost-history';
 import { authorizePlaintextAttachmentPreparation } from './attachment-workspace-access';
 import { assertProtectedAttachmentReferences } from './encrypted-session-attachment';
 import { requireWorkspaceFeature } from './workspace-feature';
@@ -41,6 +42,10 @@ export async function acceptSessionUserTurn(
   // Do not consume a draft into a provisional plaintext namespace that may be
   // retired when the workspace is classified as encrypted.
   await runtime.waitForContentAdmission?.();
+  const found = creation ? undefined : await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
+  if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
+  const meta = creation ?? (found?.meta as SessionMeta | undefined);
+
   if (
     attachments?.some(
       (attachment) =>
@@ -49,7 +54,20 @@ export async function acceptSessionUserTurn(
         attachment.ready.transport !== 'local'
     )
   ) {
-    if (runtime.contentMode !== 'e2ee')
+    // Keep remote drafts in the composer until mode is known. Native same-machine
+    // preparation uses scoped host IPC without requiring cloud authorization.
+    const localTarget =
+      !!meta?.machineId &&
+      runtime.pendingSends?.canPrepareAttachmentsLocally?.(meta.machineId as MachineId) === true;
+    if (
+      runtime.contentMode !== 'e2ee' &&
+      attachments.some((attachment) =>
+        attachment.ready
+          ? attachment.ready.type !== 'local_attachment' &&
+            !(attachment.ready.type === 'file' && attachment.ready.transport === 'local')
+          : !localTarget
+      )
+    )
       await authorizePlaintextAttachmentPreparation(runtime.workspaceId, undefined, entry.userId);
     requireWorkspaceFeature(
       { mode: runtime.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
@@ -63,40 +81,35 @@ export async function acceptSessionUserTurn(
       ...(attachments?.flatMap((item) => (item.ready ? [item.ready] : [])) ?? []),
     ]);
   }
+
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
-  const found = creation ? undefined : await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
-  if (isLoroRepoDocDeleted(found)) throw new Error('Target conversation was deleted');
-  const meta = creation ?? (found?.meta as SessionMeta | undefined);
+  const prepared =
+    !unprepared && attachments?.length
+      ? finalizePreparedSend({
+          workspaceId: runtime.workspaceId,
+          sessionId,
+          entry,
+          queue,
+          attachments,
+        })
+      : { entry, queue };
   const roostBackend = meta?.historyBackend === 'roost';
-  if (runtime.contentMode === 'e2ee' && roostBackend)
-    throw new Error('e2ee_history_backend_unavailable');
   if (pending && (unprepared || pending.hasSession(sessionId) || roostBackend)) {
-    let targetMachineId = creation?.machineId;
-    if (!targetMachineId) {
-      targetMachineId = (found?.meta as SessionMeta | undefined)?.machineId;
-    }
-    if (roostBackend && delivery.kind === 'dispatch') {
+    const targetMachineId = meta?.machineId;
+    if (roostBackend && (delivery.kind === 'dispatch' || runtime.contentMode === 'e2ee')) {
       const machine = targetMachineId
         ? await runtime.repo.getDocMeta(getMachineRoomId(targetMachineId))
         : undefined;
-      if (!machineSupportsSessionInputDispatch(machine?.meta as MachineMeta | undefined))
+      const owner = machine?.meta as MachineMeta | undefined;
+      if (runtime.contentMode === 'e2ee') requireEncryptedRoostOwner(owner);
+      if (delivery.kind === 'dispatch' && !machineSupportsSessionInputDispatch(owner))
         throw new SessionInputNotSentError(i18next.t('sessions.inputOwnerNeedsUpdate'));
     }
     // Publish routing before a row can acquire its backend, after capability
     // refusal so an older owner cannot consume the draft or create an empty session.
     if (roostBackend && creation)
       await prepareUserTurnWrite(runtime, { sessionId, entry, delivery, creation });
-    const prepared =
-      !unprepared && attachments?.length
-        ? finalizePreparedSend({
-            workspaceId: runtime.workspaceId,
-            sessionId,
-            entry,
-            queue,
-            attachments,
-          })
-        : { entry, queue };
     pending.enqueue({
       id: entry.id,
       sessionId,
@@ -114,15 +127,6 @@ export async function acceptSessionUserTurn(
   }
   if (roostBackend) throw new Error('Local input acceptance is unavailable');
   if (unprepared) throw new Error('Attachments cannot be sent in this workspace');
-  const prepared = attachments?.length
-    ? finalizePreparedSend({
-        workspaceId: runtime.workspaceId,
-        sessionId,
-        entry,
-        queue,
-        attachments,
-      })
-    : { entry, queue };
   await writeUserTurn(runtime, {
     sessionId,
     entry: prepared.entry,

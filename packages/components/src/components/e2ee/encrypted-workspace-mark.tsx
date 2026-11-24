@@ -1,5 +1,13 @@
 import { Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+
+const styles = stylex.create({
+  defaultMark: {
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
 
 /** Server-listed display metadata only. Runtime admission always resolves the
  * persisted descriptor; a missing or forged listing never opens or blocks data. */
@@ -12,18 +20,18 @@ export function isListedEncryptedWorkspace(workspace: unknown): boolean {
   );
 }
 
-/** Compact lock shown beside an encrypted workspace name in lists and switchers. */
+/** Compact lock shown beside an encrypted workspace name in lists and switchers. The
+ * name stays the only text; hovering the lock explains what the mark means. */
 export function EncryptedWorkspaceMark({ className }: { className?: string }) {
   const { t } = useTranslation();
-  const label = t('e2ee.mark.list');
   return (
     <Lock
       role="img"
-      aria-label={label}
+      aria-label={t('e2ee.mark.list')}
       size={14}
-      className={className ?? 'shrink-0 text-muted-foreground'}
+      className={className ?? stylex.props(styles.defaultMark).className}
     >
-      <title>{label}</title>
+      <title>{t('e2ee.mark.tooltip')}</title>
     </Lock>
   );
 }

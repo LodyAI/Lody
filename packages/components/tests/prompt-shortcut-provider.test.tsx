@@ -1,5 +1,17 @@
-// @vitest-environment jsdom
-
+import {
+  closePromptShortcutDatabase,
+  promptShortcutDatabaseName,
+} from '../src/lib/prompt-shortcut-storage';
+import { PromptShortcutSync as ActualShortcutSync } from '../../shared/src/prompt-shortcuts/sync';
+import { getShortcutBodyStreamId } from '../../shared/src/prompt-shortcuts/access';
+import { LoroDoc } from 'loro-crdt';
+import type { LoroRepo } from 'loro-repo';
+import {
+  ShortcutTokenAttempts,
+  ShortcutTokenAttemptError,
+} from '../src/lib/shortcut-token-attempt';
+import { isConvexUnauthenticatedError } from '@lody/shared';
+import type { ShortcutTokenReply, ShortcutTokenRequest } from '@lody/cloud-api';
 // @vitest-environment jsdom
 import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -14,11 +26,19 @@ const fixture = vi.hoisted(() => {
   });
   return {
     session,
+    auth: {
+      authSessionId: 'session-a' as string | null,
+      confirmedUnauthenticated: false,
+      requestAuthRecovery: vi.fn(),
+    },
     makePlatform,
     platform: makePlatform(),
     workspaceId: 'workspace-a',
     status: 'allowed' as 'allowed' | 'pending' | 'blocked',
     directory: [],
+    runtime: {} as Partial<import('../src/atoms/runtime').WorkspaceRuntime>,
+    queryArgs: [] as unknown[],
+    syncOptions: null as null | ConstructorParameters<typeof ActualShortcutSync>[0],
     createRepo: vi.fn(),
     openStore: vi.fn(),
     closeStore: vi.fn(),
@@ -26,9 +46,13 @@ const fixture = vi.hoisted(() => {
   };
 });
 
+vi.mock('@/hooks/use-authenticated-convex', () => ({
+  useOptionalAuthenticatedConvex: () => fixture.auth,
+}));
+
 vi.mock('jotai', async (original) => ({
   ...(await original<typeof import('jotai')>()),
-  useAtomValue: () => ({ workspaceId: fixture.workspaceId }),
+  useAtomValue: () => ({ workspaceId: fixture.workspaceId, ...fixture.runtime }),
 }));
 vi.mock('@/hooks/use-workspace-feature', () => ({
   useLegacyWorkspaceQueryStatus: () => fixture.status,
@@ -49,7 +73,10 @@ vi.mock('@lody/platform/react', () => ({
   usePlatformSession: () => fixture.session,
   useCloudMutation: () => vi.fn(),
   useCloudAction: () => vi.fn(),
-  useCloudQuery: () => fixture.directory,
+  useCloudQuery: (_: unknown, args: unknown) => {
+    fixture.queryArgs.push(args);
+    return args === 'skip' ? undefined : fixture.directory;
+  },
 }));
 vi.mock('@/lib/cloud-api-operations', () => ({ cloudOperations: { promptShortcuts: {} } }));
 vi.mock('loro-repo', async (importOriginal) => {
@@ -64,6 +91,9 @@ vi.mock('@lody/shared/prompt-shortcuts', async () => {
     PromptShortcutRuntime: ActualRuntime,
     LocalShortcutStore: { open: fixture.openStore },
     PromptShortcutSync: class {
+      constructor(options: ConstructorParameters<typeof ActualShortcutSync>[0]) {
+        fixture.syncOptions = options;
+      }
       async dispose() {}
     },
     shortcutByteLength: (value: string) => value.length,
@@ -110,11 +140,21 @@ describe('PromptShortcutProvider lifecycle', () => {
         </StrictMode>
       );
     });
+    // The provider defers its loro/streams stack behind dynamic imports, which
+    // settle on the event loop rather than inside act's microtask drain.
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
   }
 
   beforeEach(() => {
     fixture.workspaceId = 'workspace-a';
+    fixture.auth.authSessionId = 'session-a';
+    fixture.auth.confirmedUnauthenticated = false;
     fixture.status = 'allowed';
+    fixture.runtime = {};
+    fixture.queryArgs = [];
+    fixture.syncOptions = null;
     fixture.platform = fixture.makePlatform();
     fixture.records = [];
     fixture.closeStore.mockReset().mockResolvedValue(undefined);
@@ -173,6 +213,100 @@ describe('PromptShortcutProvider lifecycle', () => {
     }
   );
 
+  it('opens verified encrypted shortcuts while legacy access is blocked, uses protected grants and exposes guest read-only state', async () => {
+    fixture.status = 'blocked';
+    const localDataScope = {
+      accountId: 'user-a',
+      workspaceId: 'workspace-a',
+      windowId: 'window',
+      genesisHash: '11'.repeat(32),
+      signingPublicKey: '22'.repeat(32),
+    };
+    fixture.runtime = {
+      contentMode: 'e2ee',
+      cloudStreamsEnabled: true,
+      localDataScope,
+      streamsContent: {
+        mode: 'protected',
+        namespace: 'test',
+        resolve: () => {
+          throw new Error('unused');
+        },
+        snapshotUpload: { canUpload: () => false },
+      },
+      shortcutRole: { get: () => 'read', subscribe: () => () => {} },
+      getWorkspaceStreamsGrant: async (options) => {
+        if (options?.write) throw new Error('guest write');
+        return {
+          token: 'encrypted-token',
+          gatewayBaseUrl: 'https://gateway.test',
+          bucketId: 'encrypted-content',
+          shardHostSuffix: 'test',
+        };
+      },
+    };
+    await render();
+    expect(current?.workspaceId).toBe('workspace-a');
+    expect(current?.canWrite).toBe(false);
+    expect(fixture.queryArgs.every((args) => args === 'skip')).toBe(true);
+    const grant = await fixture.syncOptions!.grant(
+      { kind: 'workspace-index', workspaceId: 'workspace-a' },
+      false
+    );
+    expect(grant).toMatchObject({
+      token: 'encrypted-token',
+      bucketId: 'encrypted-content',
+      shardHostSuffix: 'test',
+      streamId: 'workspace-a:shortcut-index',
+    });
+    await expect(
+      fixture.syncOptions!.grant({ kind: 'workspace-index', workspaceId: 'workspace-a' }, true)
+    ).rejects.toThrow('read_only');
+    await expect(
+      fixture.syncOptions!.grant({ kind: 'body', bodyDocId: 'legacy' }, false)
+    ).rejects.toThrow('legacy_forbidden');
+    const captured = current!;
+    const drain = deferred();
+    fixture.closeStore.mockImplementationOnce(() => drain.promise);
+    let closed = false;
+    let closing!: Promise<void>;
+    await act(async () => {
+      closing = closePromptShortcutDatabase(
+        promptShortcutDatabaseName('workspace-a', 'user-a', localDataScope)
+      ).then(() => {
+        closed = true;
+      });
+    });
+    expect(current).toBeNull();
+    expect(closed).toBe(false);
+    expect(() => captured.flush()).toThrow('disposed');
+    await act(async () => {
+      drain.resolve();
+      await closing;
+    });
+    expect(closed).toBe(true);
+    fixture.auth.confirmedUnauthenticated = true;
+    await render();
+    expect(current).toBeNull();
+  });
+
+  it('retires the previous auth-session runtime even when the same account signs in again', async () => {
+    await render();
+    const first = current!;
+    fixture.auth.authSessionId = null;
+    await render();
+    expect(current).toBe(first);
+    fixture.auth.authSessionId = 'session-b';
+    rendered = [];
+    await render();
+    expect(rendered).not.toContain(first);
+    expect(current).not.toBe(first);
+    expect(() => first.setDirectory([])).toThrow('Shortcut runtime disposed');
+    fixture.auth.confirmedUnauthenticated = true;
+    await render();
+    expect(current).toBeNull();
+  });
+
   it('keeps the old runtime hidden until its durable close finishes', async () => {
     await render();
     const first = current!;
@@ -212,5 +346,223 @@ describe('PromptShortcutProvider lifecycle', () => {
     await render();
     expect(current?.workspaceId).toBe('workspace-a');
     expect(container.textContent).toBe('workspace-a');
+  });
+
+  it('passes independent workspace webSocketAuth that keeps refreshing after provider auth-session disposal', async () => {
+    const grantSpy = vi.fn(async (opts?: { forceRefresh?: boolean }) => ({
+      token: opts?.forceRefresh ? 'ws-fresh-token' : 'ws-cached-token',
+      gatewayBaseUrl: 'https://gateway.test',
+    }));
+    fixture.runtime = {
+      streamsWebSocketEnabled: true,
+      getWorkspaceStreamsGrant: grantSpy,
+    };
+
+    await render();
+    expect(fixture.syncOptions?.webSocketEnabled).toBe(true);
+    const webSocketAuth = fixture.syncOptions?.webSocketAuth;
+    expect(webSocketAuth).toBeTypeOf('function');
+
+    fixture.auth.authSessionId = 'session-b';
+    await render();
+
+    await expect(webSocketAuth!({ reason: 'request' })).resolves.toBe('ws-cached-token');
+    await expect(
+      webSocketAuth!({ reason: 'renew', previousToken: 'ws-cached-token' })
+    ).resolves.toBe('ws-fresh-token');
+    await expect(webSocketAuth!({ reason: 'reauth' })).resolves.toBe('ws-fresh-token');
+    expect(grantSpy).toHaveBeenNthCalledWith(1, { forceRefresh: false });
+    expect(grantSpy).toHaveBeenNthCalledWith(2, { forceRefresh: false });
+    expect(grantSpy).toHaveBeenNthCalledWith(3, { forceRefresh: true });
+    expect(grantSpy).toHaveBeenNthCalledWith(4, { forceRefresh: true });
+  });
+});
+
+describe('Shortcut token attempt ownership', () => {
+  const request: ShortcutTokenRequest = {
+    workspaceId: 'ws',
+    target: { kind: 'body', bodyDocId: 'body-a' },
+    write: false,
+  };
+  const failure: ShortcutTokenReply = {
+    ok: false,
+    failure: { kind: 'retryable', code: 'exchange_unavailable', phase: 'exchange' },
+  };
+  const success: ShortcutTokenReply = {
+    ok: true,
+    grant: {
+      token: 'synthetic-jwt',
+      expiresIn: 900,
+      gatewayBaseUrl: 'https://gateway.test',
+      streamId: 'shortcut-body:body-a',
+    },
+  };
+  function owner(attempt: (request: ShortcutTokenRequest) => Promise<ShortcutTokenReply>) {
+    const reports: unknown[] = [];
+    let recoveries = 0;
+    const instance = new ShortcutTokenAttempts({
+      attempt,
+      legacy: async () => {
+        if (!success.ok) throw new Error('fixture');
+        return success.grant;
+      },
+      report: (value) => {
+        reports.push(value);
+      },
+      authRejected: () => {
+        recoveries++;
+      },
+      active: () => true,
+    });
+    return { instance, reports, recoveries: () => recoveries };
+  }
+  it('100 attempts retain one diagnostic and local count, success resets only that operation, and distinct faults remain visible', async () => {
+    let reply = failure;
+    const a = owner(async () => reply);
+    for (let i = 0; i < 100; i++)
+      await expect(a.instance.grant(request)).rejects.toBeInstanceOf(ShortcutTokenAttemptError);
+    expect(a.reports).toEqual([failure.ok ? undefined : failure.failure]);
+    expect(a.instance.counts()).toEqual([100]);
+    await expect(
+      a.instance.grant({ ...request, target: { kind: 'body', bodyDocId: 'body-b' } })
+    ).rejects.toThrow();
+    expect(a.reports).toHaveLength(2);
+    reply = { ok: false, failure: { kind: 'fatal', code: 'exchange_invalid', phase: 'exchange' } };
+    await expect(a.instance.grant(request)).rejects.toThrow();
+    expect(a.reports).toHaveLength(3);
+    reply = success;
+    await expect(a.instance.grant(request)).resolves.toMatchObject({ token: 'synthetic-jwt' });
+    reply = failure;
+    await expect(a.instance.grant(request)).rejects.toThrow();
+    expect(a.reports).toHaveLength(4);
+    const b = owner(async () => failure);
+    await expect(b.instance.grant(request)).rejects.toThrow();
+    expect(b.reports).toHaveLength(1);
+    a.instance.dispose();
+    b.instance.dispose();
+  });
+  it('handled auth refusals keep the supervisor contract and do not generate diagnostics or replay', async () => {
+    let calls = 0;
+    const a = owner(async () => {
+      calls++;
+      return {
+        ok: false,
+        failure: { kind: 'denied', code: 'unauthenticated', phase: 'authorize' },
+      };
+    });
+    for (let i = 0; i < 100; i++) {
+      try {
+        await a.instance.grant(request);
+        throw new Error('unexpected success');
+      } catch (error) {
+        expect(isConvexUnauthenticatedError(error)).toBe(true);
+      }
+    }
+    expect(calls).toBe(100);
+    expect(a.reports).toEqual([]);
+    expect(a.recoveries()).toBe(1);
+    a.instance.dispose();
+  });
+  it('retirement fences late errors and late success cannot clear a newer completed failure', async () => {
+    let release!: (reply: ShortcutTokenReply) => void;
+    const a = owner(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    const pending = a.instance.grant(request);
+    const rejected = expect(pending).rejects.toThrow();
+    a.instance.dispose();
+    release(failure);
+    await rejected;
+    expect(a.reports).toEqual([]);
+    expect(a.instance.counts()).toEqual([]);
+    let first!: (reply: ShortcutTokenReply) => void;
+    let calls = 0;
+    const b = owner(() =>
+      ++calls === 1
+        ? new Promise((resolve) => {
+            first = resolve;
+          })
+        : Promise.resolve(failure)
+    );
+    const stale = b.instance.grant(request);
+    await expect(b.instance.grant(request)).rejects.toThrow();
+    first(success);
+    await stale;
+    await expect(b.instance.grant(request)).rejects.toThrow();
+    expect(b.reports).toHaveLength(1);
+    expect(b.instance.counts()).toEqual([2]);
+    b.instance.dispose();
+  });
+  it('real Streams auth refresh retains the handled failure identity instead of creating another reportable error', async () => {
+    const doc = new LoroDoc();
+    let now = 0;
+    let grants = 0;
+    const failure = new ShortcutTokenAttemptError({
+      kind: 'retryable',
+      code: 'exchange_unavailable',
+      phase: 'exchange',
+    });
+    const sync = new ActualShortcutSync({
+      content: { mode: 'plaintext' },
+      now: () => now,
+      repo: {
+        acquireDoc: async () => ({ doc, release: async () => {} }),
+        persistDocNow: async () => {},
+      } as unknown as LoroRepo,
+      grant: async () => {
+        if (++grants > 1) throw failure;
+        return {
+          token: 'synthetic',
+          expiresIn: 900,
+          gatewayBaseUrl: 'https://gateway.test',
+          streamId: getShortcutBodyStreamId('body-a'),
+        };
+      },
+    });
+    const lease = await sync.acquire({ kind: 'body', bodyDocId: 'body-a' }, false);
+    now = 900_000;
+    try {
+      await expect(lease.sync()).rejects.toBe(failure);
+    } finally {
+      await lease.release();
+      await sync.dispose();
+      doc.free();
+    }
+  });
+
+  it('only an explicit missing V2 endpoint negotiates legacy; unknown platform failures retain their identity', async () => {
+    let attempts = 0;
+    let legacy = 0;
+    const a = new ShortcutTokenAttempts({
+      attempt: async () => {
+        attempts++;
+        throw new Error('Could not find public function for promptShortcuts:getStreamTokenV2');
+      },
+      legacy: async () => {
+        legacy++;
+        if (!success.ok) throw new Error('fixture');
+        return success.grant;
+      },
+      active: () => true,
+      authRejected: () => {},
+      report: () => {
+        throw new Error('unexpected report');
+      },
+    });
+    await a.grant(request);
+    await a.grant(request);
+    expect(attempts).toBe(1);
+    expect(legacy).toBe(2);
+    a.dispose();
+    const fault = new Error('synthetic platform failure');
+    const b = owner(async () => {
+      throw fault;
+    });
+    await expect(b.instance.grant(request)).rejects.toBe(fault);
+    expect(b.reports).toEqual([]);
+    b.instance.dispose();
   });
 });

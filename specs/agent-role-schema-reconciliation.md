@@ -1,7 +1,9 @@
 # Automatic Agent Role schema reconciliation
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](agent-role-schema-reconciliation.zh.md)
 
 After upgrading and opening a workspace, the app automatically reconciles the
 current user's saved Roles against their bound agents. No Settings visit, save,
@@ -23,8 +25,12 @@ advertises boolean `plan_mode`, preserve that choice as false or true. An existi
 `plan_mode` wins. A retired `interaction_mode: plan` also migrates to true when
 neither the new field nor a recognized legacy collaboration choice exists.
 New optional defaults are not pinned during maintenance.
-For other option removals, a Role's pinned model must match the probe's model;
-otherwise retain potentially model-dependent keys until their support is known.
+For other option removals, the Role's target model (`runConfig.modelId` or generic
+`configOptionValues.model`) is resolved against the probe's model, any recorded
+`observedModelConfigOptions` entry for that model, and any explicit per-model
+control declarations (`declaredModelControls` / `modelReasoningEfforts`); when none
+of those establish what the target model supports, potentially model-dependent keys
+are retained until their support is known.
 
 Only the Role owner may persist reconciliation. Delayed results must not recreate
 deleted Roles or overwrite intervening edits. A changed Role advances its revision
@@ -36,5 +42,6 @@ Failed probes or writes preserve the original Role; reopening retries automatica
 Reconnect also retries failed probes. No global "upgrade complete" flag may suppress
 work for a Role or machine that was unavailable during the first launch.
 
-Evidence: `packages/components/src/hooks/use-agent-role-schema-reconciliation.ts`,
+Evidence: `packages/shared/src/agent-role.ts`,
+`packages/components/src/hooks/use-agent-role-schema-reconciliation.ts`,
 `packages/components/src/lib/agent-role-schema-reconciliation.ts`, and their tests.

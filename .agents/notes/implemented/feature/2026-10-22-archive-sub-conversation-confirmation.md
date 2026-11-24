@@ -59,5 +59,4 @@ snapshot: counts and working text, "Archive all" archiving opened Sessions and
 their Tabs, "Archive this only" and Cancel, the no-dialog path, and the single
 dialog of the always-confirm path.
 `session-operation-targets.test.ts` covers `archive-tree` targets and confirms
-they never include the opener. Component and shared type checks and type-aware
-lint pass. The CLI type check reports only the unbuilt ACP adapter module.
+they never include the opener.

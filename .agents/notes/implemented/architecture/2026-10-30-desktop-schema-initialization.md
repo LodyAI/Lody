@@ -73,7 +73,7 @@ with DOM nodes falling from about 43,000 to 4,000 and a bounded token cache owni
 The filesystem watcher used 61.6–61.8 MiB RSS and 13.1M footprint across empty,
 20,000-file and real-checkout cases on this Mac. Neither observation supports a
 residency-policy change; the withdrawn historical implementation in the separate
-[residency proposal](../../proposed/architecture/2026-10-17-session-residency.md)
+[residency proposal](../../rejected/architecture/2026-10-17-session-residency.md)
 remains unrelated.
 
 ## Compatibility boundary

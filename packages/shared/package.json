@@ -15,6 +15,9 @@
     "./node/e2ee-clock": "./src/node/e2ee-clock.ts",
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
+    "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
+    "./streams-crdt-factory": "./src/streams-crdt-factory.ts",
+    "./streams-transport-diagnostics": "./src/streams-transport-diagnostics.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",
@@ -32,6 +35,10 @@
       "types": "./src/session-link.ts",
       "import": "./src/session-link.ts"
     },
+    "./transient-gateway": {
+      "types": "./src/transient-gateway.ts",
+      "import": "./src/transient-gateway.ts"
+    },
     "./streams-snapshot-codec": {
       "types": "./src/streams-snapshot-codec.ts",
       "import": "./src/streams-snapshot-codec.ts"
@@ -43,6 +50,10 @@
     "./prompt-shortcuts/*": {
       "types": "./src/prompt-shortcuts/*.ts",
       "import": "./src/prompt-shortcuts/*.ts"
+    },
+    "./status-view": {
+      "types": "./src/status-view/index.ts",
+      "import": "./src/status-view/index.ts"
     },
     "./session-sharing": {
       "types": "./src/session-sharing.ts",
@@ -80,9 +91,16 @@
       "types": "./src/visual-annotation-inspector-global.ts",
       "import": "./src/visual-annotation-inspector-global.ts"
     },
+    "./path-launchers": "./src/path-launchers.ts",
+    "./workspace-bundle-control": {
+      "types": "./src/workspace-bundle-control.ts",
+      "import": "./src/workspace-bundle-control.ts",
+      "default": "./src/workspace-bundle-control.ts"
+    },
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
-      "import": "./src/electron-ipc.ts"
+      "import": "./src/electron-ipc.ts",
+      "default": "./src/electron-ipc.ts"
     },
     "./devbar": {
       "types": "./src/devbar.ts",
@@ -95,6 +113,14 @@
     "./browser-url": {
       "types": "./src/browser-url.ts",
       "import": "./src/browser-url.ts"
+    },
+    "./schedule-repository": {
+      "types": "./src/schedule-repository.ts",
+      "import": "./src/schedule-repository.ts"
+    },
+    "./session-doc-schemas": {
+      "types": "./src/session-doc-schemas.ts",
+      "import": "./src/session-doc-schemas.ts"
     },
     "./local-loro-data-plane": {
       "types": "./src/local-loro-data-plane.ts",
@@ -190,7 +216,36 @@
       "import": "./src/local-loro-writer/legacy.ts"
     },
     "./e2ee-remote-pairing": "./src/e2ee-remote-pairing.ts",
-    "./e2ee-rpc": "./src/e2ee-rpc.ts"
+    "./e2ee-rpc": "./src/e2ee-rpc.ts",
+    "./e2ee-execution-intent": "./src/e2ee-execution-intent.ts",
+    "./session-mirror": {
+      "types": "./src/session-mirror.ts",
+      "import": "./src/session-mirror.ts"
+    },
+    "./session-control-plane": {
+      "types": "./src/session-control-plane.ts",
+      "import": "./src/session-control-plane.ts"
+    },
+    "./history-writer": {
+      "types": "./src/history-writer.ts",
+      "import": "./src/history-writer.ts"
+    },
+    "./schedule-schema": {
+      "types": "./src/schedule-schema.ts",
+      "import": "./src/schedule-schema.ts"
+    },
+    "./schedule-authorization": {
+      "types": "./src/schedule-authorization.ts",
+      "import": "./src/schedule-authorization.ts"
+    },
+    "./preview-comment-schema": {
+      "types": "./src/preview-comment-schema.ts",
+      "import": "./src/preview-comment-schema.ts"
+    },
+    "./prompt-suggestions": {
+      "types": "./src/prompt-suggestions.ts",
+      "import": "./src/prompt-suggestions.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -221,11 +276,12 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "esbuild": "0.27.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",
     "@types/node": "catalog:",
     "loro-repo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "5.0.2"
+    "vitest": "catalog:"
   }
 }

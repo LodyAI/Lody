@@ -4,6 +4,10 @@ Use this workflow for Lody's Roost integration and its matching Roost SDK/Native
 changes. It fixes setup, owning suites and comparison workloads so a new change
 does not require rediscovering them. Runtime contracts remain in
 [session rules](../../apps/cli/src/session/AGENTS.md) and the matching Roost source.
+New sessions default to Loro and use Roost only behind the Developer-mode
+[history feature gate](../notes/implemented/feature/2026-10-08-roost-history-feature-gate.md).
+Open transition-timing risks stay recorded in the
+[timing review](../notes/proposed/architecture/2026-10-02-roost-lody-transition-timing-review.md).
 Run expensive measurements manually; timing is never a CI assertion.
 
 For the current coordinated release, use the [PR stack integration review](../notes/proposed/testing/2026-10-22-roost-pr-stack-integration.md) for exact heads, dependency order and release gates.
@@ -15,7 +19,7 @@ retained RSS-limit failures. These local results do not imply release acceptance
 The [position paging experiment](../notes/proposed/architecture/2026-10-24-roost-position-paging.md)
 tracks cold positional reads, derived-index maintenance and the index-only
 generation-race regression.
-The [control storage study](../notes/proposed/architecture/2026-10-23-roost-control-storage.md)
+The [control storage study](../notes/rejected/architecture/2026-10-23-roost-control-storage.md)
 records the minimal notification change and rejected storage experiments. Ordinary
 Roost KV values already have independent compression; check the current source
 and retained-byte/page breakdown before proposing the same optimization again.

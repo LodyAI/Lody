@@ -1,9 +1,11 @@
+import type { StyleXStyles } from '@stylexjs/stylex';
 import * as React from 'react';
 import { Dialog as UiDialog, AlertDialog as UiAlertDialog } from '@lody/ui';
 import { Button, type ButtonVariant } from '@lody/ui/button';
 
 import { useModalContainer } from '@lody/ui/popup-container';
 import { useHorizontalDivision } from '@/components/mobile/use-vertical-division';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 
 /**
@@ -27,6 +29,42 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
  * when the work resolves.
  */
 
+type DialogRootProps = React.ComponentProps<typeof UiDialog.Root>;
+type DialogRootActions = NonNullable<DialogRootProps['actionsRef']>['current'];
+
+function DialogRoot({ open, defaultOpen, onOpenChange, actionsRef, ...props }: DialogRootProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(Boolean(defaultOpen));
+  const localActionsRef = React.useRef<DialogRootActions>(null);
+  const effectiveActionsRef = actionsRef ?? localActionsRef;
+  const isOpen = open !== undefined ? open : uncontrolledOpen;
+
+  useMobileBackHandler(
+    () => {
+      effectiveActionsRef.current?.close();
+    },
+    { enabled: isOpen, layer: 'modal' }
+  );
+
+  const handleOpenChange: DialogRootProps['onOpenChange'] = (nextOpen, eventDetails) => {
+    if (open === undefined) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen, eventDetails);
+  };
+
+  return (
+    <MobileBackDepthProvider>
+      <UiDialog.Root
+        open={open}
+        defaultOpen={defaultOpen}
+        onOpenChange={handleOpenChange}
+        actionsRef={effectiveActionsRef}
+        {...props}
+      />
+    </MobileBackDepthProvider>
+  );
+}
+
 type DialogContentProps = React.ComponentProps<typeof UiDialog.Content>;
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(function DialogContent(
@@ -45,8 +83,51 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(funct
 
 export const Dialog = {
   ...UiDialog,
+  Root: DialogRoot,
   Content: DialogContent,
 };
+
+type AlertDialogRootProps = React.ComponentProps<typeof UiAlertDialog.Root>;
+type AlertDialogRootActions = NonNullable<AlertDialogRootProps['actionsRef']>['current'];
+
+function AlertDialogRoot({
+  open,
+  defaultOpen,
+  onOpenChange,
+  actionsRef,
+  ...props
+}: AlertDialogRootProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(Boolean(defaultOpen));
+  const localActionsRef = React.useRef<AlertDialogRootActions>(null);
+  const effectiveActionsRef = actionsRef ?? localActionsRef;
+  const isOpen = open !== undefined ? open : uncontrolledOpen;
+
+  useMobileBackHandler(
+    () => {
+      effectiveActionsRef.current?.close();
+    },
+    { enabled: isOpen, layer: 'modal' }
+  );
+
+  const handleOpenChange: AlertDialogRootProps['onOpenChange'] = (nextOpen, eventDetails) => {
+    if (open === undefined) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen, eventDetails);
+  };
+
+  return (
+    <MobileBackDepthProvider>
+      <UiAlertDialog.Root
+        open={open}
+        defaultOpen={defaultOpen}
+        onOpenChange={handleOpenChange}
+        actionsRef={effectiveActionsRef}
+        {...props}
+      />
+    </MobileBackDepthProvider>
+  );
+}
 
 type AlertDialogContentProps = React.ComponentProps<typeof UiAlertDialog.Content>;
 
@@ -105,15 +186,16 @@ const AlertDialogContent = React.forwardRef<HTMLDivElement, AlertDialogContentPr
 type AlertDialogAnswerProps = Omit<React.ComponentProps<typeof UiAlertDialog.Close>, 'render'> & {
   variant?: ButtonVariant;
   className?: string;
+  xstyle?: StyleXStyles;
 };
 
 /** The confirming answer: a `Close` rendered as a `Button` with a variant. */
 const AlertDialogAction = React.forwardRef<HTMLButtonElement, AlertDialogAnswerProps>(
-  function AlertDialogAction({ variant, className, children, ...props }, ref) {
+  function AlertDialogAction({ variant, className, xstyle, children, ...props }, ref) {
     return (
       <UiAlertDialog.Close
         ref={ref}
-        render={<Button variant={variant} className={className} />}
+        render={<Button variant={variant} className={className} xstyle={xstyle} />}
         {...props}
       >
         {children}
@@ -123,11 +205,11 @@ const AlertDialogAction = React.forwardRef<HTMLButtonElement, AlertDialogAnswerP
 );
 
 const AlertDialogCancel = React.forwardRef<HTMLButtonElement, AlertDialogAnswerProps>(
-  function AlertDialogCancel({ className, children, ...props }, ref) {
+  function AlertDialogCancel({ className, xstyle, children, ...props }, ref) {
     return (
       <UiAlertDialog.Close
         ref={ref}
-        render={<Button variant="secondary" className={className} />}
+        render={<Button variant="secondary" className={className} xstyle={xstyle} />}
         {...props}
       >
         {children}
@@ -138,6 +220,7 @@ const AlertDialogCancel = React.forwardRef<HTMLButtonElement, AlertDialogAnswerP
 
 export const AlertDialog = {
   ...UiAlertDialog,
+  Root: AlertDialogRoot,
   Content: AlertDialogContent,
   Action: AlertDialogAction,
   Cancel: AlertDialogCancel,

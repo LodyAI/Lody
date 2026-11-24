@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   encodeProjectPreparationProgress,
@@ -11,6 +11,7 @@ import {
   type AgentConfigMeta,
   type LocalProjectId,
   type MachineId,
+  type McpServerId,
   type RepoId,
   type SessionId,
   type SessionMeta,
@@ -26,9 +27,6 @@ import type { AgentSessionWarning } from '../agent/agent-client';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { Logger } from '../utils/logger';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
-import { getLegacySpeculativeWorktreeMarkerPath } from './worktree/legacy-speculative-worktrees';
-import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
-import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import {
   getWorktreeManager,
   type GitCredentialBrokerAuth,
@@ -111,6 +109,65 @@ describe('SessionManager agent archive (#1537)', () => {
     return { manager, meta, provider, cleaned: () => clean };
   }
 
+  it('keeps an independently archived native conversation archived on ordinary cold resume', async () => {
+    let nativeArchived = true;
+    const state = fixture(async ({ archived }) => {
+      nativeArchived = archived;
+      return 'native';
+    });
+    state.meta.isArchived = false;
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'custom-agent',
+    });
+    const stop = new Error('reached normal startup');
+    vi.spyOn(
+      state.manager as unknown as { prepareGitHubRepoSessionConfig(): Promise<never> },
+      'prepareGitHubRepoSessionConfig'
+    ).mockRejectedValue(stop);
+    await expect(
+      state.manager.createSession(config, { resumeSessionId: state.meta.acpSessionId })
+    ).rejects.toBe(stop);
+    expect(nativeArchived).toBe(true);
+  });
+
+  it('waits for an observed Lody restore before resuming its native session', async () => {
+    let nativeArchived = true;
+    const state = fixture(async ({ archived }) => {
+      nativeArchived = archived;
+      return 'native';
+    });
+    state.meta.isArchived = false;
+    const started = deferred<void>();
+    const release = deferred<void>();
+    const observation = state.manager.observeArchiveChange(sessionId, async () => {
+      started.resolve();
+      await release.promise;
+      await state.manager.syncNativeSessionArchive(sessionId, false);
+    });
+    await started.promise;
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'custom-agent',
+    });
+    const stop = new Error('reached normal startup');
+    vi.spyOn(
+      state.manager as unknown as { prepareGitHubRepoSessionConfig(): Promise<never> },
+      'prepareGitHubRepoSessionConfig'
+    ).mockImplementation(async () => {
+      expect(nativeArchived).toBe(false);
+      throw stop;
+    });
+    const resume = state.manager.createSession(config, {
+      resumeSessionId: state.meta.acpSessionId,
+    });
+    release.resolve();
+    await expect(resume).rejects.toBe(stop);
+    await observation;
+  });
+
   it('syncs the exact native id and saved account before releasing the Lody document', async () => {
     let archived: string | undefined;
     const state = fixture(async (input) => {
@@ -160,6 +217,24 @@ describe('SessionManager agent archive (#1537)', () => {
       );
     }
   );
+
+  it('preserves native history and cleans the document when runtime release fails', async () => {
+    let nativeArchived = false;
+    const state = fixture(async () => {
+      nativeArchived = true;
+      return 'native';
+    });
+    let warning: AgentSessionWarning | undefined;
+    await state.manager.archiveSession(sessionId, {
+      releaseFailure: 'processes still running',
+      recordWarning: async (value) => {
+        warning = value;
+      },
+    });
+    expect(nativeArchived).toBe(false);
+    expect(state.cleaned()).toBe(true);
+    expect(warning?.message).toContain('Agent archive synchronization failed');
+  });
 
   it('still releases the Lody document and exposes a warning after a native failure', async () => {
     const state = fixture(async () => {
@@ -1146,148 +1221,6 @@ describe('SessionManager worktree setup', () => {
     expect(runGit(workdir, ['symbolic-ref', '--short', 'HEAD'])).toBe('user/switched-worktree');
     expect(runGit(workdir, ['status', '--porcelain'])).toContain('?? dirty.txt');
   });
-
-  const writeLegacyPreparationMarker = (input: {
-    sessionId: SessionId;
-    sourceDir: string;
-    baseBranch: string;
-    phase: 'speculative' | 'durable-pending-setup';
-  }): string => {
-    const originalRootPath = localProjectsLegacy.normalizeLocalProjectRootPath(input.sourceDir);
-    const markerPath = getLegacySpeculativeWorktreeMarkerPath(input.sessionId);
-    mkdirSync(path.dirname(markerPath), { recursive: true });
-    writeFileSync(
-      markerPath,
-      JSON.stringify({
-        version: 1,
-        preparationId: `prepare-${input.sessionId}`,
-        sessionId: input.sessionId,
-        workspaceId: 'workspace-1',
-        machineId: 'machine-1',
-        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
-        source: { kind: 'local-shared', originalRootPath },
-        baseBranch: input.baseBranch,
-        ownsWorktree: true,
-        phase: input.phase,
-        createdAtMs: 0,
-      })
-    );
-    return markerPath;
-  };
-
-  const createLocalWorktreeManager = (docs: Map<SessionId, FakeSessionDoc>) =>
-    new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(docs),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-
-  /** `restoreBranchName` set means the shape of a real resume, which restores by name. */
-  const localWorktreeConfig = (
-    sessionId: SessionId,
-    sourceDir: string,
-    restoreBranchName?: string
-  ) =>
-    createSessionConfig({
-      sessionId,
-      branch: 'main',
-      workdir: sourceDir,
-      resume: restoreBranchName !== undefined,
-      ...(restoreBranchName ? { restoreBranchName } : {}),
-      project: {
-        kind: 'local',
-        localProjectId: 'local-project-legacy' as LocalProjectId,
-        branch: 'main',
-        useWorktree: true,
-      },
-    });
-
-  const currentBranch = (workdir: string) => runGit(workdir, ['symbolic-ref', '--short', 'HEAD']);
-
-  it('reruns setup on resume when an older daemon left it pending', async () => {
-    const sourceDir = createLocalRepo(tempHome);
-    const sessionId = 'setup-legacy-pending' as SessionId;
-    const manager = createLocalWorktreeManager(new Map());
-
-    const created = await createSessionInner(manager, localWorktreeConfig(sessionId, sourceDir));
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
-    const branchName = currentBranch(created.getWorkdir());
-    writeFileSync(path.join(created.getWorkdir(), 'keep.txt'), 'reused\n', 'utf8');
-    const markerPath = writeLegacyPreparationMarker({
-      sessionId,
-      sourceDir,
-      baseBranch: 'main',
-      phase: 'durable-pending-setup',
-    });
-
-    const resumed = await createSessionInner(
-      manager,
-      localWorktreeConfig(sessionId, sourceDir, branchName)
-    );
-
-    expect(resumed.getWorkdir()).toBe(created.getWorkdir());
-    expect(existsSync(path.join(created.getWorkdir(), 'keep.txt'))).toBe(true);
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(2);
-    expect(existsSync(markerPath)).toBe(false);
-  });
-
-  it('resumes an adopted worktree whose recorded base branch is spelled differently', async () => {
-    const sourceDir = createLocalRepo(tempHome);
-    const sessionId = 'setup-legacy-drift' as SessionId;
-    const manager = createLocalWorktreeManager(new Map());
-
-    const created = await createSessionInner(manager, localWorktreeConfig(sessionId, sourceDir));
-    const branchName = currentBranch(created.getWorkdir());
-    writeFileSync(path.join(created.getWorkdir(), 'keep.txt'), 'reused\n', 'utf8');
-    // A first create records the resolved ref; resume passes the project selector.
-    const markerPath = writeLegacyPreparationMarker({
-      sessionId,
-      sourceDir,
-      baseBranch: 'refs/heads/main',
-      phase: 'durable-pending-setup',
-    });
-
-    const resumed = await createSessionInner(
-      manager,
-      localWorktreeConfig(sessionId, sourceDir, branchName)
-    );
-
-    expect(resumed.getWorkdir()).toBe(created.getWorkdir());
-    expect(currentBranch(resumed.getWorkdir())).toBe(branchName);
-    expect(existsSync(path.join(created.getWorkdir(), 'keep.txt'))).toBe(true);
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(2);
-    expect(existsSync(markerPath)).toBe(false);
-  });
-
-  it('rebuilds an unadopted worktree an older daemon prepared for another base branch', async () => {
-    const sourceDir = createLocalRepo(tempHome);
-    const sessionId = 'setup-legacy-mismatch' as SessionId;
-    const manager = createLocalWorktreeManager(new Map());
-
-    // Stands in for the directory a preparation materialized for the draft.
-    const prepared = await createSessionInner(manager, localWorktreeConfig(sessionId, sourceDir));
-    const workdir = prepared.getWorkdir();
-    writeFileSync(path.join(workdir, 'stale.txt'), 'from the old base\n', 'utf8');
-    const markerPath = writeLegacyPreparationMarker({
-      sessionId,
-      sourceDir,
-      baseBranch: 'dev',
-      phase: 'speculative',
-    });
-
-    const created = await createSessionInner(manager, localWorktreeConfig(sessionId, sourceDir));
-
-    expect(created.getWorkdir()).toBe(workdir);
-    expect(existsSync(path.join(workdir, 'stale.txt'))).toBe(false);
-    expect(runWorktreeSetup).toHaveBeenCalledTimes(2);
-    expect(existsSync(markerPath)).toBe(false);
-  });
 });
 
 describe('SessionManager.requestSessionTerminate', () => {
@@ -1625,6 +1558,55 @@ describe('SessionManager failed agent creation', () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
+  it('delivers startup usage in order only after a successful session creation', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const sessionId = 'startup-usage' as SessionId;
+    const doc = { ...createSessionDoc(), setACPSessionId: vi.fn(async () => undefined) };
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map([[sessionId, doc]])),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const events: Array<{ acpSessionId: ACPSessionId; usage: { sessionId: string } }> = [];
+    manager.on('onUsageUpdate', (event) => events.push(event));
+    const row = (n: number) => ({
+      sessionId: 'native',
+      usage: { inputTokens: n, outputTokens: 0, cacheReadInputTokens: 0 },
+    });
+    const start = vi.spyOn(Session.prototype, 'createAgent');
+    start.mockImplementationOnce(async (callbacks) => {
+      callbacks.onUsageUpdate(row(1));
+      throw new Error('startup failed');
+    });
+    start.mockImplementationOnce(async (callbacks) => {
+      callbacks.onUsageUpdate(row(2), 'native:scope:one');
+      callbacks.onUsageUpdate(row(3));
+      expect(events).toEqual([]);
+      return 'native';
+    });
+    const config = createSessionConfig({
+      sessionId,
+      agentCliType: 'custom',
+      agentType: 'synthetic',
+      customAcp: { command: 'never-started', args: [] },
+      workdir: sourceDir,
+    });
+    await expect(manager.createSession(config)).rejects.toThrow('startup failed');
+    expect(events).toEqual([]);
+    await manager.createSession(config);
+    expect(events).toEqual([
+      { sessionId, acpSessionId: 'native', usage: row(2), accountingId: 'native:scope:one' },
+      { sessionId, acpSessionId: 'native', usage: row(3), accountingId: undefined },
+    ]);
+    await manager.terminateSession(sessionId, true);
+  });
+
   it('rejects a replacement native conversation before changing the durable resume pointer', async () => {
     const sourceDir = createLocalRepo(tempHome);
     const sessionId = 'strict-native-resume' as SessionId;
@@ -1724,7 +1706,9 @@ describe('SessionManager failed agent creation', () => {
     expect(exit).not.toHaveBeenCalled();
     createAgent.mockResolvedValueOnce('acp-memory');
     const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
-    const reconfigured = await manager.createSession({ ...config, memory });
+    const mcpServerIds = ['server-a' as McpServerId];
+    const reconfigured = await manager.createSession({ ...config, memory, mcpServerIds });
+    expect(reconfigured.getMcpServerIds?.()).toEqual(mcpServerIds);
     expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
     expect(manager.getSession(sessionId)).toBe(reconfigured);
     manager.detachSession(replacement);

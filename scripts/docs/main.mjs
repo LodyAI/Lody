@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { extractAnchors, sourceRoots, sourceExtension } from './anchors.mjs';
 import { git } from './git.mjs';
+import { listRepositoryFiles } from '../repository-files.mjs';
 
 const documentRoots = ['specs', '.agents/docs', '.agents/notes'];
 /** Word ceilings for AGENTS.md files; unlisted files use `default`, and raising one is a reviewed PR change. */
@@ -483,17 +484,27 @@ export async function documentStatus(root, { base } = {}) {
  * Check tracked and untracked non-ignored Markdown, including hubs and archives, and collect
  * the notes that a non-note document links to.
  */
+/**
+ * Gitlinks without a checkout. Their content is absent by design in worktrees that
+ * skip submodules, so a link into one proves nothing; CI checks out every submodule
+ * and still validates these targets.
+ */
+async function uninitializedSubmodules(root) {
+  const stage = (await git(root, ['ls-files', '--stage', '-z'])).toString();
+  return stage
+    .split('\0')
+    .filter((entry) => entry.startsWith('160000 '))
+    .map((entry) => entry.slice(entry.indexOf('\t') + 1))
+    .filter((submodule) => !existsSync(path.join(root, submodule, '.git')));
+}
+
 async function checkRepositoryMarkdown(root) {
   const errors = [];
   const warnings = [];
   const ownerLinkedNotes = new Set();
-  const files = [
-    ...new Set(
-      (await git(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']))
-        .toString()
-        .split('\0')
-    ),
-  ];
+  const absentSubmodules = await uninitializedSubmodules(root);
+  let skippedSubmoduleLinks = 0;
+  const files = [...new Set(listRepositoryFiles(root))];
   let budgets;
   try {
     budgets = agentsBudgets(root);
@@ -507,6 +518,8 @@ async function checkRepositoryMarkdown(root) {
         `${agentsBudgetFile}: ${relative} is budgeted but does not exist; update the manifest in the same change`
       );
   for (const file of files.filter((file) => /\.md$/i.test(file))) {
+    // Native editor fixtures contain literal Markdown inputs/outputs, not documentation.
+    if (file.startsWith('apps/mobile/ios/packages/lexical-swift/Fixtures/')) continue;
     const absolute = path.join(root, file);
     if (!existsSync(absolute) || lstatSync(absolute).isSymbolicLink()) continue;
     const bytes = readFileSync(localPath(root, file));
@@ -549,17 +562,26 @@ async function checkRepositoryMarkdown(root) {
       const destination = relative.startsWith('/')
         ? path.resolve(root, `.${relative}`)
         : path.resolve(root, path.dirname(file), relative);
-      if (
-        !(destination === root || destination.startsWith(root + path.sep)) ||
-        !existsSync(destination)
-      )
-        errors.push(`${file}: broken local link ${target}`);
+      const inside = destination === root || destination.startsWith(root + path.sep);
+      if (inside && !existsSync(destination)) {
+        const linked = path.relative(root, destination).split(path.sep).join('/');
+        if (absentSubmodules.some((name) => linked === name || linked.startsWith(`${name}/`))) {
+          skippedSubmoduleLinks += 1;
+          continue;
+        }
+      }
+      if (!inside || !existsSync(destination)) errors.push(`${file}: broken local link ${target}`);
       else if (!noteRecord.test(file)) {
         const linked = path.relative(root, destination).split(path.sep).join('/');
         if (linked.startsWith('.agents/notes/')) ownerLinkedNotes.add(noteKey(linked));
       }
     }
   }
+  if (skippedSubmoduleLinks)
+    warnings.push(
+      `${skippedSubmoduleLinks} links into uninitialized submodules were not checked; run ` +
+        '`git submodule update --init --recursive` to validate them'
+    );
   return { errors, warnings, ownerLinkedNotes };
 }
 

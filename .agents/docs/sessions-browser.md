@@ -41,13 +41,44 @@ this page is the full text of the rules summarised there.
   default to preview. Truncated documents never enter either HTML preview. The iframe is a
   permission boundary, not a promised
   renderer-process/thread boundary; do not claim arbitrary user JS cannot consume the app renderer.
-  Likewise, CSP governs the initial `srcdoc`, not an arbitrary later self-navigation. Require
-  credentialless iframe support before running scripts, and do not describe the
-  executable self-contained/no-network rule as a hard browser guarantee. Engines without
-  that support use `ReadOnlyHtmlPreview`: an empty sandbox, script-blocking CSP,
-  and a document stripped of navigation, scripts, nested documents, and SVG mutation.
-  This preserves inline CSS and embedded media but offers no script interaction or annotation.
-  The standalone mobile project browser uses the same readonly preview and eye toggle.
+  Likewise, CSP governs the initial `srcdoc`, not an arbitrary later self-navigation, and do
+  not describe the executable self-contained/no-network rule as a hard browser guarantee.
+  `getExecutableHtmlPreviewSupport()` decides whether scripts may run: `automatic` with
+  credentialless iframes (Chromium); `opt-in` on WebKit (every iOS browser), where a
+  self-navigation is an ordinary request and frame JS shares the app's main thread, so the
+  rendered view starts read-only and runs scripts only after the user presses "Run scripts"
+  for that exact document text (revoked when rendered mode ends or the text changes; the frame
+  cache refuses an executable static frame there without `scriptsOptedIn`); `unsupported`
+  (Gecko and any other engine) never runs them. The read-only fallback is `ReadOnlyHtmlPreview`: an empty sandbox,
+  script-blocking CSP, and a document stripped of navigation, scripts, nested documents, and
+  SVG mutation. It preserves inline CSS and embedded media but offers no script interaction
+  or annotation. Any executable static document goes through `useManagedPreviewFrame`
+  (frame policy from the frame cache, runtime handshake, navigation policy); never build a
+  second executable iframe. When page script replaces the document, the runtime's `pagehide`
+  unload signal (with a parent-initiated load as fallback) removes the frame at once and is
+  treated as a navigation request that leaves rendered mode. This narrows, but does not close,
+  the window in which a replacement page can run; the outgoing request has already been sent.
+
+- Desktop direct HTML preview is the one exception to the `srcdoc` path. It applies when the
+  file is on this desktop's machine and `useSessionFileActions().resolveHostPath` yields its
+  absolute path. Large HTML files keep a paged, read-only source view and open the complete
+  file from disk through the same preview protocol. Each entry into rendered mode first shows a consent dialog. Its "Allow
+  JavaScript" checkbox starts unchecked. Electron main (`machineRpc.openHtmlPreview`) then serves
+  the file's folder by default. For a nested page the user can authorize the displayed workspace
+  folder for that preview, preserving the page’s workspace-relative URL and asset paths. Both
+  choices serve content from a fresh `lody-html-preview://<random token>/` origin. Relative CSS,
+  scripts and images load, and reload re-reads disk. Without consent the iframe sandbox is
+  empty and the response carries `script-src 'none'`. With consent the sandbox adds scripts,
+  same-origin and forms, never modals, popups or top navigation. The unique origin keeps that
+  cross-origin to the renderer. Main's `will-frame-navigate` guard keeps a preview frame on
+  `lody-html-preview:` URLs, and the default session refuses every permission a preview requests. The renderer CSP admits the scheme only in `frame-src`. Main
+  refuses dot-files and paths outside the folder, judged after resolving symlinks, and other machines; a
+  null answer falls back to `srcdoc` for complete text or to the paged source for large files. This mode has no annotation or script toggle,
+  shows the saved file rather than unsaved editor text, and with scripts allowed the page can
+  reach the network. Remote and Web sessions keep the `srcdoc` path.
+  The standalone mobile project browser treats repository HTML as untrusted: it opens the
+  read-only preview with the eye toggle and runs scripts only behind an explicit "Run
+  scripts" opt-in (`StaticHtmlScriptPreview`, no annotation), on any engine that supports it.
   The session rendered frame exists only while
   its viewer tab and containing sidebar are visible. Key the file viewer by session + tab so switching
   session targets resets the HTML mode to that surface’s default.
@@ -119,7 +150,11 @@ this page is the full text of the rules summarised there.
   when remote sharing expires. The endpoint owner, not the panel, enforces the one-hour deadline.
   An empty Browser must always say WHY it is empty — a bare globe reads as a broken panel. With no
   reported candidate the empty state names that (the agent never called `lody_report_preview_candidate`,
-  which is the common case, not a bug); with one, it points at the address bar.
+  which is the common case, not a bug); with one, an idle desktop panel points at the address bar. Mobile Browser clicks
+  request candidate navigation automatically. While that request waits for the initial
+  status read or candidate document, and while its endpoint is being opened, the mobile
+  panel shows “Establishing network connection” instead of address-entry instructions.
+  Explicitly reopening an existing Browser retains its current page.
   Annotation mode installs a full-viewport transparent interaction layer inside the managed page;
   it must remain the pointer target while hit-testing temporarily ignores it to inspect the page
   below. Do not revert to listener-only interception, which lets page pointer handlers activate.

@@ -41,13 +41,7 @@ export type CreateConversationDerivationOptions = {
   yieldToEventLoop?: () => Promise<void>;
 };
 
-/**
- * Background chunks yield to real idle time where the platform has it.
- *
- * Back-to-back macrotasks kept the pass at the head of the queue, so filling a
- * long conversation's facts held the main thread for as long as it ran. The
- * timeout keeps it progressing on a busy tab.
- */
+/** Yield to idle time; the timeout preserves progress on a busy page. */
 const defaultYield = (): Promise<void> =>
   typeof requestIdleCallback === 'function'
     ? new Promise((resolve) => {
@@ -73,7 +67,7 @@ export function createConversationDerivation<F>(
   let passRunning = false;
   let passRequested = false;
   let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
-  let directoryLease = view.acquireDirectory?.();
+  let directoryLease: ReturnType<NonNullable<ConversationView['acquireDirectory']>> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = 250;
 
@@ -82,16 +76,8 @@ export function createConversationDerivation<F>(
     for (const listener of listeners) listener();
   };
 
-  /**
-   * Derive every hydrated, not-yet-derived (or changed) turn in `[from, to)`.
-   *
-   * `dropStale` is passed only for a range the view reported as CHANGED. A turn
-   * that changed while nothing holds it hydrated cannot be re-derived here and
-   * its cached fact is now stale — an older assistant turn gaining a file diff
-   * is the case that matters — so the fact is dropped and the background pass
-   * is asked to run again. The speculative tail window must NOT drop, or every
-   * index event would discard the facts of every turn past the hydrated tail.
-   */
+  /** Derive hydrated turns; only reported changes may drop an evicted turn's
+   * stale fact and request backfill. A speculative tail window preserves it. */
   const deriveRange = (from: number, to: number, dropStale = false): boolean => {
     let changed = false;
     for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
@@ -130,6 +116,29 @@ export function createConversationDerivation<F>(
 
   const unsubscribe = view.subscribe((change) => {
     if (disposed) return;
+    if (!active) {
+      if (change.kind === 'changed' && change.ids.length === 0) return;
+      // Retain unchanged facts; invalidate hidden edits without reading bodies.
+      if (change.kind === 'structure') {
+        pruneRemoved();
+        for (let i = change.from; i < Math.min(change.to, view.turnCount); i++) {
+          const id = view.index(i)?.id;
+          if (id !== undefined) {
+            facts.delete(id);
+            derivedFrom.delete(id);
+          }
+        }
+      } else {
+        for (const id of change.ids) {
+          facts.delete(id);
+          derivedFrom.delete(id);
+        }
+      }
+      complete = false;
+      passRequested = true;
+      version += 1;
+      return;
+    }
     let changed = false;
     if (change.kind === 'structure') {
       changed = pruneRemoved();
@@ -153,30 +162,42 @@ export function createConversationDerivation<F>(
   });
 
   const runBackgroundPass = async () => {
+    // Let the returning interface paint before the first optional history batch.
+    await yieldToEventLoop();
+    if (disposed || !active) return;
+    directoryLease ??= view.acquireDirectory?.();
     let end = view.turnCount;
     while (end > 0) {
       if (disposed || !active) return;
       // Next chunk of turns (from the tail backwards) that still lack a fact.
       const pending: number[] = [];
       let cursor = end;
+      let items = 0;
       while (cursor > 0 && pending.length < chunkSize) {
-        cursor -= 1;
-        const row = view.index(cursor);
-        if (row && !isUnloadedTurnId(row.id) && !facts.has(row.id)) pending.push(cursor);
+        const position = cursor - 1;
+        const row = view.index(position);
+        if (row && !isUnloadedTurnId(row.id) && !facts.has(row.id)) {
+          const weight = Math.max(1, row.itemCount ?? 0);
+          if (pending.length > 0 && items + weight > 320) break;
+          pending.push(position);
+          items += weight;
+        } else if (pending.length > 0) {
+          // Never hydrate the already-derived gap between sparse missing facts.
+          break;
+        }
+        cursor = position;
       }
       end = cursor;
       if (pending.length === 0) continue;
       const lo = pending[pending.length - 1]!;
       const hi = pending[0]! + 1;
-      // `acquireRange` pins before its first await, so the release has to run
-      // even when this derivation is disposed mid-hydration: the view outlives
-      // it in the warm store cache, and a leaked pin makes those turns
-      // permanently un-evictable.
+      // Acquire pins before awaiting; release even after disposal so warm views
+      // never retain an abandoned range.
       const range = view.acquireRange(lo, hi);
       activeRange = range;
       try {
         await range.ready;
-        if (disposed) return;
+        if (disposed || !active) return;
         if (deriveRange(lo, hi)) notify();
       } finally {
         range.release();
@@ -196,8 +217,7 @@ export function createConversationDerivation<F>(
     passRunning = true;
     try {
       while (passRequested) {
-        // `disposed` flips from `dispose()` while this loop is awaiting, and
-        // `active` from the last consumer releasing.
+        // Recheck disposal and consumer ownership after every await.
         if (disposed || !active) return;
         passRequested = false;
         await runBackgroundPass();
@@ -236,8 +256,7 @@ export function createConversationDerivation<F>(
     if (active && !passRunning && !disposed) void runPasses();
   }
 
-  // Facts for what is already hydrated come for free before the pass starts.
-  deriveRange(0, view.turnCount);
+  // Backfill after yielding; live changes still update hydrated facts synchronously.
   requestPass();
 
   return {
@@ -259,15 +278,14 @@ export function createConversationDerivation<F>(
     setActive: (next: boolean) => {
       if (active === next || disposed) return;
       active = next;
-      if (active) directoryLease = view.acquireDirectory?.();
-      else {
+      if (!active) {
         if (retryTimer) clearTimeout(retryTimer);
         retryTimer = undefined;
         directoryLease?.release();
         directoryLease = undefined;
         activeRange?.release();
       }
-      if (active && passRequested && !passRunning) void runPasses();
+      if (active && (!complete || passRequested)) requestPass();
     },
     dispose: () => {
       disposed = true;

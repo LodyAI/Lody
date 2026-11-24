@@ -20,8 +20,11 @@ The Role menu lists every Role readable in the current workspace, including
 unavailable and loading Roles. It preserves ownership and sharing permissions;
 it does not expose another user's private Roles. Available search matches come
 first, followed by disabled matches. Disabled rows explain their state below
-the name: checking availability, machine inaccessible/offline, or binding
-missing or mismatched.
+the name: checking availability, machine inaccessible/offline, binding missing
+or mismatched, or a pinned model or permission mode the bound agent no longer
+offers. Only a runtime probe of that exact agent that lists models or modes can
+report a retired pin; static defaults or an empty probe leave the Role available.
+The user fixes the pin by editing the Role; saved pins are never rewritten here.
 
 The dedicated Role list shows the full readable catalog. Aggregate search keeps
 its existing per-category cap, applied after availability ordering. Search
@@ -38,5 +41,6 @@ bindings and Operation acceptance remain governed by the
 - [Context, availability and expansion](../packages/components/src/components/mentions/mention-agent-role-source.ts)
 - [Candidate mapping](../packages/components/src/components/mentions/mention-registry.ts)
 - [Menu rows](../packages/components/src/components/mentions/mention-two-level-menu.tsx)
+- [Retired pin rule](../packages/shared/src/agent-role.ts)
 - [Behavior tests](../packages/components/tests/agent-role-mention-source.test.ts)
 - [Selection tests](../packages/components/tests/mention-two-level-menu.test.tsx)

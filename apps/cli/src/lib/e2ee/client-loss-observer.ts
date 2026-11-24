@@ -53,7 +53,13 @@ type Requester = {
   baselineGeneration: number;
   lossSequence: number;
 };
-type Scope = { machineId: string; accountId: string; workspaceId: string };
+type Scope = {
+  machineId: string;
+  accountId: string;
+  workspaceId: string;
+  /** This daemon's own signing key; an exact device refusal fences only this key. */
+  deviceKey?: string;
+};
 type ReadAuthority = (requesterDevice: string, membershipId?: string) => DaemonLossAuthority | null;
 
 /** Read-only observations cannot stop, authorize, refresh or drain product work. */
@@ -121,14 +127,29 @@ export function createDaemonLossRegistry(enabled: boolean, pid = process.pid) {
         row.code === 'e2ee_member_removed' &&
         row.retired &&
         requester.membershipId === requester.ownerMembershipId;
+      // A device refusal is scoped to this daemon's own identity. It is a fence
+      // only after the credential-confirmed receipt was persisted and the owner
+      // drained; a ledger that cannot advance (the server may refuse a revoked
+      // credential) is not required.
+      const retiredDevice =
+        row.code === 'e2ee_device_revoked' &&
+        row.retired &&
+        row.deviceKey !== undefined &&
+        requesterDevice === row.deviceKey;
       code = ledgerCut
         ? !authority.memberPresent
           ? 'e2ee_member_removed'
           : 'e2ee_device_revoked'
         : retiredMember
           ? 'e2ee_member_removed'
+          : retiredDevice
+            ? 'e2ee_device_revoked'
+            : null;
+      fence = ledgerCut
+        ? 'verified-ledger'
+        : retiredMember || retiredDevice
+          ? 'owner-retired'
           : null;
-      fence = ledgerCut ? 'verified-ledger' : retiredMember ? 'owner-retired' : null;
       if (code && requester.lossSequence === 0) {
         requester.lossSequence = sequence + 1;
         changed();

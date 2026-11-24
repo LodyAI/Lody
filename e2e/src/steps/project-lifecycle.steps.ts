@@ -12,12 +12,12 @@ When('用户通过项目选择器添加该本地文件夹', async function (this
   await this.projectLifecyclePage!.addProjectThroughProductUi();
 });
 
-When('用户从 sidebar 选择该项目', async function (this: LodyWorld) {
-  await this.projectLifecyclePage!.selectProjectFromSidebar();
+When('用户从项目选择器重新选择该项目', async function (this: LodyWorld) {
+  await this.projectLifecyclePage!.selectProjectFromPicker();
 });
 
-When('用户确认原目录安全提示后移除该项目', async function (this: LodyWorld) {
-  await this.projectLifecyclePage!.removeProjectAfterConfirmingDirectorySafety();
+When('用户查看原目录安全提示后移除该项目', async function (this: LodyWorld) {
+  await this.projectLifecyclePage!.removeProjectAfterReviewingDirectorySafety();
 });
 
 Then('该项目从本地 catalog 和项目选择器中消失', async function (this: LodyWorld) {

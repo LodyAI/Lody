@@ -32,6 +32,7 @@ export { sqliteInstalledKeyStore } from './installed-key-store';
 export { sqliteLedgerFeedStore } from './ledger-feed-store';
 export { sqliteLedgerPinStore } from './ledger-pin';
 export { sqliteReceiveJournal } from './receive-journal';
+export { sqliteRecoveryVaultLocalStore } from './recovery-vault-local';
 export { sqliteRepairJournal } from './repair-journal';
 export { sqliteSubmissionJournal } from './submission-journal';
 export {

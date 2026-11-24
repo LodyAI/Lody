@@ -16,9 +16,10 @@ import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
 import { Spinner } from '@lody/ui/spinner';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { PreviewDisconnectButton } from './preview-disconnect-button';
 
 const styles = stylex.create({
+  triggerGroup: { display: 'flex', alignItems: 'center', gap: '2px' },
   content: { width: '100%' },
   centeredContent: {
     display: 'flex',
@@ -118,13 +119,18 @@ export type PreviewConnectionStatusProps = {
   local: boolean;
   connection?: PreviewConnection;
   checking?: boolean;
+  /** True when a background status check timed out while the current preview page stays visible. */
+  unconfirmed?: boolean;
   busy?: boolean;
   unavailableReason?: string;
   error?: string | null;
   remoteMachineName?: string;
   hasShareUrl?: boolean;
   onRestore?: () => void;
+  /** Direct one-click regenerate action shown in the address bar when expired/unavailable. */
+  onRegenerate?: () => void;
   onStopSharing?: () => void;
+  onStopAndKillProcess?: () => void;
 };
 
 type PreviewStatusKind =
@@ -132,6 +138,7 @@ type PreviewStatusKind =
   | 'active'
   | 'connecting'
   | 'checking'
+  | 'unconfirmed'
   | 'expired'
   | 'closed'
   | 'failed'
@@ -147,26 +154,34 @@ type PreviewStatusPresentation = {
   restoreLabel: string;
   restoreDisabled: boolean;
   showRestore: boolean;
+  showInlineRegenerate: boolean;
   showStopSharing: boolean;
+  hasShareUrl: boolean;
+  busy: boolean;
   onRestore?: () => void;
+  onRegenerate?: () => void;
   onStopSharing?: () => void;
+  onStopAndKillProcess?: () => void;
 };
 
 function usePreviewStatusPresentation({
   local,
   connection,
   checking,
+  unconfirmed,
   busy,
   unavailableReason,
   error,
   remoteMachineName,
   hasShareUrl,
   onRestore,
+  onRegenerate,
   onStopSharing,
+  onStopAndKillProcess,
 }: PreviewConnectionStatusProps): PreviewStatusPresentation {
   const { t } = useTranslation();
   const expired = connection?.status === 'closed' && connection.closedReason === 'idle_timeout';
-  const failed = connection?.status === 'failed' || Boolean(error);
+  const failed = connection?.status === 'failed' || (Boolean(error) && !unconfirmed);
   const kind: PreviewStatusKind =
     busy || connection?.status === 'creating'
       ? 'connecting'
@@ -178,13 +193,15 @@ function usePreviewStatusPresentation({
             ? 'expired'
             : failed
               ? 'failed'
-              : connection?.status === 'closed'
-                ? 'closed'
-                : connection?.status === 'active'
-                  ? 'active'
-                  : local
-                    ? 'local'
-                    : 'inactive';
+              : unconfirmed
+                ? 'unconfirmed'
+                : connection?.status === 'closed'
+                  ? 'closed'
+                  : connection?.status === 'active'
+                    ? 'active'
+                    : local
+                      ? 'local'
+                      : 'inactive';
 
   const title =
     kind === 'local'
@@ -194,16 +211,21 @@ function usePreviewStatusPresentation({
         : kind === 'connecting'
           ? t('sessions.browser.connection.connecting', 'Creating preview link…')
           : kind === 'checking'
-            ? t('sessions.browser.connection.checking', 'Checking preview…')
-            : kind === 'expired'
-              ? t('sessions.browser.connection.expired', 'Preview link expired')
-              : kind === 'closed'
-                ? t('sessions.browser.connection.closed', 'Preview stopped')
-                : kind === 'failed'
-                  ? t('sessions.browser.connection.failed', 'Preview unavailable')
-                  : kind === 'unavailable'
-                    ? t('sessions.browser.connection.unavailable', 'Preview unavailable')
-                    : t('sessions.browser.connection.inactive', 'Not shared');
+            ? t('sessions.browser.connection.checking', 'Checking preview link…')
+            : kind === 'unconfirmed'
+              ? t(
+                  'sessions.browser.connection.unconfirmed',
+                  'Unable to confirm connection right now'
+                )
+              : kind === 'expired'
+                ? t('sessions.browser.connection.expired', 'Preview link expired')
+                : kind === 'closed'
+                  ? t('sessions.browser.connection.closed', 'Preview stopped')
+                  : kind === 'failed'
+                    ? t('sessions.browser.connection.failed', 'Preview unavailable')
+                    : kind === 'unavailable'
+                      ? t('sessions.browser.connection.unavailable', 'Preview unavailable')
+                      : t('sessions.browser.connection.inactive', 'Not shared');
 
   const localUnavailableDetail = t(
     'sessions.browser.connection.localUnavailableDetail',
@@ -227,35 +249,40 @@ function usePreviewStatusPresentation({
           : kind === 'checking'
             ? t(
                 'sessions.browser.connection.checkingDetail',
-                'Refreshing the remote sharing status.'
+                'Verifying the preview link in the background.'
               )
-            : kind === 'expired'
-              ? local
-                ? localUnavailableDetail
-                : t(
-                    'sessions.browser.connection.expiredDetail',
-                    'Closed after 1 hour idle. The address is preserved.'
-                  )
-              : kind === 'closed'
+            : kind === 'unconfirmed'
+              ? t(
+                  'sessions.browser.connection.unconfirmedDetail',
+                  'Connection check timed out. Keeping the current page open.'
+                )
+              : kind === 'expired'
                 ? local
                   ? localUnavailableDetail
-                  : t('sessions.browser.connection.closedDetail', 'Remote sharing was stopped.')
-                : kind === 'failed' || kind === 'unavailable'
+                  : t(
+                      'sessions.browser.connection.expiredDetail',
+                      'Closed after 1 hour idle. The address is preserved.'
+                    )
+                : kind === 'closed'
                   ? local
                     ? localUnavailableDetail
-                    : t(
-                        'sessions.browser.connection.failedDetail',
-                        'Remote sharing is unavailable.'
-                      )
-                  : local
-                    ? t(
-                        'sessions.browser.connection.localDetail',
-                        'Direct preview on this machine.'
-                      )
-                    : t(
-                        'sessions.browser.connection.inactiveDetail',
-                        'Remote sharing is not open.'
-                      );
+                    : t('sessions.browser.connection.closedDetail', 'Remote sharing was stopped.')
+                  : kind === 'failed' || kind === 'unavailable'
+                    ? local
+                      ? localUnavailableDetail
+                      : t(
+                          'sessions.browser.connection.failedDetail',
+                          'Remote sharing is unavailable.'
+                        )
+                    : local
+                      ? t(
+                          'sessions.browser.connection.localDetail',
+                          'Direct preview on this machine.'
+                        )
+                      : t(
+                          'sessions.browser.connection.inactiveDetail',
+                          'Remote sharing is not open.'
+                        );
 
   // A reason (archive, ownership, machine offline) is more actionable than a
   // transport error, so it stays the visible diagnostic when both are present.
@@ -282,14 +309,14 @@ function usePreviewStatusPresentation({
     facts.push(t('sessions.browser.connection.idlePolicy', 'Closes after 1 hour idle.'));
   }
 
+  const needsRebuild =
+    kind === 'expired' || kind === 'closed' || kind === 'failed' || kind === 'inactive';
   const showRestore =
-    Boolean(onRestore) &&
-    (kind === 'expired' ||
-      kind === 'closed' ||
-      kind === 'failed' ||
-      kind === 'unavailable' ||
-      kind === 'inactive');
-  const showStopSharing = Boolean(onStopSharing && hasShareUrl && kind === 'active');
+    Boolean(onRestore) && (needsRebuild || kind === 'unavailable' || kind === 'unconfirmed');
+  const showInlineRegenerate = !local && Boolean(onRegenerate) && needsRebuild;
+  const showStopSharing = Boolean(
+    onStopSharing && ((hasShareUrl && kind === 'active') || (local && kind === 'local'))
+  );
   const restoreLabel =
     connection?.closedReason === 'revoked'
       ? t('sessions.browser.connection.reopen', 'Reopen preview')
@@ -304,26 +331,27 @@ function usePreviewStatusPresentation({
     restoreLabel,
     restoreDisabled: Boolean(busy || checking || unavailableReason),
     showRestore,
+    showInlineRegenerate,
     showStopSharing,
+    hasShareUrl: Boolean(hasShareUrl),
+    busy: Boolean(busy),
     onRestore,
+    onRegenerate,
     onStopSharing,
+    onStopAndKillProcess,
   };
 }
 
 function StatusGlyph({ kind, fill = false }: { kind: PreviewStatusKind; fill?: boolean }) {
   const glyphStyle = stylex.props(fill ? styles.statusIconFill : styles.statusIcon);
-  const spinnerClassName = cn('shrink-0', fill ? 'h-full w-full' : 'h-3.5 w-3.5');
-  if (kind === 'connecting') {
-    return <Spinner label={null} className={spinnerClassName} />;
-  }
-  if (kind === 'checking') {
-    return <RefreshCw {...glyphStyle} aria-hidden />;
+  if (kind === 'connecting' || kind === 'checking') {
+    return <Spinner label={null} diameter={fill ? '100%' : 'calc(var(--spacing) * 3.5)'} />;
   }
   if (kind === 'local') return <Monitor {...glyphStyle} aria-hidden />;
   if (kind === 'active') return <RadioTower {...glyphStyle} aria-hidden />;
   if (kind === 'expired') return <TimerOff {...glyphStyle} aria-hidden />;
   if (kind === 'closed') return <Link2Off {...glyphStyle} aria-hidden />;
-  if (kind === 'failed' || kind === 'unavailable')
+  if (kind === 'failed' || kind === 'unavailable' || kind === 'unconfirmed')
     return <TriangleAlert {...glyphStyle} aria-hidden />;
   return <CloudOff {...glyphStyle} aria-hidden />;
 }
@@ -348,8 +376,11 @@ function PreviewStatusContent({
     restoreDisabled,
     showRestore,
     showStopSharing,
+    hasShareUrl,
+    busy,
     onRestore,
     onStopSharing,
+    onStopAndKillProcess,
   } = presentation;
 
   const contentStyle = stylex.props(styles.content, centered && styles.centeredContent);
@@ -386,10 +417,28 @@ function PreviewStatusContent({
       ) : null}
       {showRestore || showStopSharing ? (
         <div {...actionsStyle}>
-          {showStopSharing ? (
-            <Button type="button" variant="secondary" size="mini" onClick={onStopSharing}>
-              {t('sessions.browser.stopSharing', 'Stop sharing')}
-            </Button>
+          {showStopSharing && onStopSharing ? (
+            <PreviewDisconnectButton
+              size="mini"
+              primaryLabel={
+                hasShareUrl
+                  ? t('sessions.browser.stopSharing', 'Stop sharing')
+                  : t('sessions.browser.stopPreview', 'Close preview')
+              }
+              menuAriaLabel={t('sessions.browser.disconnectOptions', 'Preview disconnect options')}
+              disconnectOnlyLabel={
+                hasShareUrl
+                  ? t('sessions.browser.disconnectRemoteOnly', 'Stop remote preview only')
+                  : t('sessions.browser.disconnectPreviewOnly', 'Close preview only')
+              }
+              disconnectAndTerminateLabel={t(
+                'sessions.browser.disconnectAndStopProcess',
+                'Close preview and stop server'
+              )}
+              disabled={busy}
+              onDisconnectOnly={onStopSharing}
+              onDisconnectAndTerminate={onStopAndKillProcess}
+            />
           ) : null}
           {showRestore ? (
             <Button
@@ -417,42 +466,69 @@ export function PreviewConnectionStatus(props: PreviewConnectionStatusProps) {
     'Preview status: {{status}}',
     { status: presentation.title }
   );
+  const regenerateLabel = t(
+    'sessions.browser.connection.regenerateLink',
+    'Regenerate preview link'
+  );
 
   return (
-    <Popover.Root>
-      <Tooltip.Provider delay={250}>
-        <Tooltip.Root>
-          <Tooltip.Trigger
-            render={
-              <Popover.Trigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="mini"
-                    icon
-                    tone={
-                      presentation.kind === 'failed' || presentation.kind === 'unavailable'
-                        ? 'destructive'
-                        : 'neutral'
-                    }
-                    data-testid="preview-status-trigger"
-                    aria-label={accessibleName}
-                  >
-                    <StatusGlyph kind={presentation.kind} fill />
-                  </Button>
-                }
-              />
-            }
-          />
-          <Tooltip.Content side="bottom">{presentation.title}</Tooltip.Content>
-        </Tooltip.Root>
-      </Tooltip.Provider>
-      <Popover.Content align="end" sideOffset={6} className="w-72">
-        <Popover.Title className="sr-only">{accessibleName}</Popover.Title>
-        <PreviewStatusContent presentation={presentation} />
-      </Popover.Content>
-    </Popover.Root>
+    <Tooltip.Provider delay={250}>
+      <div {...stylex.props(styles.triggerGroup)}>
+        {presentation.showInlineRegenerate ? (
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="mini"
+                  icon
+                  disabled={Boolean(props.busy || props.unavailableReason)}
+                  data-testid="preview-regenerate-button"
+                  aria-label={regenerateLabel}
+                  onClick={presentation.onRegenerate}
+                >
+                  <RefreshCw {...stylex.props(styles.statusIconFill)} aria-hidden />
+                </Button>
+              }
+            />
+            <Tooltip.Content side="bottom">{regenerateLabel}</Tooltip.Content>
+          </Tooltip.Root>
+        ) : null}
+        <Popover.Root>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Popover.Trigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="mini"
+                      icon
+                      tone={
+                        presentation.kind === 'failed' || presentation.kind === 'unavailable'
+                          ? 'destructive'
+                          : 'neutral'
+                      }
+                      data-testid="preview-status-trigger"
+                      aria-label={accessibleName}
+                    >
+                      <StatusGlyph kind={presentation.kind} fill />
+                    </Button>
+                  }
+                />
+              }
+            />
+            <Tooltip.Content side="bottom">{presentation.title}</Tooltip.Content>
+          </Tooltip.Root>
+          <Popover.Content align="end" sideOffset={6} width="calc(var(--spacing) * 72)">
+            <Popover.Title visuallyHidden>{accessibleName}</Popover.Title>
+            <PreviewStatusContent presentation={presentation} />
+          </Popover.Content>
+        </Popover.Root>
+      </div>
+    </Tooltip.Provider>
   );
 }
 

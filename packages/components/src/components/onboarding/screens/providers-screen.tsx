@@ -8,6 +8,7 @@ import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
+  hasEmptyModelSelectOption,
   isManagedBuiltinAgentType,
   type AgentBrandId,
   type BuiltinAgentType,
@@ -24,7 +25,15 @@ import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  corner,
+  duration,
+  ease,
+  focus,
+  radius,
+  space,
+} from '@lody/ui/tokens/scales.stylex';
 import { AlertDialog } from '@/ui/dialog';
 import { withClassName } from '@/lib/stylex';
 import {
@@ -153,7 +162,7 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
   },
-  selectDisabled: { opacity: 0.45, cursor: 'not-allowed' },
+  selectDisabled: { opacity: control.disabledOpacity, cursor: 'not-allowed' },
   statusSlot: { display: 'flex', flexShrink: 0, justifyContent: 'flex-end', minWidth: '5rem' },
   cluster: {
     display: 'flex',
@@ -256,6 +265,7 @@ function presetShowcase(presetId: string, label: string, brandId: AgentBrandId):
  * prefill share one source of truth.
  */
 const FEATURED_SHOWCASE_AGENTS: ShowcaseAgent[] = [
+  builtinShowcase('antigravity', 'Antigravity'),
   builtinShowcase('kimi', 'Kimi'),
   builtinShowcase('grok', 'Grok'),
   builtinShowcase('devin', 'Devin'),
@@ -1060,11 +1070,29 @@ export function ProvidersScreen({
           if (!testRunsRef.current.finish(config.id, run)) return;
           clearTestActivity(config.id);
           clearFailureReason(config.id);
-          setStatus(config.id, response.authRequired ? 'needs-auth' : 'passed');
+          const emptyModelCatalog =
+            !response.authRequired && hasEmptyModelSelectOption(response.capability?.configOptions);
+          setStatus(
+            config.id,
+            response.authRequired ? 'needs-auth' : emptyModelCatalog ? 'failed' : 'passed'
+          );
+          if (emptyModelCatalog) {
+            setFailureReasons((prev) => ({
+              ...prev,
+              [config.id]: t(
+                'settings.agent.provider.emptyModelCatalog',
+                'Provider responded but reported no usable models — try testing again'
+              ),
+            }));
+          }
           analytics.capture('onboarding/operation_succeeded', {
             step: 'providers',
             operation: 'agent_test',
-            result: response.authRequired ? 'needs_auth' : 'passed',
+            result: response.authRequired
+              ? 'needs_auth'
+              : emptyModelCatalog
+                ? 'degraded_empty_model_catalog'
+                : 'passed',
             duration_ms: analytics.durationSince(startedAtMs),
           });
         } catch (error) {
@@ -1141,6 +1169,7 @@ export function ProvidersScreen({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
+            sessionDefaults: dialogMode.config.sessionDefaults,
           });
           // Editing can change credentials or the launch command; keep Test as
           // an explicit optional action instead of treating save as verification.

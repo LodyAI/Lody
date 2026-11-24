@@ -14,6 +14,33 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Agent session identity
+
+Agent processes and their ACP terminals receive `LODY_SESSION_ID` and
+`LODY_WORKSPACE_SESSION_ID`. The workspace owner id is the parent Session id for a Tab,
+or the current Session id for an independent Session.
+
+`LODY_AGENT_ROLE_ID`, `LODY_PARENT_SESSION_ID`, and `LODY_OPENED_BY_SESSION_ID`
+expose the current Session's Role, parent, and exact opener ids. Absent values
+are unset, including values inherited from the host or login shell. These ids
+require no lookup before a create. They contain no Role name or prompt and do
+not change create defaults.
+
+`SessionManager` reads Role and opener provenance from the Session metadata at
+the common process startup boundary. `SessionConfig` carries them to
+`Session.buildShellEnv` for creation, restoration, edit-and-resend, and forks.
+The parent id follows the existing workspace configuration. This avoids separate
+copies at every configuration constructor. Desktop manual PTYs use
+`terminal-pty-service`, outside this agent environment contract.
+
+## Manual terminals
+
+Desktop terminals stay alive when a conversation is stopped or its idle agent
+runtime is reclaimed, including under memory pressure. Fleet owns these PTYs
+independently of the agent process, so running shell commands survive until the
+terminal is explicitly closed, the conversation is archived/deleted, or the app
+shuts down or restarts. Shell exit still ends its terminal normally.
+
 ## Automations
 
 `lody automation` registers durable JavaScript conditions that return results to
@@ -60,13 +87,17 @@ lody e2ee journal reset --file /absolute/path/to/journal.sqlite --json
 
 The command works offline and returns `archivePath` and `journalPath`. It renames
 and preserves the old execution log, creates a fresh log, and retains old current-format
-request ID fences in the adjacent `.control.sqlite`. Keep that file and the archive;
+request ID fences and root derivation quota receipts in the adjacent `.control.sqlite`.
+Reset does not replenish the shared-member 20-start quota; Owner starts are unbounded. Reservations commit before starts; a
+failed or interrupted start may consume a slot, while an exact retry reuses it.
+Keep that file and the archive;
 unknown results are not automatically retried. Restart owners after reset. Retrying
 this command completes an interrupted reset using the same archive path.
 
 A clock error asks you to calibrate the system clock. Without trusted reference time,
-a bad observation can still reject new claims in its workspace until explicit reset;
-other workspaces and completed evidence remain available. Empty interrupted first
+claims use the current local clock, so correcting a bad forward observation recovers
+new claims without reset. Started request IDs still cannot execute twice, and
+completed evidence remains available. Empty interrupted first
 creation initializes automatically. An unknown schema is archived and reported,
 then waits for explicit reset. An incomplete current-format store still retires all
 readable request keys before archival; unreadable current request keys refuse reset
@@ -76,22 +107,34 @@ This maintenance command is available by its explicit name and hidden from gener
 CLI help. Encrypted agent starts, including Meta/history dispatch and RPC offers,
 share a `userTurnId` execution claim in `execution.sqlite` under the active encrypted
 workspace's `repositoryDirectory`. Stop the daemon before reset. There is no desktop
-reset button. The execution gate resolves the turn's original signed update, checks its verified
-signer, then calls the same host's `authorizeExecution(workspaceId, requesterDevice)`
-by default. `LodyOptions.authorizeEncryptedExecution` can override this capability
-with the same signature. Missing signer or authorization denies new starts;
-revoking a device cannot borrow another device's authority from the same user.
-Original ciphertext receipts live in `execution-origins.sqlite`; snapshot authors
-cannot substitute for the original turn signer. Snapshot recovery backfills retained
-signed updates from Streams. Missing originals keep the turn pending and retryable
-until its original window expires; they never grant a start. Each backfill attempt
-has a three-second/eight-page bound; stop cancels the watcher's delayed retry.
-Confirmed whole-member removal or machine-device revocation during backfill is
-terminal: it immediately fences new execution and invalidates cached grants before
-the existing owner drain. Late authorization results cannot claim a journal start.
+reset button. The execution gate verifies the signed execution intent stored with the
+turn row against the content that will run, checks its signer in the current ledger, then
+calls the same host's `authorizeExecution(workspaceId, requesterDevice)` by default.
+`LodyOptions.authorizeEncryptedExecution` can override this capability with the same
+signature. A missing or invalid signature, an unknown signer after an authenticated read,
+or missing authorization refuses the start with its reason; revoking a device cannot borrow
+another device's authority from the same user. No original frame, Streams backfill or time
+window is involved, so a snapshot or a late arrival carries the same evidence
+([decision](../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+Only an unreadable ledger leaves a turn pending. A received frame for the session, a
+confirmed ledger read, a key installation or an RPC reconnect rechecks a waiting turn at
+once; a fallback timer doubles from one second to at most five minutes. Stop cancels the
+watcher's delayed retry. A cancelled input that never started is retired in the journal.
 Member removal retains its identity-verified receipt/erasure path; single-device
-revocation closes the workspace while retaining local originals. Ordinary transport
-failures continue to leave missing-origin turns pending.
+revocation closes the workspace while retaining local state.
+After a crash, an encrypted start with no completion receipt is never replayed.
+Recovery closes any partial assistant reply, fails the user turn and writes one
+interruption notice per turn before returning the session to idle. Repeated
+restarts keep that notice. Already terminal turns retain their outcome, and recovery
+never replaces a newer handled pointer. An old turn's journal failure cannot block
+an independently selected new turn. Check any external effects before sending a new message.
+Iroh and Streams share live write completion signals, registered together with the
+journal claim before invoking a handler. A duplicate waits for that owner within
+its request deadline and returns the committed response frames. A retried encrypted
+feature write with no live owner and an unknown outcome returns
+`e2ee_outcome_uncertain`; it does not execute the write again. Sealed frames retained
+after a persistence failure remain retryable across both receivers.
+
 Ordinary workspaces do not open this log.
 Transport frames keep their own original request/response receipts; execution evidence
 contains intent identities and a settlement marker, never prompt or response plaintext.
@@ -131,43 +174,60 @@ window. Another OOM pair starts a fresh cooldown. Explicit start/restart recover
 immediately; stop cancels recovery. Authentication, protocol and ownership failures
 retain their existing terminal behavior.
 
-Remote upgrades install globally using the daemon's npm environment, resolve the
-installed package's declared CLI entry via `npm root -g`, and verify its version.
-The watchdog launches that entry explicitly and only reports upgrade success after
-the replacement reaches ready with the same version. A successful npm install alone
-does not prove that the running daemon upgraded. Verification or handoff failure is
-logged as failure; the existing restart recovery remains available.
+Interactive startup retains a three-minute hang backstop; see the
+[cold-start decision](../../.agents/notes/implemented/bug-fix/2026-10-16-daemon-ready-timeout-slow-cold-start.md).
 
-Autostart scripts, scheduled tasks, and service definitions must invoke the stable
-global installation, not an absolute `_npx` cache entry or a version-specific store
-path. This repository does not generate or rewrite user-owned autostart scripts.
-If an existing daemon was launched from such a pinned path:
+Managed daemon updates use a fixed SEA service entry and immutable SHA-256-checked releases.
+The entry holds the Host lease while replacing its Worker, using a pinned ordinary
+Node for external JavaScript. No remote `npm install`, login shell, system Node,
+native compilation or global prefix write is involved. The npm CLI remains JavaScript.
 
-1. In the same OS environment and user account as the daemon, install the desired
-   version globally. Windows and WSL have separate installations.
-2. Find the global prefix with `npm prefix -g`. On Windows the stable launcher is
-   `<prefix>\lody.cmd`; on Linux/WSL/macOS it is `<prefix>/bin/lody`.
-   Check that launcher's `--version` before using it. Use the same Node/npm
-   installation and preserve the script's environment and daemon arguments.
-3. Replace the old cache path in the autostart command with that absolute launcher.
-   In PowerShell invoke a quoted launcher with `&`. Ensure the task's PATH includes
-   the intended Node runtime; WSL tasks must use the launcher inside that distro.
-4. Use the verified launcher to run `daemon stop`, then `daemon start` with the
-   original options, and check `daemon status` and the startup log's CLI version.
-   Restart the watchdog too: restarting only its Worker leaves old upgrade code alive.
+The cloud connection dialog now provides a standalone Shell installer for
+macOS/Linux and a PowerShell installer for Windows. It checks the capsule's archive
+and raw hashes and lets the verified capsule install its exact ordinary Node. The
+credential stays out of public download URLs and autostart definitions. The script
+installs the fixed entry, signs in, registers future autostart where available, and
+waits for the initial daemon-ready handshake. With `--no-start`, only installation
+is performed. Autostart failure is reported separately; the current connection can
+still run. Existing/modified service definitions are preserved. Linux user services
+may require lingering to stay available after logout; Windows uses a current-user
+login task without the scheduler's default execution-time or battery stop limits.
 
-An already-running old watchdog cannot acquire this fix merely by downloading it;
-the one-time launcher correction and restart are needed for that deployment.
-Older releases without versioned readiness cannot be verified by the new remote
-handoff and must be started explicitly if a rollback is required.
+Existing npm daemons require one explicit local migration:
 
-The launcher waits up to three minutes for the new Worker to become ready.
-Releases before this change waited 30 seconds, and the old watchdog applies
-its own limit during the handoff. So on a machine where cold start exceeds
-30 seconds, remote upgrades from those releases keep falling back to the old
-version. They also fail `daemon start`. Install the fixed release globally,
-then run `daemon stop` and `daemon start` with its launcher (steps 2 and 4
-above). Later remote upgrades use the longer limit.
+1. Stop the identified old service and disable its autostart registration.
+2. Download the matching product/platform SEA from a trusted release source and
+   verify its SHA-256 and any supplied platform signature (required on macOS, optional
+   on Windows). Run `/absolute/path/to/daemon daemon install`.
+   This downloads the exact additional Node pinned in the executable; offline
+   installations can first run `__sea-install-node /absolute/path/to/node.gz`.
+3. Register the printed fixed executable with `daemon-runner` in your user service,
+   preserving arguments and `LODY_DATA_DIR`. Installation prints instructions and
+   never rewrites an arbitrary existing service or launches a second host.
+4. Run that fixed executable with `daemon start` and check `daemon status`.
+
+On a managed macOS/Linux glibc installation, `daemon upgrade` prepares a SHA-256-checked
+release while the old daemon serves, then waits for active turns to finish.
+`--immediate` explicitly interrupts work after preparation. `--channel nightly`
+selects Nightly; `--allow-channel-change` and `--allow-downgrade` confirm those
+changes. The UI chooses the initiating client's build channel and asks for
+confirmation. `daemon update-status [--request-id ID]` reads durable outcomes.
+A failed download leaves the old daemon running. Unconfirmed termination blocks
+replacement; a clean candidate failure restores the compatible retained release
+once. Remote disconnection does not roll back a locally healthy daemon.
+
+Windows automatic updates and encrypted remote lifecycle control are unavailable
+until their ownership/authorization contracts are implemented. Containers and
+external package managers retain update ownership. Fixed-entry upgrades remain
+an explicit local installer operation. Releases are retained without automatic
+cache collection. See [SEA packaging](scripts/sea/README.md) and the
+[installation contract](../../specs/daemon-upgrade-installation.md). The
+[ownership decision](../../.agents/notes/implemented/bug-fix/2026-10-03-daemon-upgrade-installation.md)
+explains why npm handoff and self-replacement were removed.
+
+The Worker's V8 heap limit is 20% of physical memory, between 768 and 4096 MiB.
+Hosts billed by memory can set `LODY_WORKER_MAX_OLD_SPACE_MB` (a whole number from 256
+to 65536) in the watchdog's service environment; an unusable value is logged and ignored.
 
 ## Structured Session output
 
@@ -194,9 +254,9 @@ lody operation list --workspace team --session SESSION_ID --state active --json
 lody session list --workspace team --query parser --machine-id MACHINE_ID --agent-role-id ROLE_ID --json
 ```
 
-Matching MCP tools are `lody_machine_list`, `lody_project_list`,
-`lody_agent_config_list/get`, `lody_agent_role_list/get`, `lody_mcp_list`, and
-`lody_operation_list`. Session list adds `query`, `machineId`, `agentConfigId`,
+Matching MCP tools are the read-only `lody_catalog` actions `machines`, `projects`,
+`agent_configs`, `agent_roles` and `mcp_servers`, and
+`lody_operation` action `list`. Session list adds `query`, `machineId`, `agentConfigId`,
 and `agentRoleId`. Creation provenance is what the Role filter matches.
 
 `lody_session_create_options` and Agent config discovery expose `runConfig.modes`
@@ -291,6 +351,8 @@ a custom OSS data root. No workspace is created automatically.
 
 This imports full Loro history and referenced local file attachments, keeps existing
 cloud conversations/settings, and disables execution of imported sessions/schedules.
+Encrypted targets require an approved paired CLI machine with the current epoch key;
+all uploaded content and attachments use its encrypted transports.
 Roost and unsupported formats fail before record uploads. Source data is retained;
 rerunning resumes the frozen snapshot. It does not copy code directories or native
 agent credentials. See [migration and recovery](src/lib/oss-migration/README.md).
@@ -304,3 +366,15 @@ protected replica used by chat, then writes JSON and Markdown on this device.
 are omitted; ordinary workspace exports keep their existing schedule data.
 Desktop conversation copy and image export likewise use the local history and
 save/clipboard bridges, without publishing a share.
+
+## Build platforms
+
+`pnpm --dir apps/cli build` builds the local platform by default. Set
+`LODY_PLATFORM=cloud` explicitly for cloud runtime support. Deployment values are
+read from the invoking process; the build never discovers deployment dotenv files.
+Both platforms use the same worker layout, native externals, bundled Loro WASM,
+and separate runtime/adapter build processes with a 2048 MiB heap.
+
+`prepare:publish` stages npm artifacts under `.publish/`; use pnpm to resolve
+catalog versions when packing. Release-script tests run with `test:release`.
+The [SEA publication guide](SEA.md) covers managed daemon artifacts and installers.

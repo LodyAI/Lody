@@ -58,6 +58,69 @@ function makeIssuePrSuggestion(number: number, type: 'issue' | 'pr', title: stri
 }
 
 describe('selectMentionMenuView', () => {
+  it('ranks @ matches across sources with available Roles first and stable score ties', () => {
+    const files = makeCategory('file', 'file', 'Files', ['src/review-notes.md', 'src/review.md']);
+    const sessions = makeCategory('session', 'session', 'Sessions', [
+      'review',
+      'src/review-notes.md',
+    ]);
+    const roles = makeCategory('agent_role', 'role', 'Agent Roles', ['review-helper', 'review']);
+    roles.getCandidates.mockImplementation(() => [
+      { ...makeCandidate('review-helper'), kind: 'agent_role', icon: 'agent_role' },
+      { ...makeCandidate('review'), value: 'offline', kind: 'agent_role', disabled: true },
+    ]);
+
+    for (const categories of [
+      [files, sessions, roles],
+      [sessions, roles, files],
+    ]) {
+      const view = selectMentionMenuView(categories, 'review');
+      const values = getMentionViewCandidates(view).map((candidate) => candidate.value);
+      expect(values[0]).toBe('review-helper');
+      expect(values[1]).toBe('review');
+      expect(values.at(-1)).toBe('offline');
+      // A later source's exact match beats both file matches. Equal scores
+      // retain source order rather than imposing another category priority.
+      expect(values.filter((value) => value === 'src/review-notes.md')).toHaveLength(2);
+      if (view.level !== 'aggregate') throw new Error('expected aggregate');
+      expect(
+        view.rankedCandidates
+          ?.filter(({ candidate }) => candidate.value === 'src/review-notes.md')
+          .map(({ category }) => category.id)
+      ).toEqual(
+        categories.filter(({ id }) => id === 'file' || id === 'session').map(({ id }) => id)
+      );
+    }
+  });
+
+  it('interleaves differently scored results within the same category', () => {
+    const files = makeCategory('file', 'file', 'Files', ['review', 'src/a-review.md']);
+    const sessions = makeCategory('session', 'session', 'Sessions', ['src/review.md']);
+    const view = selectMentionMenuView([files, sessions], 'review');
+    expect(getMentionViewCandidates(view).map(({ value }) => value)).toEqual([
+      'review',
+      'src/review.md',
+      'src/a-review.md',
+    ]);
+  });
+
+  it('keeps aggregate caps and bare @ lazy while namespaced searches retain source order', () => {
+    const files = makeCategory('file', 'file', 'Files', ['src/review.md', 'review', 'reviewer']);
+    selectMentionMenuView([files], '');
+    expect(files.getCandidates).not.toHaveBeenCalled();
+    const aggregate = selectMentionMenuView([files], 'review', { aggregateLimitPerCategory: 2 });
+    expect(getMentionViewCandidates(aggregate).map(({ value }) => value)).toEqual([
+      'review',
+      'src/review.md',
+    ]);
+    const scoped = selectMentionMenuView([files], 'file:review');
+    expect(getMentionViewCandidates(scoped).map(({ value }) => value)).toEqual([
+      'src/review.md',
+      'review',
+      'reviewer',
+    ]);
+  });
+
   it.each(['/', '、'])('routes %s to commands and shortcuts only', (trigger) => {
     const command = makeCategory('command', 'command', 'Commands', []);
     command.directTrigger = '/';
@@ -195,7 +258,6 @@ describe('Prompt Shortcut discovery', () => {
       id: slug,
       workspaceId: context.workspaceId,
       ownerUserId: context.userId,
-      visibility: 'private',
       name: slug,
       slug,
       scope: {},
@@ -208,13 +270,13 @@ describe('Prompt Shortcut discovery', () => {
     };
   }
 
-  it('ranks visible, executable shortcuts while retaining only an unavailable exact match', () => {
+  it('ranks visible, executable workspace shortcuts while retaining only an unavailable exact match', () => {
     const entries = [
       shortcut('create-intro-video'),
       shortcut('videoer'),
+      shortcut('video-teammate', { ownerUserId: 'another-user' }),
       shortcut('video', { scope: { machineId: 'another-machine' } }),
       shortcut('video-remote', { scope: { machineId: 'another-machine' } }),
-      shortcut('video-private', { ownerUserId: 'another-user' }),
       shortcut('video-foreign', { workspaceId: 'another-workspace' }),
     ];
 
@@ -222,11 +284,12 @@ describe('Prompt Shortcut discovery', () => {
 
     expect(candidates.map((candidate) => candidate.insertText)).toEqual([
       '/videoer',
+      '/video-teammate',
       '/create-intro-video',
       '/video',
     ]);
-    expect(candidates.map((candidate) => candidate.disabled)).toEqual([false, false, true]);
-    expect(candidates[2]?.disabledReason).toBe('Requires a different machine.');
+    expect(candidates.map((candidate) => candidate.disabled)).toEqual([false, false, false, true]);
+    expect(candidates[3]?.disabledReason).toBe('Requires a different machine.');
   });
 });
 

@@ -596,6 +596,8 @@ function renderItem(item: MessageContent, level: LevelConfig, tally: RenderTally
       // Message text is never trimmed; resource links were normalized at entry.
       return item.text?.trim() ? demoteMarkdownHeadings(item.text) : null;
 
+    case 'local_attachment':
+      return `- **Local attachment:** ${toSummaryLine(item.fileName)}. _Available only on the original computer; file contents not included._`;
     case 'file':
       return `- **Attachment:** ${toSummaryLine(item.fileName)} (${item.sizeBytes} bytes). _File contents not included._`;
 

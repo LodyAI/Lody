@@ -3,6 +3,24 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { conversation } from './conversation.tokens.stylex';
 
+/**
+ * The visually-hidden block: present to a screen reader, absent from the page.
+ * Tailwind's `sr-only`, in StyleX.
+ */
+export const visuallyHidden = stylex.create({
+  hidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+});
+
 export const conversationSurface = stylex.create({
   message: { paddingBlock: conversation.messagePadding },
   userMessage: { paddingTop: 0, paddingBottom: conversation.responseGap },
@@ -127,9 +145,69 @@ export const conversationSurface = stylex.create({
     flexDirection: 'row-reverse',
     alignItems: 'center',
     columnGap: space[1.5],
+    maxWidth: '100%',
     color: colors.secondaryLabel,
     fontSize: text.captionSize,
     lineHeight: text.captionLeading,
+  },
+  metadataSenderName: {
+    maxWidth: '10rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 500,
+  },
+  metadataTimestamp: {
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  userBubbleSlot: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+  },
+  userBubbleFrame: {
+    position: 'relative',
+    minWidth: 0,
+    maxWidth: 'min(100%, 800px)',
+    width: 'fit-content',
+  },
+  metadataSeparator: {
+    color: colors.tertiaryLabel,
+    userSelect: 'none',
+  },
+  metadataSourceLink: {
+    display: 'inline-flex',
+    minWidth: 0,
+    maxWidth: '13.75rem',
+    alignItems: 'center',
+    columnGap: space[1],
+    borderRadius: radius.mini,
+    paddingInline: space[1.5],
+    paddingBlock: '1px',
+    marginBlock: '-1px',
+    marginInline: `calc(${space[1]} / -2)`,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    backgroundColor: { default: 'transparent', ':hover': conversation.activityHoverFill },
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
+  mobileMetadataSourceLink: {
+    maxWidth: '10.5rem',
+  },
+  metadataSourceIcon: {
+    width: space[3],
+    height: space[3],
+    flexShrink: 0,
+  },
+  metadataSourceTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   userActions: {
     position: 'absolute',

@@ -10,6 +10,7 @@ maintenance commands here.
   direction. Shared frontend features use platform descriptors; CLI runtime
   roots consume injected ports and do not construct cloud SDK clients.
 - Keep the allowlist small and limited to deliberate adapter/composition files.
+  Capacitor staging commands may build/sync the client; they never deploy a service.
   A new violation should normally be fixed at its dependency boundary, not
   appended to the allowlist.
 - `check-code-collab-imports.mjs` protects Code Collab ownership boundaries.
@@ -17,6 +18,10 @@ maintenance commands here.
   cloud query/mutation/action references. New endpoints in its protected protocol
   families inherit the rule. Keep non-React/control exceptions exact and reasoned;
   `--inventory` prints every current client entry and protection.
+- `check-comment-ratchet.mjs` bans comment growth: per-scope counted comment
+  lines may only shrink against `comment-ratchet-baseline.json`; tighten with
+  `--update`, never to permit new prose comments. JSDoc and tool directives are
+  exempt. The audit procedure lives in `.agents/skills/delete-comment`.
 - `check-public-boundary.mjs` rejects closed product paths, private workspace
   dependencies/imports, unresolved `workspace:` dependencies, closed-path
   documentation, internal absolute paths in any publishable text, and captured
@@ -46,7 +51,7 @@ maintenance commands here.
 - `generate-acp-registry.mjs` produces the public ACP registry and its bundled,
   generation-time-validated SVG icon map. Use `--icons-only` when refreshing
   icons without also updating Provider versions.
-  Devin, Dimcode, Kimi and Kimi Code are excluded from discovery, including local
+  Antigravity ACP, Devin, Dimcode, Kimi and Kimi Code are excluded from discovery, including local
   fallback entries; keep builtin icons and persisted-provider launch compatibility.
   `generate-open-source-attributions.mjs` produces the in-app attribution
   bundle and root `THIRD_PARTY_NOTICES.md`. Generated output must come only
@@ -59,11 +64,6 @@ maintenance commands here.
   newer for source builds, and must verify byte-for-byte archive reproducibility.
   A clean submodule is required for a publishable manifest; dirty artifacts are
   development-only and must never be uploaded to the managed-runtime channel.
-
-- `package-baguette-runtime.mjs` packages a prebuilt native binary and its resources,
-  verifies the executable/patch pins, and checks deterministic archive bytes twice.
-  `--print-pins` produces local candidate pins only. The runtime uses a distinct
-  Lody revision; rebuilds must never overwrite published immutable bytes.
 
 ## Install ownership
 
@@ -90,3 +90,7 @@ or a user data directory.
 `security-undici-probe.mjs` runs a synthetic loopback response in an isolated
 client process; its root script tests must observe natural child exit after a
 caught fetch rejection. Do not mask uncaught errors or force successful exit.
+
+The documentation link scan excludes native Lexical Markdown fixtures under
+`apps/mobile/ios/packages/lexical-swift/Fixtures/`: their literal links are test
+data. Mobile READMEs and development documentation remain checked.

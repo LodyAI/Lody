@@ -13,10 +13,8 @@ Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-his
 
 ## Opening a doc pulls its stream
 
-`LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.
-`SessionDocument.init()` joins and pulls the room immediately. It stays joined
-in the manager cache until `cleanSessionDoc`; each open costs a subscription and
-full initial sync.
+New wrappers from `LoroDocumentManager.getOrCreateSessionDoc()` start a subscription
+and full stream sync in `SessionDocument.init()`, retained until `cleanSessionDoc`.
 
 Rules:
 
@@ -57,9 +55,16 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
-Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
-`createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
-`remoteCursorStore` or schedule-only `onPersist*`. Test:
+Per identity, share `repo.sqlite3`, not replicas. Meta/Flock cursors use
+`createRepoStreamsPersistence`. Only the daemon writes shared LoroDoc cursors.
+Process seeds are captured with document loading in one SQLite transaction and
+require nonempty peer clocks covered by the synchronized document's applied version
+and no pending updates;
+process saves and deletions stay in memory. The [decision](../../../../../.agents/notes/implemented/architecture/2026-09-27-loro-repo-flock-persistence-migration.md)
+explains why unchecked shared reads lose data. Never use a shared `remoteCursorStore`
+or schedule-only `onPersist*`. The incomplete-recovery scope survives reattachment.
+Its metadata persists independently of cursors; only daemons publish it.
+One-shot managers disable cloud ephemeral sinks. Test:
 `tests/cli-streams-replica-checkpoints.test.ts`.
 
 ## Shared ACP runtime config contains no secrets
@@ -69,6 +74,8 @@ workspace-shared runtime baseline. It must remove every option id matched by
 `isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
 ACP response; otherwise a future agent can persist and broadcast credential-like
 selector values to collaborators.
+
+One-shot command managers disable cloud ephemeral sinks while keeping durable Streams sync.
 
 ## Presence is ephemeral and partitioned by origin
 
@@ -82,12 +89,12 @@ distinct keys or in-flight writes; `(phase, detail)` dedupe is not a rate limit.
 Safe fields only; barriers are not exact heartbeat/peer receipts. Joined/close
 does not prove fresh delivery/POST cleanup. Never write periodic doc-meta lastSeen or
 lastRunningSeen; write meta timestamps only at status transitions. MachineMeta.lastSeen
-is retired even at registration. Online checks use presence; null from
-getOnlineMachineIds means unknown, never offline.
+is retired even at registration. Online checks use `getMachinePresenceView`: a fresh
+heartbeat is online without a joined room, and absence is offline only when `synced`,
+otherwise unknown.
 
-`session-active-presence.ts` owns native Turn leases, Clock heartbeats and latched
-stall signals. Only its lease release clears presence; incidental lifecycle clears
-cannot retire a Turn. Its Legacy entry owns execution/analytics. Intent:
+`session-active-presence.ts` owns Turn leases, native agent activity, Clock heartbeats and
+latched stall signals. Only lease release retires a Turn; native activity can remain after it. Its Legacy entry owns execution/analytics. Intent:
 `specs/session-initialization-deadline.md`.
 
 `workspace-presence.ts` owns Scopes; `presence-replica.ts` is synchronous.
@@ -153,9 +160,8 @@ not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recov
 charges the attempt counter instead of resetting it, and `force` must not clear that
 history. Regression: `tests/reconnect-storm-repro.test.ts`.
 
-Health follows the meta room. While it is joined, an aggregate `disconnected`
-means one doc or Flock room failed: health reads `rooms-degraded`, a backed-off
-per-room sweep (1s to 30s) retries that room, and cloud side effects keep running. Never
-schedule a transport-wide reconnect for it; one room that never finished its
-initial sync did that every two minutes
-([note](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).
+Health follows the Meta room. While Meta is joined, aggregate `disconnected`
+means a doc/Flock failure: report `rooms-degraded`, retry that room with 1s to 30s
+backoff, and keep cloud side effects running. While a room stays `error`, the 30s
+watchdog backs off that room alone, up to 5 minutes; other rooms are not delayed. Never
+reconnect the whole transport for one failed room ([rationale](../../../../../.agents/notes/implemented/bug-fix/2026-11-02-cross-machine-read-room-lifetime.md)).

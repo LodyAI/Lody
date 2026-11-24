@@ -1,7 +1,7 @@
-// @vitest-environment jsdom
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 // @vitest-environment jsdom
 import { LoroDoc } from 'loro-crdt';
-import { ScheduleRepository, type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
+import { type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
 import { userAtom } from '../src/atoms';
 
 import {
@@ -17,6 +17,7 @@ import {
 } from 'react';
 import { getDefaultStore } from 'jotai';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
+import { selectedMessageMarkdown } from '../src/components/ai-gui/message-quote-markdown';
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import {
@@ -34,9 +35,9 @@ import type {
   AgentRoleId,
   McpServerId,
   SessionMeta,
+  SessionHistory,
   SessionInputBlock,
-  WorkspaceMcpServerMeta,
-} from '@lody/shared';
+  WorkspaceMcpServerMeta} from '@lody/shared';
 
 const scheduleMachine = vi.hoisted(() => ({ value: null as MachineMeta | null }));
 vi.mock('../src/hooks/use-resolved-machine-meta', () => ({
@@ -55,7 +56,7 @@ const sessionAgentRoleState = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
+vi.mock('@/lib/posthog-context', () => ({ usePostHog: () => null }));
 vi.mock('../src/lib/electron-session-file-sender', () => ({
   canUseElectronLocalFileSend: vi.fn(() => false),
   sendSessionFileToLocalRuntime: vi.fn(async () => null),
@@ -153,9 +154,13 @@ import {
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
 import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
+import { queueTask } from '../src/components/sessions/message-queue/queue-task';
 import { toast } from '@/lib/toast';
 import { formatMessageQuote, getSessionRoomId } from '@lody/shared';
 import { conversationQuoteDraftKey } from '../src/lib/conversation-quote-draft';
+import { composerIn, type ComposerTestHandle } from './composer-test-utils';
+import { createConversationViewFromHistory } from '../src/lib/conversation-view/create-conversation-view-from-history';
+import type { ConversationView } from '../src/lib/conversation-view/types';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -388,7 +393,7 @@ describe('SessionChatInputArea submission feedback', () => {
         )
       );
     });
-    return container!.querySelector('textarea')!;
+    return composerIn(container!);
   }
 
   it('retires the shown prompt suggestion once a sent message is accepted', async () => {
@@ -485,8 +490,8 @@ describe('SessionChatInputArea submission feedback', () => {
       onSendMessage,
       overrides: { onRestoreSession: restore },
     });
-    expect(container!.querySelector('textarea')!.disabled).toBe(false);
-    expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
+    expect(composerIn(container!).disabled).toBe(false);
+    expect(composerIn(container!).value).toBe('focus regression draft');
     expect(
       [...container!.querySelectorAll('button')].some((item) =>
         item.textContent?.includes('Restore session')
@@ -527,16 +532,72 @@ describe('SessionChatInputArea submission feedback', () => {
   async function submit(source: 'keyboard' | 'button') {
     await act(async () => {
       if (source === 'keyboard') {
-        container!
-          .querySelector('textarea')!
-          .dispatchEvent(
-            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
-          );
+        composerIn(container!).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
       } else {
         container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click();
       }
     });
   }
+
+  it.each([true, false])(
+    'retires command hydration only after /compact acceptance=%s',
+    async (accepted) => {
+      const acceptance = deferredBoolean();
+      const submitted: SessionInputBlock[][] = [];
+      const textarea = await renderComposer({
+        onSendMessage: (blocks) => {
+          submitted.push(blocks);
+          return acceptance.promise;
+        },
+        overrides: {
+          initialInputText: '',
+          availableCommands: [{ name: 'compact', description: 'Compact history' }],
+        },
+      });
+      const commandRanges = () => container!.querySelectorAll('[data-mention-kind="command"]');
+      const input = async (text: string, inputType = 'insertText') => {
+        await act(async () => {
+          textarea.focus();
+          void inputType;
+          textarea.edit(text, text.length);
+        });
+      };
+      await input('/compact');
+      // Commit the command menu item before submitting the message.
+      await act(async () => {
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+        );
+      });
+      const commandDraft = textarea.value;
+      expect(commandDraft.trimEnd()).toBe('/compact');
+      expect(commandRanges().length).toBeGreaterThan(0);
+      await submit('button');
+      expect(submitted[0]).toMatchObject([{ type: 'text', text: '/compact' }]);
+      expect(textarea.value).toBe('');
+      await act(async () => acceptance.resolve(accepted));
+      if (!accepted) {
+        expect(textarea.value).toBe(commandDraft);
+        expect(commandRanges().length).toBeGreaterThan(0);
+        expect(commandRanges()[0]?.textContent).toBe('/compact');
+        return;
+      }
+      expect(textarea.value).toBe('');
+      // A first fragment shorter than /compact must not consume its stale seed.
+      const mixedText = '中文测试123456789';
+      for (let length = 1; length <= mixedText.length; length++) {
+        await input(mixedText.slice(0, length));
+      }
+      expect(commandRanges()).toHaveLength(0);
+      textarea.select();
+      await input('', 'deleteContentBackward');
+      await input(mixedText, 'historyUndo');
+      expect(textarea.value).toBe(mixedText);
+      expect(commandRanges()).toHaveLength(0);
+    }
+  );
 
   it('inserts a quote at the caret, preserves it after rejection, and restores deletion with undo/redo', async () => {
     scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
@@ -598,6 +659,67 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     await submit('button');
     expect(submitted[1]).toEqual(submitted[0]);
+  });
+
+  it('sends the selected Markdown snapshot in the actual session input', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    const region = document.createElement('div');
+    region.innerHTML =
+      '<div data-message-quote-text><p><strong>Important</strong> <a href="https://example.com">guide</a></p><ul><li>first</li><li>second</li></ul></div>';
+    document.body.append(region);
+    const range = document.createRange();
+    range.selectNodeContents(region.querySelector('[data-message-quote-text]')!);
+    const markdown = selectedMessageMarkdown(range, region);
+    region.remove();
+    expect(markdown).toBe('**Important** [guide](https://example.com)\n\n* first\n* second');
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote(markdown)).toBe(true);
+    });
+    await submit('button');
+    expect(submitted[0]?.[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining(formatMessageQuote(markdown)),
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+    });
+  });
+
+  it('inserts at the saved composer caret after focus leaves, without sending', async () => {
+    scheduleMachine.value = { protocolCapabilities: { messageQuotes: 1 } } as MachineMeta;
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const submitted: SessionInputBlock[][] = [];
+    const textarea = await renderComposer({
+      composerRef,
+      onSendMessage: async (blocks) => {
+        submitted.push(blocks);
+        return true;
+      },
+    });
+    textarea.focus();
+    textarea.setSelectionRange(6, 6);
+    textarea.blur();
+    await act(async () => {
+      expect(composerRef.current!.addMessageQuote('Keep this')).toBe(true);
+    });
+    expect(submitted).toHaveLength(0);
+    expect(textarea.value.startsWith('focus ')).toBe(true);
+    expect(textarea.value.endsWith('regression draft')).toBe(true);
+    await submit('button');
+    const block = submitted[0]![0]!;
+    expect(block).toMatchObject({
+      type: 'text',
+      spans: [{ kind: 'message_quote', quoteVersion: 1 }],
+    });
+    const sent = block.type === 'text' ? block.text : '';
+    expect(sent).toBe('focus ' + formatMessageQuote('Keep this') + 'regression draft');
   });
 
   it('preserves a quote draft when the target machine loses support', async () => {
@@ -737,11 +859,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     const original = textarea.value;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        textarea,
-        'Prefix ' + original
-      );
-      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.edit('Prefix ' + original);
       textarea.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
       );
@@ -868,7 +986,7 @@ describe('SessionChatInputArea submission feedback', () => {
           ? saved.definition.destination.sessionId
           : '',
     });
-    expect(container!.querySelector('textarea')?.value).toBe('');
+    expect(composerIn(container!).value).toBe('');
     expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
   });
 
@@ -912,7 +1030,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     expect(h.ordinary).toEqual([]);
     expect(await h.repository.list()).toEqual([]);
-    expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
+    expect(composerIn(container!).value).toBe('focus regression draft');
     expect(scheduledActionButton()).not.toBeNull();
   });
 
@@ -957,7 +1075,7 @@ describe('SessionChatInputArea submission feedback', () => {
     await scheduledComposer(false);
     await openScheduleEdit();
     await clickText('Remove time');
-    expect(container!.querySelector('textarea')?.value).toBe('focus regression draft');
+    expect(composerIn(container!).value).toBe('focus regression draft');
     expect(container!.querySelector('button[aria-label="Send"]')).not.toBeNull();
     expect(scheduledActionButton()).toBeUndefined();
   });
@@ -1230,7 +1348,7 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(submissions).toHaveLength(1);
       expect(submissions[0][2]?.mcpServerIds).toEqual([]);
       expect(submissions[0][2]?.skipMcpOnce).toBe(true);
-      expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
+      expect(composerIn(container!).value).toBe('focus regression draft');
       await renderComposer({
         sessionId,
         onSendMessage,
@@ -1359,7 +1477,7 @@ describe('SessionChatInputArea submission feedback', () => {
       const textarea = await renderComposer({ onSendMessage: () => acceptance.promise });
       textarea.focus();
       await submit(source);
-      expect(container!.querySelector('textarea')).toBe(textarea);
+      expect(composerIn(container!).element).toBe(textarea.element);
       expect(textarea.disabled).toBe(true);
       // jsdom leaves disabled controls focused; browsers blur them at this commit.
       document.body.tabIndex = -1;
@@ -1368,7 +1486,7 @@ describe('SessionChatInputArea submission feedback', () => {
       await act(async () => acceptance.resolve(accepted));
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
-      expect(document.activeElement).toBe(textarea);
+      expect(document.activeElement).toBe(textarea.element);
     }
   );
 
@@ -1413,15 +1531,15 @@ describe('SessionChatInputArea submission feedback', () => {
           await submit(source);
           expect(textarea.disabled).toBe(false);
           expect(textarea.value).toBe('');
-          expect(document.activeElement).toBe(textarea);
+          expect(document.activeElement).toBe(textarea.element);
           await act(async () => acceptance.resolve(accepted));
           expect(textarea.disabled).toBe(false);
           expect(textarea.value).toBe(accepted ? '' : 'focus regression draft');
-          expect(document.activeElement).toBe(textarea);
+          expect(document.activeElement).toBe(textarea.element);
           await paint();
-          expect(document.activeElement).toBe(textarea);
+          expect(document.activeElement).toBe(textarea.element);
           await paint();
-          expect(document.activeElement === textarea).toBe(!accepted);
+          expect(document.activeElement === textarea.element).toBe(!accepted);
         }
       }
     );
@@ -1435,7 +1553,7 @@ describe('SessionChatInputArea submission feedback', () => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
       await paint();
       await paint();
-      expect(document.activeElement).toBe(textarea);
+      expect(document.activeElement).toBe(textarea.element);
     });
     it(`does not dismiss a new ${mobilePlatform} session from an old accepted send`, async () => {
       const paint = setMobilePlatform();
@@ -1454,7 +1572,7 @@ describe('SessionChatInputArea submission feedback', () => {
       next.focus();
       await paint();
       await paint();
-      expect(document.activeElement).toBe(next);
+      expect(document.activeElement).toBe(next.element);
     });
     it(`does not reclaim ${mobilePlatform} focus after an explicit keyboard dismissal`, async () => {
       setMobilePlatform();
@@ -1465,7 +1583,7 @@ describe('SessionChatInputArea submission feedback', () => {
       textarea.blur();
       await act(async () => acceptance.resolve(false));
       expect(textarea.value).toBe('focus regression draft');
-      expect(document.activeElement).not.toBe(textarea);
+      expect(document.activeElement).not.toBe(textarea.element);
     });
     it(`consumes a navigation request without focusing on ${mobilePlatform}`, async () => {
       setMobilePlatform();
@@ -1479,7 +1597,7 @@ describe('SessionChatInputArea submission feedback', () => {
         },
       });
       expect(pending).toBe(false);
-      expect(document.activeElement).not.toBe(textarea);
+      expect(document.activeElement).not.toBe(textarea.element);
     });
   }
 
@@ -1507,7 +1625,7 @@ describe('SessionChatInputArea submission feedback', () => {
         window.dispatchEvent(new Event('blur'));
       }
       await act(async () => acceptance.resolve(true));
-      expect(document.activeElement).not.toBe(textarea);
+      expect(document.activeElement).not.toBe(textarea.element);
     }
   );
 
@@ -1541,7 +1659,7 @@ describe('SessionChatInputArea submission feedback', () => {
       const newDraft = textarea.value;
       await act(async () => oldAcceptance.resolve(accepted));
       expect(textarea.value).toBe(newDraft);
-      expect(document.activeElement).not.toBe(textarea);
+      expect(document.activeElement).not.toBe(textarea.element);
       textarea.focus();
       await submit('keyboard');
       expect(textarea.disabled).toBe(true);
@@ -1551,7 +1669,7 @@ describe('SessionChatInputArea submission feedback', () => {
       await act(async () => newAcceptance.resolve(false));
       expect(textarea.disabled).toBe(false);
       expect(textarea.value).toBe(newDraft);
-      expect(document.activeElement).toBe(textarea);
+      expect(document.activeElement).toBe(textarea.element);
     }
   );
 
@@ -1584,9 +1702,9 @@ describe('SessionChatInputArea submission feedback', () => {
     document.body.removeAttribute('tabindex');
     await renderComposer({ ...props, isArchived: true });
     await act(async () => acceptance.resolve(false));
-    expect(document.activeElement).not.toBe(textarea);
+    expect(document.activeElement).not.toBe(textarea.element);
     await renderComposer(props);
-    expect(document.activeElement).not.toBe(textarea);
+    expect(document.activeElement).not.toBe(textarea.element);
   });
   it('accepts an attachment-only draft once when Enter repeats before React commits', async () => {
     const acceptance = deferredBoolean();
@@ -1676,6 +1794,7 @@ describe('SessionChatInputArea submission feedback', () => {
       const pastedText = character.repeat(50_000);
       const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
       const textarea = await renderComposer({
+        overrides: { initialInputText: '' },
         onSendMessage: async (...args) => {
           submissions.push(args);
           return true;
@@ -1688,13 +1807,14 @@ describe('SessionChatInputArea submission feedback', () => {
       });
 
       expect(event.defaultPrevented).toBe(true);
-      expect(textarea.value).toBe('focus regression draft');
+      expect(textarea.value).toBe('');
       expect(container!.textContent).toContain('pasted-text.txt');
       expect(errorToast).not.toHaveBeenCalled();
 
       await submit('keyboard');
 
-      const attachment = submissions[0]?.[2]?.attachments?.[0];
+      const [blocks, , options] = submissions[0]!;
+      const attachment = options?.attachments?.[0];
       expect(attachment).toMatchObject({
         kind: 'file',
         name: 'pasted-text.txt',
@@ -1704,6 +1824,7 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(attachment?.source ? await readBlobAsText(attachment.source) : undefined).toBe(
         pastedText
       );
+      expect(queueTask(blocks, options?.attachments)).toBe('pasted-text.txt');
     });
 
     it('merges the generated file with real clipboard files', async () => {
@@ -1745,7 +1866,7 @@ describe('SessionChatInputArea submission feedback', () => {
     other.focus();
     await act(async () => acceptance.resolve(true));
     expect(document.activeElement).toBe(other);
-    expect(textarea.isConnected).toBe(false);
+    expect(textarea.element.isConnected).toBe(false);
   });
   it('retains a newer cached draft when an old send completes after leaving again', async () => {
     const acceptance = deferredBoolean();
@@ -1762,5 +1883,195 @@ describe('SessionChatInputArea submission feedback', () => {
     await act(async () => acceptance.resolve(true));
     const textarea = await renderComposer(props);
     expect(textarea.value).toBe('newer unsent draft');
+  });
+
+  describe('message history recall', () => {
+    const userTurn = (id: string, text: string, extra: Partial<SessionHistory> = {}) =>
+      ({
+        id,
+        role: 'user',
+        author: { v: 1, kind: 'human', userId: 'user-1' },
+        timestamp: '2026-11-22T00:00:00.000Z',
+        items: text ? [{ type: 'text', text }] : [{ type: 'image', text: undefined }],
+        ...extra,
+      }) as unknown as SessionHistory;
+    const assistantTurn = (id: string, text: string) =>
+      ({
+        id,
+        role: 'assistant',
+        timestamp: '2026-11-22T00:00:00.000Z',
+        finished: true,
+        items: [{ type: 'text', text }],
+      }) as unknown as SessionHistory;
+    const HISTORY: SessionHistory[] = [
+      userTurn('u1', 'first question'),
+      assistantTurn('a1', 'first answer'),
+      userTurn('u2', 'second\nmultiline question'),
+      assistantTurn('a2', 'second answer'),
+      userTurn('u3', ''),
+      userTurn('u4', 'delegated prompt', {
+        author: { v: 1, kind: 'agent' } as unknown as SessionHistory['author'],
+      }),
+      assistantTurn('a3', 'third answer'),
+      userTurn('u5', 'latest question'),
+      assistantTurn('a5', 'latest answer'),
+    ];
+    const historyView = (history: readonly SessionHistory[] = HISTORY) =>
+      createConversationViewFromHistory({
+        sessionId: 'recall-session' as SessionMeta['id'],
+        getHistory: () => history,
+        subscribe: () => () => undefined,
+      });
+    const press = async (
+      composer: ComposerTestHandle,
+      key: string,
+      init: KeyboardEventInit = {}
+    ): Promise<KeyboardEvent> => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+      await act(async () => {
+        composer.dispatchEvent(event);
+      });
+      return event;
+    };
+    const renderRecall = (
+      messageHistory: ConversationView = historyView(),
+      initialInputText = ''
+    ) =>
+      renderComposer({
+        sessionId: `recall-${++nextSession}`,
+        onSendMessage: async () => true,
+        overrides: { initialInputText, messageHistory },
+      });
+
+    it('steps through sent text from an empty composer with the caret kept at the end', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+
+      const first = await press(composer, 'ArrowUp');
+      expect(first.defaultPrevented).toBe(true);
+      expect(composer.value).toBe('latest question');
+      expect(composer.selectionStart).toBe('latest question'.length);
+
+      // Attachment-only and agent-authored turns have no text of the user's to recall.
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('second\nmultiline question');
+      expect(composer.selectionStart).toBe('second\nmultiline question'.length);
+
+      await press(composer, 'ArrowUp');
+      expect(composer.value).toBe('first question');
+      // The oldest message stays put rather than handing the key to the editor.
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('first question');
+
+      expect((await press(composer, 'ArrowDown')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('second\nmultiline question');
+      expect(composer.selectionEnd).toBe('second\nmultiline question'.length);
+      await press(composer, 'ArrowDown');
+      expect(composer.value).toBe('latest question');
+      await press(composer, 'ArrowDown');
+      expect(composer.value).toBe('');
+      // Past the newest message the composer is an ordinary empty one again.
+      expect((await press(composer, 'ArrowDown')).defaultPrevented).toBe(false);
+    });
+
+    it('leaves arrow keys to the editor when the composer already holds a draft', async () => {
+      const composer = await renderRecall(historyView(), 'my own draft');
+      composer.focus();
+      const event = await press(composer, 'ArrowUp');
+      expect(event.defaultPrevented).toBe(false);
+      expect(composer.value).toBe('my own draft');
+    });
+
+    it('does not start recall on a modified arrow key', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      expect((await press(composer, 'ArrowUp', { shiftKey: true })).defaultPrevented).toBe(false);
+      expect((await press(composer, 'ArrowUp', { altKey: true })).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('');
+    });
+
+    it('returns to editing once the user types, keeping the edited text as the draft', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      composer.type(' again');
+      expect(composer.value).toBe('latest question again');
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('latest question again');
+    });
+
+    it('returns to editing on a horizontal caret move', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      await press(composer, 'ArrowLeft');
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('latest question');
+    });
+
+    it('returns to editing when the user clicks into the text', async () => {
+      const composer = await renderRecall();
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      await act(async () => {
+        composer.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+      });
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(false);
+      expect(composer.value).toBe('latest question');
+    });
+
+    const lazyHistoryView = () => {
+      const base = historyView();
+      const loaded = new Set<number>([7, 8]);
+      const load = { finish: () => undefined as void };
+      const view: ConversationView = {
+        ...base,
+        get turnCount() {
+          return base.turnCount;
+        },
+        isHydrated: (i) => loaded.has(i),
+        turn: (i) => (loaded.has(i) ? base.turn(i) : undefined),
+        acquireRange: (from, to) => ({
+          ready: new Promise<void>((resolve) => {
+            load.finish = () => {
+              for (let i = from; i < to; i += 1) loaded.add(i);
+              resolve();
+            };
+          }),
+          release: () => undefined,
+        }),
+      };
+      return { view, load };
+    };
+
+    it('loads an older message that is not hydrated yet before showing it', async () => {
+      const { view, load } = lazyHistoryView();
+      const composer = await renderRecall(view);
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      expect(composer.value).toBe('latest question');
+      expect((await press(composer, 'ArrowUp')).defaultPrevented).toBe(true);
+      expect(composer.value).toBe('latest question');
+      await act(async () => load.finish());
+      expect(composer.value).toBe('second\nmultiline question');
+      expect(composer.selectionStart).toBe('second\nmultiline question'.length);
+    });
+
+    it('keeps text that reaches the composer while an older message is loading', async () => {
+      const { view, load } = lazyHistoryView();
+      const composerRef = createRef<SessionChatInputAreaHandle>();
+      const composer = await renderComposer({
+        sessionId: `recall-${++nextSession}`,
+        composerRef,
+        onSendMessage: async () => true,
+        overrides: { initialInputText: '', messageHistory: view },
+      });
+      composer.focus();
+      await press(composer, 'ArrowUp');
+      await press(composer, 'ArrowUp');
+      await act(async () => composerRef.current!.setInputText('set from elsewhere'));
+      await act(async () => load.finish());
+      expect(composer.value).toBe('set from elsewhere');
+    });
   });
 });

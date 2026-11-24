@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { duration, radius, space, text } from '@lody/ui/tokens/scales.stylex';
@@ -9,7 +10,30 @@ const TOUCH_ROW = 36;
 const TOUCH_MORE_WIDTH = 40;
 
 /** One line of queue text; the gutter, index and actions center on this box. */
-export const QUEUE_LINE = text.bodyLeading;
+export const QUEUE_LINE = '1.5rem';
+
+/**
+ * Preview clamp for a queued row.
+ *
+ * One line does not use `display: -webkit-box`. On iOS that display value
+ * ignores the clamp inside the touch grid, the row grows to the full message,
+ * and the sheet (overflow hidden + radius) paints the leftover black.
+ * Two lines still need the old box clamp; `maxHeight` stops the same miss
+ * from stretching the row.
+ */
+export function queuePreviewStyle(oneLine: boolean): CSSProperties {
+  if (oneLine) {
+    return { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+  }
+  return {
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    maxHeight: `calc(2 * ${QUEUE_LINE})`,
+  };
+}
+
 /** The leading gutter (index, drag handle, section label) every row shares. */
 export const QUEUE_GUTTER = 16;
 
@@ -65,14 +89,22 @@ export const queueSurface = stylex.create({
   editor: { gridColumn: '1 / -1', width: '100%' },
   text: {
     overflowWrap: 'anywhere',
-    fontSize: text.bodySize,
+    fontSize: '0.875rem',
     lineHeight: QUEUE_LINE,
     fontWeight: 400,
     color: colors.label,
     opacity: 0.86,
   },
   preparingText: { opacity: 0.55 },
-  editorText: { fontSize: text.bodySize, lineHeight: QUEUE_LINE, fontWeight: 400 },
+  // Why a local row was not sent, under its text; the actions stay on the message line.
+  failureReason: {
+    overflowWrap: 'anywhere',
+    fontSize: '0.75rem',
+    lineHeight: 1.4,
+    color: colors.destructive,
+    marginTop: 2,
+  },
+  editorText: { fontSize: '0.875rem', lineHeight: QUEUE_LINE, fontWeight: 400 },
   actions: {
     display: 'flex',
     flexShrink: 0,

@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
@@ -12,7 +14,7 @@ import { encodeExportPathSegment, joinExportPath } from './path-utils';
 import { fetchWorkspaceUsageBundle } from './workspace-usage';
 import type { ExportManifest, ExportSessionSummary } from './types';
 import { formatErrorMessage } from '@/utils/format-error';
-import { getScheduleRegistryFlockDocId, ScheduleRepository } from '@lody/shared';
+import { getScheduleRegistryFlockDocId } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '../schedules/schedule-documents';
 
 type WorkspaceDescriptor = {
@@ -109,6 +111,7 @@ async function exportSession(args: {
   cliToken: string;
   outputDir: string;
   downloadImages: boolean;
+  contentMode?: 'plaintext' | 'e2ee';
   warnings: string[];
 }): Promise<SessionIndexEntry> {
   const sessionDirName = encodeExportPathSegment(args.session.id, 'session');
@@ -129,6 +132,12 @@ async function exportSession(args: {
           authToken: args.cliToken,
           sessionDir,
           attachment,
+          source: artifacts.attachmentSources.get(attachment.imageId),
+          contentMode: args.contentMode,
+          attachmentToken:
+            args.contentMode === 'e2ee'
+              ? () => args.manager.getEncryptedAttachmentToken()
+              : undefined,
         });
         if (downloaded.warning) {
           args.warnings.push(
@@ -168,6 +177,7 @@ async function exportSession(args: {
 export async function exportWorkspaceData(
   options: ExportWorkspaceDataOptions
 ): Promise<{ manifest: ExportManifest; sessionIndex: SessionIndexEntry[]; warnings: string[] }> {
+  const contentMode = z.enum(['plaintext', 'e2ee']).optional().parse(options.workspace.contentMode);
   const downloadImages = options.downloadImages !== false;
   const warnings: string[] = [];
   await prepareExportOutputDir(options.outputDir);
@@ -186,6 +196,7 @@ export async function exportWorkspaceData(
         cliToken: options.cliToken,
         outputDir: options.outputDir,
         downloadImages,
+        contentMode,
         warnings,
       })
   );
@@ -194,10 +205,7 @@ export async function exportWorkspaceData(
 
   const scheduleIndex: { scheduleId: string; title: string }[] = [];
   if (
-    workspaceSupports(
-      { mode: options.workspace.contentMode === 'e2ee' ? 'protected' : 'plaintext' },
-      'schedules'
-    )
+    workspaceSupports({ mode: contentMode === 'e2ee' ? 'protected' : 'plaintext' }, 'schedules')
   ) {
     const scheduleRepository = new ScheduleRepository(
       options.manager.repo,

@@ -15,6 +15,7 @@ import {
   validateIosSimulatorText,
   validateIosSimulatorUrl,
 } from '@/lib/ios-simulator/ios-simulator-controls';
+import { readTextFromClipboard } from '@/lib/clipboard';
 
 export type IosSimulatorInputKind = 'text' | 'url';
 
@@ -41,14 +42,6 @@ const styles = stylex.create({
   },
   count: { fontVariantNumeric: 'tabular-nums' },
 });
-
-async function readClipboardText(): Promise<string | null> {
-  try {
-    return (await navigator.clipboard?.readText?.()) ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Typing into the simulator, or opening a URL or deep link in it. Nothing is
@@ -110,7 +103,7 @@ export function IosSimulatorInputDialog({
   };
 
   const paste = async () => {
-    const clipboard = await readClipboardText();
+    const clipboard = await readTextFromClipboard();
     if (clipboard === null) {
       setPasteFailed(true);
       return;

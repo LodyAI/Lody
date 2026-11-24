@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import {
@@ -11,6 +11,7 @@ import {
   File,
   GitPullRequest,
   MessageSquare,
+  ScrollText,
   Terminal,
   UserRoundCog,
 } from 'lucide-react';
@@ -144,6 +145,7 @@ export function matchedRuns(
  * line only to say why it cannot be picked.
  */
 const styles = stylex.create({
+  roleDetail: { position: 'absolute', inset: 0, height: 'auto', width: 'auto' },
   /**
    * The scroller holding the rows; the docked mobile strip is its own. It also
    * gives way when the composer caps the menu to the room on its side.
@@ -205,7 +207,7 @@ const styles = stylex.create({
   },
   glyphHighlighted: { color: colors.secondaryLabel },
   glyphSvg: { display: 'block', flexShrink: 0, width: '16px', height: '16px' },
-  /** An emoji standing for a Role or a shortcut: text, sized like a glyph. */
+  /** An emoji standing for a Role: text, sized like a glyph. */
   emoji: { fontSize: text.subheadlineSize, lineHeight: 1 },
   text: {
     display: 'flex',
@@ -249,6 +251,7 @@ const styles = stylex.create({
     fontWeight: 400,
     whiteSpace: 'normal',
   },
+  noteWarning: { color: colors.warning },
   /** Trailing metadata — `#3312`, a key, a scope — in the caption step. */
   trailing: {
     flexShrink: 0,
@@ -267,6 +270,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     minHeight: '24px',
+    flexShrink: 0,
     marginTop: { default: space[1], ':first-child': 0 },
     paddingInline: space[2],
     color: colors.secondaryLabel,
@@ -296,17 +300,23 @@ const styles = stylex.create({
   headerOptions: { marginInlineStart: 'auto' },
   /** A hint rather than a row: it cannot be picked. */
   message: {
+    boxSizing: 'border-box',
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
     minHeight: control.small,
+    flexShrink: 0,
     paddingInline: space[2],
+    paddingBlock: space[1],
     color: colors.tertiaryLabel,
     fontWeight: 400,
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
     userSelect: 'none',
   },
   messageError: { color: colors.destructive },
   notice: {
+    flexShrink: 0,
     paddingInline: space[2],
     paddingBottom: space[1],
     color: colors.tertiaryLabel,
@@ -319,6 +329,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: space[1],
+    flexShrink: 0,
     paddingInline: space[2],
     paddingBlock: space[1.5],
     color: colors.tertiaryLabel,
@@ -475,8 +486,9 @@ function CandidateIcon({
     case 'skill':
       return <Boxes className={className} strokeWidth={1.75} />;
     case 'command':
-    case 'prompt_shortcut':
       return <Terminal className={className} strokeWidth={1.75} />;
+    case 'prompt_shortcut':
+      return <ScrollText className={className} strokeWidth={1.75} />;
     case 'session':
       return <MessageSquare className={className} strokeWidth={1.75} />;
     case 'agent_role':
@@ -494,7 +506,12 @@ function CandidateIcon({
  */
 function carriesOwnMark(candidate: MentionCandidate, category: MentionCategory): boolean {
   return (
-    Boolean(candidate.iconEmoji) || candidate.icon === 'file' || candidate.icon !== category.icon
+    Boolean(candidate.iconEmoji) ||
+    candidate.icon === 'file' ||
+    // A saved Prompt keeps one fixed glyph on every row, so the `/` list reads
+    // the same whether it is browsed inside its category or merged with others.
+    candidate.icon === 'prompt_shortcut' ||
+    candidate.icon !== category.icon
   );
 }
 
@@ -651,7 +668,14 @@ function CandidateRow({
           {candidate.hint ? <span {...stylex.props(styles.hint)}>{candidate.hint}</span> : null}
         </span>
         {candidate.subtitle ? (
-          <span {...stylex.props(styles.note)}>{candidate.subtitle}</span>
+          <span
+            {...stylex.props(
+              styles.note,
+              candidate.subtitleTone === 'warning' && styles.noteWarning
+            )}
+          >
+            {candidate.subtitle}
+          </span>
         ) : null}
         {candidate.disabledReason ? (
           <span {...stylex.props(styles.note)}>{candidate.disabledReason}</span>
@@ -746,7 +770,8 @@ function CandidateDetailPane({ detail }: { detail: MentionCandidateDetail }) {
           agentConfig={detail.agentRole.agentConfig}
           machine={detail.agentRole.machine}
           machineLabel={detail.agentRole.machineLabel}
-          className="absolute inset-0 h-auto w-auto"
+          availability={detail.agentRole.availability}
+          xstyle={styles.roleDetail}
         />
       </div>
     );
@@ -970,7 +995,11 @@ export function MentionTwoLevelMenuBody({
             candidates.length === 0 &&
             (category.status === 'loading' || category.status === 'error')
         );
-        if (view.rankedCandidates.length === 0 && pendingGroups.length === 0) {
+        if (
+          view.rankedCandidates.length === 0 &&
+          pendingGroups.length === 0 &&
+          view.categories.length === 0
+        ) {
           return <Message>{noMatch(view.term)}</Message>;
         }
         return (
@@ -985,6 +1014,9 @@ export function MentionTwoLevelMenuBody({
                 sourceLabel={category.label}
                 onSelect={() => onCandidateSelect?.(category, rank)}
               />
+            ))}
+            {view.categories.map((category) => (
+              <CategoryRow key={category.id} category={category} onNavigate={onCategoryNavigate} />
             ))}
             {pendingGroups.map(({ category }) => (
               <React.Fragment key={category.id}>

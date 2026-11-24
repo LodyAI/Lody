@@ -1,10 +1,11 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { LoroDoc, type Change } from 'loro-crdt';
 import {
-  createSessionMirror,
   SESSION_FILE_MAX_SIZE_BYTES,
+  assertEncryptedAttachmentReference,
   type SessionHistoryInput,
   type SessionId,
   type WorkspaceId,
@@ -35,6 +36,8 @@ function assertNoLegacyAttachments(value: unknown): void {
     return;
   }
   const record = value as Record<string, unknown>;
+  if (record.type === 'local_attachment')
+    throw new Error('Local attachment references cannot be migrated from an OSS snapshot.');
   if (['file', 'image', 'image_group', 'image_url'].includes(String(record.type)))
     throw new Error('Legacy attachment references require conversion before migration.');
   for (const item of Object.values(record)) assertNoLegacyAttachments(item);
@@ -44,6 +47,8 @@ function fileItems(history: readonly SessionHistoryInput[]): LocalFile[] {
   for (const turn of history) {
     if ('contents' in turn) assertNoLegacyAttachments(turn.contents);
     for (const item of [...(turn.items ?? []), ...(turn.inputConfig?.inputBlocks ?? [])]) {
+      if (item.type === 'local_attachment')
+        throw new Error('Local attachment references cannot be migrated from an OSS snapshot.');
       if (item.type === 'image' || item.type === 'image_group')
         throw new Error('Cloud image references cannot be migrated from an OSS snapshot.');
       if (item.type === 'file') files.push(fileSchema.parse(item));
@@ -92,6 +97,8 @@ export function collectHistoricalAttachmentFiles(source: LoroDoc): LocalFile[] {
       return;
     }
     const record = value as Record<string, unknown>;
+    if (record.type === 'local_attachment')
+      throw new Error('Local attachment references cannot be migrated from an OSS snapshot.');
     if (record.type === 'image' || record.type === 'image_group' || record.type === 'image_url')
       throw new Error('Historical image references cannot be migrated from an OSS snapshot.');
     if (record.type === 'file') {
@@ -108,7 +115,7 @@ export function collectHistoricalAttachmentFiles(source: LoroDoc): LocalFile[] {
   const updates = doc.exportJsonUpdates(undefined, undefined, false);
   const mayContainAttachment = (value: unknown): boolean => {
     if (typeof value === 'string')
-      return ['file', 'image', 'image_group', 'image_url'].includes(value);
+      return ['file', 'image', 'image_group', 'image_url', 'local_attachment'].includes(value);
     if (!value || typeof value !== 'object') return false;
     return Object.values(value).some(mayContainAttachment);
   };
@@ -223,6 +230,8 @@ export async function migrateAttachments(
   transfer: SessionAttachmentTransfer,
   signal?: AbortSignal
 ): Promise<void> {
+  if (manifest.targetContentMode === 'protected' && transfer.contentMode !== 'protected')
+    throw new Error('E2EE migration requires a protected attachment transfer before upload');
   const mirror = createSessionMirror({ doc, initialState: {} });
   try {
     const history = mirror.historyWriter.readStored();
@@ -234,6 +243,8 @@ export async function migrateAttachments(
       if (receipt) {
         if (receipt.sha256 !== file.sha256 || receipt.sizeBytes !== file.sizeBytes)
           throw new Error('Attachment receipt does not match frozen history');
+        if (manifest.targetContentMode === 'protected')
+          assertEncryptedAttachmentReference('file', String(receipt.fileId), receipt.encryption);
         continue;
       }
       const absolutePath = path.join(directory, 'blobs', key);
@@ -254,7 +265,10 @@ export async function migrateAttachments(
       if (uploaded.sha256 !== file.sha256 || uploaded.sizeBytes !== file.sizeBytes) {
         throw new Error('Uploaded attachment integrity metadata does not match the frozen source');
       }
+      if (manifest.targetContentMode === 'protected')
+        assertEncryptedAttachmentReference('file', uploaded.fileId, uploaded.encryption);
       journal.attachments[key] = {
+        ...(uploaded.encryption ? { encryption: uploaded.encryption } : {}),
         fileId: uploaded.fileId,
         sha256: file.sha256,
         sizeBytes: file.sizeBytes,
@@ -275,6 +289,7 @@ export async function migrateAttachments(
           ...original,
           fileId: receipt.fileId,
           transport: 'r2',
+          ...(receipt.encryption ? { encryption: receipt.encryption } : {}),
           storageSessionId: file.storageSessionId ?? sessionId,
         },
       });
@@ -285,7 +300,13 @@ export async function migrateAttachments(
       const uploaded = journal.attachments[attachmentKey(file, sessionId)];
       if (!uploaded || typeof uploaded.fileId !== 'string')
         throw new Error('Missing uploaded attachment receipt');
-      const result = { ...item, fileId: uploaded.fileId, transport: 'r2', machineId: undefined };
+      const result = {
+        ...item,
+        fileId: uploaded.fileId,
+        transport: 'r2',
+        machineId: undefined,
+        ...(uploaded.encryption ? { encryption: uploaded.encryption } : {}),
+      };
       delete (result as { machineId?: unknown }).machineId;
       return result;
     };

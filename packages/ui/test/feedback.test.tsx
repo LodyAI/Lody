@@ -1,6 +1,11 @@
+import { Skeleton } from '../src/feedback/skeleton';
+import { Spinner } from '../src/feedback/spinner';
+
 import * as stylex from '@stylexjs/stylex';
+import { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, test } from 'vitest';
+import { act } from 'react';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Alert } from '../src/feedback/alert';
 import { Progress } from '../src/feedback/progress';
 
@@ -24,6 +29,7 @@ let mounted: Mounted | undefined;
 afterEach(async () => {
   await mounted?.unmount();
   mounted = undefined;
+  vi.useRealTimers();
 });
 
 describe('Alert', () => {
@@ -56,6 +62,89 @@ describe('Progress', () => {
 });
 
 describe('Toast', () => {
+  test('a timed message disappears without interacting with it', async () => {
+    vi.useFakeTimers();
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} />);
+    await act(async () => {
+      manager.add({ title: 'Copied' });
+    });
+    expect(document.body.textContent).toContain('Copied');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(document.body.textContent).not.toContain('Copied');
+  });
+
+  test.each(['pointerup', 'pointercancel'])(
+    'touch compatibility mouse events do not leave the timeout paused after %s',
+    async (endEvent) => {
+      vi.useFakeTimers();
+      const manager = Toast.createManager();
+      mounted = await mount(<Toast.Provider manager={manager} />);
+      await act(async () => {
+        manager.add({ title: 'Copied' });
+      });
+      const toast = one('[role="dialog"]');
+      await act(async () => {
+        toast.dispatchEvent(
+          new PointerEvent('pointerover', { bubbles: true, pointerType: 'touch' })
+        );
+        toast.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' })
+        );
+        toast.dispatchEvent(new PointerEvent(endEvent, { bubbles: true, pointerType: 'touch' }));
+        toast.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        toast.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(document.body.textContent).not.toContain('Copied');
+    }
+  );
+
+  test('a persistent message stays until dismissed', async () => {
+    vi.useFakeTimers();
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} />);
+    await act(async () => {
+      manager.add({ title: 'Copied', timeout: 0 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(document.body.textContent).toContain('Copied');
+    await act(async () => {
+      one('button[aria-label="Close"]').click();
+    });
+    expect(document.body.textContent).not.toContain('Copied');
+  });
+
+  test('mouse hover still pauses the timeout until the pointer leaves', async () => {
+    vi.useFakeTimers();
+    const manager = Toast.createManager();
+    mounted = await mount(<Toast.Provider manager={manager} />);
+    await act(async () => {
+      manager.add({ title: 'Copied' });
+    });
+    const toast = one('[role="dialog"]');
+    await act(async () => {
+      toast.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(document.body.textContent).toContain('Copied');
+    await act(async () => {
+      toast.dispatchEvent(
+        new PointerEvent('pointerout', {
+          bubbles: true,
+          pointerType: 'mouse',
+          relatedTarget: document.body,
+        })
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(document.body.textContent).not.toContain('Copied');
+  });
+
   const report = async (
     manager: ReturnType<typeof Toast.createManager>,
     options: Parameters<ReturnType<typeof Toast.createManager>['add']>[0]
@@ -93,5 +182,129 @@ describe('Toast', () => {
     // Base UI's default is the English "Notifications", which a translated
     // product has to be able to replace.
     expect(one('[role="region"]').getAttribute('aria-label')).toBe('通知');
+  });
+});
+
+describe('Spinner', () => {
+  test('a changing diameter sizes the same turning box and leaves SVG attributes on the glyph', async () => {
+    const errors: unknown[][] = [];
+    const errorLog = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
+    let glyph: SVGSVGElement | null = null;
+    const ref = (element: SVGSVGElement | null) => {
+      glyph = element;
+    };
+    try {
+      mounted = await mount(<Spinner ref={ref} diameter={14} width={37} height={31} />);
+      const box = mounted.container.querySelector<HTMLElement>('[data-slot="spinner"]')!;
+      const svg = box.firstElementChild;
+      const sizes = () => Array.from(box.style).map((name) => box.style.getPropertyValue(name));
+      expect(new Set(sizes())).toEqual(new Set(['14px']));
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('width')).toBe('37');
+      expect(svg?.getAttribute('height')).toBe('31');
+      expect(box.hasAttribute('diameter')).toBe(false);
+      expect(svg?.hasAttribute('diameter')).toBe(false);
+
+      await step(() => mounted!.root.render(<Spinner ref={ref} diameter={0} label={null} />));
+      expect(new Set(sizes())).toEqual(new Set(['0px']));
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('aria-hidden')).toBe('true');
+      await step(() => mounted!.root.render(<Spinner ref={ref} size="large" />));
+      expect(box.style.length).toBe(0);
+      expect(glyph).toBe(svg);
+      expect(svg?.getAttribute('aria-label')).toBe('Loading');
+      await step(() =>
+        mounted!.root.render(<Spinner ref={ref} diameter="calc(var(--spacing) * 3.5)" />)
+      );
+      expect(new Set(sizes())).toEqual(new Set(['calc(var(--spacing) * 3.5)']));
+      expect(mounted.container.querySelector('[data-slot="spinner"]')).toBe(box);
+      expect(glyph).toBe(svg);
+      expect(errors).toEqual([]);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+});
+
+describe('Skeleton', () => {
+  test('ring thickness resets without remounting content or leaking onto other shapes', async () => {
+    const ref = createRef<HTMLDivElement>();
+    const child = <span data-skeleton-child>Retained content</span>;
+    mounted = await mount(
+      <Skeleton ref={ref} shape="ring" inline width={96} height={48} strokeWidth={7}>
+        {child}
+      </Skeleton>
+    );
+    const element = ref.current!;
+    const content = element.querySelector('[data-skeleton-child]');
+    const values = () =>
+      Array.from(element.style).map((name) => element.style.getPropertyValue(name));
+    expect(values()).toEqual(expect.arrayContaining(['96px', '48px', '7px']));
+    await step(() =>
+      mounted!.root.render(
+        <Skeleton ref={ref} shape="ring" width={96} height={48} strokeWidth={0}>
+          {child}
+        </Skeleton>
+      )
+    );
+    expect(values()).toEqual(expect.arrayContaining(['96px', '48px', '0px']));
+    await step(() =>
+      mounted!.root.render(
+        <Skeleton ref={ref} shape="ring" width={96} height={48}>
+          {child}
+        </Skeleton>
+      )
+    );
+    expect(values()).toHaveLength(2);
+    await step(() =>
+      mounted!.root.render(
+        <Skeleton ref={ref} shape="circle" width={96} height={48} strokeWidth={7}>
+          {child}
+        </Skeleton>
+      )
+    );
+    expect(values()).toHaveLength(2);
+    expect(ref.current).toBe(element);
+    expect(element.querySelector('[data-skeleton-child]')).toBe(content);
+    expect(element.hasAttribute('stroke-width')).toBe(false);
+    expect(element.hasAttribute('strokewidth')).toBe(false);
+    expect(element.getAttribute('aria-hidden')).toBe('true');
+    for (const shape of ['bar', 'tile'] as const) {
+      await step(() =>
+        mounted!.root.render(
+          <Skeleton ref={ref} shape={shape} inline={false} width={0}>
+            {child}
+          </Skeleton>
+        )
+      );
+      expect(values()).toEqual(['0px']);
+      expect(ref.current).toBe(element);
+      expect(element.querySelector('[data-skeleton-child]')).toBe(content);
+      expect(element.hasAttribute('inline')).toBe(false);
+      expect(element.hasAttribute('shape')).toBe(false);
+    }
+  });
+
+  test('optional sizes can change without invalid style atoms or stale inline dimensions', async () => {
+    const errors: unknown[][] = [];
+    const errorLog = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args));
+    try {
+      mounted = await mount(<Skeleton width={96} />);
+      const element = mounted.container.querySelector('div')!;
+      const values = () =>
+        Array.from(element.style).map((name) => element.style.getPropertyValue(name));
+      expect(values()).toEqual(['96px']);
+      await step(() => mounted!.root.render(<Skeleton height={28} />));
+      expect(values()).toEqual(['28px']);
+      await step(() => mounted!.root.render(<Skeleton width="60%" height={0} />));
+      expect(values()).toEqual(expect.arrayContaining(['60%', '0px']));
+      expect(values()).toHaveLength(2);
+      await step(() => mounted!.root.render(<Skeleton />));
+      expect(element.style.length).toBe(0);
+      expect(element.getAttribute('aria-hidden')).toBe('true');
+      expect(errors).toEqual([]);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });

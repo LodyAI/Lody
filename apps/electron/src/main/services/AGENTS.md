@@ -30,7 +30,7 @@ access without a new capability/security decision in the owning
 The disk-full guard (`storage-guard.ts`) requires a failed Lody write AND low space
 on a Lody data volume. Space alone never blocks. Only relaunch/quit clears it;
 background agents keep running
-([decision](../../../../../.agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md)).
+([decision](../../../../../.agents/notes/implemented/feature/2026-10-22-desktop-disk-full-guard.md)).
 
 ## Public browser
 
@@ -58,23 +58,21 @@ background agents keep running
   server-side 3xx, so a public page redirecting to loopback would otherwise
   commit here and never reach Managed Preview.
 
-Renderer `beforeunload` vetoes on product windows (close, reload, quit) surface
-through one native Stay/Leave confirmation (`../renderer-unload.ts`); Leave only
-ignores that document's veto. Quit closes product windows, and so gets unload
-approval, before it destroys relays or stops the CLI; Stay cancels quit with the
-app fully running. Quit veto confirmation uses an asynchronous sheet with a visible
-parent, so its fifteen-second deadline remains runnable. Leave retries only that
-document's close; navigation, timeout or destruction cancels the sheet and invalidates
-late replies. Non-quit close/reload keeps its existing confirmation behavior.
-A quit close whose renderer hangs or dies is destroyed so quit
-cannot wait forever. Never destroy a normally closing window or add a path that
-bypasses unrelated `beforeunload` guards such as unsaved editors.
+Product-window `beforeunload` vetoes always show native Stay/Leave confirmation
+(`../renderer-unload.ts`). Leave ignores only that document's veto. Quit closes
+windows before relays or CLI; Stay cancels quit with the app running. The asynchronous
+sheet has a visible parent. If unanswered after fifteen seconds, cancel quit and
+retain the window. Leave starts a fresh fifteen-second closing budget. Navigation,
+cancellation and destruction invalidate late answers. Non-quit close/reload behavior
+stays unchanged. A hung or dead renderer is destroyed so quit remains bounded.
+Never bypass unsaved-editor guards or destroy a normally closing window.
 A renderer-requested relaunch (`../relaunch-intent.ts`) calls `app.relaunch()` only at
 `will-quit`; a quit the barrier cancels settles `cancelled`, and the IPC caller
 withdraws any reset request it armed, so a later ordinary quit neither relaunches nor
 resets. Relaunching quits the embedded CLI: never make it a default recovery step.
 
-Quit bounds each renderer close and main-owned resource drain to fifteen seconds.
+Quit bounds each renderer closing attempt and main-owned resource drain to fifteen seconds.
+Unload diagnostics use fixed unsaved-editor, pending-send or unknown categories.
 Unconfirmed work keeps its original owner until main exits. Log it, give a
 presence-only warning marker at most one second to persist, then exit nonzero
 without terminal reporting UI. Next launch delivers a nonmodal native notification; failed
@@ -110,19 +108,21 @@ quit/retry dialog. See the
 
 Read [M1](../../../../../.agents/notes/implemented/architecture/2026-10-21-e2ee-m1-runtime-boundaries.md),
 [M2](../../../../../.agents/notes/proposed/architecture/2026-10-22-e2ee-m2-product-integration.md),
-[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md)
-and [machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md).
+[join](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-personal-desktop-join.md),
+[machine](../../../../../.agents/notes/proposed/architecture/2026-10-26-e2ee-machine-pairing-journal.md)
+and [bootstrap](../../../../../.agents/docs/e2ee-workspace-bootstrap.md).
 Fence opens/late D03 registration by identity/generation; pin D03 before signing.
 Workspace custody; reset binds account/generation; recheck after lock/drain before archive.
-No network under locks; drain before release.
-Bad keys allow ledger open; core repairs.
-Isolate verification/storage errors; malformed input keeps readers.
+No network or proxy lookup under locks; drain before release. Bad keys allow ledger open; core repairs.
+Account turns share the account barrier and lock only their identity directory; account switch, close, identity cleanup and account reset hold it exclusively, draining and fencing turns. Work must never re-enter it.
+Recovery keeps completed anchors; unfinished rebinding needs verified same-device admission and archived originals.
+Isolate verification/storage errors; bad input keeps readers.
 Originals precede feed/pin; compare overlaps, retain checkpoints, await history.
+Compaction failures warn only; retry after 64 records, keeping originals/pins.
 Conflicts refuse fallback. Failed close retains its fence; report restart-required.
-Fixed cloud refs; auth/bound/abort; fence late disposed calls.
-Keep uncertain bytes; raw/SDK causes never leave main.
-Verified reads beat lost ACKs; cleanup retains admission.
-`e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
+Opens join a closing workspace's drain once, outside the lock; never `closed`.
+Fixed cloud refs; auth/bound/abort; fence late disposed calls. Keep uncertain bytes; raw/SDK causes stay in main.
+Verified reads beat lost ACKs; cleanup keeps admission. `e2ee_staging_invalid` and `e2ee_staging_corrupt` are terminal.
 
 Consent pins exact verified proofs/session/record/requestId/keys/credentials/pins.
 Missing credentials block approval; never export them. Failed begin stays discoverable.
@@ -130,14 +130,21 @@ Archive terminal/foreign attempts, including pin-only+relay; fence same-request
 unknown/admitting. Retain installed origins, other sessions and primary/cleanup causes.
 Retirement needs exact superseded socket receipt and atomic all-null local match;
 fresh sessions need consent. Unsigned staged material stays pending across windows/retries
-until verified admission/history settlement (including later revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
-denial/I/O failure cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
+until verified admission/history settlement (including revocation); see [rationale](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-local-pairing-recovery.md). Verify pinned endorsement/self-admission before snapshot binding/pin/cursor; allow sparse positions. Keys use verified mailbox/history; committed epochs may use staging. Staging read
+denial/I/O cannot gate mailbox receipt. Show file protection; socket timeout stays pending. Await CLI current-key install.
 
 Only rotate resumes candidates. Keep errors transport-free.
 
-Machine sharing uses the lazy native host in `packages/e2ee-machine-sharing`.
-Passive cache inspection uses existing entries only; never call openWorkspace or
-readMachineSharing from that path. Counts are diagnostic, not execution authority.
+A content frame the verified ledger has not caught up with (an epoch at most four
+ahead, or an unknown author at the current epoch) opens as retryable `key-pending`; the
+portable session applies the same bound, and frames further ahead keep their original
+failure. The shared content adapter's refresh catches up, at most once per interval.
+
+The iroh client (`e2ee-iroh.mts`) lives with its workspace entry and follows [these rules](../../../../../packages/iroh-native/AGENTS.md).
+
+Machine sharing uses `packages/e2ee-machine-sharing`.
+Passive inspection uses existing entries only; never call openWorkspace or
+readMachineSharing there. Counts are diagnostic, not authority.
 Policy errors affect dependent execution only. Invalidate sharing before exposing changed
-verified ledger heads/counts; unchanged ingest preserves cache freshness. Narrow read/update methods keep keys
-and device credentials in main. See the [policy decision](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
+verified heads/counts; unchanged ingest keeps cache freshness. Narrow read/update methods keep keys
+and credentials in main; see [policy](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).

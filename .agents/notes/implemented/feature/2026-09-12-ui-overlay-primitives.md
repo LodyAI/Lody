@@ -63,7 +63,7 @@ from an edge and can be dragged back out of it.
 **There is no `Sheet`, and the first version of this change was wrong about
 that.** It shipped a `Sheet` built on Base UI's `Dialog` with a `side` prop —
 which is Base UI's `Drawer` reimplemented out of the wrong primitive. Base UI's
-own subtitle for Drawer, *"a panel that slides in from the edge of the screen"*,
+own subtitle for Drawer, _"a panel that slides in from the edge of the screen"_,
 is word for word what that `Sheet`'s documentation said. That is the mistake the
 menu note already recorded under a different name: a second name for the same
 component and a second thing to keep in step.
@@ -171,7 +171,7 @@ so no test here can see a layout or a colour.
 
 **Every edge-anchored panel collapsed to the height of its own content.** The
 first version composed the centred dialog panel, a reset that set `top: auto`,
-and an edge style that set `inset-block: 0`. StyleX keeps one class per property *key* and
+and an edge style that set `inset-block: 0`. StyleX keeps one class per property _key_ and
 has no idea that `top`, `inset-block-start` and `inset-block` are three names for
 one thing, so both declarations survived into the stylesheet and the cascade, not
 the author, picked the winner. It picked `top`, leaving `top: auto` with
@@ -195,7 +195,7 @@ on the panel ordered it only against its own siblings inside the viewport; the
 viewport itself had no `z-index`, counted as `auto` against the page, and the
 backdrop at `z.dialogBackdrop` won. The rung's stacking belongs to the viewport,
 because the viewport is the element that stacks against the product shell, and
-the panel now states none. This one *was* checkable without a browser — it is a
+the panel now states none. This one _was_ checkable without a browser — it is a
 fact about which classes compile onto which part — and `test/drawer.test.tsx`
 pins it now: the viewport carries the same z-index class the dialog panel does,
 the backdrop carries the other, and the drawer panel carries neither.
@@ -207,14 +207,14 @@ already was: a probe that participates in layout measures the layout.
 
 One more was an error in the examples rather than in the primitives.
 `tone="destructive"` on a `Button` is deliberately a no-op when the variant is
-already `primary` or `destructive` — the destructive *variant* is the destructive
+already `primary` or `destructive` — the destructive _variant_ is the destructive
 primary — so the alert dialog's answer rendered as an ordinary primary button in
 the gallery, the README, this note and the component's own doc comment. All four
 now say `variant="destructive"`.
 
 ## The naming collision this leaves behind
 
-Eleven of the 23 vaul files are *named* `*-sheet.tsx` — `mobile-new-chat-sheet`,
+Eleven of the 23 vaul files are _named_ `*-sheet.tsx` — `mobile-new-chat-sheet`,
 `mobile-session-tab-sheet`, `mobile-acp-history-sheet` and so on. The product's
 word for a vaul drawer is "sheet", and this package now says a panel from an edge
 is a Drawer. Naming the primitive `Drawer` is what resolves that rather than
@@ -268,7 +268,8 @@ which stays `draft` with the popover, the modal rung and the tooltip stated.
 
 Inspected implementation: `packages/ui/src/popover`, `packages/ui/src/dialog`,
 `packages/ui/src/tooltip`, `packages/ui/src/popup`, and the deleted
-`packages/components/src/ui/sheet.tsx`.
+Radix `sheet.tsx` (no same-name replacement, by design; the nearest surface is
+`packages/ui/src/drawer/drawer.tsx`).
 
 One limit of the browser pass is worth stating: a drag cannot be synthesised
 from JavaScript here — Base UI reads real pointer input, and dispatched

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Result, Schema } from 'effect';
+import { Context, Effect, Layer, Result, Schema, Semaphore } from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Bytes from '../foundation/bytes';
 import { disposeEpochKey } from '../foundation/epoch-key';
@@ -16,7 +16,12 @@ import {
 } from '../../services/stores';
 import { DeviceIdentity, WorkspaceScope } from '../../services/workspace';
 import type { LocalStoreError } from '../../services/errors';
-import { deliverEpochEnvelope, epochDeliveryId, type DeliveryError } from './delivery';
+import {
+  deliverEpochEnvelope,
+  prepareEpochDelivery,
+  epochDeliveryId,
+  type DeliveryError,
+} from './delivery';
 import { InstalledEpochKeys } from './installed-keys';
 import { KeyReceiver, type ReceiveFailure } from './receiver';
 import { fromHex, isHash } from './reports';
@@ -59,9 +64,21 @@ const fromLedger = (error: VerifiedLedgerError) =>
   fail(
     error.reason === 'rollback' ? 'rollback' : error.reason === 'corrupt' ? 'corrupt' : 'storage'
   );
-/** Storage damage stops a whole batch; anything else only blocks the one task. */
+/**
+ * Storage damage fails a whole batch; anything else only blocks the one task. Steps
+ * for different recipients already running beside the damaged one still finish:
+ * each is an idempotent insert or an exact retry of its saved original.
+ */
 const fatal = (error: unknown) =>
   error instanceof DistributionError && (error.reason === 'storage' || error.reason === 'corrupt');
+
+/**
+ * Bound on recipients whose mailbox round trips run at once. Per-recipient steps
+ * stay ordered; only different recipients overlap, so a round costs a few round
+ * trips instead of several per device. Installed-key reads do not overlap: see
+ * `protection` in the layer.
+ */
+const RECIPIENT_CONCURRENCY = 8;
 
 const taskId = (delivery: string, revision: number) =>
   keyId(
@@ -133,10 +150,16 @@ export interface DistributionResult {
 export class KeyDistributor extends Context.Service<
   KeyDistributor,
   {
+    /** Prepare and retain the current authenticated envelope without mailbox I/O.
+     * A batch relay sends the returned original; retry uses the same outbox slot. */
+    prepareDelivery?(
+      recipient: string
+    ): Effect.Effect<{ readonly id: string; readonly frame: Uint8Array }, DistributionFailure>;
     /** Discover one page of current eligible devices (1–100, default 100) and durably schedule missing deliveries. */
     reconcileCurrentEpoch(
       limit?: number,
-      cursor?: string | null
+      cursor?: string | null,
+      recipients?: readonly string[]
     ): Effect.Effect<
       {
         readonly scheduled: number;
@@ -181,6 +204,11 @@ export class KeyDistributor extends Context.Service<
       const journal = own(yield* DistributionJournal);
       const publications = own(yield* EpochPublicationSource);
       const gate = yield* makeCloseGuard(() => fail('closed'));
+      // One installed-key read at a time. The custody writer contract lets a busy writer
+      // fail conflict instead of queueing (the browser adapter queues only within a tab),
+      // so overlapping reads could block every recipient but one per round. Network round
+      // trips still overlap.
+      const protection = yield* Semaphore.make(1);
       const org = keyId(anchor.toBytes()),
         self = keyId(signer.publicKey.toBytes());
       const store = <A>(effect: Effect.Effect<A, LocalStoreError>) =>
@@ -290,8 +318,18 @@ export class KeyDistributor extends Context.Service<
         if (inserted && !sameTask(stored, task)) return yield* fail('corrupt');
         return inserted;
       });
-      const reconcile = Effect.fnUntraced(function* (limit: number, cursor: string | null) {
-        if (!boundedPage(limit, cursor)) return yield* fail('invalid-input');
+      const reconcile = Effect.fnUntraced(function* (
+        limit: number,
+        cursor: string | null,
+        recipients?: readonly string[]
+      ) {
+        if (
+          !boundedPage(limit, cursor) ||
+          (recipients !== undefined &&
+            (!Array.isArray(recipients) ||
+              recipients.some((id) => typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id))))
+        )
+          return yield* fail('invalid-input');
         const view = yield* current(),
           epoch = view.inspectState().epoch.number;
         if (!senderEligible(view, self))
@@ -307,11 +345,13 @@ export class KeyDistributor extends Context.Service<
             yield* receiver.recordLocalInstallation(original);
         }
         const state = view.inspectState(),
+          allowed = recipients ? new Set(recipients) : null,
           targets = [...state.devices.entries()]
             .filter(
               ([id, device]) =>
                 id !== self &&
                 state.members.has(keyId(device.membershipId.toBytes())) &&
+                (!allowed || allowed.has(id)) &&
                 id > (cursor ?? '')
             )
             .map(([id]) => id)
@@ -319,11 +359,17 @@ export class KeyDistributor extends Context.Service<
         const selected = targets.slice(0, limit),
           blocked: string[] = [];
         let scheduled = 0;
-        for (const target of selected) {
-          const attempted = yield* Effect.result(schedule(epoch, target));
+        // Recipients are independent: their mailbox hints overlap. Every outcome is
+        // still checked in target order, and storage damage fails the whole page.
+        const attempts = yield* Effect.forEach(
+          selected,
+          (target) => Effect.result(schedule(epoch, target)),
+          { concurrency: RECIPIENT_CONCURRENCY }
+        );
+        for (const [index, attempted] of attempts.entries()) {
           if (Result.isFailure(attempted)) {
             if (fatal(attempted.failure)) return yield* attempted.failure;
-            blocked.push(target);
+            blocked.push(selected[index]!);
           } else if (attempted.success) scheduled++;
         }
         yield* gate.guard;
@@ -338,7 +384,7 @@ export class KeyDistributor extends Context.Service<
           return true;
         }
         return yield* Effect.acquireUseRelease(
-          keys.read(task.epoch),
+          protection.withPermit(keys.read(task.epoch)),
           Effect.fnUntraced(function* (key) {
             const context = {
               genesis: anchor,
@@ -375,8 +421,13 @@ export class KeyDistributor extends Context.Service<
         if (!boundedPage(limit, cursor)) return yield* fail('invalid-input');
         const page = yield* store(journal.pending(cursor, limit));
         const blocked: string[] = [];
-        for (const id of page.ids) {
-          const attempt = yield* Effect.result(deliver(id));
+        // Each task owns one recipient's slot and original, so their put/read/status
+        // round trips overlap. Outcomes are checked in page order as before.
+        const attempts = yield* Effect.forEach(page.ids, (id) => Effect.result(deliver(id)), {
+          concurrency: RECIPIENT_CONCURRENCY,
+        });
+        for (const [index, attempt] of attempts.entries()) {
+          const id = page.ids[index]!;
           if (Result.isFailure(attempt)) {
             if (fatal(attempt.failure)) return yield* attempt.failure;
             blocked.push(id);
@@ -387,9 +438,41 @@ export class KeyDistributor extends Context.Service<
       });
 
       return KeyDistributor.of({
+        prepareDelivery: Effect.fn('@lody/e2ee-core/KeyDistributor.prepareDelivery')(function* (
+          recipient: string
+        ) {
+          return yield* gate.run(
+            Effect.gen(function* () {
+              if (!/^[0-9a-f]{64}$/.test(recipient)) return yield* fail('invalid-input');
+              const view = yield* current();
+              const epoch = view.inspectState().epoch.number;
+              return yield* Effect.acquireUseRelease(
+                protection.withPermit(keys.read(epoch)),
+                (key) =>
+                  Effect.gen(function* () {
+                    const prepared = yield* prepareEpochDelivery({
+                      context: {
+                        genesis: anchor,
+                        epoch: Result.getOrThrow(Bytes.epochNumber(epoch)),
+                        sender: signer.publicKey,
+                        recipient: yield* Effect.fromResult(
+                          Bytes.signingPublicKey(fromHex(recipient))
+                        ),
+                      },
+                      ledger: current,
+                      prepare: { key, signer },
+                    }).pipe(Effect.provideService(DeliveryOutbox, outbox));
+                    return { id: prepared.slot, frame: prepared.frame };
+                  }),
+                (key) => Effect.sync(() => disposeEpochKey(key))
+              );
+            })
+          );
+        }),
+
         reconcileCurrentEpoch: Effect.fn('@lody/e2ee-core/KeyDistributor.reconcileCurrentEpoch')(
-          function* (limit = 100, cursor = null) {
-            return yield* gate.run(reconcile(limit, cursor));
+          function* (limit = 100, cursor = null, recipients?: readonly string[]) {
+            return yield* gate.run(reconcile(limit, cursor, recipients));
           }
         ),
         resumePendingDeliveries: Effect.fn(

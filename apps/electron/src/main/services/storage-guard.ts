@@ -4,7 +4,7 @@
 // data short of space. Once blocked it stays blocked for the process lifetime;
 // the way out is a relaunch after the user frees space, or quitting. Background
 // agents keep running until the user quits. Decision:
-// .agents/notes/proposed/feature/2026-10-22-desktop-disk-full-guard.md
+// .agents/notes/implemented/feature/2026-10-22-desktop-disk-full-guard.md
 import type {
   ElectronStorageGuardRelaunchOutcome,
   ElectronStorageGuardSource,

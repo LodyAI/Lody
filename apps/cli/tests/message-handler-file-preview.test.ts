@@ -9,7 +9,6 @@ import {
   decryptCodeCollabV2RpcPayload,
   encryptCodeCollabV2RpcPayload,
 } from '@lody/loro-streams-rpc';
-import type { E2eeQueryInput } from '@lody/shared/e2ee-rpc';
 import { encryptedRpcFixture } from '../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +24,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { Flock } from '@loro-dev/flock-wasm';
+import { LocalControlHandler } from '../src/lib/local-control-handler';
+import { LOCAL_MACHINE_RPC_PATH } from '@lody/shared/local-machine-rpc';
 import { MessageHandler } from '../src/lib/message-handler';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { ISession, SessionManager } from '../src/session/session-manager';
@@ -175,11 +176,9 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     ['machine/memory', { action: 'list', providerId: 'nowledge-mem' }],
     ['project/probe-local-member', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
     ['local-project/git-state', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
+    ['local-project/list-branches', { localProjectId: 'synthetic', requestedByUserId: 'user-1' }],
     ['session/history-read', { sessionId, query: { kind: 'count' } }],
-    [
-      'session/history-watch',
-      { sessionId, query: { kind: 'watchChanges', checkpoint: 'synthetic', waitMs: 100 } },
-    ],
+    ['session/history-subscribe', { sessionId, subscription: { action: 'open', id: 'synthetic' } }],
     ['code-collab/open-current-diff', { sessionId, path: 'artifact.txt' }],
     ['code-collab/open-all-changes-diff', { sessionId }],
     ['code-collab/open-turn-diff', { sessionId, path: 'artifact.txt', turnId: 'synthetic' }],
@@ -196,14 +195,6 @@ describe('MessageHandler file preview workspace lifecycle', () => {
         [...f.ledger.view().inspectState().members.values()].some((m) => m.role === 'guest')
       ).toBe(true);
       const before = diskSnapshot();
-      const input = {
-        queryId: 'denied',
-        method,
-        params:
-          method.startsWith('session/history-') || method.startsWith('code-collab/')
-            ? await encryptCodeCollabV2RpcPayload(sessionId, params)
-            : params,
-      } as E2eeQueryInput;
       const admitted = await Effect.runPromise(
         f.sender.prepareFeature({
           requestId: 'aa'.repeat(16),
@@ -213,15 +204,10 @@ describe('MessageHandler file preview workspace lifecycle', () => {
         () => true,
         () => false
       );
-      const handled = await handler
-        .readEncryptedQuery(input, Number.MAX_SAFE_INTEGER, new AbortController().signal)
-        .then(
-          () => true,
-          () => false
-        );
-      expect({ admitted, handled, disk: diskSnapshot() }).toEqual({
-        admitted: false,
-        handled: false,
+      expect({ admitted, disk: diskSnapshot() }).toEqual({
+        // Preparing a scoped history frame is allowed; the receiver still needs
+        // the separate session grant.
+        admitted: method === 'session/history-read',
         disk: before,
       });
     } finally {
@@ -279,13 +265,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     try {
       const before = diskSnapshot();
       const installed = await runtime.getRuntimeStatus('pi');
-      const outcome = await handler
-        .readEncryptedQuery(
-          { queryId: 'pi-install', method: 'machine/pi-extensions' as never, params: {} },
-          Number.MAX_SAFE_INTEGER,
-          new AbortController().signal
-        )
-        .then(
+      const outcome = await readFeature('machine/pi-extensions', {}).then(
           () => 'allowed',
           () => 'denied'
         );
@@ -313,18 +293,9 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     await encryptedHandler();
     resident = new Session({ sessionId } as never, logger);
     const before = diskSnapshot();
-    const params = await encryptCodeCollabV2RpcPayload(sessionId, {
-      v: 3,
-      sessionId,
-      path: 'artifact.txt',
-    });
-    const result = await handler.readEncryptedQuery(
-      { queryId: 'cold', method: 'file/preview', params },
-      Number.MAX_SAFE_INTEGER,
-      new AbortController().signal
-    );
+    const result = await readFeature('file/preview', { v: 3, sessionId, path: 'artifact.txt' });
     expect(diskSnapshot()).toEqual(before);
-    expect(result).toMatchObject({ error: { code: 'workspace_root_unavailable' } });
+    expect(result).toMatchObject({ ok: false, code: 'workspace_root_unavailable' });
   });
 
   it.each([
@@ -336,6 +307,11 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       'file/preview',
       { v: 3, sessionId, path: 'artifact.txt' },
       { status: 'ok', content: { text: content } },
+    ],
+    [
+      'file/list-dir',
+      { v: 3, sessionId, path: '' },
+      { status: 'ok', path: '', entries: [{ name: 'artifact.txt', type: 'file' }] },
     ],
     [
       'file/download-chunk',
@@ -471,17 +447,12 @@ describe('MessageHandler file preview workspace lifecycle', () => {
         1
       );
       const before = diskSnapshot();
-      const params = await encryptCodeCollabV2RpcPayload(sessionId, {
+      const response = await readFeature('file/preview', {
         v: 3,
         sessionId,
         path: 'artifact.txt',
       });
-      const response = await handler.readEncryptedQuery(
-        { queryId: 'group', method: 'file/preview', params },
-        Number.MAX_SAFE_INTEGER,
-        new AbortController().signal
-      );
-      expect(response).toHaveProperty('result');
+      expect(response).toMatchObject({ ok: true });
       expect(diskSnapshot()).toEqual(before);
     }
   );
@@ -511,21 +482,17 @@ describe('MessageHandler file preview workspace lifecycle', () => {
           1
         );
       const before = diskSnapshot();
-      const params = await encryptCodeCollabV2RpcPayload(sessionId, {
+      const response = await readFeature('file/preview', {
         v: 3,
         sessionId,
         path: 'artifact.txt',
       });
-      const response = await handler.readEncryptedQuery(
-        { queryId: 'project', method: 'file/preview', params },
-        Number.MAX_SAFE_INTEGER,
-        new AbortController().signal
-      );
       if (state === 'loaded')
-        expect(
-          await decryptCodeCollabV2RpcPayload(response.result as never, sessionId)
-        ).toMatchObject({ status: 'ok', content: { text: content } });
-      else expect(response).toMatchObject({ error: { code: 'workspace_root_unavailable' } });
+        expect(response).toMatchObject({
+          ok: true,
+          result: { status: 'ok', content: { text: content } },
+        });
+      else expect(response).toMatchObject({ ok: false, code: 'workspace_root_unavailable' });
       expect(diskSnapshot()).toEqual(before);
     }
   );
@@ -543,20 +510,16 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       });
     try {
       const before = diskSnapshot();
-      const params = await encryptCodeCollabV2RpcPayload(sessionId, {
+      const response = await readFeature('file/preview', {
         v: 3,
         sessionId,
         path: 'artifact.txt',
         resolveMarkdownLink: true,
       });
-      const response = await handler.readEncryptedQuery(
-        { queryId: 'markdown', method: 'file/preview', params },
-        Number.MAX_SAFE_INTEGER,
-        new AbortController().signal
-      );
-      expect(
-        await decryptCodeCollabV2RpcPayload(response.result as never, sessionId)
-      ).toMatchObject({ status: 'error', code: 'unsupported_protocol' });
+      expect(response).toMatchObject({
+        ok: true,
+        result: { status: 'error', code: 'unsupported_protocol' },
+      });
       expect({ disk: diskSnapshot(), processEvents }).toEqual({ disk: before, processEvents: [] });
     } finally {
       processRun.mockRestore();
@@ -601,6 +564,7 @@ describe('MessageHandler file preview workspace lifecycle', () => {
           });
           return handler.readEncryptedMachineRequest(sharedRequest, context);
         },
+        supportsRemoteControl: async () => true,
       });
       expect(result).toHaveProperty('result');
       expect(await decryptCodeCollabV2RpcPayload(result.result as never, sessionId)).toEqual(
@@ -627,6 +591,248 @@ describe('MessageHandler file preview workspace lifecycle', () => {
       ).toEqual({ ok: false, error: 'Project group probe scope mismatch' });
     }
   });
+
+  it('serves encrypted project branch and Git state reads for verified roots and refuses tampered paths', async () => {
+    await encryptedHandler();
+    const { localProjectsLegacy } = await import('@lody/shared/node/local-project');
+    const plainDir = path.join(dataDir, 'plain-dir');
+    fs.mkdirSync(plainDir);
+    const validId = localProjectsLegacy.createLocalProjectId(plainDir);
+    writeMachineFlockRowToFlock(
+      localProjects,
+      {
+        key: machineFlockKeys.localProject(validId),
+        value: { id: validId, name: 'Plain', rootPath: plainDir, createdAtMs: 1 },
+      },
+      1
+    );
+    writeMachineFlockRowToFlock(
+      localProjects,
+      {
+        key: machineFlockKeys.localProject('local-project-tampered' as never),
+        value: {
+          id: 'local-project-tampered',
+          name: 'Tampered',
+          rootPath: plainDir,
+          createdAtMs: 1,
+        },
+      },
+      1
+    );
+    const f = encryptedRpcFixture();
+    try {
+      const context = {
+        requestId: 'cc'.repeat(16),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        signal: new AbortController().signal,
+      };
+      const okResult = await callEncryptedReadFeature({
+        workspaceId,
+        machineId,
+        method: 'local-project/list-branches',
+        params: { localProjectId: validId, requestedByUserId: 'user-1', limit: 10 },
+        timeoutMs: 30_000,
+        request: async (request) => {
+          const prepared = await Effect.runPromise(
+            f.sender.prepareFeature({ requestId: 'cc'.repeat(16), request })
+          );
+          const opened = await Effect.runPromise(
+            f.receiver.openFeature(f.machineId, prepared.frameHex)
+          );
+          if (!opened) throw new Error('missing request');
+          return handler.readEncryptedMachineRequest(opened.input.request, context);
+        },
+        supportsRemoteControl: async () => true,
+      });
+      expect(okResult).toMatchObject({
+        result: {
+          type: 'local-project/list-branches_response',
+          success: true,
+          result: { git: false },
+        },
+      });
+
+      const tamperedResponse = await handler.readEncryptedMachineRequest(
+        {
+          workspaceId,
+          machineId,
+          method: 'local-project/list-branches',
+          params: { localProjectId: 'local-project-tampered', requestedByUserId: 'user-1' },
+        },
+        context
+      );
+      expect(tamperedResponse).toMatchObject({
+        ok: true,
+        result: {
+          type: 'local-project/list-branches_response',
+          success: false,
+          error: 'local_project_not_found',
+        },
+      });
+      for (const [localProjectId, expected] of [
+        [validId, { success: true, state: { git: false } }],
+        ['local-project-tampered', { success: false, error: 'local_project_not_found' }],
+      ] as const)
+        expect(
+          await handler.readEncryptedMachineRequest(
+            {
+              workspaceId,
+              machineId,
+              method: 'local-project/git-state',
+              params: { localProjectId, requestedByUserId: 'user-1' },
+            },
+            context
+          )
+        ).toMatchObject({
+          ok: true,
+          result: { type: 'local-project/git-state_response', ...expected },
+        });
+      for (const [localProjectId, expected] of [
+        [validId, { ok: true, type: 'local-project/list-files' }],
+        ['local-project-tampered', { ok: false, error: 'local_project_not_found' }],
+      ] as const)
+        expect(
+          await handler.readEncryptedMachineRequest(
+            {
+              workspaceId,
+              machineId,
+              method: 'local-project/control',
+              params: {
+                request: {
+                  type: 'local-project/list-files',
+                  machineId,
+                  workspaceId,
+                  localProjectId,
+                  requestedByUserId: 'user-1',
+                },
+              },
+            } as never,
+            context
+          )
+        ).toMatchObject({ ok: true, result: expected });
+      const gitState = {
+        workspaceId,
+        machineId,
+        method: 'local-project/git-state' as const,
+        params: { localProjectId: validId, requestedByUserId: 'user-1' },
+      };
+      expect(
+        await handler.handleEncryptedSessionWork(gitState, {
+          accountId: 'user-1',
+          executionUserId: 'user-1',
+        })
+      ).toMatchObject({ ok: true, result: { success: true } });
+      expect(
+        await handler.handleEncryptedSessionWork(gitState, {
+          accountId: 'user-1',
+          executionUserId: 'e2ee-member:00',
+        })
+      ).toMatchObject({ ok: true, result: { success: false, error: 'access_denied' } });
+      await expect(
+        handler.handleEncryptedSessionWork(gitState, {
+          accountId: 'member-account',
+          executionUserId: 'e2ee-member:00',
+        })
+      ).rejects.toThrow('e2ee_feature_requester');
+    } finally {
+      f.close();
+    }
+  });
+
+  it('checks the Sorbet config before dispatching local credential requests', async () => {
+    const internals = handler as unknown as {
+      sorbetCredentials: {
+        list: (id: string) => Promise<Array<{ providerId: string; type: string }>>;
+        logout: (id: string, providerId: string) => Promise<void>;
+      };
+    };
+    const removed: string[] = [];
+    internals.sorbetCredentials = {
+      list: async () => [{ providerId: 'openai', type: 'oauth' }],
+      logout: async (_id, providerId) => {
+        removed.push(providerId);
+      },
+    };
+    const config = { id: 'config', machineId, cliType: 'builtin', agentType: 'sorbet' };
+    document.getAgentConfigForMachineLaunch = async () => config as never;
+    const providerId = '提供商 / 账户';
+    const control = new LocalControlHandler({
+      machineId,
+      logger,
+      dispatchSession: async () => {
+        throw new Error('unexpected');
+      },
+      dispatchProject: async () => {
+        throw new Error('unexpected');
+      },
+      dispatchMachineRpc: (message) => handler.handleLocalMachineRpc(message),
+    });
+    const send = (message: unknown) =>
+      control.handle({
+        path: LOCAL_MACHINE_RPC_PATH,
+        rawBody: JSON.stringify(message),
+        requestId: 1,
+      });
+    const base = { machineId, workspaceId };
+    expect(
+      await send({ ...base, method: 'sorbet/credentials-list', params: { configId: 'config' } })
+    ).toMatchObject({
+      status: 200,
+      payload: {
+        ok: true,
+        result: {
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth' }],
+        },
+      },
+    });
+    expect(
+      await send({
+        ...base,
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'config', providerId },
+      })
+    ).toMatchObject({
+      status: 200,
+      payload: { ok: true, result: { type: 'sorbet/credentials-logout' } },
+    });
+    expect(removed).toEqual([providerId]);
+    expect(
+      await send({
+        ...base,
+        machineId: 'other',
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'config', providerId },
+      })
+    ).toMatchObject({ status: 403 });
+    config.agentType = 'other';
+    expect(
+      await send({
+        ...base,
+        method: 'sorbet/credentials-logout',
+        params: { configId: 'config', providerId },
+      })
+    ).toMatchObject({ status: 200, payload: { ok: false } });
+    expect(removed).toEqual([providerId]);
+  });
+
+  const readFeature = (method: string, params: Record<string, unknown>) =>
+    handler.readEncryptedMachineRequest(
+      {
+        workspaceId,
+        machineId,
+        method,
+        params,
+        ...(method.startsWith('file/') || method.startsWith('code-collab/')
+          ? { ownerSessionId: sessionId }
+          : {}),
+      } as never,
+      {
+        requestId: 'ab'.repeat(16),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        signal: new AbortController().signal,
+      }
+    );
 
   function writeArtifact(id = sessionId, text = content) {
     const root = getDefaultSessionWorkdir(id);

@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState, type RefObject } from 'react';
 import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { toast } from '@/lib/toast';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { Menu } from '@/ui/armed-overlays';
 import { CodeBlockCopyButton } from './markdown-code-block';
 import {
@@ -83,6 +84,8 @@ function MermaidDownloadMenu({
   hostRef: RefObject<HTMLElement | null>;
 }) {
   const { t } = useTranslation();
+  const reportExportFailure = () =>
+    toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
   const label = t('sessions.diagram.download', 'Download diagram');
   // A file leaves the themed block, so it carries the colors in effect now.
   const exportSvg = () =>
@@ -98,7 +101,8 @@ function MermaidDownloadMenu({
           disabled={!svg}
           onClick={() => {
             const file = exportSvg();
-            if (file) downloadBytesAsFile('diagram.svg', encodeText(file));
+            if (file)
+              void saveBytesAsFile('diagram.svg', encodeText(file)).catch(reportExportFailure);
           }}
         >
           {t('sessions.diagram.downloadSvg', 'SVG')}
@@ -109,13 +113,17 @@ function MermaidDownloadMenu({
             const file = exportSvg();
             if (!file) return;
             void svgToPngBytes(file)
-              .then((bytes) => downloadBytesAsFile('diagram.png', bytes))
-              .catch((error: unknown) => console.warn('[Lody] Diagram PNG export failed.', error));
+              .then((bytes) => saveBytesAsFile('diagram.png', bytes))
+              .catch(reportExportFailure);
           }}
         >
           {t('sessions.diagram.downloadPng', 'PNG')}
         </Menu.Item>
-        <Menu.Item onClick={() => downloadBytesAsFile('diagram.mmd', encodeText(code))}>
+        <Menu.Item
+          onClick={() => {
+            void saveBytesAsFile('diagram.mmd', encodeText(code)).catch(reportExportFailure);
+          }}
+        >
           {t('sessions.diagram.downloadSource', 'Mermaid source')}
         </Menu.Item>
       </Menu.Content>

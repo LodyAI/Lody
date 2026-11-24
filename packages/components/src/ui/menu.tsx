@@ -23,6 +23,43 @@ type MenuSelectionContextValue = {
 
 const MenuSelectionContext = React.createContext<MenuSelectionContextValue | null>(null);
 
+/* The row that opened the nearest submenu. `Menu.Content` reads it to tell a
+   submenu from a top-level menu, and clears it for its own rows, so a menu
+   nested inside a submenu's panel is not mistaken for one. */
+const SubmenuTriggerContext = React.createContext<React.RefObject<HTMLElement | null> | null>(null);
+
+/** `@lody/ui`'s default `sideOffset`, which the side-room check must match. */
+const SUBMENU_GAP = 4;
+/* Margin over the measured width before a side counts as fitting: Base UI's
+   flip pads its own check slightly beyond the collision padding. */
+const SUBMENU_SIDE_SLACK = 8;
+const SUBMENU_OVERLAP_AVOIDANCE = {
+  side: 'shift',
+  align: 'shift',
+  fallbackAxisSide: 'none',
+} as const satisfies MenuContentProps['collisionAvoidance'];
+
+type CollisionInsets = ReturnType<typeof useSafeAreaCollisionPadding>;
+
+/**
+ * Whether a submenu `width` wide fits beside its trigger on either side. When
+ * neither does — a narrow window — flipping only trades one clipped edge for
+ * the other, so the submenu is shifted over its parent menu instead, the way a
+ * native menu behaves at a screen edge.
+ */
+function submenuFitsBesideTrigger(
+  trigger: DOMRect,
+  width: number,
+  viewportWidth: number,
+  padding: CollisionInsets,
+  gap: number
+) {
+  const need = width + gap + SUBMENU_SIDE_SLACK;
+  return (
+    viewportWidth - padding.right - trigger.right >= need || trigger.left - padding.left >= need
+  );
+}
+
 function useMarkMenuItemSelected() {
   const selection = React.useContext(MenuSelectionContext);
   return React.useCallback(() => {
@@ -62,11 +99,49 @@ function MenuRoot({ onOpenChange, children, ...props }: MenuRootProps) {
 }
 
 const MenuContent = React.forwardRef<HTMLDivElement, MenuContentProps>(function MenuContent(
-  { finalFocus, collisionPadding, ...props },
+  { finalFocus, collisionPadding, collisionAvoidance, children, ...props },
   ref
 ) {
   const selection = React.useContext(MenuSelectionContext);
+  const submenuTriggerRef = React.useContext(SubmenuTriggerContext);
   const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
+  const [overlapParent, setOverlapParent] = React.useState(false);
+  const sideOffset = typeof props.sideOffset === 'number' ? props.sideOffset : SUBMENU_GAP;
+  const canOverlapParent =
+    submenuTriggerRef !== null &&
+    !(collisionAvoidance && 'side' in collisionAvoidance && collisionAvoidance.side === 'none');
+  const placementInputsRef = React.useRef({
+    canOverlapParent,
+    padding: mergedCollisionPadding,
+    sideOffset,
+  });
+  placementInputsRef.current = { canOverlapParent, padding: mergedCollisionPadding, sideOffset };
+  /* The positioner mounts on each opening, so measuring as it attaches runs
+     once per opening: in the commit, before Floating UI's first (asynchronous)
+     placement and before paint, while the popup still has its natural width.
+     Measuring later would read a width already narrowed to the side it landed on. */
+  const setPositionerRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      if (typeof ref === 'function') ref(node);
+      else if (ref) ref.current = node;
+      const { canOverlapParent: enabled, padding, sideOffset: gap } = placementInputsRef.current;
+      const trigger = submenuTriggerRef?.current;
+      if (!node || !enabled || !trigger) {
+        setOverlapParent(false);
+        return;
+      }
+      setOverlapParent(
+        !submenuFitsBesideTrigger(
+          trigger.getBoundingClientRect(),
+          node.getBoundingClientRect().width,
+          trigger.ownerDocument.documentElement.clientWidth,
+          padding,
+          gap
+        )
+      );
+    },
+    [ref, submenuTriggerRef]
+  );
   const handleFinalFocus = React.useCallback(
     (closeType: Parameters<Extract<MenuContentProps['finalFocus'], Function>>[0]) => {
       const provided =
@@ -99,11 +174,16 @@ const MenuContent = React.forwardRef<HTMLDivElement, MenuContentProps>(function 
   );
   return (
     <UiMenu.Content
-      ref={ref}
+      ref={setPositionerRef}
       collisionPadding={mergedCollisionPadding}
+      collisionAvoidance={
+        canOverlapParent && overlapParent ? SUBMENU_OVERLAP_AVOIDANCE : collisionAvoidance
+      }
       finalFocus={handleFinalFocus}
       {...props}
-    />
+    >
+      <SubmenuTriggerContext.Provider value={null}>{children}</SubmenuTriggerContext.Provider>
+    </UiMenu.Content>
   );
 });
 
@@ -187,16 +267,22 @@ const MenuRadioItem = React.forwardRef<HTMLDivElement, MenuRadioItemProps>(funct
  * Base UI's GroupLabel throws outside a `Menu.Group`, and these menus use a
  * label as a loose section header. A presentation div states the same thing.
  */
-const MenuGroupLabel = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
-  function MenuGroupLabel({ className, style, ...props }, ref) {
-    const sx = withClassName(stylex.props(menuStyles.groupLabel), className);
-    return <div ref={ref} {...props} className={sx.className} style={{ ...sx.style, ...style }} />;
-  }
-);
+const MenuGroupLabel = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentPropsWithoutRef<'div'> & { xstyle?: stylex.StyleXStyles }
+>(function MenuGroupLabel({ className, xstyle, style, ...props }, ref) {
+  const sx = withClassName(stylex.props(menuStyles.groupLabel, xstyle), className);
+  return <div ref={ref} {...props} className={sx.className} style={{ ...sx.style, ...style }} />;
+});
 
 /** Same-frame hover open for submenus; Base UI's trigger `delay` defaults to 100ms. */
 function MenuSubmenu(props: MenuSubmenuProps) {
-  return <UiMenu.Submenu {...props} />;
+  const triggerRef = React.useRef<HTMLElement | null>(null);
+  return (
+    <SubmenuTriggerContext.Provider value={triggerRef}>
+      <UiMenu.Submenu {...props} />
+    </SubmenuTriggerContext.Provider>
+  );
 }
 
 /* Every focusable row of a menu, in DOM order — where an arrow key from the
@@ -214,6 +300,15 @@ const MENU_SEARCH_SELECTOR = '[data-lody-menu-search]';
 
 const MenuSubmenuTrigger = React.forwardRef<HTMLDivElement, MenuSubmenuTriggerProps>(
   function MenuSubmenuTrigger({ onPointerMove, onClick, disabled, delay = 0, ...props }, ref) {
+    const submenuTriggerRef = React.useContext(SubmenuTriggerContext);
+    const setTriggerRef = React.useCallback(
+      (node: HTMLDivElement | null) => {
+        if (submenuTriggerRef) submenuTriggerRef.current = node;
+        if (typeof ref === 'function') ref(node);
+        else if (ref) ref.current = node;
+      },
+      [ref, submenuTriggerRef]
+    );
     const focusOpenSubmenuSearch = (event: React.MouseEvent<HTMLDivElement>) => {
       if (event.defaultPrevented || disabled || !window.matchMedia?.('(pointer: fine)').matches)
         return;
@@ -232,7 +327,7 @@ const MenuSubmenuTrigger = React.forwardRef<HTMLDivElement, MenuSubmenuTriggerPr
 
     return (
       <UiMenu.SubmenuTrigger
-        ref={ref}
+        ref={setTriggerRef}
         disabled={disabled}
         delay={delay}
         {...props}
@@ -259,6 +354,7 @@ type MenuSearchInputProps = {
   onSubmit?: () => void;
   /** Layout only (a width floor); the field is the recessed well. */
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 /**
@@ -281,7 +377,7 @@ type MenuSearchInputProps = {
  * menu the user just opened.
  */
 const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>(
-  ({ value, onValueChange, placeholder, ariaLabel, onSubmit, className }, forwardedRef) => {
+  ({ value, onValueChange, placeholder, ariaLabel, onSubmit, className, xstyle }, forwardedRef) => {
     const inputRef = React.useRef<HTMLInputElement | null>(null);
     /* Read by the menu-level listener below, which binds once: rebinding it per
        keystroke would drop the key that caused the re-render. */
@@ -291,8 +387,29 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
     React.useEffect(() => {
       if (typeof window === 'undefined') return undefined;
       if (!window.matchMedia?.('(pointer: fine)').matches) return undefined;
-      const frame = requestAnimationFrame(() => inputRef.current?.focus());
-      return () => cancelAnimationFrame(frame);
+      const claim = () => inputRef.current?.focus();
+      const frame = requestAnimationFrame(claim);
+      /* A same-beat open-focus on a menu row hands the field focus back. */
+      const onFocusIn = (event: FocusEvent) => {
+        const target = event.target;
+        if (
+          target instanceof HTMLElement &&
+          target !== inputRef.current &&
+          target.closest('[role="menu"]') !== null
+        ) {
+          claim();
+        }
+      };
+      document.addEventListener('focusin', onFocusIn);
+      const disarm = window.setTimeout(
+        () => document.removeEventListener('focusin', onFocusIn),
+        250
+      );
+      return () => {
+        cancelAnimationFrame(frame);
+        clearTimeout(disarm);
+        document.removeEventListener('focusin', onFocusIn);
+      };
     }, []);
 
     React.useEffect(() => {
@@ -344,7 +461,7 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
 
     return (
       <div
-        {...withClassName(stylex.props(menuStyles.searchShell), className)}
+        {...withClassName(stylex.props(menuStyles.searchShell, xstyle), className)}
         onClick={(event) => {
           event.stopPropagation();
           inputRef.current?.focus();

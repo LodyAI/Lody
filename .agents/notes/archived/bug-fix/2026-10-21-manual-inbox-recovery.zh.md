@@ -36,4 +36,4 @@ SHA-256 token 覆盖排序后的 Session 归属、未完成资源日志、输入
 
 ## 验证与限制
 
-提供合成 SQLite、进程探测、Host lease、命令和持久化历史测试，覆盖缺失/不完整日志、orphan、存活根进程/Host、快照变化、unknown 不重放、队列/结果保留、回滚及重复恢复。测试 POSIX 参数往返和 PowerShell 引号。本执行环境无法绑定测试用临时 Host socket，因此相关集成测试尚未验证，不绕过独占检查。原生工作流/SQLite 测试使用明确注入的 port，不声称证明 OS lease。验证平台为 Linux，没有恢复真实用户数据库、运行中的 daemon 或原生 Windows 进程树。[Windows 隔离方案](../../proposed/architecture/2026-10-21-windows-inbox-containment.zh.md) 单独记录第二阶段及其验收条件。
+提供合成 SQLite、进程探测、Host lease、命令和持久化历史测试，覆盖缺失/不完整日志、orphan、存活根进程/Host、快照变化、unknown 不重放、队列/结果保留、回滚及重复恢复。测试 POSIX 参数往返和 PowerShell 引号。本执行环境无法绑定测试用临时 Host socket，因此相关集成测试尚未验证，不绕过独占检查。原生工作流/SQLite 测试使用明确注入的 port，不声称证明 OS lease。验证平台为 Linux，没有恢复真实用户数据库、运行中的 daemon 或原生 Windows 进程树。[Windows 隔离方案](../../rejected/architecture/2026-10-21-windows-inbox-containment.zh.md) 单独记录第二阶段及其验收条件。

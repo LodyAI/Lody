@@ -237,7 +237,10 @@ const boundCompletionFreeText = (
   const boundError = (error: LodyError): LodyError => {
     const bounded = truncateUtf8(error.message, maxBytesPerText);
     omittedBytes += bounded.omittedBytes;
-    return { ...error, message: bounded.value };
+    if (error.detail === undefined) return { ...error, message: bounded.value };
+    const boundedDetail = truncateUtf8(error.detail, maxBytesPerText);
+    omittedBytes += boundedDetail.omittedBytes;
+    return { ...error, message: bounded.value, detail: boundedDetail.value };
   };
   const boundResult = (result: { items: LodyOperationItemResult[] }) => ({
     items: result.items.map((item): LodyOperationItemResult => {
@@ -703,16 +706,45 @@ export class LodyOperationStore {
     items: LodyOperationItemResult[]
   ): StoredLodyOperation {
     z.array(OperationItemSchema).parse(items);
-    const result = this.db
-      .prepare(
-        `UPDATE operations SET items_json = ?
-         WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
-      )
-      .run(JSON.stringify(items), requesterSessionId, operationId);
-    if (result.changes === 0) {
+    return this.transaction(() => {
+      const current = this.get(requesterSessionId, operationId);
+      if (current.state !== 'active') return current;
+      const merged = items.map((item, index) => {
+        const existing = current.items[index];
+        if (
+          item.status === 'active' &&
+          !item.inputDurable &&
+          existing?.status === 'active' &&
+          existing.inputDurable
+        ) {
+          return { ...item, inputDurable: true };
+        }
+        return item;
+      });
+      this.db
+        .prepare(
+          `UPDATE operations SET items_json = ?
+           WHERE requester_session_id = ? AND operation_id = ? AND state = 'active'`
+        )
+        .run(JSON.stringify(merged), requesterSessionId, operationId);
       return this.get(requesterSessionId, operationId);
-    }
-    return this.get(requesterSessionId, operationId);
+    }).immediate();
+  }
+
+  releaseItemMaterializationClaim(
+    requesterSessionId: SessionId,
+    operationId: string,
+    itemIndex: number,
+    claimToken: string
+  ): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `DELETE FROM operation_item_materializations
+           WHERE requester_session_id = ? AND operation_id = ? AND item_index = ? AND claim_token = ?`
+        )
+        .run(requesterSessionId, operationId, itemIndex, claimToken);
+    }).immediate();
   }
 
   claimItemMaterialization(

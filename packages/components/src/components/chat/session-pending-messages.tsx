@@ -25,20 +25,27 @@ import {
   SessionFileCardList,
 } from '@/components/ai-gui/session-file-card';
 import { peekSessionImageUrl } from '@/lib/session-image-cache';
-import { UserChatBubble, type SessionChatUser } from '@/components/ai-gui/view';
+import { conversationSurface } from '@/components/ai-gui/surface';
+import {
+  UserChatBubble,
+  UserMessageAuthorSlot,
+  UserMessageMetadataAuthor,
+  type SessionChatUser,
+} from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { UserAvatar } from '@/components/user-avatar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { ConversationView } from '@/lib/conversation-view/types';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
 import { toIntlLocale } from '@/lib/intl-locale';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import type { PendingSessionSend } from '@/lib/session-pending-sends';
 import { isQueueBoundSend } from '@/lib/session-send-status';
-import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Progress } from '@lody/ui/progress';
 import { Spinner } from '@/ui/spinner';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 
 const empty: readonly PendingSessionSend[] = [];
 const emptySnapshot = () => empty;
@@ -74,59 +81,41 @@ function useAttachmentStatus(attachment: SessionAttachmentDraft, active: boolean
   return { state, label };
 }
 
-/**
- * The whole red budget for a failure, in one place. A frame this faint plus one
- * glyph is enough to find the broken attachment; tinting the icon tile, the
- * filename, or the message status on top of it just made the row shout.
- */
-const FAILED_FRAME_CLASS = 'border-destructive/30 bg-destructive/[0.04]';
-
-/**
- * A reason that has no attachment card to live on still arrives inside the same
- * frame, so every failure in the row reads as one kind of object. Loose red text
- * under the bubble was the one shape that did not.
- */
-function PendingFailureNotice({
-  reason,
-  clamp,
-  role,
-}: {
-  reason: string;
-  clamp?: boolean;
-  role?: 'alert';
-}) {
-  return (
-    <div
-      className={cn(
-        'ml-auto flex w-full max-w-sm items-start gap-2 rounded-lg border px-2.5 py-2',
-        FAILED_FRAME_CLASS
-      )}
-      role={role}
-    >
-      <AlertCircle
-        className="mt-px size-3.5 shrink-0 text-destructive"
-        strokeWidth={2}
-        aria-hidden="true"
-      />
-      <span
-        className={cn(
-          'min-w-0 text-xs leading-snug break-words text-destructive',
-          clamp && 'line-clamp-2'
-        )}
-      >
-        {reason}
-      </span>
-    </div>
-  );
-}
-
 const styles = stylex.create({
   progress: { position: 'absolute', insetInline: 0, bottom: 0, pointerEvents: 'none' },
-  metadata: { maxWidth: '100%' },
-  timestamp: { flexShrink: 0, whiteSpace: 'nowrap' },
-  status: { minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' },
+  status: {
+    display: 'inline-flex',
+    minWidth: 0,
+    alignItems: 'center',
+    columnGap: space[1],
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+  },
   statusLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
-  acceptedBubble: { position: 'relative', minWidth: 0, maxWidth: '100%' },
+  selectableBubble: {
+    minWidth: 0,
+    maxWidth: '100%',
+    width: 'fit-content',
+    color: colors.label,
+  },
+  pendingDraftStack: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    rowGap: space[2],
+  },
+  pendingActions: {
+    display: 'flex',
+    minHeight: `calc(${space[6]} + ${space[1]})`,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+  },
   sendingSpinner: {
     position: 'absolute',
     bottom: 13,
@@ -138,7 +127,276 @@ const styles = stylex.create({
     display: { default: 'none', '@container (min-width: 520px)': 'inline-flex' },
   },
   sendingGlyph: { width: '100%', height: '100%' },
+
+  /**
+   * The whole red budget for a failure, in one place. A frame this faint plus one
+   * glyph is enough to find the broken attachment; tinting the icon tile, the
+   * filename, or the message status on top of it just made the row shout.
+   */
+  failedFrame: {
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--destructive) / 0.3)',
+    backgroundColor: 'hsl(var(--destructive) / 0.04)',
+  },
+  /**
+   * A reason that has no attachment card to live on still arrives inside the same
+   * frame, so every failure in the row reads as one kind of object. Loose red text
+   * under the bubble was the one shape that did not.
+   */
+  failureNotice: {
+    marginLeft: 'auto',
+    display: 'flex',
+    width: '100%',
+    maxWidth: '24rem',
+    alignItems: 'flex-start',
+    gap: themeSpace[2],
+    borderRadius: themeRadius.lg,
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[2],
+  },
+  failureGlyph: {
+    marginTop: '1px',
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    flexShrink: 0,
+    color: themeColors.destructive,
+  },
+  failureReason: {
+    minWidth: 0,
+    fontSize: '0.75rem',
+    lineHeight: '1.375',
+    overflowWrap: 'break-word',
+    color: themeColors.destructive,
+  },
+  failureReasonClamped: {
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 2,
+  },
+  /** Said to a screen reader and to nobody else. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+
+  /**
+   * Framed like the delivered image the commit replaces it with: a lone image at
+   * its natural size capped at 10.5rem, several as large squares. The delivered
+   * image has no caption row, so the progress strip rides the frame's bottom edge
+   * instead; a caption here is what made the row shrink the moment it was sent.
+   */
+  imageFrame: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: themeRadius.xl,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  imageFrameSingle: {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    flexDirection: 'column',
+  },
+  imageFrameSquare: {
+    width: 'calc(var(--spacing) * 36)',
+    height: 'calc(var(--spacing) * 36)',
+    flexShrink: 0,
+    '@media (min-width: 640px)': {
+      width: 'calc(var(--spacing) * 40)',
+      height: 'calc(var(--spacing) * 40)',
+    },
+  },
+  imageResting: {
+    borderColor: 'hsl(var(--border) / 0.7)',
+    backgroundColor: 'hsl(var(--muted) / 0.2)',
+  },
+  imageSingle: {
+    display: 'block',
+    maxHeight: '10.5rem',
+    maxWidth: '100%',
+    objectFit: 'contain',
+  },
+  imageSquare: {
+    width: 'calc(var(--spacing) * 36)',
+    height: 'calc(var(--spacing) * 36)',
+    objectFit: 'cover',
+    '@media (min-width: 640px)': {
+      width: 'calc(var(--spacing) * 40)',
+      height: 'calc(var(--spacing) * 40)',
+    },
+  },
+  imagePlaceholder: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: themeColors.mutedForeground,
+  },
+  imagePlaceholderSingle: {
+    height: 'calc(var(--spacing) * 36)',
+    width: 'calc(var(--spacing) * 56)',
+    maxWidth: '100%',
+    '@media (min-width: 640px)': { width: 'calc(var(--spacing) * 72)' },
+    '@media (min-width: 768px)': { width: 'calc(var(--spacing) * 80)' },
+  },
+  imagePlaceholderSquare: {
+    width: 'calc(var(--spacing) * 36)',
+    height: 'calc(var(--spacing) * 36)',
+    '@media (min-width: 640px)': {
+      width: 'calc(var(--spacing) * 40)',
+      height: 'calc(var(--spacing) * 40)',
+    },
+  },
+  imageGlyph: { width: themeSpace[6], height: themeSpace[6] },
+  imageScrim: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'hsl(var(--background) / 0.55)',
+  },
+  scrimGlyph: { width: themeSpace[6], height: themeSpace[6], color: themeColors.destructive },
+  fileGlyph: { width: themeSpace[4], height: themeSpace[4] },
+  fileGlyphDestructive: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    color: themeColors.destructive,
+  },
+  spinnerGlyph: { width: themeSpace[4], height: themeSpace[4] },
+
+  /** The row: an ordinary right-aligned user message, not an error card. */
+  row: { display: 'flex', width: '100%', flexDirection: 'row-reverse' },
+  rowMobile: { gap: themeSpace[2], paddingLeft: themeSpace[7] },
+  rowDesktop: { gap: themeSpace[2.5] },
+  avatar: { marginTop: '0.5px', flexShrink: 0, color: themeColors.mutedForeground },
+  body: {
+    display: 'flex',
+    minWidth: 0,
+    flexGrow: 1,
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    textAlign: 'left',
+  },
+  bodyMobile: { maxWidth: 'min(100%, 28rem)', gap: themeSpace[1] },
+  bodyDesktop: {
+    maxWidth: '100%',
+    gap: themeSpace[1.5],
+    '@container (min-width: 520px)': { maxWidth: '80%' },
+    '@container (min-width: 720px)': { maxWidth: '70%' },
+  },
+  metadataRow: {
+    display: 'flex',
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: '11px',
+    color: themeColors.mutedForeground,
+  },
+  timestampLabel: { fontVariantNumeric: 'tabular-nums' },
+  statusRow: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    color: themeColors.mutedForeground,
+  },
+  statusGlyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  deliveredGlyph: { width: themeSpace[3.5], height: themeSpace[3.5], color: themeColors.primary },
+  pendingGlyph: {
+    width: themeSpace[3.5],
+    height: themeSpace[3.5],
+    color: themeColors.mutedForeground,
+  },
+
+  /** The not-yet-sent body. */
+  held: {
+    display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: themeSpace[2],
+  },
+  heldImages: {
+    display: 'flex',
+    width: '100%',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: themeSpace[2],
+    paddingInline: themeSpace[2],
+    paddingTop: themeSpace[1],
+  },
+  heldTextRow: {
+    display: 'flex',
+    maxWidth: '100%',
+    justifyContent: 'flex-end',
+    '@media (min-width: 640px)': { paddingLeft: themeSpace[2] },
+  },
+  heldBubble: {
+    minWidth: 0,
+    maxWidth: '100%',
+    borderRadius: '1.15rem',
+    backgroundColor: 'hsl(var(--foreground) / 0.05)',
+    paddingInline: themeSpace[3.5],
+    paddingBlock: themeSpace[2],
+    '@media (min-width: 640px)': {
+      borderRadius: themeRadius['2xl'],
+      paddingInline: themeSpace[4],
+      paddingBlock: themeSpace[2.5],
+    },
+  },
+  heldText: {
+    minWidth: 0,
+    maxWidth: '100%',
+    whiteSpace: 'pre-wrap',
+    color: themeColors.reading,
+    overflowWrap: 'anywhere',
+  },
+  actions: {
+    display: 'flex',
+    minHeight: themeSpace[7],
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[2],
+  },
+  column: {
+    paddingBlock: themeSpace[2],
+    '@media (min-width: 640px)': { paddingBlock: themeSpace[3] },
+  },
+  failureColumn: { paddingBottom: themeSpace[3] },
 });
+
+function PendingFailureNotice({
+  reason,
+  clamp,
+  role,
+}: {
+  reason: string;
+  clamp?: boolean;
+  role?: 'alert';
+}) {
+  return (
+    <div {...stylex.props(styles.failureNotice, styles.failedFrame)} role={role}>
+      <AlertCircle {...stylex.props(styles.failureGlyph)} strokeWidth={2} aria-hidden="true" />
+      <span {...stylex.props(styles.failureReason, clamp && styles.failureReasonClamped)}>
+        {reason}
+      </span>
+    </div>
+  );
+}
 
 /** Overlay the delivered card's bottom edge without adding a layout row. */
 function AttachmentProgressTrack({
@@ -159,15 +417,6 @@ function AttachmentProgressTrack({
   ) : null;
 }
 
-/** The delivered `UserImageBlock`'s large-thumbnail square. */
-const IMAGE_SQUARE_CLASS = 'h-36 w-36 sm:h-40 sm:w-40';
-
-/**
- * Framed like the delivered image the commit replaces it with: a lone image at
- * its natural size capped at 10.5rem, several as large squares. The delivered
- * image has no caption row, so the progress strip rides the frame's bottom edge
- * instead; a caption here is what made the row shrink the moment it was sent.
- */
 function PendingImageAttachment({
   attachment,
   active,
@@ -196,16 +445,23 @@ function PendingImageAttachment({
   const failed = state === 'failed';
   const readyPreviewUrl =
     attachment.ready?.type === 'image'
-      ? peekSessionImageUrl({ workspaceId, sessionId, imageId: attachment.ready.imageId })
+      ? peekSessionImageUrl({
+          ...attachment.ready,
+          workspaceId,
+          sessionId,
+          imageId: attachment.ready.imageId,
+          transport: attachment.ready.transport,
+          machineId: attachment.ready.machineId,
+        })
       : null;
   const displayedPreviewUrl = readyPreviewUrl ?? previewUrl;
 
   return (
     <div
-      className={cn(
-        'relative overflow-hidden rounded-xl border transition-colors',
-        failed ? FAILED_FRAME_CLASS : 'border-border/70 bg-muted/20',
-        single ? 'inline-flex max-w-full flex-col' : `${IMAGE_SQUARE_CLASS} shrink-0`
+      {...stylex.props(
+        styles.imageFrame,
+        failed ? styles.failedFrame : styles.imageResting,
+        single ? styles.imageFrameSingle : styles.imageFrameSquare
       )}
       title={`${attachment.name} · ${label}`}
     >
@@ -213,27 +469,23 @@ function PendingImageAttachment({
         <img
           src={displayedPreviewUrl}
           alt={attachment.name}
-          className={
-            single
-              ? 'block max-h-[10.5rem] max-w-full object-contain'
-              : `${IMAGE_SQUARE_CLASS} object-cover`
-          }
+          {...stylex.props(single ? styles.imageSingle : styles.imageSquare)}
         />
       ) : (
         <div
-          className={cn(
-            'flex items-center justify-center text-muted-foreground',
-            single ? 'h-36 w-56 max-w-full sm:w-72 md:w-80' : IMAGE_SQUARE_CLASS
+          {...stylex.props(
+            styles.imagePlaceholder,
+            single ? styles.imagePlaceholderSingle : styles.imagePlaceholderSquare
           )}
         >
-          <ImageIcon className="size-6" aria-hidden="true" />
+          <ImageIcon {...stylex.props(styles.imageGlyph)} aria-hidden="true" />
         </div>
       )}
       {failed ? (
         /* Neutral scrim, not a red wash: it only has to make the one glyph
            legible over whatever the photo happens to be. */
-        <div className="absolute inset-0 flex items-center justify-center bg-background/55">
-          <AlertCircle className="size-6 text-destructive" aria-hidden="true" />
+        <div {...stylex.props(styles.imageScrim)}>
+          <AlertCircle {...stylex.props(styles.scrimGlyph)} aria-hidden="true" />
         </div>
       ) : null}
       <AttachmentProgressTrack attachment={attachment} active={state === 'uploading'} />
@@ -259,13 +511,13 @@ function PendingFileAttachment({
       subtitle={ready ? formatSessionFileMeta(attachment.name, ready.sizeBytes) : label}
       actionIcon={
         failed ? (
-          <AlertCircle className="size-4 text-destructive" aria-hidden="true" />
+          <AlertCircle {...stylex.props(styles.fileGlyphDestructive)} aria-hidden="true" />
         ) : state === 'uploading' ? (
-          <Spinner className="size-4" />
+          <Spinner className={stylex.props(styles.spinnerGlyph).className} />
         ) : state === 'ready' ? (
-          <ReadyIcon className="size-4" aria-hidden="true" />
+          <ReadyIcon {...stylex.props(styles.fileGlyph)} aria-hidden="true" />
         ) : (
-          <Clock3 className="size-4" aria-hidden="true" />
+          <Clock3 {...stylex.props(styles.fileGlyph)} aria-hidden="true" />
         )
       }
       failed={failed}
@@ -287,14 +539,18 @@ function PendingFileAttachment({
 export function PendingMessageRow({
   record,
   user,
+  showSenderIdentity = false,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  onNavigateSession,
   onRetry,
   onCancel,
   busy = false,
 }: {
   record: PendingSessionSend;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
   busy?: boolean;
   onRetry: () => void;
   onCancel: () => void;
@@ -319,8 +575,6 @@ export function PendingMessageRow({
   const images = record.attachments.filter((attachment) => attachment.kind === 'image');
   const files = record.attachments.filter((attachment) => attachment.kind === 'file');
   const uploading = record.attachments.some((attachment) => !attachment.ready);
-  // Only fall back to the record-level reason when no card shows one, so the
-  // same failure is never spelled out twice. Image frames carry no caption.
   const reasonOnACard = files.some((attachment) => attachmentState(attachment) === 'failed');
   const messageStatus = failed
     ? t('sessions.pendingMessageUploadFailed')
@@ -329,29 +583,39 @@ export function PendingMessageRow({
       : t('sessions.pendingMessageWaiting');
 
   return (
-    <ConversationColumn className="py-2 sm:py-3">
-      <article className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
-        <div className="mt-0.5 shrink-0 text-muted-foreground">
-          <UserAvatar user={user} size="large" showIcon />
-        </div>
+    <ConversationColumn
+      {...stylex.props(conversationSurface.message, conversationSurface.userMessage)}
+    >
+      <article
+        {...stylex.props(
+          conversationSurface.userRow,
+          isMobile && conversationSurface.mobileUserRow
+        )}
+      >
+        <UserMessageAuthorSlot
+          author={record.entry.author}
+          user={user}
+          isMobile={isMobile}
+          showSenderIdentity={showSenderIdentity}
+          onNavigateSession={onNavigateSession}
+        />
         <div
-          className={cn(
-            'flex min-w-0 flex-1 flex-col items-end text-left',
-            isMobile
-              ? 'max-w-[min(100%,28rem)] gap-1'
-              : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
+          {...stylex.props(
+            conversationSurface.userStack,
+            isMobile && conversationSurface.mobileUserStack
           )}
         >
-          <div
-            className={cn(
-              'flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground',
-              stylex.props(styles.metadata).className
-            )}
-          >
+          <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
+            <UserMessageMetadataAuthor
+              author={record.entry.author}
+              sessionId={record.sessionId}
+              user={user}
+              showSenderIdentity={showSenderIdentity}
+              isMobile={isMobile}
+              onNavigateSession={onNavigateSession}
+            />
             {timestampLabel ? (
-              <span className={cn('tabular-nums', stylex.props(styles.timestamp).className)}>
-                {timestampLabel}
-              </span>
+              <span {...stylex.props(conversationSurface.metadataTimestamp)}>{timestampLabel}</span>
             ) : null}
             {acceptedInput ? (
               <span
@@ -362,27 +626,32 @@ export function PendingMessageRow({
                 }
               >
                 {delivered ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" strokeWidth={2} />
+                  <CheckCircle2 {...stylex.props(styles.deliveredGlyph)} strokeWidth={2} />
                 ) : (
-                  <Circle className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={2} />
+                  <Circle {...stylex.props(styles.pendingGlyph)} strokeWidth={2} />
                 )}
               </span>
             ) : (
               <span
-                className={cn(
-                  'inline-flex items-center gap-1 text-muted-foreground',
-                  stylex.props(styles.status).className
-                )}
+                {...stylex.props(styles.statusRow, styles.status)}
                 role="status"
                 title={messageStatus}
               >
                 {failed ? (
-                  <AlertCircle className="size-3.5" strokeWidth={2} aria-hidden="true" />
+                  <AlertCircle
+                    {...stylex.props(styles.statusGlyph)}
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
                 ) : (
-                  <Clock3 className="size-3.5" strokeWidth={2} aria-hidden="true" />
+                  <Clock3
+                    {...stylex.props(styles.statusGlyph)}
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
                 )}
                 {isMobile ? (
-                  <span className="sr-only">{messageStatus}</span>
+                  <span {...stylex.props(styles.srOnly)}>{messageStatus}</span>
                 ) : (
                   <span {...stylex.props(styles.statusLabel)}>{messageStatus}</span>
                 )}
@@ -390,22 +659,26 @@ export function PendingMessageRow({
             )}
           </div>
           {acceptedInput ? (
-            <div {...stylex.props(styles.acceptedBubble)}>
-              {showSendingSpinner ? (
-                <span {...stylex.props(styles.sendingSpinner)}>
-                  <Spinner {...stylex.props(styles.sendingGlyph)} />
-                </span>
-              ) : null}
-              <UserChatBubble
-                message={{ id: record.id, items: record.entry.items ?? [] }}
-                sessionId={record.sessionId}
-                conversationFontSize={conversationFontSize}
-              />
+            <div {...stylex.props(conversationSurface.userBubbleSlot)}>
+              <div {...stylex.props(conversationSurface.userBubbleFrame)}>
+                {showSendingSpinner ? (
+                  <span {...stylex.props(styles.sendingSpinner)}>
+                    <Spinner {...stylex.props(styles.sendingGlyph)} />
+                  </span>
+                ) : null}
+                <div {...stylex.props(styles.selectableBubble)} data-text-selectable>
+                  <UserChatBubble
+                    message={{ id: record.id, items: record.entry.items ?? [] }}
+                    sessionId={record.sessionId}
+                    conversationFontSize={conversationFontSize}
+                  />
+                </div>
+              </div>
             </div>
           ) : (
-            <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
+            <div {...stylex.props(styles.pendingDraftStack)}>
               {images.length ? (
-                <div className="flex w-full flex-wrap justify-end gap-2 px-2 pt-1">
+                <div {...stylex.props(styles.heldImages)}>
                   {images.map((attachment) => (
                     <PendingImageAttachment
                       key={attachment.id}
@@ -430,13 +703,21 @@ export function PendingMessageRow({
                 </SessionFileCardList>
               ) : null}
               {text ? (
-                <div className="flex max-w-full justify-end sm:pl-2">
-                  <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
-                    <div
-                      className="min-w-0 max-w-full whitespace-pre-wrap text-reading [overflow-wrap:anywhere]"
-                      style={conversationTextFontSizeStyle(conversationFontSize)}
-                    >
-                      {text}
+                <div {...stylex.props(conversationSurface.userBubbleSlot)}>
+                  <div {...stylex.props(conversationSurface.userBubbleFrame)}>
+                    <div {...stylex.props(conversationSurface.bubbleRow)}>
+                      <div
+                        {...stylex.props(conversationSurface.bubble)}
+                        data-user-message-bubble=""
+                      >
+                        <div
+                          {...stylex.props(conversationSurface.userText)}
+                          style={conversationTextFontSizeStyle(conversationFontSize)}
+                          data-text-selectable
+                        >
+                          {text}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -444,21 +725,18 @@ export function PendingMessageRow({
             </div>
           )}
           {failed && !reasonOnACard ? <PendingFailureNotice reason={record.error!} clamp /> : null}
-          {/* Always in the flow at the delivered row's 28px action height, so
-              committing (which swaps these for hover-revealed copy/fork) does
-              not move anything below. */}
-          <div className="flex min-h-7 flex-wrap items-center justify-end gap-2">
-            {!acceptedInput || failed ? (
+          {!acceptedInput || failed ? (
+            <div {...stylex.props(styles.pendingActions)}>
               <Button size="small" variant="ghost" disabled={busy} onClick={onCancel}>
                 {t(acceptedInput ? 'sessions.removeLocalInput' : 'sessions.cancelPendingSend')}
               </Button>
-            ) : null}
-            {failed ? (
-              <Button size="small" disabled={busy} onClick={onRetry}>
-                {t('sessions.retryPendingSend')}
-              </Button>
-            ) : null}
-          </div>
+              {failed ? (
+                <Button size="small" disabled={busy} onClick={onRetry}>
+                  {t('sessions.retryPendingSend')}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </article>
     </ConversationColumn>
@@ -474,12 +752,16 @@ export function useSessionPendingMessages({
   sessionId,
   history,
   user,
+  showSenderIdentity = false,
   conversationFontSize,
+  onNavigateSession,
 }: {
   sessionId: SessionId;
   history?: Pick<ConversationView, 'indexOf' | 'turn' | 'subscribe'> | null;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const pendingSends = runtime?.pendingSends;
@@ -547,19 +829,21 @@ export function useSessionPendingMessages({
             key={send.id}
             record={send}
             user={user}
+            showSenderIdentity={showSenderIdentity}
             conversationFontSize={conversationFontSize}
+            onNavigateSession={onNavigateSession}
             busy={busy === send.id}
             onRetry={() => void action(send, 'retry')}
             onCancel={() => void action(send, 'cancel')}
           />
         ),
       })),
-    [pending, user, conversationFontSize, busy, action]
+    [pending, user, showSenderIdentity, conversationFontSize, onNavigateSession, busy, action]
   );
   const failureNotice = useMemo(
     () =>
       failure ? (
-        <ConversationColumn className="pb-3">
+        <ConversationColumn className={stylex.props(styles.failureColumn).className}>
           <PendingFailureNotice reason={failure} role="alert" />
         </ConversationColumn>
       ) : null,

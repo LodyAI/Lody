@@ -29,6 +29,7 @@ export type LedgerEventSummary =
       owner: LedgerMemberLabel | null;
     }
   | { type: 'transferOwner'; actor: LedgerMemberLabel | null; member: LedgerMemberLabel }
+  | { type: 'abandonEpoch'; actor: LedgerMemberLabel | null; epoch: number; baseEpoch: number }
   | { type: 'publishEpoch'; actor: LedgerMemberLabel | null; epoch: number }
   | {
       type: 'removeMemberAndPublishEpoch';
@@ -128,6 +129,8 @@ export function ledgerOverview(history: VerifiedLedgerHistory): LedgerOverview {
           actor,
           member: label(bytesToHex(op.successorMembershipId.toBytes())),
         };
+      case 'abandonEpoch':
+        return { type: 'abandonEpoch', actor, epoch: op.epoch, baseEpoch: op.baseEpoch };
       case 'publishEpoch':
         return { type: 'publishEpoch', actor, epoch: op.epoch };
       case 'removeMember':

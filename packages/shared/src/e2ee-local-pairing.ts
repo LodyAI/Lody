@@ -14,6 +14,9 @@ const machineId = z
       new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) === value
     );
   });
+/** Ledger handoff bounds: past either, the desktop omits the handoff and the CLI reads history. */
+export const LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS = 2048;
+export const LOCAL_E2EE_LEDGER_HANDOFF_MAX_HEX_CHARS = 512 * 1024;
 const hex32 = z.string().regex(/^[0-9a-f]{64}$/);
 const hex16 = z.string().regex(/^[0-9a-f]{32}$/);
 const common = {
@@ -38,6 +41,20 @@ export const LocalE2eeActivateRequestSchema = z
     type: z.literal('activate'),
     pairingSessionId: hex16,
     signingPublicKey: hex32,
+    /** Optional untrusted transport of the desktop's verified ledger originals from
+     * genesis, with that ledger's own resume position. The CLI verifies them from its
+     * pinned genesis exactly like history pages; they never confirm live authority. */
+    ledgerRecordsHex: z
+      .array(z.string().regex(/^(?:[0-9a-f]{2}){1,8192}$/))
+      .min(1)
+      .max(LOCAL_E2EE_LEDGER_HANDOFF_MAX_RECORDS)
+      .optional(),
+    ledgerPosition: z
+      .string()
+      .min(1)
+      .max(1024)
+      .regex(/^p1:\S+$/)
+      .optional(),
   })
   .strict();
 export const LocalE2eePairingRequestSchema = z.discriminatedUnion('type', [
@@ -112,6 +129,25 @@ export const LocalE2eeRecoveryFailureSchema = z
       'e2ee_conflict',
       'e2ee_unavailable',
       'e2ee_identity-busy',
+    ]),
+  })
+  .strict();
+
+/** Content-free local pairing failures: the recovery codes plus fixed pairing
+ * refusals, so the desktop learns the exact reason. Raw causes never cross IPC. */
+export const LocalE2eePairingFailureSchema = z
+  .object({
+    ok: z.literal(false),
+    error: z.enum([
+      ...LocalE2eeRecoveryFailureSchema.shape.error.options,
+      'e2ee_binding_conflict',
+      'e2ee_identity_busy',
+      'e2ee_account_unavailable',
+      'e2ee_device_revoked',
+      'e2ee_machine_mismatch',
+      'e2ee_invalid_input',
+      'e2ee_invalid_response',
+      'e2ee_pairing_unavailable',
     ]),
   })
   .strict();

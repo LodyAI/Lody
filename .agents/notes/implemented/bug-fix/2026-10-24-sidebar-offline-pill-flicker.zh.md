@@ -38,8 +38,8 @@ socket 一重连就忘掉刚刚拿到的快照——快照对「缺席」的证�
 - 窗口内恢复会取消待执行的降级，不发出任何 UI 状态；窗口结束后发布当前
   原始状态。
 - 终止状态（`error`、`disconnected`）立即发布。
-- `start()` 会替换 store，因此其 `connecting` 绕过宽限；新 store 的空快照
-  不能继承旧房间的权威。
+- `start()` 会替换 store，因此其 `connecting` 绕过宽限；未确认的新房间
+  不能继承旧房间的权威。自[落地页选择修复](2026-11-05-landing-selection-presence-churn.zh.md)起，消费者保留上一份快照直到 `joined`。
 - `stop()` 立即发布 `idle` 并清除计时器。
 
 `RuntimeProvider` 把展示状态写入 `lodyPresenceSyncStateAtom`；room-sync

@@ -11,8 +11,8 @@ Translation: current
 让第一轮直接接管。在一台机器三天的日志里，daemon 预热了 64 个草稿，一次都没有被接管。
 其中 27 次在消息到达后被判定不兼容，整套删除后再从零重建；重建比普通冷启动更慢，
 有时还会让这一轮直接失败。本次移除预热：会话只在第一轮派发时才启动 agent 和
-worktree。daemon 仍会回应旧请求，保证旧版桌面端可用；旧版 daemon 预热的
-worktree 要么由对应会话安全地认领，要么被移除。
+worktree。为旧版桌面端保留的过渡应答，以及对旧版 daemon 预热 worktree 的恢复，
+已在 2026-11-16 的[兼容切断](2026-11-16-drop-pre-october-compatibility.zh.md)中删除。
 
 ## 问题
 
@@ -49,11 +49,11 @@ MCP、选项值）完全一致；该 daemon 早于
 - daemon 只在派发时，通过普通的会话创建路径创建 agent 进程、沙箱、凭据和 worktree。
   删除预热服务、TTL 控制、接管、`AgentClient` 启动中的认领闸门，以及推测性 worktree
   的创建/认领/完成步骤。
-- 两个 RPC 方法及其 schema 保留：旧版桌面端仍会发送，daemon 立即回应，不做访问检查，
+- 在[兼容切断](2026-11-16-drop-pre-october-compatibility.zh.md)之前，两个 RPC 方法及其 schema 为旧版桌面端保留，daemon 立即回应，不做访问检查，
   也不做任何工作。prepare 返回已接受的 `duplicate`，旧版桌面端于是只持有这一个租约，
   直到草稿空闲或发送；若返回拒绝，它会在每次停顿后重新发送 prepare 和 cancel。
   cancel 返回 `not-found`。
-- `legacy-speculative-worktrees.ts` 处理旧版 daemon 留下的标记。会话创建在探测目录之前
+- 在同一次切断之前，`legacy-speculative-worktrees.ts` 处理旧版 daemon 留下的标记。会话创建在探测目录之前
   先认领该会话的标记，并对 worktree 重新运行 setup，因为预热从未完成过它；setup 成功后才
   删除标记。从未被会话接管的 worktree，若针对其他仓库或基准分支则重建。已被会话接管的
   worktree（`durable-pending-setup`，或创建时带有要还原的分支）绝不会因目标不一致而被销毁；
@@ -79,8 +79,8 @@ MCP、选项值）完全一致；该 daemon 早于
 
 - 新会话的第一轮现在总要付冷启动的代价。在这台机器上中位数为 6.6 秒，大头是
   `git fetch` 及其 GitHub token 请求，那是另一项后续工作。
-- 等到没有受支持的 daemon 或桌面端还会产生它们时，删除
-  `legacy-speculative-worktrees.ts`、拒绝处理函数和请求 schema。
+- `legacy-speculative-worktrees.ts` 和拒绝处理函数已于 2026-11-16 删除（[决定](2026-11-16-drop-pre-october-compatibility.zh.md)）；
+  2026-10-16 以前的孤儿 worktree 不再被清扫。
 
 ## 验证
 

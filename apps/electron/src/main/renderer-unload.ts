@@ -6,6 +6,7 @@ import { getMainWindow, productWindows, setAppQuitting } from './window-state'
 type QuitClose = {
   settle: (closed: boolean) => void
   approved: boolean
+  restartDeadline: () => void
   confirmation?: AbortController
 }
 const quitCloses = new Map<BrowserWindow, QuitClose>()
@@ -25,6 +26,7 @@ export function installRendererUnloadConfirmation(window: BrowserWindow): void {
     }
     if (quitClose?.confirmation) return
     if (quitClose) console.info('[Electron] Quit renderer unload veto', { windowId: window.id })
+    console.info('[Electron] Renderer unload blocked', { windowId: window.id, category: 'unknown' })
     // A hidden or minimized parent would hide the sheet; show what is being kept.
     if (window.isMinimized()) window.restore()
     if (!window.isVisible()) window.show()
@@ -65,6 +67,8 @@ export function installRendererUnloadConfirmation(window: BrowserWindow): void {
             quitClose.settle(false)
             return
           }
+          quitClose.confirmation = undefined
+          quitClose.restartDeadline()
           quitClose.approved = true
           window.close()
         })
@@ -129,7 +133,18 @@ export async function closeProductWindowsForQuit(
         entry.confirmation?.abort()
         resolve(value)
       }
-      const entry: QuitClose = { settle, approved: false }
+      const onDeadline = (): void => {
+        if (quitCloses.get(window) !== entry) return
+        if (entry.confirmation) {
+          console.info('[Electron] Quit renderer confirmation expired', { windowId })
+          settle(false)
+        } else onStuck()
+      }
+      const restartDeadline = (): void => {
+        clearTimeout(timer)
+        timer = setTimeout(onDeadline, 15_000)
+      }
+      const entry: QuitClose = { settle, approved: false, restartDeadline }
       const onNavigation = (
         _event: unknown,
         _url: string,
@@ -144,7 +159,7 @@ export async function closeProductWindowsForQuit(
       contents.on('did-start-navigation', onNavigation)
       quitCloses.set(window, entry)
       // Electron does not guarantee an unresponsive event for a pending close.
-      timer = setTimeout(onStuck, 15_000)
+      restartDeadline()
       console.info('[Electron] Quit renderer deadline armed', { windowId })
       console.info('[Electron] Quit renderer close requested', { windowId })
       window.close()

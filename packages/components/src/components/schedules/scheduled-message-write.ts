@@ -1,6 +1,5 @@
 import { requireWorkspaceFeature } from '@/lib/workspace-feature';
 import {
-  ScheduleRepository,
   ScheduledMessageSchema,
   getServerNow,
   type ScheduleDraft,
@@ -12,6 +11,7 @@ import {
 import type { WorkspaceRuntime } from '@/atoms/runtime';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { prepareDraftAttachments } from '@/lib/session-attachment-preparation';
+import { assertProtectedAttachmentReferences } from '@/lib/encrypted-session-attachment';
 
 /** One-time message reservations share delivery policy across the composer and quota continue. */
 export const SCHEDULED_MESSAGE_POLICY = {
@@ -32,6 +32,7 @@ export function scheduledAttachmentProgress(attachments: SessionAttachmentDraft[
 /** Use the same owned attachment transfers as Send, without publishing a user turn. */
 export async function prepareScheduledMessage(args: {
   runtime: WorkspaceRuntime;
+  scheduleId: string;
   sessionId: SessionId;
   machineId: MachineId;
   actorId: string;
@@ -51,20 +52,20 @@ export async function prepareScheduledMessage(args: {
     args.inputBlocks.some((block) => block.type === 'file' || block.type === 'image')
   )
     requireWorkspaceFeature(content, 'attachments');
-  let attachments = args.attachments;
   const prepared = await prepareDraftAttachments({
     content,
     resources: args.runtime.sendResources,
     signal: args.signal,
     token: () => args.token,
+    attachmentToken: content.mode === 'protected' ? args.runtime.attachmentToken : undefined,
     localMachineId: () => args.localMachineId,
     record: {
       workspaceId: args.runtime.workspaceId,
       sessionId: args.sessionId,
       targetMachineId: args.machineId,
-      attachments,
+      attachments: args.attachments,
       entry: {
-        id: 'scheduled-draft',
+        id: 'schedule:' + args.scheduleId,
         role: 'user',
         userId: args.actorId,
         timestamp: new Date(getServerNow()).toISOString(),
@@ -74,15 +75,12 @@ export async function prepareScheduledMessage(args: {
         inputConfig: { inputBlocks: args.inputBlocks },
       },
     },
-    update: (next) => {
-      attachments = next;
-      args.onAttachments(next);
-    },
-    report: (id, progress) =>
-      args.onAttachments(
-        attachments.map((item) => (item.id === id ? { ...item, progress } : item))
-      ),
+    update: args.onAttachments,
   });
+
+  if (content.mode === 'protected')
+    assertProtectedAttachmentReferences(prepared.entry.inputConfig?.inputBlocks ?? []);
+
   return ScheduledMessageSchema.parse({
     ...args.message,
     inputBlocks: prepared.entry.inputConfig?.inputBlocks,
@@ -103,11 +101,16 @@ export async function saveScheduledMessage(args: {
   const now = args.now ?? getServerNow();
   if (args.draft.trigger.kind !== 'once' || Date.parse(args.draft.trigger.at) <= now)
     throw new Error('SCHEDULE_TIME_PASSED');
+
+  // Boot-path module: keep `loro-mirror`/`loro-crdt` out of the initial
+  // chunk; the repository loads on first use.
+  const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
   return args.runtime.withScheduleStore(
     args.scheduleId,
     () =>
       new ScheduleRepository(args.runtime.repo, args.runtime.workspaceId, {
         protectedContent: args.runtime.contentMode === 'e2ee',
+        signDeclaration: args.runtime.signScheduleDeclaration,
       }).save({ ...args, now }),
     { create: args.create }
   );

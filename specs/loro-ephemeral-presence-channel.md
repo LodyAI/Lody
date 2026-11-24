@@ -6,8 +6,9 @@ Translation: current
 [中文](loro-ephemeral-presence-channel.zh.md)
 
 A workspace publishes liveness over a Loro ephemeral channel that is separate from durable
-document synchronization: machine heartbeats, active-session status, and "who is viewing this
-session". Readers decide that a machine is online only from a heartbeat whose `updatedAt` is
+document synchronization: machine heartbeats, active-session status, "who is viewing this
+session", and "this user has a focused desktop" (which lets a Host skip that user's mobile
+push). Readers decide that a machine is online only from a heartbeat whose `updatedAt` is
 inside the freshness window. Durable conversation content travels on its own transport and is
 unaffected by anything below.
 
@@ -70,6 +71,11 @@ offline may block work or refuse a dispatch; unknown proceeds and fails later ag
 deadline, because a truthful slow failure beats a fast wrong one. A surface that reports liveness
 carries the state itself rather than a boolean, so a caller can tell "we checked and it is down"
 from "we could not check".
+
+Role availability and machine deletion need a yes/no answer, so they resolve unknown instead of
+carrying it: a machine this client saw online within the last ten minutes counts as online, and
+any other machine counts as offline. This is the one exception to reporting unknown; it applies
+only to those two surfaces and never to dispatch.
 
 ## Evidence
 

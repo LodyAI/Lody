@@ -16,21 +16,35 @@ describe('machine command helpers', () => {
     const machine = createMachine({ id: 'machine-1' });
 
     // A joined room that simply lacks the entry is real evidence the machine is down.
-    const absent = toMachineListEntry(machine, new Set<MachineId>());
+    const absent = toMachineListEntry(machine, { online: new Set<MachineId>(), synced: true });
     expect(absent.online).toBe(false);
     expect(absent.onlineStatus).toBe('offline');
 
-    const present = toMachineListEntry(machine, new Set<MachineId>(['machine-1' as MachineId]));
+    const present = toMachineListEntry(machine, {
+      online: new Set<MachineId>(['machine-1' as MachineId]),
+      synced: true,
+    });
     expect(present.online).toBe(true);
     expect(present.onlineStatus).toBe('online');
 
-    // A null snapshot means the presence room could not be joined. `online` stays false
-    // because nothing proved the machine up, but a --json consumer reading stdout must
-    // still be able to tell that apart from a confident offline: the distinction used to
-    // exist only in a stderr warning.
-    const unavailable = toMachineListEntry(machine, null);
+    // Without a joined room and a fresh heartbeat, nothing proved the machine up or down.
+    // `online` stays false, but a --json consumer reading stdout must still be able to
+    // tell that apart from a confident offline: the distinction used to exist only in a
+    // stderr warning.
+    const unavailable = toMachineListEntry(machine, {
+      online: new Set<MachineId>(),
+      synced: false,
+    });
     expect(unavailable.online).toBe(false);
     expect(unavailable.onlineStatus).toBe('unknown');
+
+    // A heartbeat received before the room left 'joined' (a live-read recycle or a
+    // failed local POST) still proves the machine up.
+    const recycling = toMachineListEntry(machine, {
+      online: new Set<MachineId>(['machine-1' as MachineId]),
+      synced: false,
+    });
+    expect(recycling.onlineStatus).toBe('online');
   });
 
   it('sorts machines by presence-online state, current machine, then name', () => {

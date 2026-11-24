@@ -33,8 +33,13 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
-Header controls use the local `CuidaSidebarExpandOutline` SVG for the sidebar toggle
-and Lucide `ChevronLeft` / `ChevronRight` for history navigation, in 16px boxes.
+Opening a desktop session row's menu immediately dismisses its hover card.
+The card stays hidden while the menu or a submenu is open.
+
+Header controls (`sidebar-history-controls.tsx`) use the local `CuidaSidebarExpandOutline`
+SVG for the sidebar toggle and Lucide `ChevronLeft` / `ChevronRight` for history
+navigation, in 16px boxes. Every page header that offers to show a hidden sidebar
+(conversation, new chat, Today, Archive, Schedules) renders these same controls.
 Cuida's source and Apache-2.0 license are retained beside the icon component.
 
 The Add folder and view controls use Lucide `FolderPlus` and `SlidersHorizontal`
@@ -71,6 +76,39 @@ Decisions:
 [project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md),
 [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md),
 and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sidebar-row-details-group.md).
+
+## Workspace sheets
+
+Mobile workspace creation and deletion use the Vaul-backed
+[`DrawerDescription`](../ui/drawer.tsx)'s optional physical `fontSize` to keep their
+0.78rem copy. Omitting it retains the description's original default; caller and
+slotted-child styles keep precedence. The sheet still owns validation, pending
+state and keyboard handling.
+
+In the Project (Workspace) view the Details group adds a third switch, `Hide
+Empty Projects` (`sidebarHideEmptyProjectsAtom`, on by default). On, a project
+is listed only while it has Session rows after pinned-tree separation and opener
+placement, and an emptied machine section is hidden unless it still holds a
+multi-repository project with conversations; off, every registered project under
+each machine stays listed. The
+selection lives in `selectVisibleLocalProjectSections`
+(`lib/project-group-placement.ts`). Multi-repository projects that run anywhere
+sit with the GitHub repositories and stay listed only while they have
+conversations, whatever the switch says.
+
+Status organize mode lists the same rows as Updated below the Pinned area, in the
+Focus, Later and Settled tiers of the [Status view Spec](../../../../specs/sidebar-status-view.md).
+The shared Status view in `packages/shared/src/status-view/` decides each row's tier,
+order and opened-by nesting and plans every Status and pin-section write;
+`buildSidebarUpdatedBuckets` adapts its tiers for both the renderer and keyboard
+navigation, and `hooks/use-session-actions.ts` performs the planned writes. Focus stays
+mounted while empty as a drop target, only Settled folds behind Show all, and tier
+collapse and Show all share Updated's persisted per-bucket maps. Members who cannot
+write shared state (an encrypted workspace's Guest, a read-only membership) are not
+offered Status actions or section management (`hooks/use-status-view-writable.ts`). A
+drop the planner refuses because it would reorder conversations the member cannot manage
+snaps back with a notice rather than silently. `lib/status-view-state.ts` turns a drop slot
+into the neighbor the planner takes, for the sidebar and the Storybook playgrounds alike.
 
 ## Entry points and layout
 
@@ -155,6 +193,11 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   beside the automatic navigation — a browser that refuses a custom-scheme
   navigation reports nothing back, so the link must already be on screen.
   [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-electron-browser-signin-account-choice.md).
+  The post-transfer Storybook states mount the real LoginPage in a same-origin
+  sandboxed iframe that blocks custom-protocol launch while the trusted fixture
+  keeps its sandbox intact. It is not an isolation boundary for hostile scripts.
+  Manual link activation is recorded without opening external software; these
+  states cover UI, not OS handoff.
 - Desktop update prompt: `sidebar-update-banner.tsx` and
   `update-changelog-dialog.tsx`, driven by the pure selectors in
   `lib/electron-update-banner.ts`.
@@ -163,6 +206,17 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
   `viewport-fit=cover`, which is why desktop top/side padding also matters there.
   The composer owns its bottom edge; a global bottom inset would double-pad it.
+  [`workspace-layout-utils.ts`](workspace-layout-utils.ts) owns the shared StyleX
+  root/content classes and the element-local safe-area and native-keyboard readers.
+  The root helper defaults to the page surface; the main workspace explicitly
+  selects `surface: 'sidebar'`, choosing one background in the same StyleX
+  composition. Settings and existing default callers keep the page surface.
+  Its retained `h-svh` hook also serves the old-browser fallback and Electron devbar;
+  it is not an unused utility.
+  The persistent
+  [`workspace inset browser suite`](../../tests/e2e/workspace-layout-insets.spec.ts)
+  checks the real composer fixtures, local inset readers, natural keyboard-padding
+  transition, focus and draft retention against a running Storybook build.
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact
@@ -173,6 +227,10 @@ and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sid
   presentation and settings navigation can still remount it: `LoroSidebar` saves
   its viewport offset by workspace in `atoms/sidebar-state.ts` and restores it
   before paint. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-content-width-animation.md).
+- On wide mobile Web layouts, the workspace shows a centered 44 px grab target at
+  the sidebar seam. Dragging it or focusing the separator and using Left/Right
+  changes the saved width within 180–420 px. The desktop sidebar minimum is
+  240 px. The boot shell uses the same limits.
 
 ## Provider readiness
 
@@ -216,7 +274,10 @@ records the preservation boundary.
 visibility copy (`getSessionSharingLabel` / `getSessionSharingDescription`), the
 list-row `SessionSharingIndicator`, the `SessionArchivedBadge`, the team-share
 confirmation dialogs, and `SessionAccessControl` — the one header control
-carrying both team visibility and static publication.
+showing Private / Team read-only / Team can edit. Machine owners manage independent
+read grants through the platform `sessionAccess` port in both workspace modes;
+public publication remains a separate section. Read-only targets mount the
+independent history reader. See the draft [session access Spec](../../../../specs/session-access.md).
 
 Team visibility is resolved by `hooks/use-session-sharing.ts` over
 `lib/session-sharing.ts`. Static publication lives in `sharing/`, with
@@ -226,13 +287,14 @@ companion `useSessionShareStatus` answering the header's "already shared?".
 and the "…" menu open. Rationale:
 [header share control](../../../../.agents/notes/implemented/feature/2026-09-14-session-header-share-control.md).
 
-## PR auto-archive
+## Terminal
 
-`auto-archive-pr-watcher.tsx` keeps observed PR transitions separate from unfinished
-archive attempts. Its owning window retries the existing Session action with capped
-backoff and drops superseded work on scope changes. The action's automatic-only
-progress receipt records accepted targets; its cancellation check uses the
-authoritative snapshot before retry side effects, so restoring a partially archived
-Session or Tab supersedes the unfinished operation. Startup and restore still only
-establish the PR baseline.
-See the [retry decision](../../../../.agents/notes/implemented/bug-fix/2026-10-17-pr-auto-archive-retry.md).
+`terminal/terminal-theme.ts` resolves CSS colors synchronously through a disposable
+probe with transitions disabled, so the global reduced-motion rule cannot blank a
+terminal. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-09-terminal-reduced-motion-colors.md).
+
+In the bottom terminal panel, hold Cmd on macOS or Ctrl on Windows/Linux and
+left-click an HTTP(S) URL to open it. A text selection prevents the click from
+opening a URL. Plain-text links show a pointer and underline while the modifier
+is held. OSC 8 links keep the default xterm decoration and use the same click rule.
+Plain-text detection accepts ASCII URLs and joins wrapped rows.

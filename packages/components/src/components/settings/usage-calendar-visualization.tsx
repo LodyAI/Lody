@@ -21,6 +21,7 @@ import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
@@ -58,8 +59,10 @@ import {
   formatUsageTimelineBucketLabel,
   formatUsageTimelineBucketInterval,
   formatUsageTimelineWindow,
+  groupUsageWeekBuckets,
   usageTimelineHourLabels,
 } from './usage-timeline-bucket-label';
+import { copyTextToClipboard } from '@/lib/clipboard';
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
 
@@ -158,6 +161,7 @@ const styles = stylex.create({
   },
   selectedMark: { boxShadow: '0 0 0 1px hsl(var(--foreground))' },
   dayBarInteractive: {
+    default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -170,6 +174,7 @@ const styles = stylex.create({
     },
   },
   weekDotInteractive: {
+    default: null,
     '@media (hover: hover)': {
       filter: {
         default: 'none',
@@ -366,9 +371,6 @@ const styles = stylex.create({
   },
   rangeLabel: {
     minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
     fontSize: '11px',
     fontVariantNumeric: 'tabular-nums',
     color: 'hsl(var(--muted-foreground))',
@@ -376,7 +378,13 @@ const styles = stylex.create({
   weekColumn: { minWidth: 0, flex: 1 },
   mutedHalf: { color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)' },
   foreground: { color: 'hsl(var(--foreground))' },
-  peakLine: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: '12px' },
+  peakLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: '12px',
+    rowGap: '4px',
+  },
   rangeFrame: { position: 'relative', minHeight: '10.5rem', minWidth: 0 },
   fixedReadout: {
     display: 'flex',
@@ -551,6 +559,12 @@ const styles = stylex.create({
     borderRadius: 'var(--radius-lg)',
     backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
     padding: space[4],
+  },
+  detailCloseOffset: {
+    position: 'absolute',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    right: 'calc(var(--spacing) * 2)',
+    top: 'calc(var(--spacing) * 2)',
   },
   detailCloseIcon: {
     width: '14px',
@@ -1027,13 +1041,9 @@ function RangeSweep({
   );
 }
 
-/** Hours are labelled every three; a label on all 24 becomes noise. */
+/** Label every third column to keep the narrow view readable. */
 const HOUR_LABEL_STEP = 3;
-function HourAxis({
-  labels = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0')),
-}: {
-  labels?: string[];
-}) {
+function HourAxis({ labels }: { labels: string[] }) {
   return (
     <div
       aria-hidden="true"
@@ -1072,6 +1082,8 @@ function UsageDayMatrix({
 }) {
   const { buckets } = timeline;
   const formats = useCalendarFormats();
+  const timeZone = formats.timeline.resolvedOptions().timeZone;
+  const hourLabels = useMemo(() => usageTimelineHourLabels(buckets, timeZone), [buckets, timeZone]);
   const maxValue = buckets.reduce(
     (peak, bucket) => Math.max(peak, metric === 'tokens' ? bucket.tokens : bucket.costUSD),
     0
@@ -1155,7 +1167,7 @@ function UsageDayMatrix({
         })}
       </div>
       <div aria-hidden="true" {...stylex.props(styles.emptyRow)} />
-      <HourAxis labels={usageTimelineHourLabels(buckets)} />
+      <HourAxis labels={hourLabels} />
     </div>
   );
 }
@@ -1164,18 +1176,14 @@ const WEEK_DOT_MIN_PX = 5;
 const WEEK_DOT_MAX_PX = 13;
 
 /**
- * 7d: the same 24 hour tracks as the 24h view, stacked seven deep. Dots rather
- * than tiles — a circle that grows and brightens with its hour keeps a quiet
- * week readable as texture, where a full-bleed grid turns into a wall. Clicking
- * a dot opens that day's breakdown.
+ * 7d: one row per local date, with dots positioned by the start hour. Each dot
+ * retains the original timestamp for the UTC day breakdown.
  */
 function UsageWeekMatrix({
   timeline,
   metric,
   intensityOf,
   reduced,
-  weekdayFormat,
-  dayOfMonthFormat,
   selectedCellMs,
   onToggleDay,
 }: {
@@ -1183,105 +1191,108 @@ function UsageWeekMatrix({
   metric: UsageCalendarMetric;
   intensityOf: (value: number) => number;
   reduced: boolean;
-  weekdayFormat: Intl.DateTimeFormat;
-  dayOfMonthFormat: Intl.DateTimeFormat;
   /** Exact hour cell that opened the breakdown; only it carries the ring. */
   selectedCellMs: number | null;
   onToggleDay: (dayStartMs: number, cellMs: number, element: HTMLElement | null) => void;
 }) {
-  const startDayMs = Math.floor(timeline.startMs / DAY_MS) * DAY_MS;
-  const lastDayMs = Math.floor(Math.max(timeline.startMs, timeline.endMs - 1) / DAY_MS) * DAY_MS;
-  const dayStarts = Array.from(
-    { length: Math.floor((lastDayMs - startDayMs) / DAY_MS) + 1 },
-    (_, index) => startDayMs + index * DAY_MS
-  );
-  const cellCount = dayStarts.length * 24;
   const formats = useCalendarFormats();
-  const valuesByBucket = useMemo(() => {
-    const values = new Map<number, number>();
-    for (const bucket of timeline.buckets) {
-      values.set(bucket.bucketStartMs, metric === 'tokens' ? bucket.tokens : bucket.costUSD);
-    }
-    return values;
-  }, [metric, timeline.buckets]);
+  const { buckets } = timeline;
+  const timeZone = formats.timeline.resolvedOptions().timeZone;
+  const { labels, rows } = useMemo(
+    () => groupUsageWeekBuckets(buckets, timeZone),
+    [buckets, timeZone]
+  );
 
-  // Roving tabindex: the 7×24 grid is one tab stop, arrow keys walk cells.
+  // One tab stop for the grid. Vertical arrows stay in the same clock column.
   const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [focusIndex, setFocusIndex] = useState(0);
-  const focusCell = useCallback(
-    (index: number) => {
-      const next = Math.min(Math.max(index, 0), cellCount - 1);
-      setFocusIndex(next);
-      cellRefs.current[next]?.focus();
-    },
-    [cellCount]
-  );
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
-    const deltas: Record<string, number> = {
-      ArrowUp: -24,
-      ArrowDown: 24,
-      ArrowLeft: -1,
-      ArrowRight: 1,
-    };
-    const delta = deltas[event.key];
-    if (delta !== undefined) {
-      event.preventDefault();
-      focusCell(index + delta);
-      return;
+  const onKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+    dayIndex: number,
+    column: number
+  ) => {
+    let target: number | undefined;
+    switch (event.key) {
+      case 'ArrowUp':
+      case 'ArrowDown': {
+        const adjacent = rows[dayIndex + (event.key === 'ArrowDown' ? 1 : -1)];
+        const firstColumnForHour = labels.indexOf(labels[column]!);
+        target = adjacent?.bucketIndexes[column] ?? adjacent?.bucketIndexes[firstColumnForHour];
+        break;
+      }
+      case 'ArrowLeft':
+        target = index - 1;
+        break;
+      case 'ArrowRight':
+        target = index + 1;
+        break;
+      case 'Home':
+        target = 0;
+        break;
+      case 'End':
+        target = buckets.length - 1;
+        break;
+      default:
+        return;
     }
-    if (event.key === 'Home' || event.key === 'End') {
-      event.preventDefault();
-      focusCell(event.key === 'Home' ? 0 : cellCount - 1);
-    }
+    event.preventDefault();
+    if (target !== undefined) cellRefs.current[target]?.focus();
   };
 
   return (
     <div {...stylex.props(styles.weekMatrix)}>
       {/* Day gutter, outside the rows so the sweep cannot drag the labels. */}
       <div aria-hidden="true" {...stylex.props(styles.dayGutter)}>
-        {dayStarts.map((dayStartMs) => (
-          <span key={dayStartMs} {...stylex.props(styles.gutterLabel, styles.weekRow)}>
-            <span>{weekdayFormat.format(new Date(dayStartMs))}</span>
-            <span {...stylex.props(styles.dimmedText)}>
-              {dayOfMonthFormat.format(new Date(dayStartMs))}
-            </span>
+        {rows.map(({ dateMs }) => (
+          <span key={dateMs} {...stylex.props(styles.gutterLabel, styles.weekRow)}>
+            <span>{formats.weekday.format(dateMs)}</span>
+            <span {...stylex.props(styles.dimmedText)}>{formats.dayOfMonth.format(dateMs)}</span>
           </span>
         ))}
       </div>
       <div {...stylex.props(styles.weekColumn)}>
         <div {...stylex.props(styles.weekRows)}>
-          {dayStarts.map((dayStartMs, dayIndex) => (
-            <RangeSweep key={dayStartMs} index={dayIndex} reduced={reduced} axis="row">
-              <div {...stylex.props(styles.hourGrid)} role="row">
-                {Array.from({ length: 24 }, (_, hour) => {
-                  const cellIndex = dayIndex * 24 + hour;
-                  const cellMs = dayStartMs + hour * HOUR_MS;
-                  const value = valuesByBucket.get(cellMs) ?? 0;
+          {rows.map(({ dateMs, bucketIndexes }, dayIndex) => (
+            <RangeSweep key={dateMs} index={dayIndex} reduced={reduced} axis="row">
+              <div
+                {...stylex.props(styles.hourGrid, styles.weekRow)}
+                role="row"
+                style={{ gridTemplateColumns: `repeat(${labels.length}, minmax(0, 1fr))` }}
+              >
+                {bucketIndexes.map((index, column) => {
+                  if (index === undefined) return null;
+                  const bucket = buckets[index]!;
+                  const cellMs = bucket.bucketStartMs;
+                  const dayStartMs = Math.floor(cellMs / DAY_MS) * DAY_MS;
+                  const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
                   const intensity = intensityOf(value);
                   const size =
                     intensity > 0
                       ? WEEK_DOT_MIN_PX + (WEEK_DOT_MAX_PX - WEEK_DOT_MIN_PX) * intensity
                       : WEEK_DOT_MIN_PX - 1;
-                  const label = `${formatUsageTimelineBucketLabel(timeline, { bucketStartMs: cellMs, bucketLabel: '' }, formats.timeline)} · ${formatMetric(value, metric)}`;
+                  const label = `${formatUsageTimelineBucketLabel(timeline, bucket, formats.timeline)} · ${formatMetric(value, metric)}`;
                   const selected = cellMs === selectedCellMs;
                   return (
                     <button
-                      key={hour}
+                      key={cellMs}
                       ref={(element) => {
-                        cellRefs.current[cellIndex] = element;
+                        cellRefs.current[index] = element;
                       }}
                       type="button"
                       role="gridcell"
-                      tabIndex={cellIndex === focusIndex ? 0 : -1}
+                      tabIndex={index === Math.min(focusIndex, buckets.length - 1) ? 0 : -1}
                       title={label}
                       aria-label={label}
                       aria-selected={selected}
+                      aria-colindex={column + 1}
                       // focus-visible:shadow-none opts out of the global inset
                       // primary focus border; the dot carries the focus ring instead.
                       {...stylex.props(styles.weekCell, styles.weekRow, usageCellMarker)}
+                      style={{ gridColumn: column + 1 }}
                       onClick={(event) => onToggleDay(dayStartMs, cellMs, event.currentTarget)}
-                      onKeyDown={(event) => onKeyDown(event, cellIndex)}
-                      onFocus={() => setFocusIndex(cellIndex)}
+                      onKeyDown={(event) => onKeyDown(event, index, dayIndex, column)}
+                      onFocus={() => setFocusIndex(index)}
                     >
                       <span
                         aria-hidden="true"
@@ -1304,15 +1315,28 @@ function UsageWeekMatrix({
             </RangeSweep>
           ))}
         </div>
-        <HourAxis />
+        <HourAxis labels={labels} />
       </div>
     </div>
   );
 }
 
 const COMPOSITION_SEGMENT_LIMIT = 5;
-const MODEL_SERIES_COLORS = ['#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'] as const;
-const MEMBER_SERIES_COLORS = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#e9d5ff'] as const;
+// Per-subject alpha over the chart palette so series hues follow the theme.
+const MODEL_SERIES_COLORS = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-1) / 0.82)',
+  'hsl(var(--chart-1) / 0.64)',
+  'hsl(var(--chart-1) / 0.46)',
+  'hsl(var(--chart-1) / 0.28)',
+] as const;
+const MEMBER_SERIES_COLORS = [
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-3) / 0.82)',
+  'hsl(var(--chart-3) / 0.64)',
+  'hsl(var(--chart-3) / 0.46)',
+  'hsl(var(--chart-3) / 0.28)',
+] as const;
 
 type UsageCompositionSegment = {
   id: string;
@@ -1819,8 +1843,6 @@ function UsageRangePanel({
                   metric={metric}
                   intensityOf={intensityOf}
                   reduced={reduced}
-                  weekdayFormat={formats.weekday}
-                  dayOfMonthFormat={formats.dayOfMonth}
                   selectedCellMs={selectedCellMs}
                   onToggleDay={toggleDay}
                 />
@@ -1845,7 +1867,7 @@ function UsageRangePanel({
         <p {...stylex.props(styles.readout)} aria-live="polite">
           {selectedDayMs !== null && selectedDayTotal !== null ? (
             <>
-              {formats.day.format(new Date(selectedDayMs))}
+              {`${formats.day.format(selectedDayMs)} · UTC`}
               {selectedDayTotal > 0
                 ? ` · ${formatMetric(selectedDayTotal, metric)}${
                     metric === 'tokens' ? ` ${t('workspace.usage.tokens')}` : ''
@@ -1855,7 +1877,7 @@ function UsageRangePanel({
           ) : (
             <span {...stylex.props(styles.clickHint)}>
               <MousePointerClick {...stylex.props(styles.iconSmall)} aria-hidden="true" />
-              {t('workspace.usage.skyline.clickHint')}
+              {t('workspace.usage.skyline.hourClickHint')}
             </span>
           )}
         </p>
@@ -2308,14 +2330,16 @@ function UsageDayDetailPanel({
           icon
           variant="ghost"
           aria-label={t('common.close')}
-          className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
+          height="calc(var(--spacing) * 6)"
+          width="calc(var(--spacing) * 6)"
+          xstyle={styles.detailCloseOffset}
           onClick={onClose}
         >
           <X {...stylex.props(styles.detailCloseIcon)} />
         </Button>
         <div {...stylex.props(styles.detailGrid)}>
           <div {...stylex.props(styles.minWidthZero)}>
-            <p {...stylex.props(styles.detailDate)}>{formats.day.format(new Date(dayStartMs))}</p>
+            <p {...stylex.props(styles.detailDate)}>{`${formats.day.format(dayStartMs)} · UTC`}</p>
             <p {...stylex.props(styles.detailTotal)}>
               <span {...stylex.props(styles.detailValue)}>
                 {day ? (
@@ -2417,7 +2441,7 @@ function UsageDayDetailPanel({
                       tokens: row.tokens,
                       icon: (
                         <Avatar.Root size="mini">
-                          {user?.image ? <Avatar.Image src={user.image} alt="" /> : null}
+                          <CachedAvatarImage src={user?.image} alt="" />
                           <Avatar.Fallback>{label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
                         </Avatar.Root>
                       ),
@@ -2828,7 +2852,7 @@ export function UsageCalendarVisualization({
 
   const copyAscii = async () => {
     try {
-      await navigator.clipboard.writeText(ascii);
+      await copyTextToClipboard(ascii);
       toast.success(t('workspace.usage.skyline.asciiCopied'));
     } catch {
       toast.error(t('workspace.usage.skyline.copyFailed'));
@@ -2857,9 +2881,7 @@ export function UsageCalendarVisualization({
           <p {...stylex.props(styles.cardSubtitle)}>
             {hourlyTimeline
               ? t(`workspace.usage.window.${hourlyTimeline.range}.long`)
-              : windowTimeline
-                ? t('workspace.usage.skyline.windowSubtitle')
-                : t('workspace.usage.skyline.subtitle')}
+              : `${t(windowTimeline ? 'workspace.usage.skyline.windowSubtitle' : 'workspace.usage.skyline.subtitle')} · UTC`}
           </p>
         </div>
         <div {...stylex.props(styles.controlGroup)}>
@@ -2885,10 +2907,7 @@ export function UsageCalendarVisualization({
             letting the old view vanish before the new one starts. */}
         {/* Keep the containing block even after the hourly-only grid goes away:
             popLayout's measured offsets must retain the same coordinate system. */}
-        <div
-          data-usage-view-frame
-          {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}
-        >
+        <div data-usage-view-frame {...stylex.props(styles.viewFrame, rings && styles.ringLayout)}>
           {/* Hourly ranges only: the ring runs its own plain fade, independent
               of the matrix container's fade. popLayout pops the
               leaving ring out of flow at its old spot — otherwise the grid

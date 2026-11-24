@@ -254,6 +254,7 @@ it('opens an admitted workspace through actual HTTP/public SDK, cleans failed ac
             ledger: () => Effect.sync(currentView),
           });
           const gateway = yield* makeLabControlGateway({
+            quotaPath: join(f.dir, 'ledger-quota.sqlite'),
             genesis: f.anchor,
             now: () => 0,
             checkpoint: () => Effect.sync(() => checkpoint(originals)),

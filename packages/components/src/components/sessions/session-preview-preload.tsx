@@ -17,6 +17,7 @@ import {
   canPrepareManagedPreviewFrame,
   prepareManagedPreviewFrame,
 } from './managed-preview-frame-cache';
+import { rememberSessionRemotePreview } from './session-browser-resume-state';
 
 /** Observes the visible conversation's existing document; no extra doc or polling. */
 export function SessionPreviewPreload({
@@ -82,6 +83,7 @@ export function SessionPreviewPreload({
           !samePreviewTargetOrigin(connection.target, address.target)
         )
           return;
+        rememberSessionRemotePreview(session.id, connection, response?.expiresAt);
         release = prepareManagedPreviewFrame(
           session.id,
           buildManagedViewerUrl(connection.publicUrl, address.target),

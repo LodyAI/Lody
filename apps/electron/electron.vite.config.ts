@@ -1,10 +1,10 @@
+import cloudConfig from './electron.cloud.config'
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
-import tailwindcss from '@tailwindcss/vite'
 import stylex from '@stylexjs/unplugin'
 import {
   loroCrdtBundlerAlias,
@@ -15,7 +15,7 @@ import {
   isMermaidRuntimeDependency,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
-import { stylexOptions } from '../../packages/ui/stylex-options'
+import { componentsStylexOptions } from '../../packages/components/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
@@ -66,7 +66,12 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
   return define
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig((context) => {
+  const platform = process.env.VITE_LODY_PLATFORM?.trim() || 'local'
+  if (!['local', 'cloud'].includes(platform))
+    throw new Error(`Unsupported VITE_LODY_PLATFORM: ${platform}`)
+  if (platform === 'cloud') return cloudConfig(context)
+  const { mode } = context
   const buildMode = mode || OSS_BUILD_MODE
   if (buildMode !== OSS_BUILD_MODE) {
     throw new Error(`The public Electron workspace only supports --mode ${OSS_BUILD_MODE}`)
@@ -187,10 +192,8 @@ export default defineConfig(({ mode }) => {
           }
         }
       },
-      // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
-        tailwindcss(),
-        stylex.vite(stylexOptions),
+        stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

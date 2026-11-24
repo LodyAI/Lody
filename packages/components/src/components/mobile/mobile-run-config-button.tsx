@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ListChecks, Zap } from 'lucide-react';
-import { classifyPermissionModeFace } from '@lody/shared';
+import { ACP_FAST_MODE_VALUE_ULTRAFAST, classifyPermissionModeFace } from '@lody/shared';
 
 import {
   resolveConfigOptionValue,
@@ -12,6 +12,7 @@ import {
   type AcpSelectConfigOptionSelector,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
+import { StackedZapIcon } from '@/components/icons/stacked-zap-icon';
 import { composerSurface } from '@/components/shared/composer-surface';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -109,6 +110,7 @@ export function useRunConfigFace({
     permissionModeSelectors,
     modeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
   } = useMemo(() => orderAcpConfigOptionSelectors(configOptionSelectors), [configOptionSelectors]);
@@ -164,11 +166,20 @@ export function useRunConfigFace({
     ? resolvePlanModeSelectorEnabled(planSelector, configOptionValues?.[planSelector.configId])
     : false;
   const fastSelector = fastModeSelectors[0];
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
   const fastOn = fastSelector
     ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
-    : false;
+    : Boolean(speedTierValue && speedTierValue !== 'off');
 
-  return { modelLabel, thinkingLabel, modeId, planOn, fastOn };
+  const ultrafastOn = !fastSelector && speedTierValue === ACP_FAST_MODE_VALUE_ULTRAFAST;
+
+  return { modelLabel, thinkingLabel, modeId, planOn, fastOn, ultrafastOn };
 }
 
 /** Middle-dot separator between the face's identity/status groups. */
@@ -187,7 +198,8 @@ export function MobileRunConfigButton({
   ariaLabel = 'Run configuration',
   ...faceProps
 }: MobileRunConfigButtonProps) {
-  const { modelLabel, thinkingLabel, modeId, planOn, fastOn } = useRunConfigFace(faceProps);
+  const { modelLabel, thinkingLabel, modeId, planOn, fastOn, ultrafastOn } =
+    useRunConfigFace(faceProps);
   const hasToggle = planOn || fastOn;
   // The indicator hides itself for default/unknown modes; mirror that here so
   // the separator dot never renders next to nothing.
@@ -231,7 +243,13 @@ export function MobileRunConfigButton({
               aria-hidden="true"
             />
           ) : null}
-          {fastOn ? (
+          {ultrafastOn ? (
+            <StackedZapIcon
+              {...stylex.props(composerSurface.glyph14, styles.live)}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          ) : fastOn ? (
             <Zap
               {...stylex.props(composerSurface.glyph14, styles.live)}
               strokeWidth={1.8}

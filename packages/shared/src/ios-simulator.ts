@@ -7,7 +7,15 @@ export const IosSimulatorDeviceControlSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('button'),
-      button: z.enum(['home', 'app-switcher', 'lock', 'volume-up', 'volume-down', 'action']),
+      button: z.enum([
+        'home',
+        'app-switcher',
+        'lock',
+        'volume-up',
+        'volume-down',
+        'action',
+        'software-keyboard',
+      ]),
     })
     .strict(),
   z.object({ kind: z.literal('rotate'), direction: z.enum(['left', 'right']) }).strict(),
@@ -59,7 +67,13 @@ export const IosSimulatorCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('exterior'), udid: IosSimulatorUdidSchema }).strict(),
   z.object({ action: z.literal('start'), udid: IosSimulatorUdidSchema }).strict(),
   z.object({ action: z.literal('status'), operationId: id.optional() }).strict(),
-  z.object({ action: z.literal('stop'), operationId: id }).strict(),
+  z
+    .object({
+      action: z.literal('stop'),
+      operationId: id,
+      shutdownDevice: z.boolean().optional(),
+    })
+    .strict(),
 ]);
 export const IosSimulatorRequestSchema = z
   .object({

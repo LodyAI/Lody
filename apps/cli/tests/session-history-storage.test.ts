@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import {
   applyNotificationOnHistory,
   buildAgentMessageAuthor,
@@ -10,7 +11,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
 import type { SessionHistory } from '@lody/shared';
 import type { SessionId } from '@lody/shared/ids';
-import { createHistoryWriter } from '@lody/shared';
 import {
   createLoroSessionData as createStoredSession,
   pageVisibleTranscript,

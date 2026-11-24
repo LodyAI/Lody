@@ -1,9 +1,12 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { existsSync } from 'node:fs';
 import { prepareMagpieRuntime } from './magpie-runtime';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { inspectNpxInstallState } from './npx-cache';
 
 import {
   type AgentConfigCliType,
@@ -27,10 +30,12 @@ import { getAcpBinaryManager } from '@/agent/acp-binary-manager';
 import {
   BUILTIN_CLAUDE_CAPABILITY_SOURCE_VERSION,
   BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION,
+  formatBuiltinCodexCapabilitySourceVersion,
   BUILTIN_GROK_CAPABILITY_SOURCE_VERSION,
   BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION,
   CLAUDE_ACP_ADAPTER_VERSION,
   CLAUDE_AGENT_SDK_VERSION,
+  ANTIGRAVITY_RUNTIME_VERSION,
   CODEX_ACP_ADAPTER_VERSION,
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
@@ -129,6 +134,7 @@ export type ResolveBuiltinAuthenticationProcessLaunchInput = ResolveACPSettingIn
 };
 
 export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
+  antigravity: { packageName: 'antigravity', version: ANTIGRAVITY_RUNTIME_VERSION, binName: 'agy' },
   devin: {
     packageName: 'acp-extension-devin',
     version: DEVIN_ACP_ADAPTER_VERSION,
@@ -176,6 +182,15 @@ const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
 // User-managed version; refresh capabilities explicitly after upgrading.
 const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
+/**
+ * Sorbet ships runtime fixes on its own cadence, so Lody launches the dist-tag and never
+ * pins a version. The tag names the requested install, not the build that runs: the
+ * capability source version below reports the installed version when the npx cache can
+ * name it and falls back to this tag when it cannot.
+ */
+const SORBET_ACP_PACKAGE_NAME = '@sorbetai/acp';
+const SORBET_ACP_DIST_TAG = 'alpha';
+const SORBET_ACP_PACKAGE = `${SORBET_ACP_PACKAGE_NAME}@${SORBET_ACP_DIST_TAG}`;
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -205,6 +220,49 @@ const registryAgentsById: Record<string, RegistryAcpAgent> = Object.fromEntries(
 );
 // Keep existing providers and stored turns runnable until their owner chooses
 // migration. This compatibility entry is deliberately absent from the catalog.
+registryAgentsById['antigravity-acp'] = {
+  id: 'antigravity-acp',
+  name: 'Antigravity ACP (Legacy)',
+  version: '1.5.0',
+  description: 'Google’s AI coding agent',
+  icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/antigravity-acp.svg',
+  distribution: {
+    binary: {
+      'darwin-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-arm64.zip',
+        cmd: './agy_acp_server.par',
+      },
+      'darwin-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.5.0-darwin-x86_64.zip',
+        cmd: './agy_acp_server.par',
+      },
+      'linux-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-x86_64.zip',
+        cmd: './agy_acp_server.par',
+        args: ['--uid='],
+      },
+      'linux-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.5.0-linux-arm64.zip',
+        cmd: './agy_acp_server.par',
+        args: ['--uid='],
+      },
+      'windows-x86_64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-x86_64.zip',
+        cmd: './agy_acp_server.exe',
+      },
+      'windows-aarch64': {
+        archive:
+          'https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.5.0-windows-arm64.zip',
+        cmd: './agy_acp_server.exe',
+      },
+    },
+  },
+};
 registryAgentsById['pi-acp'] = {
   id: 'pi-acp',
   name: 'Pi ACP (legacy)',
@@ -230,7 +288,7 @@ registryAgentsById.dimcode = {
 registryAgentsById.devin = {
   id: 'devin',
   name: 'Devin',
-  version: '3000.11.3',
+  version: '3000.12.28',
   distribution: {
     binary: Object.fromEntries(
       (
@@ -245,7 +303,7 @@ registryAgentsById.devin = {
       ).map(([platform, target]) => [
         platform,
         {
-          archive: `https://static.devin.ai/cli/3000.11.3/devin-3000.11.3-${target}.${platform.startsWith('windows-') ? 'zip' : 'tar.gz'}`,
+          archive: `https://static.devin.ai/cli/3000.12.28/devin-3000.12.28-${target}.${platform.startsWith('windows-') ? 'zip' : 'tar.gz'}`,
           cmd: platform.startsWith('windows-') ? './bin/devin.exe' : './bin/devin',
           args: ['acp'],
         },
@@ -265,13 +323,34 @@ export function resolveBuiltinACPSetting(agentType: string): ResolvedACPSetting 
   );
 }
 
+/**
+ * The Sorbet build an npx launch would run, when the local cache can name it.
+ *
+ * `@sorbetai/acp@alpha` names the requested install, so a capability entry stamped
+ * with the tag cannot say which build produced it. Reading the installed
+ * `package.json` version fixes that for provenance and for future targeted
+ * invalidations, while a cold or ambiguous cache falls back to the tag instead of
+ * asserting a build Lody has not observed. Nothing keys a cache hit on this value:
+ * `resolveExpectedAcpCapabilitySourceVersion` always re-probes Sorbet.
+ */
+function resolveSorbetInstalledAcpVersion(): string | undefined {
+  const state = inspectNpxInstallState(SORBET_ACP_PACKAGE_NAME, SORBET_ACP_DIST_TAG);
+  return state.kind === 'ready' ? state.resolvedVersion : undefined;
+}
+
 export function getAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput,
-  managedRuntimeVersion?: string
+  managedRuntimeVersion?: string,
+  /** The Sorbet build the npx cache would run; omitted when it cannot be named. */
+  sorbetInstalledVersion?: string
 ): string {
   if (input.cliType === 'builtin' && input.magpieGatewayUrl) {
     const { magpieGatewayUrl: gateway, ...nativeInput } = input;
-    const base = getAcpCapabilitySourceVersion(nativeInput, managedRuntimeVersion);
+    const base = getAcpCapabilitySourceVersion(
+      nativeInput,
+      managedRuntimeVersion,
+      sorbetInstalledVersion
+    );
     const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
     const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
     return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
@@ -288,9 +367,12 @@ export function getAcpCapabilitySourceVersion(
       const runtimeOverrideSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(
         input.runtimeOverrides
       );
+      if (input.agentType === 'antigravity') {
+        return `builtin-antigravity:${managedRuntimeVersion ?? ANTIGRAVITY_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
+      }
       if (input.agentType === 'codex') {
         return managedRuntimeVersion
-          ? `builtin-codex-acp:${CODEX_ACP_ADAPTER_VERSION}+codex:${managedRuntimeVersion}`
+          ? formatBuiltinCodexCapabilitySourceVersion(managedRuntimeVersion)
           : `${BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'claude') {
@@ -320,6 +402,9 @@ export function getAcpCapabilitySourceVersion(
           ? `${DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION}+endpoint:${createHash('sha256').update(baseUrl).digest('hex').slice(0, 12)}`
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
       }
+      if (input.agentType === 'sorbet') {
+        return `builtin-sorbet:${SORBET_ACP_PACKAGE_NAME}@${sorbetInstalledVersion ?? SORBET_ACP_DIST_TAG}+auth-discovery:1`;
+      }
       if (input.agentType === 'dimcode') {
         return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;
       }
@@ -348,6 +433,7 @@ export function getAcpCapabilitySourceVersion(
  * answering capability refreshes from the managed runtime's cached entry.
  */
 const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
+  antigravity: 'antigravityPath',
   kimi: 'kimiPath',
   grok: 'grokPath',
   devin: 'devinPath',
@@ -370,6 +456,11 @@ const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
 export async function resolveExpectedAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput
 ): Promise<string | undefined> {
+  if (input.cliType === 'builtin' && input.agentType === 'sorbet') {
+    // The tag may move without changing the launch spec, and the build stamped into a
+    // cached entry is provenance only. Always probe on refresh.
+    return undefined;
+  }
   if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
     return getAcpCapabilitySourceVersion(input);
   }
@@ -504,12 +595,64 @@ export function resolveACPSetting(input: ResolveACPSettingInput): ResolvedACPSet
   throw new Error(`Unsupported ACP cliType: ${input.cliType as string}`);
 }
 
-function expandHomePath(pathValue: string): string {
-  if (pathValue === '~') return homedir();
+export function expandHomePath(pathValue: string, homeDir = homedir()): string {
+  if (!homeDir) return pathValue;
+  if (pathValue === '~' || pathValue === '$HOME' || pathValue === '${HOME}') {
+    return homeDir;
+  }
   if (pathValue.startsWith('~/') || pathValue.startsWith('~\\')) {
-    return join(homedir(), pathValue.slice(2));
+    return join(homeDir, pathValue.slice(2));
+  }
+  if (pathValue.startsWith('$HOME/') || pathValue.startsWith('$HOME\\')) {
+    return join(homeDir, pathValue.slice('$HOME/'.length));
+  }
+  if (pathValue.startsWith('${HOME}/') || pathValue.startsWith('${HOME}\\')) {
+    return join(homeDir, pathValue.slice('${HOME}/'.length));
   }
   return pathValue;
+}
+
+const AGENT_HOME_PATH_ENV_KEYS = [
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_EXECUTABLE',
+  'CLAUDE_CODE_HOST_CREDS_FILE',
+  'CODEX_HOME',
+  'GROK_HOME',
+  'GROK_CONFIG',
+  'XDG_CONFIG_HOME',
+] as const;
+
+/**
+ * Expands leading `~`, `$HOME`, and `${HOME}` in filesystem-path environment
+ * variables configured in Lody's Agent Config UI. Unlike a terminal shell,
+ * JSON/UI environment maps do not undergo shell word expansion before `spawn()`,
+ * and downstream SDKs (such as `@anthropic-ai/claude-agent-sdk` reading
+ * `CLAUDE_CONFIG_DIR`) treat unexpanded `$HOME/...` or `~/.claude-...` as
+ * non-absolute paths.
+ */
+export function normalizeAgentProcessEnv(
+  env: NodeJS.ProcessEnv,
+  homeDir = env.HOME?.trim() || homedir()
+): NodeJS.ProcessEnv {
+  let out: NodeJS.ProcessEnv | undefined;
+  for (const key of AGENT_HOME_PATH_ENV_KEYS) {
+    const raw = env[key];
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      if (key === 'CLAUDE_CONFIG_DIR') {
+        out ??= { ...env };
+        delete out[key];
+      }
+      continue;
+    }
+    const expanded = expandHomePath(trimmed, homeDir);
+    if (expanded !== raw) {
+      out ??= { ...env };
+      out[key] = expanded;
+    }
+  }
+  return out ?? env;
 }
 
 function trimRuntimeOverride(value: string | undefined): string | undefined {
@@ -568,6 +711,28 @@ async function resolveBuiltinACPProcessLaunch(
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }
+  if (input.agentType === 'sorbet') {
+    return {
+      command: 'npx',
+      args: ['-y', SORBET_ACP_PACKAGE, '--no-session-title', ...(input.extraArgs ?? [])],
+      env: {
+        // Bound npm's registry requests; npm can use cached metadata when offline.
+        npm_config_fetch_retries: '0',
+        npm_config_fetch_timeout: '5000',
+        // Third-party state: the agent owns this store's format, atomicity and migration.
+        // Lody only passes the path, and only reaches it through the bounded credentials
+        // operations. Never parse, rewrite, export or preview it from Lody.
+        SORBET_DATA_DIR: join(getLodyDataDir(), 'sorbet'),
+        SORBET_OBSERVABILITY_RECORDING: 'false',
+        SORBET_OBSERVABILITY_CONFIG: '',
+      },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(
+        input,
+        undefined,
+        resolveSorbetInstalledAcpVersion()
+      ),
+    };
+  }
   if (input.agentType === 'dimcode') {
     return {
       command: 'dimcode',
@@ -592,6 +757,26 @@ async function resolveBuiltinACPProcessLaunch(
   if (!isManagedBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported managed builtin ACP type: ${input.agentType}`);
   }
+  if (input.agentType === 'antigravity') {
+    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.antigravityPath);
+    const runtime = overridePath
+      ? { command: overridePath, version: undefined }
+      : await resolveManagedRuntimeForLaunch('antigravity', input);
+    return {
+      command: runtime.command,
+      args: [
+        'acp',
+        '--process-per-session',
+        '--disable-telemetry',
+        ...(input.runtimeOverrides?.antigravitySkipPermissions === true
+          ? ['--dangerously-skip-permissions']
+          : []),
+        ...(input.extraArgs ?? []),
+      ],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
+    };
+  }
   if (input.agentType === 'pi') {
     const extensions = input.runtimeOverrides?.piExtensions ?? [];
     if (extensions.length && !PI_EXTENSIONS_SUPPORTED) {
@@ -611,7 +796,7 @@ async function resolveBuiltinACPProcessLaunch(
     // unset, so do not revert to a conditional undefined env.
     const piPath = trimRuntimeOverride(input.runtimeOverrides?.piPath);
     return {
-      command: process.execPath,
+      command: getCliNodeExecutable(),
       args: [
         runtime.command,
         ...extensions.flatMap((path) => ['-e', path]),
@@ -627,7 +812,7 @@ async function resolveBuiltinACPProcessLaunch(
       ? { command: overridePath, version: undefined }
       : await resolveManagedRuntimeForLaunch('kimi-code', input);
     return {
-      command: overridePath ? runtime.command : process.execPath,
+      command: overridePath ? runtime.command : getCliNodeExecutable(),
       args: overridePath
         ? ['acp', ...(input.extraArgs ?? [])]
         : [runtime.command, 'acp', ...(input.extraArgs ?? [])],
@@ -652,7 +837,7 @@ async function resolveBuiltinACPProcessLaunch(
     ? { command: overridePath, version: undefined }
     : await resolveManagedRuntimeForLaunch(runtimeName, input);
   return {
-    command: process.execPath,
+    command: getCliNodeExecutable(),
     args: [
       ...resolveCliAdapterEntry(`${agentType}-acp`),
       ...(BuiltinACPSetting[agentType].args ?? []),
@@ -682,13 +867,26 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
 
   if (input.agentType === 'devin') {
     if (input.action === 'status') return null;
-    throw new Error('Devin authentication uses the ACP authentication flow.');
+    throw new Error(`${input.agentType} authentication uses the ACP authentication flow.`);
   }
   if (input.agentType === 'pi') {
     if (input.action === 'status') return null;
     throw new Error(
       'Configure Pi credentials through provider environment variables or Pi settings.'
     );
+  }
+
+  if (input.agentType === 'antigravity') {
+    if (input.action === 'status') return null;
+    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.antigravityPath);
+    const runtime = overridePath
+      ? { command: overridePath }
+      : await resolveManagedRuntimeForLaunch('antigravity', input);
+    return {
+      command: runtime.command,
+      args: ['acp', '--login', '--disable-telemetry'],
+      env: { AGY_CLI_DISABLE_AUTO_UPDATE: 'true' },
+    };
   }
 
   if (input.agentType === 'kimi') {
@@ -842,13 +1040,14 @@ export function withDefaultAcpPathEntries(
   env: NodeJS.ProcessEnv,
   agentType?: string
 ): NodeJS.ProcessEnv {
+  const normalizedEnv = normalizeAgentProcessEnv(env);
   const defaultEntries = getDefaultAcpPathEntries(homedir(), agentType);
   if (defaultEntries.length === 0) {
-    return env;
+    return normalizedEnv;
   }
 
-  const pathKey = getPathEnvKey(env);
-  const currentParts = (env[pathKey] ?? '').split(delimiter).filter(Boolean);
+  const pathKey = getPathEnvKey(normalizedEnv);
+  const currentParts = (normalizedEnv[pathKey] ?? '').split(delimiter).filter(Boolean);
   const defaultEntrySet = new Set(defaultEntries.map(normalizePathEntry));
   const currentWithoutDefaults = currentParts.filter(
     (entry) => !defaultEntrySet.has(normalizePathEntry(entry))
@@ -858,12 +1057,12 @@ export function withDefaultAcpPathEntries(
     getLeadingGhShimBinDir(currentParts)
   ).join(delimiter);
 
-  if (env[pathKey] === nextPath) {
-    return env;
+  if (normalizedEnv[pathKey] === nextPath) {
+    return normalizedEnv;
   }
 
   return {
-    ...env,
+    ...normalizedEnv,
     [pathKey]: nextPath,
   };
 }
@@ -891,7 +1090,7 @@ export function mergeLoginShellEnv(
   shellEnv: NodeJS.ProcessEnv | null | undefined
 ): NodeJS.ProcessEnv {
   if (!shellEnv || Object.keys(shellEnv).length === 0) {
-    return base;
+    return normalizeAgentProcessEnv(base);
   }
 
   const merged: NodeJS.ProcessEnv = { ...shellEnv, ...base };
@@ -916,5 +1115,5 @@ export function mergeLoginShellEnv(
     merged[pathKey] = withLeadingEntry(ordered, getLeadingGhShimBinDir(baseParts)).join(delimiter);
   }
 
-  return merged;
+  return normalizeAgentProcessEnv(merged);
 }

@@ -40,3 +40,22 @@ void test('renderer entries allow exactly the current inline boot shell script',
     assert.ok(getDirectiveSources(html, 'script-src').includes(`'sha256-${digest}'`))
   }
 })
+
+void test('renderer entries may frame direct HTML previews but never load them as code or data', () => {
+  for (const html of [rendererHtml, devbarHtml]) {
+    assert.ok(getDirectiveSources(html, 'frame-src').includes('lody-html-preview:'))
+    for (const directive of ['default-src', 'script-src', 'connect-src', 'img-src', 'media-src']) {
+      assert.ok(!getDirectiveSources(html, directive).includes('lody-html-preview:'), directive)
+    }
+  }
+})
+
+void test('renderer entries allow local resource and blob media without opening arbitrary remote media', () => {
+  for (const html of [rendererHtml, devbarHtml]) {
+    const mediaSources = getDirectiveSources(html, 'media-src')
+    assert.ok(mediaSources.includes("'self'"))
+    assert.ok(mediaSources.includes('lody-resource:'))
+    assert.ok(mediaSources.includes('blob:'))
+    assert.ok(!mediaSources.includes('https:'))
+  }
+})

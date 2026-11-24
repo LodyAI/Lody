@@ -4,6 +4,8 @@ import { getSessionChatInputAreaShellClassName } from '@/components/chat/compose
 export { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
 import { useScheduledMessage } from '../schedules/use-scheduled-message';
 import { useLatestRef } from '@/hooks/use-latest-ref';
+import type { ConversationView } from '@/lib/conversation-view/types';
+import { useComposerMessageRecall } from './composer-message-recall';
 import { ScheduledMessageTimeDialog } from '../schedules/scheduled-message-time';
 import { formatUpcoming } from '../schedules/schedule-format';
 import type { AgentConfigMeta } from '@lody/shared';
@@ -17,8 +19,10 @@ import {
   loadConversationQuoteDraft,
   saveConversationQuoteDraft,
 } from '@/lib/conversation-quote-draft';
+import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
+import { composerActionButtonTheme } from '../chat/composer-action-button.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   snapshotAttachmentDrafts,
@@ -84,7 +88,7 @@ import {
   type PersistedMentionRange,
 } from '@/components/mentions/mention-persistence';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
 import type {
@@ -156,10 +160,42 @@ import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
+import {
+  type ComposerInputElement,
+  getComposerSelection,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
 const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
+  mobileUsage: { height: 'calc(var(--spacing) * 8)' },
+  primaryAction: {
+    boxShadow: {
+      default: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':focus-visible': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+      ':active': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+    },
+    transitionProperty: 'all',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+    translate: { default: null, ':active': '0 1px' },
+  },
+  shell: {
+    position: 'relative',
+    flexShrink: 0,
+    paddingTop: 0,
+    marginBottom: 'var(--native-keyboard-height, 0px)',
+    paddingBottom:
+      'calc(0.5rem + max(0px, env(safe-area-inset-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+    backgroundColor: colors.background,
+    transitionProperty: 'margin-bottom',
+    transitionDuration: '250ms',
+    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
+  },
+  shellEdgeBackLayer: { zIndex: 40 },
   footerSelectors: {
     display: 'flex',
     minWidth: 0,
@@ -220,7 +256,7 @@ const styles = stylex.create({
     fontSize: '0.75rem',
     fontWeight: 500,
     lineHeight: '1rem',
-    boxShadow: '0 1px 2px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
   },
   freeTurnUpgrade: {
     fontWeight: 600,
@@ -403,13 +439,8 @@ export const clearSessionChatInputDrafts = (sessionId: SessionId): void => {
 };
 
 const toImageInputBlock = (image: SessionImagePayload): SessionInputBlock => ({
+  ...image,
   type: 'image',
-  imageId: image.imageId,
-  mimeType: image.mimeType,
-  fileName: image.fileName,
-  sizeBytes: image.sizeBytes,
-  width: image.width,
-  height: image.height,
 });
 
 const toFileInputBlock = (file: SessionFilePayload): SessionInputBlock => ({
@@ -489,6 +520,7 @@ export interface SessionChatInputAreaProps {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /** Whether the session's repo is public (for #mention feature) */
   isRepoPublic?: boolean;
+  isRepoLinked?: boolean;
   /** Available slash commands from the ACP agent. */
   availableCommands?: AcpCommandSummary[];
   /** False while this retained composer is hidden behind another session tab. */
@@ -528,6 +560,8 @@ export interface SessionChatInputAreaProps {
   onAgentRoleSaved?: (role: AgentRole, meta: { created: boolean }) => void;
   initialInputText?: string;
   onInputValueChange?: (value: string) => void;
+  /** This session's turns; Up/Down in an empty composer steps through its sent messages. */
+  messageHistory?: ConversationView | null;
   disableImageUpload?: boolean;
   /** Called when a comment reference chip is clicked to navigate to the comment */
   onNavigateToComment?: (reference: CommentReferencePayload) => void;
@@ -557,6 +591,7 @@ export type SessionSendMessageOptions = {
 };
 
 export type SessionChatInputAreaHandle = {
+  /** Insert a quote at the saved composer caret and return focus to the composer. */
   addMessageQuote: (text: string) => boolean;
   addDocumentSelection: (selection: DocumentSelection) => boolean;
   setInputText: (text: string) => void;
@@ -616,6 +651,7 @@ export const SessionChatInputArea = memo(
       configOptionSelectors,
       configOptionValues,
       isRepoPublic,
+      isRepoLinked,
       availableCommands,
       commandsEnabled = true,
       hideTopSpacer = false,
@@ -633,6 +669,7 @@ export const SessionChatInputArea = memo(
       onAgentRoleSaved,
       initialInputText,
       onInputValueChange,
+      messageHistory,
       disableImageUpload = false,
       onNavigateToComment,
       onCommentReferencesChange,
@@ -695,14 +732,17 @@ export const SessionChatInputArea = memo(
       useSessionPromptSuggestion(session.id);
     const promptSuggestionRef = useRef({ text: promptSuggestion, markPromptSuggestionAnswered });
     promptSuggestionRef.current = { text: promptSuggestion, markPromptSuggestionAnswered };
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const textareaRef = useRef<ComposerInputElement>(null);
     const quoteCaretRef = useRef<{ sessionId: SessionId; position: number } | null>(null);
     useEffect(() => {
       quoteCaretRef.current = null;
       const input = textareaRef.current;
       if (!input) return undefined;
       const remember = () => {
-        quoteCaretRef.current = { sessionId: session.id, position: input.selectionEnd };
+        quoteCaretRef.current = {
+          sessionId: session.id,
+          position: getComposerSelection(input).end,
+        };
       };
       const select = () => {
         if (input.ownerDocument.activeElement === input) remember();
@@ -711,11 +751,14 @@ export const SessionChatInputArea = memo(
       input.addEventListener('blur', remember);
       input.addEventListener('select', select);
       input.addEventListener('input', remember);
+      // The mention editor's caret moves without `select`; the document reports it.
+      input.ownerDocument.addEventListener('selectionchange', select);
       return () => {
         input.removeEventListener('focus', remember);
         input.removeEventListener('blur', remember);
         input.removeEventListener('select', select);
         input.removeEventListener('input', remember);
+        input.ownerDocument.removeEventListener('selectionchange', select);
       };
     }, [session.id]);
     const cancelNavigationDismissal = useRef<(() => void) | undefined>(undefined);
@@ -1028,7 +1071,12 @@ export const SessionChatInputArea = memo(
 
     const clearInput = useCallback(() => {
       setUserInput('');
-    }, [setUserInput]);
+      // Retire the accepted draft's hydration seed as well as its visible text.
+      mentionRangesRef.current = [];
+      setSessionMentionRanges(session.id, []);
+      setPersistedMentionRanges([]);
+      setDraftMentionRevision((revision) => revision + 1);
+    }, [session.id, setUserInput]);
 
     const quoteStorageWarning = useRef<string | null>(null);
     useEffect(() => {
@@ -1469,7 +1517,14 @@ export const SessionChatInputArea = memo(
     );
 
     const insertLargePastedTextAtSelection = useCallback(
-      (text: string, options?: { label: string; append?: boolean; kind?: 'message_quote' }) => {
+      (
+        text: string,
+        options?: {
+          label: string;
+          append?: boolean;
+          kind?: 'message_quote';
+        }
+      ) => {
         if (isArchived) {
           return false;
         }
@@ -1481,21 +1536,37 @@ export const SessionChatInputArea = memo(
           return false;
         }
 
-        let currentValue = textareaRef.current?.value ?? userInput;
-        if (options?.append && currentValue && !currentValue.endsWith('\n\n'))
+        let currentValue = textareaRef.current ? getComposerText(textareaRef.current) : userInput;
+        // A quote is spliced against the input's own value, so it takes no
+        // separator that the textarea would not also receive.
+        if (
+          options?.append &&
+          options.kind !== 'message_quote' &&
+          currentValue &&
+          !currentValue.endsWith('\n\n')
+        )
           currentValue += '\n\n';
         const selectionStart = options?.append
           ? currentValue.length
           : options?.kind === 'message_quote'
-            ? quoteCaretRef.current?.sessionId === session.id
-              ? quoteCaretRef.current.position
-              : currentValue.length
-            : (textareaRef.current?.selectionStart ?? null);
+            ? // While the composer has focus its caret is live; once focus left
+              // for the conversation, the caret it last had is remembered.
+              textareaRef.current &&
+              textareaRef.current.ownerDocument.activeElement === textareaRef.current
+              ? getComposerSelection(textareaRef.current).end
+              : quoteCaretRef.current?.sessionId === session.id
+                ? quoteCaretRef.current.position
+                : currentValue.length
+            : textareaRef.current
+              ? getComposerSelection(textareaRef.current).start
+              : null;
         const selectionEnd = options?.append
           ? currentValue.length
           : options?.kind === 'message_quote'
             ? selectionStart
-            : (textareaRef.current?.selectionEnd ?? null);
+            : textareaRef.current
+              ? getComposerSelection(textareaRef.current).end
+              : null;
         const result = insertPastedTextDraft({
           currentValue,
           pastedText: normalizedText,
@@ -1529,7 +1600,10 @@ export const SessionChatInputArea = memo(
             })
           )
             return false;
-          quoteCaretRef.current = { sessionId: session.id, position: result.draft.end };
+          quoteCaretRef.current = {
+            sessionId: session.id,
+            position: result.draft.end,
+          };
         } else setUserInput(result.nextValue);
         updatePastedTextDraftsForSession(session.id, (prev) =>
           getPastedTextDraftsAfterInsertion({
@@ -1543,11 +1617,12 @@ export const SessionChatInputArea = memo(
         requestAnimationFrame(() => {
           if (
             activeSessionIdRef.current !== session.id ||
-            textareaRef.current?.value !== result.nextValue
+            !textareaRef.current ||
+            getComposerText(textareaRef.current) !== result.nextValue
           )
             return;
-          textareaRef.current?.focus({ preventScroll: true });
-          textareaRef.current?.setSelectionRange(result.draft.end, result.draft.end);
+          textareaRef.current.focus({ preventScroll: true });
+          setComposerSelection(textareaRef.current, result.draft.end, result.draft.end);
         });
 
         return true;
@@ -1589,7 +1664,7 @@ export const SessionChatInputArea = memo(
       [isArchived]
     );
     const handlePaste = useCallback(
-      (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      (event: React.ClipboardEvent<ComposerInputElement>) => {
         if (isArchived) {
           return;
         }
@@ -1607,8 +1682,7 @@ export const SessionChatInputArea = memo(
             });
           } else {
             const target = event.currentTarget;
-            const at = target.selectionStart ?? target.value.length;
-            const replaceEnd = target.selectionEnd ?? at;
+            const { start: at, end: replaceEnd } = getComposerSelection(target);
             if (insertSessionMention(sessionUrl.sessionId, { at, replaceEnd })) {
               capturePostHogEvent(postHog, 'mention/session_link_pasted', {
                 converted: true,
@@ -1754,10 +1828,10 @@ export const SessionChatInputArea = memo(
             );
             return false;
           }
-          const excerpt = Array.from(text.replace(/\s+/g, ' ').trim()).slice(0, 32).join('');
+          const excerpt = formatMessageQuoteExcerpt(text);
           return insertLargePastedTextAtSelection(text, {
             kind: 'message_quote',
-            label: t('composer.messageQuoteInlineLabel', '[Quote: {{text}}]', { text: excerpt }),
+            label: t('composer.messageQuoteInlineLabel', '[{{text}}]', { text: excerpt }),
           });
         },
         addDocumentSelection,
@@ -1784,6 +1858,7 @@ export const SessionChatInputArea = memo(
         isArchived,
         submissionPending,
         quoteMachineRef,
+        session.id,
         t,
         insertLargePastedTextAtSelection,
         addDocumentSelection,
@@ -1798,14 +1873,39 @@ export const SessionChatInputArea = memo(
       ]
     );
 
+    const showRecalledText = useCallback(
+      (value: string) => {
+        setUserInputState(value);
+        onInputValueChange?.(value);
+      },
+      [onInputValueChange]
+    );
+    const { absorbChange: absorbRecallChange } = useComposerMessageRecall({
+      sessionId: session.id,
+      view: isArchived ? null : messageHistory,
+      inputRef: textareaRef,
+      value: userInput,
+      canStart:
+        !submissionPending &&
+        userInput === '' &&
+        pendingImages.length === 0 &&
+        pendingFiles.length === 0 &&
+        pastedTextDrafts.length === 0 &&
+        commentReferences.length === 0 &&
+        visualAnnotationReferences.length === 0,
+      showText: showRecalledText,
+      commitText: setUserInput,
+    });
+
     const handleInputChange = useCallback(
       (nextValue: string) => {
         if (isArchived) {
           return;
         }
+        if (absorbRecallChange(nextValue)) return;
         setUserInput(nextValue);
       },
-      [isArchived, setUserInput]
+      [absorbRecallChange, isArchived, setUserInput]
     );
     const handlePastedTextDraftsChange = useCallback(
       (drafts: PastedTextDraft[]) => {
@@ -1881,7 +1981,7 @@ export const SessionChatInputArea = memo(
           );
           return;
         }
-        const currentValue = textareaRef.current?.value ?? userInput;
+        const currentValue = textareaRef.current ? getComposerText(textareaRef.current) : userInput;
         // One pass: pasted placeholders, `$skill`, `@session:`, and the mentions
         // that need no rewrite all resolve against the same original text, and
         // the spans record where each landed.
@@ -2083,7 +2183,7 @@ export const SessionChatInputArea = memo(
     );
 
     const handleKeyDown = useCallback(
-      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      (e: React.KeyboardEvent<ComposerInputElement>) => {
         if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
           return;
         }
@@ -2139,6 +2239,7 @@ export const SessionChatInputArea = memo(
       session,
       sessionLocalProjectRootPath,
       isRepoPublic,
+      isRepoLinked,
       // No index is borrowed until someone could actually type `@`.
       enableCodeCollabProvider: userInput.includes('@'),
       debugLabel: 'session-chat-input:mention-provider',
@@ -2147,12 +2248,19 @@ export const SessionChatInputArea = memo(
       () =>
         !isArchived && session.cliType && session.agentType
           ? {
+              magpieGatewayUrl: quotaConfig?.magpieGatewayUrl,
               cliType: session.cliType,
               agentType: session.agentType,
               machineId: session.machineId,
             }
           : undefined,
-      [isArchived, session.agentType, session.cliType, session.machineId]
+      [
+        quotaConfig?.magpieGatewayUrl,
+        isArchived,
+        session.agentType,
+        session.cliType,
+        session.machineId,
+      ]
     );
     const { expand: expandPromptMentions } = useMentionPromptExpansion({
       source: isArchived ? undefined : mentionSource,
@@ -2382,6 +2490,7 @@ export const SessionChatInputArea = memo(
           modeOptions={modeOptions}
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
+          commandsEnabled={commandsEnabled}
         />
         {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
@@ -2425,7 +2534,7 @@ export const SessionChatInputArea = memo(
           isContextCompacting={isContextCompacting}
           showRateLimitWithoutContext
           showCodexResetForecast={showCodexResetForecast}
-          className={isMobile ? 'h-8 shrink-0' : 'shrink-0'}
+          xstyle={isMobile && styles.mobileUsage}
         />
       </div>
     );
@@ -2433,7 +2542,7 @@ export const SessionChatInputArea = memo(
     const externalHistorySyncNode =
       isExternalHistoryRefreshing && externalHistorySyncLabel ? (
         <div {...stylex.props(styles.externalSync)}>
-          <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <Spinner diameter="calc(var(--spacing) * 3.5)" aria-hidden="true" />
           <span {...stylex.props(styles.externalSyncLabel)}>{externalHistorySyncLabel}</span>
         </div>
       ) : null;
@@ -2474,12 +2583,13 @@ export const SessionChatInputArea = memo(
           onClick={() => {
             void onStop();
           }}
-          variant="ghost"
+          variant="solid"
           size={isMobile ? 'medium' : 'small'}
           shape="pill"
           icon
           aria-label={t('sessions.stop')}
-          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+          className={stylex.props(composerActionButtonTheme).className}
+          xstyle={styles.primaryAction}
         >
           <span
             {...stylex.props(
@@ -2494,7 +2604,7 @@ export const SessionChatInputArea = memo(
           data-testid="composer-send"
           type="button"
           icon
-          variant="ghost"
+          variant="solid"
           size={isMobile ? 'medium' : 'small'}
           shape="pill"
           onClick={() => {
@@ -2507,7 +2617,8 @@ export const SessionChatInputArea = memo(
               ? externalHistorySyncLabel
               : t('sessions.send')
           }
-          className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
+          className={stylex.props(composerActionButtonTheme).className}
+          xstyle={styles.primaryAction}
         >
           {submissionPending || isExternalHistoryRefreshing ? (
             <Spinner size={isMobile ? 'medium' : 'small'} />

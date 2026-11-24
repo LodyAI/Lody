@@ -1,0 +1,1536 @@
+name: Release cloud clients
+on:
+  push:
+    branches:
+      - main
+      - release
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Recover one untouched platform from reviewed release
+        required: true
+        type: choice
+        options:
+          - cli
+          - electron
+          - android
+          - ios
+      expected_sha:
+        description: Full original stable release commit SHA
+        required: true
+        type: string
+      expected_version:
+        description: Exact existing stable version
+        required: true
+        type: string
+      source_run_id:
+        description: 'Original release-clients push: validation failed and all publishers skipped'
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  NODE_VERSION: 22.23.4
+concurrency:
+  group: |-
+    ${{
+      (github.ref == 'refs/heads/release' || github.event_name == 'workflow_dispatch') &&
+      'lody-production-release' ||
+      github.ref == 'refs/heads/main' &&
+      'lody-staging-release' ||
+      format('release-cli-{0}', github.run_id)
+    }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      publish_requested: ${{ steps.recovery.outputs.validated == 'true' && 'true' || steps.release.outputs.releases_created }}
+      paths_released: ${{ steps.recovery.outputs.paths_released || steps.release.outputs.paths_released }}
+      checkout_sha: ${{ steps.recovery.outputs.checkout_sha || github.sha }}
+      build_number: ${{ steps.recovery.outputs.build_number || github.run_number }}
+      linux_arm64: ${{ github.event_name != 'workflow_dispatch' || steps.recovery.outputs.linux_arm64 == 'true' }}
+      target_environment: ${{ (steps.recovery.outputs.validated == 'true' || github.ref_name == 'release') && 'production' || 'staging' }}
+    steps:
+      - name: Checkout reviewed recovery helper
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: recursive
+      - name: Validate recovery before production environments
+        if: github.event_name == 'workflow_dispatch'
+        id: recovery
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          RECOVERY_INPUTS: ${{ toJSON(inputs) }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const helper = pathToFileURL(`${process.env.GITHUB_WORKSPACE}/.github/scripts/stable-release-recovery.mjs`);
+            const { validateRecovery } = await import(helper.href);
+            const target = await validateRecovery({ github, context,
+              inputs: JSON.parse(process.env.RECOVERY_INPUTS), currentSha: process.env.WORKFLOW_SHA });
+            for (const [name, value] of Object.entries(target)) core.setOutput(name, value);
+            if (JSON.parse(process.env.RECOVERY_INPUTS).component === 'electron') {
+              const { data } = await github.rest.repos.getContent({
+                ...context.repo, path: 'apps/electron/package.json', ref: target.checkout_sha,
+              });
+              const pkg = JSON.parse(Buffer.from(data.content, 'base64').toString('utf8'));
+              core.setOutput('linux_arm64', Boolean(pkg.scripts?.['build:linux:arm64']));
+            }
+            core.setOutput('validated', 'true');
+      - name: Resolve release-please files
+        if: github.event_name == 'push'
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == "release" ]]; then
+            echo "RELEASE_PLEASE_CONFIG=release-please-config.json" >> "$GITHUB_ENV"
+            echo "RELEASE_PLEASE_MANIFEST=.release-please-manifest.json" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_PLEASE_CONFIG=release-please-config.prerelease.json" >> "$GITHUB_ENV"
+            echo "RELEASE_PLEASE_MANIFEST=.release-please-manifest.prerelease.json" >> "$GITHUB_ENV"
+          fi
+      - name: Release Please
+        if: github.event_name == 'push'
+        id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          config-file: ${{ env.RELEASE_PLEASE_CONFIG }}
+          manifest-file: ${{ env.RELEASE_PLEASE_MANIFEST }}
+          target-branch: ${{ github.ref_name }}
+    if:
+      github.repository == 'LodyAI/Lody' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release') &&
+      vars.CLIENT_RELEASES_ENABLED == 'true'
+  validate-app-redirects:
+    needs: release
+    permissions:
+      contents: read
+    if: ${{ needs.release.outputs.publish_requested == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+      LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install validation dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Run independent validation
+        env:
+          CHECK: ${{ matrix.check }}
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 3GiB
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          case "$CHECK" in
+            lint) corepack pnpm check:quick ;;
+            typecheck-desktop-cli)
+              corepack pnpm --dir apps/cli prepare:acp-adapters
+              corepack pnpm -r --no-sort --workspace-concurrency=2 --filter '!{**/acp-extension-*}' --filter '!./apps/mobile-capacitor' run typecheck
+              ;;
+            typecheck-mobile) corepack pnpm --dir apps/mobile-capacitor typecheck ;;
+            *) exit 1 ;;
+          esac
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - lint
+          - typecheck-desktop-cli
+          - typecheck-mobile
+    name: validate-app-redirects (${{ matrix.check }})
+  publish-daemon:
+    permissions:
+      contents: read
+      actions: read
+    needs:
+      - release
+      - validate-app-redirects
+    if:
+      ${{ needs.release.outputs.publish_requested == 'true' && (contains(fromJSON(needs.release.outputs.paths_released),
+      'apps/cli') || github.event_name == 'workflow_dispatch') }}
+    uses: ./.github/workflows/publish-daemon-sea.yml
+    with:
+      source-sha: ${{ needs.release.outputs.checkout_sha }}
+      channel: ${{ needs.release.outputs.target_environment == 'production' && 'stable' || 'next' }}
+      target-environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    secrets: inherit
+  verify-daemon-installation:
+    needs:
+      - release
+      - publish-daemon
+    if: |-
+      ${{ !cancelled() && needs.release.result == 'success' &&
+          (needs.publish-daemon.result == 'success' || needs.publish-daemon.result == 'skipped') &&
+          (needs.release.outputs.publish_requested == 'true' ||
+           (github.event_name == 'push' && needs.release.outputs.target_environment == 'production' &&
+            contains(github.event.head_commit.message || '', '[electron-release]'))) }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: .daemon-publish-gate
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+      - name: Verify public installers and all platform downloads before client publication
+        env:
+          DAEMON_CHANNEL: ${{ needs.release.outputs.target_environment == 'production' && 'stable' || 'next' }}
+          DAEMON_EXPECTED_VERSION: auto
+        run: node .daemon-publish-gate/apps/cli/check-installer.mjs . "$DAEMON_CHANNEL" "$DAEMON_EXPECTED_VERSION"
+  publish-cli:
+    needs:
+      - release
+      - validate-app-redirects
+      - verify-daemon-installation
+    permissions:
+      contents: read
+      id-token: write
+    if: |-
+      ${{ needs.verify-daemon-installation.result == 'success' &&
+        (
+          needs.release.outputs.publish_requested == 'true' &&
+          contains(fromJSON(needs.release.outputs.paths_released), 'apps/cli')
+        )
+      }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
+      NPM_DIST_TAG: ${{ needs.release.outputs.target_environment == 'production' && 'latest' || 'next' }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      NODE_OPTIONS: --max-old-space-size=6144
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Validate CLI release env
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in LODY_AUTH_URL LODY_AUTH_SITE_URL LODY_SERVER_URL SITE_URL; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "${name} is required for the CLI package build"
+              exit 1
+            fi
+          done
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@11.21.0
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+      - name: Build CLI package
+        run: corepack pnpm --dir apps/cli build
+      - name: Stage immutable npm packages
+        run: corepack pnpm --dir apps/cli prepare:publish
+      - name: Publish lody to npm
+        working-directory: apps/cli/.publish/lody
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
+        run: |
+          node --version
+          pnpm --version
+          npm --version
+          pnpm exec npm --version
+          pnpm publish --access public --no-git-checks --tag "${NPM_DIST_TAG}"
+  build-electron:
+    needs:
+      - release
+      - validate-app-redirects
+    permissions:
+      contents: read
+    if: |-
+      ${{
+        (
+          needs.release.outputs.publish_requested == 'true' &&
+          contains(fromJSON(needs.release.outputs.paths_released), 'apps/electron')
+        ) ||
+        (
+          github.event_name == 'push' &&
+          needs.release.outputs.target_environment == 'production' &&
+          contains(github.event.head_commit.message || '', '[electron-release]')
+        )
+      }}
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{
+          fromJSON(
+            needs.release.outputs.target_environment == 'production' && needs.release.outputs.linux_arm64 != 'true' &&
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"}]}' ||
+            needs.release.outputs.target_environment == 'production' &&
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64:release"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:staging"}]}'
+          )
+        }}
+    runs-on: ${{ matrix.os }}
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
+      VITE_ELECTRON_UPDATE_URL: |-
+        ${{
+          needs.release.outputs.target_environment == 'production' &&
+          vars.ELECTRON_UPDATE_URL_PRODUCTION ||
+          vars.ELECTRON_UPDATE_URL_STAGING
+        }}
+      VITE_ELECTRON_UPDATE_CHANNEL: |-
+        ${{
+          needs.release.outputs.target_environment == 'production' &&
+          'latest' ||
+          'next'
+        }}
+      ELECTRON_UPDATE_CHANNEL: |-
+        ${{
+          needs.release.outputs.target_environment == 'production' &&
+          'latest' ||
+          'next'
+        }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NODE_OPTIONS: --max-old-space-size=6144
+      npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Normalize Electron auth base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_site_url="${VITE_CONVEX_SITE_URL:-${VITE_CONVEX_DEPLOY_URL:-}}"
+          if [[ -z "${raw_site_url}" ]]; then
+            echo "VITE_CONVEX_SITE_URL=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          normalized_site_url="${raw_site_url%/}"
+          if [[ "${normalized_site_url}" == *".convex.cloud" ]]; then
+            normalized_site_url="${normalized_site_url/.convex.cloud/.convex.site}"
+          fi
+
+          echo "VITE_CONVEX_SITE_URL=${normalized_site_url}" >> "$GITHUB_ENV"
+
+          update_base_url="${VITE_ELECTRON_UPDATE_URL%/}"
+          {
+            echo "SPARKLE_APPCAST_URL=${update_base_url}/appcast.xml"
+            echo "SPARKLE_DOWNLOAD_URL_PREFIX=${update_base_url}/"
+            echo "SPARKLE_APPCAST_URL_ARM64=${update_base_url}/arm64/appcast.xml"
+            echo "SPARKLE_DOWNLOAD_URL_PREFIX_ARM64=${update_base_url}/arm64/"
+            echo "SPARKLE_APPCAST_URL_X64=${update_base_url}/x64/appcast.xml"
+            echo "SPARKLE_DOWNLOAD_URL_PREFIX_X64=${update_base_url}/x64/"
+          } >> "$GITHUB_ENV"
+      - name: Validate Electron build env
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "VITE_SERVER_URL"
+            "VITE_CONVEX_SITE_URL"
+            "VITE_CONVEX_DEPLOY_URL"
+            "VITE_SITE_URL"
+            "VITE_PUBLIC_POSTHOG_HOST"
+            "VITE_PUBLIC_POSTHOG_KEY"
+            "VITE_ELECTRON_UPDATE_URL"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required env: ${key}"
+              exit 1
+            fi
+          done
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+      - name: Prepare macOS signing and notarization credentials
+        if: matrix.target == 'mac'
+        shell: bash
+        env:
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_P8: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_P8 || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "CSC_LINK"
+            "CSC_KEY_PASSWORD"
+            "APPLE_API_KEY_P8"
+            "APPLE_API_KEY_ID"
+            "APPLE_API_ISSUER"
+            "SPARKLE_ED_PUBLIC_KEY"
+            "SPARKLE_ED_PRIVATE_KEY"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required macOS signing or Sparkle secret: ${key}"
+              exit 1
+            fi
+          done
+
+          api_key_path="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "${APPLE_API_KEY_P8}" > "${api_key_path}"
+          chmod 600 "${api_key_path}"
+          echo "APPLE_API_KEY=${api_key_path}" >> "$GITHUB_ENV"
+      - name: Remove previous macOS packaging outputs
+        if: matrix.target == 'mac'
+        run: rm -rf -- apps/electron/dist
+      - name: Validate Sparkle signing key pair before building
+        if: matrix.target == 'mac'
+        env:
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: node apps/electron/sparkle-signing.mjs key-pair
+      - name: Build Electron package (${{ matrix.target }})
+        env:
+          CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          BUILD_SCRIPT: ${{ matrix.build_script }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            bash .github/scripts/observe-macos-build.sh corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          else
+            corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          fi
+      - name: Generate signed Sparkle appcast and deltas (staging)
+        if: matrix.target == 'mac' && needs.release.outputs.target_environment != 'production'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          legacy-appcast-sha256: 6f23204c249f4c7ef5dc599a0ff2b6053dac43246b35ed0f3a1e3d972b1377d7
+          delta-compression: lzfse
+          appcast-url: ${{ env.SPARKLE_APPCAST_URL }}
+          archive-dir: ${{ runner.temp }}/sparkle-appcast
+          dist-dir: apps/electron/dist
+          download-url-prefix: ${{ env.SPARKLE_DOWNLOAD_URL_PREFIX }}
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
+      - name: Generate signed Sparkle appcast and deltas (arm64)
+        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          delta-compression: lzfse
+          appcast-url: ${{ env.SPARKLE_APPCAST_URL_ARM64 }}
+          archive-dir: ${{ runner.temp }}/sparkle-appcast-arm64
+          dist-dir: apps/electron/dist
+          archive-pattern: '*-arm64.zip'
+          output-dir: apps/electron/dist/arm64
+          download-url-prefix: ${{ env.SPARKLE_DOWNLOAD_URL_PREFIX_ARM64 }}
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
+      - name: Generate signed Sparkle appcast and deltas (x64)
+        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          delta-compression: lzfse
+          appcast-url: ${{ env.SPARKLE_APPCAST_URL_X64 }}
+          archive-dir: ${{ runner.temp }}/sparkle-appcast-x64
+          dist-dir: apps/electron/dist
+          archive-pattern: '*-x64.zip'
+          output-dir: apps/electron/dist/x64
+          download-url-prefix: ${{ env.SPARKLE_DOWNLOAD_URL_PREFIX_X64 }}
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
+      - name: Prepare channel metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${ELECTRON_UPDATE_CHANNEL}" != "next" ]]; then
+            exit 0
+          fi
+
+          shopt -s nullglob
+          next_metadata_files=(apps/electron/dist/next*.yml)
+          if [[ ${#next_metadata_files[@]} -gt 0 ]]; then
+            exit 0
+          fi
+
+          latest_metadata_files=(apps/electron/dist/latest*.yml)
+          if [[ ${#latest_metadata_files[@]} -eq 0 ]]; then
+            echo "No next*.yml or latest*.yml metadata generated by electron-builder"
+            exit 1
+          fi
+
+          for file in "${latest_metadata_files[@]}"; do
+            dir="$(dirname "$file")"
+            base="$(basename "$file")"
+            cp "$file" "${dir}/${base/latest/next}"
+          done
+      - name: Collect Electron release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p electron-release-assets
+          metadata_pattern='latest*.yml'
+          if [[ "${ELECTRON_UPDATE_CHANNEL}" == "next" ]]; then
+            metadata_pattern='next*.yml'
+          fi
+
+          find apps/electron/dist -type f \
+            \( \
+              -name "${metadata_pattern}" -o \
+              -name '*.blockmap' -o \
+              -name '*.exe' -o \
+              -name '*.dmg' -o \
+              -name '*.zip' -o \
+              -name '*.delta' -o \
+              -name 'appcast.xml' -o \
+              -name '*.AppImage' -o \
+              -name '*.deb' -o \
+              -name '*.snap' \
+            \) \
+            -print0 | while IFS= read -r -d '' file; do
+              relative_path="${file#apps/electron/dist/}"
+              destination="electron-release-assets/${relative_path}"
+              mkdir -p "$(dirname "${destination}")"
+              cp "$file" "${destination}"
+            done
+
+          if [[ -z "$(ls -A electron-release-assets)" ]]; then
+            echo "No electron release assets collected"
+            exit 1
+          fi
+      - name: Upload Electron release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          compression-level: 0
+          name: electron-release-assets-${{ matrix.target }}
+          path: electron-release-assets/*
+          if-no-files-found: error
+      - name: Remove macOS notarization key
+        env:
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+        if: always() && matrix.target == 'mac'
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+  upload-electron-to-r2:
+    needs:
+      - release
+      - build-electron
+      - verify-daemon-installation
+    permissions:
+      contents: read
+    if: >-
+      ${{ !cancelled() && needs.release.result == 'success' && needs.build-electron.result == 'success' &&
+      needs.verify-daemon-installation.result == 'success' &&
+          ((
+          needs.release.outputs.publish_requested == 'true' &&
+          contains(fromJSON(needs.release.outputs.paths_released), 'apps/electron')
+        ) ||
+        (
+          github.event_name == 'push' &&
+          needs.release.outputs.target_environment == 'production' &&
+          contains(github.event.head_commit.message || '', '[electron-release]')
+        )) }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_ELECTRON_UPDATE_PREFIX: |-
+        ${{
+          needs.release.outputs.target_environment == 'production' &&
+          vars.R2_ELECTRON_UPDATE_PREFIX_PRODUCTION ||
+          vars.R2_ELECTRON_UPDATE_PREFIX_STAGING
+        }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Clear previous Electron upload artifacts
+        shell: bash
+        run: rm -rf -- electron-release-assets download-aliases
+      - name: Download Electron release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: electron-release-assets-*
+          path: electron-release-assets
+          merge-multiple: true
+      - name: Ensure AWS CLI
+        run: bash .github/scripts/setup-aws-cli.sh
+        shell: bash
+      - name: Upload Electron installers and updater metadata to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${R2_ACCOUNT_ID}" || -z "${R2_BUCKET}" || -z "${R2_ELECTRON_UPDATE_PREFIX}" ]]; then
+            echo "R2 configuration is incomplete"
+            exit 1
+          fi
+
+          endpoint_url="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          prefix="${R2_ELECTRON_UPDATE_PREFIX#/}"
+          prefix="${prefix%/}"
+
+          upload_asset() {
+            local file="$1"
+            local relative_path="${file#electron-release-assets/}"
+            local object_key="${relative_path}"
+            if [[ -n "${prefix}" ]]; then
+              object_key="${prefix}/${relative_path}"
+            fi
+            # Versioned artifacts never change once published; mutable pointers
+            # must revalidate on every request.
+            if [[ "$relative_path" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              cache_control="public, max-age=31536000, immutable"
+              existing_file="$(mktemp "${RUNNER_TEMP}/lody-r2-existing.XXXXXX")"
+              head_error="$(mktemp "${RUNNER_TEMP}/lody-r2-head.XXXXXX")"
+              if aws s3api head-object \
+                --bucket "${R2_BUCKET}" \
+                --key "${object_key}" \
+                --endpoint-url "${endpoint_url}" \
+                >/dev/null 2>"${head_error}"; then
+                aws s3 cp "s3://${R2_BUCKET}/${object_key}" "${existing_file}" \
+                  --endpoint-url "${endpoint_url}" \
+                  --no-progress
+                if ! cmp -s "$file" "${existing_file}"; then
+                  echo "Refusing to overwrite immutable R2 object with different bytes: ${object_key}"
+                  rm -f "${existing_file}" "${head_error}"
+                  return 1
+                fi
+                echo "Immutable R2 object already matches, skipping: ${object_key}"
+                rm -f "${existing_file}" "${head_error}"
+                return 0
+              fi
+              if ! grep -Eqi '\(404\)|Not Found|NoSuchKey' "${head_error}"; then
+                cat "${head_error}" >&2
+                rm -f "${existing_file}" "${head_error}"
+                return 1
+              fi
+              rm -f "${existing_file}" "${head_error}"
+            else
+              cache_control="no-cache"
+            fi
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${object_key}" \
+              --endpoint-url "${endpoint_url}" \
+              --no-progress \
+              --cache-control "${cache_control}"
+          }
+
+          # Each worker has isolated shell state and unique temporary files. Wait
+          # for every immutable upload before publishing any mutable feed pointer.
+          export -f upload_asset
+          export endpoint_url prefix
+          # shellcheck disable=SC2016 # The child Bash intentionally expands its own $1.
+          find electron-release-assets -type f \
+            \( \
+              -name '*.blockmap' -o \
+              -name '*.exe' -o \
+              -name '*.dmg' -o \
+              -name '*.zip' -o \
+              -name '*.delta' -o \
+              -name '*.AppImage' -o \
+              -name '*.deb' -o \
+              -name '*.snap' \
+            \) \
+            -print0 | xargs -0 -r -P 4 -I '{}' bash -euo pipefail -c 'upload_asset "$1"' _ '{}'
+
+          find electron-release-assets -type f \
+            \( -name 'next*.yml' -o -name 'latest*.yml' \) \
+            -print0 | while IFS= read -r -d '' file; do
+              upload_asset "$file"
+            done
+
+          find electron-release-assets -type f -name 'appcast.xml' \
+            -print0 | while IFS= read -r -d '' file; do
+              upload_asset "$file"
+            done
+      - name: Upload stable download aliases and version metadata to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          endpoint_url="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          prefix="${R2_ELECTRON_UPDATE_PREFIX#/}"
+          prefix="${prefix%/}"
+
+          # Extract version from whichever metadata YAML is present
+          metadata_file=""
+          for f in electron-release-assets/latest-mac.yml \
+                   electron-release-assets/latest.yml \
+                   electron-release-assets/next-mac.yml \
+                   electron-release-assets/next.yml; do
+            if [[ -f "$f" ]]; then
+              metadata_file="$f"
+              break
+            fi
+          done
+
+          if [[ -z "$metadata_file" ]]; then
+            echo "No metadata file found – skipping download aliases"
+            exit 0
+          fi
+
+          version=$(grep '^version:' "$metadata_file" | head -1 | sed 's/^version: *//')
+          release_date=$(grep '^releaseDate:' "$metadata_file" | head -1 \
+            | sed "s/^releaseDate: *//" | sed "s/^'//" | sed "s/'$//")
+
+          echo "Creating download aliases for v${version} (${release_date})"
+
+          mkdir -p download-aliases
+
+          # Create fixed-name copies by replacing the version segment, and
+          # record alias -> versioned filename so the download page can link
+          # directly to the immutable versioned objects (the aliases are only
+          # a fallback and can be served stale by HTTP caches).
+          shopt -s nullglob
+          downloads_json=""
+          for file in electron-release-assets/Lody-*.{dmg,exe,AppImage,deb,snap}; do
+            filename=$(basename "$file")
+            alias_name="${filename/Lody-${version}-/Lody-latest-}"
+            cp "$file" "download-aliases/${alias_name}"
+            if [[ "$alias_name" != "$filename" ]]; then
+              if [[ -n "$downloads_json" ]]; then
+                downloads_json+=","
+              fi
+              downloads_json+="\"${alias_name}\":\"${filename}\""
+            fi
+          done
+
+          # Generate version.json
+          files_json="["
+          first=true
+          for f in download-aliases/Lody-*; do
+            fname=$(basename "$f")
+            if [[ "$first" == "true" ]]; then
+              first=false
+            else
+              files_json+=","
+            fi
+            files_json+="\"${fname}\""
+          done
+          files_json+="]"
+
+          cat > download-aliases/version.json <<VEOF
+          {
+            "version": "${version}",
+            "releaseDate": "${release_date}",
+            "files": ${files_json},
+            "downloads": {${downloads_json}}
+          }
+          VEOF
+
+          echo "Download aliases:"
+          ls -la download-aliases/
+
+          # Upload aliases and version.json. All of these objects are mutable
+          # pointers overwritten on every release, so they must always
+          # revalidate (no-cache) instead of relying on heuristic caching.
+          for file in download-aliases/*; do
+            filename=$(basename "$file")
+            if [[ -n "${prefix}" ]]; then
+              object_key="${prefix}/${filename}"
+            else
+              object_key="${filename}"
+            fi
+            extra_args=()
+            if [[ "$filename" == "version.json" ]]; then
+              extra_args=(--content-type application/json)
+            fi
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${object_key}" \
+              --endpoint-url "${endpoint_url}" \
+              --no-progress \
+              --cache-control "no-cache" \
+              "${extra_args[@]}"
+          done
+  build-mobile-android:
+    needs:
+      - release
+      - validate-app-redirects
+      - verify-daemon-installation
+    permissions:
+      contents: read
+      actions: read
+    if: >-
+      ${{ !cancelled() && needs.release.result == 'success' && needs.validate-app-redirects.result == 'success' &&
+      needs.verify-daemon-installation.result == 'success' &&
+          ((github.event_name == 'push' || inputs.component == 'android') &&
+        needs.release.outputs.publish_requested == 'true' &&
+        contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor')) }}
+    runs-on: macos-15
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
+      MOBILE_VITE_MODE: ${{ needs.release.outputs.target_environment == 'production' && 'prod' || 'staging' }}
+      NODE_OPTIONS: --max-old-space-size=8192
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_GITHUB_APP_NAME: ${{ vars.VITE_GITHUB_APP_NAME }}
+      VITE_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
+      VITE_ONESIGNAL_SAFARI_WEB_ID: ${{ vars.VITE_ONESIGNAL_SAFARI_WEB_ID || vars.ONESIGNAL_SAFARI_WEB_ID }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_MOBILE_ANDROID_PREFIX: |-
+        ${{
+          needs.release.outputs.target_environment == 'production' &&
+          vars.R2_MOBILE_ANDROID_PREFIX_PRODUCTION ||
+          vars.R2_MOBILE_ANDROID_PREFIX_STAGING
+        }}
+      MOBILE_ANDROID_DOWNLOAD_BASE_URL: |-
+        ${{
+          needs.release.outputs.target_environment == 'production' &&
+          vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_PRODUCTION ||
+          vars.MOBILE_ANDROID_DOWNLOAD_BASE_URL_STAGING
+        }}
+      MOBILE_VERSION_CODE: ${{ needs.release.outputs.build_number }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+      - name: Setup Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/mobile-capacitor/android/**/*.gradle*
+            apps/mobile-capacitor/android/gradle/wrapper/gradle-wrapper.properties
+      - name: Install dependencies
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Normalize mobile auth base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_site_url="${VITE_CONVEX_SITE_URL:-${VITE_CONVEX_DEPLOY_URL:-}}"
+          if [[ -z "${raw_site_url}" ]]; then
+            echo "VITE_CONVEX_SITE_URL=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          normalized_site_url="${raw_site_url%/}"
+          if [[ "${normalized_site_url}" == *".convex.cloud" ]]; then
+            normalized_site_url="${normalized_site_url/.convex.cloud/.convex.site}"
+          fi
+
+          echo "VITE_CONVEX_SITE_URL=${normalized_site_url}" >> "$GITHUB_ENV"
+      - name: Resolve shared Android version code
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANDROID_SOURCE_RUN_ID: ${{ inputs.source_run_id || github.run_id }}
+        run: |
+          set -euo pipefail
+          # The checked-out source defines the numbering scheme. Historical
+          # recovery predating this helper retains its original workflow counter.
+          if [[ -f .github/scripts/android-version-code.mjs ]]; then
+            node .github/scripts/android-version-code.mjs
+          fi
+      - name: Resolve mobile version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/mobile-capacitor/package.json').version")"
+          if [[ -z "${version}" ]]; then
+            echo "Could not resolve mobile package version"
+            exit 1
+          fi
+          echo "MOBILE_VERSION_NAME=${version}" >> "$GITHUB_ENV"
+          echo "MOBILE_BUILD_NUMBER=${MOBILE_VERSION_CODE}" >> "$GITHUB_ENV"
+      - name: Validate Android release configuration
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "VITE_SERVER_URL"
+            "VITE_CONVEX_SITE_URL"
+            "VITE_CONVEX_DEPLOY_URL"
+            "VITE_SITE_URL"
+            "R2_ACCOUNT_ID"
+            "R2_BUCKET"
+            "R2_MOBILE_ANDROID_PREFIX"
+            "MOBILE_ANDROID_DOWNLOAD_BASE_URL"
+            "ANDROID_KEYSTORE_BASE64"
+            "ANDROID_KEYSTORE_PASSWORD"
+            "ANDROID_KEY_ALIAS"
+            "ANDROID_KEY_PASSWORD"
+            "MOBILE_VERSION_NAME"
+            "MOBILE_VERSION_CODE"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required Android release env: ${key}"
+              exit 1
+            fi
+          done
+      - name: Prepare Android signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          keystore_path="${RUNNER_TEMP}/lody-mobile-release.keystore"
+
+          decode_base64_secret() {
+            local secret_name="$1"
+            local secret_value="$2"
+            local output_path="$3"
+            local encoded_path="${output_path}.base64"
+
+            printf '%s' "${secret_value}" |
+              sed -e 's/\\n//g' -e 's/\\r//g' |
+              tr -d '[:space:]' > "${encoded_path}"
+            if [[ ! -s "${encoded_path}" ]]; then
+              echo "${secret_name} is empty after removing whitespace"
+              exit 1
+            fi
+
+            if ! openssl base64 -A -d -in "${encoded_path}" -out "${output_path}"; then
+              rm -f "${encoded_path}" "${output_path}"
+              echo "${secret_name} must contain base64-encoded file contents."
+              echo "Regenerate it with: openssl base64 -A -in <file>"
+              exit 1
+            fi
+            rm -f "${encoded_path}"
+          }
+
+          decode_base64_secret "ANDROID_KEYSTORE_BASE64" "${ANDROID_KEYSTORE_BASE64}" "${keystore_path}"
+          chmod 600 "${keystore_path}"
+          echo "ANDROID_KEYSTORE_PATH=${keystore_path}" >> "$GITHUB_ENV"
+      - name: Sync Android project
+        env:
+          PUSH_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.PUSH_ANDROID_GOOGLE_SERVICES_JSON }}
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          test -n "${PUSH_ANDROID_GOOGLE_SERVICES_JSON}" || { echo "Missing PUSH_ANDROID_GOOGLE_SERVICES_JSON" >&2; exit
+          1; }
+
+          pnpm --filter @lody/mobile-capacitor run configure:push
+
+          pnpm --filter @lody/mobile-capacitor exec vite build --mode "${MOBILE_VITE_MODE}"
+
+          pnpm --filter @lody/mobile-capacitor exec cap sync android
+      - name: Build signed Android APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: apps/mobile-capacitor/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :app:assembleRelease \
+            -PmobileVersionName="${MOBILE_VERSION_NAME}" \
+            -PmobileVersionCode="${MOBILE_VERSION_CODE}"
+      - name: Collect Android APK
+        shell: bash
+        run: >
+          set -euo pipefail
+
+          mkdir -p mobile-android-release
+
+          apk_path="$(find apps/mobile-capacitor/android/app/build/outputs/apk/release -type f -name '*.apk' | head -n
+          1)"
+
+          if [[ -z "${apk_path}" || ! -f "${apk_path}" ]]; then
+            echo "No Android APK found"
+            exit 1
+          fi
+
+          cp "${apk_path}" mobile-android-release/app.apk
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-android-apk
+          path: mobile-android-release/app.apk
+          if-no-files-found: error
+      - name: Ensure AWS CLI
+        shell: bash
+        run: bash .github/scripts/setup-aws-cli.sh
+      - name: Upload Android APK and metadata to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: bash .github/scripts/upload-android-release.sh
+      - name: Remove Android signing material
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/lody-mobile-release.keystore" "${RUNNER_TEMP}/lody-mobile-release.keystore.base64"
+  upload-mobile-ios-to-app-store-connect:
+    needs:
+      - release
+      - validate-app-redirects
+    permissions:
+      contents: read
+      actions: read
+    if: |-
+      ${{ !cancelled() && needs.release.result == 'success' && needs.validate-app-redirects.result == 'success' &&
+          ((github.event_name == 'push' || inputs.component == 'ios') &&
+        needs.release.outputs.publish_requested == 'true' &&
+        contains(fromJSON(needs.release.outputs.paths_released), 'apps/mobile-capacitor') &&
+        needs.release.outputs.target_environment == 'production' &&
+        vars.MOBILE_IOS_RELEASE_ENABLED == 'true') }}
+    runs-on: xcode-27
+    concurrency:
+      group: mobile-ios-app-store-connect-release
+      cancel-in-progress: false
+    environment: ${{ needs.release.outputs.target_environment == 'production' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      NODE_OPTIONS: --max-old-space-size=8192
+      LODY_ENV: ${{ needs.release.outputs.target_environment == 'production' && 'production' || 'staging' }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_GITHUB_APP_NAME: ${{ vars.VITE_GITHUB_APP_NAME }}
+      VITE_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
+      VITE_ONESIGNAL_SAFARI_WEB_ID: ${{ vars.VITE_ONESIGNAL_SAFARI_WEB_ID || vars.ONESIGNAL_SAFARI_WEB_ID }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      IOS_BUNDLE_ID: ai.lody.mobile
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release.outputs.checkout_sha }}
+          submodules: recursive
+      - name: Checkout reviewed iOS admission helper
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: .release-workflow
+          persist-credentials: false
+          submodules: recursive
+      - name: Verify Xcode SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcode-select -p
+          iphoneos_sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "iPhoneOS SDK version: ${iphoneos_sdk_version}"
+          if [[ "${iphoneos_sdk_version%%.*}" -lt 26 ]]; then
+            echo "App Store Connect requires iOS 26 SDK or later for iOS uploads."
+            exit 1
+          fi
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: corepack pnpm --filter '{./apps/mobile-capacitor}...' --fail-if-no-match install --frozen-lockfile --prefer-offline
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+      - name: Reject existing or uncertain iOS uploads before build
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: node .release-workflow/.github/scripts/ios-release-recovery.mjs
+      - name: Normalize mobile auth base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_site_url="${VITE_CONVEX_SITE_URL:-${VITE_CONVEX_DEPLOY_URL:-}}"
+          if [[ -z "${raw_site_url}" ]]; then
+            echo "VITE_CONVEX_SITE_URL=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          normalized_site_url="${raw_site_url%/}"
+          if [[ "${normalized_site_url}" == *".convex.cloud" ]]; then
+            normalized_site_url="${normalized_site_url/.convex.cloud/.convex.site}"
+          fi
+
+          echo "VITE_CONVEX_SITE_URL=${normalized_site_url}" >> "$GITHUB_ENV"
+      - name: Resolve iOS release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/mobile-capacitor/package.json').version")"
+          if [[ -z "${version}" ]]; then
+            echo "Could not resolve iOS release version"
+            exit 1
+          fi
+          echo "MOBILE_VERSION_NAME=${version}" >> "$GITHUB_ENV"
+      - name: Validate iOS release configuration
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+          IOS_EXTENSION_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_EXTENSION_PROVISIONING_PROFILE_BASE64 }}
+          IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "VITE_SERVER_URL"
+            "VITE_CONVEX_SITE_URL"
+            "VITE_CONVEX_DEPLOY_URL"
+            "VITE_SITE_URL"
+            "VITE_ONESIGNAL_APP_ID"
+            "APPLE_TEAM_ID"
+            "APPLE_API_KEY_P8"
+            "APPLE_API_KEY_ID"
+            "APPLE_API_ISSUER"
+            "IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64"
+            "IOS_DISTRIBUTION_CERTIFICATE_PASSWORD"
+            "IOS_APP_PROVISIONING_PROFILE_BASE64"
+            "IOS_EXTENSION_PROVISIONING_PROFILE_BASE64"
+            "IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64"
+            "IOS_BUNDLE_ID"
+            "MOBILE_VERSION_NAME"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required iOS release env: ${key}"
+              exit 1
+            fi
+          done
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_key_dir="${HOME}/.appstoreconnect/private_keys"
+          mkdir -p "${api_key_dir}"
+          api_key_path="${api_key_dir}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "${APPLE_API_KEY_P8}" > "${api_key_path}"
+          chmod 600 "${api_key_path}"
+          echo "APPLE_API_KEY_PATH=${api_key_path}" >> "$GITHUB_ENV"
+      - name: Resolve iOS build number
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_number="$(node .github/scripts/resolve-ios-app-store-build-number.mjs)"
+          if [[ -z "${build_number}" ]]; then
+            echo "Could not resolve iOS build number"
+            exit 1
+          fi
+          echo "MOBILE_BUILD_NUMBER=${build_number}" >> "$GITHUB_ENV"
+          echo "Resolved iOS version ${MOBILE_VERSION_NAME} build ${build_number}"
+      - name: Pin first iOS build for untouched version
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "MOBILE_BUILD_NUMBER=1" >> "$GITHUB_ENV"
+      - name: Prepare iOS signing assets
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+          IOS_EXTENSION_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_EXTENSION_PROVISIONING_PROFILE_BASE64 }}
+          IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keychain_path="${RUNNER_TEMP}/lody-ios-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          certificate_path="${RUNNER_TEMP}/ios_distribution.p12"
+
+          decode_base64_secret() {
+            local secret_name="$1"
+            local secret_value="$2"
+            local output_path="$3"
+            local encoded_path="${output_path}.base64"
+
+            printf '%s' "${secret_value}" |
+              sed -e 's/\\n//g' -e 's/\\r//g' |
+              tr -d '[:space:]' > "${encoded_path}"
+            if [[ ! -s "${encoded_path}" ]]; then
+              echo "${secret_name} is empty after removing whitespace"
+              exit 1
+            fi
+
+            if ! openssl base64 -A -d -in "${encoded_path}" -out "${output_path}"; then
+              rm -f "${encoded_path}" "${output_path}"
+              echo "${secret_name} must contain base64-encoded file contents."
+              echo "Regenerate it with: openssl base64 -A -in <file>"
+              exit 1
+            fi
+            rm -f "${encoded_path}"
+          }
+
+          decode_base64_secret \
+            "IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64" \
+            "${IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64}" \
+            "${certificate_path}"
+          security create-keychain -p "${keychain_password}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${keychain_password}" "${keychain_path}"
+          security import "${certificate_path}" \
+            -k "${keychain_path}" \
+            -P "${IOS_DISTRIBUTION_CERTIFICATE_PASSWORD}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security list-keychains -d user -s "${keychain_path}" login.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "${keychain_password}" \
+            "${keychain_path}"
+
+          mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
+
+          install_profile() {
+            local secret_name="$1"
+            local encoded_profile="$2"
+            local profile_path="$3"
+            local env_key="$4"
+            local plist_path="${profile_path}.plist"
+            decode_base64_secret "${secret_name}" "${encoded_profile}" "${profile_path}"
+            if ! security cms -D -i "${profile_path}" > "${plist_path}"; then
+              echo "${secret_name} decoded but is not a valid provisioning profile"
+              exit 1
+            fi
+            local uuid name
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print UUID' "${plist_path}")"
+            name="$(/usr/libexec/PlistBuddy -c 'Print Name' "${plist_path}")"
+            cp "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${uuid}.mobileprovision"
+            # Manual signing keys on the profile *name* (bundle id -> name) in both the
+            # project and ExportOptions, so surface the name (not the UUID) downstream.
+            echo "${env_key}=${name}" >> "$GITHUB_ENV"
+          }
+
+          install_profile \
+            "IOS_APP_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_APP_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/app.mobileprovision" \
+            "IOS_APP_PROFILE_NAME"
+          install_profile \
+            "IOS_EXTENSION_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_EXTENSION_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/extension.mobileprovision" \
+            "IOS_EXTENSION_PROFILE_NAME"
+          install_profile \
+            "IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/live-activity-widget.mobileprovision" \
+            "IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME"
+      - name: Sync iOS project
+        run: pnpm --filter @lody/mobile-capacitor run ci:sync:ios
+      - name: Configure manual code signing
+        working-directory: apps/mobile-capacitor/ios/App
+        shell: bash
+        run: |
+          set -euo pipefail
+          gem list -i xcodeproj >/dev/null 2>&1 || gem install xcodeproj --no-document
+          ruby <<'RUBY'
+          require 'xcodeproj'
+
+          project = Xcodeproj::Project.open('App.xcodeproj')
+          team = ENV.fetch('APPLE_TEAM_ID')
+          profiles = {
+            'App' => ENV.fetch('IOS_APP_PROFILE_NAME'),
+            'OneSignalNotificationServiceExtension' => ENV.fetch('IOS_EXTENSION_PROFILE_NAME'),
+            'LodyLiveActivityWidget' => ENV.fetch('IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME'),
+          }
+
+          profiles.each do |target_name, profile_name|
+            target = project.targets.find { |t| t.name == target_name }
+            raise "Target #{target_name} not found in App.xcodeproj" unless target
+
+            target.build_configurations.each do |config|
+              next unless config.name == 'Release'
+              settings = config.build_settings
+              settings['CODE_SIGN_STYLE'] = 'Manual'
+              settings['CODE_SIGN_IDENTITY'] = 'Apple Distribution'
+              settings['CODE_SIGN_IDENTITY[sdk=iphoneos*]'] = 'Apple Distribution'
+              settings['PROVISIONING_PROFILE_SPECIFIER'] = profile_name
+              settings['DEVELOPMENT_TEAM'] = team
+            end
+          end
+
+          project.save
+          RUBY
+      - name: Archive iOS app
+        working-directory: apps/mobile-capacitor/ios/App
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath "${RUNNER_TEMP}/Lody.xcarchive" \
+            MARKETING_VERSION="${MOBILE_VERSION_NAME}" \
+            CURRENT_PROJECT_VERSION="${MOBILE_BUILD_NUMBER}" \
+            CODE_SIGN_STYLE=Manual \
+            archive
+      - name: Export iOS IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          export_options="${RUNNER_TEMP}/ExportOptions.plist"
+          cat > "${export_options}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>ai.lody.mobile</key>
+              <string>${IOS_APP_PROFILE_NAME}</string>
+              <key>ai.lody.mobile.OneSignalNotificationServiceExtension</key>
+              <string>${IOS_EXTENSION_PROFILE_NAME}</string>
+              <key>ai.lody.mobile.LodyLiveActivityWidget</key>
+              <string>${IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME}</string>
+            </dict>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "${RUNNER_TEMP}/Lody.xcarchive" \
+            -exportPath "${RUNNER_TEMP}/LodyIpa" \
+            -exportOptionsPlist "${export_options}"
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mobile-ios-ipa
+          path: ${{ runner.temp }}/LodyIpa/*.ipa
+          if-no-files-found: error
+      - name: Wait for same-run SEA verification before iOS publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/wait-release-gate.mjs
+      - name: Recheck iOS admission immediately before upload
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: node .release-workflow/.github/scripts/ios-release-recovery.mjs
+      - name: Upload iOS build to App Store Connect
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipa_path="$(find "${RUNNER_TEMP}/LodyIpa" -type f -name '*.ipa' | head -n 1)"
+          if [[ -z "${ipa_path}" || ! -f "${ipa_path}" ]]; then
+            echo "No IPA found"
+            exit 1
+          fi
+          xcrun altool --upload-app \
+            --type ios \
+            --file "${ipa_path}" \
+            --apiKey "${APPLE_API_KEY_ID}" \
+            --apiIssuer "${APPLE_API_ISSUER}"
+      - name: Remove iOS signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/lody-ios-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/ios_distribution.p12" "${APPLE_API_KEY_PATH:-}"
+  attach-electron-release:
+    needs:
+      - release
+      - upload-electron-to-r2
+    if:
+      needs.release.outputs.publish_requested == 'true' && (github.event_name != 'workflow_dispatch' || inputs.component
+      == 'electron')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: electron-release-assets-*
+          path: electron-release-assets
+          merge-multiple: true
+      - name: Attach immutable Electron installers
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: >
+            const fs = require('node:fs/promises');
+
+            const path = require('node:path');
+
+            const {attachReleaseAssets} = await import(path.join(process.env.GITHUB_WORKSPACE,
+            '.github/scripts/github-release-assets.mjs'));
+
+            const root = 'electron-release-assets';
+
+            const files = await fs.readdir(root);
+
+            const metadata = files.find(name => name === 'latest-mac.yml' || name === 'next-mac.yml');
+
+            if (!metadata) throw new Error('Missing Electron release metadata');
+
+            const text = await fs.readFile(path.join(root, metadata), 'utf8');
+
+            const version = /^version: ["']?([^"'\s]+)["']?$/m.exec(text)?.[1];
+
+            const assets = files.filter(name => /\.(dmg|exe|AppImage|deb|snap|zip)$/.test(name)).map(name => ({name,
+            read: () => fs.readFile(path.join(root,name))}));
+
+            await attachReleaseAssets({github, repo: context.repo, version, assets});

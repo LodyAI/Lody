@@ -18,6 +18,7 @@ export type UseSessionMentionSourceArgs = {
   sessionLocalProjectRootPath?: string | null;
   /** Whether the session's repo is public (GitHub-sourced file/index reads). */
   isRepoPublic?: boolean;
+  isRepoLinked?: boolean;
   /**
    * Gates the Code Collab file-index provider. The composer's `@` menu passes
    * `value.includes('@')` so no index is borrowed until someone could ask; an
@@ -44,6 +45,7 @@ export function useSessionMentionSource({
   session,
   sessionLocalProjectRootPath,
   isRepoPublic,
+  isRepoLinked,
   enableCodeCollabProvider,
   debugLabel,
 }: UseSessionMentionSourceArgs): MentionProjectSource | undefined {
@@ -88,6 +90,10 @@ export function useSessionMentionSource({
     codeCollabMentionFiles.status === 'checking' || codeCollabMentionFiles.status === 'loading';
 
   return useMemo<MentionProjectSource | undefined>(() => {
+    const isLocalSession = session.project?.kind === 'local';
+    const linkedLocalGithubRepo =
+      isLocalSession && isRepoLinked ? repoFullName || undefined : undefined;
+
     if (codeCollabMentionFiles.provider || codeCollabMentionFilesPending) {
       return {
         kind: 'provider',
@@ -97,12 +103,16 @@ export function useSessionMentionSource({
         localProject:
           session.project?.kind === 'local'
             ? {
+                ...(effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : {}),
                 machineId: session.machineId,
                 localProjectId: session.project.localProjectId,
               }
             : undefined,
-        githubRepoFullName: repoFullName || undefined,
-        isPublic: isRepoPublic,
+        githubRepoFullName: isLocalSession
+          ? linkedLocalGithubRepo
+          : repoFullName || undefined,
+        isPublic: !isLocalSession || linkedLocalGithubRepo ? isRepoPublic : undefined,
+        issuePrEnabled: isLocalSession ? Boolean(linkedLocalGithubRepo) : isRepoLinked !== false,
       };
     }
 
@@ -120,7 +130,8 @@ export function useSessionMentionSource({
         machineId: session.machineId,
         workspaceId: localProject.workspaceId,
         localProjectId: localProject.localProjectId,
-        githubRepoFullName: repoFullName || undefined,
+        githubRepoFullName: linkedLocalGithubRepo,
+        isPublic: linkedLocalGithubRepo ? isRepoPublic : undefined,
         localWorktree: {
           machineId: session.machineId,
           repoKey: sessionLocalFileSource.repoKey,
@@ -135,7 +146,8 @@ export function useSessionMentionSource({
         machineId: session.machineId,
         workspaceId: sessionLocalFileSource.workspaceId,
         localProjectId: sessionLocalFileSource.localProjectId,
-        githubRepoFullName: repoFullName || undefined,
+        githubRepoFullName: linkedLocalGithubRepo,
+        isPublic: linkedLocalGithubRepo ? isRepoPublic : undefined,
       };
     }
 
@@ -144,6 +156,7 @@ export function useSessionMentionSource({
         kind: 'github',
         repoFullName,
         isPublic: isRepoPublic,
+        issuePrEnabled: isRepoLinked !== false,
         localWorktree:
           sessionLocalFileSource?.kind === 'session-worktree'
             ? {
@@ -160,6 +173,7 @@ export function useSessionMentionSource({
     codeCollabMentionFiles.message,
     codeCollabMentionFiles.provider,
     codeCollabMentionFilesPending,
+    isRepoLinked,
     isRepoPublic,
     repoFullName,
     effectiveWorkspaceId,

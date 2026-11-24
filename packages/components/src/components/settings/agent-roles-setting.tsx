@@ -24,6 +24,11 @@ import {
   useWorkspaceAgentRoleActions,
   useWorkspaceAgentRoles,
 } from '@/hooks/use-workspace-agent-roles';
+import {
+  buildAcpSelectorOptions,
+  type AcpSelectorOptions,
+} from '@/components/shared/acp-selector-options';
+import { localizeBuiltinGrokSelectorOptions } from '@/lib/grok-acp-selector-i18n';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { buildAgentRoleRunConfigSummary, createAgentRoleFormValue } from '@/lib/agent-role-form';
 import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
@@ -32,8 +37,10 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
-import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import {
   AgentRoleEditorDialog,
@@ -78,13 +85,30 @@ export function AgentRolesSetting() {
     return roles.map((role) => {
       const targets = getAgentRoleTargets(role).map((target): AgentRoleRowTarget => {
         const bound = bindAgentRoleTarget(role, target.machineId) ?? role;
+        const agentConfig = agentConfigs.find((entry) => entry.id === target.agentConfigId);
+        const options = buildAcpSelectorOptions(
+          agentConfig
+            ? {
+                configId: target.agentConfigId,
+                cliType: agentConfig.cliType,
+                agentType: agentConfig.agentType,
+                runtimeOverrides: agentConfig.runtimeOverrides,
+                machine: machines.get(target.machineId) ?? null,
+                selectedModelId: target.runConfig.modelId,
+              }
+            : undefined
+        );
         return {
           machineId: target.machineId,
           label: machines.get(target.machineId)?.name ?? t('settings.agentRoles.unknownMachine'),
           online: onlineMachineIds.has(target.machineId),
           availability: resolve(bound),
           runConfig: target.runConfig,
-          agentConfig: agentConfigs.find((entry) => entry.id === target.agentConfigId),
+          agentConfig,
+          selectorOptions:
+            agentConfig?.cliType === 'builtin' && agentConfig.agentType.toLowerCase() === 'grok'
+              ? localizeBuiltinGrokSelectorOptions(options, t)
+              : options,
         };
       });
       const allMachines =
@@ -152,6 +176,12 @@ export function AgentRolesSetting() {
   };
 
   const addLabel = t('settings.agentRoles.add');
+  const addButton = (
+    <Button size="small" variant="secondary" onClick={openAdd}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
 
   return (
     <div {...stylex.props(surface.container)}>
@@ -164,14 +194,15 @@ export function AgentRolesSetting() {
             {t('settings.agentRoles.syncing')}
           </span>
         ) : null}
-        <Button size="small" variant="secondary" onClick={openAdd}>
-          <Plus {...stylex.props(catalog.icon)} />
-          {addLabel}
-        </Button>
+        {rows.length > 0 ? addButton : null}
       </SettingsPageActions>
 
       {rows.length === 0 ? (
-        <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
+        <SettingsEmptyState
+          title={t('settings.agentRoles.empty')}
+          description={t('settings.agentRoles.emptyHint')}
+          action={addButton}
+        />
       ) : (
         // One provider: after the first machine note opens, the next opens at once.
         <Tooltip.Provider delay={250}>
@@ -246,6 +277,10 @@ export type AgentRoleRowTarget = {
   online: boolean;
   availability: AgentRoleAvailability;
   runConfig: AgentRole['runConfig'];
+  selectorOptions?: Pick<
+    AcpSelectorOptions,
+    'modelOptions' | 'modeOptions' | 'configOptionSelectors'
+  >;
   /** The bound config, when it still exists; its icon stands for the agent. */
   agentConfig?: Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'brandId' | 'env' | 'name'>;
 };
@@ -281,18 +316,31 @@ export function AgentRoleRow({
   const { t } = useTranslation();
   const [first] = targets;
   const summaries = targets.map((target) => ({
-    text: buildAgentRoleRunConfigSummary(target.runConfig).join(' · '),
-    agent: target.agentConfig?.name ?? '',
+    text: buildAgentRoleRunConfigSummary(target.runConfig, target.selectorOptions).join(' · '),
+    // Option key order is storage order, not meaning: sort before comparing.
+    identity: buildAgentRoleRunConfigSummary({
+      ...target.runConfig,
+      configOptionValues: Object.fromEntries(
+        Object.entries(target.runConfig.configOptionValues ?? {}).sort(([a], [b]) =>
+          a < b ? -1 : a > b ? 1 : 0
+        )
+      ),
+    }).join(' · '),
+    // Each machine names its own Provider; the kind of agent is what must match.
+    agent: target.agentConfig
+      ? `${target.agentConfig.cliType}:${target.agentConfig.agentType.toLowerCase()}`
+      : '',
   }));
   // Two machines running the Role the same way read as one line; when they
   // differ, the row says so instead of picking one to show.
   const uniform = summaries.every(
-    (summary) => summary.text === summaries[0]?.text && summary.agent === summaries[0]?.agent
+    (summary) =>
+      summary.identity === summaries[0]?.identity && summary.agent === summaries[0]?.agent
   );
   const runConfig = uniform ? (summaries[0]?.text ?? '') : '';
 
   return (
-    <div {...stylex.props(catalog.row, surface.pressableLine)}>
+    <div {...withClassName(stylex.props(catalog.row, surface.pressableLine), ROW_MARKER)}>
       <button
         type="button"
         onClick={onEdit}
@@ -334,7 +382,7 @@ export function AgentRoleRow({
         </span>
       </button>
       <AgentRoleMachines targets={targets} allMachines={allMachines} />
-      <div {...stylex.props(catalog.actions)}>
+      <div {...stylex.props(catalog.actions, styles.reveal)}>
         {canManage ? (
           <Button
             type="button"
@@ -342,7 +390,6 @@ export function AgentRoleRow({
             aria-label={t('common.remove')}
             size="small"
             icon
-            tone="destructive"
             onClick={onRemove}
           >
             <Trash2 {...stylex.props(catalog.icon)} />
@@ -471,7 +518,25 @@ function MachineMark({
   );
 }
 
+/** The row the remove action waits on: its hover and focus reveal it. */
+const ROW_MARKER = stylex.props(stylex.defaultMarker()).className;
+
 const styles = stylex.create({
+  /**
+   * Removing is the row's second action, so it waits for the pointer or the
+   * keyboard; a touch screen has no hover and always shows it.
+   */
+  reveal: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':hover')]: 1,
+      [stylex.when.ancestor(':focus-within')]: 1,
+      '@media (hover: none)': 1,
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
   /** A badge's height whether or not the Role has one, so every row is one height. */
   titleLine: { flexWrap: 'nowrap', height: '20px' },
   machines: {

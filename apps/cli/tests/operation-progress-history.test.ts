@@ -1,8 +1,9 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import { withHistoryPort } from './history-port-fixture';
 import { describe, expect, it } from 'vitest';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
-import { createSessionMirror, sessionDocSchema } from '@lody/shared';
 
 import type {
   LodyOperationItemResult,

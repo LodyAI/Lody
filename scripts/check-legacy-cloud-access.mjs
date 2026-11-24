@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+
+import { listRepositoryFiles } from './repository-files.mjs';
 
 // Public protocol families whose ordinary content APIs reject encrypted workspaces.
 // A new operation in one of these families requires admission without updating this list.
@@ -17,6 +18,7 @@ const legacyModules = new Set([
   'machineCredentials',
   'activity',
   'notifications',
+  'pushSubscriptions',
 ]);
 const legacyNames = new Set([
   'auth:transferWorkspaceOwnership',
@@ -28,6 +30,24 @@ const legacyNames = new Set([
   'workspaceJoinRequests:reviewRequest',
 ]);
 const safeNames = new Map([
+  ...[
+    'usage:getWorkspaceUsageCalendar',
+    'usage:getWorkspaceUsageDay',
+    'usage:getWorkspaceUsageSummary',
+    'usage:getWorkspaceUsageTimeline',
+    'activity:recordMyWorkspaceDailyActiveUser',
+  ].map((name) => [
+    name,
+    'Numeric accounting and own daily activity support active encrypted ledger members; no workspace content.',
+  ]),
+  [
+    'pushSubscriptions:configuration',
+    'Authenticated provider configuration; no workspace content.',
+  ],
+  [
+    'pushSubscriptions:unregister',
+    'Own installation cleanup must remain available after workspace revocation.',
+  ],
   [
     'auth:getUserById',
     'Display-only profile lookup returns null on denied membership/mode; never throws the mode refusal into render.',
@@ -58,7 +78,7 @@ const exceptions = new Map([
         'github:getAccessTokenByRepoNameForCli',
       ].map((name) => [
         name,
-        'CLI GitHub token port: explicit workspace/token binding; protected machine composition exposes no ordinary GitHub capability; denied results are operation failures.',
+        'CLI GitHub token port: explicit workspace/token binding; account CLI keys use verified encrypted membership; device-only machine composition has no GitHub capability; denied results are operation failures.',
       ]),
     ]),
   ],
@@ -79,7 +99,7 @@ const exceptions = new Map([
     new Map([
       [
         'usage:upsertSessionUsageFromCli',
-        'Ordinary CLI usage service only; encrypted machine composition has no usage capability. Rejections remain failed queued records.',
+        'Account-token numeric usage only; encrypted turns for other users are skipped before queueing. Device-only machine composition has no usage capability. Rejections remain queued.',
       ],
     ]),
   ],
@@ -95,7 +115,9 @@ const exceptions = new Map([
         'deviceAuth:getWorkspaceBillingEntitlementForCliToken',
       ].map((name) => [
         name,
-        'Ordinary CLI workspace/account catalog and token validators; encrypted machine composition uses its separate device-authenticated port. Mode denial returns invalid or fails the requested command.',
+        name === 'github:listWorkspaceRepositoriesForCliToken'
+          ? 'Workspace-scoped repository metadata for ordinary and verified encrypted member accounts; device-only composition has no account catalog. Denied results fail the requested command.'
+          : 'Ordinary CLI workspace/account catalog and token validators; encrypted machine composition uses its separate device-authenticated port. Mode denial returns invalid or fails the requested command.',
       ]),
     ]),
   ],
@@ -110,7 +132,7 @@ const exceptions = new Map([
         'notifications:syncLiveActivitySummary',
       ].map((name) => [
         name,
-        'Ordinary CLI notification port; encrypted machine composition has no ordinary notification capability. Each failed operation is caught at the service boundary.',
+        'CLI notification port; encrypted runtime forwards only its own account recipient and removes HTTP permission actions. Device-only machine composition has no notification port. Failed operations are caught at the service boundary.',
       ]),
     ]),
   ],
@@ -118,9 +140,22 @@ const exceptions = new Map([
     'apps/cli/src/lib/cloud-cli-port.ts',
     new Map([
       [
+        'machines:canRequestSessionReadFromCliToken',
+        'Ordinary MCP history preflight only; encrypted reads use the verified native policy host. Mode denial fails the requested read before joining history.',
+      ],
+      [
         'auth:getWorkspaceUserProfileForCliToken',
         'Ordinary CLI profile lookup; encrypted machine composition has no account catalog capability. Backend mode rejection yields no profile.',
       ],
+    ]),
+  ],
+  [
+    'packages/components/src/providers/cloud-session-access.ts',
+    new Map([
+      ...['machines:listSessionAccess', 'machines:setSessionReadSharedWithTeam'].map((name) => [
+        name,
+        'Imperative platform port: CloudPlatformProvider supplies assertScope using the shared live legacy admission verdict before every ordinary read, write or subscription; asynchronous reads fence account/runtime changes.',
+      ]),
     ]),
   ],
   [
@@ -131,15 +166,44 @@ const exceptions = new Map([
         'github:getOperationAccessTokenByRepoNameForClient',
       ].map((name) => [
         name,
-        'Imperative token owner rechecks the same live admission atoms before the first request and again after auth refresh, before retry.',
+        'Imperative token owner rechecks live account/workspace admission and the verified encrypted member role before requests, after responses and before auth retry.',
       ]),
     ]),
   ],
+]);
+const githubMetadataNames = new Set([
+  'github:getWorkspaceRepositories',
+  'github:listWorkspaceReposWithStatus',
+  'github:getPersonalOperationSettings',
+  'github:refreshPersonalGitHubProfile',
+  'github:setPersonalOperationPreference',
+  'githubPersonalAuthorization:begin',
+  'github:beginPersonalAuthorization',
+  'githubPersonalAuthorization:complete',
+  'github:completePersonalAuthorization',
+  'github:createGitHubInstallState',
+  'github:removeRepoFromWorkspace',
+  'github:setRepoEnabled',
+  'github:setRepoWorktreeSetup',
+  'github:setRepoWorktreeCleanup',
 ]);
 const wrappers = new Set([
   'useLegacyWorkspaceQuery',
   'useLegacyWorkspaceMutation',
   'useLegacyWorkspaceAction',
+]);
+const notificationNames = new Set([
+  'inbox:listMine',
+  'inbox:getSharingReviewState',
+  'inbox:markRead',
+  'inbox:dismiss',
+  'inbox:reconcileSharingReview',
+  'inbox:suppressSharingReview',
+  'pushSubscriptions:register',
+]);
+const notificationWrappers = new Set([
+  'useWorkspaceNotificationQuery',
+  'useWorkspaceNotificationMutation',
 ]);
 const isLegacy = (name) => legacyModules.has(name.split(':')[0]) || legacyNames.has(name);
 
@@ -161,6 +225,8 @@ export function auditLegacyCloudSource(file, source) {
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const apiRoots = new Set();
   const guardedCalls = new Set();
+  const notificationCalls = new Set();
+  const githubGuardedCalls = new Set();
   const apiNamespaces = new Map();
   const referenceFactories = new Set(['makeFunctionReference']);
   const factoryNamespaces = new Set();
@@ -184,6 +250,17 @@ export function auditLegacyCloudSource(file, source) {
         (module.endsWith('cloud-api-operations') && original === 'cloudOperations')
       )
         apiRoots.add(binding.name.text);
+      if (module.endsWith('use-workspace-notifications') && notificationWrappers.has(original))
+        notificationCalls.add(binding.name.text);
+      if (
+        module.endsWith('use-github-workspace') &&
+        [
+          'useGithubWorkspaceQuery',
+          'useGithubWorkspaceMutation',
+          'useGithubWorkspaceAction',
+        ].includes(original)
+      )
+        githubGuardedCalls.add(binding.name.text);
       if (module.endsWith('use-legacy-workspace-query') && wrappers.has(original))
         guardedCalls.add(binding.name.text);
     }
@@ -227,7 +304,9 @@ export function auditLegacyCloudSource(file, source) {
       ts.isCallExpression(parent) &&
       parent.arguments[0] === node &&
       ts.isIdentifier(parent.expression) &&
-      guardedCalls.has(parent.expression.text);
+      (guardedCalls.has(parent.expression.text) ||
+        (notificationNames.has(name) && notificationCalls.has(parent.expression.text)) ||
+        (githubGuardedCalls.has(parent.expression.text) && githubMetadataNames.has(name)));
     const reason = safeNames.get(name) ?? exceptions.get(file)?.get(name);
     const line = ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1;
     rows.push({
@@ -291,17 +370,7 @@ export function auditLegacyCloudSource(file, source) {
 }
 
 export function auditLegacyCloudTree(root) {
-  const files = [
-    ...new Set(
-      execFileSync('git', ['ls-files', '-co', '--exclude-standard'], {
-        cwd: root,
-        encoding: 'utf8',
-        maxBuffer: 20 * 1024 * 1024,
-      })
-        .trim()
-        .split('\n')
-    ),
-  ];
+  const files = [...new Set(listRepositoryFiles(root))];
   const rows = [],
     errors = [];
   for (const file of files) {

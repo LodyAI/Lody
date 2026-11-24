@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { fn, userEvent, within } from 'storybook/test';
@@ -8,6 +9,47 @@ import {
   type MobileChatListRowActions,
 } from '@/components/mobile/mobile-chat-list';
 import type { MobileConversationItem } from '@/components/mobile/mobile-project-screen';
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflowY: 'auto',
+    paddingBottom: 'calc(var(--spacing) * 12)',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayout = stylex.create({
+  canvas: {
+    'padding-inline': 'calc(var(--spacing) * 5)',
+    'padding-top': 'calc(var(--spacing) * 6)',
+    'padding-bottom': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xl)',
+    'line-height': 'var(--text-xl--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+});
+import type { MobileStatusCommands } from '@/components/mobile/use-mobile-status-list';
+import {
+  planStatusViewCommand,
+  type PinSection,
+  type StatusViewCommand,
+  type StatusViewState,
+} from '@lody/shared';
 
 const hour = 60 * 60 * 1000;
 const now = Date.now();
@@ -21,7 +63,6 @@ const baseChats: MobileConversationItem[] = [
     prNumber: 154,
     prStatus: 'open',
     prUrl: 'https://github.com/loro-dev/lody/pull/154',
-    /* CI running — the PR glyph carries a static verdict dot. */
     prCiState: 'p',
     addedLines: 156,
     deletedLines: 8,
@@ -41,9 +82,6 @@ const baseChats: MobileConversationItem[] = [
     prStatus: 'open',
     prUrl: 'https://github.com/loro-dev/lody/pull/152',
     prCiState: 's',
-    /* Clean merge state + green CI: the row swaps its line diff for the
-       Mergeable pill (the diff numbers below are deliberately still set, to
-       show that the pill takes that slot). */
     prReadiness: 'y',
     addedLines: 88,
     deletedLines: 21,
@@ -62,8 +100,6 @@ const baseChats: MobileConversationItem[] = [
     prStatus: 'merged',
     prUrl: 'https://github.com/loro-dev/lody/pull/149',
     prCiState: 's',
-    /* Stale readiness left behind after the merge — the pill must not linger
-       next to a merged PR. */
     prReadiness: 'y',
     addedLines: 42,
     deletedLines: 10,
@@ -80,7 +116,6 @@ const baseChats: MobileConversationItem[] = [
     branchName: 'feat/draft-review',
     prNumber: 151,
     prStatus: 'draft',
-    /* No poller CI record yet — plain PR glyph, no verdict badge. */
     prUrl: 'https://github.com/loro-dev/lody/pull/151',
     addedLines: 73,
     deletedLines: 4,
@@ -146,7 +181,6 @@ const baseChats: MobileConversationItem[] = [
     prNumber: 142,
     prStatus: 'open',
     prUrl: 'https://github.com/loro-dev/lody/pull/142',
-    /* Checks expected but not reported yet. */
     prCiState: 'x',
     isPinned: true,
     machineId: 'zx-macbook',
@@ -155,18 +189,6 @@ const baseChats: MobileConversationItem[] = [
   },
 ];
 
-/* Sessions created by another Session (`lody_session_create` MCP tool). The
-   list nests each one under its opener; `openedByRowSessionId` is the row to
-   indent under, which differs from the precise opener when an agent inside a
-   child Tab created the Session. `fanout-3` is opened by `fanout-1`, itself
-   opened by `orchestrator` — depth is capped at one, so it attaches to the
-   topmost visible ancestor. `detached` names an opener that is not in this
-   list and therefore stays a plain top-level row.
-
-   `fanout-1` is deliberately working and `fanout-2` unread: an active row
-   shows its status at the leading node INSTEAD of the ├/└, so only the idle
-   `fanout-3` draws connectors. `OpenedBySessionsActiveOpener` shows the same
-   rule applied to the opener's own fold control. */
 const openedByChats: MobileConversationItem[] = [
   {
     id: 'orchestrator',
@@ -231,11 +253,6 @@ const openedByChats: MobileConversationItem[] = [
   ...baseChats,
 ];
 
-/* The clutter the preview cap exists for: one busy worktree with twelve
-   Sessions, then two other worktrees that a flat list would push below the
-   fold. `busy-9` is an opener with two opened Sessions — expand the bucket and
-   its group arrives intact, because the cap counts TOP-LEVEL rows rather than
-   rendered ones. */
 const overflowingChats: MobileConversationItem[] = [
   ...Array.from({ length: 12 }, (_, index): MobileConversationItem => ({
     id: `busy-${index}`,
@@ -325,8 +342,6 @@ function StoryShell({
         onArchive: (id) => {
           setChats((prev) => prev.filter((c) => c.id !== id));
         },
-        /* Archived list: restore drops the row out of the archived
-           view (here we just remove it from the mock list). */
         onRestore: (id) => {
           setChats((prev) => prev.filter((c) => c.id !== id));
           fn()(id);
@@ -335,9 +350,9 @@ function StoryShell({
     : undefined;
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-y-auto bg-background pb-12 shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
-        <div className="px-5 pb-1 pt-6 text-xl font-semibold">对话</div>
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
+        <div {...stylex.props(storyLayout.canvas)}>对话</div>
         <MobileChatList
           chats={chats}
           groupBy={groupBy}
@@ -363,8 +378,6 @@ function StoryShell({
             fn()(id);
           }}
           rowActions={actions}
-          /* In archived mode, swipe delete + multi-select both route
-             through this; remove the confirmed ids from the mock list. */
           onPermanentDelete={
             archived
               ? (ids) => {
@@ -397,16 +410,10 @@ export const GroupByProject: Story = {
   args: { groupBy: 'project' },
 };
 
-/* Sessions opened by another Session indent one level under their opener with
-   a ├/└ connector — the mobile face of the desktop sidebar's opened-by tree. */
 export const OpenedBySessions: Story = {
   args: { groupBy: 'none', chats: openedByChats },
 };
 
-/* An active opener shows its status at the leading node instead of the fold
-   chevron — status outranks the tree on both sides of the relationship. The
-   fold stays reachable on desktop through the row context menu; on mobile an
-   active opener simply cannot be folded until it goes quiet. */
 export const OpenedBySessionsActiveOpener: Story = {
   args: {
     groupBy: 'none',
@@ -416,10 +423,6 @@ export const OpenedBySessionsActiveOpener: Story = {
   },
 };
 
-/* Same relationships, but resolved INSIDE each bucket: an opener and its
-   opened Sessions land in the same date group here, so the tree survives
-   grouping. A child whose opener sits in another bucket goes back to
-   top-level. */
 export const OpenedBySessionsGroupedByDate: Story = {
   args: { groupBy: 'date', chats: openedByChats },
 };
@@ -431,20 +434,22 @@ export const GroupByDate: Story = {
 /* Group preview cap — the state this exists for. Three worktrees on the same
    project plus a long-running one: without the cap the first bucket's twelve
    rows push every other worktree off the screen. Each bucket previews five
-   top-level rows and ends in "Show all (N)". */
+   top-level rows and ends in "Show more". */
+
 export const GroupPreviewOverflow: Story = {
   args: { groupBy: 'project', chats: overflowingChats, capGroupPreviews: true },
 };
 
-/* One bucket expanded past the cap: the toggle reads "Show less" and stays
-   pinned to the tail of the bucket it belongs to. Collapsing it scrolls the
-   toggle back into view rather than dropping the user somewhere else in the
-   list. */
+/* One bucket expanded past the cap: "Show more" uncovers another page and
+   "Show less" appears beside it, pinned to the tail of the bucket it belongs
+   to. Collapsing scrolls the toggle back into view rather than dropping the
+   user somewhere else in the list. */
+
 export const GroupPreviewExpanded: Story = {
   args: { groupBy: 'project', chats: overflowingChats, capGroupPreviews: true },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const [toggle] = await canvas.findAllByRole('button', { name: /Show all/i });
+    const [toggle] = await canvas.findAllByRole('button', { name: /Show more/i });
     await userEvent.click(toggle!);
   },
 };
@@ -453,9 +458,192 @@ export const WithSwipeActions: Story = {
   args: { groupBy: 'project', rowActions: {} },
 };
 
-/* Archived list: swipe a row left to reveal 恢复 (restore) + 删除
-   (delete) instead of 置顶 / 归档. Delete routes through the shared
-   confirm dialog; long-press still enters multi-select. */
 export const Archived: Story = {
   args: { groupBy: 'none', flatHeading: '归档对话', rowActions: {}, archived: true },
+};
+
+export const ReadOnlyRows: Story = {
+  args: {
+    groupBy: 'none',
+    chats: baseChats.map((chat, index) =>
+      index < 2 ? { ...chat, readOnly: true, owner: { id: 'teammate', name: 'Alex' } } : chat
+    ),
+  },
+};
+
+/**
+ * Status grouping fixtures. The story host runs the real shared planner and
+ * applies its writes; open at a phone viewport with touch emulation.
+ */
+const statusSections: PinSection[] = [
+  { id: 'review', name: 'Review', orderKey: '80' },
+  { id: 'ops', name: 'Ops', orderKey: '81' },
+];
+
+const statusChats: MobileConversationItem[] = [
+  { id: 's-pin', title: 'Release checklist', isPinned: true, orderKey: '80' },
+  {
+    id: 's-review-1',
+    title: 'Review the sync PR',
+    isPinned: true,
+    pinSectionId: 'review',
+    orderKey: '80',
+  },
+  {
+    id: 's-ops-1',
+    title: 'Rotate staging keys',
+    isPinned: true,
+    pinSectionId: 'ops',
+    orderKey: '80',
+  },
+  { id: 's-f1', title: 'Phone Status view', orderKey: '80', isWorking: true },
+  {
+    id: 's-f2',
+    title: 'Fix flaky upload test',
+    orderKey: '81',
+    hasUnreadMessages: true,
+    lastReadAt: now - 2 * hour,
+  },
+  { id: 's-f3', title: 'Draft release notes', orderKey: '82' },
+  { id: 's-woken', title: 'Check CI after the weekend', snoozedUntil: now - 10 * 60 * 1000 },
+  { id: 's-l1', title: 'Follow up with design', snoozedUntil: now + 3 * hour },
+  { id: 's-l2', title: 'Revisit pricing copy', snoozedUntil: now + 4 * 24 * hour },
+  { id: 's-done', title: 'Migrate settings page', settledAt: now - hour },
+  {
+    id: 's-quiet',
+    title: 'Old spike',
+    latestMessageAt: now - 9 * 24 * hour,
+    lastMessageAt: now - 9 * 24 * hour,
+  },
+].map((chat) => ({
+  kind: 'chat' as const,
+  latestMessageAt: now - hour,
+  lastMessageAt: now - hour,
+  lastReadAt: now,
+  ...chat,
+}));
+
+function toSession(chat: MobileConversationItem) {
+  return {
+    id: chat.id,
+    title: chat.title,
+    lastMessageAt: chat.lastMessageAt ?? null,
+    activityAt: chat.latestMessageAt ?? null,
+    lastReadAt: chat.lastReadAt ?? null,
+    isPinned: chat.isPinned === true,
+    pinSectionId: chat.pinSectionId ?? null,
+    orderKey: chat.orderKey ?? null,
+    snoozedUntil: chat.snoozedUntil ?? null,
+    settledAt: chat.settledAt ?? null,
+    focusRestoredAt: chat.focusRestoredAt ?? null,
+    openedById: chat.openedByRowSessionId ?? chat.openedBySessionId ?? null,
+    isWorking: chat.isWorking === true,
+    isWaitingPermission: chat.isWaitingPermission === true,
+    canManage: chat.readOnly !== true,
+    canPrefer: true,
+  };
+}
+
+function StatusStoryShell({
+  initialChats = statusChats,
+  initialSections = statusSections,
+  canManageSections = true,
+}: {
+  initialChats?: MobileConversationItem[];
+  initialSections?: PinSection[];
+  canManageSections?: boolean;
+}) {
+  const [host, setHost] = useState({ chats: initialChats, sections: initialSections });
+  const apply = (command: StatusViewCommand, state?: StatusViewState) =>
+    setHost((current) => {
+      const writes = planStatusViewCommand(
+        state ?? {
+          sessions: current.chats.map(toSession),
+          sections: current.sections,
+          sectionsLoaded: true,
+          canManageSections,
+          nowMs: Date.now(),
+        },
+        command,
+        { nowMs: Date.now(), randomByte: () => Math.floor(Math.random() * 256) }
+      );
+      let { chats, sections } = current;
+      for (const write of writes) {
+        if (write.type === 'session')
+          chats = chats.map((chat) =>
+            chat.id === write.sessionId
+              ? ({ ...chat, ...write.patch } as MobileConversationItem)
+              : chat
+          );
+        else if (write.type === 'putSection')
+          sections = [...sections.filter((s) => s.id !== write.section.id), write.section];
+        else sections = sections.filter((s) => s.id !== write.sectionId);
+      }
+      return { chats, sections };
+    });
+  const commands: MobileStatusCommands = {
+    run: async (command, state) => apply(command, state),
+    snooze: (sessionId, until) => apply({ type: 'snooze', sessionId, until, includeOpened: false }),
+    settle: (sessionId) => apply({ type: 'settle', sessionId, includeOpened: false }),
+    moveToFocus: (sessionId) => apply({ type: 'moveToFocus', sessionId, includeOpened: false }),
+    report: fn(),
+  };
+  return (
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div data-story-phone-scroll="" {...stylex.props(phoneFrame.frame)}>
+        <div {...stylex.props(storyLayout.canvas)}>Chat</div>
+        <MobileChatList
+          chats={host.chats}
+          groupBy="status"
+          capGroupPreviews
+          pinSections={host.sections}
+          statusWritable={canManageSections}
+          statusCommands={commands}
+          groupLabels={{ __pinned__: 'Pinned' }}
+          onSelect={fn()}
+          rowActions={{
+            onTogglePin: (sessionId, pinned) => apply({ type: 'setPinned', sessionId, pinned }),
+            onArchive: (id) =>
+              setHost((current) => ({
+                ...current,
+                chats: current.chats.filter((c) => c.id !== id),
+              })),
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export const Status: StoryObj<typeof StatusStoryShell> = {
+  render: (args) => <StatusStoryShell {...args} />,
+};
+
+export const StatusReadOnlyRows: StoryObj<typeof StatusStoryShell> = {
+  render: (args) => <StatusStoryShell {...args} />,
+  args: {
+    canManageSections: false,
+    initialChats: statusChats.map((chat, index) =>
+      index % 2 ? { ...chat, readOnly: true } : chat
+    ),
+  },
+};
+
+/** Taller than a phone: a flick scrolls, a dragged row scrolls the list at the edges. */
+export const StatusLongList: StoryObj<typeof StatusStoryShell> = {
+  render: (args) => <StatusStoryShell {...args} />,
+  args: {
+    initialChats: [
+      ...statusChats,
+      ...Array.from({ length: 24 }, (_, index) => ({
+        id: `s-extra-${index}`,
+        title: `Background task ${index + 1}`,
+        kind: 'chat' as const,
+        orderKey: `9${index.toString(16).padStart(2, '0')}`,
+        latestMessageAt: now - hour,
+        lastMessageAt: now - hour,
+        lastReadAt: now,
+      })),
+    ],
+  },
 };

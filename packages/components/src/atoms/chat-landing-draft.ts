@@ -55,6 +55,22 @@ export type PendingFile = {
 export const buildChatLandingDraftKey = (stateKey: string | null, workspaceSlug: string): string =>
   `${stateKey ?? 'anonymous'}:${workspaceSlug}`;
 
+/** A landing embedded outside the new-chat page (Today's "Convert to task" dialog). */
+export type ChatLandingSurface = 'today-convert';
+
+/**
+ * The draft key of an alternate landing surface. The owner is resolved the
+ * same way as the page's (`userAtom.id`, else the encrypted account id), and
+ * the surface rides on it after a `#`, which never appears in the page's
+ * `<owner>:<slug>` shape — including the anonymous case, where passing
+ * `null` straight to `buildChatLandingDraftKey` would collide with the page.
+ */
+export const buildChatLandingSurfaceDraftKey = (
+  owner: string | null | undefined,
+  surface: ChatLandingSurface,
+  workspaceSlug: string
+): string => buildChatLandingDraftKey(`${owner ?? 'anonymous'}#${surface}`, workspaceSlug);
+
 export const chatLandingPendingImagesAtomFamily = atomFamily((_draftKey: string) =>
   atom<PendingImage[]>([])
 );

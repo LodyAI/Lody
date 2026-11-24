@@ -34,9 +34,27 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
 - Replacement verifies new desktop approval, drains the old incarnation and uses
   the approved atomic archive/current switch. Preserve old pins, wrappers and
   journals. Logout, close and ordinary cache cleanup never delete identity.
+- Exact access loss comes only from the session's verified ledger classifying its own
+  key as revoked or member-removed, or from a trusted adapter's typed
+  `PersonalAccessLoss`; the runtime boundary projects either to `e2ee_device_revoked`
+  or `e2ee_member_removed`. Messages, codes and transport, JWT or parse failures never
+  do. Opens and admitted operations refuse such a device; ledger reads stay usable, and
+  a confirmed self-revocation still reports success.
+- A revoked device keeps its identity until replaced. A new personal offer prepares a
+  replacement identity. Account pairing prepares one only when the complete history,
+  verified from the pinned genesis, classifies the current identity as lost; its offer
+  session derives from the replaced key, so the revoked key is never reused.
+- Each remote round under a serial permit is bounded (`boundedBy`, injectable sleep):
+  at the deadline it is interrupted, releases the permit and fails as `network`. Its
+  outcome is unknown: retained originals and journals stay, and the retry resends or
+  resumes them. Governance commands settle a journaled original first and never sign
+  the same command again.
 - RPC exposes the existing closed product methods and exact original retries,
   never private keys, credentials or generic signing to product callers. Real
   injected implementations are required; no empty handler substitutes for support.
+- The optional `iroh` platform port receives the device seed once per session via
+  `withTransportSeed`; targets come from the admitted ledger, and route network
+  waits run outside session locks ([transport rules](../iroh-native/AGENTS.md)).
 
 - Product/runtime assembly uses `makeOwnedPersonalDeviceHost` with resource-owning
   port Layers. Its bounded close retains the actual drain and all dependencies;
@@ -52,3 +70,57 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   account and owner; retain incomplete failures until actual close confirmation.
   Account change retires the assembly permanently. Only real optional port Layers
   advertise RPC or machine sharing; no unsupported channel becomes plaintext.
+
+- `personalRuntimeRecovery` exposes only closed setup/restore commands on the
+  existing owned host. Setup requires an active reader; callers release only
+  their own reader. Recovery failure never retires unrelated content readers.
+  Setup serializes per session without holding the session round permit across
+  caller vault or submission I/O; caller restore page streams own their transport deadlines.
+
+- Member approval on the portable runtime uses the optional `members` platform port with
+  the session's own credential. A listed key package is pinned per session; approval
+  signs only that pinned package through the session's ledger journal, never re-signs on
+  a lost reply, and key delivery afterwards never holds or undoes the admission.
+  The first attempt only distributes; a delivery short of mailbox evidence retries full
+  rounds on a bounded backoff, holding
+  the reader only during an attempt and never opening one; only an exhausted schedule or
+  an ineligible sender ends it `failed` for a manual retry. Its task stays in the core
+  distribution journal, so any later key round on this device also sends it. An open on
+  an active member's non-recovery device schedules one delayed background installing key
+  round, even before the current key is installed: it receives and installs before it
+  distributes. At most one is in flight, spaced by an interval; it borrows the reader
+  only while it runs, never opens one, and only reports failure.
+  Unattended automatic approval is disabled on both portable and desktop hosts:
+  `approveMemberJoin` accepts only `'explicit'` and refuses `'automatic'` with
+  `invalid-input`. Retained joins, links and lists still read offers without signatures,
+  and a retained join keeps its signed request id.
+- Removing a member on the portable runtime follows core authority, as desktop does: only
+  the owner removes and publishes the next epoch in one record. An administrator removes
+  the member plainly, declaring removal support first if the ledger lacks it; that marks
+  the epoch for rotation, which an administrator may then publish as a separate update.
+- Joining a team on the portable runtime prepares this workspace's identity for
+  `memberPairingOffer`, whose request id is the admitted membership and the pairing
+  session of the credential binding. The key package is retained before submission and
+  resubmitted unchanged on retry. The relay's `committed` is a hint: only this device's
+  admission in the verified full signed history is accepted, as a history approval.
+  The retained join reports `joined` once that approval original exists, so a reopened
+  join page shows it joined before its confirming claim; the hint grants nothing.
+- A new invitation after an ended join first retires the old request through the relay;
+  only `cancelled` writes the terminal receipt that settles it. The old credential is
+  pinned to that membership, so the new one gets a replacement identity, activated only
+  after its own verified admission. An admitted or still-live join keeps refusing.
+- Automatic pairing approval signs only after the person enters the code the new
+  device shows, typed or scanned from that screen, and it equals this device's derived
+  code. Reviews never expose that code, and the third wrong entry ends the request on
+  the approver before any signing. A request verified under an approver's own shown
+  account pairing QR code is signed for every listed workspace without another
+  confirmation; showing it on a computer as a request arrives is an owner decision.
+  An approver publishes only once every workspace it admitted has its invitation, so
+  the requester's `omitted` coverage is exact.
+- Requester listings open only the workspaces a request names. Cached history saves
+  downloads, never verification.
+
+- Management exposes last-personal-device risk from the verified ledger and requires
+  explicit recovery-only confirmation before signing its revocation.
+
+[Recovery scheduling](src/AGENTS.md) owns workspace concurrency and joins.

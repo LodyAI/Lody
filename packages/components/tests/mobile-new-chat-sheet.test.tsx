@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +18,7 @@ import {
   MOBILE_NEW_CHAT_SLIDE_MS,
   MobileNewChatSheet,
 } from '../src/components/mobile/mobile-new-chat-sheet';
+import { dispatchMobileBack } from '../src/lib/mobile-back-navigation';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -51,12 +50,12 @@ function projectButton(): HTMLButtonElement {
 }
 
 function panel(): HTMLElement {
-  return container.querySelector<HTMLElement>('.fixed.inset-0 > div')!;
+  return container.querySelector<HTMLElement>('[data-mobile-new-chat-panel]')!;
 }
 
 function touch(type: string, target: Element, x: number, y = 300) {
   const point = { identifier: 1, target, clientX: x, clientY: y };
-  const ended = type === 'touchend';
+  const ended = type === 'touchend' || type === 'touchcancel';
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.assign(event, {
     touches: ended ? [] : [point],
@@ -106,6 +105,31 @@ describe('MobileNewChatSheet', () => {
     touch('touchmove', target, 170);
     touch('touchend', target, 170);
 
+    expect(panel().style.transform).toBe('translate3d(100%, 0, 0)');
+    act(() => {
+      vi.advanceTimersByTime(MOBILE_NEW_CHAT_SLIDE_MS);
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('slides out to the right on Android system back and snaps back if an edge touch is canceled', () => {
+    renderSheet();
+    const target = projectButton();
+
+    touch('touchstart', target, 10);
+    touch('touchmove', target, 120);
+    touch('touchcancel', target, 120);
+    expect(panel().style.transform).toBe('translate3d(0px, 0, 0)');
+    act(() => {
+      vi.advanceTimersByTime(MOBILE_NEW_CHAT_SLIDE_MS);
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    let handled = false;
+    act(() => {
+      handled = dispatchMobileBack();
+    });
+    expect(handled).toBe(true);
     expect(panel().style.transform).toBe('translate3d(100%, 0, 0)');
     act(() => {
       vi.advanceTimersByTime(MOBILE_NEW_CHAT_SLIDE_MS);

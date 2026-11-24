@@ -21,14 +21,10 @@ export function buildWorkspaceMachineSelectionPool(args: {
   const { filteredItems, allItems, selectedMachineId } = args;
   const selectedItem = selectedMachineId
     ? allItems.find(
-        (item) =>
-          item.machine.id === selectedMachineId && (item.sharedWithTeam || item.isOwn)
+        (item) => item.machine.id === selectedMachineId && (item.sharedWithTeam || item.isOwn)
       )
     : undefined;
-  if (
-    !selectedItem ||
-    filteredItems.some((item) => item.machine.id === selectedItem.machine.id)
-  ) {
+  if (!selectedItem || filteredItems.some((item) => item.machine.id === selectedItem.machine.id)) {
     return filteredItems;
   }
   return [selectedItem, ...filteredItems];
@@ -59,4 +55,20 @@ export function resolveDesktopMachineSelection(args: {
   const fallback =
     byId(localMachineId) ?? pool.find((item) => item.isOwn)?.machine ?? pool[0]?.machine;
   return { resolved: fallback, nextSelectedMachineId: fallback?.id ?? null };
+}
+
+/** Recovery requires catalog ownership; being this installation's local machine is insufficient. */
+export function getMachineIdentityRestoreCandidates(args: {
+  allItems: readonly MachineTabItem[];
+  accessByMachineId: ReadonlyMap<MachineId, { ownerUserId: string }>;
+  currentUserId: string | null;
+}): MachineViewMeta[] {
+  if (!args.currentUserId) return [];
+  return args.allItems
+    .filter(
+      (item) =>
+        !item.isOnline &&
+        args.accessByMachineId.get(item.machine.id)?.ownerUserId === args.currentUserId
+    )
+    .map((item) => item.machine);
 }

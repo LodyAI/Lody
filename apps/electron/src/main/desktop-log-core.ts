@@ -97,9 +97,16 @@ export function createCliProbeTrace(options: {
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi
 const SECRET_QUERY_PATTERN =
   /([?&#](?:token|access_token|refresh_token|id_token|session_token|ott|code|code_verifier|state|password|secret|key|api_key)=)[^&#\s"'<>]+/gi
+// Include display separators after console formatting (literal \n / \t).
+// This conservative backstop intentionally does not load the pairing runtime.
+const PAIRING_DISPLAY_PATTERN =
+  /(?<![A-Za-z0-9])(?:lody:\/\/pair\/)?[0-7OoIL](?:(?:[\s-]|\\(?:[nrtfv]|x0[bB]))*[0-9A-HJKMNP-TV-ZOIL]){27}(?![A-Za-z0-9])/giu
 
 export function redactDesktopLogText(text: string): string {
-  return text.replace(BEARER_PATTERN, '$1[redacted]').replace(SECRET_QUERY_PATTERN, '$1[redacted]')
+  return text
+    .replace(BEARER_PATTERN, '$1[redacted]')
+    .replace(SECRET_QUERY_PATTERN, '$1[redacted]')
+    .replace(PAIRING_DISPLAY_PATTERN, '[redacted]')
 }
 
 export function formatConsoleArgs(args: readonly unknown[]): string {

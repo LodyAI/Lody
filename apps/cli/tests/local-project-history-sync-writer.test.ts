@@ -1,10 +1,10 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
 import { Mirror, schema } from 'loro-mirror';
 import {
   getSessionRoomId,
-  sessionDocSchema,
   parseSessionNotification,
   resolveSessionAcpRuntimeConfig,
   type AcpSessionNotification,
@@ -16,8 +16,7 @@ import {
   type MachineId,
   type SessionId,
   type SessionMeta,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 import {
   HASH_VERSION_V1,
   hashHistoryEntryForVersion,

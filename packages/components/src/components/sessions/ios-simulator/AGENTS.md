@@ -7,7 +7,7 @@ Decision and rationale:
 - The iOS Simulator is its own side-panel tab (`ios-simulator`, mobile `?simulator=1`),
   never a Browser mode: no address bar, history, annotation or sharing, and no state
   shared with `SessionBrowserPanel`.
-- The tab exists only when the Session's TARGET machine is a Mac; read that and the
+- The iOS Simulator tab exists in ordinary and encrypted workspaces only when the Session's TARGET machine is a Mac; read that and the
   protocol capability through `getIosSimulatorPanelAvailability` only. An old Mac keeps
   the tab and asks for an update without calling it.
 - Lifecycle calls are `runtime.requestIosSimulatorControl` (`ios-simulator/control`).
@@ -60,10 +60,15 @@ Decision and rationale:
   source/origin/operation checks. Copy diagnostics appears only for current errors;
   healthy fallback is not an error. Never include SDP, ICE addresses or credentials.
 
+- Both platforms permit local control and authenticated encrypted remote previews.
+  Lifecycle control uses signed feature RPC remotely; agent-control stays local-only.
 - `SessionDevicePreviewPanel` also serves Android through `android-emulator/control`
   and the independent `androidEmulator: 1` capability. Keep its state/preferences
   separate from iOS, never request iOS exterior assets for it, and expose only
-  supported controls. Android IDs are exact AVD names on the wire.
+  supported controls. Android IDs are exact AVD names on the wire. Consume Android
+  preview requests once per device in localStorage, independently of iOS, so closing
+  the panel remains effective across app restarts. Preserve this dismissal preference
+  during cache clearing; a new request may reveal the panel again.
 
 - Keep Stop preview directly accessible in ready desktop/mobile headers, bound to
   the current operation. Android starts Clear on the local machine and Balanced remotely, and exposes quality switching while ready inside the controls' More menu; switching

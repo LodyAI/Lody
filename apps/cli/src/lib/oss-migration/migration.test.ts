@@ -1,3 +1,4 @@
+import { createSessionMirror } from '@lody/shared/session-mirror';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +10,6 @@ import { Flock } from '@loro-dev/flock-wasm';
 import { LoroRepo } from 'loro-repo';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import {
-  createSessionMirror,
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
   type SessionId,
@@ -384,6 +384,44 @@ describe('OSS migration', () => {
     expect(first(frozen.documents).meta.isArchived).toBe(true);
     expect(hashBytes(await fs.readFile(dbPath))).toBe(before);
   });
+  async function sourceWithToday(userId: string) {
+    const { manifest } = fixture();
+    const root = await temporary();
+    const directory = path.join(root, 'loro-repo', manifest.sourceWorkspaceId);
+    await fs.mkdir(directory, { recursive: true });
+    const store = new SqliteRepoStore({ path: path.join(directory, 'repo.sqlite3') });
+    const repo = await LoroRepo.create({ storageAdapter: store.storage, metaDebounceCommitMs: 0 });
+    const docId = `today-${encodeURIComponent(userId)}-2026-11-20`;
+    const { doc } = await repo.openPersistedDoc(docId);
+    doc.getTree('outline').createNode().data.set('sessionId', 'one');
+    doc.commit();
+    await repo.upsertDocMeta(docId, { userId, date: '2026-11-20' });
+    await repo.flush();
+    await repo.destroy();
+    store.close();
+    return { manifest: { ...manifest, documents: [] }, root };
+  }
+
+  it('moves the owner’s Today pages to the target user, keeping their content', async () => {
+    const { manifest, root } = await sourceWithToday('local:owner');
+    const frozen = await freezeSource({ ...manifest, sourcePath: root }, path.join(root, 'backup'));
+    const page = frozen.documents.find((document) => document.id.startsWith('today-'));
+    expect(page).toMatchObject({
+      id: 'today-cloud-owner-2026-11-20',
+      meta: { userId: 'cloud-owner', date: '2026-11-20' },
+    });
+    const prepared = new LoroDoc();
+    prepared.import(await fs.readFile(sourceDocumentPath(path.join(root, 'backup'), page!.id)));
+    expect(prepared.getTree('outline').roots()[0]?.data.get('sessionId')).toBe('one');
+  });
+
+  it('refuses an OSS snapshot holding another user’s Today page', async () => {
+    const { manifest, root } = await sourceWithToday('local:stranger');
+    await expect(
+      freezeSource({ ...manifest, sourcePath: root }, path.join(root, 'backup'))
+    ).rejects.toThrow('another user');
+  });
+
   it('does not resurrect deleted index rows or replace existing project configuration', async () => {
     const { manifest } = fixture();
     manifest.flocks = [
@@ -722,6 +760,52 @@ describe('OSS migration', () => {
     expect(() => collectAttachmentFiles(doc)).toThrow('Legacy attachment references');
   });
 
+  it.each(['items', 'inputBlocks', 'contents', 'deleted'] as const)(
+    'rejects local references in %s before migration',
+    async (location) => {
+      const { original, manifest } = fixture();
+      const attachment = {
+        type: 'local_attachment' as const,
+        machineId: manifest.sourceMachineId,
+        path: '/tmp/local.txt',
+        kind: 'file' as const,
+        fileName: 'local.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 5,
+      };
+      if (location === 'contents') {
+        original.getList('history').push({
+          id: 'legacy-local',
+          role: 'user',
+          timestamp: '2026-11-06T00:00:00Z',
+          contents: [attachment],
+        });
+        original.commit();
+      }
+      const mirror = createSessionMirror({ doc: original, initialState: {} });
+      mirror.historyWriter.update((history) =>
+        history.map((turn) =>
+          turn.id !== 'u1'
+            ? turn
+            : {
+                ...turn,
+                ...(location === 'contents'
+                  ? { contents: [attachment] }
+                  : location === 'inputBlocks'
+                    ? { inputConfig: { inputBlocks: [attachment] } }
+                    : { items: [attachment] }),
+              }
+        )
+      );
+      if (location === 'deleted')
+        mirror.historyWriter.update((history) => history.filter((turn) => turn.id !== 'u1'));
+      mirror.dispose();
+      await expect(
+        validateAttachments(original, 'one', await temporary(), manifest.sourceMachineId)
+      ).rejects.toThrow('Local attachment references cannot be migrated');
+    }
+  );
+
   it('validates attachment bytes and checkpoints uploads before changing history', async () => {
     const { manifest, original } = fixture();
     const dir = await temporary();
@@ -1054,7 +1138,7 @@ describe('OSS migration', () => {
   });
 });
 
-it('rejects encrypted import before authenticating or creating streams', async () => {
+it('requires paired authorization before authenticating or creating encrypted streams', async () => {
   const requests: string[] = [];
   vi.stubGlobal('fetch', async (url: string) => {
     requests.push(url);
@@ -1066,7 +1150,14 @@ it('rejects encrypted import before authenticating or creating streams', async (
     },
   });
   await expect(
-    openMigrationTarget(blockedTokens, 'cloud' as WorkspaceId, { mode: 'protected' })
-  ).rejects.toThrow('加密工作区不支持导入');
+    openMigrationTarget(blockedTokens, 'cloud' as WorkspaceId, {
+      mode: 'protected',
+      namespace: 'synthetic',
+      resolve: () => {
+        throw new Error('must not resolve');
+      },
+      snapshotUpload: { canUpload: () => false },
+    })
+  ).rejects.toThrow('approved paired CLI machine');
   expect(requests).toEqual([]);
 });

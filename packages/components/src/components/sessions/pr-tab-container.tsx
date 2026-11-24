@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 
-import { currentWorkspaceIdAtom } from '@/atoms';
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
+import { openExternalUrl } from '@/lib/native-browser';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
   isGitHubOperationTokenConnectionLostError,
@@ -45,11 +47,6 @@ export interface PrTabContainerProps {
   actionSessionId: string | null;
 }
 
-function resolveGitHubAppInstallUrl(): string {
-  const appName = (import.meta.env.VITE_GITHUB_APP_NAME as string | undefined) || 'lodyai';
-  return `https://github.com/apps/${appName}/installations/new`;
-}
-
 const NOT_AUTHENTICATED_ERROR_MESSAGE = 'Not authenticated. Please sign in.';
 
 function isRecoverableReadyForReviewAuthError(error: unknown): boolean {
@@ -70,6 +67,7 @@ export function PrTabContainer({
   const { t } = useTranslation();
   const postHog = usePostHog();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const {
     canWrite,
     state,
@@ -173,10 +171,17 @@ export function PrTabContainer({
         // detail as a merge failure.
         if (isGitHubOperationTokenConnectionLostError(err)) return;
         const message = err instanceof Error ? err.message : String(err);
-        toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), { description: message });
+        toast.error(
+          prNumber
+            ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+                number: prNumber,
+              })
+            : t('sessions.prTab.mergeError', 'Failed to merge'),
+          { description: message }
+        );
       }
     },
-    [analyticsBase, data?.checkRuns, data?.pullRequest, mergePullRequest, postHog, t]
+    [analyticsBase, data?.checkRuns, data?.pullRequest, mergePullRequest, postHog, prNumber, t]
   );
 
   const handleSetState = useCallback(
@@ -279,8 +284,8 @@ export function PrTabContainer({
   const handleRefresh = useCallback(() => refresh(), [refresh]);
 
   const handleGrantChecksPermission = useCallback(() => {
-    window.open(resolveGitHubAppInstallUrl(), '_blank', 'noopener,noreferrer');
-  }, []);
+    if (workspaceSlug) void openExternalUrl(getPersonalGitHubAuthorizationUrl(workspaceSlug));
+  }, [workspaceSlug]);
 
   return (
     <PrTabView

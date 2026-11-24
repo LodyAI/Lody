@@ -66,11 +66,10 @@ export class AgentRolePage {
     await editor
       .getByLabel(/^(Default instruction|默认指令)$/u)
       .fill(this.fixture.initialInstruction);
-    const machineTab = editor.getByRole('tablist', { name: /^(Machine|机器)$/u }).getByRole('tab');
-    // The isolated desktop has one local machine, presented as a configuration tab.
-    await expect(machineTab).toHaveCount(1);
-    await machineTab.click();
-    await expect(machineTab).toHaveAttribute('aria-selected', 'true');
+    // The isolated desktop's one machine is the new Role's one open "Runs on" row.
+    const machineRow = editor.locator('[data-machine-id] > button[aria-expanded]');
+    await expect(machineRow).toHaveCount(1);
+    await expect(machineRow).toHaveAttribute('aria-expanded', 'true');
     await editor.getByLabel(/^(Agent config|Agent 配置)$/u).click();
     await this.page.getByRole('option', { name: this.fixture.agentName, exact: true }).click();
     await editor.getByRole('button', { name: /^(Create role|创建角色)$/u }).click();
@@ -292,7 +291,7 @@ export class AgentRolePage {
     const settings = await this.openSettings();
     await settings.locator('[data-settings-tab-id="agent-roles"]').click();
     await expect(
-      settings.getByText(/^(An Agent Role saves|Agent 角色保存了)/u).first()
+      settings.getByRole('button', { name: /^(Add role|添加角色)$/u }).first()
     ).toBeVisible();
     return settings;
   }

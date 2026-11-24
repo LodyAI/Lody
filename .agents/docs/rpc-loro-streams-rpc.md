@@ -39,16 +39,29 @@ starting; already-started raw work retains its task/permit until it settles.
 [Incremental recovery and scheduling decision](../notes/implemented/bug-fix/2026-10-16-roost-incremental-history.md)
 records boundary tests and limits; none is a live-service latency measurement.
 
-`session/history-watch` is an independently negotiated, owner-encrypted read method.
-It admits at most 128 parked requests in a separate lane; MessageHandler also caps
-owner waits across transports at 128. The checkpoint wait lasts at most 15 seconds
-outside ordinary permits, SQLite execution and writer serialization. After publication
-or deadline, its change/body read acquires an ordinary permit. The client response
-budget is 45 seconds. Local watches use independent wait lanes and a bounded
-post-wake read pool; one viewer cannot park another viewer behind its same-session wait.
-Stop aborts parked waits and fences queued work. The existing dispatcher retains raw
-reads through settlement; it never interprets waiter cancellation as write rollback.
-See [peer observation](../notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
+Roost advertises `sessionHistorySubscription`. An owner-encrypted
+`session/history-subscribe` sends the initial durable checkpoint and then further
+publications on the same reply stream as the owner commits. A lease lasts up to
+45 seconds or 64 publications. The client budget is 55 seconds. An idle owner
+parks on Native commit observation outside read capacity, SQLite and the writer
+lane. Each transport has bounded admission, with 128 active subscriptions
+across the daemon. Owner reads serialize per session with eight active sessions
+across the daemon. A separate close lane uses
+`session/history-unsubscribe` with the original reply stream and read proof.
+Owner shutdown aborts active leases.
+
+Each publication rechecks current ordinary history read access before delivery.
+A coherent delta up to 16 KiB can accompany the checkpoint. The reader applies it
+only at its exact cache base and window. Missing, oversized or unusable deltas
+use the existing `readChanges` path, which handles expired checkpoints by staging
+a new bounded page, including a new generation with a lower revision. Each reader
+adopts an owner-confirmed shared cache checkpoint in its own view before skipping
+repeated publications. Reconnection starts at the last cached checkpoint. The
+native mobile runtime consumes the reply stream over Streams long-poll. It
+withdraws live readiness on subscription failure and restores it once the
+owner-confirmed checkpoint is readable in the transcript. Local
+Electron uses the same publication contract over `session/history-subscription`
+and needs no network grant. See [peer observation](../notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
 
 ## History readiness and error provenance
 
@@ -154,9 +167,21 @@ The earlier `method.startsWith('code-collab/')` checks silently excluded any new
 envelope method, which is why every encrypt/decrypt/error-decode site now goes
 through `isOwnerScopedEncryptedRpcMethod`.
 
+`file/list-dir` (capability `sessionDirectoryListing`) is the folder counterpart: one
+folder of the session's own workspace, in the same envelope and owner check, so a
+listed file is always one `file/preview` can open. `local-project/list-dir` lists the
+project's original folder instead, which differs from a worktree conversation's
+workspace. Encrypted workspaces answer `unsupported_protocol` for now.
+
 ## Project group member probing
 
 `project/probe-local-member` is a read-only workspace/machine method. It carries a registered
 localProjectId and requester identity, never a host path. The daemon checks machine/project
 access and shares its native probe with local IPC. `requestProjectProbeLocalMember` returns
 the shared `ProjectProbeLocalMemberResult`, or null on failure. Local/file URLs are redacted.
+
+`local-project/list-branches` (capability `localProjectBranchListing`) serves paginated and
+query-filtered branch selectors (`{ query, limit, cursor }`) without scanning the working tree.
+Daemons publish lightweight `(git, defaultBranch, currentBranch)` summaries on Machine Flock
+`localProject` rows for immediate UI selection, and encrypted workspaces admit branch queries
+only for the verified owner or policy-admitted project writers against identity-verified roots.

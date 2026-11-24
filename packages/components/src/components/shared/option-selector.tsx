@@ -38,7 +38,6 @@ export interface OptionSelectorOption<TValue extends string | number = string> {
 }
 
 type SelectorSize = 'sm' | 'md' | 'lg';
-type SelectorTone = 'light' | 'dark';
 
 /**
  * The material the trigger takes from where it sits.
@@ -60,8 +59,17 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   appearance?: OptionSelectorAppearance;
   /** Layout only (width, flex); the trigger's look is `appearance`'s. */
   className?: string;
+  /** Styles compose with the trigger's own surface. */
+  xstyle?: stylex.StyleXStyles;
+  /** Styles for the trigger's owned value wrapper and default label. */
+  valueXstyle?: stylex.StyleXStyles;
+  labelXstyle?: stylex.StyleXStyles;
   /** Layout only (width); the popup's look is the floating rung's. */
   contentClassName?: string;
+  contentXstyle?: stylex.StyleXStyles;
+  contentWidth?: string | number;
+  contentMinWidth?: string | number;
+  contentMaxWidth?: string | number;
   disabled?: boolean;
   searchable?: boolean;
   searchPlaceholder?: string;
@@ -74,8 +82,6 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
    * `toolbar` trigger is 24px at `sm` (inside a context pill) and 28px above.
    */
   size?: SelectorSize;
-  /** @deprecated The popup reads the palette in force; kept for callers. */
-  tone?: SelectorTone;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   renderTriggerValue?: (option?: OptionSelectorOption<TValue>) => ReactNode;
@@ -83,7 +89,13 @@ export interface OptionSelectorProps<TValue extends string | number = string> {
   showChevron?: boolean;
   /** When false, the search input won't auto-focus when the popover opens. */
   autoFocusSearch?: boolean;
+  onQueryChange?: (query: string) => void;
+  disableClientFilter?: boolean;
+  onReachEnd?: () => void;
+  footer?: ReactNode;
 }
+
+const OPTION_SELECTOR_REACH_END_ROWS = 5;
 
 const styles = stylex.create({
   // The list scrolls under the search field; the cap keeps it clear of the
@@ -117,7 +129,14 @@ export function OptionSelector<TValue extends string | number = string>({
   placeholderIcon,
   appearance = 'field',
   className,
+  xstyle,
+  valueXstyle,
+  labelXstyle,
   contentClassName,
+  contentXstyle,
+  contentWidth,
+  contentMinWidth,
+  contentMaxWidth,
   disabled = false,
   searchable = false,
   searchPlaceholder,
@@ -132,13 +151,17 @@ export function OptionSelector<TValue extends string | number = string>({
   renderOption,
   showChevron = true,
   autoFocusSearch = true,
+  onQueryChange,
+  disableClientFilter = false,
+  onReachEnd,
+  footer,
 }: OptionSelectorProps<TValue>) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = open !== undefined;
   const isOpen = isControlled ? open : internalOpen;
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const didSelectItemRef = useRef(false);
-  const [contentWidth, setContentWidth] = useState<number | undefined>(undefined);
+  const [triggerWidth, setTriggerWidth] = useState<number | undefined>(undefined);
   // Tracks search input changes so we can reset scroll position.
   const [searchToken, setSearchToken] = useState(0);
   // The row under the keyboard or pointer, as cmdk reports it: StyleX cannot read
@@ -187,7 +210,7 @@ export function OptionSelector<TValue extends string | number = string>({
   // to virtualize), reusing the command-palette's fuzzy scorer. Small lists keep cmdk's
   // built-in filtering untouched.
   const filteredOptions = useMemo(() => {
-    if (!virtualize) return options;
+    if (disableClientFilter || !virtualize) return options;
     const q = query.trim();
     if (!q) return options;
     return options
@@ -198,7 +221,7 @@ export function OptionSelector<TValue extends string | number = string>({
       )
       .sort((a, b) => b.score - a.score)
       .map((entry) => entry.option);
-  }, [virtualize, options, query]);
+  }, [disableClientFilter, virtualize, options, query]);
 
   const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: filteredOptions.length,
@@ -222,7 +245,7 @@ export function OptionSelector<TValue extends string | number = string>({
   useLayoutEffect(() => {
     const element = triggerRef.current;
     if (!element) return undefined;
-    const updateWidth = () => setContentWidth(element.offsetWidth);
+    const updateWidth = () => setTriggerWidth(element.offsetWidth);
     updateWidth();
 
     if (typeof ResizeObserver !== 'undefined') {
@@ -242,6 +265,7 @@ export function OptionSelector<TValue extends string | number = string>({
       didSelectItemRef.current = false;
     } else {
       setQuery(''); // reopen starts unfiltered
+      onQueryChange?.('');
     }
     if (!isControlled) {
       setInternalOpen(next);
@@ -270,7 +294,9 @@ export function OptionSelector<TValue extends string | number = string>({
   ) : (
     <>
       {renderIcon(selectedOption)}
-      <span {...stylex.props(surface.truncate)}>{selectedOption?.label ?? placeholder ?? ''}</span>
+      <span {...stylex.props(surface.truncate, labelXstyle)}>
+        {selectedOption?.label ?? placeholder ?? ''}
+      </span>
     </>
   );
 
@@ -335,6 +361,7 @@ export function OptionSelector<TValue extends string | number = string>({
         ref={triggerRef}
         type="button"
         disabled={disabled}
+        style={stylex.props(xstyle).style}
         className={(state) =>
           withClassName(
             stylex.props(
@@ -342,17 +369,22 @@ export function OptionSelector<TValue extends string | number = string>({
               isField && fieldSizes[size],
               !isField && size === 'sm' && surface.triggerSmall,
               isField && !selectedOption && surface.fieldPlaceholder,
-              !isField && state.open && surface.triggerOpen
+              !isField && state.open && surface.triggerOpen,
+              xstyle
             ),
             className
           ).className ?? ''
         }
       >
-        <span {...stylex.props(surface.value)}>{triggerContent}</span>
+        <span {...stylex.props(surface.value, valueXstyle)}>{triggerContent}</span>
         {showChevron ? <ChevronDown {...stylex.props(surface.chevron)} aria-hidden="true" /> : null}
       </Popover.Trigger>
       <Popover.Content
         className={contentClassName}
+        xstyle={contentXstyle}
+        width={contentWidth}
+        minWidth={contentMinWidth}
+        maxWidth={contentMaxWidth}
         container={portalContainer}
         align={align}
         side={side}
@@ -361,7 +393,7 @@ export function OptionSelector<TValue extends string | number = string>({
             ? { side: 'none', align: 'none', fallbackAxisSide: 'none' }
             : undefined
         }
-        style={{ minWidth: contentWidth ? `${contentWidth}px` : undefined }}
+        style={{ minWidth: triggerWidth ? `${triggerWidth}px` : undefined }}
         initialFocus={!autoFocusOnOpen ? false : undefined}
         finalFocus={() => {
           const didSelectItem = didSelectItemRef.current;
@@ -373,7 +405,7 @@ export function OptionSelector<TValue extends string | number = string>({
         }}
       >
         <CommandPrimitive
-          shouldFilter={!virtualize}
+          shouldFilter={!disableClientFilter && !virtualize}
           value={highlighted}
           onValueChange={setHighlighted}
           {...stylex.props(surface.popupList)}
@@ -385,12 +417,28 @@ export function OptionSelector<TValue extends string | number = string>({
               onValueChange={(nextQuery: string) => {
                 setQuery(nextQuery);
                 setSearchToken((n) => n + 1);
+                onQueryChange?.(nextQuery);
               }}
               {...stylex.props(surface.search)}
             />
           )}
           <CommandPrimitive.List
             ref={listViewportRef}
+            onScroll={
+              onReachEnd
+                ? (event) => {
+                    const viewport = event.currentTarget;
+                    const remaining =
+                      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+                    if (
+                      remaining <=
+                      OPTION_SELECTOR_REACH_END_ROWS * OPTION_SELECTOR_ROW_ESTIMATE_PX
+                    ) {
+                      onReachEnd();
+                    }
+                  }
+                : undefined
+            }
             {...stylex.props(surface.popupScroll, styles.scroll)}
           >
             <CommandPrimitive.Empty {...stylex.props(surface.empty)}>
@@ -414,6 +462,7 @@ export function OptionSelector<TValue extends string | number = string>({
             ) : (
               options.map((option) => renderOptionItem(option))
             )}
+            {footer ? <div {...stylex.props(surface.empty)}>{footer}</div> : null}
           </CommandPrimitive.List>
         </CommandPrimitive>
       </Popover.Content>

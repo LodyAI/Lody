@@ -7,6 +7,9 @@ import { SessionHistoryRequestError } from './roost-history-error';
 
 /** Proven source-side refusal before owner history is invoked. */
 export class SessionInputNotSentError extends Error {}
+
+/** The queue row committed locally; only the signal that wakes its machine failed. */
+export class QueueSignalError extends Error {}
 const refusalCodes = new Set([
   'session_metadata_pending',
   'session_owner_mismatch',
@@ -28,6 +31,7 @@ type InputPorts = {
     send: PendingSessionSend,
     signal: AbortSignal
   ): Promise<SessionInputAcceptanceResult & { readonly dispatchHandled?: boolean }>;
+  prepareIntent?(send: PendingSessionSend, signal: AbortSignal): Promise<string>;
   lookup(send: PendingSessionSend, signal: AbortSignal): Promise<SessionInputAcceptanceResult>;
   deliver(
     send: PendingSessionSend,
@@ -267,8 +271,20 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
       let receipt: SessionInputAcceptanceResult & { readonly dispatchHandled?: boolean };
       if (row.state === 'queued') {
         // A crash after handoff must recover by query, never a new append.
-        current =
-          (await ports.storage.patch(row.id, { state: 'unknown', error: undefined })) ?? row;
+        const intent =
+          ports.prepareIntent && !row.send.entry.e2eeIntent
+            ? await ports.prepareIntent(row.send, signal)
+            : undefined;
+        if (closed || signal.aborted || canceled.has(row.id)) return false;
+        const prepared = await ports.storage.patch(row.id, {
+          state: 'unknown',
+          error: undefined,
+          ...(intent
+            ? { send: { ...row.send, entry: { ...row.send.entry, e2eeIntent: intent } } }
+            : {}),
+        });
+        if (!prepared || prepared.canceled) return true;
+        current = prepared;
         project(current, true);
         receipt = await step('write', () => ports.write(current.send, signal));
       } else {
@@ -350,7 +366,7 @@ export function createAcceptedSessionInputs(ports: InputPorts) {
         state:
           current.state === 'confirmed'
             ? 'confirmed'
-            : row.state === 'queued' && didNotStart(error)
+            : current.state === 'queued' || (row.state === 'queued' && didNotStart(error))
               ? 'failed'
               : 'unknown',
         error: error instanceof Error ? error.message : ports.unknownMessage(),

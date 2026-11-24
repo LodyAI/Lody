@@ -1,7 +1,7 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoroStreamsTokenProviderLegacy,
-  ScheduleRepository,
   getSessionRoomId,
   type MachineId,
   type SessionId,
@@ -44,6 +44,10 @@ const mocks = vi.hoisted(() => {
   const streamsConnect = vi.fn(async () => undefined);
   const streamsTransportConstructors = vi.fn();
   const machineRpcConstructors = vi.fn();
+  const encryptedAcpTransport = {
+    handler: null as null | ((request: any, options: any) => Promise<any>),
+    closeHandler: null as null | (() => Promise<void>),
+  };
   const machineRpcStart = vi.fn(async () => {});
   const machineRpcStop = vi.fn();
   const machineRpcOpenTurnDiff = vi.fn(async () => ({ status: 'ok' }));
@@ -99,6 +103,7 @@ const mocks = vi.hoisted(() => {
     streamsConnect,
     streamsTransportConstructors,
     machineRpcConstructors,
+    encryptedAcpTransport,
     machineRpcStart,
     machineRpcStop,
     machineRpcOpenTurnDiff,
@@ -115,46 +120,6 @@ const mocks = vi.hoisted(() => {
 
 let documentListeners: Map<string, Set<EventListener>>;
 let windowListeners: Map<string, Set<EventListener>>;
-
-type FakeMetaSub = {
-  status: 'joined';
-  firstSyncedWithRemote: Promise<void>;
-  onStatusChange: (listener: (status: 'joined') => void) => () => void;
-  unsubscribe: ReturnType<typeof vi.fn>;
-};
-
-const createMetaSub = (firstSyncedWithRemote: Promise<void>): FakeMetaSub => {
-  const bindings = new Map<string, unknown>();
-  return {
-    status: 'joined',
-    firstSyncedWithRemote,
-    onStatusChange: vi.fn(() => vi.fn()),
-    unsubscribe: vi.fn(),
-    // Per-transport stable bindings (loro-repo >=0.19); the runtime selects a
-    // plane instead of reading the aggregate on dual-homed rooms.
-    subscription: vi.fn((transportId: string) => {
-      let binding = bindings.get(transportId);
-      if (!binding) {
-        binding = {
-          transportId,
-          status: 'joined',
-          firstSyncedWithRemote,
-          onStatusChange: vi.fn(() => vi.fn()),
-          waitUntilSynced: vi.fn(async () => {}),
-          rejoin: vi.fn(async () => {}),
-        };
-        bindings.set(transportId, binding);
-      }
-      return binding;
-    }),
-  };
-};
-
-const flushPromises = async (): Promise<void> => {
-  for (let i = 0; i < 8; i += 1) {
-    await Promise.resolve();
-  }
-};
 
 const dispatchDocumentEvent = (event: string): void => {
   for (const listener of documentListeners.get(event) ?? []) {
@@ -237,6 +202,8 @@ vi.mock('loro-repo/transport/streams', () => ({
     constructor(readonly options: unknown) {
       mocks.streamsTransportConstructors(options);
     }
+    joinFlockDocRoom = vi.fn();
+    syncFlockDoc = vi.fn();
     connect = mocks.streamsConnect;
     close = vi.fn(async () => undefined);
     reconnect = vi.fn(async () => undefined);
@@ -248,6 +215,17 @@ vi.mock('loro-repo/transport/streams', () => ({
     });
   },
 }));
+
+vi.mock('@loro-dev/streams-crdt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-crdt')>();
+  return {
+    ...actual,
+    StreamsCrdt: class StreamsCrdt {
+      createStream = vi.fn(async () => ({ ok: true }));
+      close = vi.fn(async () => {});
+    },
+  };
+});
 
 vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();
@@ -338,7 +316,8 @@ vi.mock('../src/providers/workspace-machine-monitor-transport', () => ({
   },
 }));
 
-vi.mock('@lody/loro-streams-rpc', () => ({
+vi.mock('@lody/loro-streams-rpc', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@lody/loro-streams-rpc')>()),
   createLoroStreamsJsonStreamClient: vi.fn(() => mocks.streamClient),
   LoroStreamsLiveModePolicy: class LoroStreamsLiveModePolicy {
     constructor(readonly options: unknown) {}
@@ -411,15 +390,43 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
+vi.mock('../src/providers/encrypted-dispatch-legacy', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../src/providers/encrypted-dispatch-legacy')>();
+  return {
+    ...actual,
+    createEncryptedDispatchLegacy: (
+      options: Parameters<typeof actual.createEncryptedDispatchLegacy>[0]
+    ) => {
+      if (!mocks.encryptedAcpTransport.handler)
+        return actual.createEncryptedDispatchLegacy(options);
+      return {
+        requestFeature: (request: unknown, requestOptions: unknown) =>
+          mocks.encryptedAcpTransport.handler!(request, requestOptions),
+        close: async () => {
+          await mocks.encryptedAcpTransport.closeHandler?.();
+        },
+      } as ReturnType<typeof actual.createEncryptedDispatchLegacy>;
+    },
+  };
+});
+
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '../src/lib/clear-local-cache';
 import { waitForWorkspaceContentAdmission } from '../src/providers/workspace-mode-admission';
+import {
+  type FakeMetaSub,
+  createMetaSub,
+  flushPromises,
+} from './create-workspace-runtime-meta-recovery-test-helpers';
 
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers({
       toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
     });
+    mocks.encryptedAcpTransport.handler = null;
+    mocks.encryptedAcpTransport.closeHandler = null;
     mocks.repoOverride = null;
     mocks.realTokenProvider = false;
     mocks.tokenReady.mockReset().mockResolvedValue('streams-token');
@@ -507,6 +514,47 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('backs off a cloud-readiness binding in the actual dual-plane runtime', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    const downloads: number[] = [];
+    // No registry projection for this room: only the cloud member reports error.
+    const entry = {
+      room: { kind: 'doc', id: 'cloud-only-large-stream' },
+      subscription: {
+        status: 'error',
+        rejoin: async () => {
+          downloads.push(Date.now());
+        },
+      },
+    };
+    mocks.transportRooms.mockReturnValue([entry] as never[]);
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    try {
+      await runtime.setAuthToken('auth-token');
+      await vi.advanceTimersByTimeAsync(0);
+      const afterStartup = downloads.length;
+      expect(afterStartup).toBeGreaterThan(0);
+      mocks.reconnect.mockClear();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(downloads.length).toBe(afterStartup + 1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(downloads.length).toBe(afterStartup + 1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(downloads.length).toBe(afterStartup + 2);
+      // No workspace-wide restart may bypass this member's backoff.
+      expect(mocks.reconnect.mock.calls).toEqual([]);
+    } finally {
+      mocks.transportRooms.mockReturnValue([]);
+      await runtime.dispose();
+    }
   });
 
   it('aborts the real token provider fetch when startup is cancelled', async () => {
@@ -920,6 +968,39 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       } finally {
         await runtime.dispose();
       }
+    }
+  );
+
+  it.each(['cloud', 'dual'] as const)(
+    'keeps the presence snapshot through a wake restart but clears it at disposal (%s)',
+    async (syncMode) => {
+      if (syncMode === 'dual') enableElectronLocalDataPlane();
+      mocks.presenceShouldRestartOnExternalWake.mockReturnValue(true);
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      const runtime = await createWorkspaceRuntime({
+        content: { mode: 'plaintext' },
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode,
+      });
+      try {
+        await runtime.setAuthToken('auth-token');
+        await vi.advanceTimersByTimeAsync(0);
+        const startsBeforeWake = mocks.presenceStart.mock.calls.length;
+        expect(startsBeforeWake).toBeGreaterThan(0);
+        mocks.presenceStop.mockClear();
+
+        dispatchDocumentEvent('visibilitychange');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mocks.presenceStop.mock.calls).toEqual([[{ retainSnapshot: true }]]);
+        expect(mocks.presenceStart.mock.calls.length).toBe(startsBeforeWake + 1);
+      } finally {
+        mocks.presenceStop.mockClear();
+        await runtime.dispose();
+      }
+      expect(mocks.presenceStop.mock.calls.flat().filter(Boolean)).toEqual([]);
     }
   );
 
@@ -1516,596 +1597,5 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
 
     expect(candidates).toEqual(['visible']);
     await runtime.dispose();
-  });
-
-  it('uses the Electron local data plane without attaching Loro Streams', async () => {
-    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
-    enableElectronLocalDataPlane();
-
-    const runtime = await createWorkspaceRuntime({
-      content: { mode: 'plaintext' },
-      workspaceSlug: 'workspace',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      apiBaseUrl: 'https://api.example.test',
-      token: 'auth-token',
-    });
-
-    expect(mocks.streamsTransportConstructors).not.toHaveBeenCalled();
-    expect(mocks.presenceStart).not.toHaveBeenCalled();
-    expect(mocks.addTransport).toHaveBeenCalledTimes(1);
-    expect(mocks.addTransport).toHaveBeenCalledWith('local', expect.anything());
-    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
-
-    await runtime.dispose();
-  });
-
-  it('attaches the cloud plane after an offline Electron startup comes online', async () => {
-    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
-    enableElectronLocalDataPlane();
-    Object.assign(navigator, { onLine: false });
-
-    const runtime = await createWorkspaceRuntime({
-      content: { mode: 'plaintext' },
-      workspaceSlug: 'workspace',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      apiBaseUrl: 'https://api.example.test',
-      token: 'auth-token',
-    });
-    await runtime.setAuthToken('auth-token');
-    expect(mocks.streamsTransportConstructors).not.toHaveBeenCalled();
-
-    Object.assign(navigator, { onLine: true });
-    dispatchWindowEvent('online');
-    await flushPromises();
-
-    expect(mocks.streamsTransportConstructors).toHaveBeenCalledTimes(1);
-    expect(mocks.reconnect).not.toHaveBeenCalled();
-    await runtime.dispose();
-  });
-
-  it.each(['roost-arrives', 'owner-arrives', 'legacy', 'close', 'deleted'] as const)(
-    'retains a cold reader until its own metadata source is ready (%s)',
-    async (scenario) => {
-      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
-      const { LoroDoc } = await import('loro-crdt');
-      const { createLoroSessionData } = await import('@lody/shared/session-data');
-      const repo = await RealRepo.create({
-        metaDebounceCommitMs: 0,
-        resolveRoomTransports: () => ({ transportIds: ['local', 'cloud'] }),
-      });
-      const remoteSync = Promise.withResolvers<void>();
-      const localMetaJoined = Promise.withResolvers<void>();
-      const cloudMetaJoined = Promise.withResolvers<void>();
-      const adapter = (cloud: boolean): TransportAdapter => ({
-        connect: async () => {},
-        close: async () => {},
-        isConnected: () => true,
-        getStatus: () => 'connected',
-        onStatusChange: () => () => {},
-        reconnect: async () => {},
-        syncMeta: async () => ({ ok: true }),
-        syncDoc: async () => ({ ok: true }),
-        joinMetaRoom: () => {
-          (cloud ? cloudMetaJoined : localMetaJoined).resolve();
-          return {
-            status: 'joined',
-            firstSyncedWithRemote: cloud ? remoteSync.promise : Promise.resolve(),
-            onStatusChange: () => () => {},
-            unsubscribe: () => {},
-            waitUntilSynced: async () => {},
-            rejoin: async () => {},
-          };
-        },
-      });
-      const add = repo.addTransport.bind(repo);
-      vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
-        add(id, adapter(id === 'cloud'), options)
-      );
-      mocks.repoOverride = repo;
-      enableElectronLocalDataPlane();
-      const sessionId = 'synthetic-cold-peer' as SessionId;
-      const roomId = getSessionRoomId(sessionId);
-      await repo.upsertDocMeta(roomId, {
-        id: sessionId,
-        ...(scenario === 'owner-arrives' ? {} : { machineId: 'foreign-machine' }),
-      });
-      // The previous premature Loro reader can leave an empty list in an
-      // otherwise Roost control document. It must not become legacy evidence.
-      const provisional = await repo.openPersistedDoc(roomId);
-      const misplaced = provisional.doc.getList('history');
-      if (scenario === 'roost-arrives' || scenario === 'owner-arrives') {
-        // A cached old reader may even have authored a misplaced Loro entry.
-        // A known Roost cursor must keep this provisional backend unresolved.
-        misplaced.push({
-          id: 'misplaced-old-input',
-          role: 'user',
-          timestamp: 'synthetic',
-          items: [{ type: 'text', text: 'Old mistaken Loro reader' }],
-        });
-        provisional.doc.getMap('roostHistoryCursor').set('cursor', '1');
-      }
-      provisional.doc.commit();
-      const armed = Promise.withResolvers<void>();
-      const live = new Set<unknown>();
-      const observe = repo.observeDocs.bind(repo);
-      vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
-        const observation = observe(listener, options);
-        if (!options?.filter?.docIds?.includes(roomId)) return observation;
-        live.add(observation);
-        armed.resolve();
-        return {
-          ...observation,
-          unsubscribe: () => {
-            live.delete(observation);
-            observation.unsubscribe();
-          },
-        };
-      });
-      const body = new LoroDoc();
-      body.getList('history').push({
-        id: 'synthetic-visible-body',
-        role: 'assistant',
-        timestamp: 'synthetic',
-        items: [{ type: 'text', text: 'Visible after backend readiness' }],
-      });
-      body.commit();
-      const runtime = await createWorkspaceRuntime({
-        content: { mode: 'plaintext' },
-        workspaceSlug: 'workspace',
-        workspaceId: 'workspace-1' as WorkspaceId,
-        apiBaseUrl: 'https://api.example.test',
-        syncMode: 'dual',
-        createSessionData: ({ sessionId: targetSessionId }) =>
-          createLoroSessionData({ sessionId: targetSessionId, doc: body }),
-      });
-      runtime.setLocalMachineId('local-machine' as MachineId);
-      await localMetaJoined.promise;
-      await runtime.setAuthToken('synthetic-token');
-      await cloudMetaJoined.promise;
-      const opening = runtime.acquireSessionStore(sessionId);
-      const outcome = opening.catch((error) => error);
-      await armed.promise;
-      expect(runtime.peekSessionStore?.(sessionId)).toBeUndefined();
-      expect(live.size).toBe(1);
-      if (scenario === 'close') {
-        remoteSync.resolve();
-        await runtime.dispose();
-        expect(await outcome).toBeInstanceOf(Error);
-        expect(live.size).toBe(0);
-        return;
-      }
-      if (scenario === 'deleted') {
-        try {
-          await repo.deleteDoc(roomId);
-          expect(await outcome).toBeInstanceOf(Error);
-          expect(runtime.peekSessionStore?.(sessionId)).toBeUndefined();
-          expect(live.size).toBe(0);
-        } finally {
-          remoteSync.resolve();
-          await runtime.dispose();
-        }
-        return;
-      }
-      if (scenario === 'roost-arrives' || scenario === 'owner-arrives') {
-        // Local Meta restored already. The same acquire must bind Roost when
-        // the foreign session's identity arrives, without a view reopen.
-        const metaLease = await repo.joinMetaRoom();
-        try {
-          remoteSync.resolve();
-          expect(
-            await metaLease.subscription('cloud').waitFor({ phase: 'restored' })
-          ).toMatchObject({ status: 'complete' });
-        } finally {
-          metaLease.unsubscribe();
-        }
-        await repo.upsertDocMeta(roomId, { historyBackend: 'roost', machineId: 'foreign-machine' });
-      } else remoteSync.resolve();
-      try {
-        const store = await opening;
-        expect(store.historyBackend).toBe(scenario === 'legacy' ? 'loro' : 'roost');
-        expect(await store.sessionData.history.readTurn('synthetic-visible-body')).toMatchObject({
-          state: 'ready',
-        });
-        expect(live.size).toBe(0);
-      } finally {
-        remoteSync.resolve();
-        await runtime.dispose();
-      }
-    }
-  );
-
-  it('repairs a dual-homed room whose cloud binding failed (invisible to trackers)', async () => {
-    // The regression this pins: a dual-homed room's cloud subscription failing
-    // while the local plane stays healthy produced no signal anywhere and the
-    // pending renderer-authored ops sat local-only. The repair loop must
-    // discover it via repo.transportRooms('cloud') and reconnect that plane.
-    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
-    enableElectronLocalDataPlane();
-    Object.assign(navigator, { onLine: true });
-
-    const runtime = await createWorkspaceRuntime({
-      content: { mode: 'plaintext' },
-      workspaceSlug: 'workspace',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      apiBaseUrl: 'https://api.example.test',
-      token: 'auth-token',
-    });
-    // A dual-homed room needs resolved LOCAL ownership: the scan deliberately
-    // skips cloud-readiness rooms (their binding is already registry-tracked).
-    runtime.setLocalMachineId('local-machine' as MachineId);
-    await runtime.setAuthToken('auth-token');
-    await flushPromises();
-    expect(mocks.streamsTransportConstructors).toHaveBeenCalledTimes(1);
-    mocks.reconnect.mockClear();
-
-    // A detached binding is deliberate absence — never a repair trigger.
-    mocks.transportRooms.mockReturnValue([
-      {
-        room: { kind: 'doc', id: 'machine-local-machine' },
-        subscription: { status: 'detached', rejoin: vi.fn(async () => {}) },
-      },
-    ]);
-    await vi.advanceTimersByTimeAsync(120_000);
-    await flushPromises();
-    expect(mocks.reconnect).not.toHaveBeenCalled();
-
-    const brokenRejoin = vi.fn(async () => {});
-    mocks.transportRooms.mockReturnValue([
-      {
-        room: { kind: 'doc', id: 'machine-local-machine' },
-        subscription: { status: 'error', rejoin: brokenRejoin },
-      },
-    ]);
-    await vi.advanceTimersByTimeAsync(120_000);
-    await flushPromises();
-    expect(mocks.reconnect).toHaveBeenCalledWith({ transportIds: ['cloud'], resetBackoff: true });
-    // A failed loro-repo-level attach is only repaired by the per-room rejoin.
-    expect(brokenRejoin).toHaveBeenCalled();
-
-    mocks.transportRooms.mockReturnValue([]);
-    await runtime.dispose();
-  });
-
-  it('re-joins a held session room after every initial join attempt failed', async () => {
-    // A join that never attaches leaves loro-repo no room record, so neither
-    // repo.reconnect() nor the reconnect loop can revive it. The open view
-    // used to sit on its cached copy until a reload.
-    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
-    const repo = await RealRepo.create({
-      metaDebounceCommitMs: 0,
-      resolveRoomTransports: () => ({ transportIds: ['local'] }),
-    });
-    const subscription = (): TransportSubscription => ({
-      status: 'joined',
-      firstSyncedWithRemote: Promise.resolve(),
-      onStatusChange: () => () => {},
-      unsubscribe: () => {},
-      waitUntilSynced: async () => {},
-      rejoin: async () => {},
-    });
-    const sessionId = 'synthetic-join-retry' as SessionId;
-    const roomId = getSessionRoomId(sessionId);
-    // Three attempts inside one join pass, then one more after the backoff.
-    let failingJoins = 4;
-    const adapter: TransportAdapter = {
-      connect: async () => {},
-      close: async () => {},
-      isConnected: () => true,
-      getStatus: () => 'connected',
-      onStatusChange: () => () => {},
-      reconnect: async () => {},
-      syncMeta: async () => ({ ok: true }),
-      syncDoc: async () => ({ ok: true }),
-      joinMetaRoom: () => subscription(),
-      joinDocRoom: (docId) => {
-        if (docId === roomId && failingJoins > 0) {
-          failingJoins -= 1;
-          throw new Error('synthetic attach failure');
-        }
-        return subscription();
-      },
-    };
-    const add = repo.addTransport.bind(repo);
-    vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
-      add(id, adapter, options)
-    );
-    mocks.repoOverride = repo;
-    enableElectronLocalDataPlane();
-    await repo.upsertDocMeta(roomId, { id: sessionId, machineId: 'local-machine' });
-
-    const runtime = await createWorkspaceRuntime({
-      content: { mode: 'plaintext' },
-      workspaceSlug: 'workspace',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      apiBaseUrl: 'https://api.example.test',
-    });
-    runtime.setLocalMachineId('local-machine' as MachineId);
-    const store = await runtime.acquireSessionStore(sessionId);
-    const releaseSync = store.acquireSync();
-    try {
-      // The join pass's own retries (1 s, 2 s) all fail.
-      await vi.advanceTimersByTimeAsync(3_000);
-      expect(failingJoins).toBe(1);
-      expect(store.getSyncState()).toBe('error');
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      expect(failingJoins).toBe(0);
-      expect(store.getSyncState()).toBe('synced');
-      await expect(store.firstSynced).resolves.toBeUndefined();
-    } finally {
-      releaseSync();
-      runtime.releaseSessionStoreRef(sessionId);
-      await runtime.dispose();
-    }
-  });
-
-  it('rebinds the eager-sync auth callback when the token provider is replaced', async () => {
-    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
-    const runtime = await createWorkspaceRuntime({
-      content: { mode: 'plaintext' },
-      workspaceSlug: 'workspace',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      apiBaseUrl: 'https://api.example.test',
-      token: 'auth-token',
-    });
-    const bridge = mocks.eagerSyncDeps.at(-1);
-    await bridge?.auth({ reason: 'request' });
-    const firstProvider = mocks.authInvocations.at(-1)?.providerId;
-
-    // Signing out drops the provider; a stale callback must never be served.
-    await runtime.setAuthToken(null);
-    expect(await bridge?.auth({ reason: 'request' })).toBeUndefined();
-
-    // Signing back in builds a new provider, and the bridge follows it.
-    await runtime.setAuthToken('auth-token-2');
-    expect(await bridge?.auth({ reason: 'request' })).toBe('streams-token');
-    const rebound = mocks.authInvocations.at(-1);
-    expect(rebound?.providerId).not.toBe(firstProvider);
-    expect(rebound?.callbackId).not.toBe(mocks.authInvocations[0]?.callbackId);
-
-    await runtime.dispose();
-  });
-  it('opens the encrypted file index and preview comments through the production runtime repo', async () => {
-    vi.useRealTimers();
-    const { indexedDB, IDBKeyRange } = await import('fake-indexeddb');
-    vi.stubGlobal('indexedDB', indexedDB);
-    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
-    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
-    const { IndexedDBStorageAdaptor } = await vi.importActual<
-      typeof import('loro-repo/storage/indexeddb')
-    >('loro-repo/storage/indexeddb');
-    const repo = await RealRepo.create({
-      storageAdapter: new IndexedDBStorageAdaptor({ dbName: 'encrypted-file-surfaces' }),
-      metaDebounceCommitMs: 0,
-    });
-    mocks.repoOverride = repo;
-    const { writeCodeCollabFileIndexToFlock } = await import('@lody/shared');
-    const flockId = 'workspace-1:fi:synthetic';
-    const handle = await repo.openFlockDoc(flockId);
-    writeCodeCollabFileIndexToFlock(handle.flock, { 'private.ts': { kind: 'text' } }, 1000);
-    const runtime = await createWorkspaceRuntime({
-      content: {
-        mode: 'protected',
-        namespace: 'synthetic',
-        resolve: () => {
-          throw new Error('offline');
-        },
-        snapshotUpload: { canUpload: () => false },
-      },
-      e2ee: {
-        bucketId: () => 'encrypted',
-        createTokenProvider: () => {
-          throw new Error('offline');
-        },
-      },
-      accountId: 'synthetic-account',
-      e2eeLocalIdentity: {
-        accountId: 'synthetic-account',
-        workspaceId: 'workspace-1',
-        genesisHash: '11'.repeat(32),
-        signingPublicKey: '22'.repeat(32),
-      },
-      workspaceId: 'workspace-1' as WorkspaceId,
-      workspaceSlug: 'workspace',
-      apiBaseUrl: 'https://api.example.test',
-    });
-    try {
-      const lease = await runtime.codeCollabFileIndexCache.acquire(flockId);
-      expect(lease.resource.getSnapshot()).toMatchObject({
-        status: 'ready',
-        snapshot: { fileIndex: { 'private.ts': { kind: 'text' } } },
-      });
-      await lease.release();
-      const comments = await runtime.acquirePreviewVisualCommentStore('synthetic' as SessionId);
-      comments.setState((draft) => {
-        draft.meta.sessionId = 'synthetic';
-      });
-      expect(comments.getState().meta.sessionId).toBe('synthetic');
-      runtime.releasePreviewVisualCommentStoreRef('synthetic' as SessionId);
-    } finally {
-      await runtime.dispose();
-    }
-  });
-
-  it.each(['none', 'dispatch-only', 'complete'])(
-    'binds protected remote execution capability to the actual host port (%s)',
-    async (support) => {
-      const supported = support !== 'none';
-      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
-      const repo = await RealRepo.create({});
-      mocks.repoOverride = repo;
-      const intents: unknown[][] = [];
-      const featurePreparations: unknown[][] = [];
-      const original = {
-        requestId: '11'.repeat(16),
-        targetMachineId: 'remote-machine',
-        requesterDevice: '22'.repeat(32),
-        expiresAt: 123456,
-        frameHex: 'synthetic-original-ciphertext',
-      };
-      const host = (supported
-        ? {
-            prepareDispatch: async (...args: unknown[]) => {
-              intents.push(args);
-              return original;
-            },
-            acceptDispatchResponse: async () => ({}),
-            ...(support === 'complete'
-              ? {
-                  prepareFeatureRpc: async (...args: unknown[]) => {
-                    featurePreparations.push(args);
-                    return original;
-                  },
-                  acceptFeatureRpcResponse: async () => null,
-                }
-              : {}),
-          }
-        : {}) as unknown as E2eeWorkspaceRuntime;
-      const access = createE2eeContent({
-        runtime: host,
-        workspaceId: 'workspace-1',
-        genesisHash: '11'.repeat(32),
-        epoch: 0,
-        authToken: () => null,
-      });
-      const runtime = await createWorkspaceRuntime({
-        content: access.content,
-        e2ee: access.e2ee,
-        accountId: 'synthetic-account',
-        workspaceSlug: 'workspace',
-        workspaceId: 'workspace-1',
-        apiBaseUrl: 'https://synthetic.invalid',
-        syncMode: 'cloud',
-        e2eeLocalIdentity: {
-          accountId: 'synthetic-account',
-          workspaceId: 'workspace-1',
-          genesisHash: '11'.repeat(32),
-          signingPublicKey: '22'.repeat(32),
-        },
-      });
-      try {
-        expect(runtime.protectedRpcAvailable).toBe(support === 'complete');
-        expect(Boolean(runtime.prepareEncryptedDispatch)).toBe(supported);
-        if (supported) {
-          const input = {
-            sessionId: 'session',
-            userTurnId: 'turn',
-            userId: 'member',
-            timestamp: '2026-10-30T00:00:00Z',
-            inputConfig: {},
-          };
-          const first = await runtime.prepareEncryptedDispatch!('remote-machine', input);
-          const retry = await runtime.prepareEncryptedDispatch!('remote-machine', input);
-          expect(first.original).toEqual(original);
-          expect(retry.original).toEqual(first.original);
-          expect(intents).toEqual([
-            ['workspace-1', 'remote-machine', input],
-            ['workspace-1', 'remote-machine', input],
-          ]);
-        } else {
-          await expect(
-            runtime.requestFilePreview('remote-machine' as MachineId, {} as never)
-          ).resolves.toMatchObject({
-            status: 'error',
-            code: 'permission_denied',
-            retryable: false,
-            message: 'Encrypted workspaces do not yet support remote machine operations.',
-          });
-        }
-        // Writes follow the verified ledger role; a Guest is refused before any signing.
-        access.updateStatus({
-          epoch: 0,
-          rotationRequired: false,
-          hasCurrentKey: true,
-          memberRole: 'guest',
-        });
-        expect(runtime.protectedCodeCollabRole?.get()).toBe('read');
-        await expect(
-          runtime.requestCodeCollabSaveText('remote-machine' as MachineId, {
-            sessionId: 'session',
-            requestedByUserId: 'guest',
-            path: 'a.ts',
-            baseDigest: `sha256:${'0'.repeat(64)}`,
-            text: { encoding: 'plain', text: 'x', rawBytes: 1 },
-          })
-        ).resolves.toMatchObject({ status: 'error', code: 'permission_denied', retryable: false });
-        expect(featurePreparations).toEqual([]);
-        // Preparation needs no local agent or ordinary transport/token.
-        expect(cloudAttachCalls()).toEqual([]);
-        expect(mocks.authInvocations).toEqual([]);
-        expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
-      } finally {
-        await runtime.dispose();
-        await access.close();
-      }
-    }
-  );
-
-  it('opens protected schedules offline through the production store cache and retains encrypted transport assembly', async () => {
-    const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
-    const repo = await RealRepo.create({});
-    mocks.repoOverride = repo;
-    vi.spyOn(repo, 'addTransport').mockImplementation(mocks.addTransport as never);
-    vi.spyOn(repo, 'joinMetaRoom').mockImplementation(mocks.joinMetaRoom as never);
-    const provider = () =>
-      createLoroStreamsTokenProviderLegacy({
-        endpoint: 'https://encrypted.example.test/token',
-        workspaceId: 'workspace-1',
-        authToken: () => 'synthetic',
-      });
-    const content = {
-      mode: 'protected' as const,
-      namespace: 'synthetic-genesis',
-      resolve: () => {
-        throw new Error('unused until protected transport attaches');
-      },
-      snapshotUpload: { canUpload: () => false },
-    };
-    const runtime = await createWorkspaceRuntime({
-      content,
-      e2ee: { bucketId: () => 'synthetic-encrypted-content', createTokenProvider: provider },
-      accountId: 'synthetic-account',
-      e2eeLocalIdentity: {
-        accountId: 'synthetic-account',
-        workspaceId: 'workspace-1',
-        genesisHash: '11'.repeat(32),
-        signingPublicKey: '22'.repeat(32),
-      },
-      workspaceSlug: 'workspace',
-      workspaceId: 'workspace-1' as WorkspaceId,
-      apiBaseUrl: 'https://api.example.test',
-      syncMode: 'dual',
-    });
-    try {
-      expect(runtime.contentMode).toBe('e2ee');
-      await expect(runtime.ensureDocStream('encrypted-session')).resolves.toBeUndefined();
-      await expect(
-        runtime.requestFilePreview('machine-1' as MachineId, {} as never)
-      ).resolves.toMatchObject({
-        status: 'error',
-        code: 'permission_denied',
-        retryable: false,
-      });
-      const schedule = await runtime.acquireScheduleStore('schedule-1');
-      expect(schedule.roomId).toBe('schedule-schedule-1');
-      expect(await repo.openPersistedDoc(schedule.roomId)).toBeDefined();
-      runtime.releaseScheduleStoreRef('schedule-1');
-      expect(cloudAttachCalls()).toEqual([]);
-      expect(mocks.authInvocations).toEqual([]);
-      mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
-      await runtime.setAuthToken('synthetic');
-      const adapter = mocks.streamsTransportConstructors.mock.calls.at(-1)?.[0] as {
-        bucketId: string;
-        payloadProtection: unknown;
-      };
-      expect(adapter.bucketId).toBe('synthetic-encrypted-content');
-      expect(adapter.payloadProtection).toBeDefined();
-      expect(mocks.presenceStart.mock.calls.at(-1)?.[0]).toMatchObject({
-        bucketId: 'synthetic-encrypted-content',
-      });
-      expect(mocks.machineRpcConstructors.mock.calls).toEqual([]);
-    } finally {
-      await runtime.dispose();
-    }
   });
 });

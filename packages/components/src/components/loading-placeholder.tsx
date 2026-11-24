@@ -2,7 +2,13 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { BootLoadingIndicator, BootShell } from '@/components/boot-shell';
-import { cn } from '@/lib/utils';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeSpace,
+} from '../style/theme-scale.stylex';
 
 const styles = stylex.create({
   content: {
@@ -16,12 +22,48 @@ const styles = stylex.create({
     backgroundColor: 'hsl(var(--background))',
     color: colors.secondaryLabel,
   },
+  viewport: {
+    display: 'flex',
+    minHeight: '100dvh',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: themeColors.background,
+    padding: themeSpace[6],
+    color: themeColors.mutedForeground,
+  },
+  column: {
+    display: 'flex',
+    maxWidth: '24rem',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    textAlign: 'center',
+  },
+  /**
+   * `space-y-1` between the title and the description: the description sits one
+   * step below the title, and the last statement gives the step back.
+   */
+  title: {
+    marginBottom: { default: themeSpace[1], ':last-child': 0 },
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.foreground,
+  },
+  description: {
+    marginInline: 'auto',
+    maxWidth: '320px',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeSpace[5],
+  },
 });
 
 export function LoadingPlaceholder({
   title = 'Loading',
   description = '',
   variant = 'viewport',
+  startsNow = false,
 }: {
   title?: string;
   description?: string;
@@ -33,13 +75,21 @@ export function LoadingPlaceholder({
    * sidebar and workspace identity remain stable during scoped synchronization.
    */
   variant?: 'boot' | 'viewport' | 'content';
+  /**
+   * A `content` wait that begins inside a running page rather than continuing the
+   * boot frame: the mark fades in after a beat, so a wait that ends quickly shows
+   * only the empty pane instead of flashing the mark.
+   */
+  startsNow?: boolean;
 }) {
   if (variant === 'boot') {
     return (
       <BootShell
         status={
           <>
-            <div data-testid="workspace-loading" className="lody-boot-shell__status-title">{title}</div>
+            <div data-testid="workspace-loading" className="lody-boot-shell__status-title">
+              {title}
+            </div>
             {description ? <div>{description}</div> : null}
           </>
         }
@@ -51,9 +101,12 @@ export function LoadingPlaceholder({
     return (
       <div {...stylex.props(styles.content)} data-loading-placeholder-scope="content">
         <BootLoadingIndicator
+          elapsedMs={startsNow ? 0 : undefined}
           status={
             <>
-              <div data-testid="workspace-loading" className="lody-boot-shell__status-title">{title}</div>
+              <div data-testid="workspace-loading" className="lody-boot-shell__status-title">
+                {title}
+              </div>
               {description ? <div>{description}</div> : null}
             </>
           }
@@ -63,24 +116,12 @@ export function LoadingPlaceholder({
   }
 
   return (
-    <div
-      className={cn(
-        'flex w-full items-center justify-center bg-background p-6 text-muted-foreground',
-        'min-h-[100dvh]'
-      )}
-      data-loading-placeholder-scope={variant}
-    >
-      <div
-        className="flex max-w-sm flex-col items-center gap-3 text-center"
-        role="status"
-        aria-live="polite"
-      >
-        <Spinner className="h-5 w-5" aria-hidden />
-        <div className="space-y-1">
-          <div className="text-sm font-medium text-foreground">{title}</div>
-          {description ? (
-            <div className="mx-auto max-w-[320px] text-xs leading-5">{description}</div>
-          ) : null}
+    <div {...stylex.props(styles.viewport)} data-loading-placeholder-scope={variant}>
+      <div {...stylex.props(styles.column)} role="status" aria-live="polite">
+        <Spinner diameter="calc(var(--spacing) * 5)" aria-hidden />
+        <div>
+          <div {...stylex.props(styles.title)}>{title}</div>
+          {description ? <div {...stylex.props(styles.description)}>{description}</div> : null}
         </div>
       </div>
     </div>

@@ -1,8 +1,8 @@
+import { focus, radius as sharedRadius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronDown } from 'lucide-react';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { focus, space } from '@lody/ui/tokens/scales.stylex';
 import { Menu, MenuSearchInput } from '@/ui/menu';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 
@@ -69,7 +69,7 @@ const styles = stylex.create({
     left: 0,
     bottom: 0,
     height: '2px',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: colors.label,
     transitionProperty: 'transform, width',
     transitionDuration: '240ms',

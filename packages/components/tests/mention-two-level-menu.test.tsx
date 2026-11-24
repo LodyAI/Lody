@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +19,7 @@ import {
   type MentionMenuView,
 } from '../src/components/mentions/mention-registry';
 import { initI18n } from '../src/i18n';
+import { composerIn } from './composer-test-utils';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -227,11 +226,8 @@ describe('MentionTwoLevelMenuBody', () => {
     act(() => {
       root?.render(<Harness initialValue={initialValue} categories={categories} detail={detail} />);
     });
-    const input = container?.querySelector('textarea');
-    if (!input) throw new Error('Expected mention textarea to render');
-    act(() => {
-      input.setSelectionRange(initialValue.length, initialValue.length);
-    });
+    const input = composerIn(container!);
+    input.setSelectionRange(initialValue.length, initialValue.length);
     return input;
   }
 
@@ -315,14 +311,61 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(latest.mentions).toEqual([{ value: '#3312', start: 0, end: 5, kind: 'issue' }]);
   });
 
-  it('groups results by category when a bare term is typed', () => {
+  it('shows matching results with their source when a bare term is typed', () => {
     render('@3312');
 
     const titles = rowTitles();
-    expect(titles).toContain('Broken menu#3312');
+    expect(titles).toContain('Broken menuIssues · #3312');
     // Only the issue category matched, so the file group is absent.
     expect(titles.some((title) => title.startsWith('src/'))).toBe(false);
   });
+
+  it.each(['click', 'Enter'] as const)(
+    'puts Roles before cross-source matches and category links, then selects by %s',
+    (action) => {
+      const categories = makeCategories();
+      categories[0]!.getCandidates = () => [
+        {
+          value: 'src/review.md',
+          label: 'src/review.md',
+          title: 'review.md',
+          insertText: '@src/review.md',
+          kind: 'file',
+          icon: 'file',
+        },
+      ];
+      categories.push({
+        id: 'agent_role',
+        namespace: 'role',
+        label: 'Review Roles',
+        icon: 'agent_role',
+        status: 'ready',
+        getCandidates: () => [
+          {
+            value: 'reviewer-role',
+            label: 'Reviewer',
+            title: 'Reviewer',
+            insertText: '@Reviewer',
+            kind: 'agent_role',
+            icon: 'agent_role',
+          },
+        ],
+      });
+      const input = render('@review', categories);
+      expect(rowTitles()).toEqual(['ReviewerReview Roles', 'review.mdFiles', 'Review Roles']);
+      act(() => {
+        if (action === 'click') {
+          container?.querySelector<HTMLElement>('[data-slot="mention-item"]')?.click();
+        } else {
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        }
+      });
+      expect(latest.inputValue).toBe('@Reviewer ');
+      expect(latest.mentions).toEqual([
+        { value: 'reviewer-role', start: 0, end: 9, kind: 'agent_role' },
+      ]);
+    }
+  );
 
   it('renders a typed slash query as ranked rows with their sources', () => {
     const shortcuts: MentionCategory = {
@@ -425,21 +468,21 @@ describe('MentionTwoLevelMenuBody', () => {
       act(() =>
         root?.render(<Harness initialValue="@review" categories={categories} followHighlight />)
       );
-      const input = container?.querySelector('textarea');
+      const input = container ? composerIn(container) : null;
       const rows = container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]');
       const issue = rows?.[3];
-      const role = rows?.[4];
+      const role = rows?.[0];
       if (!input || !issue || !role) throw new Error('Expected issue and Role candidates');
       const scroller = role.parentElement;
       if (!scroller) throw new Error('Expected candidate scroller');
       scroller.scrollTop = 240;
-      act(() => input.setSelectionRange(7, 7));
+      input.setSelectionRange(7, 7);
 
       for (const row of [role, issue, role]) {
         act(() => {
           row.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
         });
-        const currentRole = container?.querySelectorAll('[data-slot="mention-item"]')[4];
+        const currentRole = container?.querySelectorAll('[data-slot="mention-item"]')[0];
         expect(currentRole?.parentElement?.scrollTop).toBe(240);
         expect(currentRole).toBe(role);
         expect(row.hasAttribute('data-highlighted')).toBe(true);

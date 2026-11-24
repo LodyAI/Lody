@@ -1,7 +1,7 @@
 # Usage snapshots and delivery
 
 Status: draft
-Translation: current
+Translation: stale
 
 [中文](usage-delivery.zh.md)
 
@@ -44,8 +44,7 @@ session ID. The actual ACP session ID and session metadata stay unchanged. Repea
 delivery of a scope stays idempotent without modifying hosted persistence.
 Codex attributes native root-thread counter increments to the model frozen from
 the submitted turn parameters. A native turn is one accounting lifetime and its
-scope; for one release the CLI also reads the legacy Codex-only
-`_meta.codex.usageTurnId` as that scope. This keeps A's earlier tokens out of B's
+scope. This keeps A's earlier tokens out of B's
 new turn.
 Claude scopes each SDK result by its uuid, carrying only what that result added
 to the query-wide reading; a new query() after restart or clear-context counts
@@ -64,9 +63,10 @@ before they affect the consuming runtime.
 Provider costs are preserved; missing cache-write tariffs cannot be replaced with
 cache-read prices. An empty aggregate does not imply a known zero cost.
 
-Eligibility follows the builtin agent catalog, including DeepSeek Harness, not
-the managed-download catalog. Receiving a provider's delta does not prove its
-cumulative counters satisfy the lifetime contract; the
+Eligibility includes custom agents, recorded as `custom`, and the builtin agent
+catalog, including DeepSeek Harness. Custom agents must follow the same cumulative
+and scope contract; their reported costs are preserved. Receiving a provider's
+delta does not prove its cumulative counters satisfy the lifetime contract; the
 [builtin audit](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md#builtin-audit-correction-2026-09-13)
 records unresolved adapter normalization and resume/reset gaps.
 
@@ -97,7 +97,7 @@ a provider bill or adapter estimate, not an invoice.
 - [DSH tests](../packages/acp-extension-dsh/src/usage.test.ts)
 - [Grok tests](../packages/acp-extension-grok/test/proxy.test.js)
 - [Delivery tests](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
-- [Scope decision](../.agents/notes/proposed/bug-fix/2026-09-25-usage-accounting-scopes.md)
+- [Scope decision](../.agents/notes/implemented/bug-fix/2026-09-25-usage-accounting-scopes.md)
 - [Research correction](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md)
 
 Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release

@@ -113,7 +113,10 @@ function arrangementGap(
   column: HomeNowColumn
 ): number {
   const { columns } = layoutHomeNow(totals, hasUsage, maxRows, column);
-  return Math.abs(columnHeight(columns[0]!, totals) - columnHeight(columns[1]!, totals));
+  // An empty board without usage is one quiet column. There is no second column to
+  // compare, and every arrangement places the same quiet card, so the gap is zero.
+  if (!columns[1]) return 0;
+  return Math.abs(columnHeight(columns[0]!, totals) - columnHeight(columns[1], totals));
 }
 
 /**

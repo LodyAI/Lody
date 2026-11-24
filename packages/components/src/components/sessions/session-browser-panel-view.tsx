@@ -13,6 +13,7 @@ import {
 } from './preview-connection-status';
 
 const styles = stylex.create({
+  dismiss: { marginLeft: 'auto' },
   root: {
     display: 'flex',
     flexDirection: 'column',
@@ -110,13 +111,20 @@ export function SessionBrowserPanelView({
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const hasContent = Boolean(children);
-  // When remote content is absent the placeholder owns the single recovery
-  // action; keeping it out of the popover avoids two simultaneous Restore
-  // buttons. Local/connected content has no placeholder, so the popover owns it.
+  // When remote content is absent the placeholder owns the single Restore
+  // button inside the popover; the address bar still exposes a one-click
+  // regenerate icon button. Local/connected content has no placeholder, so the
+  // popover owns its actions.
   const toolbarPreviewStatus =
     previewStatus && hasContent
       ? previewStatus
-      : previewStatus && { ...previewStatus, onRestore: undefined, onStopSharing: undefined };
+      : previewStatus && {
+          ...previewStatus,
+          onRestore: undefined,
+          onStopSharing: undefined,
+          onStopAndKillProcess: undefined,
+          onRegenerate: previewStatus.onRegenerate ?? previewStatus.onRestore,
+        };
   const previewDiagnostic =
     previewStatus?.unavailableReason ??
     previewStatus?.error ??
@@ -144,7 +152,7 @@ export function SessionBrowserPanelView({
             type="button"
             variant="ghost"
             size="mini"
-            className="ml-auto"
+            xstyle={styles.dismiss}
             onClick={onDismissError}
           >
             {t('common.dismiss', 'Dismiss')}
@@ -155,11 +163,16 @@ export function SessionBrowserPanelView({
         <div role="status" aria-live="polite" {...stylex.props(styles.progress)}>
           <Spinner label={null} size="small" />
           <span>
-            {navigationPhase === 'resolving-machine'
-              ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
-              : navigationPhase === 'creating-tunnel'
-                ? t('sessions.browser.creatingTunnel', 'Establishing a secure preview connection…')
-                : t('sessions.browser.openingLocal', 'Opening the local preview…')}
+            {isMobile
+              ? t('sessions.browser.connectingNetwork', 'Establishing network connection')
+              : navigationPhase === 'resolving-machine'
+                ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
+                : navigationPhase === 'creating-tunnel'
+                  ? t(
+                      'sessions.browser.creatingTunnel',
+                      'Establishing a secure preview connection…'
+                    )
+                  : t('sessions.browser.openingLocal', 'Opening the local preview…')}
           </span>
         </div>
       ) : (

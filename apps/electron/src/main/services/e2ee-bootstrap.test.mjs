@@ -6,7 +6,13 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { Deferred, Effect, Exit, Fiber, Result } from 'effect'
-import { Bytes, decodeRecord, hashRecordBytes, verifyLedger } from '@lody/e2ee-core/protocol'
+import {
+  accountIdFromUserId,
+  Bytes,
+  decodeRecord,
+  hashRecordBytes,
+  verifyLedger
+} from '@lody/e2ee-core/protocol'
 import { makeDesktopE2eeCustody } from '../e2ee-custody.mts'
 import { makeDesktopE2eeBootstrap } from './e2ee-bootstrap.mts'
 
@@ -34,7 +40,7 @@ const safeStorage = {
   }
 }
 const intent = Object.freeze({
-  accountId: 'synthetic-account',
+  accountId: '2w8hg7s65mt3pgj9a1bnwsbcedx48wr',
   requestId: 'request-0123456789',
   name: 'Encrypted example',
   slug: 'encrypted-example'
@@ -56,10 +62,6 @@ const openOwner = (directory, override = (custody) => custody) =>
       directory,
       accountId: intent.accountId,
       custody: override(custody)
-    })
-    yield* bootstrap.recordAccountIdentity({
-      accountId: intent.accountId,
-      cryptoUserId: 'aa'.repeat(32)
     })
     return { custody, bootstrap }
   })
@@ -83,6 +85,13 @@ function stored(directory) {
 
 void test('creation retains real native device keys and epoch0 before returning a verifiable genesis; reopen is exact', async (t) => {
   const directory = await fixture(t)
+  const decodedCredentials = []
+  const originalFrom = Buffer.from
+  t.mock.method(Buffer, 'from', function (...args) {
+    const buffer = Reflect.apply(originalFrom, Buffer, args)
+    if (args[1] === 'hex' && buffer.length === 32) decodedCredentials.push(buffer)
+    return buffer
+  })
   const first = await prepare(directory)
   assert.deepEqual(
     Object.keys(first).sort(),
@@ -116,6 +125,12 @@ void test('creation retains real native device keys and epoch0 before returning 
   assert.ok(row.epoch_blob instanceof Uint8Array)
   assert.ok(row.epoch_blob.length > 32)
   assert.deepEqual(await prepare(directory), first)
+  // Public genesis/signing hashes may also be decoded; only credential hashes
+  // match this persisted creation binding. Inspect actual retained allocations.
+  for (const buffer of decodedCredentials) {
+    const hash = createHash('sha256').update(buffer).digest('hex')
+    assert.notEqual(hash, first.deviceCredentialHash, 'decoded credential survived hashing')
+  }
 })
 
 void test('concurrent calls on one owner reuse one original, and immutable intent conflicts preserve it', async (t) => {
@@ -280,7 +295,6 @@ void test('hard process exit releases creation ownership and preserves incomplet
             if(stage==='device-retained') process.exit(73);
           })))
         }});
-        yield* bootstrap.recordAccountIdentity({accountId:intent.accountId,cryptoUserId:'aa'.repeat(32)});
         yield* bootstrap.prepareCreation(intent);
         process.exit(74);
       })));
@@ -290,7 +304,7 @@ void test('hard process exit releases creation ownership and preserves incomplet
         command: process.execPath,
         args: [
           '--import',
-          import.meta.resolve('tsx'),
+          new URL('../../../scripts/node-test-ts-resolve.mjs', import.meta.url).href,
           '--input-type=module',
           '-e',
           child,
@@ -386,7 +400,7 @@ void test('pre-credential developer creations require recreation instead of gene
   assert.equal(Buffer.from(stored(directory).record).toString('hex'), prepared.genesisRecordHex)
 })
 
-void test('D03 fixed identity survives reopen and signs multiple workspaces without replacing older signed originals', async (t) => {
+void test('one account signs every workspace with its own account ID, without replacing older signed originals', async (t) => {
   const directory = await fixture(t)
   const first = await prepare(directory)
   const second = await prepare(directory, {
@@ -404,232 +418,8 @@ void test('D03 fixed identity survives reopen and signs multiple workspaces with
   assert.ok(firstBody.userId.equals(secondBody.userId))
   assert.ok(!firstBody.membershipId.equals(secondBody.membershipId))
   assert.notEqual(first.genesisHashHex, second.genesisHashHex)
-  const changed = await execute(
-    Effect.gen(function* () {
-      const owner = yield* openOwner(directory)
-      return yield* Effect.result(
-        owner.bootstrap.recordAccountIdentity({
-          accountId: intent.accountId,
-          cryptoUserId: 'bb'.repeat(32)
-        })
-      )
-    })
-  )
-  assert.equal(changed.failure.code, 'conflict')
+  assert.equal(Result.getOrThrow(accountIdFromUserId(firstBody.userId)), intent.accountId)
   assert.deepEqual(await prepare(directory), first)
-})
-
-void test('D03 no registration fails before signing and succeeds on the next explicit registration without deleting originals', async (t) => {
-  const directory = await fixture(t)
-  await execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody
-      })
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), true)
-      const missing = yield* Effect.result(bootstrap.prepareCreation(intent))
-      assert.equal(missing.failure.code, 'account-identity-required')
-      assert.equal(stored(directory).record, null)
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), false)
-      const signed = yield* bootstrap.prepareCreation(intent)
-      assert.ok(signed.genesisRecordHex)
-    })
-  )
-})
-
-void test('D03 write-before-publication failure retains old signed originals and the next registration call recovers', async (t) => {
-  const directory = await fixture(t)
-  const original = await prepare(directory)
-  await unlink(join(directory, 'account-identity.json'))
-  let failLink = true
-  await execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody,
-        identityFiles: {
-          unlink,
-          link: async (...args) => {
-            if (failLink)
-              throw Object.assign(new Error('synthetic publish unavailable'), { code: 'EIO' })
-            return link(...args)
-          }
-        }
-      })
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), false)
-      assert.deepEqual(yield* bootstrap.prepareCreation(intent), original)
-      const failed = yield* Effect.result(
-        bootstrap.recordAccountIdentity({
-          accountId: intent.accountId,
-          cryptoUserId: 'aa'.repeat(32)
-        })
-      )
-      assert.equal(failed.failure.code, 'storage')
-      failLink = false
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.deepEqual(yield* bootstrap.prepareCreation(intent), original)
-    })
-  )
-  assert.deepEqual(await prepare(directory), original)
-})
-
-void test('D03 lost publication acknowledgment and failed auxiliary unlink preserve the valid ID; next access owns cleanup', async (t) => {
-  const directory = await fixture(t)
-  let cleanupBlocked = true
-  await execute(
-    Effect.gen(function* () {
-      const custody = yield* makeDesktopE2eeCustody({
-        directory: join(directory, 'custody'),
-        platform: 'linux',
-        safeStorage
-      })
-      const bootstrap = yield* makeDesktopE2eeBootstrap({
-        directory,
-        accountId: intent.accountId,
-        custody,
-        identityFiles: {
-          link: async (...args) => {
-            await link(...args)
-            throw new Error('synthetic lost link receipt')
-          },
-          unlink: async (...args) => {
-            if (cleanupBlocked) throw new Error('synthetic cleanup busy')
-            return unlink(...args)
-          }
-        }
-      })
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.equal(
-        (yield* Effect.promise(() => readdir(directory))).filter((name) =>
-          name.endsWith('.pending')
-        ).length,
-        1
-      )
-      // nlink=2 is our own valid published copy and must not poison the next read.
-      assert.equal(yield* bootstrap.creationNeedsAccountIdentity(intent), false)
-      const prepared = yield* bootstrap.prepareCreation(intent)
-      assert.ok(prepared.genesisRecordHex)
-      cleanupBlocked = false
-      yield* bootstrap.recordAccountIdentity({
-        accountId: intent.accountId,
-        cryptoUserId: 'aa'.repeat(32)
-      })
-      assert.equal(
-        (yield* Effect.promise(() => readdir(directory))).filter((name) =>
-          name.endsWith('.pending')
-        ).length,
-        0
-      )
-    })
-  )
-})
-
-void test('D03 unknown cache and symlink stay untouched and do not enroll or sign', async (t) => {
-  for (const state of ['unknown', 'symlink']) {
-    const directory = await fixture(t)
-    const path = join(directory, 'account-identity.json')
-    const foreign = Buffer.from('{"version":99,"opaque":"must remain"}')
-    if (state === 'unknown') await writeFile(path, foreign, { mode: 0o600 })
-    else {
-      await writeFile(join(directory, 'foreign'), foreign, { mode: 0o600 })
-      await symlink(join(directory, 'foreign'), path)
-    }
-    await execute(
-      Effect.gen(function* () {
-        const custody = yield* makeDesktopE2eeCustody({
-          directory: join(directory, 'custody'),
-          platform: 'linux',
-          safeStorage
-        })
-        const bootstrap = yield* makeDesktopE2eeBootstrap({
-          directory,
-          accountId: intent.accountId,
-          custody
-        })
-        assert.ok(
-          Result.isFailure(yield* Effect.result(bootstrap.creationNeedsAccountIdentity(intent)))
-        )
-        assert.ok(
-          Result.isFailure(
-            yield* Effect.result(
-              bootstrap.recordAccountIdentity({
-                accountId: intent.accountId,
-                cryptoUserId: 'aa'.repeat(32)
-              })
-            )
-          )
-        )
-      })
-    )
-    assert.deepEqual(await readFile(path), foreign)
-    assert.equal(stored(directory), undefined)
-  }
-})
-
-void test('D03 hard exit before or after atomic publication preserves the first identity and cleanup responsibility', async (t) => {
-  const { runCommand, ProcessSpawnerLive, NodeProcessLive } =
-    await import('@lody/shared/node/process')
-  for (const stage of ['before-publish', 'after-publish']) {
-    const directory = await fixture(t)
-    const child = `
-      import { Effect } from 'effect';
-      import { link,unlink } from 'node:fs/promises';
-      import { makeDesktopE2eeBootstrap } from ${JSON.stringify(new URL('./e2ee-bootstrap.mts', import.meta.url).href)};
-      const directory=process.argv[1],stage=process.argv[2];
-      await Effect.runPromise(Effect.scoped(Effect.gen(function*(){
-        const bootstrap=yield* makeDesktopE2eeBootstrap({ directory,accountId:'synthetic-account',custody:{},identityFiles:{unlink,link:async(...args)=>{
-          if(stage==='after-publish') await link(...args);
-          process.exit(stage==='before-publish'?73:74);
-        }}});
-        yield* bootstrap.recordAccountIdentity({accountId:'synthetic-account',cryptoUserId:'aa'.repeat(32)});
-      })));`
-    const result = await Effect.runPromise(
-      runCommand({
-        command: process.execPath,
-        args: [
-          '--import',
-          import.meta.resolve('tsx'),
-          '--input-type=module',
-          '-e',
-          child,
-          directory,
-          stage
-        ],
-        cwd: new URL('../../../', import.meta.url).pathname,
-        env: { ...process.env },
-        maxOutputBytes: 65536
-      }).pipe(Effect.provide(ProcessSpawnerLive), Effect.provide(NodeProcessLive))
-    )
-    assert.equal(result.code, stage === 'before-publish' ? 73 : 74, result.stderr.toString())
-    assert.equal((await readdir(directory)).filter((name) => name.endsWith('.pending')).length, 1)
-    const signed = await prepare(directory)
-    const body = Result.getOrThrow(decodeRecord(Buffer.from(signed.genesisRecordHex, 'hex'))).body
-    assert.equal(Buffer.from(body.userId.toBytes()).toString('hex'), 'aa'.repeat(32))
-    assert.equal((await readdir(directory)).filter((name) => name.endsWith('.pending')).length, 0)
-  }
 })
 
 void test('an unreserved old identity refusal removes only renderer intent and retains the exact signed host original', async (t) => {
@@ -740,3 +530,383 @@ void test('authenticated member removal erases only the exact local incarnation 
   )
   assert.ok(files.includes('kek.safe-storage'))
 })
+
+void test('recovery adoption reuses its durable personal join after admission and an interrupted adoption', async (t) => {
+  const { envelopeFixture } = await import('../../../../../packages/e2ee-core/test/keys/fixture.ts')
+  const { recoveryRestoreTarget } = await import('./e2ee-recovery-vault.mts')
+  const f = envelopeFixture()
+  const directory = await fixture(t)
+  await execute(
+    Effect.gen(function* () {
+      const { bootstrap } = yield* openOwner(directory)
+      let failOnce = true
+      const sessionIds = []
+      const target = recoveryRestoreTarget({
+        id: 'restore-retry',
+        name: 'Restore retry',
+        genesisHash: Buffer.from(f.context.genesis.toBytes()).toString('hex'),
+        hasIdentity: () => true,
+        identity: (pin) => bootstrap.recoveryIdentity(pin),
+        append: () => Effect.succeed({ status: 'committed' }),
+        history: () =>
+          Effect.succeed({ startIndex: 0, recordsHex: [], nextCursor: null, checkpoint: null }),
+        mailbox: () => ({ fetch: () => Effect.succeed({ items: [] }) }),
+        stagedGroup: () => Effect.succeed(null),
+        adopt: (join) =>
+          Effect.gen(function* () {
+            sessionIds.push(join.pairingSessionId)
+            yield* bootstrap.preparePersonalJoin({
+              version: 1,
+              workspaceId: 'restore-retry',
+              genesisHash: Buffer.from(f.context.genesis.toBytes()).toString('hex'),
+              genesisRecordHex: join.genesisRecordHex,
+              membershipId: join.membershipId,
+              endorser: join.endorser,
+              pairingSessionId: join.pairingSessionId
+            })
+            // The real SQLite pin and credential request already exist when installation fails.
+            if (failOnce) {
+              failOnce = false
+              return yield* Effect.fail(new Error('installation interrupted'))
+            }
+          })
+      })
+      const anchor = {
+        genesis: f.context.genesis,
+        membershipId: Result.getOrThrow(Bytes.membershipId(new Uint8Array(16).fill(10))),
+        recovery: f.phone.publicKey,
+        genesisRecord: f.genesisRecord
+      }
+      const first = yield* target.connect(anchor)
+      yield* first.submitOriginalAsRecovery(
+        new Uint8Array(64).fill(4),
+        undefined,
+        new Uint8Array(32).fill(5)
+      )
+      assert.equal(Result.isFailure(yield* Effect.result(first.adopt([]))), true)
+      // A new connect on the already-admitted path does not submit another admission.
+      const second = yield* target.connect(anchor)
+      yield* second.adopt([])
+      assert.match(sessionIds[0], /^[0-9a-f]{32}$/)
+      assert.equal(sessionIds[1], sessionIds[0])
+    })
+  )
+})
+
+for (const scenario of ['rotated-recovery', 'unfinished-join']) {
+  void test(`native recovery installs keys after ${scenario} without replacing completed identity`, async (t) => {
+    const { envelopeFixture } =
+      await import('../../../../../packages/e2ee-core/test/keys/fixture.ts')
+    const { createRecoveryVault, wipeRecoveryPackage } =
+      await import('../../../../../packages/e2ee-core/src/internal/recovery/vault.ts')
+    const { disposeEpochKey } =
+      await import('../../../../../packages/e2ee-core/src/internal/foundation/epoch-key.ts')
+    const {
+      generateRecoveryPackage,
+      importRecoveryIdentity,
+      prepareDeviceAdmission,
+      prepareLedgerCommand,
+      signLedgerRecord,
+      prepareEpochEnvelope,
+      commitEpochKey,
+      sealHistoryPacket,
+      prepareLedgerRecord,
+      accountUserId
+    } = await import('@lody/e2ee-core/protocol')
+    const { encodeCbor } =
+      await import('../../../../../packages/e2ee-core/src/internal/foundation/cbor.ts')
+    const { restoreVaultWorkspaces, recoveryRestoreIncomplete } =
+      await import('@lody/e2ee-client/recovery-restore')
+    const { recoveryRestoreTarget, adoptRecoveredWorkspace } =
+      await import('./e2ee-recovery-vault.mts')
+    const { makeDesktopE2eeRuntimeHost } = await import('./e2ee-runtime.mts')
+    const { sqliteRecoveryVaultLocalStore } = await import('@lody/e2ee-core/adapters/node-sqlite')
+    const directory = await fixture(t)
+    const ok = Result.getOrThrow
+    const hex = (bytes) => Buffer.from(bytes).toString('hex')
+    const f = envelopeFixture(0, 100, ok(accountUserId(intent.accountId)).toBytes())
+    const records = f.records()
+    const view = () =>
+      ok(
+        verifyLedger({
+          anchor: f.context.genesis,
+          records,
+          checkpoint: { head: hashRecordBytes(records.at(-1)), length: records.length }
+        })
+      )
+    const workspaceId = 'recovery-rebind'
+    const genesisHash = hex(f.context.genesis.toBytes())
+    const membershipId = '0a'.repeat(16)
+    const page = () => ({
+      workspaceId,
+      genesisHash,
+      startIndex: 0,
+      recordsHex: records.map(hex),
+      checkpoint: { length: records.length, headHash: hex(view().head.toBytes()) },
+      nextCursor: null,
+      position: `p1:${workspaceId}:${records.length}:source:0`
+    })
+    const entries = new Map()
+    let index = null
+    const store = {
+      putImmutable: (_vault, entry) =>
+        Effect.sync(() => {
+          entries.set(entry.entryId, entry)
+        }),
+      readEntry: (_vault, id) => Effect.sync(() => entries.get(id) ?? null),
+      readIndex: () => Effect.sync(() => index),
+      compareAndSwapIndex: (_vault, _expected, next) =>
+        Effect.sync(() => {
+          index = next
+          return 'Committed'
+        }),
+      deleteUnreferenced: () => Effect.void
+    }
+    await execute(
+      Effect.gen(function* () {
+        const { bootstrap, custody } = yield* openOwner(directory)
+        const host = yield* makeDesktopE2eeRuntimeHost({ directory, custody, bootstrap })
+        const local = yield* sqliteRecoveryVaultLocalStore({
+          path: join(directory, 'recovery.sqlite'),
+          mode: 'create-or-open'
+        })
+        const { vault, recoveryFile } = yield* createRecoveryVault({
+          locator: 'native-rebind',
+          store,
+          local
+        })
+        recoveryFile.fill(0)
+        const next = ok(Bytes.epochKey(new Uint8Array(32).fill(0x72)))
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            disposeEpochKey(next)
+            disposeEpochKey(f.secret)
+          })
+        )
+        const append = (signer, command) =>
+          Effect.gen(function* () {
+            records.push(
+              yield* signLedgerRecord(
+                ok(prepareLedgerCommand(view(), signer.publicKey, command)),
+                signer
+              )
+            )
+            view()
+          })
+        const enroll = (generation) =>
+          Effect.gen(function* () {
+            const bundle = yield* generateRecoveryPackage({
+              genesis: genesisHash,
+              membershipId,
+              generation,
+              trust: {
+                source: 'synthetic',
+                genesisRecord: f.genesisRecord,
+                head: hex(view().head.toBytes()),
+                length: view().length
+              }
+            })
+            const identity = yield* importRecoveryIdentity(bundle)
+            const reference = yield* vault.upload(bundle)
+            wipeRecoveryPackage(bundle)
+            if (generation === 0) yield* vault.reserve(reference)
+            else yield* vault.replace(reference)
+            yield* append(
+              f.owner.signer,
+              yield* prepareDeviceAdmission({
+                genesis: f.context.genesis,
+                membershipId: ok(Bytes.membershipId(Buffer.from(membershipId, 'hex'))),
+                encryptionPublicKey: identity.encryptionPublicKey,
+                signer: identity,
+                kind: 'recovery'
+              })
+            )
+            return identity
+          })
+        const r1 = yield* enroll(0)
+        const envelope0 = yield* prepareEpochEnvelope({
+          context: { ...f.context, recipient: r1.publicKey },
+          key: f.secret,
+          signer: f.owner.signer,
+          ledger: () => Effect.sync(view)
+        })
+        const body = ok(
+          encodeCbor([
+            view().head.toBytes(),
+            f.owner.raw,
+            [
+              7,
+              1,
+              ok(commitEpochKey(f.context.genesis, 1, next)).toBytes(),
+              ok(
+                sealHistoryPacket({
+                  genesis: f.context.genesis,
+                  epoch: 1,
+                  currentKey: next,
+                  previousKey: f.secret
+                })
+              )
+            ]
+          ])
+        )
+        records.push(yield* signLedgerRecord(ok(prepareLedgerRecord(view(), body)), f.owner.signer))
+        let oldPin
+        if (scenario === 'unfinished-join') {
+          oldPin = {
+            version: 1,
+            workspaceId,
+            genesisHash,
+            genesisRecordHex: hex(f.genesisRecord),
+            membershipId,
+            endorser: hex(f.owner.raw),
+            pairingSessionId: '88'.repeat(16)
+          }
+          yield* bootstrap.preparePersonalJoin(oldPin)
+        }
+        let currentRecovery = r1,
+          latestDelivered = scenario === 'unfinished-join',
+          completed = false
+        const target = recoveryRestoreTarget({
+          id: workspaceId,
+          name: 'Recovery rebind',
+          genesisHash,
+          hasIdentity: () => completed,
+          identity: (pin) => bootstrap.recoveryIdentity(pin),
+          history: () => Effect.sync(page),
+          stagedGroup: () => Effect.succeed(null),
+          mailbox: () => ({
+            fetch: (epoch) =>
+              Effect.gen(function* () {
+                if (epoch === 0 && currentRecovery === r1)
+                  return { items: [{ sender: hex(f.owner.raw), frame: envelope0 }] }
+                if (epoch === 1 && latestDelivered)
+                  return {
+                    items: [
+                      {
+                        sender: hex(f.owner.raw),
+                        frame: yield* prepareEpochEnvelope({
+                          context: {
+                            ...f.context,
+                            epoch: ok(Bytes.epochNumber(1)),
+                            recipient: currentRecovery.publicKey
+                          },
+                          key: next,
+                          signer: f.owner.signer,
+                          ledger: () => Effect.sync(view)
+                        })
+                      }
+                    ]
+                  }
+                return { items: [] }
+              })
+          }),
+          append: (request) =>
+            Effect.sync(() => {
+              records.push(Buffer.from(request.recordHex, 'hex'))
+              view()
+              return { status: 'committed' }
+            }),
+          adopt: (join) =>
+            adoptRecoveredWorkspace({ workspaceId, genesisHash, join, bootstrap, host }).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  completed = true
+                })
+              )
+            )
+        })
+        const run = () => restoreVaultWorkspaces({ vault, local, targets: [target] })
+        if (scenario === 'unfinished-join') {
+          // Without the R-signed on-chain admission, recovery cannot replace the pending pin.
+          const refused = yield* Effect.result(
+            bootstrap.prepareRecoveryPersonalJoin(
+              {
+                ...oldPin,
+                endorser: hex(r1.publicKey.toBytes()),
+                pairingSessionId: '99'.repeat(16)
+              },
+              [page()]
+            )
+          )
+          assert.equal(Result.isFailure(refused), true)
+          assert.deepEqual(
+            database(directory, (db) =>
+              JSON.parse(
+                db.prepare('SELECT pin FROM personal_joins WHERE workspace_id=?').get(workspaceId)
+                  .pin
+              )
+            ),
+            oldPin
+          )
+        }
+        const first = yield* run()
+        assert.equal(first[0].outcome, 'Committed')
+        const initial = yield* host.status(workspaceId)
+        assert.equal(initial.hasCurrentKey, scenario === 'unfinished-join')
+        if (scenario === 'rotated-recovery') {
+          assert.equal(first[0].partialEpochKey, true)
+          assert.equal(
+            new TextDecoder().decode(yield* local.read(`restore-progress/${workspaceId}`)),
+            'partial'
+          )
+          const origin = yield* bootstrap.creationFor(workspaceId)
+          const original = database(directory, (db) => ({
+            pin: db.prepare('SELECT pin FROM personal_joins WHERE workspace_id=?').get(workspaceId)
+              .pin,
+            history: db
+              .prepare('SELECT history FROM personal_join_histories WHERE workspace_id=?')
+              .get(workspaceId).history
+          }))
+          currentRecovery = yield* enroll(1)
+          yield* append(f.owner.signer, { _tag: 'RevokeDevice', target: r1.publicKey })
+          // A completed anchor may never be rebound, even to a valid current R.
+          const changed = {
+            ...JSON.parse(original.pin),
+            endorser: hex(currentRecovery.publicKey.toBytes()),
+            pairingSessionId: '99'.repeat(16)
+          }
+          const immutable = yield* Effect.result(
+            bootstrap.prepareRecoveryPersonalJoin(changed, [page()])
+          )
+          assert.equal(Result.isFailure(immutable), true)
+          latestDelivered = true
+          const before = records.length
+          const repaired = yield* run()
+          assert.equal(repaired[0].outcome, 'Committed')
+          assert.equal(repaired[0].partialEpochKey, undefined)
+          assert.equal(records.length, before)
+          assert.equal((yield* bootstrap.creationFor(workspaceId)).genesisHash, origin.genesisHash)
+          const retained = database(directory, (db) => ({
+            pin: db.prepare('SELECT pin FROM personal_joins WHERE workspace_id=?').get(workspaceId)
+              .pin,
+            history: db
+              .prepare('SELECT history FROM personal_join_histories WHERE workspace_id=?')
+              .get(workspaceId).history
+          }))
+          assert.deepEqual(retained, original)
+        } else {
+          const rows = database(directory, (db) => ({
+            current: db
+              .prepare('SELECT pin FROM personal_joins WHERE workspace_id=?')
+              .get(workspaceId).pin,
+            retired: db
+              .prepare('SELECT pin,request_hex FROM retired_personal_joins WHERE workspace_id=?')
+              .get(workspaceId)
+          }))
+          assert.equal(JSON.parse(rows.current).endorser, hex(r1.publicKey.toBytes()))
+          assert.deepEqual(JSON.parse(rows.retired.pin), oldPin)
+          assert.ok(rows.retired.request_hex)
+          const replay = yield* bootstrap.preparePersonalJoin(JSON.parse(rows.current))
+          assert.equal(replay.signingPublicKey, initial.signingPublicKey)
+        }
+        assert.equal((yield* host.status(workspaceId)).hasCurrentKey, true)
+        assert.equal((yield* host.status(workspaceId)).signingPublicKey, initial.signingPublicKey)
+        assert.equal(
+          new TextDecoder().decode(yield* local.read(`restore-progress/${workspaceId}`)),
+          'done'
+        )
+        assert.equal(yield* recoveryRestoreIncomplete(local, workspaceId), false)
+      })
+    )
+  })
+}

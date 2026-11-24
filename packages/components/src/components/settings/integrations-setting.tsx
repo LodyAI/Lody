@@ -1,11 +1,13 @@
 import {
-  useLegacyWorkspaceAction,
-  useLegacyWorkspaceMutation,
-  useLegacyWorkspaceQuery,
-} from '@/hooks/use-legacy-workspace-query';
+  useGithubWorkspaceQuery,
+  useGithubWorkspaceMutation,
+  useGithubWorkspaceAction,
+} from '@/hooks/use-github-workspace';
+import { GitHubInstallationNotice } from '@/components/settings/github-installation-notice';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
 import { AlertCircle, CheckCircle2, Github } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -90,6 +92,17 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     color: colors.secondaryLabel,
   },
+  authorizeButton: {
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 6%, transparent)',
+      '@media (hover: hover)': {
+        default: null,
+        ':hover': 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      },
+    },
+    [buttonTokens.gap]: 'calc(var(--spacing) * 1)',
+    alignSelf: { default: 'flex-start', '@media (min-width: 40rem)': 'auto' },
+  },
   authorizeIcon: { width: '14px', height: '14px' },
 });
 
@@ -136,7 +149,7 @@ export function GitHubPersonalIdentitySettingsCard({
   /* Mobile only: the parent renders the toggle row with `MobileSettingsRowGroup`,
      so this is just the "act-as-you" details panel. Desktop draws the identity
      row itself (`GitHubSettingsView`). */
-  if (!enabled) return null;
+  if (!enabled && authorizationReady) return null;
   return (
     <div {...stylex.props(styles.personalIdentityCard)}>
       <div {...stylex.props(styles.identityDetails)}>
@@ -180,12 +193,12 @@ export function GitHubPersonalIdentitySettingsCard({
         <Button
           size="small"
           variant="ghost"
-          className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap bg-foreground/[0.06] self-start hover:bg-foreground/[0.1] sm:self-auto"
+          xstyle={styles.authorizeButton}
           onClick={onAuthorize}
           disabled={!workspaceReady || authorizing}
         >
           {authorizing ? (
-            <Spinner className="h-3.5 w-3.5" />
+            <Spinner diameter="calc(var(--spacing) * 3.5)" />
           ) : (
             <Github {...stylex.props(styles.authorizeIcon)} />
           )}
@@ -236,20 +249,21 @@ function CloudIntegrationsSettings() {
   const authorizeInBrowser = isElectronRenderer() || isNativeAppShell();
   const canAuthorizePersonalGitHub = Boolean(currentWorkspaceSlug);
 
-  const personalOperationSettings = useLegacyWorkspaceQuery(
+  const personalOperationSettings = useGithubWorkspaceQuery(
     cloudOperations.github.getPersonalOperationSettings,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
-  const createGitHubInstallState = useLegacyWorkspaceAction(
+  const createGitHubInstallState = useGithubWorkspaceAction(
     cloudOperations.github.createGitHubInstallState
   );
-  const setRepoEnabled = useLegacyWorkspaceMutation(cloudOperations.github.setRepoEnabled);
-  const setPersonalOperationPreference = useLegacyWorkspaceMutation(
+  const setRepoEnabled = useGithubWorkspaceMutation(cloudOperations.github.setRepoEnabled);
+  const setPersonalOperationPreference = useGithubWorkspaceMutation(
     cloudOperations.github.setPersonalOperationPreference
   );
-  const refreshPersonalGitHubProfile = useLegacyWorkspaceAction(
+  const refreshPersonalGitHubProfile = useGithubWorkspaceAction(
     cloudOperations.github.refreshPersonalGitHubProfile
   );
+  const [installNeedsAuthorization, setInstallNeedsAuthorization] = useState(false);
   const [connectingToGitHub, setConnectingToGitHub] = useState(false);
   const [updatingPersonalPreference, setUpdatingPersonalPreference] = useState(false);
   const [authorizingPersonalGitHub, setAuthorizingPersonalGitHub] = useState(false);
@@ -317,6 +331,12 @@ function CloudIntegrationsSettings() {
       return;
     }
 
+    if (personalOperationSettings === undefined) return;
+    if (personalAuthorizationState !== 'authorized') {
+      setInstallNeedsAuthorization(true);
+      return;
+    }
+    setInstallNeedsAuthorization(false);
     const githubAppName = import.meta.env.VITE_GITHUB_APP_NAME || 'lodyai';
     const isElectron = isElectronRenderer();
     const popup = isElectron ? null : window.open('', '_blank');
@@ -365,6 +385,8 @@ function CloudIntegrationsSettings() {
     currentWorkspaceId,
     currentWorkspaceSlug,
     getConvexErrorMessage,
+    personalAuthorizationState,
+    personalOperationSettings,
     t,
   ]);
 
@@ -445,7 +467,9 @@ function CloudIntegrationsSettings() {
     try {
       if (authorizeInBrowser) {
         const opened = await openExternalUrl(
-          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!)
+          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!, {
+            installation: installNeedsAuthorization,
+          })
         );
         if (!opened) {
           throw new Error(
@@ -469,6 +493,7 @@ function CloudIntegrationsSettings() {
     authedWorkspaceId,
     authorizeInBrowser,
     canAuthorizePersonalGitHub,
+    installNeedsAuthorization,
     currentWorkspaceSlug,
     t,
   ]);
@@ -477,6 +502,16 @@ function CloudIntegrationsSettings() {
 
   return (
     <GitHubSettingsView
+      installationNotice={
+        <GitHubInstallationNotice
+          needsAuthorization={
+            installNeedsAuthorization && personalAuthorizationState !== 'authorized'
+          }
+          authorized={personalAuthorizationState === 'authorized'}
+          onAuthorize={() => void handleAuthorizePersonalGitHub()}
+          disabled={!workspaceAuthReady || authorizingPersonalGitHub}
+        />
+      }
       key={currentWorkspaceId ?? 'none'}
       canManage={canManage}
       workspaceReady={workspaceAuthReady}

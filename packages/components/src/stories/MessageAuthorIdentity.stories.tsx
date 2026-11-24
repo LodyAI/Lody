@@ -1,5 +1,13 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import * as stylex from '@stylexjs/stylex';
+import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { createStore, Provider as JotaiProvider } from 'jotai';
+import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lody/shared';
+import { setDocMetaByRoomIdAtom } from '@/atoms/doc-meta';
 import { MessageAuthorIdentity } from '@/components/ai-gui/message-author-identity';
+import { MessageRowView } from '@/components/ai-gui/view';
+import { ConversationColumn } from '@/components/shared/conversation-column';
 
 const meta = {
   title: 'Sessions/MessageAuthorIdentity',
@@ -37,3 +45,63 @@ export const DeletedRoleSnapshot: Story = {
     },
   },
 };
+
+const targetSessionId = 'synthetic-target' as SessionId;
+const delegatedMessage: SessionHistoryParsed = {
+  id: 'delegated-user-turn',
+  role: 'user',
+  timestamp: '2026-10-05T12:04:00.000Z',
+  read: true,
+  author: {
+    v: 1,
+    kind: 'agent',
+    sessionId: 'synthetic-source',
+    turnId: 'synthetic-turn',
+    name: 'Claude Code',
+    cliType: 'builtin',
+    agentType: 'claude_code',
+    role: { id: 'dispatcher', revision: 1, name: 'Opus Manager', emoji: '🧭' },
+    model: { id: 'claude-opus-4-6', source: 'runtime' },
+    reasoningEffort: 'medium',
+  },
+  items: [
+    {
+      type: 'text',
+      text: 'Please fix the flaky portal assertion in review-page.test.tsx and report back once it passes 20 consecutive runs.',
+    },
+  ],
+};
+
+function DelegatedMessageRowDemo() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(setDocMetaByRoomIdAtom, getSessionRoomId('synthetic-source' as SessionId), {
+      id: 'synthetic-source',
+      title: 'Coordinate PR #789 regression fix',
+    });
+    return next;
+  }, []);
+
+  return (
+    <JotaiProvider store={store}>
+      <div {...stylex.props(themeStyles.glyph)}>
+        <ConversationColumn>
+          <MessageRowView
+            message={delegatedMessage}
+            sessionId={targetSessionId}
+            showSenderIdentity={false}
+            onNavigateSession={() => {}}
+          />
+        </ConversationColumn>
+      </div>
+    </JotaiProvider>
+  );
+}
+
+export const DelegatedMessageRow: Story = {
+  render: () => <DelegatedMessageRowDemo />,
+};
+
+const themeStyles = stylex.create({
+  glyph: { width: '720px', maxWidth: '100%', backgroundColor: uiColors.background, paddingBlock: 'calc(var(--spacing) * 6)' },
+});

@@ -1,3 +1,4 @@
+import { readAntigravityPromptUsage } from '../../agent/antigravity-usage';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ConvexHttpClient } from 'convex/browser';
 import type { Logger } from '@/utils/logger';
@@ -92,7 +93,6 @@ describe('usage delivery', () => {
       const event = parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
         sessionId: 'native',
-        provider: 'claude',
         params: {
           sessionId: 'native',
           usage,
@@ -138,8 +138,64 @@ describe('usage delivery', () => {
     expect([...stored.values()].reduce((a, b) => a + b, 0)).toBe(12500);
   });
 
+  it('delivers custom adapter costs without inventing prices for known model names', async () => {
+    const report = input(100, 'custom');
+    const usage = { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 0 };
+    report.update.usage = { ...usage, costUSD: 0.75 };
+    report.update.modelUsage = {
+      'gpt-5.6': { ...usage, costUSD: 0.5 },
+      'gpt-5.5': { ...usage },
+    };
+    service.recordSessionUsageUpdate(report);
+    await service.flushSessionUsage('s');
+    expect(persisted[0]).toMatchObject({
+      cliType: 'custom',
+      usage: { ...usage, costUSD: 0.75 },
+      modelUsage: { 'gpt-5.6': { ...usage, costUSD: 0.5 }, 'gpt-5.5': usage },
+    });
+    expect(persisted[0]?.modelUsage?.['gpt-5.5'].costUSD).toBeUndefined();
+  });
+
+  it('persists Antigravity context capacity alongside tokens without putting it in per-model counters', async () => {
+    const update = readAntigravityPromptUsage(
+      { usage: { inputTokens: 100, outputTokens: 5 } },
+      'native',
+      'gemini-4-hydrogen',
+      1048576
+    );
+    if (!update) throw new Error('Missing native usage');
+    service.recordSessionUsageUpdate({
+      ...input(0, 'antigravity'),
+      acpSessionId: 'native:scope:first',
+      update,
+    });
+    await service.flushSessionUsage('s');
+    expect(persisted).toEqual([
+      expect.objectContaining({
+        cliType: 'antigravity',
+        acpSessionId: 'native:scope:first',
+        usage: {
+          inputTokens: 100,
+          outputTokens: 5,
+          cacheReadInputTokens: 0,
+          contextWindow: 1048576,
+        },
+        modelUsage: {
+          'gemini-4-hydrogen': { inputTokens: 100, outputTokens: 5, cacheReadInputTokens: 0 },
+        },
+      }),
+    ]);
+  });
+
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
     const report = input(100);
+    Object.assign(report, {
+      title: 'PRIVATE TITLE',
+      prompt: 'PRIVATE PROMPT',
+      path: '/private/project',
+    });
+    Object.assign(report.update, { prompt: 'PRIVATE PROMPT' });
+    Object.assign(report.update.usage, { title: 'PRIVATE TITLE' });
     report.update.usage.webSearchRequests = 2;
     report.update.usage.contextWindow = 128000;
     report.update.usage.costUSD = 0.25;
@@ -150,6 +206,7 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(report);
     await service.flushSessionUsage('s');
     expect(persisted).toHaveLength(1);
+    expect(JSON.stringify(persisted)).not.toMatch(/PRIVATE|private\/project/);
     expect(persisted[0]?.usage).toEqual({
       ...input(100).update.usage,
       contextWindow: 128000,

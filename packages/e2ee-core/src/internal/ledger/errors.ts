@@ -8,6 +8,7 @@ export type LedgerErrorCode =
   | 'unknown-operation'
   /** A well-formed, authorized capability declaration this client does not support. */
   | 'upgrade-required'
+  | 'device-quota-exceeded'
   | 'bad-proof'
   | 'unauthorized'
   | 'replay'

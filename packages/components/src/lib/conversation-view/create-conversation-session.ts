@@ -1,9 +1,5 @@
-import {
-  createHistoryWriter,
-  type HistoryWriter,
-  type SessionHistoryBackendKind,
-  type SessionId,
-} from '@lody/shared';
+import { createHistoryWriter, type HistoryWriter } from '@lody/shared/history-writer';
+import type { SessionHistoryBackendKind, SessionId } from '@lody/shared';
 import { createLoroSessionData, type SessionData } from '@lody/shared/session-data';
 import type { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
@@ -11,7 +7,7 @@ import {
   createControlPlaneDoc,
   CONTROL_PLANE_IGNORED_ROOT_KEYS,
   sessionControlPlaneSchema,
-} from '@lody/shared';
+} from '@lody/shared/session-control-plane';
 import type { CreateConversationViewFromReaderOptions } from './create-conversation-view-from-reader';
 import { createConversationViewFromReader } from './create-conversation-view-from-reader';
 

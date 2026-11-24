@@ -37,6 +37,7 @@ import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import type { AgentRoleDetailSubject } from '@/components/sessions/agent-role-detail-pane';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import type { MentionKind } from '@/ui/mention/index';
+import { scoreMentionMatch } from './mention-rank';
 
 /** The shared category-menu trigger. Skills and commands also retain their
  * direct `$` and `/` entry points. */
@@ -122,6 +123,8 @@ export type MentionCandidate = {
   slashRank?: SlashMatchRank;
   /** A second line under the title, such as why a Role cannot be picked. */
   subtitle?: string;
+  /** A problem the user can fix, not a passing state such as a machine being offline. */
+  subtitleTone?: 'warning';
   trailing?: string;
   /**
    * When the thing was last touched, for a row whose recency is what tells two
@@ -215,10 +218,10 @@ export type MentionMenuView =
   | {
       level: 'aggregate';
       term: string;
-      /** Categories whose own name matches, offered above the results. */
+      /** Categories whose own name matches, offered after ranked results. */
       categories: MentionCategory[];
       groups: MentionCandidateGroup[];
-      /** Direct / and 、 searches are one relevance-ordered list across sources. */
+      /** Typed @, / and 、 searches share one ordered list across sources. */
       rankedCandidates?: Array<{ category: MentionCategory; candidate: MentionCandidate }>;
       /** Direct grouped triggers activate only their own sources, even while empty. */
       queriedCategories?: readonly MentionCategory[];
@@ -321,6 +324,25 @@ export function selectMentionMenuView(
     term: search,
     categories: categories.filter((category) => matchesCategoryName(category, search)),
     groups,
+    rankedCandidates: groups
+      .flatMap(({ category, candidates }) =>
+        candidates.map((candidate) => ({
+          category,
+          candidate,
+          score: Math.max(
+            ...[candidate.label, candidate.title, candidate.detail?.agentRole?.role.name].map(
+              (field) => (field ? (scoreMentionMatch(search, field) ?? 0) : 0)
+            )
+          ),
+        }))
+      )
+      .sort(
+        (left, right) =>
+          Number(Boolean(left.candidate.disabled)) - Number(Boolean(right.candidate.disabled)) ||
+          Number(right.category.id === 'agent_role') - Number(left.category.id === 'agent_role') ||
+          right.score - left.score
+      )
+      .map(({ category, candidate }) => ({ category, candidate })),
   };
 }
 
@@ -393,10 +415,6 @@ export function selectMentionMenuViewForTrigger(
     candidates: direct.status === 'disabled' ? [] : direct.getCandidates(search),
   };
 }
-
-// ============================================================================
-// Candidate builders
-// ============================================================================
 
 /** Cut a ranked list down before it is mapped into candidate objects. */
 function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
@@ -575,6 +593,10 @@ export function toAgentRoleCandidate(
   // already says these are Agent Roles, so a second generic glyph only crowds
   // out the Role's own mark. Every Role has one, defaulted, so rows stay aligned.
   const emoji = getAgentRoleEmoji(role);
+  const { availability } = item;
+  const needsEdit =
+    availability.kind === 'unavailable' &&
+    (availability.reason === 'model_unavailable' || availability.reason === 'mode_unavailable');
   return {
     // The range payload is the stable Role id; the text only carries the token
     // derived from the name, which its owner may rename at any time.
@@ -590,6 +612,7 @@ export function toAgentRoleCandidate(
     hint: [item.agentConfig?.name, item.machine?.name].filter(Boolean).join(' · ') || undefined,
     disabled: item.availability.kind !== 'available',
     subtitle: availabilityText,
+    ...(needsEdit ? { subtitleTone: 'warning' as const } : {}),
     detail: {
       // No `title` and no meta: the pane heads itself with the Role's own
       // mark and name, and visibility is deliberately absent — every Role the menu
@@ -603,6 +626,7 @@ export function toAgentRoleCandidate(
         // every machine the user may reach, so which one a Role binds to is
         // part of what accepting it authorizes.
         machineLabel: item.machine?.name,
+        availability,
       },
     },
   };
@@ -649,10 +673,6 @@ export function buildCommandCandidates(
     limit ?? commands.length
   ).map(({ item, rank }) => toCommandCandidate(item, rank));
 }
-
-// ============================================================================
-// Hook
-// ============================================================================
 
 type SourceState = {
   enabled: boolean;
@@ -839,7 +859,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         id: 'prompt_shortcut',
         namespace: 'shortcut',
         directTrigger: '/',
-        label: t('mention.category.promptShortcut.label', 'Prompt Shortcuts'),
+        label: t('mention.category.promptShortcut.label', 'Prompts'),
         icon: 'prompt_shortcut',
         ...sourceCategoryFields('promptShortcut', promptShortcut),
         getCandidates: promptShortcut.getCandidates,

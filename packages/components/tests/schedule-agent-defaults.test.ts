@@ -1,5 +1,4 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   getAcpCapabilityCacheKey,
@@ -25,7 +24,15 @@ const machine = (id: string, capabilities: Record<string, unknown> = {}) =>
     acpCapabilities: capabilities,
   }) as unknown as MachineViewMeta;
 
-afterEach(() => localStorage.clear());
+beforeEach(() => {
+  vi.stubGlobal('window', { localStorage });
+  localStorage.clear();
+});
+
+afterEach(() => {
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 describe('a new schedule starts from the chat landing’s choices', () => {
   it('reuses the landing’s remembered Agent when it runs on one of the person’s machines', () => {
@@ -85,6 +92,23 @@ describe('a new schedule starts from the chat landing’s choices', () => {
       agentConfigId: 'reviewer',
       modelId: 'sonnet',
       configOptionValues: { mode: 'auto', verbose: true, plan_mode: false, select_flag: 'false' },
+    });
+  });
+
+  it('lets the Provider’s session defaults win over what was merely used last', () => {
+    const config = {
+      ...agent('reviewer', 'macbook'),
+      sessionDefaults: { configOptionValues: { mode: 'auto', model: 'deep' } },
+    } as AgentConfigMeta;
+    agentDefaultsCache.set('reviewer', {
+      modeId: null,
+      modelId: null,
+      configOptionValues: { mode: 'ask', model: 'fast', verbose: true },
+    });
+    expect(seedScheduleAgentRunRef(config, machine('macbook')).configOptionValues).toEqual({
+      mode: 'auto',
+      model: 'deep',
+      verbose: true,
     });
   });
 

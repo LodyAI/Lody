@@ -35,3 +35,66 @@ export function isCloudE2eeDeviceRevoked(value: unknown): boolean {
   }
   return false;
 }
+
+/** Node's codes for a connection lost while a response body was still arriving. */
+const SOCKET_FAILURE_CODES = new Set([
+  'UND_ERR_SOCKET',
+  'UND_ERR_BODY_TIMEOUT',
+  'ECONNRESET',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+]);
+
+function isTransportInterruption(cause: Error): boolean {
+  const seen = new Set<unknown>();
+  let value: unknown = cause;
+  while (value instanceof Error && !seen.has(value)) {
+    if (value.name === 'TimeoutError' || value.name === 'AbortError') return true;
+    if ('code' in value && SOCKET_FAILURE_CODES.has(value.code as string)) return true;
+    seen.add(value);
+    value = value.cause;
+  }
+  return false;
+}
+
+/** The SDK can reduce protocol errors to message text, even on an upstream-error status. */
+const E2EE_FAILURE_CODE = /\be2ee_[a-z_]+\b/i;
+const REFUSAL_TEXT = /\bunauthori[sz]ed\b|\bforbidden\b|\brevoked\b|\bremoved\b/i;
+
+/** Maps a failed latest ledger read to the outage rule of
+ * specs/e2ee/execution-freshness-outage.md. `httpStatus` is absent when no response arrived.
+ * Explicit protocol/authentication refusals take precedence over upstream failures.
+ * Unknown or invalid replies remain refusals. */
+export function ledgerReadFailure(cause: unknown, httpStatus?: number): unknown {
+  if (!(cause instanceof Error)) return cause;
+  if (isCloudE2eeMemberRemoved(cause) || isCloudE2eeDeviceRevoked(cause)) return cause;
+  if ('data' in cause || E2EE_FAILURE_CODE.test(cause.message)) return cause;
+  // A refusal already received stands, even if its body was then cut off.
+  if (
+    httpStatus !== undefined &&
+    httpStatus >= 400 &&
+    httpStatus < 500 &&
+    httpStatus !== 408 &&
+    httpStatus !== 429
+  )
+    return cause;
+  // Gateway HTML is not a business refusal merely because it mentions authorization.
+  if (httpStatus === 408 || httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500))
+    return new CloudE2eeLedgerOutage({ cause });
+  if (REFUSAL_TEXT.test(cause.message)) return cause;
+  if (httpStatus === undefined || isTransportInterruption(cause))
+    return new CloudE2eeLedgerOutage({ cause });
+  // Convex actions may return HTTP 200 for an unstructured internal server error.
+  return cause.name === 'Error' && /\bServer Error\b/i.test(cause.message)
+    ? new CloudE2eeLedgerOutage({ cause })
+    : cause;
+}
+
+/** The latest ledger read got no answer. It carries no access decision, unlike a refusal. */
+export class CloudE2eeLedgerOutage extends Error {
+  constructor(options: { cause?: unknown } = {}) {
+    super('e2ee_ledger_outage', { cause: options.cause });
+    this.name = 'CloudE2eeLedgerOutage';
+  }
+}

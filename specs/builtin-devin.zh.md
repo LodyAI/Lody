@@ -24,4 +24,4 @@ Devin、Dimcode、Kimi、Kimi Code 不出现在 registry 发现列表。已有 r
 
 - `apps/cli/src/agent/setting.ts` 与 `managed-agent-runtime.ts`。
 - `scripts/generate-acp-registry.mjs`。
-- 官方版本清单：<https://static.devin.ai/cli/3000.11.3/manifest.json>。
+- 官方版本清单：<https://static.devin.ai/cli/3000.12.28/manifest.json>。

@@ -1,3 +1,4 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -5,7 +6,6 @@ import path from 'node:path';
 import { LoroDoc } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
-  createHistoryWriter,
   getSessionRoomId,
   type LodyOperationCompletion,
   type LodyOperationItemResult,
@@ -49,7 +49,10 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
       ) =>
         await fn({
           repo: { getDocMeta: mocks.getDocMeta },
-          getOnlineMachineIds: vi.fn(async () => new Set(['machine-id'])),
+          getMachinePresenceView: vi.fn(async () => ({
+            online: new Set(['machine-id']),
+            synced: true,
+          })),
           syncDocOrThrow: async () => undefined,
           getOrCreateSessionDoc: vi.fn(async () => ({ getMetaState: async () => ({}) })),
         })
@@ -238,7 +241,7 @@ it('returns an explicit Inbox error before opening storage, then accepts calls a
   let available = false;
   const handlers: SessionToolHandlers = new Map();
   const server = buildSessionToolServer(handlers);
-  const handler = handlers.get('lody_operation_get');
+  const handler = handlers.get('lody_operation');
   if (!handler) throw new Error('operation_get handler missing');
   const call = () =>
     runWithMcpSessionContext(
@@ -257,7 +260,7 @@ it('returns an explicit Inbox error before opening storage, then accepts calls a
             );
         },
       },
-      () => handler({ operationId: 'startup-test' })
+      () => handler({ action: 'get', arguments: { operationId: 'startup-test' } })
     );
   try {
     const degraded = await call();
@@ -947,6 +950,26 @@ describe('chat Machine offline verdicts', () => {
     });
   });
 
+  it('hands off an accepted chat for daemon replay on post-accept transient sync failure', async () => {
+    mocks.sendSessionChatResult.mockRejectedValue(
+      new WorkspaceSyncUnavailableError({
+        message: 'Document sync failed: ECONNRESET',
+        cause: new Error('ECONNRESET'),
+      })
+    );
+
+    const result = await startSessionChatOperation({
+      operationId: 'sync-error-after-accept',
+      sessionId: remoteSession.id,
+      prompt: 'continue',
+    });
+
+    expect(result).toEqual({
+      state: 'active',
+      items: [expect.objectContaining({ status: 'active', inputDurable: false })],
+    });
+  });
+
   it('keeps the validator offline verdict retryable instead of COMMAND_REJECTED', async () => {
     mocks.validateSessionChatTarget.mockRejectedValue(
       new MachineOfflineError({ machineId: 'remote-machine-id' })
@@ -1401,13 +1424,18 @@ describe('scoped completed work batch reader', () => {
       store.inbox.accept(input);
       const batch = store.inbox.prepare(input, 'owner')!;
       mocks.operationInbox.mockReturnValue(store.inbox);
-      const handler = handlers.get('lody_operation_batch_get')!;
+      const handler = handlers.get('lody_operation')!;
       const decode = (result: Awaited<ReturnType<typeof handler>>) =>
         JSON.parse((result.content[0] as { text: string }).text);
-      const first = decode(await handler({ batchId: batch.batchId, limit: 1 }));
+      const first = decode(
+        await handler({ action: 'batch', arguments: { batchId: batch.batchId, limit: 1 } })
+      );
       expect(first.items.map((i: { operationId: string }) => i.operationId)).toEqual(['read-0']);
       const second = decode(
-        await handler({ batchId: batch.batchId, limit: 1, cursor: first.nextCursor })
+        await handler({
+          action: 'batch',
+          arguments: { batchId: batch.batchId, limit: 1, cursor: first.nextCursor },
+        })
       );
       expect(second.items.map((i: { operationId: string }) => i.operationId)).toEqual(['read-1']);
       store.inbox.abandonInput(input.workspaceId, input.sessionId, input.inputId);
@@ -1415,7 +1443,10 @@ describe('scoped completed work batch reader', () => {
       store.inbox.accept(nextInput);
       const nextBatch = store.inbox.prepare(nextInput, 'owner')!;
       const invalid = decode(
-        await handler({ batchId: nextBatch.batchId, limit: 1, cursor: first.nextCursor })
+        await handler({
+          action: 'batch',
+          arguments: { batchId: nextBatch.batchId, limit: 1, cursor: first.nextCursor },
+        })
       );
       expect(invalid.ok).toBe(false);
       expect(JSON.stringify(invalid)).toContain('CURSOR_INVALID');
@@ -1427,7 +1458,9 @@ describe('scoped completed work batch reader', () => {
         sourceTurnId: input.inputId,
         inputConfig: {},
       });
-      expect(decode(await handler({ batchId: batch.batchId }))).toMatchObject({
+      expect(
+        decode(await handler({ action: 'batch', arguments: { batchId: batch.batchId } }))
+      ).toMatchObject({
         ok: false,
         error: { code: 'BATCH_NOT_FOUND' },
       });

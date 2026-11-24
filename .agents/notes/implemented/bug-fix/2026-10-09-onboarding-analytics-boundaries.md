@@ -36,7 +36,7 @@ Workspace auth readiness is owned by the separate
 [auth/app contract](../../../../specs/auth-session-analytics.md): `app/active`
 replaces the duplicate `account_ready`, while `cli_ready` retains its later
 machine-readiness transition.
-The [blueprint proposal](../../proposed/feature/2026-09-26-blueprint-onboarding.md)
+The [blueprint proposal](../../rejected/feature/2026-09-26-blueprint-onboarding.md)
 is not the production flow and does not supersede this contract.
 
 ## Validation and limits

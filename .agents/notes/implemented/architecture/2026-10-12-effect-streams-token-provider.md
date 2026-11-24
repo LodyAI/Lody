@@ -42,8 +42,10 @@ The five lifecycle questions are:
   close is memoized by Deferred. Failed close retains one receipt and the child
   Scope. Explicit `retryCleanup` joins retained resources before admission resumes.
 - Failure/recovery: typed auth, HTTP/credential/response, deadline and interruption
-  stay distinct. Native getToken/auth preserve typed auth failure; only the explicit
-  Legacy old-protocol callback maps a nonempty all-auth Cause to undefined. Release
+  stay distinct. Native and Legacy getToken/auth preserve typed auth failure. Returning undefined
+  permits anonymous HTTP in the Streams client and cannot represent denied cloud
+  credentials. Terminal rejection suppresses issuer requests for the same credential;
+  credential rotation or manual invalidation permits recovery. Release
   defects retain raw owners; shutdown defects retain the provider and complete
   Cause, including simultaneous timeout/interruption and release failure.
 
@@ -82,6 +84,16 @@ provider; the official CLI root retains Legacy providers through disposal,
 retaining failed providers for recovery. Runtime and provider abort signals
 are composed instead of overriding each other.
 
+Renderer ephemeral startup checks its held auth callback before joining. In the
+pinned streams-crdt 0.23.0 Promise adapter, callback rejection is wrapped as a
+retryable auth-provider error; the combined room status can remain connecting.
+The startup check delivers rejection to the existing room error handler without
+HTTP. The workspace reconnect owner can retry after login rotation. A stale
+startup cannot join after its generation retires. Eager-sync's parent observes
+auth rejection and terminates its worker as failed; durable Streams clients return
+operation failures before fetch. CLI presence uses native auth; machine-monitor and prompt suggestions retain
+Promise callbacks, whose rejections remain inside SDK join/retry ownership.
+
 Delete the Legacy facade, compatibility credential adapter and provider-owner
 registry once those callers and their application owners compose native Effects.
 No upper caller or end-to-end daemon ownership is claimed native merely by using
@@ -100,7 +112,14 @@ traversed iteratively with identity deduplication; original Causes remain intact
 recovery. A failed close/timeout leaves health observable, and successful cleanup
 clears its blocked state. New providers in the same parent Scope have independent
 close receipts. A retained release failure fences admission before any new credential
-I/O, not only before producer replacement. This changes no P1-owned logger/presence files.
+I/O, not only before producer replacement.
+
+Producer diagnostics observe Exit, including interruption and I/O finalizer failures.
+Only a pure interruption whose first stop intent is explicit owner close becomes
+the fixed, content-free `fetch-cancelled` / `owner_released` lifecycle event.
+Unknown stops, deadlines and mixed failures remain reportable; error names are
+not cancellation evidence. Waiter results and cleanup custody stay unchanged.
+This proof is local to the provider and does not classify platform-side disconnects.
 
 The raw HTTP receipt includes success-body EOF and error-body cancellation. A body
 release rejection retains its owner and I/O failure; 401/403 also retain their typed
@@ -156,7 +175,8 @@ In a disposable overlay, baseline and restored auth suites passed. Removing
 shared lease protection, raw settlement join, rejected-token storage fence,
 late unauthorized matching, credential-after-encryption fence or full raw-owner
 Cause aggregation each made its behavioral regression fail. The follow-up also
-ablates native auth failure preservation, Legacy all-auth projection, diagnostic
+ablates native auth failure preservation, the then-current Legacy all-auth projection (subsequently removed because it
+permits anonymous cloud requests), diagnostic
 redaction, credential admission, observer Cause combination, success/error-body joins
 and release-owner registration (14 mutations total). Scripts and logs
 remain outside the product/repository.

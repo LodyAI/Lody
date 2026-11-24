@@ -15,9 +15,9 @@ Translation: current
 
 基线的 `getMachineRpcClient` 通过统一的 `rpc` 功能门拒绝加密工作区；主机准备能力缺失时也会返回 `e2ee_rpc_unavailable`。生产链为 cloud provider → 推导类型的 IPC 代理 → preload 白名单 → 绑定账户和窗口的主机 → 原生准备和响应验签。两个查询操作及 `rpcOnly` token 选择都通过这条链，签名私钥不会离开主机。
 
-白名单允许十个方法名：机器状态、ping、二进制状态、会话实时状态、文件预览和下载、文本打开和刷新，以及两个现有 LSP 查询。二进制状态只检查缓存元数据，不安装缺失或不兼容的运行时。LSP 继续返回 `lsp_not_wired`，不启动服务。文本读取使用服务的只读模式，禁止 watcher、索引协调和发布。
+允许的方法及其通道记录在唯一的穷举表 `packages/shared/src/e2ee-rpc.ts` 的 `E2EE_RPC_POLICIES` 中。读取通道允许面向 Guest 的机器读取（机器状态、ping、二进制状态、文件预览、下载和目录列表、文本打开和刷新，以及两个现有 LSP 查询），同时接受当前会话读取授权的 `session-read` 方法（`session/history-read`、会话实时状态以及 Code Collab diff 清单/blob 读取），以及项目读取 `local-project/list-branches`、`local-project/git-state` 与 `project/probe-local-member`。二进制状态只检查缓存元数据，不安装缺失或不兼容的运行时。LSP 继续返回 `lsp_not_wired`，不启动服务。文本读取使用服务的只读模式，禁止 watcher、索引协调和发布。这三个项目读取要求写角色与项目共享授权，并在运行 Git 前用已打开的 Machine Flock 校验规范路径的本地项目 ID 哈希，且不回写摘要，因此 Guest 与被篡改路径均无法调用 Git。
 
-方法名不能证明只读。Pi 发现会安装并扫描运行时；memory list 运行 Provider 命令；本地项目探测和 Git 状态会启动 Git；history read/watch 会打开后端并刷盘；diff 读取可能启动 Git/worker 或初始化 SQLite。九个方法均不进入读取通道。Pi、memory、项目探测和 history 在原生准备和接收时被拒绝；Code Collab diff 继续走需要写权限的功能通道。只有新增无副作用读取器后才能授予读权限。保存、索引发布和预览租约同样要求写权限和执行 claim；安装和认证不在功能 RPC 的允许范围。
+方法名不能证明只读。Pi 发现会安装并扫描运行时；memory list 运行 Provider 命令；本地项目成员探测与旧版 Git 状态会启动更重的 Git 探测；history watch 会打开后端并刷盘；diff 读取可能启动 Git/worker 或初始化 SQLite。这些方法不向无作用域的 Guest 开放：Pi 与 memory 是仅限 Owner 的写操作，会话读取与项目读取必须经过功能接收器的作用域授权，其余 Code Collab diff 接口继续走需要写权限的功能通道。只有具备无副作用读取器或作用域写权限门控后才能放行。保存、索引发布和预览租约同样要求写权限和执行 claim；安装和认证不在功能 RPC 的允许范围。
 
 加密文件解析先检查持久的会话、父会话和机器归属，再通过 `Session.peekHostWorkdir` 观察现有会话路径，或推导现有聊天、项目和 worktree 路径。临时 `WorktreeManager` 只计算路径并检查目录，不取得全局 manager，不 checkout、fetch 或初始化。项目注册只从机器同步所有者已持有的 Flock 中读取，快照不可用就返回不可用；读取不打开 Flock，也不发起同步。这里也拒绝使用 SDK 的 detached Flock 读取，因为冷读取时 SQLite `loadFlockDoc` 可能压缩并写盘。项目成员解析关闭链接修复，缺失目录、链接和注册保持缺失。`file/preview` 的 Markdown 发现选项明确返回不支持，因为共享解析器会运行 `git worktree list`；只返回当前根目录的候选会隐藏歧义。显式文件路径继续可读。普通工作区保留原来的解析路径。[PR 方法审计](https://github.com/LodyAI/Lody/pull/2013)列出了原来十九个方法的完整调用链。
 

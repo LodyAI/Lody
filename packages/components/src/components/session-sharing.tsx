@@ -1,3 +1,4 @@
+import { Menu } from '@lody/ui/menu';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -5,16 +6,19 @@ import {
   ChevronDown,
   ChevronLeft,
   Globe,
+  Eye,
   Link2,
   LockKeyhole,
-  Share2,
   Users,
+  Settings,
+  UserPlus,
+  X,
   type LucideIcon,
 } from 'lucide-react';
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import {
   shouldShowPrivateSharingStatus,
   type SessionPublicShareStatus,
@@ -22,13 +26,89 @@ import {
 } from '@/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Popover } from '@lody/ui/popover';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
-import { Tabs } from '@lody/ui/tabs';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { ease, space, text } from '@lody/ui/tokens/scales.stylex';
-import { AlertDialog } from '@/ui/dialog';
+import { control, ease, space, text } from '@lody/ui/tokens/scales.stylex';
+import { AlertDialog, Dialog } from '@/ui/dialog';
+import { toast } from '@/lib/toast';
+import { Tabs } from '@lody/ui/tabs';
 import { shareSurface } from './sharing/surface';
+import { UserAvatar } from './user-avatar';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  accessPopoverPadding: { [popup.panelPadding]: space[2] },
+  lockMark: {
+    margin: 'calc(var(--spacing) * -1)',
+    boxSizing: 'content-box',
+    display: 'inline-flex',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xs,
+    padding: themeSpace[1],
+    color: themeColors.sidebarForegroundMuted,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  glyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  chevron: { width: themeSpace[3], height: themeSpace[3], opacity: 0.45 },
+  tooltipPadding: {
+    maxWidth: 'calc(var(--spacing) * 72)',
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[2],
+  },
+  tooltipTitle: { fontWeight: themeFontWeight.medium },
+  tooltipDescription: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  statusPill: {
+    display: 'inline-flex',
+    height: themeSpace[7],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': 'hsl(var(--foreground) / 0.05)',
+    },
+    paddingInline: themeSpace[2],
+    fontSize: '0.7rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 'normal',
+    color: {
+      default: 'hsl(var(--foreground) / 0.8)',
+      ':hover': themeColors.foreground,
+    },
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  statusPillOpen: {
+    backgroundColor: 'hsl(var(--foreground) / 0.07)',
+    color: themeColors.foreground,
+  },
+});
 
 export type SessionSharingTranslator = (
   key: string,
@@ -40,9 +120,9 @@ export function getSessionSharingLabel(
   t: SessionSharingTranslator,
   state: SessionSharingState
 ): string {
-  if (state.visibility === 'team') {
-    return t('sessions.sharing.team', 'Team');
-  }
+  if (state.access === 'read' && state.visibility === 'team')
+    return t('sessions.access.read', 'Team read-only');
+  if (state.visibility === 'team') return t('sessions.access.edit', 'Team can edit');
   if (state.visibility === 'private') {
     return t('sessions.sharing.private', 'Private');
   }
@@ -95,9 +175,14 @@ export function getSessionShareDialogDescription(
   t: SessionSharingTranslator,
   state: SessionSharingState
 ): string {
+  if (state.access === 'read') {
+    return t(
+      'sessions.access.confirmRead',
+      'Teammates can read this conversation and reference it in their own sessions.'
+    );
+  }
   const machine = state.machineName ?? t('sessions.sharing.thisDevice', 'this device');
   const project = state.projectName ?? t('sessions.sharing.thisProject', 'this project');
-
   switch (state.privateReason) {
     case 'project':
       return t(
@@ -134,7 +219,7 @@ export function SessionSharingIndicator({
 }) {
   const { t } = useTranslation();
 
-  if (!shouldShowPrivateSharingStatus(state)) {
+  if (!shouldShowPrivateSharingStatus(state) && state.access !== 'read') {
     return null;
   }
 
@@ -149,59 +234,25 @@ export function SessionSharingIndicator({
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={cn(
-              '-m-1 box-content inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs p-1',
-              'text-sidebar-foreground-muted outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50',
-              className
-            )}
+            className={clsx(stylex.props(styles.lockMark).className, className)}
           >
-            <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+            {state.access === 'read' ? (
+              <Eye {...stylex.props(styles.glyph)} aria-hidden="true" />
+            ) : (
+              <LockKeyhole {...stylex.props(styles.glyph)} strokeWidth={2} aria-hidden="true" />
+            )}
           </span>
         }
       />
-      <Tooltip.Content side="right" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+      <Tooltip.Content side="right" {...stylex.props(styles.tooltipPadding)}>
+        <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
+        <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
 }
 
-function getSessionShareActionLabel(
-  t: SessionSharingTranslator,
-  state: SessionSharingState
-): string {
-  switch (state.privateReason) {
-    case 'project':
-      return t('sessions.sharing.shareProjectWithTeam', 'Share project with team…');
-    case 'machine-and-project':
-      return t('sessions.sharing.shareProjectAndDevice', 'Share project and device…');
-    case 'machine':
-      return t('sessions.sharing.shareDeviceWithTeam', 'Share device with team…');
-    case 'machine-not-registered':
-      return t('sessions.sharing.registerDeviceToShare', 'Register this device before sharing');
-    default:
-      return t('sessions.sharing.shareWithTeam', 'Share with team…');
-  }
-}
-
-/** Shared chrome for status pills in the session conversation header (Private, Archived).
- *
- * The line height is `normal`, not `leading-none`. `items-center` centres the
- * label's LINE BOX, and a line box shorter than the font's own leaves the
- * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
- * is zero and the ink lands where the font intends, for whatever interface
- * font is selected.
- *
- * The outline is a foreground tint, not `border-border`: the theme border is
- * tuned for dividers and nearly vanishes as a transparent button's only edge
- * on the dark canvas. */
-export const SESSION_HEADER_STATUS_PILL_CLASS =
-  'inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 ' +
-  'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
-  'hover:bg-foreground/[0.05] hover:text-foreground ' +
-  'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
-  'text-foreground/80';
+export const SESSION_HEADER_STATUS_PILL_CLASS = stylex.props(styles.statusPill).className ?? '';
 
 /** Read-only status pill for archived conversations in the desktop toolbar. */
 export function SessionArchivedBadge({ className }: { className?: string }) {
@@ -220,30 +271,24 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
+            className={clsx(SESSION_HEADER_STATUS_PILL_CLASS, className)}
           >
-            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            <Archive {...stylex.props(styles.glyph)} aria-hidden="true" />
             <span>{label}</span>
           </span>
         }
       />
-      <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+      <Tooltip.Content side="bottom" align="end" {...stylex.props(styles.tooltipPadding)}>
+        <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
+        <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
 }
 
 const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
-
-/** The watermark arrives from the corner it is cropped by, turning a little as it lands.
- * It ends on the opacity it rests at (0.07, below): a keyframe that ended on 1 would
- * flash the mark dark until the animation finished. */
-const markIn = stylex.keyframes({
-  from: { opacity: 0, transform: 'translate(8px, 6px) rotate(-8deg) scale(0.92)' },
-  to: { opacity: 0.07, transform: 'none' },
-});
+const ROW_INSET_X = '10px';
+const ROW_GAP = '6px';
 
 /** The next view arrives from the side it lives on, and the way back reverses it. */
 const enterFromRight = stylex.keyframes({
@@ -259,8 +304,8 @@ const accessPanel = stylex.create({
   /**
    * Height follows the content with a small overshoot, so the panel settles into
    * each view instead of snapping. The wrapper's inset is given back by a negative
-   * margin: the clip then lands on the popup's own edge, so the watermark is still
-   * cropped by the panel and a focus ring at the content's edge is not.
+   * margin: the clip then lands on the popup's own edge, so a focus ring at the
+   * content's edge is not cropped.
    */
   elastic: {
     margin: `calc(-1 * ${space[2]})`,
@@ -287,30 +332,13 @@ const accessPanel = stylex.create({
   /** The publish view's header: the way back, and what this view is. */
   publishHead: { display: 'flex', alignItems: 'center', gap: space[1], paddingBottom: space[3] },
 
-  /** The panel's own box: the watermark is placed against it and cropped by the popup. */
   root: { position: 'relative', display: 'flex', flexDirection: 'column' },
-  /** A faint mark of how far the conversation reaches. Decoration, so it takes no pointer. */
-  watermark: {
-    position: 'absolute',
-    top: '-2px',
-    right: '-6px',
-    width: '52px',
-    height: '52px',
-    color: colors.label,
-    opacity: 0.07,
-    pointerEvents: 'none',
-    animationName: { default: markIn, [REDUCED_MOTION]: 'none' },
-    animationDuration: '550ms',
-    animationTimingFunction: ease.standard,
-  },
-  /** Sits above the watermark; the right gutter keeps text off it. */
   head: {
     position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
-    paddingInline: space[1],
-    paddingRight: space[8],
+    paddingInline: ROW_INSET_X,
   },
   title: {
     margin: 0,
@@ -325,11 +353,25 @@ const accessPanel = stylex.create({
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
-  stops: { position: 'relative', marginTop: space[2] },
+  ownerReason: { paddingInline: ROW_INSET_X, marginTop: space[1.5] },
+  stops: { position: 'relative', marginTop: space[1.5] },
   /** The one rule: who can open it above, what to do with it below. */
-  rule: { position: 'relative', marginBlock: space[2], marginInline: space[1] },
+  rule: { position: 'relative', marginBlock: space[1.5], marginInline: ROW_INSET_X },
   /** Plain rows in the density of the app's menus: ghost, left-aligned, one per action. */
   actions: { position: 'relative', display: 'flex', flexDirection: 'column' },
+  /**
+   * Every row button uses `Button` `size="small"` (`paddingInline: 10px`,
+   * `gap: 6px`), and wraps its leading glyph in a 16px box so icons and 16px
+   * (`mini`) member avatars sit on the exact same vertical axis.
+   */
+  actionIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '16px',
+    height: '16px',
+  },
 });
 
 /** Static publication offered by the header control, when this build has a cloud. */
@@ -362,7 +404,6 @@ export type SessionAccessAction = {
   keepOpen?: boolean;
 };
 
-type AccessStop = 'you' | 'team' | 'web';
 type AccessView = 'home' | 'publish';
 
 /** Lets the panel's height follow whatever view or step is showing. */
@@ -384,25 +425,181 @@ function ElasticHeight({ children }: { children: ReactNode }) {
   );
 }
 
-/** The one conversation-access control in the desktop toolbar.
- *
- * A reader asks a header a single question — who can open this conversation —
- * so the panel leads with the answer, in a title and a faint watermark that name
- * how far it reaches, and makes the answer the control: a sliding strip of
- * audiences (you, team, web). The strip shows what IS; it never previews what
- * will be, because widening the audience is a decision the page confirms in its
- * own dialog, and a thumb that moved before that answer would lie. Audiences
- * that cannot be reached from here — narrowing, or a device the person does not
- * own — are disabled with the reason in the caption. Copy link and the copies
- * that leave the conversation (Markdown, image) sit below.
- *
- * Team visibility and a published link both pick the stop: published is "web",
- * otherwise a private conversation is "you" and anything else is "team". The
- * trigger's label follows the same rule, a published link being the wider
- * disclosure.
- *
- * `publicShare` is omitted when the build or workspace cannot publish, which is
- * also why a team-visible conversation can still render nothing at all. */
+/** Machine-owner team access and independent public-link publication share one panel. */
+function SessionAccessMembers({
+  state,
+  busy,
+  setBusy,
+}: {
+  state: SessionSharingState;
+  busy: boolean;
+  setBusy: (value: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const directory = new Map(
+    (state.availableMembers ?? []).map((member) => [member.userId, member])
+  );
+  const memberName = (userId: string) =>
+    directory.get(userId)?.name?.trim() ||
+    t(state.membersLoading ? 'common.loading' : 'sessions.access.unknownMember');
+  const ids = [
+    ...new Set([...(state.ownerUserId ? [state.ownerUserId] : []), ...(state.memberUserIds ?? [])]),
+  ];
+  const hasRemovableMembers =
+    !!state.canManage && ids.some((userId) => userId !== state.ownerUserId);
+  const change = async (userId: string, shared: boolean) => {
+    if (!state.canManage || !state.setMemberReadAccess || busy || userId === state.ownerUserId)
+      return;
+    setBusy(true);
+    try {
+      await state.setMemberReadAccess(userId, shared);
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const available = [...directory.values()].filter((member) => !ids.includes(member.userId));
+  return (
+    <section {...stylex.props(memberStyles.section)}>
+      <div {...stylex.props(accessPanel.rule)}>
+        <Separator />
+      </div>
+      <p {...stylex.props(memberStyles.heading)}>{t('sessions.access.members')}</p>
+      {state.membersError && (
+        <div role="status" {...stylex.props(memberStyles.notice)}>
+          <span>{t('sessions.access.directoryFailed')}</span>
+          {state.retryMembers && (
+            <Button variant="ghost" size="small" onClick={state.retryMembers}>
+              {t('common.retry')}
+            </Button>
+          )}
+        </div>
+      )}
+      {ids.map((userId) => (
+        <div key={userId} {...stylex.props(memberStyles.row)}>
+          <UserAvatar user={{ id: userId, ...directory.get(userId) }} size="mini" />
+          <span
+            {...stylex.props(memberStyles.name)}
+            aria-busy={!!state.membersLoading && !directory.has(userId)}
+          >
+            {memberName(userId)}
+          </span>
+          <span {...stylex.props(memberStyles.role)}>
+            {t(
+              userId === state.ownerUserId ? 'sessions.access.owner' : 'sessions.access.memberRead'
+            )}
+          </span>
+          {hasRemovableMembers &&
+            userId === state.ownerUserId && (
+              // Holds the remove button's width so every role label lines up when removable rows exist.
+              <span aria-hidden="true" {...stylex.props(memberStyles.placeholder)}>
+                <Button variant="ghost" icon size="mini" disabled tabIndex={-1}>
+                  <X {...stylex.props(shareSurface.glyphSmall)} />
+                </Button>
+              </span>
+            )}
+          {state.canManage && userId !== state.ownerUserId && (
+            <span {...stylex.props(memberStyles.removeSlot)}>
+              <Button
+                variant="ghost"
+                icon
+                size="mini"
+                disabled={busy}
+                aria-label={t('sessions.access.removeMember', {
+                  name: memberName(userId),
+                })}
+                onClick={() => {
+                  void change(userId, false);
+                }}
+              >
+                <X {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+              </Button>
+            </span>
+          )}
+        </div>
+      ))}
+      {state.canManage && (
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                variant="ghost"
+                size="small"
+                xstyle={themeStyles.layout}
+                disabled={busy || !state.setMemberReadAccess || !available.length}
+              >
+                <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                  <UserPlus {...stylex.props(shareSurface.glyphSmall)} />
+                </span>
+                {t('sessions.access.addMember')}
+              </Button>
+            }
+          />
+          <Menu.Content>
+            {available.map((member) => (
+              <Menu.Item
+                key={member.userId}
+                onClick={() => {
+                  void change(member.userId, true);
+                }}
+              >
+                {member.name}
+              </Menu.Item>
+            ))}
+          </Menu.Content>
+        </Menu.Root>
+      )}
+    </section>
+  );
+}
+const memberStyles = stylex.create({
+  notice: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    paddingInline: ROW_INSET_X,
+    fontSize: text.captionSize,
+    color: colors.secondaryLabel,
+  },
+  section: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  heading: {
+    margin: 0,
+    paddingInline: ROW_INSET_X,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.secondaryLabel,
+  },
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: ROW_GAP,
+    minWidth: 0,
+    minHeight: control.small,
+    paddingInline: ROW_INSET_X,
+    fontSize: text.subheadlineSize,
+    lineHeight: text.subheadlineLeading,
+  },
+  placeholder: {
+    display: 'inline-flex',
+    visibility: 'hidden',
+    pointerEvents: 'none',
+    marginInlineEnd: `calc(-1 * ${space[1]})`,
+  },
+  removeSlot: {
+    display: 'inline-flex',
+    marginInlineEnd: `calc(-1 * ${space[1]})`,
+  },
+  name: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  role: { fontSize: text.captionSize, color: colors.secondaryLabel, flexShrink: 0 },
+});
+
 export function SessionAccessControl({
   state,
   onShareWithTeam,
@@ -410,6 +607,8 @@ export function SessionAccessControl({
   onCopyLink,
   exportActions,
   className,
+  presentation = 'popover',
+  onClose,
 }: {
   state?: SessionSharingState | null;
   onShareWithTeam?: () => void | Promise<void>;
@@ -417,282 +616,258 @@ export function SessionAccessControl({
   onCopyLink?: () => void | Promise<void>;
   exportActions?: SessionAccessAction[];
   className?: string;
+  presentation?: 'popover' | 'dialog';
+  onClose?: () => void;
 }) {
   const sharingAllowed = useWorkspaceFeature('sharing');
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(presentation === 'dialog');
   const [view, setView] = useState<AccessView>('home');
-  // True once the person has moved between views, so the first opening is not animated.
   const [moved, setMoved] = useState(false);
-  // A publication is under way: the panel stays open until it finishes.
   const [busy, setBusy] = useState(false);
-
-  if (!sharingAllowed) return null;
-  const isPrivate = shouldShowPrivateSharingStatus(state);
-  if (!isPrivate && !publicShare) {
-    return null;
-  }
-
-  // `unknown` reads as not-yet-shared: the label upgrades in place once the
-  // control plane answers, rather than a badge appearing and disappearing.
-  const isShared = publicShare?.status === 'shared';
-  const sharedLabel = t('sharing.header.shared', 'Shared');
-  const sharedDescription = t(
-    'sharing.header.sharedDescription',
-    'Anyone with the link can read a published copy of this conversation.'
-  );
-  const shareLabel = t('sharing.manager.title', 'Share');
-  const hasTeamScope = state?.visibility === 'private' || state?.visibility === 'team';
-  // Without a sharing state (a solo workspace) nobody else can open it, so "only
-  // you" is true; while the state is still being resolved it is not yet known, so
-  // that stop is withheld instead of claiming privacy the control plane has not
-  // confirmed.
-  const canSayOnlyYou = !state || hasTeamScope;
-
-  const current: AccessStop = isShared ? 'web' : state?.visibility === 'team' ? 'team' : 'you';
-  const privateTitle = t('sessions.sharing.privateToYou', 'Private to you');
-  const scopeTitle = !state
-    ? privateTitle
-    : isPrivate
-      ? privateTitle
-      : state.visibility === 'team'
-        ? t('sessions.sharing.sharedWithTeam', 'Shared with team')
-        : getSessionSharingLabel(t, state);
-  const scopeDescription = state
-    ? getSessionSharingDescription(t, state)
-    : t(
-        'sharing.header.shareDescription',
-        'Publish a read-only copy of this conversation as a link.'
-      );
-  const ariaLabel = isShared
-    ? `${sharedLabel}: ${sharedDescription}`
-    : isPrivate
-      ? `${scopeTitle}: ${scopeDescription}`
-      : shareLabel;
-
-  const notRegistered = isPrivate && state.privateReason === 'machine-not-registered';
-  const teamReachable = isPrivate && !!onShareWithTeam && !notRegistered && state.canManage;
-  const teamBlocked = isPrivate
-    ? !state.canManage
-      ? t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')
-      : notRegistered
-        ? t('sessions.sharing.registerDeviceToShare', 'Register this device before sharing')
-        : null
-    : null;
-  const teamActionLabel = isPrivate ? getSessionShareActionLabel(t, state) : undefined;
-
-  const heading = isShared
-    ? t('sharing.header.anyoneWithLink', 'Anyone with the link')
-    : scopeTitle;
-  const caption = isShared ? sharedDescription : (teamBlocked ?? scopeDescription);
-  const WatermarkIcon = { you: LockKeyhole, team: Users, web: Globe }[current];
-
-  const stops: Array<{ id: AccessStop; label: string; icon: LucideIcon; disabled: boolean }> = [
-    ...(canSayOnlyYou
-      ? [
-          {
-            id: 'you' as const,
-            label: t('sharing.header.audienceYou', 'Only you'),
-            icon: LockKeyhole,
-            // Narrowing is not offered from here; the current stop is never disabled.
-            disabled: current !== 'you',
-          },
-        ]
-      : []),
-    ...(hasTeamScope
-      ? [
-          {
-            id: 'team' as const,
-            label: t('sharing.header.audienceTeam', 'Team'),
-            icon: Users,
-            disabled: current !== 'team' && !teamReachable,
-          },
-        ]
-      : []),
-    ...(publicShare
-      ? [
-          {
-            id: 'web' as const,
-            label: t('sharing.header.audienceWeb', 'Web'),
-            icon: Globe,
-            disabled: false,
-          },
-        ]
-      : []),
-  ];
-
-  const act = (run: () => void | Promise<void>) => {
-    setOpen(false);
-    void run();
+  if (!state && (!sharingAllowed || !publicShare)) return null;
+  const level =
+    state?.visibility === 'private'
+      ? 'private'
+      : (state?.access ?? (state?.visibility === 'team' ? 'edit' : 'private'));
+  const individualCount = new Set(state?.memberUserIds ?? []).size;
+  const label =
+    level === 'private' && individualCount > 0
+      ? t('sessions.access.sharedMembers', { count: individualCount })
+      : state?.visibility === 'unknown'
+        ? t('sessions.sharing.checking')
+        : t(`sessions.access.${level}`);
+  const Icon =
+    level === 'edit' || individualCount > 0 ? Users : level === 'read' ? Eye : LockKeyhole;
+  const setLevel = async (next: 'read' | null) => {
+    if (!state?.canManage || level === 'edit' || busy) return;
+    if (!state.setReadAccess) {
+      if (next === 'read') await onShareWithTeam?.();
+      return;
+    }
+    setBusy(true);
+    try {
+      await state.setReadAccess(next);
+    } catch {
+      toast.error(t('sessions.access.failed'));
+    } finally {
+      setBusy(false);
+    }
   };
-
   const goTo = (next: AccessView) => {
     setMoved(true);
     setView(next);
   };
-
-  const handleOpenChange = (next: boolean) => {
-    if (!next && busy) return;
-    setOpen(next);
-    if (!next) {
-      setView('home');
-      setMoved(false);
-    }
+  const act = (run: () => void | Promise<void>) => {
+    setOpen(false);
+    setView('home');
+    setMoved(false);
+    void run();
   };
-
-  const choose = (next: AccessStop) => {
-    if (next === current) return;
-    if (next === 'team') act(() => onShareWithTeam?.());
-    else if (next === 'web') goTo('publish');
-  };
-
+  const caption =
+    state?.visibility === 'unknown'
+      ? t('sessions.sharing.checkingDescription')
+      : level === 'edit'
+        ? t('sessions.access.machineShared')
+        : level === 'read'
+          ? t('sessions.access.confirmRead')
+          : t('sessions.sharing.privateDescription');
   const rows: SessionAccessAction[] = [
-    ...(isShared && publicShare
+    ...(publicShare
       ? [
           {
-            id: 'manage-link',
-            label: t('sharing.header.manageLink', 'Manage link'),
+            id: 'public-link',
+            label: t(
+              publicShare.status === 'shared'
+                ? 'sharing.header.manageLink'
+                : 'sharing.header.publishTitle'
+            ),
             icon: Globe,
-            keepOpen: true,
             onSelect: () => goTo('publish'),
+            keepOpen: true,
           },
         ]
       : []),
     ...(onCopyLink
-      ? [
-          {
-            id: 'copy-url',
-            label: t('sessions.copyUrl', 'Copy URL'),
-            icon: Link2,
-            onSelect: onCopyLink,
-          },
-        ]
+      ? [{ id: 'copy-url', label: t('sessions.copyUrl'), icon: Link2, onSelect: onCopyLink }]
       : []),
     ...(exportActions ?? []),
   ];
-
+  const content = (
+    <ElasticHeight>
+      <div
+        key={view}
+        {...stylex.props(
+          moved && (view === 'publish' ? accessPanel.enterRight : accessPanel.enterLeft)
+        )}
+      >
+        {view === 'publish' && publicShare ? (
+          <>
+            <div {...stylex.props(accessPanel.publishHead)}>
+              <Button
+                variant="ghost"
+                size="small"
+                icon
+                disabled={busy}
+                aria-label={t('common.back')}
+                onClick={() => goTo('home')}
+              >
+                <ChevronLeft />
+              </Button>
+              <p {...stylex.props(accessPanel.title)}>{t('sharing.header.publishTitle')}</p>
+            </div>
+            {publicShare.renderEditor({ onClose: () => goTo('home'), onBusyChange: setBusy })}
+          </>
+        ) : (
+          <div {...stylex.props(accessPanel.root)}>
+            <div {...stylex.props(accessPanel.head)}>
+              <p {...stylex.props(accessPanel.title)}>{t('sessions.access.teamAccess')}</p>
+              <p {...stylex.props(accessPanel.description)}>{caption}</p>
+            </div>
+            {level === 'edit' && state?.openMachineSettings && (
+              <div {...stylex.props(accessPanel.actions, accessPanel.stops)}>
+                <Button
+                  variant="ghost"
+                  size="small"
+                  xstyle={themeStyles.layout}
+                  onClick={() => act(() => state.openMachineSettings?.())}
+                >
+                  <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                    <Settings {...stylex.props(shareSurface.glyphSmall)} />
+                  </span>
+                  {t('sessions.access.machineSettings')}
+                </Button>
+              </div>
+            )}
+            {state && level !== 'edit' && (
+              <>
+                <div {...stylex.props(accessPanel.stops)}>
+                  <Tabs.Root
+                    value={level}
+                    onValueChange={(next) => {
+                      void setLevel(next === 'read' ? 'read' : null);
+                    }}
+                  >
+                    <Tabs.List size="small" stretch aria-label={t('sessions.access.teamAccess')}>
+                      <Tabs.Tab
+                        value="private"
+                        disabled={!state.canManage || busy || state.visibility === 'unknown'}
+                      >
+                        <LockKeyhole
+                          {...stylex.props(shareSurface.glyphSmall)}
+                          aria-hidden="true"
+                        />
+                        {t('sessions.access.private')}
+                      </Tabs.Tab>
+                      <Tabs.Tab
+                        value="read"
+                        disabled={!state.canManage || busy || state.visibility === 'unknown'}
+                      >
+                        <Eye {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
+                        {t('sessions.access.read')}
+                      </Tabs.Tab>
+                    </Tabs.List>
+                  </Tabs.Root>
+                </div>
+                {!state.canManage && (
+                  <p {...stylex.props(accessPanel.description, accessPanel.ownerReason)}>
+                    {t('sessions.sharing.onlyOwnerCanShare')}
+                  </p>
+                )}
+              </>
+            )}
+            {state &&
+              (state.ownerUserId || state.memberUserIds?.length || state.setMemberReadAccess) && (
+                <SessionAccessMembers state={state} busy={busy} setBusy={setBusy} />
+              )}
+            {rows.length > 0 && (
+              <>
+                <div {...stylex.props(accessPanel.rule)}>
+                  <Separator />
+                </div>
+                <div {...stylex.props(accessPanel.actions)}>
+                  {rows.map((row) => (
+                    <Button
+                      key={row.id}
+                      variant="ghost"
+                      size="small"
+                      xstyle={themeStyles.layout}
+                      disabled={row.disabled}
+                      title={row.title}
+                      onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
+                    >
+                      <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
+                        <row.icon {...stylex.props(shareSurface.glyphSmall)} />
+                      </span>
+                      {row.label}
+                    </Button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </ElasticHeight>
+  );
+  if (presentation === 'dialog')
+    return (
+      <Dialog.Root
+        open={open}
+        onOpenChange={(next) => {
+          if (!busy) {
+            setOpen(next);
+            if (!next) onClose?.();
+          }
+        }}
+      >
+        <Dialog.Content>
+          <Dialog.Title>{t('sessions.sharing.panelTitle')}</Dialog.Title>
+          {content}
+        </Dialog.Content>
+      </Dialog.Root>
+    );
   return (
-    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) {
+          setOpen(next);
+          if (!next) {
+            setView('home');
+            setMoved(false);
+          }
+        }
+      }}
+    >
       <Popover.Trigger
         render={
           <button
             type="button"
-            aria-label={ariaLabel}
-            className={cn(
+            aria-label={label}
+            className={clsx(
               SESSION_HEADER_STATUS_PILL_CLASS,
-              'data-[popup-open]:bg-foreground/[0.07] data-[popup-open]:text-foreground',
+              open && stylex.props(styles.statusPillOpen).className,
               className
             )}
           >
-            {isPrivate && !isShared ? (
-              <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            <span>{isShared ? sharedLabel : shareLabel}</span>
-            <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
+            <Icon {...stylex.props(styles.glyph)} aria-hidden="true" />
+            <span>{label}</span>
+            <ChevronDown {...stylex.props(styles.chevron)} aria-hidden="true" />
           </button>
         }
       />
-      <Popover.Content align="end" sideOffset={6} className="w-[18.5rem] gap-0 p-2">
+      <Popover.Content
+        align="end"
+        sideOffset={6}
+        gap="none"
+        width="18.5rem"
+        className={stylex.props(styles.accessPopoverPadding).className}
+      >
         <Popover.Title {...stylex.props(shareSurface.visuallyHidden)}>
-          {t('sessions.sharing.panelTitle', 'Share this conversation')}
+          {t('sessions.sharing.panelTitle')}
         </Popover.Title>
-        <ElasticHeight>
-          <div
-            key={view}
-            {...stylex.props(
-              moved && (view === 'publish' ? accessPanel.enterRight : accessPanel.enterLeft)
-            )}
-          >
-            {view === 'publish' && publicShare ? (
-              <>
-                <div {...stylex.props(accessPanel.publishHead)}>
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    icon
-                    disabled={busy}
-                    aria-label={t('common.back', 'Back')}
-                    onClick={() => goTo('home')}
-                  >
-                    <ChevronLeft {...stylex.props(shareSurface.glyph)} aria-hidden="true" />
-                  </Button>
-                  <p {...stylex.props(accessPanel.title)}>
-                    {t('sharing.header.publishTitle', 'Publish to the web')}
-                  </p>
-                </div>
-                {publicShare.renderEditor({
-                  onClose: () => goTo('home'),
-                  onBusyChange: setBusy,
-                })}
-              </>
-            ) : (
-              <div {...stylex.props(accessPanel.root)}>
-                <WatermarkIcon
-                  key={current}
-                  {...stylex.props(accessPanel.watermark)}
-                  aria-hidden="true"
-                />
-                <div {...stylex.props(accessPanel.head)}>
-                  <p {...stylex.props(accessPanel.title)}>{heading}</p>
-                  <p {...stylex.props(accessPanel.description)}>{caption}</p>
-                </div>
-                {stops.length > 1 ? (
-                  <div {...stylex.props(accessPanel.stops)}>
-                    <Tabs.Root value={current} onValueChange={(next) => choose(next as AccessStop)}>
-                      <Tabs.List
-                        size="small"
-                        stretch
-                        aria-label={t('sharing.header.whoCanOpen', 'Who can open this')}
-                      >
-                        {stops.map((stop) => (
-                          <Tabs.Tab
-                            key={stop.id}
-                            value={stop.id}
-                            disabled={stop.disabled}
-                            title={
-                              stop.id === 'team' && teamReachable ? teamActionLabel : undefined
-                            }
-                          >
-                            <stop.icon
-                              {...stylex.props(shareSurface.glyphSmall)}
-                              aria-hidden="true"
-                            />
-                            {stop.label}
-                          </Tabs.Tab>
-                        ))}
-                      </Tabs.List>
-                    </Tabs.Root>
-                  </div>
-                ) : null}
-                {rows.length > 0 ? (
-                  <div {...stylex.props(accessPanel.rule)}>
-                    <Separator />
-                  </div>
-                ) : null}
-                {rows.length > 0 ? (
-                  <div {...stylex.props(accessPanel.actions)}>
-                    {rows.map((row) => (
-                      <Button
-                        key={row.id}
-                        variant="ghost"
-                        size="small"
-                        className="justify-start"
-                        disabled={row.disabled}
-                        title={row.title}
-                        onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
-                      >
-                        <row.icon {...stylex.props(shareSurface.glyphSmall)} aria-hidden="true" />
-                        {row.label}
-                      </Button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </ElasticHeight>
+        {content}
       </Popover.Content>
     </Popover.Root>
   );
@@ -721,7 +896,7 @@ function ShareConfirmationDialog({
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Content>
         <AlertDialog.Header>
-          <AlertDialog.Title className="line-clamp-2 break-words">{title}</AlertDialog.Title>
+          <AlertDialog.Title>{title}</AlertDialog.Title>
           <AlertDialog.Description>{description}</AlertDialog.Description>
         </AlertDialog.Header>
         <AlertDialog.Footer>
@@ -734,7 +909,7 @@ function ShareConfirmationDialog({
               onConfirm();
             }}
           >
-            {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
+            {isSharing ? <Spinner className={stylex.props(themeStyles.glyph).className} /> : null}
             {actionLabel}
           </Button>
         </AlertDialog.Footer>
@@ -830,3 +1005,9 @@ export function ProjectShareDialog({
     />
   );
 }
+
+const themeStyles = stylex.create({
+  layout: { justifyContent: 'flex-start' },
+  layout2: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'break-word' },
+  glyph: { marginRight: 'calc(var(--spacing) * 1.5)', height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+});

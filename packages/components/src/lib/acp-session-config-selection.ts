@@ -1,11 +1,15 @@
 import {
+  isModelScopedSessionDefaultConfigId,
   isPerModelControlConfigId,
   type AcpCapabilityAuthority,
   type AcpConfigOptionValue,
   type AcpModelControls,
 } from '@lody/shared';
 import {
+  coerceFastModeConfigOptionValue,
   isConfigOptionValueValid,
+  isFastModeSelector,
+  isSpeedTierSelector,
   isThoughtLevelSelector,
   normalizePerModelSelectors,
   type AcpConfigOptionSelector,
@@ -41,21 +45,49 @@ export type AcpSessionConfigPreferences = {
   modeId?: string | null;
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  /** Per-model saved controls (`thought_level`, `fast-mode`, etc.), keyed by `modelId`. */
+  modelConfigOptionValues?: Record<string, Record<string, AcpConfigOptionValue>>;
 };
 
 /**
  * The user's unsent edits — the ONLY stored selection state. `mode`/`model`
  * wrap their value so an explicit `null` choice stays distinguishable from
- * "untouched".
+ * "untouched". Model-scoped controls (`thought_level`, `fast-mode`, etc.) live
+ * under `modelConfigOptions[modelId]` whenever a candidate model is known, so
+ * switching models in the composer preserves each model's independent choice.
  */
 export type AcpSessionUserConfigEdits = {
   mode?: { value: string | null };
   model?: { value: string | null };
   configOptions: Record<string, AcpConfigOptionValue>;
+  modelConfigOptions?: Record<string, Record<string, AcpConfigOptionValue>>;
 };
 
 export const EMPTY_ACP_SESSION_USER_CONFIG_EDITS: AcpSessionUserConfigEdits = {
   configOptions: {},
+};
+
+export const isPerModelSelector = (selector: AcpConfigOptionSelector): boolean =>
+  isThoughtLevelSelector(selector) ||
+  isFastModeSelector(selector) ||
+  isSpeedTierSelector(selector) ||
+  isPerModelControlConfigId(selector.configId) ||
+  isModelScopedSessionDefaultConfigId(selector.configId);
+
+const resolvePreferenceModelId = (
+  source: AcpSessionConfigPreferences | null | undefined,
+  genericModelConfigId?: string
+): string | null => {
+  if (source?.modelId) return source.modelId;
+  if (
+    genericModelConfigId &&
+    typeof source?.configOptionValues?.[genericModelConfigId] === 'string'
+  ) {
+    return source.configOptionValues[genericModelConfigId] as string;
+  }
+  return typeof source?.configOptionValues?.model === 'string'
+    ? source.configOptionValues.model
+    : null;
 };
 
 /**
@@ -83,6 +115,22 @@ export const fenceAcpSessionUserEdits = (
       configOptions[configId] = value;
     }
   }
+  const prefModelId = resolvePreferenceModelId(options.preferences);
+  const modelConfigOptions: Record<string, Record<string, AcpConfigOptionValue>> = {};
+  for (const [modelId, entries] of Object.entries(edits.modelConfigOptions ?? {})) {
+    const remaining: Record<string, AcpConfigOptionValue> = {};
+    for (const [configId, value] of Object.entries(entries)) {
+      const prefValue =
+        options.preferences.modelConfigOptionValues?.[modelId]?.[configId] ??
+        (prefModelId === modelId ? options.preferences.configOptionValues?.[configId] : undefined);
+      if (prefValue !== value) {
+        remaining[configId] = value;
+      }
+    }
+    if (Object.keys(remaining).length > 0) {
+      modelConfigOptions[modelId] = remaining;
+    }
+  }
   const mode =
     edits.mode && edits.mode.value !== (options.preferences.modeId ?? null)
       ? edits.mode
@@ -91,10 +139,41 @@ export const fenceAcpSessionUserEdits = (
     edits.model && edits.model.value !== (options.preferences.modelId ?? null)
       ? edits.model
       : undefined;
-  if (!mode && !model && Object.keys(configOptions).length === 0) {
+  const hasModelConfigOptions = Object.keys(modelConfigOptions).length > 0;
+  if (!mode && !model && Object.keys(configOptions).length === 0 && !hasModelConfigOptions) {
     return EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
   }
-  return { ...(mode ? { mode } : {}), ...(model ? { model } : {}), configOptions };
+  return {
+    ...(mode ? { mode } : {}),
+    ...(model ? { model } : {}),
+    configOptions,
+    ...(hasModelConfigOptions ? { modelConfigOptions } : {}),
+  };
+};
+
+const areFlatConfigRecordsEqual = (
+  left: Record<string, AcpConfigOptionValue> | undefined,
+  right: Record<string, AcpConfigOptionValue> | undefined
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => key in right && left[key] === right[key]);
+};
+
+const areModelConfigMapsEqual = (
+  left: Record<string, Record<string, AcpConfigOptionValue>> | undefined,
+  right: Record<string, Record<string, AcpConfigOptionValue>> | undefined
+): boolean => {
+  if (left === right) return true;
+  const leftEntries = left ? Object.keys(left) : [];
+  const rightEntries = right ? Object.keys(right) : [];
+  if (leftEntries.length === 0 && rightEntries.length === 0) return true;
+  if (!left || !right || leftEntries.length !== rightEntries.length) return false;
+  return leftEntries.every(
+    (modelId) => modelId in right && areFlatConfigRecordsEqual(left[modelId], right[modelId])
+  );
 };
 
 /**
@@ -118,13 +197,8 @@ export const areAcpSessionConfigPreferencesEqual = (
   if (!left || !right) return false;
   if ((left.modeId ?? null) !== (right.modeId ?? null)) return false;
   if ((left.modelId ?? null) !== (right.modelId ?? null)) return false;
-  const leftValues = left.configOptionValues;
-  const rightValues = right.configOptionValues;
-  if (leftValues === rightValues) return true;
-  if (!leftValues || !rightValues) return false;
-  const leftKeys = Object.keys(leftValues);
-  if (leftKeys.length !== Object.keys(rightValues).length) return false;
-  return leftKeys.every((key) => key in rightValues && leftValues[key] === rightValues[key]);
+  if (!areFlatConfigRecordsEqual(left.configOptionValues, right.configOptionValues)) return false;
+  return areModelConfigMapsEqual(left.modelConfigOptionValues, right.modelConfigOptionValues);
 };
 
 export type AcpSessionConfigSelectionInputs = {
@@ -152,15 +226,29 @@ export const buildAcpSessionConfigCandidates = (
   inputs: AcpSessionConfigSelectionInputs
 ): AcpSessionConfigCandidates => {
   const { edits, preferences, runtimePreferences } = inputs;
+  const modeId = edits.mode
+    ? edits.mode.value
+    : (runtimePreferences?.modeId ?? preferences.modeId ?? null);
+  const modelId = edits.model
+    ? edits.model.value
+    : (runtimePreferences?.modelId ?? preferences.modelId ?? null);
   const baseTable = runtimePreferences?.configOptionValues ?? preferences.configOptionValues ?? {};
+  const configModelId =
+    typeof edits.configOptions.model === 'string'
+      ? edits.configOptions.model
+      : typeof baseTable.model === 'string'
+        ? baseTable.model
+        : null;
+  const effectiveModelId = modelId ?? configModelId;
   return {
-    modeId: edits.mode
-      ? edits.mode.value
-      : (runtimePreferences?.modeId ?? preferences.modeId ?? null),
-    modelId: edits.model
-      ? edits.model.value
-      : (runtimePreferences?.modelId ?? preferences.modelId ?? null),
-    configOptionValues: { ...baseTable, ...edits.configOptions },
+    modeId,
+    modelId,
+    configOptionValues: {
+      ...baseTable,
+      ...(effectiveModelId ? preferences.modelConfigOptionValues?.[effectiveModelId] : undefined),
+      ...edits.configOptions,
+      ...(effectiveModelId ? edits.modelConfigOptions?.[effectiveModelId] : undefined),
+    },
   };
 };
 
@@ -217,24 +305,73 @@ const resolveSelectField = (
   return isSelectValueValid(options, defaultValue) ? defaultValue : (options[0]?.value ?? null);
 };
 
+type ConfigTableModelContext = {
+  effectiveModelId?: string | null;
+  genericModelConfigId?: string;
+};
+
 const resolveConfigOptionValues = (
   inputs: AcpSessionConfigSelectionInputs,
   selectors: AcpConfigOptionSelector[],
-  capabilityAuthority: AcpCapabilityAuthority
+  capabilityAuthority: AcpCapabilityAuthority,
+  modelContext: ConfigTableModelContext = {}
 ): Record<string, AcpConfigOptionValue> => {
   const { edits, preferences, runtimePreferences } = inputs;
+  const { effectiveModelId = null, genericModelConfigId } = modelContext;
   const runtimeTable = runtimePreferences?.configOptionValues;
-  const baseTable = runtimeTable ?? preferences.configOptionValues ?? {};
+  const userSwitchedModel = Boolean(
+    edits.model || (genericModelConfigId && genericModelConfigId in edits.configOptions)
+  );
+  const runtimeModelId = resolvePreferenceModelId(runtimePreferences, genericModelConfigId);
+  const prefModelId = resolvePreferenceModelId(preferences, genericModelConfigId);
+  const perModelSelectorIds = new Set(
+    selectors.filter(isPerModelSelector).map((selector) => selector.configId)
+  );
+  const isModelScopedKey = (configId: string) =>
+    perModelSelectorIds.has(configId) || isModelScopedSessionDefaultConfigId(configId);
+  const runtimeAppliesToModel =
+    !userSwitchedModel ||
+    !runtimeModelId ||
+    !effectiveModelId ||
+    runtimeModelId === effectiveModelId;
+  const flatPreferencesApplyToModel =
+    !userSwitchedModel || !prefModelId || !effectiveModelId || prefModelId === effectiveModelId;
 
   /* A present runtime table owns the whole non-user KEY SET, not just the
      values: a selector key it omits stays omitted (the agent did not report a
      value for it) rather than being back-filled from the selector's fallback.
-     Selector fallbacks seed only the no-runtime path, preserving the old
-     reconcile behavior for a conversation the agent has not reported on yet. */
+     Selector fallbacks seed only the no-runtime path (or per-model controls
+     after the user explicitly switched away from the runtime snapshot's model). */
   const configOptionValues: Record<string, AcpConfigOptionValue> = {};
   if (capabilityAuthority !== 'authoritative') {
-    Object.assign(configOptionValues, baseTable);
-    if (!runtimeTable) {
+    if (runtimeTable) {
+      for (const [configId, value] of Object.entries(runtimeTable)) {
+        if (!runtimeAppliesToModel && isModelScopedKey(configId)) continue;
+        configOptionValues[configId] = value;
+      }
+      if (!runtimeAppliesToModel) {
+        if (flatPreferencesApplyToModel && preferences.configOptionValues) {
+          for (const [configId, value] of Object.entries(preferences.configOptionValues)) {
+            if (isModelScopedKey(configId)) configOptionValues[configId] = value;
+          }
+        }
+        if (effectiveModelId && preferences.modelConfigOptionValues?.[effectiveModelId]) {
+          Object.assign(configOptionValues, preferences.modelConfigOptionValues[effectiveModelId]);
+        }
+        for (const selector of selectors) {
+          if (isPerModelSelector(selector) && !(selector.configId in configOptionValues)) {
+            configOptionValues[selector.configId] = selector.currentValue;
+          }
+        }
+      }
+    } else {
+      for (const [configId, value] of Object.entries(preferences.configOptionValues ?? {})) {
+        if (!flatPreferencesApplyToModel && isModelScopedKey(configId)) continue;
+        configOptionValues[configId] = value;
+      }
+      if (effectiveModelId && preferences.modelConfigOptionValues?.[effectiveModelId]) {
+        Object.assign(configOptionValues, preferences.modelConfigOptionValues[effectiveModelId]);
+      }
       for (const selector of selectors) {
         if (!(selector.configId in configOptionValues)) {
           configOptionValues[selector.configId] = selector.currentValue;
@@ -242,24 +379,49 @@ const resolveConfigOptionValues = (
       }
     }
     Object.assign(configOptionValues, edits.configOptions);
+    if (effectiveModelId && edits.modelConfigOptions?.[effectiveModelId]) {
+      Object.assign(configOptionValues, edits.modelConfigOptions[effectiveModelId]);
+    }
   } else {
     // Authoritative: only cataloged selectors exist and invalid stored values
     // fall through the chain.
+    const perModelEdits = effectiveModelId
+      ? edits.modelConfigOptions?.[effectiveModelId]
+      : undefined;
+    const perModelPrefs = effectiveModelId
+      ? preferences.modelConfigOptionValues?.[effectiveModelId]
+      : undefined;
     for (const selector of selectors) {
       const configId = selector.configId;
-      const editValue = configId in edits.configOptions ? edits.configOptions[configId] : undefined;
+      const perModel = isPerModelSelector(selector);
+      const hasPerModelEdit = Boolean(perModel && perModelEdits && configId in perModelEdits);
+      const rawEditValue = hasPerModelEdit
+        ? perModelEdits?.[configId]
+        : configId in edits.configOptions
+          ? edits.configOptions[configId]
+          : undefined;
+      const editValue =
+        hasPerModelEdit || configId in edits.configOptions
+          ? coerceFastModeConfigOptionValue(selector, rawEditValue)
+          : undefined;
       if (isConfigOptionValueValid(selector, editValue)) {
         configOptionValues[configId] = editValue;
         continue;
       }
-      if (runtimeTable) {
-        const runtimeValue = runtimeTable[configId];
+      if (runtimeTable && (!perModel || runtimeAppliesToModel)) {
+        const runtimeValue = coerceFastModeConfigOptionValue(selector, runtimeTable[configId]);
         if (isConfigOptionValueValid(selector, runtimeValue)) {
           configOptionValues[configId] = runtimeValue;
         }
         continue;
       }
-      const preferredValue = preferences.configOptionValues?.[configId];
+      const rawPreferredValue =
+        perModel && perModelPrefs && configId in perModelPrefs
+          ? perModelPrefs[configId]
+          : !perModel || flatPreferencesApplyToModel
+            ? preferences.configOptionValues?.[configId]
+            : undefined;
+      const preferredValue = coerceFastModeConfigOptionValue(selector, rawPreferredValue);
       configOptionValues[configId] = isConfigOptionValueValid(selector, preferredValue)
         ? preferredValue
         : selector.currentValue;
@@ -356,7 +518,10 @@ export const resolveAcpSessionConfigSelection = (
     );
   }
 
-  const configOptionValues = resolveConfigOptionValues(inputs, selectors, capabilityAuthority);
+  const configOptionValues = resolveConfigOptionValues(inputs, selectors, capabilityAuthority, {
+    effectiveModelId,
+    genericModelConfigId: genericModel?.configId,
+  });
 
   return {
     selectedModeId,
@@ -392,8 +557,9 @@ export const filterAcpSessionConfigOptionValues = (
       filtered[selector.configId] = value;
       continue;
     }
-    if (isConfigOptionValueValid(selector, value)) {
-      filtered[selector.configId] = value;
+    const coerced = coerceFastModeConfigOptionValue(selector, value);
+    if (isConfigOptionValueValid(selector, coerced)) {
+      filtered[selector.configId] = coerced;
     }
   }
   if (options.switchesModel === true) {

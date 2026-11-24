@@ -18,8 +18,8 @@ import {
 
 /*
  * What the new-chat page's two boards share: the flat tile in the well material, its label,
- * figure and note, the rolling count, and the plan usage with the Codex reset beside it. Each
- * board places its tiles by hand (`TileArea`), never by auto-flow, so the bento stays uneven.
+ * figure and note, the rolling count, and the plan usage with every reset it knows beside it.
+ * Each board places its tiles by hand (`TileArea`), never by auto-flow, so the bento stays uneven.
  */
 
 const MOTION = '@media (prefers-reduced-motion: no-preference)';
@@ -179,6 +179,29 @@ export const tileStyles = stylex.create({
     cursor: 'help',
   },
   infoGlyph: { width: '13px', height: '13px' },
+  /**
+   * The right side of a tile's head: the plan's name and, beside it, when its other window comes
+   * back. Both shrink, so a half tile clips the tail rather than pushing the source picker out.
+   */
+  headEnd: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'flex-end',
+    gap: space[2],
+    minWidth: 0,
+  },
+  /**
+   * A plan's two segments side by side — the 5-hour one and the week — each whole: its name and
+   * percent used, its own track and when it comes back. Two columns are the same height as one
+   * meter, so the board's four-row budget for this tile does not move.
+   */
+  meters: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    alignItems: 'stretch',
+    gap: space[4],
+    minWidth: 0,
+  },
   /** One window. A plain column: the tile's space-between sets it on the tile's floor. */
   meter: { display: 'flex', flexDirection: 'column', gap: space[1.5], minWidth: 0 },
   meterHead: {
@@ -295,25 +318,58 @@ export function Count({
 }
 
 /** "Resets in about 2 hours", counted from `nowMs`. */
-export function useFormatReset(nowMs: number) {
-  const { t, i18n } = useTranslation();
+export function useFormatResetTime(nowMs: number) {
+  const { i18n } = useTranslation();
   const dateLocale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   return (resetsAtEpochSeconds: number | null): string | null =>
     resetsAtEpochSeconds
-      ? t('machines.rateLimits.resetsAt', 'Resets {{time}}', {
-          time: formatDistance(new Date(resetsAtEpochSeconds * 1_000), new Date(nowMs), {
-            addSuffix: true,
-            locale: dateLocale,
-          }),
+      ? formatDistance(new Date(resetsAtEpochSeconds * 1_000), new Date(nowMs), {
+          addSuffix: true,
+          locale: dateLocale,
         })
       : null;
 }
 
+/**
+ * The countdown in the unit it lands in ("20h", "4d"), in the product language's own unit
+ * vocabulary. A half tile has room for the other window's name and this, not for a sentence.
+ */
+export function useCompactResetTime(nowMs: number) {
+  const { i18n } = useTranslation();
+  const intlLocale = toIntlLocale(i18n.language || 'en');
+  return (resetsAtEpochSeconds: number | null): string | null => {
+    if (!resetsAtEpochSeconds) return null;
+    const seconds = Math.max(0, resetsAtEpochSeconds - nowMs / 1_000);
+    const [value, unit] =
+      seconds >= 24 * 60 * 60
+        ? [Math.round(seconds / (24 * 60 * 60)), 'day' as const]
+        : seconds >= 60 * 60
+          ? [Math.round(seconds / (60 * 60)), 'hour' as const]
+          : [Math.max(1, Math.round(seconds / 60)), 'minute' as const];
+    return new Intl.NumberFormat(intlLocale, {
+      style: 'unit',
+      unit,
+      unitDisplay: 'narrow',
+    }).format(value);
+  };
+}
+
+export function useFormatReset(nowMs: number) {
+  const { t } = useTranslation();
+  const formatTime = useFormatResetTime(nowMs);
+  return (resetsAtEpochSeconds: number | null): string | null => {
+    const time = formatTime(resetsAtEpochSeconds);
+    return time ? t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time }) : null;
+  };
+}
+
 function UsageMeter({
   window,
+  index,
   formatReset,
 }: {
   window: AgentRateLimitWindow;
+  index: number;
   formatReset: (resetsAtEpochSeconds: number | null) => string | null;
 }) {
   const { t } = useTranslation();
@@ -326,7 +382,7 @@ function UsageMeter({
     t
   );
   return (
-    <div {...stylex.props(tileStyles.meter)}>
+    <div data-usage-window={index} {...stylex.props(tileStyles.meter)}>
       <p {...stylex.props(tileStyles.meterHead)}>
         <span {...stylex.props(tileStyles.name)}>{name}</span>
         <span {...stylex.props(tileStyles.meterUsed)}>{used}</span>
@@ -341,6 +397,34 @@ function UsageMeter({
       <p {...stylex.props(tileStyles.note)}>{formatReset(window.resetsAtEpochSeconds)}</p>
     </div>
   );
+}
+
+/**
+ * When the plan's other window comes back ("Weekly resets in 4 days"), as the pieces a sentence
+ * needs. The tile meters one window — the one that resets next — and this second segment's own
+ * reset sits in the head beside the plan's name rather than adding a second meter and two rows of
+ * height the Now board does not have in a short stage.
+ */
+function useOtherWindowReset(
+  usage: HomeWeekUsage | null,
+  nowMs: number,
+  compact: boolean
+): { name: string; time: string } | null {
+  const { t } = useTranslation();
+  const formatSentence = useFormatResetTime(nowMs);
+  const formatCountdown = useCompactResetTime(nowMs);
+  const formatTime = compact ? formatCountdown : formatSentence;
+  const other = usage?.otherWindow ?? null;
+  const time = other ? formatTime(other.resetsAtEpochSeconds) : null;
+  if (!other || !time) return null;
+  return {
+    name: formatAgentRateLimitWindowLabel(
+      other,
+      formatRateLimitWindowDurationLabel(other.windowDurationSeconds, t),
+      t
+    ),
+    time,
+  };
 }
 
 export type AgentIconRenderer = (agent: { cliType: string; agentType: string }) => ReactNode;
@@ -414,7 +498,7 @@ function UsageSourcePicker({
 
 /** The plan usage a board shows, and how to pick whose. */
 export type UsageProps = {
-  /** The chosen provider's subscription windows; only the shortest is drawn. */
+  /** The chosen provider's plan: the window the tile meters, and the one behind it. */
   usage?: HomeWeekUsage | null;
   usageSources?: readonly HomeWeekUsageSource[];
   usageSourceId?: string | null;
@@ -424,9 +508,10 @@ export type UsageProps = {
 };
 
 /**
- * The chosen provider's shortest window, and beside it, when the forecast knows one, the Codex
- * reset as a tile of its own (never squeezed into the usage). Without a reset the usage takes
- * `wide`. Renders nothing without usage: the board decides what takes the space.
+ * The chosen provider's plan usage — its meter and when each window comes back — and beside it,
+ * when the forecast knows one, the Codex reset as a tile of its own (never squeezed into the
+ * usage). Without a reset the usage takes `wide`. Renders nothing without usage: the board
+ * decides what takes the space.
  */
 export function UsageTiles({
   usage = null,
@@ -444,13 +529,25 @@ export function UsageTiles({
 }) {
   const { t } = useTranslation();
   const formatReset = useFormatReset(nowMs);
-  if (!usage) return null;
   const hasSide = forecast != null;
+  /* Two meters need a full tile: beside the Codex forecast a half tile has room for one meter and
+     the other window's countdown in its head, not for two columns of labels. */
+  const pair = usage?.otherWindow != null && !hasSide;
+  const otherReset = useOtherWindowReset(usage, nowMs, hasSide);
+  if (!usage) return null;
   const usageSource = usageSources.find((candidate) => candidate.id === usageSourceId) ?? null;
   const forecastSource = t(
     'home.week.forecastSource',
     'Third-party forecast from codex-resets.com, loaded when this page opens. No account data is sent. For reference only.'
   );
+  /* A half tile beside the Codex forecast has room for the window's name and a countdown, not for
+     a sentence: it reads "Weekly in 20 hours", and the full-width tile says "Weekly resets in
+     about 4 days". */
+  const otherResetText =
+    otherReset && hasSide
+      ? t('home.week.otherWindowResetsShort', '{{name}} in {{time}}', otherReset)
+      : null;
+  const showLabel = !usageSource || !hasSide;
   return (
     <>
       <Tile area={hasSide ? areas.usage : areas.wide} testId="home-week-usage">
@@ -463,15 +560,31 @@ export function UsageTiles({
               onChange={onUsageSourceChange}
             />
           ) : null}
-          {!usageSource || !hasSide ? (
-            <p {...stylex.props(tileStyles.label)}>
-              {usage.name
-                ? t('home.week.usageNamed', 'Plan usage · {{name}}', { name: usage.name })
-                : t('home.week.usage', 'Plan usage')}
-            </p>
+          {showLabel || otherResetText ? (
+            <div {...stylex.props(tileStyles.headEnd)}>
+              {showLabel ? (
+                <p {...stylex.props(tileStyles.label)}>
+                  {usage.name
+                    ? t('home.week.usageNamed', 'Plan usage · {{name}}', { name: usage.name })
+                    : t('home.week.usage', 'Plan usage')}
+                </p>
+              ) : null}
+              {otherResetText ? (
+                <p data-testid="home-week-usage-other-window" {...stylex.props(tileStyles.label)}>
+                  {otherResetText}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
-        <UsageMeter window={usage.windows[0]!} formatReset={formatReset} />
+        {pair ? (
+          <div {...stylex.props(tileStyles.meters)}>
+            <UsageMeter window={usage.window} index={0} formatReset={formatReset} />
+            <UsageMeter window={usage.otherWindow!} index={1} formatReset={formatReset} />
+          </div>
+        ) : (
+          <UsageMeter window={usage.window} index={0} formatReset={formatReset} />
+        )}
       </Tile>
 
       {forecast ? (

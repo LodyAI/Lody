@@ -20,6 +20,7 @@ type QuerySource = {
   getSnapshot: () => unknown;
   canRetainSnapshot: () => boolean;
   retain: () => () => void;
+  retry: () => void;
 };
 
 const querySources = new WeakMap<ConvexReact.ConvexReactClient, Map<string, QuerySource>>();
@@ -129,6 +130,18 @@ function getQuerySource(
 
   const source: QuerySource = {
     getSnapshot: () => result,
+    retry: () => {
+      if (listeners.size === 0) return;
+      stopWatch();
+      clearTimeout(retryTimer);
+      clearTimeout(healthyTimer);
+      retryTimer = healthyTimer = undefined;
+      attempts = 0;
+      serverFailure = true;
+      pendingRetryDelay = QUERY_RETRY_DELAYS_MS[0];
+      publish(undefined);
+      scheduleRetry();
+    },
     canRetainSnapshot: () => !serverFailure,
     retain: () => {
       owners += 1;
@@ -200,7 +213,7 @@ export function useRecoverableConvexQuery<Query extends FunctionReference<'query
 export function useOptionalRecoverableConvexQuery<Query extends FunctionReference<'query'>>(
   query: Query,
   ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
-): { data: Query['_returnType'] | undefined; error: Error | null } {
+): { data: Query['_returnType'] | undefined; error: Error | null; retry: () => void } {
   const { authSessionId, confirmedUnauthenticated, isAuthenticated, requestAuthRecovery } =
     useAuthenticatedConvex();
   const client = ConvexReact.useConvex();
@@ -243,7 +256,7 @@ export function useOptionalRecoverableConvexQuery<Query extends FunctionReferenc
   }, [authSessionId, queryKey, queryName, result, skip]);
 
   if (result instanceof Error) {
-    if (!authError) return { data: undefined, error: result };
+    if (!authError) return { data: undefined, error: result, retry: source.retry };
     const snapshot = snapshotRef.current;
     return {
       data:
@@ -251,6 +264,7 @@ export function useOptionalRecoverableConvexQuery<Query extends FunctionReferenc
           ? (snapshot.value as Query['_returnType'])
           : undefined,
       error: null,
+      retry: source.retry,
     };
   }
 
@@ -266,11 +280,11 @@ export function useOptionalRecoverableConvexQuery<Query extends FunctionReferenc
   if (skip && !callerSkipped && !confirmedUnauthenticated) {
     const snapshot = snapshotRef.current;
     if (source.canRetainSnapshot() && matchesSnapshot(snapshot, authSessionId, queryKey)) {
-      return { data: snapshot.value as Query['_returnType'], error: null };
+      return { data: snapshot.value as Query['_returnType'], error: null, retry: source.retry };
     }
   }
 
-  return { data: result, error: null };
+  return { data: result, error: null, retry: source.retry };
 }
 
 /** Public queries must run before authentication, so they cannot use the

@@ -1,5 +1,11 @@
 import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import { parseLodyExtensionCapabilities, parseRateLimitsSnapshot } from './lody-acp-extension';
+import {
+  parseAntigravityCliQuota,
+  isAntigravityBuiltinAgent,
+  createAntigravityQuotaReader,
+  isAntigravityRegistryAgent,
+} from './antigravity-quota';
 import { platformLayer, toShared } from '@/platform/process-options';
 import { Effect } from 'effect';
 import { prepareDeepSeekNodeEnvironment } from './deepseek-system-node';
@@ -21,6 +27,8 @@ import { z } from 'zod';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
+  ProcessCleanupFailed,
+  runCommandOk,
   runPromiseSquashedLegacy,
   startProcessLegacy,
   terminateChildTreeLegacy,
@@ -39,6 +47,7 @@ import {
   type AcpStartupStageEvent,
   type AcpStartupTimeoutOptions,
 } from './agent-client';
+import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from './claude-env-conflict';
 import { getLoginShellEnvLegacy } from './login-shell-env';
 import {
   mergeACPProcessEnv,
@@ -63,6 +72,7 @@ import type {
 } from '@lody/shared';
 
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
+import type { SorbetCustomProviderInput } from '@lody/shared/local-machine-rpc';
 import type {
   LodyPromptSuggestion,
   RateLimitsSnapshot,
@@ -114,6 +124,7 @@ export type CreateAcpClientOptions = {
    * adapter uses the native local runner; other agents default to true.
    */
   terminalEnabled?: boolean;
+  discoverAuthenticationMethods?: boolean;
   workspaceId?: WorkspaceId;
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
@@ -122,13 +133,14 @@ export type CreateAcpClientOptions = {
     requestId: string,
     request: RequestPermissionRequest
   ): Promise<RequestPermissionResponse>;
-  onUsageUpdate?(usage: SessionUsageUpdate): void;
+  onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(snapshot: RateLimitsSnapshot): void;
   onPromptSuggestion?(suggestion: LodyPromptSuggestion): void;
   onThreadGoalUpdated?(goal: Extract<MessageContent, { type: 'goal' }>): void;
   onThreadGoalCleared?(threadId: string): void;
   onSessionTitleUpdate?(title: string): void;
+  onNativeWorkChanged?(work: import('./agent-client').NativeAgentWork): void;
   onAgentWarning?(warning: AgentSessionWarning): void;
   loadExternalMcpServers?: AgentClientOptions['loadExternalMcpServers'];
   onImageGenerationBegin?(event: ImageGenerationBeginEvent): void;
@@ -155,6 +167,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     resolveAdditionalDirectories: options.resolveAdditionalDirectories,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
+    discoverAuthenticationMethods: options.discoverAuthenticationMethods,
     onStartupStage: options.onStartupStage,
     onUpdateMessage: options.onUpdateMessage,
     onRequestPermission: options.onRequestPermission,
@@ -165,6 +178,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     onThreadGoalUpdated: options.onThreadGoalUpdated,
     onThreadGoalCleared: options.onThreadGoalCleared,
     onSessionTitleUpdate: options.onSessionTitleUpdate,
+    onNativeWorkChanged: options.onNativeWorkChanged,
     onAgentWarning: options.onAgentWarning,
     loadExternalMcpServers: options.loadExternalMcpServers,
     onImageGenerationBegin: options.onImageGenerationBegin,
@@ -283,10 +297,19 @@ export type StartLocalAcpAgentOptions = {
   magpieGatewayUrl?: string;
   workdir: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * User-configured env vars from the Agent Config (before merging with
+   * `process.env`), used to scrub conflicting Claude auth/routing vars
+   * contributed by the login shell.
+   */
+  userExplicitEnv?: Record<string, string>;
   logger: Logger;
   terminalManager: TerminalManager;
   /** Set to false to disable terminal capability advertisement. Defaults to true. */
   terminalEnabled?: boolean;
+  discoverAuthenticationMethods?: boolean;
+  onUsageUpdate?: CreateAcpClientOptions['onUsageUpdate'];
+  onContextWindowUsageUpdate?: CreateAcpClientOptions['onContextWindowUsageUpdate'];
   onUpdateMessage(message: AcpSessionNotification): void;
   onRequestPermission(
     requestId: string,
@@ -380,11 +403,15 @@ export class AcpQuotaCleanupError extends Error {
   }
 }
 
-export async function initializeAndReadAcpRateLimits(stream: Stream) {
+export async function initializeAndReadAcpRateLimits(
+  stream: Stream,
+  agent?: { cliType: AgentConfigCliType; agentType: string; workdir: string }
+) {
+  const antigravity = createAntigravityQuotaReader();
   const connection = new ClientSideConnection(
     () => ({
       requestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
-      sessionUpdate: async () => {},
+      sessionUpdate: antigravity.update,
     }),
     stream
   );
@@ -393,43 +420,111 @@ export async function initializeAndReadAcpRateLimits(stream: Stream) {
     clientCapabilities: { terminal: false, fs: { readTextFile: false, writeTextFile: false } },
   });
   const capabilities = parseLodyExtensionCapabilities(initialized.agentCapabilities?._meta);
-  if (capabilities.rateLimits?.query !== true) throw new Error('Rate-limit query unsupported');
+  if (capabilities.rateLimits?.query !== true) {
+    if (
+      agent &&
+      isAntigravityRegistryAgent(agent) &&
+      initialized.agentInfo?.name === 'antigravity-acp'
+    ) {
+      return antigravity.read(connection, agent.workdir, {
+        deleteSession: initialized.agentCapabilities?.sessionCapabilities?.delete != null,
+      });
+    }
+    throw new Error('Rate-limit query unsupported');
+  }
   return parseRateLimitsSnapshot(
     await connection.request(LODY_EXTENSION_METHODS.rateLimitsGet, {})
   );
 }
 
-/** Read-only ACP initialization: no session, MCP servers, file access or prompts. */
+/** Core queries need no session; official Antigravity /usage needs an isolated scratch session. */
 export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions) {
-  const started = await startLocalAcpProtocol(
-    options,
-    async ({ stream, startupAbort }) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const snapshot = await Promise.race([
-          initializeAndReadAcpRateLimits(stream),
-          ...(startupAbort ? [startupAbort] : []),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error('Rate-limit query timed out')), 20_000);
-          }),
-        ]);
-        return { snapshot };
-      } finally {
-        clearTimeout(timer);
-      }
-    },
-    true
-  );
-  try {
-    await terminateAcpProcessTree(started.agentProcess, {
-      logger: options.logger,
-      sessionLabel: 'provider-rate-limits',
-      exitTimeoutMs: 3000,
+  if (isAntigravityBuiltinAgent(options)) {
+    // Never drop account-selecting ACP arguments and accidentally read another account.
+    if (options.extraArgs?.length || options.magpieGatewayUrl)
+      throw new Error('Antigravity quota is unavailable for custom launch arguments');
+    const launch = await resolveACPProcessLaunchAsync({
+      ...options,
+      onManagedRuntimeProgress: options.onManagedRuntimeProgress,
     });
-  } catch (cause) {
-    throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    const env = withoutElectronBootstrapCredentials(
+      mergeACPProcessEnv(
+        launch,
+        mergeLoginShellEnv(options.env ?? process.env, await getLoginShellEnvLegacy())
+      )
+    );
+    let quotaChild: ChildProcess | undefined;
+    const output = await runPromiseSquashedLegacy(
+      runCommandOk({
+        command: launch.command,
+        args: ['--print', '/usage', '--output-format', 'json'],
+        cwd: os.tmpdir(),
+        env,
+        timeout: 20_000,
+        maxOutputBytes: 65_536,
+        onSpawned: (child) => {
+          quotaChild = child;
+        },
+      }).pipe(
+        Effect.provide(platformLayer(withSpawn(options.spawnImpl, { logger: options.logger })))
+      ),
+      { signal: options.signal }
+    ).catch((cause: unknown) => {
+      if (cause instanceof ProcessCleanupFailed && quotaChild)
+        throw new AcpQuotaCleanupError(quotaChild, cause);
+      throw cause;
+    });
+    return parseAntigravityCliQuota(JSON.parse(output.stdout.toString('utf8')));
   }
-  return started.snapshot;
+  const workdir = isAntigravityRegistryAgent(options)
+    ? fs.mkdtempSync(path.join(os.tmpdir(), 'lody-antigravity-quota-'))
+    : undefined;
+  let retainWorkdir = false;
+  try {
+    const started = await startLocalAcpProtocol(
+      workdir ? { ...options, workdir } : options,
+      async ({ stream, startupAbort }) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const snapshot = await Promise.race([
+            initializeAndReadAcpRateLimits(stream, {
+              ...options,
+              workdir: workdir ?? options.workdir,
+            }),
+            ...(startupAbort ? [startupAbort] : []),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error('Rate-limit query timed out')), 20_000);
+            }),
+          ]);
+          return { snapshot };
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      true
+    );
+    try {
+      await terminateAcpProcessTree(started.agentProcess, {
+        logger: options.logger,
+        sessionLabel: 'provider-rate-limits',
+        exitTimeoutMs: 3000,
+      });
+    } catch (cause) {
+      throw new AcpQuotaCleanupError(started.agentProcess, cause);
+    }
+    return started.snapshot;
+  } catch (cause) {
+    retainWorkdir = cause instanceof AcpQuotaCleanupError;
+    throw cause;
+  } finally {
+    if (workdir && !retainWorkdir) {
+      try {
+        fs.rmSync(workdir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+  }
 }
 
 export type SessionArchiveResult = 'native' | 'title-marker' | 'unsupported' | 'superseded';
@@ -526,7 +621,9 @@ export async function prepareAcpProcessEnvironmentLegacy(
 async function startLocalAcpProtocol<T>(
   options: LocalAcpProtocolOptions,
   startClient: (options: LocalAcpConnectionOptions) => Promise<T>,
-  retainCleanupFailure = false
+  retainCleanupFailure = false,
+  sensitiveOutput = false,
+  safeOfflineBeforeInitialization?: () => boolean
 ) {
   options.signal?.throwIfAborted();
   // Async resolve so registry agents distributed as a platform binary are
@@ -580,6 +677,11 @@ async function startLocalAcpProtocol<T>(
   // merging the agent-specific env. withDefaultAcpPathEntries still runs as a
   // last-resort fallback for environments where the shell probe yields nothing.
   const loginShellEnv = await getLoginShellEnvLegacy();
+  const withLoginShell = mergeLoginShellEnv(env, loginShellEnv);
+  const scrubbedEnv =
+    shouldScrubClaudeAuthEnv(options.cliType, options.agentType) && options.userExplicitEnv
+      ? scrubInheritedClaudeAuthEnv(withLoginShell, options.userExplicitEnv)
+      : withLoginShell;
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.
@@ -587,10 +689,7 @@ async function startLocalAcpProtocol<T>(
     withoutElectronBootstrapCredentials(
       withLodyNpmCacheForNpx(
         launch.command,
-        withDefaultAcpPathEntries(
-          mergeACPProcessEnv(launch, mergeLoginShellEnv(env, loginShellEnv)),
-          options.agentType
-        )
+        withDefaultAcpPathEntries(mergeACPProcessEnv(launch, scrubbedEnv), options.agentType)
       )
     )
   );
@@ -614,12 +713,14 @@ async function startLocalAcpProtocol<T>(
   // cleanly: the codex CODEX_HOME setup/cleanup lives inside, so a failed attempt's
   // teardown does not leak into the retry.
   let lastStderrTail = '';
+  let safeOfflineFailure = false;
   const attemptStart = async (
     attemptArgs: readonly string[],
     startupTimeouts?: AcpStartupTimeoutOptions
   ) => {
     options.signal?.throwIfAborted();
     lastStderrTail = '';
+    safeOfflineFailure = false;
     if (shouldUseWorkdirCodexHome) {
       fs.mkdirSync(env.CODEX_HOME!, { recursive: true });
       if (isTitleAgentCodexRun && localConfigPath && fs.existsSync(defaultConfigPath)) {
@@ -697,6 +798,12 @@ async function startLocalAcpProtocol<T>(
       `[acp-startup] spawned ACP process (cliType=${options.cliType} agentType=${options.agentType} workdir=${options.workdir})`
     );
 
+    let sawProtocolOutput = false;
+    if (safeOfflineBeforeInitialization) {
+      agentProcess.stdout?.on('data', () => {
+        sawProtocolOutput = true;
+      });
+    }
     const stderrStream = agentProcess.stderr;
     let stderrTail = '';
     if (stderrStream) {
@@ -705,6 +812,7 @@ async function startLocalAcpProtocol<T>(
         if (!chunk) return;
         stderrTail = appendStderrTail(stderrTail, chunk);
         lastStderrTail = stderrTail;
+        if (sensitiveOutput) return;
         options.logger.debug(
           `[acp-startup] stderr (${chunk.length} chars): ${truncateLogText(chunk, {
             maxChars: 1200,
@@ -734,7 +842,7 @@ async function startLocalAcpProtocol<T>(
         sessionId: 'acp-startup',
         command: launch.command,
         args: [...attemptArgs],
-        getStderrTail: () => stderrTail,
+        getStderrTail: () => (sensitiveOutput ? '' : stderrTail),
       }
     );
 
@@ -805,6 +913,14 @@ async function startLocalAcpProtocol<T>(
         );
       });
 
+      safeOfflineFailure =
+        safeOfflineBeforeInitialization?.() === true &&
+        !sawProtocolOutput &&
+        agentProcess.exitCode !== null &&
+        agentProcess.exitCode !== 0 &&
+        /npm (?:error|ERR!) code (?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH)/i.test(
+          stderrTail
+        );
       throw startupError;
     } finally {
       options.signal?.removeEventListener('abort', handleSignalAbort);
@@ -827,6 +943,9 @@ async function startLocalAcpProtocol<T>(
     async () =>
       await runNpxStartupWithRecovery({
         maxAttempts: retainCleanupFailure ? 1 : undefined,
+        canRetryOfflineAfterFailure: safeOfflineBeforeInitialization
+          ? () => safeOfflineFailure
+          : undefined,
         command: launch.command,
         args: launch.args,
         env: envWithAcpStartup,
@@ -844,6 +963,11 @@ export type ShutdownLocalAcpAgentOptions = {
   acpSessionId?: ACPSessionId | null;
   logger: Logger;
   sessionLabel: string;
+  /**
+   * The session is one-shot scratch work: remove it from the agent's history with
+   * `session/delete` when advertised, else close it as usual.
+   */
+  deleteSession?: boolean;
   closeSessionTimeoutMs?: number;
   exitTimeoutMs?: number;
   /** Test seam for the OS process table. */
@@ -856,10 +980,13 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
 
   if (options.client && options.acpSessionId) {
     try {
-      await options.client.closeSession(options.acpSessionId, closeSessionTimeoutMs);
+      const deleted =
+        options.deleteSession === true &&
+        (await options.client.deleteSession(options.acpSessionId, closeSessionTimeoutMs));
+      if (!deleted) await options.client.closeSession(options.acpSessionId, closeSessionTimeoutMs);
     } catch (error) {
       options.logger.debug(
-        `[${options.sessionLabel}] ACP session close failed during local agent shutdown: ${
+        `[${options.sessionLabel}] ACP session ${options.deleteSession ? 'delete' : 'close'} failed during local agent shutdown: ${
           error instanceof Error ? error.message : String(error)
         }`
       );

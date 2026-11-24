@@ -21,6 +21,9 @@ builds to `site-docs/out/client`. Binding rules live in
 ## Component responsibilities
 
 - `components/landing.tsx` — landing copy, nav, and footer.
+- `components/landing-hero-download.tsx` and `components/landing-cta-section.tsx` —
+  platform-aware download and Web App links on the landing page; unknown platforms
+  link to all downloads.
 - `components/underwater-experience.tsx` — hero, in-flow product stage, and the
   post-demo stack (free scroll; no wheel lock). Styles in `app/underwater.css`.
 - `components/underwater-background.tsx` — the three.js point-cloud scene and
@@ -33,6 +36,11 @@ builds to `site-docs/out/client`. Binding rules live in
   conversation, composer, diff, browser, mobile, and usage/PR views. They take demo
   data as props and import nothing from the app; `scripts/app-boundary.mjs` checks
   that in `test`.
+- `content/docs/` — public docs grouped by reader path; only parenthesized virtual
+  groups move, so published URLs stay stable
+  ([decision](../.agents/notes/implemented/feature/2026-10-01-docs-information-architecture.md)).
+  `(migrating)/acp-feature-support` is a maintainer-checked capability snapshot, not
+  runtime probing ([decision](../.agents/notes/implemented/feature/2026-10-06-docs-acp-feature-support.md)).
 - `components/docs-replica/` — display-only previews embedded in docs pages. The
   original sidebar session list and home composer repo/branch pickers share the
   directory with the Feature List / reference previews for conversation diffs,

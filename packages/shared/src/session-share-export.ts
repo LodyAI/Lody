@@ -1,3 +1,4 @@
+import { stripEncryptedAttachmentMetadata } from './encrypted-attachment';
 import {
   SHARE_LIMITS,
   SESSION_SHARE_FILE_ATTACHMENTS_ENABLED,
@@ -187,6 +188,10 @@ export async function prepareSharePackage(options: {
         options.fileAttachmentOmissionText ?? 'File attachment not included in this share';
       return;
     }
+    if (value.type === 'local_attachment')
+      throw new Error(
+        'Local-only attachments cannot be included in a share; remove them or explicitly transfer them first'
+      );
     if (value.type === 'image' && typeof value.imageId === 'string') {
       copyAttachment(value, 'image', sourceId);
     } else if (value.type === 'file' && typeof value.fileId === 'string') {
@@ -245,6 +250,7 @@ export async function prepareSharePackage(options: {
     captured,
     async (source, index, signal) => {
       const historyObjectId = `h${index + 1}`;
+      stripEncryptedAttachmentMetadata(source.history);
       const raw = encodeShareJson(source.history, SHARE_LIMITS.historyBytes);
       const compressed = options.compressHistory ? await options.compressHistory(raw) : raw;
       signal.throwIfAborted();

@@ -4,9 +4,9 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
-import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
+import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
 import { useAtomValue } from 'jotai';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { Plus, RefreshCw, Trash2, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -36,7 +36,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 import { McpAuthenticationPanel } from './mcp-authentication-panel';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -229,6 +229,12 @@ export function McpSetting() {
   };
 
   const addLabel = t('settings.mcp.add');
+  const addButton = (
+    <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
+      <Plus {...stylex.props(catalog.icon)} />
+      {addLabel}
+    </Button>
+  );
 
   return (
     <div {...stylex.props(surface.container)}>
@@ -241,14 +247,15 @@ export function McpSetting() {
             {t('settings.mcp.syncing')}
           </span>
         ) : null}
-        <Button size="small" variant="secondary" onClick={() => openEditor({ mode: 'add' })}>
-          <Plus {...stylex.props(catalog.icon)} />
-          {addLabel}
-        </Button>
+        {servers.length > 0 ? addButton : null}
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <SettingsEmptyList>{t('settings.mcp.empty')}</SettingsEmptyList>
+        <SettingsEmptyState
+          title={t('settings.mcp.empty')}
+          description={t('settings.mcp.emptyHint')}
+          action={addButton}
+        />
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (
@@ -285,7 +292,7 @@ export function McpSetting() {
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>

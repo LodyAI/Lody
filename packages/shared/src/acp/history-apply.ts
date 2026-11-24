@@ -1,3 +1,4 @@
+import { parseLodyMessagePhase } from './schema';
 import type { MessageContent, ModelInfo, SubagentRunItem } from '../ai';
 import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 import type { SessionHistoryInput, SessionPlanEntry } from '../schema';
@@ -23,6 +24,7 @@ import {
   deriveLocationsFromRawInput,
   deriveLocationsFromToolCallContent,
   stripToolCallContentForHistory,
+  truncateToolTextForHistory,
 } from './tool-call-history';
 import {
   parseLodyTaskMeta,
@@ -84,6 +86,51 @@ const asRecordOrUndefined = (value: unknown): Record<string, unknown> | undefine
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+
+const boundJsonValueForHistory = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (typeof value === 'string') return truncateToolTextForHistory(value);
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const bounded = boundJsonValueForHistory(item, seen);
+      if (bounded !== item) changed = true;
+      return bounded;
+    });
+    return changed ? next : value;
+  }
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    const bounded = boundJsonValueForHistory(v, seen);
+    if (bounded !== v) changed = true;
+    next[k] = bounded;
+  }
+  return changed ? next : value;
+};
+
+const arePlanEntriesEqual = (
+  a: readonly SessionPlanEntry[] | undefined,
+  b: readonly SessionPlanEntry[]
+): boolean => {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      !left ||
+      !right ||
+      left.status !== right.status ||
+      left.content !== right.content ||
+      left.priority !== right.priority
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
 
 /**
  * IANA timezone of THIS machine — the one processing the ACP notification, i.e. the machine
@@ -165,8 +212,6 @@ const canAppendAssistantDeltas = (
 export const truncateTerminalOutputForHistory = (
   output: string
 ): { output: string; didTruncate: boolean } => {
-  // UTF-8 uses at least one byte per UTF-16 code unit, so this avoids encoding
-  // a legacy multi-megabyte output merely to discover that it needs a tail.
   if (
     output.length <= MAX_STORED_TERMINAL_OUTPUT_BYTES &&
     utf8Encoder.encode(output).byteLength <= MAX_STORED_TERMINAL_OUTPUT_BYTES
@@ -265,7 +310,6 @@ const utf8Head = (value: string, maxBytes: number): { end: number; bytes: number
       unit <= 0xdbff &&
       end + 1 < value.length &&
       (value.charCodeAt(end + 1) & 0xfc00) === 0xdc00;
-    // A lone surrogate encodes as U+FFFD: three bytes.
     const width = unit < 0x80 ? 1 : unit < 0x800 ? 2 : isPair ? 4 : 3;
     if (bytes + width > maxBytes) break;
     bytes += width;
@@ -291,7 +335,6 @@ export const truncateTerminalCommandForHistory = <
     }
     remaining -= head.bytes;
   }
-  // Already-truncated commands fit, so re-compacting a stored block is a no-op.
   if (fits) return block;
 
   let budget = MAX_STORED_TERMINAL_COMMAND_BYTES - TERMINAL_COMMAND_TRUNCATION_MARKER_BYTES;
@@ -343,7 +386,6 @@ const extractTerminalCommandContent = (
   rawInput: unknown,
   kind?: ToolKind | null
 ): StoredToolCallContent => {
-  // Try Codex format first
   const codexParsed = parseCodexTerminalCommand(rawInput);
   if (codexParsed) {
     return [
@@ -356,7 +398,6 @@ const extractTerminalCommandContent = (
     ];
   }
 
-  // Try Claude Code format
   const claudeParsed = parseClaudeCodeTerminalCommand(rawInput);
   if (claudeParsed) {
     return [
@@ -369,9 +410,6 @@ const extractTerminalCommandContent = (
     ];
   }
 
-  // Search tools (Grep/Glob) use {pattern, path} instead of {command}.
-  // Check explicitly by kind, or heuristically when kind is omitted on tool_call_update:
-  // only search tools have `pattern` without `command` in rawInput.
   if (kind === 'search' || (kind == null && looksLikeSearchRawInput(rawInput))) {
     return extractSearchCommandFromRawInput(rawInput);
   }
@@ -392,7 +430,6 @@ const extractTerminalCommandFromContent = (
     if (block.type !== 'content' || !('content' in block)) continue;
     if (block.content.type !== 'text' || !block.content.text) continue;
     const text = block.content.text.trim();
-    // Only try JSON-like strings to avoid false positives
     if (!text.startsWith('{') || !text.endsWith('}')) continue;
     try {
       const parsed = JSON.parse(text) as Record<string, unknown>;
@@ -407,7 +444,6 @@ const extractTerminalCommandFromContent = (
         ];
       }
     } catch {
-      // Not valid JSON, skip
     }
   }
   return [];
@@ -460,17 +496,11 @@ const extractTerminalOutputContent = (
   rawOutput: unknown,
   kind?: ToolKind | null
 ): StoredToolCallContent => {
-  // Codex format: object with aggregated_output, exit_code, etc.
-  // This has explicit fields (aggregated_output, exit_code) so it's safe for any tool kind.
   const parsed = parseCodexTerminalOutput(rawOutput);
   if (parsed) {
     return buildTerminalOutputBlocks(parsed);
   }
 
-  // Claude Code v0.19+: rawOutput is a plain string.
-  // Only treat as terminal output for execute/bash tools (or when kind is unknown).
-  // Non-terminal tools (edit, search, write, read) also send string rawOutput but it's not
-  // terminal output — persisting it would bloat the CRDT and duplicate content blocks.
   if (
     typeof rawOutput === 'string' &&
     rawOutput.length > 0 &&
@@ -479,8 +509,6 @@ const extractTerminalOutputContent = (
     return buildTerminalOutputBlocks({ output: rawOutput });
   }
 
-  // Pi: a shell result is `{ content: [{ type: 'text', text }], details }`. Other Pi
-  // tools share that shape, so only an execute call's result is terminal output.
   if (kind === 'execute') {
     const content = asRecordOrUndefined(rawOutput)?.content;
     if (Array.isArray(content)) {
@@ -544,7 +572,6 @@ const buildTerminalOutputBlocks = (parsed: {
         }
       : undefined;
 
-  // Combined output takes precedence over separate stdout/stderr
   if (parsed.output !== undefined) {
     if (!shouldKeepTerminalOutput(parsed.output, parsed.exitCode, parsed.truncated)) {
       return [];
@@ -589,11 +616,6 @@ const normalizeTerminalOutputForComparison = (value: string): string => {
 const stripDuplicateFencedToolContent = (
   contents: StoredToolCallContent
 ): StoredToolCallContent => {
-  // Many agents emit terminal output twice:
-  // - as a structured `terminal_output` block, and
-  // - as a fenced `content` snapshot (often repeated on every update).
-  //
-  // Once we have *any* structured terminal output, drop all fenced snapshot blocks.
   const hasTerminalOutput = contents.some((b) => b.type === 'terminal_output');
   if (!hasTerminalOutput) {
     return contents;
@@ -690,8 +712,6 @@ const compactToolCallContentForHistory = (
   contents: StoredToolCallContent,
   opts: { kind?: ToolKind | null } = {}
 ): StoredToolCallContent => {
-  // Remove empty text content blocks (e.g. Kimi sends an empty text content block
-  // in the initial tool_call notification that renders as an empty bordered div).
   let compacted = contents.filter((block) => {
     if (block.type !== 'content' || !('content' in block)) return true;
     if (block.content.type !== 'text') return true;
@@ -700,9 +720,6 @@ const compactToolCallContentForHistory = (
 
   compacted = dedupeAdjacentToolCallContent(compacted);
 
-  // Convert repeated fenced "terminal snapshots" emitted as ACP `content` blocks into a single
-  // `terminal_output` block so future updates can merge into the same LoroText instead of
-  // re-inserting the full snapshot every time.
   if (opts.kind === 'execute') {
     const latest = findLastTerminalSnapshotInContentBlocks(compacted);
     if (latest) {
@@ -716,16 +733,12 @@ const compactToolCallContentForHistory = (
           { type: 'terminal_output' }
         >;
         if (latest.snapshot.startsWith(existing.output)) {
-          // Common case: snapshot-style streaming. Apply as append to keep CRDT ops small.
           compacted[existingIndex] = {
             ...existing,
             output: existing.output + latest.snapshot.slice(existing.output.length),
             stream: 'combined',
           };
         } else {
-          // Prefer already-derived terminal output (e.g. from `rawOutput`) over fenced snapshots.
-          // Codex often emits a fenced block containing escaped `\\u001b` sequences while `rawOutput`
-          // contains real ANSI escapes. Don't clobber the real output in that case.
           const existingHasAnsi = existing.output.includes('\u001b');
           const snapshotHasEscapedAnsi = latest.snapshot.includes('\\u001b');
           if (!existingHasAnsi || !snapshotHasEscapedAnsi) {
@@ -754,7 +767,6 @@ const compactToolCallContentForHistory = (
   compacted = normalizeTerminalOutputsForHistory(compacted);
   compacted = normalizeTerminalCommandsForHistory(compacted);
 
-  // Post-filtering may have created adjacent duplicates again.
   return dedupeAdjacentToolCallContent(compacted);
 };
 
@@ -774,7 +786,10 @@ const compactAdjacentTextAndThought = (items: MessageContent[]): MessageContent[
     if (
       last &&
       (nextItem.type === 'text' || nextItem.type === 'thought') &&
-      last.type === nextItem.type
+      last.type === nextItem.type &&
+      (last.type !== 'text' ||
+        nextItem.type !== 'text' ||
+        last.messagePhase === nextItem.messagePhase)
     ) {
       const existing = last as Extract<MessageContent, { type: 'text' | 'thought' }>;
       const next = nextItem as Extract<MessageContent, { type: 'text' | 'thought' }>;
@@ -795,13 +810,10 @@ function mergeTerminalOutputSnapshot(current: string, incoming: string): string 
   if (!incoming) return current;
   if (!current) return incoming;
 
-  // If the upstream sends an aggregated snapshot (common), prefer keeping the latest snapshot,
-  // but apply it as an append when it's a strict prefix to keep CRDT operations small.
   if (incoming.startsWith(current)) {
     return current + incoming.slice(current.length);
   }
 
-  // Dedupe replays.
   if (incoming === current) {
     return current;
   }
@@ -810,8 +822,6 @@ function mergeTerminalOutputSnapshot(current: string, incoming: string): string 
     return current;
   }
 
-  // Best-effort overlap merge (same approach as text streaming), but fallback to snapshot replacement
-  // instead of concatenation to avoid duplicating output when the upstream sends snapshots.
   const maxWindow = 4096;
   const minOverlap = 24;
   const maxOverlap = Math.min(current.length, incoming.length, maxWindow);
@@ -839,8 +849,6 @@ const mergeToolCallMessage = (
 ): ToolCallMessage => {
   const nextKind = (incoming.kind ?? prev.kind) as ToolKind | null | undefined;
 
-  // ACP content is a replacement list. Locally derived terminal commands are
-  // independent rawInput projections and survive an output-only replacement.
   const mergedContent: StoredToolCallContent = replaceContent
     ? (prev.content ?? []).filter((block) => block.type === 'terminal_command')
     : [...(prev.content ?? [])];
@@ -853,8 +861,6 @@ const mergeToolCallMessage = (
     >[];
     if (diffChunks.length > 0) {
       if (nextKind === 'edit') {
-        // Edits often include full old/new text in `diff` blocks. Ignore them to keep the
-        // persisted history small (we only keep paths/status/terminal output).
         for (let i = mergedContent.length - 1; i >= 0; i--) {
           if (mergedContent[i]?.type === 'diff') {
             mergedContent.splice(i, 1);
@@ -868,7 +874,6 @@ const mergeToolCallMessage = (
           }
         }
 
-        // Replace in-place where possible to avoid "delete + re-insert full text" CRDT churn.
         const replaceCount = Math.min(existingDiffIndices.length, diffChunks.length);
         for (let i = 0; i < replaceCount; i++) {
           const idx = existingDiffIndices[i];
@@ -877,7 +882,6 @@ const mergeToolCallMessage = (
           mergedContent[idx] = diff;
         }
 
-        // Remove extra existing diffs.
         if (existingDiffIndices.length > diffChunks.length) {
           const toRemove = new Set(existingDiffIndices.slice(diffChunks.length));
           const filtered: StoredToolCallContent = [];
@@ -890,7 +894,6 @@ const mergeToolCallMessage = (
           mergedContent.splice(0, mergedContent.length, ...filtered);
         }
 
-        // Append any extra incoming diffs.
         if (diffChunks.length > existingDiffIndices.length) {
           mergedContent.push(...diffChunks.slice(existingDiffIndices.length));
         }
@@ -908,7 +911,6 @@ const mergeToolCallMessage = (
         if (existingIndex >= 0) {
           mergedContent[existingIndex] = cmd;
         } else {
-          // Keep the typical ordering: command before output.
           const firstOutputIndex = mergedContent.findIndex((c) => c.type === 'terminal_output');
           if (firstOutputIndex >= 0) {
             mergedContent.splice(firstOutputIndex, 0, cmd);
@@ -924,17 +926,13 @@ const mergeToolCallMessage = (
       { type: 'terminal_output' }
     >[];
     if (nextTerminalOutputs.length > 0) {
-      // Terminal output updates are often snapshots, not deltas. Merge them carefully so the CRDT
-      // sees small appends when possible instead of repeated full-string replacements.
       const hasCombined = nextTerminalOutputs.some((o) => (o.stream ?? 'combined') === 'combined');
       if (hasCombined) {
-        // Canonicalize to one combined output block.
         const combined = nextTerminalOutputs.find((o) => (o.stream ?? 'combined') === 'combined');
         if (combined) {
           const existingIndex = mergedContent.findIndex(
             (c) => c.type === 'terminal_output' && (c.stream ?? 'combined') === 'combined'
           );
-          // Drop all existing terminal_output blocks except the combined one we will merge into.
           const filtered: StoredToolCallContent = [];
           for (let i = 0; i < mergedContent.length; i++) {
             const block = mergedContent[i];
@@ -1004,8 +1002,6 @@ const mergeToolCallMessage = (
     }
   }
 
-  // Reconnect/retry tails can replay an older `tool_call` notification after a newer update
-  // already persisted. Status is monotonic in the ACP lifecycle, so it must never regress.
   const statusRank = { pending: 0, in_progress: 1, completed: 2, failed: 2 } as const;
   const nextStatus =
     statusRank[incoming.status] < statusRank[prev.status] ? prev.status : incoming.status;
@@ -1013,8 +1009,6 @@ const mergeToolCallMessage = (
   return {
     ...prev,
     toolCallId: incoming.toolCallId,
-    // `null` title/kind means "no information" on the wire (zod allows explicit null);
-    // it must keep the previously persisted value, not wipe it.
     title: truncateToolTitleForHistory(incoming.title ?? prev.title),
     kind: nextKind ?? undefined,
     status: nextStatus,
@@ -1024,15 +1018,12 @@ const mergeToolCallMessage = (
         ? []
         : prev.content,
     locations: incoming.locations !== undefined ? incoming.locations : prev.locations,
-    // Scheduling tools split rawInput and the terminal `completed` across updates; keep
-    // whichever update carried each (see SCHEDULING_TOOL_NAMES).
     rawInput: incoming.rawInput !== undefined ? incoming.rawInput : prev.rawInput,
     rawOutput: incoming.rawOutput !== undefined ? incoming.rawOutput : prev.rawOutput,
     schedulingTimeZone:
       incoming.schedulingTimeZone !== undefined
         ? incoming.schedulingTimeZone
         : prev.schedulingTimeZone,
-    // The first-persisted stamp wins; a replayed/retried update must not move it.
     recordedAtMs: prev.recordedAtMs ?? incoming.recordedAtMs,
     toolName: incoming.toolName ?? prev.toolName,
     activityKind: incoming.activityKind !== undefined ? incoming.activityKind : prev.activityKind,
@@ -1050,13 +1041,6 @@ const mergeToolCallMessage = (
 const parseClaudeCodeThinkingTags = (text: string): MessageContent[] => {
   const result: MessageContent[] = [];
 
-  // Only tags anchored to line boundaries are structural (same rationale as the
-  // hardened `<proposed_plan>` parser below): the opening tag must start a line
-  // and the closing tag must end one, so inline mentions like `<thinking>` in
-  // prose or code stay visible text instead of being extracted and rewritten.
-  // Content (including its delimiter newlines) is captured verbatim. The
-  // negative lookahead prevents a stray isolated opening tag from swallowing
-  // prose up to a later real block.
   const thinkingRegex =
     /(^|\r?\n)[ \t]*<thinking>((?:(?!<thinking>)[\s\S])*?)<\/thinking>[ \t]*(?=\r?\n|$)/g;
   let lastIndex = 0;
@@ -1080,7 +1064,6 @@ const parseClaudeCodeThinkingTags = (text: string): MessageContent[] => {
     lastIndex = thinkingRegex.lastIndex;
   }
 
-  // Add remaining text after last thinking tag
   if (lastIndex < text.length) {
     const textAfter = text.slice(lastIndex);
     if (textAfter) {
@@ -1088,7 +1071,6 @@ const parseClaudeCodeThinkingTags = (text: string): MessageContent[] => {
     }
   }
 
-  // If no thinking tags found, return the original text
   if (result.length === 0) {
     return [{ type: 'text', text }];
   }
@@ -1097,18 +1079,6 @@ const parseClaudeCodeThinkingTags = (text: string): MessageContent[] => {
 };
 
 const parseCodexProposedPlanTags = (text: string, turnId: string): MessageContent[] => {
-  // Codex may still emit proposed-plan markup as ordinary assistant text. Keep parsing in Lody,
-  // but only for line-isolated control tags; inline mentions like `<proposed_plan>` in prose or
-  // code must remain visible text.
-  //
-  // The content match uses a negative lookahead so it cannot swallow another
-  // `<proposed_plan>` opening tag. Without it, when the model wrote
-  // `` `<proposed_plan>` `` on a line of its own (e.g. wrapped prose) before
-  // the real plan block, the lazy `[\s\S]*?` paired the *first* opening with
-  // the *final* closing tag — yanking the intervening prose plus the real
-  // opening tag into the plan markdown. Rejected: a hand-rolled scan that
-  // tracks the latest unmatched opening — equivalent behavior, more code,
-  // and harder to reason about for streaming partial input.
   const planRegex =
     /(^|\r?\n)[ \t]*<proposed_plan>[ \t]*(?:\r?\n)((?:(?!<proposed_plan>)[\s\S])*?)(\r?\n)[ \t]*<\/proposed_plan>[ \t]*(?=\r?\n|$)/g;
   const result: MessageContent[] = [];
@@ -1147,7 +1117,7 @@ const parseCodexProposedPlanTags = (text: string, turnId: string): MessageConten
     result.splice(insertIndex, 0, {
       type: 'proposed_plan',
       turnId,
-      markdown,
+      markdown: truncateToolTextForHistory(markdown),
       status: 'completed',
       isLatest: true,
     });
@@ -1171,9 +1141,6 @@ type ToolUpdate = Extract<
   { sessionUpdate: 'tool_call' | 'tool_call_update' }
 >;
 
-// Subagent/background task lifecycle rides the tool_call transport (see
-// claude-subagent-task.ts). Materialize it as a first-class `subagent_task`
-// item instead of persisting a tool_call; the applier merges by taskId.
 const toolUpdateSubagentTasks = (update: ToolUpdate): MessageContent[] => {
   const subagentTask =
     parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
@@ -1296,60 +1263,30 @@ const buildToolCallMessageForHistory = (
 ): ToolCallMessage => {
   const kind = (update.kind ?? previousTool?.kind) as ToolKind | null | undefined;
 
-  // `update.content` is untrusted and provider-dependent; some tools include whole file
-  // contents or full old/new text. Strip those early so we never persist them.
   let baseContent: StoredToolCallContent = update.content ? [...update.content] : [];
   baseContent = stripToolCallContentForHistory(kind, baseContent);
 
-  // Extract structured terminal command/output from implementation-specific fields.
-  //
-  // rawInput → terminal_command block
-  // _meta.claudeCode.toolResponse / rawOutput → terminal_output blocks
-  //
-  // For file reads, `rawOutput` is usually the full file text; we intentionally do NOT
-  // persist that into session history.
-  //
-  // Priority for terminal output extraction:
-  // 1. Claude Code _meta.claudeCode.toolResponse (v0.19+: {stdout, stderr, ...})
-  // 2. Codex rawOutput (object: {aggregated_output, exit_code, ...})
-  // 3. Claude Code rawOutput (v0.19+: plain string)
   let derivedCommand = extractTerminalCommandContent(update.rawInput, kind);
 
-  // Fallback: some agents (e.g., Kimi) put the command as JSON in content blocks
-  // instead of rawInput. Try to extract it from content when rawInput yields nothing.
   if (derivedCommand.length === 0) {
     derivedCommand = extractTerminalCommandFromContent(baseContent);
   }
 
   let derivedOutput: StoredToolCallContent = [];
   if (kind !== 'read') {
-    // Prefer _meta.claudeCode.toolResponse for Claude Code tools (has separate stdout/stderr)
     const meta = (update as ToolCallUpdateWithMeta)._meta;
     if (isClaudeCodeTool(meta)) {
       derivedOutput = extractClaudeCodeTerminalOutputContent(meta);
     }
 
-    // Fallback to rawOutput (Codex object format or Claude Code plain string for execute tools)
     if (derivedOutput.length === 0) {
       derivedOutput = extractTerminalOutputContent(update.rawOutput, kind);
     }
   }
 
   if (derivedOutput.length > 0) {
-    // ACP uses a `terminal` placeholder block to indicate that terminal output is streaming
-    // in the CLI. Once we have *any* structured terminal output (`terminal_output`) persisted
-    // in history, the placeholder becomes redundant and can cause confusing UI layouts
-    // (e.g. "streaming in your CLI" inserted between command and output).
     baseContent = baseContent.filter((c) => c.type !== 'terminal');
 
-    // Some agents duplicate terminal output by emitting both:
-    // - `rawOutput.aggregated_output` (with real ANSI escapes), and
-    // - a fenced `content` snapshot (often with escaped sequences like `\\u001b`).
-    //
-    // Agents using ACP terminal RPCs (e.g., Kimi) put the result as plain text content
-    // blocks which are also extracted as rawOutput → terminal_output.
-    //
-    // When we have a derived terminal output, drop any content blocks whose text matches.
     const candidateOutputs = new Set(
       derivedOutput
         .filter((b) => b.type === 'terminal_output')
@@ -1359,13 +1296,10 @@ const buildToolCallMessageForHistory = (
       if (c.type !== 'content') return true;
       if (!('content' in c)) return true;
       if (c.content.type !== 'text') return true;
-      // Check fenced code blocks (Codex style)
       const fenced = extractSingleFencedBlock(c.content.text);
       if (fenced && candidateOutputs.has(normalizeTerminalOutputForComparison(fenced.body))) {
         return false;
       }
-      // Check plain text match (Kimi/Pi style: content text is identical to terminal
-      // output). Indented output such as `launchctl print` only matches untrimmed.
       const plainText = c.content.text.trim();
       if (
         plainText.length > 0 &&
@@ -1385,10 +1319,6 @@ const buildToolCallMessageForHistory = (
     explicitLocations ??
     deriveLocationsFromToolCallContent(update.content) ??
     deriveLocationsFromRawInput(update.rawInput);
-  // Scheduling tools are the one exception to stripping rawInput/rawOutput: the
-  // scheduled-tasks panel derives entirely from history, so it needs the schedule and
-  // the created job id. Persist them (small, stable) plus the canonical tool name the
-  // deriver switches on; `title` stays whatever the agent chose to show.
   const toolName =
     resolveAcpToolName((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.toolName;
   const activityKind = getToolCallActivityKind((update as ToolCallUpdateWithMeta)._meta);
@@ -1403,16 +1333,16 @@ const buildToolCallMessageForHistory = (
     status: update.status ?? previousTool?.status ?? 'pending',
     content: content.length ? content : undefined,
     locations,
-    // Generic ACP rawInput/rawOutput is excluded because it is unstructured by spec;
-    // scheduling tools keep theirs, and mode switches retain only the displayed plan.
     rawInput: isSchedulingTool
-      ? input
+      ? (boundJsonValueForHistory(input) as Record<string, unknown> | undefined)
       : kind === 'switch_mode' && typeof input?.plan === 'string'
-        ? { plan: input.plan }
+        ? { plan: truncateToolTextForHistory(input.plan) }
         : undefined,
-    rawOutput: isSchedulingTool ? asRecordOrUndefined(update.rawOutput) : undefined,
-    // Cron is local-time to this machine — record its zone so the panel resolves the
-    // fire time in the right timezone regardless of where it is later viewed.
+    rawOutput: isSchedulingTool
+      ? (boundJsonValueForHistory(asRecordOrUndefined(update.rawOutput)) as
+          | Record<string, unknown>
+          | undefined)
+      : undefined,
     schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
     activityKind,
   };
@@ -1431,15 +1361,14 @@ export const buildMessageContentFromNotification = (
     case 'agent_message_chunk':
       switch (update.content.type) {
         case 'text':
-          // Note: Claude Code streams <thinking> tags across multiple chunks.
-          // We handle parsing in postProcessThinkingTags() after all chunks are merged.
-          return [{ type: 'text', text: update.content.text }];
+          const messagePhase = parseLodyMessagePhase(update._meta);
+          return [
+            { type: 'text', text: update.content.text, ...(messagePhase ? { messagePhase } : {}) },
+          ];
         case 'image':
         case 'audio':
         case 'resource_link':
         case 'resource':
-          // Persisted history currently stores text-only assistant chunks. Live UI can still
-          // consume richer ACP content directly from notifications.
           return [];
       }
     case 'agent_thought_chunk':
@@ -1461,8 +1390,6 @@ export const buildMessageContentFromNotification = (
       return [buildToolCallMessageForHistory(update, previousTool)];
     }
     case 'plan':
-      // Plan is now stored as a field on the history entry, not as a MessageContent item.
-      // Return empty array here; plan updates are handled separately in the applier.
       return [];
     case 'plan_update':
       switch (update.plan.type) {
@@ -1473,7 +1400,7 @@ export const buildMessageContentFromNotification = (
             {
               type: 'proposed_plan',
               turnId: update.plan.planId,
-              markdown: update.plan.content,
+              markdown: truncateToolTextForHistory(update.plan.content),
               status: 'delta',
               isLatest: true,
             },
@@ -1492,15 +1419,11 @@ export const buildMessageContentFromNotification = (
         },
       ];
     case 'available_commands_update':
-      // Commands belong to session control state, outside the transcript.
-      // Persisting them into chat history only creates empty assistant rows in the UI.
       return [];
     case 'current_mode_update':
-      // Mode changes are session-level metadata; the persisted history only stores message content.
       return [];
     case 'session_info_update':
       const { title } = update;
-      // TODO: wait for cc codex agent support
       void title;
       return [];
     default:
@@ -1528,13 +1451,8 @@ class NotificationOnHistoryApplier {
   private readonly now: () => string;
   private readonly targetAssistantEntryId: string | undefined;
 
-  // Cache for parsing `entry.items` (we only parse each entry once).
   private readonly parsedItemsByEntryIndex: Array<MessageContent[] | null>;
-  // Tool calls can receive future updates that should be applied to the entry where the
-  // tool call originally appeared (keyed by `toolCallId`).
   private readonly toolCallEntryIndexById = new Map<string, number | null>();
-  // Subagent tasks receive future lifecycle events that must merge into the item
-  // where the task first appeared (keyed by `taskId`).
   private readonly subagentTaskEntryIndexById = new Map<string, number | null>();
   private readonly touchedAssistantEntryIndices = new Set<number>();
   private runIndex: Map<string, { entryIndex: number; itemIndex: number }> | undefined;
@@ -1572,11 +1490,6 @@ class NotificationOnHistoryApplier {
         continue;
       }
 
-      // Devin subagent internals carry `cognition.ai/subagent_context`. Once the
-      // owning task row exists, internals stay out of the transcript — except a
-      // tool update merging into an already-persisted row (e.g. one a permission
-      // request wrote), and any update carrying a `cognition.ai/subagent_*`
-      // payload this version doesn't recognize, which passes through fail-open.
       const devinSubagentOwnerId = getDevinSubagentContextId(update._meta);
       if (
         devinSubagentOwnerId !== null &&
@@ -1603,8 +1516,6 @@ class NotificationOnHistoryApplier {
         }
       }
 
-      // Checklist plans go to entry.plan, not entry.items. ACP 1.0 called this
-      // update `plan`; ACP 1.3 carries the same entries in `plan_update`.
       if (update.sessionUpdate === 'plan') {
         this.updateEntryPlan(update.entries);
         continue;
@@ -1634,9 +1545,6 @@ class NotificationOnHistoryApplier {
       }
     }
 
-    // Post-process: Parse <thinking> tags from accumulated text content.
-    // Claude Code streams <thinking> tags across multiple chunks, so we need to
-    // parse them after all chunks are merged, not per-chunk.
     this.postProcessTouchedAssistantEntries();
 
     return this.history;
@@ -1680,7 +1588,6 @@ class NotificationOnHistoryApplier {
 
     let entryIndex = existing?.entryIndex;
     if (event.type === 'snapshot') {
-      // Only established same-root ancestry may bind a grandchild. Reject cycles.
       let parentId = event.snapshot.parentRunId;
       const seen = new Set([event.runId]);
       while (parentId) {
@@ -1694,7 +1601,6 @@ class NotificationOnHistoryApplier {
       if (entryIndex === undefined && event.snapshot.parentToolCallId) {
         entryIndex = this.resolveToolCallEntryIndex(event.snapshot.parentToolCallId);
       }
-      // A supplied initiating turn is evidence of ownership; never guess from the live tail.
       if (entryIndex === undefined && this.targetAssistantEntryId)
         entryIndex = this.ensureActiveAssistantEntry();
       if (entryIndex === undefined) return;
@@ -1771,14 +1677,21 @@ class NotificationOnHistoryApplier {
         } else {
           const type = update.sessionUpdate === 'agent_message_chunk' ? 'text' : 'thought';
           const last = run.items.at(-1);
-          // Normalized chunks are deltas; repeated text must not be heuristically deduplicated.
+          const messagePhase = type === 'text' ? parseLodyMessagePhase(update._meta) : undefined;
           if (
             last?.type === type &&
             last.nativeTurnId === identity.nativeTurnId &&
-            last.messageId === identity.messageId
+            last.messageId === identity.messageId &&
+            (last.type !== 'text' || last.messagePhase === messagePhase)
           )
             run.items[run.items.length - 1] = { ...last, text: last.text + update.content.text };
-          else run.items.push({ type, text: update.content.text, ...identity });
+          else
+            run.items.push({
+              type,
+              text: update.content.text,
+              ...identity,
+              ...(messagePhase ? { messagePhase } : {}),
+            });
         }
       } else {
         const index = run.items.findIndex(
@@ -1937,7 +1850,6 @@ class NotificationOnHistoryApplier {
     const last = lastIndex >= 0 ? this.history[lastIndex] : undefined;
     if (canAppendAssistantDeltas(last)) {
       this.ensureEntryItems(lastIndex);
-      // Populate modelInfo if missing (e.g., placeholder entry created by web client)
       if (!last.modelInfo && this.model) {
         last.modelInfo = this.model;
         this.changed = true;
@@ -1966,7 +1878,7 @@ class NotificationOnHistoryApplier {
         const text = sanitizeLodyInternalInstructions(message.text);
         if (!text) return;
         const entryIndex = this.ensureActiveAssistantEntry();
-        this.appendOrMergeAdjacentText(entryIndex, 'text', text);
+        this.appendOrMergeAdjacentText(entryIndex, 'text', text, message.messagePhase);
         return;
       }
       case 'thought': {
@@ -2043,6 +1955,7 @@ class NotificationOnHistoryApplier {
     const entryIndex = this.ensureActiveAssistantEntry();
     const entry = this.history[entryIndex];
     if (!entry) return;
+    if (arePlanEntriesEqual(entry.plan, entries)) return;
 
     entry.plan = entries;
     this.changed = true;
@@ -2051,13 +1964,18 @@ class NotificationOnHistoryApplier {
   private appendOrMergeAdjacentText(
     entryIndex: number,
     kind: Extract<MessageContent, { type: 'text' | 'thought' }>['type'],
-    delta: string
+    delta: string,
+    messagePhase?: 'commentary' | 'final_answer'
   ) {
     if (!delta) return;
     const items = this.ensureEntryItems(entryIndex);
 
     const last = items[items.length - 1];
-    if (last && last.type === kind) {
+    if (
+      last &&
+      last.type === kind &&
+      (last.type !== 'text' || last.messagePhase === messagePhase)
+    ) {
       const existing = last as Extract<MessageContent, { type: typeof kind }>;
       const merged = mergeStreamText(existing, delta);
       const text = merged.item.text;
@@ -2082,7 +2000,11 @@ class NotificationOnHistoryApplier {
       return;
     }
 
-    items.push({ type: kind, text: delta } as MessageContent);
+    items.push({
+      type: kind,
+      text: delta,
+      ...(messagePhase ? { messagePhase } : {}),
+    } as MessageContent);
     this.touchedAssistantEntryIndices.add(entryIndex);
     this.changed = true;
   }
@@ -2120,6 +2042,14 @@ class NotificationOnHistoryApplier {
       (item) => item.type === 'proposed_plan' && item.turnId === next.turnId
     );
     if (existingIndex >= 0) {
+      const existing = items[existingIndex] as ProposedPlanMessage;
+      if (
+        existing.markdown === next.markdown &&
+        existing.status === next.status &&
+        existing.isLatest === next.isLatest
+      ) {
+        return;
+      }
       items[existingIndex] = next;
       this.changed = true;
       return;
@@ -2171,7 +2101,6 @@ class NotificationOnHistoryApplier {
     const idx = items.findIndex((m) => m.type === 'subagent_task' && m.taskId === incoming.taskId);
     if (idx >= 0) {
       const prev = items[idx] as Extract<MessageContent, { type: 'subagent_task' }>;
-      // Later events win per field, earlier-only fields (subagentType/description) survive.
       items[idx] = { ...mergeSubagentTaskPayload(prev, incoming), type: 'subagent_task' };
       this.changed = true;
       return;
@@ -2215,7 +2144,13 @@ class NotificationOnHistoryApplier {
           parsed[0]?.type !== 'text' ||
           (parsed[0]?.type === 'text' && parsed[0].text !== text)
         ) {
-          newItems.push(...parsed);
+          newItems.push(
+            ...parsed.map((part) =>
+              part.type === 'text' && item.messagePhase
+                ? { ...part, messagePhase: item.messagePhase }
+                : part
+            )
+          );
           modified = true;
         } else {
           newItems.push(item);
@@ -2223,7 +2158,6 @@ class NotificationOnHistoryApplier {
       }
 
       if (modified) {
-        // Compact adjacent text/thought blocks that may have been created
         const compacted = compactAdjacentTextAndThought(newItems);
         entry.items = compacted as unknown as SessionHistoryInput['items'];
         this.parsedItemsByEntryIndex[entryIndex] = compacted;
@@ -2275,7 +2209,6 @@ export function planAgentHistoryMutation(
   const textAppends: AgentHistoryTextAppend[] = [];
   const changes: AgentHistoryMutationPath[] = [];
   let next = history;
-  // Preserve the current per-event post-processing and transport order.
   const ownedEvents = structuredClone(events);
   const ownedModel = model === undefined ? undefined : structuredClone(model);
   for (const event of ownedEvents) {
@@ -2344,21 +2277,16 @@ export const applyMessageContentsBatch = (
   messages: MessageContent[],
   options: ApplyMessageContentsBatchOptions = {}
 ): SessionHistoryInput[] => {
-  // Fast-path: nothing to apply.
   if (messages.length === 0) {
     return history;
   }
 
-  // Dependency injection for deterministic tests (IDs/timestamps).
   const createId = options.createId ?? defaultCreateId;
   const now = options.now ?? (() => new Date().toISOString());
 
   type EntryState = {
-    // The underlying persisted history entry we will (maybe) rewrite.
     entry: SessionHistoryInput;
-    // Working set of items for `entry` (always normalized to `MessageContent[]`).
     items: MessageContent[];
-    // Whether `entry` needs to be rewritten because `items` changed.
     dirty: boolean;
   };
 
@@ -2392,7 +2320,6 @@ export const applyMessageContentsBatch = (
     dirty: true,
   });
 
-  // Normalize existing history entries into mutable `EntryState`s.
   const entryStates: EntryState[] = history.map((entry) => {
     return { entry, items: parseEntryItems(entry), dirty: false };
   });
@@ -2418,8 +2345,6 @@ export const applyMessageContentsBatch = (
       return entryStates.length - 1;
     }
 
-    // We append assistant deltas to the latest assistant entry whenever possible.
-    // If history ends with a non-assistant entry (e.g. user), we create a new assistant entry.
     const lastIndex = entryStates.length - 1;
     const last = lastIndex >= 0 ? entryStates[lastIndex] : undefined;
     if (last && canAppendAssistantDeltas(last.entry)) {
@@ -2439,16 +2364,19 @@ export const applyMessageContentsBatch = (
   const appendOrMergeAdjacentText = (
     entryIndex: number,
     kind: Extract<MessageContent, { type: 'text' | 'thought' }>['type'],
-    delta: string
+    delta: string,
+    messagePhase?: 'commentary' | 'final_answer'
   ) => {
     if (!delta) return;
     const state = entryStates[entryIndex];
     if (!state) return;
 
-    // Most ACP updates stream text/thought in many small deltas.
-    // Keep the stored representation compact by merging adjacent deltas.
     const last = state.items[state.items.length - 1];
-    if (last && last.type === kind) {
+    if (
+      last &&
+      last.type === kind &&
+      (last.type !== 'text' || last.messagePhase === messagePhase)
+    ) {
       const existing = last as Extract<MessageContent, { type: typeof kind }>;
       const merged = mergeStreamText(existing, delta);
       const text = merged.item.text;
@@ -2466,7 +2394,11 @@ export const applyMessageContentsBatch = (
         state.items.pop();
       }
     } else {
-      state.items.push({ type: kind, text: delta } as MessageContent);
+      state.items.push({
+        type: kind,
+        text: delta,
+        ...(messagePhase ? { messagePhase } : {}),
+      } as MessageContent);
     }
     state.dirty = true;
   };
@@ -2481,14 +2413,11 @@ export const applyMessageContentsBatch = (
 
     const last = state.items[state.items.length - 1];
     if (last && last.type === type) {
-      // Common case: the singleton is already the last item (cheap overwrite).
       state.items[state.items.length - 1] = next as MessageContent;
       state.dirty = true;
       return;
     }
 
-    // Singleton semantics: there should only be one `available_commands` per entry,
-    // representing the "current snapshot". Replace any existing item of that type.
     const withoutType = state.items.filter((m) => m.type !== type);
     withoutType.push(next as MessageContent);
     state.items = compactAdjacentTextAndThought(withoutType);
@@ -2503,6 +2432,14 @@ export const applyMessageContentsBatch = (
       (item) => item.type === 'proposed_plan' && item.turnId === next.turnId
     );
     if (existingIndex >= 0) {
+      const existing = state.items[existingIndex] as ProposedPlanMessage;
+      if (
+        existing.markdown === next.markdown &&
+        existing.status === next.status &&
+        existing.isLatest === next.isLatest
+      ) {
+        return;
+      }
       state.items[existingIndex] = next;
       state.dirty = true;
       return;
@@ -2517,8 +2454,6 @@ export const applyMessageContentsBatch = (
     const state = entryStates[entryIndex];
     if (!state) return;
 
-    // Tool calls are keyed by `toolCallId` (not by position).
-    // We merge updates into the original entry whenever possible.
     const toolIndex = state.items.findIndex(
       (m) => m.type === 'tool_call' && (m as ToolCallMessage).toolCallId === incoming.toolCallId
     );
@@ -2547,8 +2482,6 @@ export const applyMessageContentsBatch = (
     state.dirty = true;
   };
 
-  // Build an index of existing tool calls so updates can be applied to the entry where the
-  // tool call originally appeared (instead of always appending to the latest assistant entry).
   const toolCallEntryIndexById = new Map<string, number>();
   for (let i = 0; i < entryStates.length; i++) {
     const state = entryStates[i];
@@ -2560,14 +2493,13 @@ export const applyMessageContentsBatch = (
     }
   }
 
-  // Single pass over incoming message deltas (O(n) in number of deltas + history size).
   for (const message of messages) {
     switch (message.type) {
       case 'text': {
         const text = sanitizeLodyInternalInstructions(message.text);
         if (!text) break;
         const entryIndex = ensureActiveAssistantEntry();
-        appendOrMergeAdjacentText(entryIndex, 'text', text);
+        appendOrMergeAdjacentText(entryIndex, 'text', text, message.messagePhase);
         break;
       }
       case 'thought': {
@@ -2578,7 +2510,6 @@ export const applyMessageContentsBatch = (
         break;
       }
       case 'plan': {
-        // Plan is stored as a field on the entry, not as a MessageContent item
         const entryIndex = ensureActiveAssistantEntry();
         const state = entryStates[entryIndex];
         if (state) {
@@ -2598,8 +2529,6 @@ export const applyMessageContentsBatch = (
         break;
       }
       case 'tool_call': {
-        // Unlike other message types, tool calls can receive future updates that should
-        // modify the original tool call entry (by `toolCallId`), not the "current" entry.
         const existingEntryIndex = toolCallEntryIndexById.get(message.toolCallId);
         if (existingEntryIndex !== undefined) {
           upsertToolCall(existingEntryIndex, message);
@@ -2640,7 +2569,13 @@ export const applyMessageContentsBatch = (
         parsed[0]?.type !== 'text' ||
         (parsed[0]?.type === 'text' && parsed[0].text !== item.text)
       ) {
-        newItems.push(...parsed);
+        newItems.push(
+          ...parsed.map((part) =>
+            part.type === 'text' && item.messagePhase
+              ? { ...part, messagePhase: item.messagePhase }
+              : part
+          )
+        );
         modified = true;
       } else {
         newItems.push(item);
@@ -2652,7 +2587,6 @@ export const applyMessageContentsBatch = (
     }
   }
 
-  // Materialize the updated history, rewriting only dirty entries to avoid churn.
   return entryStates.map((state) => {
     if (!state.dirty) return state.entry;
     return writeEntryItems(state.entry, state.items);

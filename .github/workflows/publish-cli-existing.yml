@@ -1,0 +1,145 @@
+name: Publish Existing CLI
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full commit SHA at the selected branch tip
+        required: true
+        type: string
+      expected_version:
+        description: Exact package version at that commit
+        required: true
+        type: string
+      source_run_id:
+        description: 'Production recovery: original failed release-clients run ID'
+        required: false
+        type: string
+permissions:
+  contents: read
+  id-token: write
+env:
+  NODE_VERSION: 22.23.4
+jobs:
+  validate-target:
+    if:
+      github.repository == 'LodyAI/Lody' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release') &&
+      vars.CLIENT_RELEASES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      checkout_sha: ${{ steps.target.outputs.checkout_sha }}
+      build_number: ${{ steps.target.outputs.build_number }}
+      target_environment: ${{ steps.target.outputs.target_environment }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        id: target
+        env:
+          TARGET_INPUTS: ${{ toJSON(inputs) }}
+          COMPONENT: cli
+        with:
+          script: >
+            const { validateManualTarget } = await
+            import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/client-release-target.mjs`);
+
+            const target = await validateManualTarget({github, context, inputs: JSON.parse(process.env.TARGET_INPUTS),
+            component: process.env.COMPONENT});
+
+            for (const [key, value] of Object.entries(target)) core.setOutput(key, value);
+  publish-cli:
+    if: needs.validate-target.result == 'success'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/release' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ github.ref_name == 'release' && 'production' || 'staging' }}
+      NPM_DIST_TAG: ${{ github.ref_name == 'release' && 'latest' || 'next' }}
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      NODE_OPTIONS: --max-old-space-size=6144
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+          ref: ${{ needs.validate-target.outputs.checkout_sha }}
+      - name: Validate requested package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_version="$(node -p "require('./apps/cli/package.json').version")"
+          if [[ "${actual_version}" != "${EXPECTED_VERSION}" ]]; then
+            echo "Requested version ${EXPECTED_VERSION}, but apps/cli/package.json is ${actual_version}"
+            exit 1
+          fi
+      - name: Verify managed daemon before npm publication
+        run: node apps/cli/check-installer.mjs . "$DAEMON_CHANNEL" "$EXPECTED_VERSION"
+        env:
+          DAEMON_CHANNEL: ${{ github.ref_name == 'release' && 'stable' || 'next' }}
+      - name: Validate CLI release env
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in LODY_AUTH_URL LODY_AUTH_SITE_URL LODY_SERVER_URL SITE_URL; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "${name} is required for the CLI package build"
+              exit 1
+            fi
+          done
+      - name: Ensure version is not already published
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm view "lody@${EXPECTED_VERSION}" version >/dev/null 2>&1; then
+            echo "lody@${EXPECTED_VERSION} is already published"
+            exit 1
+          fi
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@11.21.0
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        env:
+          LODY_SKIP_ELECTRON_POSTINSTALL: '1'
+        run: corepack pnpm --filter lody... --fail-if-no-match install --frozen-lockfile --prefer-offline
+      - name: Build CLI package
+        run: corepack pnpm --dir apps/cli build
+      - name: Test CLI package
+        run: pnpm --filter lody test
+      - name: Stage immutable npm packages
+        run: corepack pnpm --dir apps/cli prepare:publish
+      - name: Publish lody to npm
+        working-directory: apps/cli/.publish/lody
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
+        run: |
+          node --version
+          pnpm --version
+          npm --version
+          pnpm exec npm --version
+          pnpm publish --access public --no-git-checks --tag "${NPM_DIST_TAG}"
+    needs:
+      - validate-target
+concurrency:
+  group: ${{ github.ref == 'refs/heads/release' && 'lody-production-release' || 'lody-staging-release' }}
+  cancel-in-progress: false

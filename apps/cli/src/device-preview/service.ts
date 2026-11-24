@@ -20,6 +20,8 @@ type ViewerEndpoint = {
 };
 type Operation = {
   resumeAfterIdle?: boolean;
+  shutdownOnStop?: boolean;
+  shutdownError?: string;
   quality?: AndroidEmulatorQuality;
   state: DevicePreview;
   owner: string;
@@ -56,6 +58,7 @@ export type DevicePreviewAdapter = {
   list(signal?: AbortSignal): Promise<DeviceEntry[]>;
   prepare(signal: AbortSignal): Promise<string>;
   boot(id: string, signal: AbortSignal): Promise<void>;
+  shutdown?(id: string, signal?: AbortSignal): Promise<void>;
   open(
     runtime: string,
     device: DeviceEntry,
@@ -111,15 +114,17 @@ export class DevicePreviewService {
   control(
     request: DeviceRequest,
     remote: boolean,
-    authorizeRemote?: () => Promise<unknown>
+    authorizeRemote?: () => Promise<unknown>,
+    isRemoteCurrent?: () => boolean
   ): Promise<DeviceResponse> {
-    return this.handleControl(request, remote, authorizeRemote, false);
+    return this.handleControl(request, remote, authorizeRemote, false, isRemoteCurrent);
   }
   private async handleControl(
     request: DeviceRequest,
     remote: boolean,
     authorizeRemote: (() => Promise<unknown>) | undefined,
-    fromAgent: boolean
+    fromAgent: boolean,
+    isRemoteCurrent?: () => boolean
   ): Promise<DeviceResponse> {
     const base = { sessionId: request.sessionId };
     let ownerSessionId = request.sessionId;
@@ -129,7 +134,10 @@ export class DevicePreviewService {
     const current = () =>
       requestGeneration === (this.generations.get(request.sessionId) ?? 0) &&
       generation === (this.generations.get(ownerSessionId) ?? 0) &&
-      (!remote || (this.remoteEnabled && remoteGeneration === this.remoteGeneration));
+      (!remote ||
+        (this.remoteEnabled &&
+          remoteGeneration === this.remoteGeneration &&
+          (isRemoteCurrent?.() ?? true)));
     try {
       try {
         if (!current()) throw new Error('Remote simulator access is disabled.');
@@ -207,11 +215,29 @@ export class DevicePreviewService {
       }
       // Cancellation is eager, before joining an earlier replacement's cleanup barrier.
       if (command.action === 'stop') {
+        if (command.shutdownDevice && fromAgent) {
+          return {
+            ...base,
+            success: false,
+            error: 'denied',
+            message: 'Agents cannot shut down simulators or emulators.',
+          };
+        }
         const op = this.operations.get(ownerSessionId);
         if (op?.state.operationId === command.operationId) {
           op.resumeAfterIdle = false;
+          if (command.shutdownDevice) op.shutdownOnStop = true;
           op.abort.abort();
           await op.done;
+          if (op.shutdownError) {
+            return {
+              ...base,
+              success: false,
+              error: 'failed',
+              message: op.shutdownError,
+              preview: this.snapshot(op, fromAgent ? undefined : remote),
+            };
+          }
         }
         return {
           ...base,
@@ -542,9 +568,22 @@ export class DevicePreviewService {
         op.resumeAfterIdle = false;
       }
       if (op.state.phase !== 'failed') op.state.phase = 'closed';
+      // Only explicit user-requested stop-and-shutdown turns off the simulator/emulator,
+      // while this operation still holds the exclusive device lease.
+      const captureCleaned = captureCleanup.every((result) => result.status === 'fulfilled');
+      if (captureCleaned && op.shutdownOnStop && this.deps.adapter.shutdown) {
+        try {
+          await this.deps.adapter.shutdown(op.state.id, AbortSignal.timeout(30_000));
+        } catch (error) {
+          op.shutdownError =
+            error instanceof Error && error.message
+              ? error.message
+              : 'Preview stopped, but the simulator could not be shut down.';
+        }
+      }
       // A revoked endpoint cannot send input; an unconfirmed capture may still do so.
       // Fence only that device, never the workspace or the other platform.
-      if (captureCleanup.every((result) => result.status === 'fulfilled'))
+      if (captureCleaned)
         this.leases.release(this.deviceKey(op.state.id), op.owner, op.state.operationId);
     }
   }

@@ -7,6 +7,25 @@ import { currentWorkspaceIdAtom } from './workspace-context';
 export const sidebarScrollTopByWorkspaceAtom = atom<Record<string, number>>({});
 
 /**
+ * Builds a Jotai JSON storage adapter that persists to `localStorage` (or the
+ * given per-window storage) across mounts and reloads without subscribing to
+ * cross-renderer `storage` events, so sidebar collapse and filter changes in
+ * one renderer do not mutate other open renderers.
+ */
+function createRendererIsolatedJSONStorage<Value>(
+  getStringStorage?: () => Storage
+): ReturnType<typeof createJSONStorage<Value>> {
+  const storage = getStringStorage
+    ? createJSONStorage<Value>(getStringStorage)
+    : createJSONStorage<Value>();
+  return {
+    getItem: storage.getItem,
+    setItem: storage.setItem,
+    removeItem: storage.removeItem,
+  };
+}
+
+/**
  * Sidebar state atoms with localStorage persistence
  *
  * WHY: Previously, sidebar UI state (chat scope, repo collapse, repo order, etc.) was stored
@@ -20,22 +39,11 @@ export const sidebarScrollTopByWorkspaceAtom = atom<Record<string, number>>({});
  *
  * 3. State couldn't be shared across components if needed in the future.
  *
- * SOLUTION: Use jotai atoms with `atomWithStorage` to:
- * - Persist state to localStorage automatically
- * - Provide global state that survives component unmount/remount
- * - Follow existing patterns in the codebase (see settings.ts for similar usage)
- *
- * These atoms manage:
- * - Chat scope (my/team tasks filter)
- * - Repo collapse states
- * - Repo ordering
- * - Pinned section collapsed state
- * - Chats section collapsed state
+ * SOLUTION: Use jotai atoms with `atomWithStorage` and renderer-isolated storage to:
+ * - Persist state to localStorage (or per-window storage) for new windows and reloads
+ * - Provide global state within the current renderer that survives component unmount/remount
+ * - Avoid live-syncing UI collapse and filter state across open renderers via `storage` events
  */
-
-// ============================================================================
-// Chat Scope (My Tasks / Team Tasks)
-// ============================================================================
 
 export type SidebarChatScope = 'my' | 'team';
 
@@ -47,11 +55,11 @@ export type SidebarChatScope = 'my' | 'team';
  * Default to the team view so a participant who has not chosen a scope sees
  * the complete workspace. An explicit choice remains persisted below.
  */
-export const chatScopeAtom = atomWithStorage<SidebarChatScope>('lody-sidebar-chat-scope', 'team');
-
-// ============================================================================
-// Repo State (Collapse + Ordering)
-// ============================================================================
+export const chatScopeAtom = atomWithStorage<SidebarChatScope>(
+  'lody-sidebar-chat-scope',
+  'team',
+  createRendererIsolatedJSONStorage<SidebarChatScope>()
+);
 
 export type RepoCollapseState = Record<string, boolean>;
 
@@ -61,7 +69,8 @@ export type RepoCollapseState = Record<string, boolean>;
  */
 export const repoCollapseStateAtom = atomWithStorage<RepoCollapseState>(
   'lody-sidebar-repo-collapse',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<RepoCollapseState>()
 );
 
 /**
@@ -70,7 +79,8 @@ export const repoCollapseStateAtom = atomWithStorage<RepoCollapseState>(
  */
 const repoOrderByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
   'lody-sidebar-repo-order-by-workspace',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<Record<string, string[]>>()
 );
 
 /**
@@ -141,14 +151,14 @@ export const setRepoOrderAtom = atom(null, (_get, set, order: string[]) => {
   set(repoOrderAtom, order);
 });
 
-// ============================================================================
-// Chats Section Collapsed
-// ============================================================================
-
 /**
  * Chats section collapsed state - persisted to localStorage
  */
-export const chatsCollapsedAtom = atomWithStorage<boolean>('lody-sidebar-chats-collapsed', false);
+export const chatsCollapsedAtom = atomWithStorage<boolean>(
+  'lody-sidebar-chats-collapsed',
+  false,
+  createRendererIsolatedJSONStorage<boolean>()
+);
 
 /**
  * Toggle chats section collapsed state
@@ -162,12 +172,30 @@ export const toggleChatsCollapsedAtom = atom(null, (get, set) => {
  */
 export const pinnedSectionCollapsedAtom = atomWithStorage<boolean>(
   'lody-sidebar-pinned-section-collapsed',
-  false
+  false,
+  createRendererIsolatedJSONStorage<boolean>()
 );
 
-// ============================================================================
-// Local Project Collapse State (folders under Local Projects / <Machine> project)
-// ============================================================================
+/**
+ * Folded user pin sections on this device, by section id (ids are unique
+ * across workspaces). The default section keeps `pinnedSectionCollapsedAtom`.
+ */
+export const pinSectionsCollapsedAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-collapsed',
+  {},
+  createRendererIsolatedJSONStorage<Record<string, boolean>>()
+);
+
+/**
+ * Pin sections hidden on this device, keyed by `pinSectionKey(section.id)`
+ * (`'default'` for the default section). The visibility menu on the Pinned
+ * header can restore sections.
+ */
+export const pinSectionsHiddenAtom = atomWithStorage<Record<string, boolean>>(
+  'lody-sidebar-pin-sections-hidden',
+  {},
+  createRendererIsolatedJSONStorage<Record<string, boolean>>()
+);
 
 export type LocalProjectCollapseState = Record<string, boolean>;
 
@@ -177,7 +205,8 @@ export type LocalProjectCollapseState = Record<string, boolean>;
  */
 export const localProjectCollapseStateAtom = atomWithStorage<LocalProjectCollapseState>(
   'lody-sidebar-local-project-collapse',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<LocalProjectCollapseState>()
 );
 
 /**
@@ -187,7 +216,8 @@ export const localProjectCollapseStateAtom = atomWithStorage<LocalProjectCollaps
  */
 const localProjectOrderByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
   'lody-sidebar-local-project-order-by-workspace',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<Record<string, string[]>>()
 );
 
 const EMPTY_LOCAL_PROJECT_ORDER: readonly string[] = Object.freeze([]);
@@ -216,7 +246,8 @@ export const localProjectOrderAtom = atom<readonly string[], [readonly string[]]
 /** Per-workspace Project group order: group ids, most recently arranged by the user. */
 const projectGroupOrderByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
   'lody-sidebar-project-group-order-by-workspace',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<Record<string, string[]>>()
 );
 
 /** Project group order scoped to the current workspace, like `localProjectOrderAtom`. */
@@ -257,17 +288,14 @@ export function moveLocalProjectOrder(
   return [...nextVisibleOrder, ...persistedOrder.filter((key) => !visibleSet.has(key))];
 }
 
-// ============================================================================
-// Section Collapsed (Local Projects + GitHub Worktrees headers)
-// ============================================================================
-
 /**
  * Local Projects section header collapsed state (per machine section) - persisted.
  * Key: section.machineId ?? section.kind, Value: collapsed (true/false)
  */
 export const localProjectsSectionCollapseStateAtom = atomWithStorage<Record<string, boolean>>(
   'lody-sidebar-local-projects-section-collapse',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<Record<string, boolean>>()
 );
 
 /**
@@ -275,12 +303,9 @@ export const localProjectsSectionCollapseStateAtom = atomWithStorage<Record<stri
  */
 export const githubWorktreesSectionCollapsedAtom = atomWithStorage<boolean>(
   'lody-sidebar-github-worktrees-section-collapsed',
-  false
+  false,
+  createRendererIsolatedJSONStorage<boolean>()
 );
-
-// ============================================================================
-// Sidebar Collapsed (Desktop)
-// ============================================================================
 
 /**
  * Whether the desktop left sidebar is collapsed (fully hidden). Persisted.
@@ -290,9 +315,49 @@ export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
   atomWithStorage<boolean>(
     'lody-sidebar-collapsed',
     isSessionWindow(),
-    createJSONStorage<boolean>(windowStorage),
+    createRendererIsolatedJSONStorage<boolean>(windowStorage),
     { getOnInit: true }
   );
+
+/** Today pinned as a column next to the sidebar (specs/today-outline.md); per window. */
+export const todayPinnedAtom: ReturnType<typeof atomWithStorage<boolean>> =
+  atomWithStorage<boolean>(
+    'lody-today-pinned',
+    false,
+    createRendererIsolatedJSONStorage<boolean>(windowStorage),
+    { getOnInit: true }
+  );
+
+/**
+ * A day opened while pinned (a Today link, or the sidebar entry with `{}` for
+ * today): the column shows this member/date and clears it (in memory only).
+ */
+export const todayPinnedTargetAtom = atom<{ member?: string; date?: string } | null>(null);
+
+/**
+ * Today page spans the whole main area instead of the readable column
+ * (specs/today-outline.md); a preference stored on this device.
+ */
+export const todayFullWidthAtom = atomWithStorage<boolean>(
+  'lody-today-full-width',
+  false,
+  createRendererIsolatedJSONStorage<boolean>(),
+  {
+    getOnInit: true,
+  }
+);
+
+export const TODAY_COLUMN_DEFAULT_WIDTH = 360;
+export const TODAY_COLUMN_MIN_WIDTH = 280;
+export const TODAY_COLUMN_MAX_WIDTH = 560;
+
+/** Width of the pinned Today column in px; stored on this device. */
+export const todayColumnWidthAtom = atomWithStorage<number>(
+  'lody-today-column-width',
+  TODAY_COLUMN_DEFAULT_WIDTH,
+  createRendererIsolatedJSONStorage<number>(),
+  { getOnInit: true }
+);
 
 /**
  * Last expanded width in px. Restored when the user re-opens the sidebar so
@@ -302,24 +367,23 @@ export const sidebarCollapsedAtom: ReturnType<typeof atomWithStorage<boolean>> =
 export const sidebarLastWidthAtom = atomWithStorage<number>(
   'lody-sidebar-last-width',
   0,
-  undefined,
+  createRendererIsolatedJSONStorage<number>(),
   { getOnInit: true }
 );
 
-// ============================================================================
-// Sidebar Organize Mode (Workspace vs Updated)
-// ============================================================================
-
-export type SidebarOrganizeMode = 'workspace' | 'updated';
+export type SidebarOrganizeMode = 'workspace' | 'updated' | 'status';
 
 /**
  * How the sidebar groups items.
  * - 'workspace' = group by Chats / Local Projects / GitHub Worktrees (default)
  * - 'updated'   = single flat list sorted by latest-update recency
+ * - 'status'    = the Status view: Pinned, then Focus / Later / Settled
+ *                 (`specs/sidebar-status-view.md`)
  */
 export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
   'lody-sidebar-organize-mode',
-  'workspace'
+  'workspace',
+  createRendererIsolatedJSONStorage<SidebarOrganizeMode>()
 );
 
 /**
@@ -330,7 +394,8 @@ export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
  */
 export const sidebarUpdatedShowProjectNamesAtom = atomWithStorage<boolean>(
   'lody-sidebar-updated-show-project-names',
-  true
+  true,
+  createRendererIsolatedJSONStorage<boolean>()
 );
 
 /**
@@ -344,34 +409,76 @@ export const sidebarUpdatedShowProjectNamesAtom = atomWithStorage<boolean>(
  */
 export const sidebarShowBranchNamesAtom = atomWithStorage<boolean>(
   'lody-sidebar-show-branch-names',
-  false
+  false,
+  createRendererIsolatedJSONStorage<boolean>()
 );
 
 /**
- * Per-bucket collapse state for the Updated organize mode.
- * Keyed by the single 'all' bucket; value is whether collapsed. (Persisted
- * entries from the retired today/week/older buckets are simply ignored.)
+ * Project (Workspace) organize mode only: when true, a project with no visible
+ * Session rows is left out of the sidebar, and a machine section with no
+ * remaining projects goes with it. When false, every registered local project
+ * and every workspace project is listed, empty or not. Defaults on.
+ */
+export const sidebarHideEmptyProjectsAtom = atomWithStorage<boolean>(
+  'lody-sidebar-hide-empty-projects',
+  true,
+  createRendererIsolatedJSONStorage<boolean>()
+);
+
+/**
+ * Per-bucket collapse state for the Updated and Status organize modes.
+ * Keyed by Updated's single 'all' bucket and by each status group; value is
+ * whether collapsed. (Persisted entries from the retired today/week/older
+ * buckets are simply ignored.)
  */
 export const sidebarUpdatedBucketCollapseStateAtom = atomWithStorage<Record<string, boolean>>(
   'lody-sidebar-updated-bucket-collapse',
-  {}
+  {},
+  createRendererIsolatedJSONStorage<Record<string, boolean>>()
+);
+
+const storedUpdatedBucketRevealRowsAtom = atomWithStorage<Record<string, number | boolean>>(
+  'lody-sidebar-updated-bucket-show-full',
+  {},
+  createRendererIsolatedJSONStorage<Record<string, number | boolean>>()
 );
 
 /**
- * Per-bucket "show all" state for the Updated organize mode. Buckets above the
- * preview threshold default to a compact preview; this map records which
- * buckets the user has explicitly expanded. Mirrors the pattern that
- * `sidebarShowFullListAtom` uses for Workspace task groups, but keyed by the
- * single 'all' bucket.
+ * Per-bucket incremental reveal for the Updated and Status organize modes:
+ * extra top-level rows beyond the preview threshold. Buckets above the
+ * threshold default to a compact preview; this map records how much further
+ * each bucket was revealed through "Show more". Mirrors the pattern that
+ * `sidebarRevealedRowsAtom` uses for Workspace task groups, keyed by Updated's
+ * 'all' bucket and Status's 'settled' group. Persisted legacy boolean "show
+ * all" values read as fully revealed.
  */
-export const sidebarUpdatedBucketShowFullStateAtom = atomWithStorage<Record<string, boolean>>(
-  'lody-sidebar-updated-bucket-show-full',
-  {}
+export const sidebarUpdatedBucketRevealedRowsAtom = atom(
+  (get) => {
+    const stored = get(storedUpdatedBucketRevealRowsAtom);
+    let next: Record<string, number> | null = null;
+    for (const [key, value] of Object.entries(stored)) {
+      const rows =
+        typeof value === 'number' && Number.isFinite(value) && value > 0
+          ? Math.floor(value)
+          : value === true
+            ? Number.MAX_SAFE_INTEGER
+            : 0;
+      if (rows !== value) {
+        next ??= { ...(stored as Record<string, number>) };
+        next[key] = rows;
+      }
+    }
+    return next ?? (stored as Record<string, number>);
+  },
+  (
+    get,
+    set,
+    update: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)
+  ) => {
+    const current = get(sidebarUpdatedBucketRevealedRowsAtom);
+    set(storedUpdatedBucketRevealRowsAtom, typeof update === 'function' ? update(current) : update);
+  }
 );
-
-// ============================================================================
-// Archive Scope (My Tasks / All Tasks for archive view)
-// ============================================================================
 
 export type ArchiveScopeValue = 'my' | 'team';
 
@@ -383,4 +490,8 @@ export type ArchiveScopeValue = 'my' | 'team';
  * Default to the team view so a participant who has not chosen a scope sees
  * the complete workspace archive. An explicit choice remains persisted below.
  */
-export const archiveScopeAtom = atomWithStorage<ArchiveScopeValue>('lody-archive-scope', 'team');
+export const archiveScopeAtom = atomWithStorage<ArchiveScopeValue>(
+  'lody-archive-scope',
+  'team',
+  createRendererIsolatedJSONStorage<ArchiveScopeValue>()
+);

@@ -10,10 +10,12 @@ import { Field as UiField } from '@lody/ui/field';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
+import { SettingsInfo } from './settings-info';
 
 const styles = stylex.create({
   field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
   fieldHead: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  sectionHead: { display: 'flex', alignItems: 'center', gap: space[1] },
   fieldIcon: { display: 'inline-flex', color: colors.secondaryLabel },
   fieldHint: { margin: 0, fontSize: '11px', lineHeight: 1.375, color: colors.secondaryLabel },
   /**
@@ -128,16 +130,21 @@ const styles = stylex.create({
 export function Section({
   title,
   hint,
+  info,
   children,
 }: {
   title: string;
   hint?: string;
+  info?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section {...stylex.props(surface.formGroup)}>
       <header>
-        <h3 {...stylex.props(surface.formGroupTitle)}>{title}</h3>
+        <div {...stylex.props(styles.sectionHead)}>
+          <h3 {...stylex.props(surface.formGroupTitle)}>{title}</h3>
+          {info != null ? <SettingsInfo label={title}>{info}</SettingsInfo> : null}
+        </div>
         {hint ? <p {...stylex.props(surface.formGroupHint)}>{hint}</p> : null}
       </header>
       {children}
@@ -147,15 +154,20 @@ export function Section({
 
 export function Field({
   htmlFor,
+  labelId,
   label,
   hint,
+  info,
   icon,
   children,
 }: {
   /** Associates the label with a control that owns an id; omit for a group. */
   htmlFor?: string;
+  /** Lets a group name itself by this label through `aria-labelledby`. */
+  labelId?: string;
   label: string;
   hint?: ReactNode;
+  info?: ReactNode;
   icon?: ReactNode;
   children: ReactNode;
 }) {
@@ -163,7 +175,10 @@ export function Field({
     <div {...stylex.props(styles.field)}>
       <div {...stylex.props(styles.fieldHead)}>
         {icon ? <span {...stylex.props(styles.fieldIcon)}>{icon}</span> : null}
-        <UiField.Label htmlFor={htmlFor}>{label}</UiField.Label>
+        <UiField.Label id={labelId} htmlFor={htmlFor}>
+          {label}
+        </UiField.Label>
+        {info != null ? <SettingsInfo label={label}>{info}</SettingsInfo> : null}
       </div>
       {children}
       {hint ? <p {...stylex.props(styles.fieldHint)}>{hint}</p> : null}

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -53,9 +51,9 @@ vi.mock('../src/lib/clipboard', () => ({
   writeTextToClipboard: vi.fn(async () => true),
 }));
 
-const downloadBytesAsFile = vi.fn();
+const saveBytesAsFile = vi.fn(async (..._args: unknown[]) => ({ saved: true }));
 vi.mock('../src/lib/download-file', () => ({
-  downloadBytesAsFile: (...args: unknown[]) => downloadBytesAsFile(...args),
+  saveBytesAsFile: (...args: unknown[]) => saveBytesAsFile(...args),
 }));
 
 const monacoMockState = vi.hoisted(() => ({
@@ -162,6 +160,7 @@ afterEach(() => {
   sharedCodeCollabTextState = createCodeCollabSessionFileProviderTextState();
   delete window.__LODY_ELECTRON__;
   delete window.ipc;
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -169,6 +168,7 @@ type RenderOptions = {
   /** Machine liveness comes from ephemeral presence. Defaults to online. */
   readonly machineOnline?: boolean;
   readonly localMachine?: boolean;
+  readonly workspacePath?: string;
 };
 
 function createMachineMeta(): MachineMeta {
@@ -191,7 +191,10 @@ async function render(node: ReactNode, options: RenderOptions = {}): Promise<HTM
   const store = createStore();
   currentStore = store;
   store.set(machineMetaCacheAtom, {
-    [getMachineRoomId(session.machineId)]: createMachineMeta(),
+    [getMachineRoomId(session.machineId)]: {
+      ...createMachineMeta(),
+      workspacePaths: options.workspacePath ? { [session.id]: options.workspacePath } : {},
+    },
   });
   store.set(lodyPresenceSyncStateAtom, 'synced');
   if (options.localMachine === true) {
@@ -915,7 +918,7 @@ describe('SessionFileContentView', () => {
     const view = await render(renderView(0));
     await flushMicrotasks();
 
-    expect(view.querySelector('[data-native-selection-allow]')).not.toBeNull();
+    expect(view.querySelector('[data-text-selectable]')).not.toBeNull();
     await act(async () => {
       view.querySelector<HTMLButtonElement>('button[aria-label="Copy full Markdown"]')?.click();
     });
@@ -957,61 +960,127 @@ describe('SessionFileContentView', () => {
     );
     expect(source?.value).toBe(markdown);
     expect(source?.readOnly).toBe(true);
-    expect(source?.hasAttribute('data-native-selection-allow')).toBe(true);
+    expect(source?.hasAttribute('data-text-selectable')).toBe(true);
     expect(view.querySelector('[data-testid="monaco-viewer"]')).toBeNull();
   });
 
-  it('copies unsaved Markdown edits from the mobile native source', async () => {
-    const provider = createFakeSessionFileProvider({
-      files: [
-        {
-          path: 'README.md',
+  it.each(['write', 'read'] as const)(
+    'opens read-only and resets on reopen with role=%s',
+    async (role) => {
+      const provider = createEditableProvider();
+      const renderView = (active: boolean) =>
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'src/live.ts',
+          fileId: 't:live',
+          fileProvider: provider,
+          fileProviderRole: role,
+          defaultReadOnly: true,
+          active,
+        });
+      const view = await render(renderView(true));
+      await flushMicrotasks();
+      expect(monacoMockState.readOnly).toBe(true);
+      expect(monacoMockState.onContentChange).toBeUndefined();
+      const editButton = () =>
+        view.querySelector<HTMLButtonElement>('button[aria-label="Edit file"]');
+      if (role === 'read') {
+        expect(editButton()).toBeNull();
+        return;
+      }
+      expect(editButton()).not.toBeNull();
+      await act(async () => editButton()?.click());
+      expect(monacoMockState.readOnly).toBe(false);
+      expect(monacoMockState.onContentChange).toBeTypeOf('function');
+      const mountedEditor = view.querySelector('[data-testid="monaco-viewer"]');
+      await act(async () => {
+        view.querySelector<HTMLButtonElement>('button[aria-label="Switch to read-only"]')?.click();
+      });
+      expect(monacoMockState.readOnly).toBe(true);
+      expect(view.querySelector('[data-testid="monaco-viewer"]')).toBe(mountedEditor);
+      await act(async () => editButton()?.click());
+      await rerender(renderView(false));
+      await rerender(renderView(true));
+      await flushMicrotasks();
+      expect(monacoMockState.readOnly).toBe(true);
+      expect(editButton()).not.toBeNull();
+    }
+  );
+
+  it.each([false, true])(
+    'copies unsaved Markdown edits with defaultReadOnly=%s',
+    async (defaultReadOnly) => {
+      const provider = createFakeSessionFileProvider({
+        files: [
+          {
+            path: 'README.md',
+            fileId: 't:readme',
+            kind: 'text',
+            sourceState: 'live-collaborative',
+          },
+        ],
+        snapshots: { 'README.md': { kind: 'text', text: '# Original' } },
+      });
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'README.md',
           fileId: 't:readme',
-          kind: 'text',
-          sourceState: 'live-collaborative',
-        },
-      ],
-      snapshots: { 'README.md': { kind: 'text', text: '# Original' } },
-    });
-    const view = await render(
-      createElement(SessionFileContentView, {
-        sessionId: session.id,
-        session,
-        filePath: 'README.md',
-        fileId: 't:readme',
-        fileProvider: provider,
-        fileProviderPending: false,
-        fileProviderRole: 'write',
-        preferNativeMarkdownSelection: true,
-      })
-    );
-    await flushMicrotasks();
+          fileProvider: provider,
+          fileProviderPending: false,
+          fileProviderRole: 'write',
+          preferNativeMarkdownSelection: true,
+          defaultReadOnly,
+        })
+      );
+      await flushMicrotasks();
 
-    await act(async () => {
-      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click();
-    });
-    const source = view.querySelector<HTMLTextAreaElement>(
-      'textarea[aria-label="Markdown source"]'
-    );
-    expect(source?.readOnly).toBe(false);
+      await act(async () => {
+        view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click();
+      });
+      const source = view.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Markdown source"]'
+      );
+      expect(source?.readOnly).toBe(defaultReadOnly);
+      if (defaultReadOnly) {
+        await act(async () => {
+          view.querySelector<HTMLButtonElement>('button[aria-label="Edit file"]')?.click();
+        });
+        expect(source?.readOnly).toBe(false);
+      }
 
-    const editedMarkdown = '# Edited locally\n\nNot saved yet.';
-    await act(async () => {
-      const valueSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        'value'
-      )?.set;
-      valueSetter?.call(source, editedMarkdown);
-      source?.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await flushMicrotasks();
+      const editedMarkdown = '# Edited locally\n\nNot saved yet.';
+      await act(async () => {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          'value'
+        )?.set;
+        valueSetter?.call(source, editedMarkdown);
+        source?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await flushMicrotasks();
+      if (defaultReadOnly) {
+        await act(async () => {
+          view
+            .querySelector<HTMLButtonElement>('button[aria-label="Switch to read-only"]')
+            ?.click();
+        });
+        expect(source?.readOnly).toBe(true);
+        expect(source?.value).toBe(editedMarkdown);
+        expect(view.querySelector<HTMLButtonElement>('button[aria-label="Save"]')?.disabled).toBe(
+          false
+        );
+      }
 
-    await act(async () => {
-      view.querySelector<HTMLButtonElement>('button[aria-label="Copy full Markdown"]')?.click();
-    });
-    await flushMicrotasks();
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith(editedMarkdown);
-  });
+      await act(async () => {
+        view.querySelector<HTMLButtonElement>('button[aria-label="Copy full Markdown"]')?.click();
+      });
+      await flushMicrotasks();
+      expect(writeTextToClipboard).toHaveBeenLastCalledWith(editedMarkdown);
+    }
+  );
 
   it('renders SVG text files as an image by default with a preview eye toggle', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
@@ -1261,6 +1330,153 @@ describe('SessionFileContentView', () => {
     await rerender(renderView());
     expect(view.querySelector('iframe')).not.toBeNull();
     installCredentiallessIframeSupportForTest();
+  });
+
+  it('runs WebKit HTML scripts only after an explicit opt-in and resets it on hide', async () => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+    const userAgent = vi
+      .spyOn(navigator, 'userAgent', 'get')
+      .mockReturnValue(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+      );
+    try {
+      const text = '<h1>Preview</h1><script>window.executed = true</script>';
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'result.html': { kind: 'text', text } },
+      });
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'result.html',
+          fileProvider: provider,
+          fileProviderPending: false,
+          defaultHtmlPreview: true,
+          active: true,
+        })
+      );
+      await flushMicrotasks();
+      expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
+
+      const runScripts = view.querySelector<HTMLButtonElement>('button[aria-label="Run scripts"]');
+      expect(runScripts?.getAttribute('aria-pressed')).toBe('false');
+      await act(async () => runScripts?.click());
+      await flushMicrotasks();
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).not.toBeNull();
+      expect(
+        view.querySelector('button[aria-label="Stop scripts"]')?.getAttribute('aria-pressed')
+      ).toBe('true');
+
+      await act(async () =>
+        view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')?.click()
+      );
+      await act(async () =>
+        view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]')?.click()
+      );
+      await flushMicrotasks();
+      expect(view.querySelector('[data-testid="managed-html-preview"]')).toBeNull();
+      expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+    } finally {
+      userAgent.mockRestore();
+      installCredentiallessIframeSupportForTest();
+    }
+  });
+
+  it('keeps Gecko HTML read-only without a script opt-in', async () => {
+    delete (HTMLIFrameElement.prototype as HTMLIFrameElement & { credentialless?: boolean })
+      .credentialless;
+    const userAgent = vi
+      .spyOn(navigator, 'userAgent', 'get')
+      .mockReturnValue(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.0; rv:131.0) Gecko/20100101 Firefox/131.0'
+      );
+    try {
+      const provider = createFakeSessionFileProvider({
+        files: [{ path: 'result.html', kind: 'text', sourceState: 'live-readonly' }],
+        snapshots: { 'result.html': { kind: 'text', text: '<script>1</script><p>x</p>' } },
+      });
+      const view = await render(
+        createElement(SessionFileContentView, {
+          sessionId: session.id,
+          session,
+          filePath: 'result.html',
+          fileProvider: provider,
+          fileProviderPending: false,
+          defaultHtmlPreview: true,
+          active: true,
+        })
+      );
+      await flushMicrotasks();
+      expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+      expect(view.querySelector('button[aria-label="Run scripts"]')).toBeNull();
+    } finally {
+      userAgent.mockRestore();
+      installCredentiallessIframeSupportForTest();
+    }
+  });
+
+  it('opens paged local HTML from disk after consent and returns to paged source', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    );
+    const path = 'large.html';
+    const url = 'lody-html-preview://preview/large.html';
+    Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
+    Object.defineProperty(window, 'ipc', {
+      configurable: true,
+      value: {
+        invoke: async (channel: string) => {
+          if (channel === 'machineRpc.openHtmlPreview') return { status: 'ok', url };
+          throw new Error(`Unexpected invoke ${channel}`);
+        },
+        on: () => () => {},
+        send: () => {},
+      },
+    });
+    const provider = createFakeSessionFileProvider({
+      files: [{ path, kind: 'text', sourceState: 'live-readonly', readonly: true }],
+      snapshots: {
+        [path]: {
+          kind: 'paged-text',
+          source: { sizeBytes: 524289, pageBytes: 65536, readPage: async () => '<h1>Page' },
+        },
+      },
+    });
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: path,
+        fileProvider: provider,
+        active: true,
+      }),
+      { localMachine: true, workspacePath: '/work' }
+    );
+    expect(view.textContent).toContain('Large file · read-only');
+    const preview = view.querySelector<HTMLButtonElement>('button[aria-label="Preview"]');
+    expect(preview).not.toBeNull();
+    await act(async () => preview!.click());
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain('Allow JavaScript');
+    const confirm = Array.from(dialog!.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Preview'
+    );
+    await act(async () => confirm!.click());
+    expect(view.querySelector('iframe')?.getAttribute('src')).toBe(url);
+    expect(view.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
+    await act(async () =>
+      view.querySelector<HTMLButtonElement>('button[aria-label="Hide preview"]')!.click()
+    );
+    expect(view.textContent).toContain('Large file · read-only');
+    expect(view.querySelector('iframe')).toBeNull();
   });
 
   it('does not preview a truncated HTML snapshot even with mobile default preview', async () => {

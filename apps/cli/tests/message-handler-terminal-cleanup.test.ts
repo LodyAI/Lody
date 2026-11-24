@@ -58,8 +58,9 @@ type MessageHandlerInternals = {
   ) => Promise<NotificationPresentation | undefined>;
   cleanup: () => Promise<void>;
   codeCollabV2DiffStore: { close: () => Promise<void> };
+  diffBlobStoreReader: { close: () => Promise<void> };
   sessionActivePresence: SessionActivePresenceControllerLegacy;
-  handleSessionArchived: (sessionId: SessionId) => Promise<void>;
+  handleSessionArchiveChanged: (sessionId: SessionId) => Promise<void>;
   readWorktreeOwnerState: (sessionId: SessionId) => Promise<WorktreeOwnerState>;
   handleSessionDeleted: (sessionId: SessionId) => Promise<void>;
   discardLegacySessionCommands: () => Promise<void>;
@@ -224,6 +225,7 @@ function createHarness(options?: {
     terminateSession: vi.fn(async (id: SessionId) => {
       activeSessionIds.delete(id);
     }),
+    isArchiveInFlight: () => false,
     archiveSession: vi.fn(async () => {}),
     cleanUp: vi.fn(async () => {}),
     setSessionError: vi.fn(async () => {}),
@@ -329,12 +331,46 @@ describe('MessageHandler terminal cleanup', () => {
     await Effect.runPromise(
       Scope.provide(handler.sessionActivePresence.native.hold(sessionId), lease)
     );
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
     expect(presenceEntries.get(sessionId)).toEqual({ type: 'running' });
     expect(handler.sessionActivePresence.has(sessionId)).toBe(true);
     await Effect.runPromise(Scope.close(lease, Exit.void));
     expect(presenceEntries.has(sessionId)).toBe(false);
     await handler.sessionActivePresence.close();
+  });
+
+  it('closes independent shutdown resources before reporting a read-only diff worker failure', async () => {
+    const { handler, sessionManager } = createHarness();
+    const failure = new Error('Synthetic read worker close failed.');
+    vi.spyOn(handler.diffBlobStoreReader, 'close').mockRejectedValue(failure);
+    let writerClosed = false,
+      tunnelsClosed = false,
+      documentsClosed = false;
+    const closeWriter = handler.codeCollabV2DiffStore.close.bind(handler.codeCollabV2DiffStore);
+    vi.spyOn(handler.codeCollabV2DiffStore, 'close').mockImplementation(async () => {
+      await closeWriter();
+      writerClosed = true;
+    });
+    handler.previewService.closeAllActiveTunnelsForCleanup = async () => {
+      tunnelsClosed = true;
+    };
+    sessionManager.cleanUp.mockImplementation(
+      async (options?: { keepWorkspaceDocumentOpen?: boolean }) => {
+        if (!options?.keepWorkspaceDocumentOpen) documentsClosed = true;
+      }
+    );
+    try {
+      await handler.cleanup();
+      throw new Error('Expected cleanup to report failure.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toContain(failure);
+    }
+    expect({ writerClosed, tunnelsClosed, documentsClosed }).toEqual({
+      writerClosed: true,
+      tunnelsClosed: true,
+      documentsClosed: true,
+    });
   });
 
   it('waits for the native Turn lease before closing evidence stores and documents on shutdown', async () => {
@@ -395,11 +431,14 @@ describe('MessageHandler terminal cleanup', () => {
   it('releases the runtime when a session becomes archived, even without an active session', async () => {
     const { handler, sessionId, closeSessionTerminals, sessionManager } = createHarness();
 
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
     expect(sessionManager.terminateSession).not.toHaveBeenCalled();
-    expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.archiveSession).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ releaseFailure: undefined })
+    );
   });
 
   it('releases only contained runtimes and keeps independently opened worktree owners active', async () => {
@@ -460,7 +499,7 @@ describe('MessageHandler terminal cleanup', () => {
     // This test reads GC eligibility directly and must never scan the host data directory.
     handler.worktreeGc = { schedule: async () => ({ removed: [] }) };
 
-    await handler.handleSessionArchived(root.id);
+    await handler.handleSessionArchiveChanged(root.id);
 
     expect(isSessionActive(root.id)).toBe(false);
     expect(isSessionActive(child.id)).toBe(false);
@@ -498,10 +537,13 @@ describe('MessageHandler terminal cleanup', () => {
       new Error('process group 4321 was still running 5000ms after SIGKILL')
     );
 
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
 
     expect(getSessionMeta(sessionId)).toMatchObject({ status: SessionStatusFactory.idle() });
-    expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.archiveSession).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ releaseFailure: expect.stringContaining('SIGKILL') })
+    );
   });
 
   it('removes the worktree of an archived local-project session and keeps its branch', async () => {
@@ -541,7 +583,7 @@ describe('MessageHandler terminal cleanup', () => {
       const renamed = `${worktree.branch}-renamed`;
       runGit(worktree.hostPath, ['branch', '-m', renamed]);
 
-      await handler.handleSessionArchived(sessionId);
+      await handler.handleSessionArchiveChanged(sessionId);
       await handler.worktreeGc.schedule();
 
       expect(fs.existsSync(worktree.hostPath)).toBe(false);
@@ -577,7 +619,7 @@ describe('MessageHandler terminal cleanup', () => {
       ],
     });
 
-    await handler.handleSessionArchived(sessionId);
+    await handler.handleSessionArchiveChanged(sessionId);
     await handler.handleSessionDeleted(sessionId);
 
     expect(closeSessionTerminals).not.toHaveBeenCalled();

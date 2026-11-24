@@ -8,6 +8,90 @@ type Event = {
   timestamp?: unknown;
 };
 
+function isBoundaryException(event: Event): boolean {
+  return (
+    event.event === '$exception' &&
+    (event.properties?.source === 'errorBoundary' || event.properties?.errorBoundary !== undefined)
+  );
+}
+
+const REDACTED_CAPABILITY = '[redacted_installation_capability]';
+
+function decodedCapabilityText(value: string): string {
+  let decoded = value;
+  // Decode delimiters even if an unrelated malformed escape is present.
+  for (let i = 0; i < 8; i++) {
+    const next = decoded.replace(/%([0-9a-f]{2})/gi, (_, hex: string) =>
+      String.fromCharCode(parseInt(hex, 16))
+    );
+    if (next === decoded) break;
+    decoded = next;
+  }
+  return decoded;
+}
+
+function hasInstallationCapability(value: string): boolean {
+  return /(?:^|[?&#;=\s])(?:state|github[-_]install[-_]retry)\s*=/i.test(
+    decodedCapabilityText(value)
+  );
+}
+
+/** Replay URL metadata is masked before SDK compression; keep unrelated query data. */
+export function sanitizePostHogCapabilityUrl(value: string): string {
+  if (!hasInstallationCapability(value)) return value;
+  try {
+    const url = new URL(value);
+    for (const [key, entry] of [...url.searchParams]) {
+      if (
+        /^(?:state|github[-_]install[-_]retry)$/i.test(decodedCapabilityText(key)) ||
+        hasInstallationCapability(key) ||
+        hasInstallationCapability(entry)
+      )
+        url.searchParams.delete(key);
+    }
+    if (hasInstallationCapability(url.hash)) url.hash = '';
+    const result = url.toString();
+    return hasInstallationCapability(result) ? REDACTED_CAPABILITY : result;
+  } catch {
+    return REDACTED_CAPABILITY;
+  }
+}
+
+function sanitizeCapabilityValues(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === 'string') return sanitizePostHogCapabilityUrl(value);
+  if (!value || typeof value !== 'object') return value;
+  if (
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  )
+    return value;
+  if (seen.has(value)) return REDACTED_CAPABILITY;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const result = value.map((entry) => sanitizeCapabilityValues(entry, seen));
+    seen.delete(value);
+    return result;
+  }
+  const result: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (
+      /^github[-_]install[-_]retry$/i.test(decodedCapabilityText(key)) ||
+      hasInstallationCapability(key)
+    )
+      continue;
+    result[key] = sanitizeCapabilityValues(entry, seen);
+  }
+  seen.delete(value);
+  return result;
+}
+
+function sanitizeEventCapabilities(event: Event): Event {
+  if (event.properties)
+    event.properties = sanitizeCapabilityValues(event.properties) as Record<string, unknown>;
+  return event;
+}
+
 /** Keep the internal SDK boundary here. The real-SDK browser regression pins
  * discard, batching, retries, unload and synchronous transport encoding. */
 export function createPostHogPrivacy(readScope: () => string | null) {
@@ -96,19 +180,25 @@ export function createPostHogPrivacy(readScope: () => string | null) {
     isAllowed: allowed,
     beforeSend(event: Event): Event | null {
       sync();
+      // Retired duplicate event: also reject older callers and deferred queues.
+      if (event.event === 'app/error_boundary_triggered') return null;
       if (event.event === '$snapshot') {
         if (!allowed() || !canDiscard) return null;
         generations.set(event, generation);
       } else if (event.event === '$exception') {
         const deferredGeneration = event.properties?.__lody_exception_generation;
-        if (!allowed() || (deferredGeneration !== undefined && deferredGeneration !== generation)) {
+        if (
+          isBoundaryException(event) ||
+          !allowed() ||
+          (deferredGeneration !== undefined && deferredGeneration !== generation)
+        ) {
           event = redact(event);
         } else if (event.properties) {
           delete event.properties.__lody_exception_generation;
         }
         generations.set(event, generation);
       }
-      return event;
+      return sanitizeEventCapabilities(event);
     },
     attach(client: PostHog) {
       if (sdk) return;
@@ -120,15 +210,20 @@ export function createPostHogPrivacy(readScope: () => string | null) {
         const filter = (data: unknown): unknown => {
           if (!data || typeof data !== 'object' || !('event' in data)) return data;
           const event = data as Event;
+          if (event.event === 'app/error_boundary_triggered') return null;
           if (event.event === '$snapshot') {
             sensitive = true;
-            return allowed() && canDiscard && generations.get(event) === generation ? event : null;
+            return allowed() && canDiscard && generations.get(event) === generation
+              ? sanitizeEventCapabilities(event)
+              : null;
           }
           if (event.event === '$exception') {
             sensitive = true;
-            return allowed() && generations.get(event) === generation ? event : redact(event);
+            return !isBoundaryException(event) && allowed() && generations.get(event) === generation
+              ? sanitizeEventCapabilities(event)
+              : redact(event);
           }
-          return event;
+          return sanitizeEventCapabilities(event);
         };
         const data = Array.isArray(options.data)
           ? options.data.map(filter).filter((event) => event !== null)
@@ -164,7 +259,18 @@ export function createPostHogPrivacy(readScope: () => string | null) {
       error.stack = undefined;
       return [
         error,
-        { ...redactedTelemetryException(properties), __lody_exception_generation: generation },
+        {
+          ...redactedTelemetryException(
+            {
+              ...properties,
+              source: isBoundaryException({ event: '$exception', properties })
+                ? 'errorBoundary'
+                : 'captureException',
+            },
+            args[0]
+          ),
+          __lody_exception_generation: generation,
+        },
       ];
     },
   };
@@ -174,8 +280,9 @@ let readWorkspaceScope: () => string | null = () => null;
 let routeTarget: string | null | undefined;
 let routeCommitted = false;
 let routeRevision = 0;
+const privateSurfaces = new Set<object>();
 export const postHogPrivacy = createPostHogPrivacy(() =>
-  routeCommitted ? readWorkspaceScope() : null
+  routeCommitted && privateSurfaces.size === 0 ? readWorkspaceScope() : null
 );
 
 export function getTelemetryRouteTarget(): string | null | undefined {
@@ -188,6 +295,17 @@ export function setTelemetryRouteTarget(slug: string | null, committed: boolean)
   routeTarget = slug;
   if (committed) routeCommitted = true;
   postHogPrivacy.sync();
+}
+
+/** Private overlays can appear above an ordinary workspace. Each mounted surface
+ * owns a lease; a route commit or another surface's release cannot revive capture. */
+export function holdPrivateTelemetrySurface(): () => void {
+  const owner = {};
+  privateSurfaces.add(owner);
+  postHogPrivacy.sync();
+  return () => {
+    if (privateSurfaces.delete(owner)) postHogPrivacy.sync();
+  };
 }
 
 export function suspendWorkspaceTelemetry(): () => void {

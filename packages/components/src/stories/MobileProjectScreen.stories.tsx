@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
 import { ChevronRight, Wrench } from 'lucide-react';
 import type { WorktreeSetupScriptConfig, WorktreeSetupShell } from '@lody/shared';
 
@@ -9,8 +11,120 @@ import {
   type MobileConversationItem,
   type MobileProjectContext,
 } from '@/components/mobile/mobile-project-screen';
+import { useMobileBackRevealClass } from '@/components/mobile/mobile-drill-page-layout';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { MobileWorktreeConfigSheet } from '@/components/mobile/mobile-worktree-config-sheet';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+const fileStory = stylex.create({
+  list: {
+    marginTop: 'calc(var(--spacing) * 4)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    ':is(*) > :not(:last-child)': {
+      marginBlockStart: 0,
+      marginBlockEnd: 'calc(var(--spacing) * 2)',
+    },
+  },
+  file: {
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--muted) / 1) 60%,transparent)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+  },
+});
+const phoneFrame = stylex.create({
+  frame: {
+    height: { default: '100dvh', '@media (min-width: 40rem)': '852px' },
+    width: { default: '100%', '@media (min-width: 40rem)': '393px' },
+    borderRadius: { default: null, '@media (min-width: 40rem)': '34px' },
+    backgroundColor: 'hsl(var(--background) / 1)',
+    boxShadow: '0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, 0 25px 50px -12px rgb(0 0 0 / 0.25)',
+    overflow: 'hidden',
+  },
+});
+
+const storyLayoutStylesStyles = stylex.create({
+  frame: {
+    height: '1.05rem',
+    width: '1.05rem',
+  },
+  frame2: {
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+    'flex-shrink': '0',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+  },
+});
+
+const storyViewport = stylex.create({
+  canvas: {
+    display: 'flex',
+    minHeight: '100dvh',
+    alignItems: 'center',
+    justifyContent: 'center',
+    '--story-device-canvas-components': '92.3% 0.003 48.717',
+    backgroundColor: 'oklch(var(--story-device-canvas-components))',
+    padding: { default: '0px', '@media (min-width: 40rem)': 'calc(var(--spacing) * 6)' },
+  },
+});
+
+const storyLayoutStyles = stylex.create({
+  label: {
+    overflow: 'hidden',
+    'text-overflow': 'ellipsis',
+    'white-space': 'nowrap',
+    'font-size': '0.95rem',
+    'line-height': 'var(--leading-tight)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  canvas: {
+    'margin-inline': 'calc(var(--spacing) * 3)',
+    'margin-top': 'calc(var(--spacing) * 3)',
+    'border-radius': 'var(--radius-2xl)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'color-mix(in oklab, hsl(var(--border) / 1) 40%, transparent)',
+    'background-color': 'hsl(var(--card) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  caption: {
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  caption2: {
+    'margin-top': 'calc(var(--spacing) * 1)',
+    'font-size': 'var(--text-xs)',
+    'line-height': 'var(--text-xs--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-width': 'calc(var(--spacing) * 0)',
+    'align-items': 'center',
+    gap: 'calc(var(--spacing) * 3)',
+  },
+  row2: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 9)',
+    width: 'calc(var(--spacing) * 9)',
+    'flex-shrink': '0',
+    'align-items': 'center',
+    'justify-content': 'center',
+    'border-radius': 'var(--radius-xl)',
+    'background-color': 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+  },
+});
 
 const meta = {
   title: 'Mobile/MobileProjectScreen',
@@ -115,17 +229,15 @@ function MockWorktreeSettings({ shell }: { shell?: WorktreeSetupShell }) {
       <MobileSettingsSection title="Worktree">
         <MobileSettingsRow
           label={
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <Wrench className="h-[1.05rem] w-[1.05rem]" />
+            <div {...stylex.props(storyLayout.row)}>
+              <div {...stylex.props(storyLayout.row2)}>
+                <Wrench {...stylex.props(storyLayoutStylesStyles.frame)} />
               </div>
-              <span className="truncate text-[0.95rem] font-medium leading-tight">
-                Worktree setup &amp; cleanup
-              </span>
+              <span {...stylex.props(storyLayoutStyles.label)}>Worktree setup &amp; cleanup</span>
             </div>
           }
           onClick={() => setOpen(true)}
-          trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+          trailing={<ChevronRight {...stylex.props(storyLayoutStylesStyles.frame2)} />}
         />
       </MobileSettingsSection>
       <MobileWorktreeConfigSheet
@@ -143,19 +255,15 @@ function MockWorktreeSettings({ shell }: { shell?: WorktreeSetupShell }) {
 
 function ProjectFilesStoryContent() {
   return (
-    <div className="mx-3 mt-3 rounded-2xl border border-border/40 bg-card p-4">
-      <div className="text-sm font-semibold text-foreground">文件浏览</div>
-      <div className="mt-1 text-xs text-muted-foreground">项目文件树和预览区域</div>
-      <div className="mt-4 space-y-2 text-sm">
-        <div className="rounded-xl bg-muted/60 px-3 py-2 font-mono text-xs">
-          apps/mobile/src/main.tsx
-        </div>
-        <div className="rounded-xl bg-muted/60 px-3 py-2 font-mono text-xs">
+    <div {...stylex.props(storyLayoutStyles.canvas)}>
+      <div {...stylex.props(storyLayoutStyles.caption)}>文件浏览</div>
+      <div {...stylex.props(storyLayoutStyles.caption2)}>项目文件树和预览区域</div>
+      <div {...stylex.props(fileStory.list)}>
+        <div {...stylex.props(fileStory.file)}>apps/mobile/src/main.tsx</div>
+        <div {...stylex.props(fileStory.file)}>
           packages/components/src/components/chat/chat-landing.tsx
         </div>
-        <div className="rounded-xl bg-muted/60 px-3 py-2 font-mono text-xs">
-          packages/shared/src/message.ts
-        </div>
+        <div {...stylex.props(fileStory.file)}>packages/shared/src/message.ts</div>
       </div>
     </div>
   );
@@ -163,14 +271,13 @@ function ProjectFilesStoryContent() {
 
 function StoryShell({ project }: { project: MobileProjectContext }) {
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
         <MobileProjectScreen
           project={project}
           conversations={conversations}
           labels={{
             backAriaLabel: '返回',
-            allConversationsHeading: '全部对话',
             emptyConversations: '没有匹配的对话',
             settingsTab: '设置',
           }}
@@ -204,4 +311,202 @@ export const IOSLocal: Story = {
     onBack: fn(),
   },
   render: () => <StoryShell project={localProject} />,
+};
+
+const ownedStyles = stylex.create({
+  frame: { maxWidth: 440, backgroundColor: themeColors.background },
+  screen: { width: '100%', height: 'calc(100dvh - 104px)', minHeight: 400, overflow: 'hidden' },
+  scopeControls: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: 8 },
+  result: { display: 'block', padding: 8, fontSize: 12, color: themeColors.mutedForeground },
+  home: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+  homeTitle: {
+    paddingTop: 'calc(var(--k-safe-area-top, 0px) + 1rem)',
+    paddingInline: '1rem',
+    paddingBottom: '0.75rem',
+    fontSize: '1.5rem',
+    fontWeight: 600,
+  },
+  homeProject: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginInline: '0.75rem',
+    marginBottom: '0.5rem',
+    borderRadius: '0.75rem',
+    backgroundColor: themeColors.card,
+    paddingInline: '1rem',
+    paddingBlock: '0.75rem',
+    textAlign: 'left',
+  },
+  homeProjectName: { display: 'block', fontSize: '0.875rem', fontWeight: 500 },
+  homeProjectDetail: { display: 'block', fontSize: '0.75rem', color: themeColors.mutedForeground },
+  homeChevron: { width: '1rem', height: '1rem', color: themeColors.mutedForeground },
+});
+
+const ownedConversations: MobileConversationItem[] = [
+  {
+    id: 'alpha',
+    title: 'Alpha: preserve project controls',
+    branchName: 'fix/alpha',
+    ageLabel: '1h',
+  },
+  { id: 'beta', title: 'Beta: review keyboard behavior', branchName: 'fix/beta', ageLabel: '2h' },
+  {
+    id: 'long',
+    title: 'Long project conversation title preserves truncation at narrow widths',
+    ageLabel: '3h',
+  },
+];
+
+function OwnedProjectFixture({ scoped = false }: { scoped?: boolean }) {
+  const [archived, setArchived] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [backCount, setBackCount] = useState(0);
+  const [scope, setScope] = useState(0);
+  const scopeNames = ['dark-scope', 'light-scope', 'nested-light-exclusion'];
+  const outerScope = scoped ? (scope === 0 ? 'dark-scope' : 'light-scope') : undefined;
+  return (
+    <div
+      {...stylex.props(ownedStyles.frame)}
+      data-owned-project-fixture
+      data-owned-project-back-count={backCount}
+      data-owned-project-filter={filter}
+      data-owned-project-archived={archived}
+      data-owned-project-scope={scoped ? scopeNames[scope] : undefined}
+    >
+      {scoped ? (
+        <div {...stylex.props(ownedStyles.scopeControls)}>
+          <Button size="small" onClick={() => setScope((current) => (current + 1) % 3)}>
+            Change local theme scope
+          </Button>
+          <output>{scopeNames[scope]}</output>
+        </div>
+      ) : null}
+      <div
+        className={outerScope}
+        style={scoped ? ({ '--color-white': '#ffdfc4' } as CSSProperties) : undefined}
+      >
+        <div
+          {...withClassName(
+            stylex.props(ownedStyles.screen),
+            scoped && scope === 2 ? 'dark-scope' : undefined
+          )}
+        >
+          <MobileProjectScreen
+            project={localProject}
+            conversations={filter === 'alpha' ? ownedConversations.slice(0, 1) : ownedConversations}
+            filterPills={[
+              {
+                kind: 'single',
+                id: 'view',
+                fallbackLabel: 'Messages',
+                options: [
+                  { id: 'all', label: 'All messages' },
+                  { id: 'alpha', label: 'Alpha only' },
+                ],
+                selectedId: filter,
+                onSelect: setFilter,
+              },
+            ]}
+            labels={{
+              backAriaLabel: 'Back to projects',
+              archiveToggleLabel: 'Archived conversations',
+              filterBarToggleLabel: 'Show project filters',
+              searchAriaLabel: 'Search conversations',
+              searchPlaceholder: 'Search conversations',
+              clearSearchAriaLabel: 'Clear project search',
+              emptyConversations: 'No matching conversations',
+              archivedConversationsHeading: 'Archived chats',
+              chatTab: 'Chat',
+              filesTab: 'Files',
+              settingsTab: 'Settings',
+            }}
+            filesTabContent={null}
+            onBack={() => setBackCount((count) => count + 1)}
+            onConversationSelect={fn()}
+            showArchived={archived}
+            onShowArchivedToggle={() => setArchived((current) => !current)}
+          />
+        </div>
+      </div>
+      <output {...stylex.props(ownedStyles.result)}>
+        Back {backCount}; filter {filter}; archived {String(archived)}
+      </output>
+    </div>
+  );
+}
+
+/* Home ⇄ project in one slot, as in `MobileWorkspaceLayout`: Back slides the
+   project off while the list underneath, a stand-in for the home Projects
+   tab, mounts with the same reveal `MobileHomeScreen` plays. */
+function StandInProjectsHome({ onOpen }: { onOpen: (project: MobileProjectContext) => void }) {
+  const backRevealClass = useMobileBackRevealClass();
+  return (
+    <div
+      data-testid="stand-in-home"
+      {...withClassName(stylex.props(ownedStyles.home), backRevealClass ?? undefined)}
+    >
+      <h1 {...stylex.props(ownedStyles.homeTitle)}>项目</h1>
+      {[localProject, githubProject].map((item) => (
+        <button
+          key={item.kind}
+          type="button"
+          onClick={() => onOpen(item)}
+          {...stylex.props(ownedStyles.homeProject)}
+        >
+          <span>
+            <span {...stylex.props(ownedStyles.homeProjectName)}>{item.name}</span>
+            <span {...stylex.props(ownedStyles.homeProjectDetail)}>
+              {item.kind === 'local' ? item.path : item.fullName}
+            </span>
+          </span>
+          <ChevronRight {...stylex.props(ownedStyles.homeChevron)} aria-hidden="true" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type OwnedProjectStory = StoryObj<typeof OwnedProjectFixture>;
+
+export const OwnedControls: OwnedProjectStory = { render: () => <OwnedProjectFixture /> };
+export const OwnedScopes: OwnedProjectStory = { render: () => <OwnedProjectFixture scoped /> };
+
+function BackToHomeShell() {
+  const [project, setProject] = useState<MobileProjectContext | null>(null);
+  return (
+    <div {...stylex.props(storyViewport.canvas)}>
+      <div {...stylex.props(phoneFrame.frame)}>
+        {project ? (
+          <MobileProjectScreen
+            key={project.kind}
+            project={project}
+            conversations={conversations}
+            labels={{ backAriaLabel: '返回', emptyConversations: '没有匹配的对话' }}
+            filesTabContent={<ProjectFilesStoryContent />}
+            onBack={() => setProject(null)}
+            onConversationSelect={fn()}
+          />
+        ) : (
+          <StandInProjectsHome onOpen={setProject} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+export const BackToHome: Story = {
+  args: {
+    project: localProject,
+    conversations,
+    filesTabContent: <ProjectFilesStoryContent />,
+    onBack: fn(),
+  },
+  render: () => <BackToHomeShell />,
 };

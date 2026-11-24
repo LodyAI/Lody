@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { runtimeAtom } from '@/atoms/runtime';
 import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
@@ -8,8 +9,44 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { authTokenAtom } from '@/atoms/runtime';
 import { getSessionImageBlobUrl } from '@/lib/session-image-cache';
-import { cn } from '@/lib/utils';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../../style/theme-colors.stylex';
+
+const pulse = stylex.keyframes({ '50%': { opacity: 0.5 } });
+const styles = stylex.create({
+  trigger: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderRadius: '0.25rem',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    backgroundColor: 'hsl(var(--background) / 0.6)',
+    cursor: { default: 'zoom-in', ':disabled': 'default' },
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    outline: {
+      default: null,
+      ':focus-visible': '2px solid transparent',
+      '@media (forced-colors: active)': { ':focus-visible': 'auto' },
+    },
+    outlineOffset: { default: null, ':focus-visible': 2 },
+  },
+  thumbnail: { width: '100%', height: '100%', objectFit: 'cover' },
+  failure: { color: themeColors.mutedForeground },
+  loading: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'hsl(var(--muted) / 0.7)',
+    animationName: pulse,
+    animationDuration: '2s',
+    animationIterationCount: 'infinite',
+    animationTimingFunction: 'cubic-bezier(0.4, 0, 0.6, 1)',
+  },
+});
 
 export type QueuedImageBlock = Extract<SessionInputBlock, { type: 'image' }>;
 
@@ -37,14 +74,24 @@ export function QueuedImagePreview({
   // The full-size image loads only once the preview opens (the row itself
   // needs just the thumbnail); the viewer shows its loading state until then.
   useEffect(() => {
-    if (!previewOpen || originalUrl || !workspaceId || !authToken) return undefined;
+    if (
+      !previewOpen ||
+      originalUrl ||
+      !workspaceId ||
+      (!authToken && image.transport !== 'local' && !image.localImageId)
+    )
+      return undefined;
     let active = true;
     void getSessionImageBlobUrl({
+      ...image,
       workspaceId,
       sessionId: image.storageSessionId ?? sessionId,
-      encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
+      encryption: image.encryption,
+      attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
-      token: authToken,
+      transport: image.transport,
+      machineId: image.machineId,
+      token: authToken ?? '',
       variant: 'original',
     })
       .then((url) => {
@@ -57,7 +104,23 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, runtime, image.storageSessionId, image.encryption, image.imageId, originalUrl, previewOpen, sessionId, thumbnailUrl, workspaceId]);
+  }, [
+    authToken,
+    runtime,
+    image.localImageId,
+    image.mimeType,
+    image.sizeBytes,
+    image.transport,
+    image.machineId,
+    image.storageSessionId,
+    image.encryption,
+    image.imageId,
+    originalUrl,
+    previewOpen,
+    sessionId,
+    thumbnailUrl,
+    workspaceId,
+  ]);
 
   const previewImages = useMemo(
     () => [{ key: image.imageId, src: originalUrl, fileName: image.fileName }],
@@ -69,7 +132,7 @@ export function QueuedImagePreview({
     setThumbnailUrl(null);
     setLoadFailed(false);
 
-    if (!workspaceId || !authToken) {
+    if (!workspaceId || (!authToken && image.transport !== 'local' && !image.localImageId)) {
       setLoadFailed(true);
       return () => {
         active = false;
@@ -77,11 +140,15 @@ export function QueuedImagePreview({
     }
 
     void getSessionImageBlobUrl({
+      ...image,
       workspaceId,
       sessionId: image.storageSessionId ?? sessionId,
-      encryption: image.encryption, attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
+      encryption: image.encryption,
+      attachmentToken: runtime?.workspaceId === workspaceId ? runtime.attachmentToken : undefined,
       imageId: image.imageId,
-      token: authToken,
+      transport: image.transport,
+      machineId: image.machineId,
+      token: authToken ?? '',
       variant: 'thumbnail',
       thumbnailWidth: size * 2,
       thumbnailHeight: size * 2,
@@ -102,44 +169,57 @@ export function QueuedImagePreview({
     return () => {
       active = false;
     };
-  }, [authToken, runtime, image.storageSessionId, image.encryption, image.imageId, sessionId, workspaceId, size]);
+  }, [
+    authToken,
+    runtime,
+    image.localImageId,
+    image.mimeType,
+    image.sizeBytes,
+    image.transport,
+    image.machineId,
+    image.storageSessionId,
+    image.encryption,
+    image.imageId,
+    sessionId,
+    workspaceId,
+    size,
+  ]);
 
   return (
     <>
       <Tooltip.Root>
-        <Tooltip.Trigger delay={300} render={<button
-            type="button"
-            disabled={loadFailed}
-            onClick={(event) => {
-              // The row is draggable and editable; opening the preview is all
-              // this click should do.
-              event.stopPropagation();
-              setPreviewOpen(true);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            className={cn(
-              'flex shrink-0 items-center justify-center overflow-hidden rounded',
-              'border border-border/40 bg-background/60',
-              'cursor-zoom-in disabled:cursor-default',
-              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40',
-              className
-            )}
-            style={{ width: size, height: size }}
-            aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
-              name: label,
-            })}
-          >
-            {thumbnailUrl ? (
-              <img src={thumbnailUrl} alt={label} className="h-full w-full object-cover" />
-            ) : loadFailed ? (
-              <ImageIcon
-                className="text-muted-foreground"
-                style={{ width: size * 0.5, height: size * 0.5 }}
-              />
-            ) : (
-              <div className="h-full w-full animate-pulse bg-muted/70" />
-            )}
-          </button>}/>
+        <Tooltip.Trigger
+          delay={300}
+          render={
+            <button
+              type="button"
+              disabled={loadFailed}
+              onClick={(event) => {
+                // The row is draggable and editable; opening the preview is all
+                // this click should do.
+                event.stopPropagation();
+                setPreviewOpen(true);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              className={clsx(stylex.props(styles.trigger).className, className)}
+              style={{ width: size, height: size }}
+              aria-label={t('sessions.messageQueue.previewImage', 'Preview {{name}}', {
+                name: label,
+              })}
+            >
+              {thumbnailUrl ? (
+                <img src={thumbnailUrl} alt={label} {...stylex.props(styles.thumbnail)} />
+              ) : loadFailed ? (
+                <ImageIcon
+                  {...stylex.props(styles.failure)}
+                  style={{ width: size * 0.5, height: size * 0.5 }}
+                />
+              ) : (
+                <div {...stylex.props(styles.loading)} />
+              )}
+            </button>
+          }
+        />
         <Tooltip.Content side="top">{label}</Tooltip.Content>
       </Tooltip.Root>
       <ZoomableImageViewer

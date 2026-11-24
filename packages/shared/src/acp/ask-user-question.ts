@@ -462,7 +462,6 @@ export function createAskUserQuestionPermissionOutcome(
   };
 }
 
-// ============================================================================
 // Elicitation bridge (acp-extension-claude >= 0.44.0)
 //
 // As of 0.44.0 Claude no longer surfaces AskUserQuestion as a permission
@@ -477,23 +476,25 @@ export function createAskUserQuestionPermissionOutcome(
 // `CreateElicitationResponse`. Rejected: a native elicitation path would
 // duplicate the question card, history persistence, and outcome wiring for no
 // behavioral gain.
-// ============================================================================
+
+type ElicitationChoiceField = {
+  key: string;
+  choices: Array<{ label: string; value: string }>;
+  multiSelect: boolean;
+};
 
 /**
- * Result of parsing an AskUserQuestion form elicitation. `fieldKeys[i]` is the
- * schema property key for `meta.questions[i]`, retained so the answers can be
- * folded back into the elicitation response by field key.
+ * Parsed questions retain their schema keys and private choice mappings so
+ * readable permission answers can be translated back into the original form.
  */
 export type AskUserQuestionElicitation = {
   meta: AskUserQuestionPermissionMeta;
   fieldKeys: string[];
   customFieldKeys?: Array<string | undefined>;
   /** Droid's wire values are private to the active request, not displayed labels. */
-  droidFields?: Array<{
-    key: string;
-    choices: Array<{ label: string; value: string }>;
-    multiSelect: boolean;
-  }>;
+  droidFields?: ElicitationChoiceField[];
+  /** Native agy also uses private IDs, but custom answers omit the selected field. */
+  antigravityFields?: ElicitationChoiceField[];
   autoResolutionMs?: number | null;
 };
 
@@ -651,10 +652,11 @@ function parseDroidElicitation(schema: Record<string, unknown>): AskUserQuestion
   };
 }
 
-/** Convert displayed Droid answers back to the original option IDs and companion fields. */
-function buildDroidElicitationResponse(
-  fields: NonNullable<AskUserQuestionElicitation['droidFields']>,
-  answers: AskUserQuestionAnswers
+/** Keep private wire IDs out of permission history and map them only on reply. */
+function buildMappedElicitationResponse(
+  fields: ElicitationChoiceField[],
+  answers: AskUserQuestionAnswers,
+  includeOtherOption: boolean
 ): CreateElicitationResponse {
   const content: Record<string, string | string[]> = Object.create(null);
   for (const field of fields) {
@@ -681,28 +683,85 @@ function buildDroidElicitationResponse(
       else {
         if (custom !== undefined) return { action: 'cancel' };
         custom = value;
-        selected.push('other');
+        if (includeOtherOption) selected.push('other');
       }
     }
-    content[field.key] = field.multiSelect ? selected : selected[0]!;
+    if (selected.length > 0) content[field.key] = field.multiSelect ? selected : selected[0]!;
     if (custom !== undefined) content[`${field.key}_other`] = custom;
   }
   return { action: 'accept', content };
 }
 
+/** Native agy puts the prompt in title and choices in numbered oneOf/anyOf entries. */
+function parseAntigravityElicitation(
+  schema: Record<string, unknown>
+): AskUserQuestionElicitation | null {
+  const properties = schema.properties;
+  if (schema.type !== 'object' || !isRecord(properties)) return null;
+  const entries = Object.entries(properties).filter(([key]) => /^q[1-9]\d*$/.test(key));
+  if (entries.length === 0) return null;
+  const consumed = new Set<string>();
+  const questions: AskUserQuestion[] = [];
+  const fields: ElicitationChoiceField[] = [];
+  for (const [key, prop] of entries) {
+    if (!isRecord(prop) || typeof prop.title !== 'string' || !prop.title.trim()) return null;
+    const multiSelect = prop.type === 'array';
+    const source = getEnumOptionSource(prop);
+    if (
+      !source?.length ||
+      (multiSelect
+        ? !isRecord(prop.items) || !Array.isArray(prop.items.anyOf)
+        : prop.type !== 'string' || !Array.isArray(prop.oneOf)) ||
+      !isFreeTextProperty(properties[`${key}_other`])
+    )
+      return null;
+    const choices: ElicitationChoiceField['choices'] = [];
+    for (const [index, entry] of source.entries()) {
+      if (
+        !isEnumOption(entry) ||
+        entry.const !== String(index + 1) ||
+        typeof entry.title !== 'string' ||
+        !entry.title.trim()
+      )
+        return null;
+      choices.push({ label: entry.title, value: entry.const });
+    }
+    if (new Set(choices.map((choice) => choice.label)).size !== choices.length) return null;
+    consumed.add(key);
+    consumed.add(`${key}_other`);
+    questions.push({
+      id: key,
+      header: '',
+      question: prop.title,
+      options: choices.map(({ label }) => ({ label })),
+      multiSelect,
+      allowCustomAnswer: true,
+    });
+    fields.push({ key, choices, multiSelect });
+  }
+  if (Object.keys(properties).some((key) => !consumed.has(key))) return null;
+  return {
+    meta: { source: 'lody', version: 1, allowCustomAnswer: true, questions },
+    fieldKeys: fields.map((field) => field.key),
+    antigravityFields: fields,
+  };
+}
+
 /**
- * Parse an ACP form elicitation produced by Claude's AskUserQuestion tool back
- * into `AskUserQuestionPermissionMeta`. Returns `null` for elicitations that are
- * not AskUserQuestion-shaped (url mode, or a form with no enum-backed question
- * fields) so callers can fall back to declining them.
+ * Parse supported ACP question forms into shared permission metadata. Native
+ * agy requires explicit provider provenance because its numbered values and
+ * title-only prompts have different semantics from legacy Claude forms.
  */
 export function parseAskUserQuestionElicitationRequest(
-  request: CreateElicitationRequest
+  request: CreateElicitationRequest,
+  provider?: 'antigravity'
 ): AskUserQuestionElicitation | null {
   if (!isRecord(request) || request.mode !== 'form') return null;
 
   const schema = request.requestedSchema;
   if (!isRecord(schema) || !isRecord(schema.properties)) return null;
+  if (provider === 'antigravity' && !getLodyElicitationMeta(request._meta))
+    return parseAntigravityElicitation(schema);
   if (
     request.message === 'Droid needs your answers to continue.' &&
     !getLodyElicitationMeta(request._meta)
@@ -857,10 +916,14 @@ export function buildAskUserQuestionElicitationResponse(
     _meta: isRecord(outcome._meta) ? outcome._meta : null,
   });
   if (!answers) {
-    return elicitation.droidFields ? { action: 'cancel' } : { action: 'accept', content: {} };
+    return elicitation.droidFields || elicitation.antigravityFields
+      ? { action: 'cancel' }
+      : { action: 'accept', content: {} };
   }
   if (elicitation.droidFields)
-    return buildDroidElicitationResponse(elicitation.droidFields, answers);
+    return buildMappedElicitationResponse(elicitation.droidFields, answers, true);
+  if (elicitation.antigravityFields)
+    return buildMappedElicitationResponse(elicitation.antigravityFields, answers, false);
 
   const content: Record<string, AskUserQuestionAnswerValue> = Object.create(null);
   elicitation.meta.questions.forEach((question, index) => {

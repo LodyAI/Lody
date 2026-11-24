@@ -6,8 +6,12 @@ import {
   type MachineRateLimits,
 } from './session-usage';
 
-/** The new-chat page shows one window: the shortest, the one that resets next (5 hours when there is one). */
-const HOME_WEEK_USAGE_WINDOWS = 1;
+/**
+ * A subscription plan bills two segments: the short one (5 hours on Claude and Codex) and the
+ * week. Both resets matter — the short one says when the throttle lifts, the week's says when the
+ * plan comes back — so the page keeps both, and a third would only repeat the tile.
+ */
+const HOME_WEEK_USAGE_WINDOWS = 2;
 
 /** A Codex reset the forecast knows about, already worded and timed for display. */
 export type HomeWeekForecast = {
@@ -40,8 +44,10 @@ export type HomeWeekUsageOption = {
 export type HomeWeekUsage = {
   /** The tier the provider named (a model-specific limit), when it named one. */
   name: string | null;
-  /** The shortest window, alone. */
-  windows: AgentRateLimitWindow[];
+  /** The window the tile meters: the shortest, the one that resets next. */
+  window: AgentRateLimitWindow;
+  /** The plan's other window (the week behind the 5-hour segment), for when it comes back. */
+  otherWindow: AgentRateLimitWindow | null;
 };
 
 /**
@@ -49,6 +55,9 @@ export type HomeWeekUsage = {
  * the same way, that the composer's usage popover reads from the machine's rate limits. Local
  * data only. Null when the provider reported no window, so the page shows nothing rather than
  * an empty meter.
+ *
+ * The two segments keep their own reset times: a plan's 5-hour segment and its week come back at
+ * different moments, so merging them into the one that resets next hid when the week itself does.
  */
 export function buildHomeWeekUsage(args: {
   rateLimits: MachineRateLimits | null | undefined;
@@ -58,13 +67,13 @@ export function buildHomeWeekUsage(args: {
 }): HomeWeekUsage | null {
   const entry = resolveAgentRateLimitForModel({ ...args, modelId: args.modelId ?? null });
   if (!entry) return null;
-  const windows = getAgentRateLimitWindows(entry.limits)
+  const [window, otherWindow] = getAgentRateLimitWindows(entry.limits)
     .sort(
       (left, right) =>
         (left.windowDurationSeconds ?? Number.POSITIVE_INFINITY) -
         (right.windowDurationSeconds ?? Number.POSITIVE_INFINITY)
     )
     .slice(0, HOME_WEEK_USAGE_WINDOWS);
-  if (windows.length === 0) return null;
-  return { name: entry.limits.limitName?.trim() || null, windows };
+  if (!window) return null;
+  return { name: entry.limits.limitName?.trim() || null, window, otherWindow: otherWindow ?? null };
 }

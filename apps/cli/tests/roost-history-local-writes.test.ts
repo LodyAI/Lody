@@ -1,18 +1,16 @@
+import { prepareReplacement } from '@lody/shared/history-writer';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Identity, decodeBatch, decodeJson } from '@loro-dev/roost';
-import {
-  planAgentHistoryMutation,
-  prepareReplacement,
-  type SessionHistoryInput,
-} from '@lody/shared';
+import { planAgentHistoryMutation, type SessionHistoryInput } from '@lody/shared';
 import {
   fromApplicationJson,
   toApplicationJson,
   applicationJsonText,
+  type HistoryProjectedMessage,
 } from '@loro-dev/roost/lody-history';
 import {
   agentReceiptPut,
@@ -22,7 +20,7 @@ import {
   stageRoostContent,
 } from '../src/session/roost-content-patches';
 import { createRoostHistoryReader } from '@lody/shared/session-data';
-import { createRoostReadPort } from '../src/session/roost-history-port';
+import { adaptRoostProjectedMessage, createRoostReadPort } from '../src/session/roost-history-port';
 import {
   createRoostHistoryChanges,
   roostCommitMetadata,
@@ -768,4 +766,35 @@ it('stages all content operations exactly like Native, including Unicode and own
     await client.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+describe('local Roost release-candidate binding', () => {
+  it('converts Roost lossless JSON into the Lody port DTO', () => {
+    const row: HistoryProjectedMessage = {
+      businessId: 'assistant-1',
+      segmentId: 'primary',
+      turnId: new Uint8Array(16),
+      content: fromApplicationJson({
+        id: 'storage-id-must-not-win',
+        role: 'assistant',
+        timestamp: '2026-10-03T00:00:01.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+      }),
+      nextSeq: 1n,
+      sealed: true,
+    };
+
+    expect(adaptRoostProjectedMessage(row)).toEqual({
+      businessId: 'assistant-1',
+      segmentId: 'primary',
+      content: {
+        id: 'storage-id-must-not-win',
+        role: 'assistant',
+        timestamp: '2026-10-03T00:00:01.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+      },
+      nextSeq: 1n,
+      sealed: true,
+    });
+  });
 });

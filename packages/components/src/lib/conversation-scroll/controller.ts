@@ -1,5 +1,5 @@
 import { anchorOfRow, deriveAnchor, resolveAnchor } from './anchor';
-import { Geometry, type SavedSizes } from './geometry';
+import { Geometry } from './geometry';
 import {
   FIXED_ROW_KINDS,
   type CycleDiagnostic,
@@ -7,13 +7,14 @@ import {
   type Intent,
   type MovementClass,
   type ReadingAnchor,
+  type SavedScrollState,
   type ScrollSnapshot,
   type StickyMode,
 } from './types';
 
 /**
  * The conversation scroll engine's transaction logic, independent of React and
- * of the DOM. The adapter (`use-conversation-scroll-engine.tsx`) and the model
+ * of the DOM. The adapter (`engine-conversation-scroller.tsx`) and the model
  * tests' simulator both drive it through {@link ScrollHost}.
  *
  * Design, invariants I1–I8 and the coverage lemma:
@@ -179,8 +180,7 @@ interface Observed {
 export interface ControllerOptions {
   host: ScrollHost;
   callbacks?: ControllerCallbacks;
-  initialIntent?: Extract<Intent, { kind: 'follow' | 'read' }>;
-  savedSizes?: SavedSizes | null;
+  savedState?: SavedScrollState | null;
   layoutVersion?: string;
   /** Viewport height to plan the very first render with, before the viewport is mounted. */
   initialViewportHeight?: number;
@@ -204,6 +204,8 @@ export class ScrollController {
   private viewportKnown = false;
   private extent = 0;
   private replyRoom = 0;
+  /** Temporary room below a manually toggled disclosure, released by reader movement. */
+  private disclosureSpace = false;
   private lastObserved: Observed | null = null;
   private pendingExternalMove = false;
   private tx: Transaction | null = null;
@@ -241,8 +243,22 @@ export class ScrollController {
     this.callbacks = options.callbacks ?? {};
     this.overscan = options.overscanPx ?? ENGINE_OVERSCAN_PX;
     this.minRow = options.minRowPx ?? ENGINE_MIN_ROW_PX;
-    this.geometry = new Geometry(options.layoutVersion ?? '', options.savedSizes);
-    this.intent = options.initialIntent ?? { kind: 'follow' };
+    const saved = options.savedState ?? null;
+    this.geometry = new Geometry(
+      options.layoutVersion ?? saved?.sizes?.layoutVersion ?? '',
+      saved?.sizes ?? null
+    );
+    if (saved?.intent.kind === 'read') {
+      const { anchor, screenY, replyRoom, disclosureSpace } = saved.intent;
+      this.intent = { kind: 'read', anchor, screenY };
+      this.replyRoom =
+        typeof replyRoom === 'number' && Number.isFinite(replyRoom) && replyRoom > 0
+          ? replyRoom
+          : 0;
+      this.disclosureSpace = disclosureSpace === true;
+    } else {
+      this.intent = { kind: 'follow' };
+    }
     this.viewportHeight = options.initialViewportHeight ?? 800;
     this.sticky = this.intent.kind !== 'read';
   }
@@ -301,6 +317,7 @@ export class ScrollController {
       this.cancelGlide();
     } else {
       this.reshown = true;
+      this.geometry.invalidateLiveMeasurements();
     }
   }
 
@@ -343,24 +360,25 @@ export class ScrollController {
 
   // ---- The commit protocol ------------------------------------------------
 
-  /** Call from the layout effect of every list commit. */
-  afterCommit(): void {
-    if (this.disposed) return;
+  /** Call from every list commit; true once its measured layout has settled. */
+  afterCommit(): boolean {
+    if (this.disposed) return false;
     if (this.updateLoopError) throw this.updateLoopError;
     const previous = this.committedPlan;
     this.committedPlan = this.lastPlan;
-    if (this.rows.length === 0 || this.hidden) return;
+    if (this.rows.length === 0 || this.hidden) return false;
     // A parent setState from `onScroll` (hydration, the top fade) re-commits
     // the list with the same layout. Starting a fresh cycle every time, then
     // reporting the offset again, is the React #185 nested-update loop.
     if (!this.tx) {
-      if (this.isSettled()) return;
+      if (this.isSettled()) return true;
     }
     this.checkSynchronousCommitBudget();
     if (!this.tx) {
       this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
     }
     this.continueTransaction();
+    return this.tx === null;
   }
 
   /** Mounted rows changed size (ResizeObserver). */
@@ -546,6 +564,29 @@ export class ScrollController {
 
   // ---- Commands -----------------------------------------------------------
 
+  /** Hold a disclosure header in place before its body changes the layout. */
+  preserveDisclosure(rowKey: string, offsetPx: number, revealOffsetPx?: number): void {
+    if (this.disposed || this.hidden) return;
+    const index = this.geometry.indexOfKey(rowKey);
+    const row = this.rows[index];
+    if (!row) return;
+    this.refreshViewport();
+    const rowY = this.contentTop + this.geometry.offset(index) - this.readScrollTop();
+    let screenY = rowY + offsetPx;
+    // Mobile only asks for a preview when none of the details would be visible.
+    if (revealOffsetPx !== undefined && rowY + revealOffsetPx >= this.viewportHeight - 0.5) {
+      screenY -=
+        rowY + revealOffsetPx - this.viewportHeight + Math.min(96, this.viewportHeight / 4);
+    }
+    this.resetReaderInput();
+    this.cancelGlide();
+    this.gesture = null;
+    this.setIntent({ kind: 'read', anchor: anchorOfRow(row, offsetPx), screenY });
+    this.disclosureSpace = true;
+    // The click's state update and this commit are batched; measure the new body.
+    this.host.requestCommit(false);
+  }
+
   scrollToBottom(): void {
     if (this.disposed) return;
     this.resetReaderInput();
@@ -682,9 +723,20 @@ export class ScrollController {
     return this.geometry.size(index);
   }
 
-  /** The intent to persist: a sent message is saved as following, as today. */
-  savedIntent(): Extract<Intent, { kind: 'follow' | 'read' }> {
-    return this.intent.kind === 'read' ? this.intent : { kind: 'follow' };
+  savedState(): SavedScrollState {
+    const sizes = this.geometry.snapshot();
+    if (this.intent.kind !== 'read') {
+      return { formatVersion: 1, intent: { kind: 'follow' }, sizes };
+    }
+    return {
+      formatVersion: 1,
+      intent: {
+        ...this.intent,
+        ...(this.replyRoom > 0 ? { replyRoom: this.replyRoom } : {}),
+        ...(this.disclosureSpace ? { disclosureSpace: true } : {}),
+      },
+      sizes,
+    };
   }
 
   // ---- Internals ----------------------------------------------------------
@@ -813,6 +865,17 @@ export class ScrollController {
       }
     }
     if (this.intent.kind === 'follow') room = 0;
+    if (this.intent.kind === 'read' && this.disclosureSpace) {
+      const position = this.readTargetScrollTop(this.intent);
+      if (position !== null) {
+        // A collapse near the end must not let the browser clamp away the header.
+        // One viewport bounds this space; scrolling shrinks it like sent reply room.
+        room = Math.min(
+          this.viewportHeight,
+          Math.max(0, position + this.viewportHeight - this.paddingBottom - bottomLimit)
+        );
+      }
+    }
 
     const extentBefore = this.extent;
     const roomBefore = this.replyRoom;
@@ -1067,6 +1130,13 @@ export class ScrollController {
     return Math.max(0, this.geometry.offset(index) - SENT_CONTEXT_PX);
   }
 
+  private readTargetScrollTop(intent: Extract<Intent, { kind: 'read' }>): number | null {
+    const resolved = resolveAnchor(this.rows, intent.anchor, this.geometry);
+    if (!resolved) return null;
+    const screenY = resolved.fellBack ? 0 : intent.screenY;
+    return this.contentTop + this.geometry.offset(resolved.index) + resolved.offsetPx - screenY;
+  }
+
   /** The scroll position the current intent (or glide frame) resolves to. */
   private targetScrollTop(): number {
     const max = this.maxScrollTop();
@@ -1091,14 +1161,8 @@ export class ScrollController {
         return clamp(this.sentScrollTop(index));
       }
       case 'read': {
-        const resolved = resolveAnchor(this.rows, this.intent.anchor, this.geometry);
-        if (!resolved) return clamp(this.lastObserved?.scrollTop ?? 0);
-        return clamp(
-          this.contentTop +
-            this.geometry.offset(resolved.index) +
-            resolved.offsetPx -
-            this.intent.screenY
-        );
+        const position = this.readTargetScrollTop(this.intent);
+        return clamp(position ?? this.lastObserved?.scrollTop ?? 0);
       }
     }
     return max;
@@ -1198,6 +1262,7 @@ export class ScrollController {
     if (movement === 'none' || movement === 'own-write') return;
     const last = this.lastObserved;
     if (movement === 'reader') {
+      this.disclosureSpace = false;
       // Scroll steps precede animation callbacks. Actual movement confirms the
       // input for this sequence; a no-op input expires without needing scrollend.
       if (this.readerInputFrame !== null) this.host.cancelFrame(this.readerInputFrame);
@@ -1315,6 +1380,7 @@ export class ScrollController {
   }
 
   private setIntent(intent: Intent, preserveInput = false): void {
+    this.disclosureSpace = false;
     this.intent = intent;
     if (intent.kind !== 'read' && !preserveInput) this.resetReaderInput();
     const sticky = intent.kind !== 'read';

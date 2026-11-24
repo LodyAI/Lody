@@ -11,7 +11,7 @@ import {
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
-import { onlineMachineIdsAtom } from '@/atoms/presence';
+import { presumedOnlineMachineIdsAtom } from '@/atoms/presence';
 import { evaluateMachineDeletion, prepareMachineForDeletion } from '@/lib/machine-deletion';
 import { useAppCapability } from '@/lib/app-platform';
 
@@ -23,7 +23,7 @@ export function useMachineActions(params: {
   const { t } = useTranslation();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const onlineMachineIds = useAtomValue(onlineMachineIdsAtom);
+  const onlineMachineIds = useAtomValue(presumedOnlineMachineIdsAtom);
   const teamSharingAvailable = useAppCapability('teamSharing');
   const setMachineSharedWithTeam = useLegacyWorkspaceMutation(
     cloudOperations.machines.setMachineSharedWithTeam

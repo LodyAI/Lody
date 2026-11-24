@@ -1,8 +1,36 @@
-import { WorkspaceSettings } from './e2ee/workspace-security';
+import {
+  loadWorkspaceSettings,
+  loadMemorySetting,
+  loadGeneralSettingsComponent,
+  loadAppearanceSettingsComponent,
+  loadAccountSettingsComponent,
+  loadBillingSettingsComponent,
+  loadStatsSettingsComponent,
+  loadProjectSettingsComponent,
+  loadMachineAgentSettings,
+  loadHarness,
+  loadIntegrationsSettingsComponent,
+  loadKeyboardShortcutsSetting,
+  loadAboutSettingsComponent,
+  loadAgentRolesSetting,
+  loadPromptShortcutsSetting,
+  loadMcpSetting,
+  loadShareManagementSetting,
+  loadWorkspaceDataSetting,
+  preloadSettingsPanel,
+} from './settings-code';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
-import { MemorySetting } from './memory-setting';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -24,7 +52,6 @@ import { Dialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
-import { useOrganization } from '@/hooks/useOrganization';
 import { useStableSession } from '@/hooks/useStableSession';
 import { SettingsDataCacheProvider } from './settings-data-cache';
 import {
@@ -33,20 +60,24 @@ import {
   type SettingsTabId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
-import { GeneralSettingsComponent } from './general-setting';
-import { AppearanceSettingsComponent } from './appearance-setting';
-import { AccountSettingsComponent } from './account-setting';
-import { BillingSettingsComponent } from './billing-setting';
-import { StatsSettingsComponent } from './stats-setting';
-import { ProjectSettingsComponent } from './project-settings';
-import { MachineAgentSettings } from './machine-agent-settings';
-import { IntegrationsSettingsComponent } from './integrations-setting';
-import { KeyboardShortcutsSetting } from './keyboard-shortcuts-setting';
-import { AboutSettingsComponent } from './about-setting';
-import { AgentRolesSetting } from './agent-roles-setting';
-import { PromptShortcutsSetting } from './prompt-shortcuts-setting';
-import { McpSetting } from './mcp-setting';
-import { ShareManagementSetting } from './share-management-setting';
+const WorkspaceSettings = lazy(loadWorkspaceSettings);
+const MemorySetting = lazy(loadMemorySetting);
+const GeneralSettingsComponent = lazy(loadGeneralSettingsComponent);
+const AppearanceSettingsComponent = lazy(loadAppearanceSettingsComponent);
+const AccountSettingsComponent = lazy(loadAccountSettingsComponent);
+const BillingSettingsComponent = lazy(loadBillingSettingsComponent);
+const StatsSettingsComponent = lazy(loadStatsSettingsComponent);
+const ProjectSettingsComponent = lazy(loadProjectSettingsComponent);
+const MachineAgentSettings = lazy(loadMachineAgentSettings);
+const Harness = lazy(loadHarness);
+const IntegrationsSettingsComponent = lazy(loadIntegrationsSettingsComponent);
+const KeyboardShortcutsSetting = lazy(loadKeyboardShortcutsSetting);
+const AboutSettingsComponent = lazy(loadAboutSettingsComponent);
+const AgentRolesSetting = lazy(loadAgentRolesSetting);
+const PromptShortcutsSetting = lazy(loadPromptShortcutsSetting);
+const McpSetting = lazy(loadMcpSetting);
+const ShareManagementSetting = lazy(loadShareManagementSetting);
+const WorkspaceDataSetting = lazy(loadWorkspaceDataSetting);
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { useResolvedTheme } from '@/theme-provider';
@@ -251,7 +282,6 @@ function SettingsModalBody() {
   const setSelectedProjectKey = useSetAtom(settingsSelectedProjectKeyAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
   const canReportBug = useAppCapability('bugReport');
-  const { activeOrganization } = useOrganization();
   const { data: session } = useStableSession();
   const resolvedTheme = useResolvedTheme();
   const shortcutsAllowed = useWorkspaceFeature('shortcuts');
@@ -263,9 +293,6 @@ function SettingsModalBody() {
   const visibleTabs = isNativeAppShell()
     ? platformTabs.filter((tab) => tab.id !== 'billing')
     : platformTabs;
-  const navigationTabs = visibleTabs.filter(
-    (tab) => !tab.multiMemberOnly || (activeOrganization?.members.length ?? 0) > 1
-  );
 
   const handleReportBug = useCallback(() => {
     setBugReportDialogOpen(true);
@@ -372,7 +399,7 @@ function SettingsModalBody() {
                 {...stylex.props(styles.navScroll)}
               >
                 {groupedSections.map((section) => {
-                  const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+                  const tabs = visibleTabs.filter((tab) => tab.section === section.id);
                   const showsAccountEntry = section.id === 'personal' && accountTab;
                   if (tabs.length === 0 && !showsAccountEntry) return null;
                   return (
@@ -384,6 +411,10 @@ function SettingsModalBody() {
                             data-id="settings:account"
                             data-scope-item="row"
                             data-settings-tab-id="account"
+                            onPointerEnter={() =>
+                              void preloadSettingsPanel('account').catch(() => {})
+                            }
+                            onFocus={() => void preloadSettingsPanel('account').catch(() => {})}
                           >
                             <SettingsAccountEntry
                               user={session?.user}
@@ -407,6 +438,12 @@ function SettingsModalBody() {
                                     data-id={`settings:${tab.id}`}
                                     data-scope-item="row"
                                     data-settings-tab-id={tab.id}
+                                    onPointerEnter={() =>
+                                      void preloadSettingsPanel(tab.id).catch(() => {})
+                                    }
+                                    onFocus={() =>
+                                      void preloadSettingsPanel(tab.id).catch(() => {})
+                                    }
                                     {...stylex.props(
                                       surface.listRow,
                                       styles.navRowRail,
@@ -526,14 +563,18 @@ function SettingsModalBody() {
                     {usesInternalScrolling ? (
                       <div {...stylex.props(styles.fill, styles.paneInset)}>
                         <div {...stylex.props(styles.fill, styles.paneColumn)}>
-                          <SettingsTabContent tabId={resolvedActiveTab} />
+                          <Suspense fallback={null}>
+                            <SettingsTabContent tabId={resolvedActiveTab} />
+                          </Suspense>
                         </div>
                       </div>
                     ) : (
                       <ScrollArea {...stylex.props(styles.fill)}>
                         <div {...stylex.props(styles.paneInset)}>
                           <div {...stylex.props(styles.paneColumn)}>
-                            <SettingsTabContent tabId={resolvedActiveTab} />
+                            <Suspense fallback={null}>
+                              <SettingsTabContent tabId={resolvedActiveTab} />
+                            </Suspense>
                           </div>
                         </div>
                       </ScrollArea>
@@ -579,6 +620,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
           onSelectedMachineChange={setSelectedMachineId}
         />
       );
+    case 'lody-agent':
+      return <Harness />;
     case 'memory':
       return <MemorySetting />;
     case 'agent-roles':
@@ -589,6 +632,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       return <McpSetting />;
     case 'shares':
       return <ShareManagementSetting />;
+    case 'data':
+      return <WorkspaceDataSetting />;
     case 'machines':
       return (
         <MachineAgentSettings

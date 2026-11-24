@@ -26,13 +26,13 @@ export function getIosSimulatorPanelAvailability(
   machine:
     | { os?: string | null; protocolCapabilities?: MachineProtocolCapabilities }
     | null
-    | undefined
+    | undefined,
+  _contentMode?: 'plaintext' | 'e2ee'
 ): IosSimulatorPanelAvailability {
   if (machine?.os !== 'darwin') return 'hidden';
   return machineSupportsIosSimulatorProtocol(machine) ? 'available' : 'upgrade-required';
 }
 
-// ---------------------------------------------------------------------------
 // Catalog: the machine's `simctl` view, shaped for a picker.
 
 const RUNTIME_IDENTIFIER = /SimRuntime\.([A-Za-z]+)-(\d+(?:-\d+)*)$/;
@@ -197,7 +197,6 @@ export function groupIosSimulatorDevices(
     .sort((a, b) => compareIosSimulatorRuntimes(a.runtime, b.runtime));
 }
 
-// ---------------------------------------------------------------------------
 // Preview status.
 
 /** The device the Session's current preview (in any phase) is about, if any. */
@@ -368,7 +367,6 @@ export function resolveIosSimulatorSelection(
 export const IOS_SIMULATOR_PREPARING_POLL_MS = 1_000;
 export const IOS_SIMULATOR_PREPARING_MAX_POLLS = 180;
 
-// ---------------------------------------------------------------------------
 // Viewer handshake. The panel names the frame's exact origin; the frame answers
 // with its stream state for the same operation.
 
@@ -437,7 +435,6 @@ export function getIosSimulatorAspectRatio(family: IosSimulatorDeviceFamily | un
   }
 }
 
-// ---------------------------------------------------------------------------
 // Selected-device preference: local, per workspace + machine + Session. It is a
 // preference, not a cache, so a cache clear keeps it.
 
@@ -477,7 +474,6 @@ export function writeIosSimulatorSelectedDevice(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Diagnostics. Copied text may be pasted anywhere, so it never carries a URL
 // (the viewer address holds a capability and a remote tunnel is private), a
 // long opaque token, a device UDID, or a home-directory user name.

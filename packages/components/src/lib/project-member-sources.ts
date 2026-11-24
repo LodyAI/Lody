@@ -56,6 +56,24 @@ export type ProjectMemberLocalProjectInput = {
   > & { rootPath?: string };
 };
 
+/** Resolve the source selected by an editor entry point. */
+export function resolveProjectEditorSource(
+  key: string,
+  option: ProjectMemberSourceOption
+): ProjectMemberSource {
+  // Repository aliases are for catalog display, not execution identity. The
+  // chosen folder may even be an older copy omitted from `option.copies`.
+  if (option.localKeys.includes(key)) {
+    const separator = key.indexOf(':', 'local:'.length);
+    return {
+      kind: 'local',
+      machineId: key.slice('local:'.length, separator) as MachineId,
+      localProjectId: key.slice(separator + 1) as LocalProjectId,
+    };
+  }
+  return option.source;
+}
+
 /**
  * Merges every machine's local projects with the workspace's GitHub
  * repositories into picker rows, one per repository.

@@ -154,7 +154,10 @@ abstract quality, diagram accuracy, or genuine human approval.
 A separate pass checks local inline and reference-definition link targets in all
 tracked and untracked non-ignored repository Markdown, including root/contributor
 hubs and archived notes. Dependency/build output is normally ignored by Git; submodule
-contents belong to their own repository. Symlink aliases are skipped in favor of their
+contents belong to their own repository. Links into uninitialized submodules are
+unverified and summarized in one warning; broken links elsewhere or into checked-out
+submodules remain errors. CI checks out submodules recursively to validate those targets.
+Symlink aliases are skipped in favor of their
 canonical files. Heading fragments are not validated. Archived metadata and prose
 are historical, but broken outbound links are reported and may be repaired without
 changing the historical decision. Every canonical `AGENTS.md` must stay within its

@@ -19,7 +19,7 @@ describe('hasBuiltinEnvAuthentication', () => {
 
 describe('supportsBuiltinAuthentication', () => {
   it('allows sign-in for managed built-in agents without env credentials', () => {
-    for (const agentType of ['claude', 'codex', 'kimi', 'grok']) {
+    for (const agentType of ['claude', 'codex', 'kimi', 'grok', 'antigravity']) {
       expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType, env: {} })).toBe(true);
     }
   });
@@ -90,6 +90,10 @@ describe('usesAcpProtocolAuthentication', () => {
     expect(usesAcpProtocolAuthentication('custom')).toBe(true);
     expect(usesAcpProtocolAuthentication('builtin')).toBe(false);
     expect(usesAcpProtocolAuthentication('builtin', 'devin')).toBe(true);
+    expect(usesAcpProtocolAuthentication('builtin', 'sorbet')).toBe(true);
+    expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'sorbet' })).toBe(
+      true
+    );
     expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'devin' })).toBe(false);
     expect(usesAcpProtocolAuthentication(undefined)).toBe(false);
   });
@@ -119,4 +123,14 @@ describe('supportsAuthenticationWhenRequired', () => {
       false
     );
   });
+});
+
+it('offers managed Antigravity browser sign-in without protocol terminal authentication', () => {
+  expect(usesAcpProtocolAuthentication('builtin', 'antigravity')).toBe(false);
+  expect(
+    supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'antigravity', env: {} })
+  ).toBe(true);
+  expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'antigravity' })).toBe(
+    true
+  );
 });

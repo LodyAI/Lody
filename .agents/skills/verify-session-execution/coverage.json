@@ -1,0 +1,87 @@
+{
+  "system": "Session Inbox admission, submission and continuation scheduling",
+  "syncCommit": "55c88e70277942af8b3ebdaf0a0f8897413c7889",
+  "sources": [
+    {
+      "path": "apps/cli/src/orchestration/inbox/service.ts",
+      "sha256": "8eec4a37522b81a05c56cab7560112c87404f8ab5d0fbff9b99c232514a3aef3"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/sqlite.ts",
+      "sha256": "d3e86bbbdc8ddec51cd1b0e94870a2c48665f8dfe48f345248080d4719577ff0"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/execution-owner.ts",
+      "sha256": "3cde37a98d40980efd96eec652c44d4ba7c18544842edff9e632016217ce767f"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/model.ts",
+      "sha256": "e4fa92ac7a1dc39ec93a6680e50d51e719bdf5cc6f0d59d117577c0d4fd2e719"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/rules.ts",
+      "sha256": "94f9808eb526a78720eb599bca5148e86ed3555307fea8af0d85a7fbdf10164d"
+    },
+    {
+      "path": "apps/cli/src/orchestration/inbox/admission-failure.ts",
+      "sha256": "24c654d09c99d5dcfedb1e2aaa64d5a026f2d23783034b0b57aaf71632e98904"
+    },
+    {
+      "path": "apps/cli/src/orchestration/platform/inbox-repository.ts",
+      "sha256": "9ac2c43ce4b0bc60cd0b87f029544c241a164c71f12f599043fc07dcc4d9c327"
+    },
+    {
+      "path": "apps/cli/src/orchestration/storage-error.ts",
+      "sha256": "a0b1dc72d96a2530f67b25d3baaac670f5642a59a7fdc263940a2ebe5da6cbe8"
+    },
+    {
+      "path": "specs/session-orchestration.md",
+      "sha256": "f04df7f36be6c62bf8552f1f0b4fd1dc06d89be382f6b5467f68c870ec79a0ae"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sha256": "d2a5e46040383bc0e67063b5091e01d1109491942465abca5ca476609db0e03a"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "492cd8b9dfc5c4a22c9dd458ebc11d332399f7d2e54970754495108302792a53"
+    },
+    {
+      "path": "apps/cli/src/orchestration/platform/database.ts",
+      "sha256": "716870d42c7ea9c4f532c114849c508e06fd3dc883734786d87a3dd7a8d14165"
+    }
+  ],
+  "bounds": "Two sessions in one workspace/account; one already-submitted A batch with a retained settlement; one B automatic batch/result; one Stop of B; at most two B starts to detect replay. One scanner fiber, a coalesced wake bit, a running-worker latch and per-session admission. No quiesce, host owner handoff, fresh-input replacement or native Agent process.",
+  "limits": "Original scheduling slice is finite: two sessions, one retained A settlement, one B batch/input/Stop and at most two B starts; weak fairness and repeated wake opportunities, B never stopped in progress profile. Expanded slices and exact source limits are in expanded-coverage.json. Real replay uses production service/owner/repository/native SQLite, injected provider start and logger port. Native capacity fixture is not OS disk exhaustion. No full app/replication/authorization/native provider/device acceptance, unbounded refinement or whole-database-outage availability is proved. The sync commit contains every hash-verified product source; the separate verification commit follows it.",
+  "finding": {
+    "id": "INBOX_RETRY_BLOCKS_OTHER_SESSION",
+    "severity": "P1",
+    "status": "fixed-at-verified-product-commit",
+    "path": "apps/cli/src/orchestration/inbox/service.ts",
+    "line": 257,
+    "property": "HealthySessionProgress",
+    "cause": "An unresolved A settlement aborts retrySettlements before scan reaches repo.pending; outer catch reports and returns to Queue.take. Every further wake retries A first and can abort again.",
+    "originalLine": 224
+  },
+  "actions": {
+    "RecordASettlement": "service.ts settle: retain Map receipt before repository.settle; failed write stays retained and wakes scanner; execution-owner.ts finishWork observes the latest outcome",
+    "ReleaseA": "execution-owner.ts finishWork then sqlite.ts release transaction; storage retry evidence survives slot release",
+    "BResultArrives": "sqlite.ts indexCompletion/requestAutomatic in caller completion transaction; workspace/session/user queue and no active B input",
+    "Wake/TakeWake": "service.ts Queue.dropping(1), wake, Queue.take in one scanner fiber",
+    "RetryReceipts/EndFailedScan": "service retrySettlements attempts independent receipts, retains failed entries and combines causes; scan reports failure and continues to pending work. Legacy config restores the former scan-wide abort.",
+    "ReadPending/PrepareBatch": "service.ts scan running.has check and repo.prepare; sqlite.ts prepare atomically fixes membership and intent",
+    "LaunchWorker/BeginB": "service.ts running.add then forkIn; execution-owner.ts makeExecutionOwner and sqlite.ts begin",
+    "RejectWorker/EndWorker": "execution failure reporting and service.ts launch ensuring running.delete; native process life is outside this worker latch",
+    "SubmitB": "service.ts submit per-session/global admission, canSubmit/fence then synchronous start callback; sqlite.ts fence CAS prepared->submitting",
+    "SettleB/UnknownB": "execution-owner.ts finishWork observation plus sqlite.ts settle transaction; failed/ambiguous transport is not replay permission",
+    "ReleaseB/ReleaseStoppedB": "sqlite.ts release transaction; no submission means no result consumption; service wakes after durable slot release",
+    "StopB": "service.ts pause under same admission; sqlite.ts pause cancels prior input and supersedes prepared batch without deleting results"
+  },
+  "abstractionNotes": "Original scheduling slice only. A is initialized in an already-submitted batch context. Repeated failed updates for the same A batch are represented by the latest retained Map entry, not one indivisible pair of writes. One B input/result only; admission and SQL fences are exact boundaries, not a claim that the whole surrounding async method is atomic. The worker latch is separate from durable active execution. No fresh-input/steer/config/host-handoff/native-process/whole-database-outage model.",
+  "expanded": {
+    "coverage": "expanded-coverage.json",
+    "requirements": "requirements.md",
+    "output": "External --out folder: summary.json, raw TLC and source replay logs"
+  },
+  "syncWorkingTree": false
+}

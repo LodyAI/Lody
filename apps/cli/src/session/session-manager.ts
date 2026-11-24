@@ -8,7 +8,11 @@ import {
   projectGroupDirectory,
   resolveProjectGroupRepositories,
 } from './worktree/project-worktrees';
-import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
+import {
+  resolveApprovedOwnerIdentityLegacy,
+  resolveGitIdentityPolicyLegacy,
+} from './git-identity-policy';
+import { sessionUserProfileFromCloud } from './session-user-resolver';
 import {
   acquireSessionCredentialsLegacy,
   nativeSessionCredentials,
@@ -48,6 +52,7 @@ import {
   resolveSessionAcpTargetId,
   type SessionMeta,
   encodeProjectPreparationProgress,
+  isMissingEmail,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
 import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
@@ -74,6 +79,7 @@ import {
   type ManagedRuntimeProgressEvent,
 } from '@/agent/managed-agent-runtime';
 import { buildGitHubCloneUrl, deriveRepoIdFromGitHubRepo, redactUrlAuth } from '@/utils/github';
+import { createSessionPullRequestLinks } from '@/lib/session-pr-links';
 import {
   GitCredentialBroker,
   LODY_GIT_CRED_BROKER_STATE_FILE_ENV,
@@ -133,11 +139,6 @@ import {
 } from '@/lib/local-project-meta';
 import { loadSessionMcpCatalog } from '@/agent/session-mcp-resolver';
 import { waitForMcpCatalogBaseline } from '@/lib/workspace-mcp-store';
-import {
-  claimLegacySpeculativeWorktree,
-  completeLegacySpeculativeWorktreeSetup,
-  recoverLegacySpeculativeWorktrees,
-} from './worktree/legacy-speculative-worktrees';
 
 function formatManagedRuntimeProgressDetail(event: ManagedRuntimeProgressEvent): string {
   const runtimeLabel =
@@ -203,6 +204,13 @@ const tryDeriveGitHubRepoFromUrl = (rawUrl?: string): string | null => {
 const PENDING_CREATE_TERMINATE_TIMEOUT_MS = 300_000;
 const PENDING_CREATE_TERMINATE_TIMED_OUT = Symbol('pending-create-terminate-timed-out');
 
+export type GitIdentityOptions = {
+  preferMachineIdentity: boolean;
+  personalIdentityEnabled: boolean;
+  /** The approved owner's account identity; owner dispatch profiles are placeholders. */
+  personalIdentity?: { name: string; email: string };
+};
+
 type SessionWorktreeTarget = {
   manager: WorktreeManager;
   managerConfig: Omit<WorktreeManagerConfig, 'logger'>;
@@ -220,6 +228,7 @@ export interface ISession {
   getAcpCapabilitySourceVersion?(): string | null;
   getProviderBinding?(): import('./automation-observations').ProviderBinding | undefined;
   getMemoryBinding?(): SessionConfig['memory'];
+  getMcpServerIds?(): Readonly<SessionConfig['mcpServerIds']>;
   getWorkdir(): string;
   /**
    * Host-side working directory for file operations.
@@ -236,6 +245,8 @@ export interface ISession {
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
   terminate(force?: boolean): Promise<void>;
+  /** False once the agent process has exited or termination has started. */
+  hasLiveAgentProcess?(): boolean;
   /**
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
@@ -244,7 +255,7 @@ export interface ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean }
+    options: GitIdentityOptions
   ): void;
   /**
    * Return the already-resolved effective git identity only when it belongs to
@@ -309,6 +320,7 @@ export interface CreateAgentConfig {
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
   onThreadGoalCleared: (threadId: string) => void;
   onSessionTitleUpdate: (title: string) => void;
+  onNativeWorkChanged?: (work: import('../agent/agent-client').NativeAgentWork) => void;
   onAgentWarning: (warning: AgentSessionWarning) => void;
   loadExternalMcpServers: NonNullable<AgentClientOptions['loadExternalMcpServers']>;
   releaseExternalMcpServers?: () => Promise<void>;
@@ -367,6 +379,10 @@ interface SessionManagerEvents {
   ) => void;
   onThreadGoalCleared: (sessionId: SessionId, threadId: string) => void;
   onSessionTitleUpdate: (sessionId: SessionId, title: string) => void;
+  onNativeWorkChanged: (
+    sessionId: SessionId,
+    work: import('../agent/agent-client').NativeAgentWork
+  ) => void;
   onAgentWarning: (sessionId: SessionId, warning: AgentSessionWarning) => void;
   onImageGenerationBegin: (sessionId: SessionId, event: ImageGenerationBeginEvent) => void;
   onImageGenerationEnd: (sessionId: SessionId, event: ImageGenerationEndEvent) => void;
@@ -389,16 +405,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly sessionSandboxFactory: SessionSandboxFactory;
   private readonly cloudPort: CloudPort;
-  private detachSpeculativeWorktreeRecovery: (() => void) | null = null;
-  private speculativeWorktreeRecoveryChain: Promise<void> = Promise.resolve();
   readonly mcpAuthentication: McpAuthenticationLegacy;
-  /** Coalescing latch for {@link enqueueSpeculativeWorktreeRecovery}. */
-  private speculativeWorktreeRecoveryQueued = false;
-  private speculativeWorktreeRecoveryGeneration = 0;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
   private sandboxRebalanceChain: Promise<void> = Promise.resolve();
+  private readonly archiveObservations = new Map<
+    SessionId,
+    { done: Promise<void>; repeat: boolean }
+  >();
   private readonly nativeArchiveJobs = new Map<SessionId, Promise<unknown>>();
   // Shutdown aborts archive transitions, whose ACP children do not belong to a Session.
   private readonly archiveTransitionLifetime = new AbortController();
@@ -612,64 +627,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async initialize(): Promise<void> {
-    const recoveryGeneration = ++this.speculativeWorktreeRecoveryGeneration;
-    this.detachSpeculativeWorktreeRecovery?.();
-    this.detachSpeculativeWorktreeRecovery = this.workspaceDocument.onMetaRoomSynced((reason) => {
-      if (this.speculativeWorktreeRecoveryGeneration === recoveryGeneration) {
-        this.enqueueSpeculativeWorktreeRecovery(`meta-room-synced:${reason}`);
-      }
-    });
-    void this.workspaceDocument
-      .waitUntilMetaSynced({ reason: 'legacy-speculative-worktree-recovery' })
-      .then((synced) => {
-        if (synced && this.speculativeWorktreeRecoveryGeneration === recoveryGeneration) {
-          this.enqueueSpeculativeWorktreeRecovery('initialize');
-        }
-      })
-      .catch((error: unknown) => {
-        this.logger.debug(
-          `Failed to wait for metadata sync before speculative worktree recovery: ${formatErrorMessage(
-            error
-          )}`
-        );
-      });
     this.logger.debug('Session manager initialized');
-  }
-
-  private enqueueSpeculativeWorktreeRecovery(reason: string): void {
-    // Bound a burst to one running + one queued pass. This is an O(sessions)
-    // filesystem sweep on a recovery signal, and without a latch every
-    // transport edge appended another full pass to the chain — the dispatch
-    // bootstrap scan has had this latch all along, this one was missing it.
-    if (this.speculativeWorktreeRecoveryQueued) {
-      return;
-    }
-    this.speculativeWorktreeRecoveryQueued = true;
-    this.speculativeWorktreeRecoveryChain = this.speculativeWorktreeRecoveryChain
-      .then(async () => {
-        // Released before the sweep runs, so a signal arriving DURING it still
-        // gets its own follow-up pass and nothing is silently skipped.
-        this.speculativeWorktreeRecoveryQueued = false;
-        await recoverLegacySpeculativeWorktrees({
-          workspaceId: this.workspaceId,
-          machineId: this.machineId,
-          logger: this.logger,
-          isActiveSession: (sessionId) =>
-            this.pendingSessionCreates.has(sessionId) || this.sessions.has(sessionId),
-          isDurableSession: async (sessionId) => {
-            const record = await this.workspaceDocument.repo.getDocMeta(
-              getSessionRoomId(sessionId)
-            );
-            return !!record?.meta && !isLoroRepoDocDeleted(record);
-          },
-        });
-      })
-      .catch((error: unknown) => {
-        this.speculativeWorktreeRecoveryQueued = false;
-        this.logger.debug(
-          `Failed speculative worktree recovery (${reason}): ${formatErrorMessage(error)}`
-        );
-      });
   }
 
   private buildCreateAgentConfig(
@@ -801,6 +759,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onThreadGoalUpdated: (goal) => this.emit('onThreadGoalUpdated', sessionId, goal),
       onThreadGoalCleared: (threadId) => this.emit('onThreadGoalCleared', sessionId, threadId),
       onSessionTitleUpdate: (title) => this.emit('onSessionTitleUpdate', sessionId, title),
+      onNativeWorkChanged: (work) => {
+        if (this.sessions.get(sessionId) === session)
+          this.emit('onNativeWorkChanged', sessionId, work);
+      },
       onAgentWarning: (warning) => this.emit('onAgentWarning', sessionId, warning),
       loadExternalMcpServers: () =>
         loadSessionMcpCatalog({
@@ -834,16 +796,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     await this.freezeCodexProfile(config);
     signal?.throwIfAborted();
     if (config.sessionId && agentStart?.resumeSessionId && !agentStart.forkSessionId) {
-      try {
-        const warning = await this.syncNativeSessionArchive(config.sessionId, false, signal);
-        if (warning) this.emit('onAgentWarning', config.sessionId, warning);
-      } catch (error) {
-        this.reportNativeArchiveFailure(config.sessionId, error);
-      }
+      await this.archiveObservations.get(config.sessionId)?.done;
       signal?.throwIfAborted();
     }
     const credentials = await this.prepareGitHubRepoSessionConfig(config);
     let session: Session | undefined;
+    let usageState: 'starting' | 'active' | 'failed' = 'starting';
+    const pendingUsage: Parameters<CreateAgentConfig['onUsageUpdate']>[] = [];
     try {
       const requestedResumeSessionId = agentStart?.resumeSessionId;
       const requestedForkSessionId = agentStart?.forkSessionId;
@@ -961,21 +920,26 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       publishAcpStep('spawn');
       this.logger.debug(`[${sessionId}] About to call session.createAgent`);
       try {
+        const agentConfig = this.buildCreateAgentConfig(session, config, launch, {
+          resumeSessionId: requestedResumeSessionId,
+          forkSessionId: requestedForkSessionId,
+          forkSessionTurnId: requestedForkSessionTurnId,
+          abortSignal: signal,
+          onStartupStage: (event) => {
+            if (event.type === 'initialize_start') {
+              publishAcpStep('initialize');
+            } else if (event.type === 'new_session_start') {
+              publishAcpStep('new-session');
+            }
+          },
+        });
+        const deliverUsage = agentConfig.onUsageUpdate;
+        agentConfig.onUsageUpdate = (usage, accountingId) => {
+          if (usageState === 'starting') pendingUsage.push([usage, accountingId]);
+          else if (usageState === 'active') deliverUsage(usage, accountingId);
+        };
         acpSessionId = await withSlowOperationWarning(
-          session.createAgent(
-            this.buildCreateAgentConfig(session, config, launch, {
-              resumeSessionId: requestedResumeSessionId,
-              forkSessionId: requestedForkSessionId,
-              forkSessionTurnId: requestedForkSessionTurnId,
-              onStartupStage: (event) => {
-                if (event.type === 'initialize_start') {
-                  publishAcpStep('initialize');
-                } else if (event.type === 'new_session_start') {
-                  publishAcpStep('new-session');
-                }
-              },
-            })
-          ),
+          session.createAgent(agentConfig),
           this.logger,
           `session.createAgent(resume=${requestedResumeSessionId ? 'yes' : 'no'})`,
           sessionId
@@ -1032,6 +996,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       if (!agentStart?.deferAcpSessionIdPersistence) {
         await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
       }
+      signal?.throwIfAborted();
+      usageState = 'active';
+      for (const [usage, accountingId] of pendingUsage) {
+        if (usage.sessionId === acpSessionId) {
+          this.emit('onUsageUpdate', {
+            sessionId,
+            acpSessionId: acpSessionId as ACPSessionId,
+            usage,
+            accountingId,
+          });
+        }
+      }
+      pendingUsage.length = 0;
       this.logger.debug(`[${sessionId}] ACP session ID persisted to doc`);
       this.logger.debug(
         `[${sessionId}] ACP session established (acpSessionId=${acpSessionId ?? 'unknown'})`
@@ -1039,6 +1016,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(`[${sessionId}] createSessionInnerWithAgent returning session`);
       return session;
     } catch (error) {
+      usageState = 'failed';
+      pendingUsage.length = 0;
       // Cleanup runs to the end and never replaces the start failure: callers
       // classify that error (auth, resume, transient) to decide what happens next.
       if (session) {
@@ -1119,26 +1098,49 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /**
    * Commit identity follows the same precedence as GitHub credentials: a
-   * requester who enabled "Act as you" commits as themselves; otherwise the
-   * machine owner may use the machine's global Git identity. Policy lookup
-   * failures degrade to "not enabled" rather than blocking the turn.
+   * requester who approved "Act as you" commits as themselves; otherwise the
+   * machine owner keeps the machine's Git configuration, and everyone else
+   * commits as LodyAI. Lookup failures degrade to "not approved" rather than
+   * blocking the turn.
    */
   async resolveGitIdentityOptions(
     requesterUserId: string,
     signal?: AbortSignal,
     sessionId?: SessionId
-  ): Promise<{ preferMachineIdentity: boolean; personalIdentityEnabled: boolean }> {
+  ): Promise<GitIdentityOptions> {
     signal?.throwIfAborted();
     const preferMachineIdentity = requesterUserId === this.cloudPort.identity.userId;
     const tokenManager = this.getGitHubTokenManager();
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
+    const context = sessionId ?? 'git-identity';
     const policy = await resolveGitIdentityPolicyLegacy(
-      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
+      (attemptSignal) =>
+        tokenManager.getCredentialPolicy(
+          { requesterUserId, machineId: this.machineId },
+          attemptSignal
+        ),
       this.logger,
-      sessionId ?? 'git-identity',
+      context,
       signal
     );
-    return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
+    if (!policy.personalEnabled || !preferMachineIdentity) {
+      return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
+    }
+    const personalIdentity = await resolveApprovedOwnerIdentityLegacy(
+      async () => {
+        const profile = await this.cloudPort.access.resolveWorkspaceUser({
+          workspaceId: this.workspaceId,
+          userId: requesterUserId,
+        });
+        if (!profile) return null;
+        const { name, email } = sessionUserProfileFromCloud(requesterUserId, profile);
+        return isMissingEmail(email) ? null : { name, email };
+      },
+      this.logger,
+      context,
+      signal
+    );
+    return { preferMachineIdentity, personalIdentityEnabled: true, personalIdentity };
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {
@@ -1199,7 +1201,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const brokerEnv = await this.ensureGitCredentialBrokerEnv();
     if (!brokerEnv) return nativeSessionCredentials;
     if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
-    const credentialOwner = await this.resolveGitHubOwner(config.sessionId, config.requesterUserId);
+    const credentialOwner = await this.resolveGitHubOwner(
+      config.sessionId,
+      config.resume ? undefined : config.requesterUserId
+    );
     const broker = this.gitCredentialBroker;
     if (!broker) throw new Error('GitHub credential broker is required');
     const credentials = acquireSessionCredentialsLegacy(broker, {
@@ -1290,16 +1295,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   }
 
-  private async resolveGitHubOwner(sessionId: SessionId, initialOwner: string): Promise<string> {
+  private async resolveGitHubOwner(sessionId: SessionId, initialOwner?: string): Promise<string> {
     const record = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
     const owner = record?.meta?.userId;
     if (typeof owner === 'string' && owner) return owner;
-    if (record?.meta) throw new Error('GitHub session owner is missing');
+    if (record?.meta || !initialOwner) throw new Error('GitHub session owner is missing');
     // A new session has not published metadata yet; its creator is the owner.
     return initialOwner;
   }
 
-  async validateSessionCredentials(session: ISession, requesterUserId: string): Promise<void> {
+  async validateSessionCredentials(
+    session: ISession,
+    requesterUserId: string,
+    ownerChange?: 'replace-before-prompt'
+  ): Promise<void | 'retired'> {
     await session.validateMcpRequester?.(requesterUserId);
     const credentials = session.getGitHubCredentials();
     if (credentials.mode === 'native') return;
@@ -1311,20 +1320,27 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     ) {
       throw new GitCredentialContextError({ message: 'github_runtime_context_invalid' });
     }
-    const owner = await this.resolveGitHubOwner(session.sessionId, requesterUserId);
+    const owner = await this.resolveGitHubOwner(
+      session.sessionId,
+      lease.context.requesterUserId === requesterUserId ? requesterUserId : undefined
+    );
     // The runtime may have been retired while trusted metadata was loading.
     if (!lease.active)
       throw new GitCredentialContextError({ message: 'github_runtime_context_released' });
     if (lease.context.requesterUserId !== owner) {
+      const replace =
+        ownerChange === 'replace-before-prompt' && this.getSession(session.sessionId) === session;
       try {
         lease.revoke();
       } finally {
-        await session.terminate(true);
+        if (replace) {
+          await this.retireSessionForReconfiguration(session);
+        } else {
+          await session.terminate(true);
+        }
       }
-      throw new GitCredentialContextError({
-        message:
-          'github_owner_changed: previous session processes were closed; start a new turn with the new owner',
-      });
+      if (replace) return 'retired';
+      throw new GitCredentialContextError({ message: 'github_owner_changed' });
     }
   }
 
@@ -1364,11 +1380,26 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       return null;
     }
     if (!this.gitCredentialBroker) {
+      const pullRequestLinks = createSessionPullRequestLinks({
+        store: this.workspaceDocument.repo,
+        machineId: this.machineId,
+      });
       this.gitCredentialBroker = new GitCredentialBroker({
         tokenManager,
         workspaceId: this.workspaceId,
         logger: this.logger,
         ownerUserId: this.cloudPort.identity.userId ?? undefined,
+        // The broker's own workspace and this machine: a context token from
+        // another workspace never resolves here.
+        reportPullRequest: async (context, url) => {
+          if (context.machineId !== this.machineId)
+            return { linked: false, reason: 'not_this_machine' };
+          const result = await pullRequestLinks.link(context.sessionId, url, 'shim');
+          this.logger.debug(
+            `[Lody GitHub] PR report for session ${context.sessionId}: ${result.linked ? 'linked' : 'reason' in result ? result.reason : 'unlinked'}`
+          );
+          return result;
+        },
       });
     }
     try {
@@ -1676,10 +1707,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const repoId = config.repoId;
     this.reportStartStage(config, 'workdir');
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(config.sessionId!);
+    const sessionMeta = await sessionDoc.getMetaState();
+    config.agentRoleId = sessionMeta?.agentRoleId;
+    config.openedBySessionId = sessionMeta?.openedBySessionId;
     const ownerDoc = config.parentSessionId
       ? await this.workspaceDocument.getOrCreateSessionDoc(config.parentSessionId)
       : sessionDoc;
-    config.projectRun = (await ownerDoc.getMetaState())?.projectRun ?? config.projectRun;
+    const ownerMeta = config.parentSessionId ? await ownerDoc.getMetaState() : sessionMeta;
+    config.projectRun = ownerMeta?.projectRun ?? config.projectRun;
     if (config.projectRun)
       await config.authorizeExecutionInputs?.({ projectRun: config.projectRun });
     if (config.githubRepo && !config.projectRun)
@@ -1758,25 +1793,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Preparing worktree (repoId=${worktreeTarget.managerConfig.repoId} sessionId=${config.sessionId}) in host`
       );
-      // An older daemon may have prepared this Session's worktree for a draft.
-      // Claim before probing the directory: a mismatched one is removed here.
-      const legacyTarget = {
-        repoId: worktreeTarget.managerConfig.repoId,
-        source: worktreeTarget.managerConfig.source ?? {
-          kind: 'github' as const,
-          repoUrl: worktreeTarget.managerConfig.repoUrl,
-        },
-        ...(config.branch ? { baseBranch: config.branch } : {}),
-      };
-      const legacyClaim = await claimLegacySpeculativeWorktree({
-        sessionId: config.sessionId!,
-        workspaceId: config.workspaceId,
-        machineId: this.machineId,
-        target: legacyTarget,
-        restoreBranchName: config.restoreBranchName,
-        logger: this.logger,
-      });
-      const legacySetupPending = legacyClaim === 'setup-pending';
       const worktreeAlreadyExisted = worktreeManager.hasWorktree(config.sessionId!);
       const worktreeInfo = await worktreeManager.createWorktree(
         config.sessionId!,
@@ -1798,7 +1814,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.debug(
         `[${config.sessionId}] Worktree details (branch=${worktreeInfo.branch} head=${worktreeInfo.headSha ?? 'unknown'}): host=${worktreeInfo.hostPath}`
       );
-      if (config.resume && worktreeAlreadyExisted && !legacySetupPending) {
+      if (config.resume && worktreeAlreadyExisted) {
         this.logger.debug(
           `[${config.sessionId}] Skipping worktree setup for restored session because the worktree already exists`
         );
@@ -1833,13 +1849,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             onEnd: (event) => setupHistory.onEnd?.(event),
           },
         });
-        if (legacySetupPending) {
-          await completeLegacySpeculativeWorktreeSetup({
-            sessionId: config.sessionId!,
-            workspaceId: config.workspaceId,
-            machineId: this.machineId,
-          });
-        }
       }
     } else if (config.parentSessionId) {
       const parentSessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(
@@ -1877,11 +1886,23 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /** Retire an instance between prompts without ending its execution owner's turn. */
   async retireSessionForReconfiguration(session: ISession): Promise<void> {
-    if (this.sessions.get(session.sessionId) !== session)
-      throw new Error('Session changed before reconfiguration');
-    // Reconfiguration and stale-prompt replacement preserve the live history owner.
+    const current = this.sessions.get(session.sessionId);
+    if (!current || current !== session) throw new Error('Session changed before reconfiguration');
+    // Suppress agent-death events for the continuing turn. Keep custody of the
+    // exact instance until physical retirement succeeds, including on failure.
+    this.sessionEventDetachers.get(session)?.();
+    this.sessionEventDetachers.delete(session);
+    try {
+      await session.terminate(true);
+    } catch (error) {
+      if (
+        this.sessions.get(session.sessionId) === current &&
+        !this.sessionEventDetachers.has(current)
+      )
+        this.registerSessionEvents(current);
+      throw error;
+    }
     this.detachSession(session);
-    await session.terminate(true);
   }
 
   async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {
@@ -1896,9 +1917,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async cleanUp(options: { keepWorkspaceDocumentOpen?: boolean } = {}) {
-    this.speculativeWorktreeRecoveryGeneration += 1;
-    this.detachSpeculativeWorktreeRecovery?.();
-    this.detachSpeculativeWorktreeRecovery = null;
     const failures: unknown[] = [];
     const attempt = async (step: () => Promise<unknown>) => {
       try {
@@ -1907,7 +1925,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         failures.push(error);
       }
     };
-    await attempt(() => this.speculativeWorktreeRecoveryChain);
     // Archive transitions record failures before MessageHandler's final flush.
     await Promise.all([
       attempt(() => this.cleanupSessions()),
@@ -2034,18 +2051,49 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return childSessionIds;
   }
 
+  isArchiveInFlight(sessionId: SessionId): boolean {
+    return this.archiveObservations.has(sessionId);
+  }
+
+  observeArchiveChange(sessionId: SessionId, reconcile: () => Promise<void>): Promise<void> {
+    const existing = this.archiveObservations.get(sessionId);
+    if (existing) {
+      existing.repeat = true;
+      return existing.done;
+    }
+
+    const observation = { repeat: false, done: Promise.resolve() };
+    observation.done = Promise.resolve().then(async () => {
+      try {
+        do {
+          observation.repeat = false;
+          await reconcile();
+        } while (observation.repeat);
+      } finally {
+        this.archiveObservations.delete(sessionId);
+      }
+    });
+    this.archiveObservations.set(sessionId, observation);
+    return observation.done;
+  }
+
   /**
    * Native sync, its warning and the Lody document release form one transition,
    * so a restore queued behind it never receives a destroyed document.
    */
   async archiveSession(
     sessionId: SessionId,
-    options: { recordWarning?: (warning: AgentSessionWarning) => Promise<void> } = {}
+    options: {
+      releaseFailure?: string;
+      recordWarning?: (warning: AgentSessionWarning) => Promise<void>;
+    } = {}
   ): Promise<void> {
     await this.enqueueArchiveTransition(sessionId, undefined, async (signal) => {
       let warning: AgentSessionWarning | undefined;
       try {
-        warning = await this.applyNativeSessionArchive(sessionId, true, signal);
+        warning = options.releaseFailure
+          ? this.nativeArchiveFailureWarning(sessionId, options.releaseFailure)
+          : await this.applyNativeSessionArchive(sessionId, true, signal);
       } catch (error) {
         warning = this.nativeArchiveFailureWarning(sessionId, error);
       }
@@ -2101,7 +2149,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /** Cancels archive transitions and waits for their ACP process cleanup. */
   private async joinArchiveTransitions(): Promise<void> {
     this.archiveTransitionLifetime.abort();
-    const transitions = [...this.nativeArchiveJobs.values()];
+    const transitions = [
+      ...this.nativeArchiveJobs.values(),
+      ...Array.from(this.archiveObservations.values(), ({ done }) => done),
+    ];
     if (!transitions.length) return;
     await withTimeout(
       Promise.allSettled(transitions),
@@ -2284,6 +2335,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.sessionEventDetachers.get(session)?.();
     this.sessionEventDetachers.delete(session);
     if (this.sessions.get(session.sessionId) === session) {
+      this.emit('onNativeWorkChanged', session.sessionId, null);
       this.sessions.delete(session.sessionId);
       void this.rebalanceSessionSandboxes().catch((cause: unknown) =>
         this.logger.warn(`Sandbox rebalance after detach failed: ${formatErrorMessage(cause)}`)

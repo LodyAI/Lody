@@ -13,6 +13,17 @@ import type { RoomSyncState } from '@/lib/room-sync-state';
 export const lodyPresenceStatesAtom = atom<LodyPresenceStateMap>({});
 export const lodyPresenceNowMsAtom = atom(getServerNow());
 
+/** How long a machine stays presumed online after its last heartbeat while presence is unknown. */
+export const MACHINE_RECENTLY_ONLINE_MS = 10 * 60 * 1000;
+
+/**
+ * Last time this client saw each machine online. Presence is ephemeral and durable
+ * `lastSeen` is gone, so this memory lasts only as long as the renderer: a cold start
+ * has no record. Clearing the presence snapshot keeps it, because a restart is exactly
+ * when the record is needed.
+ */
+const machineLastOnlineMsAtom = atom<ReadonlyMap<MachineId, number>>(new Map());
+
 /**
  * Display health of the workspace presence transport (the ephemeral Streams
  * room). This is the raw transport state except that a brief in-place reconnect
@@ -56,6 +67,10 @@ const setsEqual = (a: ReadonlySet<MachineId>, b: ReadonlySet<MachineId>): boolea
  *
  * Recomputes on every presence snapshot and on the 30s presence-now tick, so
  * consumers do not need their own recheck timers.
+ *
+ * Membership is evidence of online; absence is not evidence of offline, because
+ * an unsynced room has no heartbeats. Anything that concludes "offline" or blocks
+ * work must read the three-state `machineOnlineStatusAtomFamily` or check sync.
  */
 let _prevOnlineMachineIds: ReadonlySet<MachineId> = new Set();
 export const onlineMachineIdsAtom = atom<ReadonlySet<MachineId>>((get) => {
@@ -67,6 +82,32 @@ export const onlineMachineIdsAtom = atom<ReadonlySet<MachineId>>((get) => {
     return _prevOnlineMachineIds;
   }
   _prevOnlineMachineIds = next;
+  return next;
+});
+
+/**
+ * Machines to treat as online when a surface must give a yes/no answer, currently
+ * Role availability and machine deletion. A synced room is authoritative. While
+ * presence is unknown, a machine counts as online if this client saw it within
+ * {@link MACHINE_RECENTLY_ONLINE_MS}; otherwise it counts as offline.
+ */
+let _prevPresumedOnlineMachineIds: ReadonlySet<MachineId> = new Set();
+export const presumedOnlineMachineIdsAtom = atom<ReadonlySet<MachineId>>((get) => {
+  const online = get(onlineMachineIdsAtom);
+  if (get(lodyPresenceSyncStateAtom) === 'synced') {
+    return online;
+  }
+  const nowMs = get(lodyPresenceNowMsAtom);
+  const next = new Set(online);
+  for (const [machineId, lastOnlineMs] of get(machineLastOnlineMsAtom)) {
+    if (nowMs - lastOnlineMs <= MACHINE_RECENTLY_ONLINE_MS) {
+      next.add(machineId);
+    }
+  }
+  if (setsEqual(next, _prevPresumedOnlineMachineIds)) {
+    return _prevPresumedOnlineMachineIds;
+  }
+  _prevPresumedOnlineMachineIds = next;
   return next;
 });
 
@@ -91,13 +132,26 @@ export const machineOnlineStatusAtomFamily = atomFamily((machineId?: MachineId) 
   })
 );
 
+const recordOnlineMachinesAtom = atom(null, (get, set) => {
+  const online = get(onlineMachineIdsAtom);
+  if (online.size === 0) return;
+  const nowMs = get(lodyPresenceNowMsAtom);
+  const next = new Map(get(machineLastOnlineMsAtom));
+  for (const machineId of online) {
+    next.set(machineId, nowMs);
+  }
+  set(machineLastOnlineMsAtom, next);
+});
+
 export const setLodyPresenceStatesAtom = atom(null, (_get, set, states: LodyPresenceStateMap) => {
   set(lodyPresenceNowMsAtom, getServerNow());
   set(lodyPresenceStatesAtom, states);
+  set(recordOnlineMachinesAtom);
 });
 
 export const setLodyPresenceNowMsAtom = atom(null, (_get, set, nowMs?: number) => {
   set(lodyPresenceNowMsAtom, nowMs ?? getServerNow());
+  set(recordOnlineMachinesAtom);
 });
 
 export const setLodyPresenceSyncStateAtom = atom(null, (_get, set, state: RoomSyncState) => {

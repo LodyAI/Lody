@@ -49,8 +49,11 @@
 保存工作区签名记录的只追加日志，是协议在权限上唯一依赖的远端写入。
 
 - `read(anchor)` 返回从创世开始的全部记录，以及日志自称的检查点。库会重新验证全部内容。
+- 可选的 `readFrom(anchor, base)` 只返回已验证视图之后的未可信后缀。提交工作流
+  验证后缀与检查点；适配器未实现、父记录不匹配或保留历史不覆盖旧 pin 时，
+  使用 `read`。服务端状态不能证明提交成功。
 - `appendCas(anchor, expected, record)` **仅当**日志仍以 `expected` 结尾时才追加，绝不能无条件追加。同样的字节追加两次必须是幂等的或被拒绝。
-- 失败为 `LedgerLogError`。任何失败之后库都会回读以确认结果，因此响应丢失是安全的。
+- 失败为 `LedgerLogError`。库会回读以确认不确定的结果。只有明确证明未发送的首次自助操作限流拒绝可以释放原始记录；响应丢失始终保留原始记录以供重试。
 
 ### LedgerFeedSource
 
@@ -77,6 +80,17 @@
 ### RecoveryVaultStore
 
 保存加密的恢复 vault：不可变条目，加上通过比较并交换替换的索引。它从不接收解锁秘密、vault 主密钥或恢复私钥。线上格式在 `@lody/e2ee-core/host`；见[后端指南](backend-guide.zh.md#5-恢复-vault)。
+
+可选 `RecoveryVaultStore.readEntries` 按请求顺序读取 1–8 个不同 id，缺失为 null，
+密文体总量最多 256 KiB。密码解锁用它读取固定八槽，核对数量与 id 后仍执行原候选选择、
+Argon2id、当前索引认证和回滚检查。适配器只在旧部署明确缺少端点时，回退到四并发的原读取；
+其他拒绝或错误响应仍是失败。
+
+`RecoveryVault.readEntry` 在会话锁内取得本次读取独有的临时主密钥副本，
+随后释放锁再获取不可变密文。单个工作区的包读取缓慢，不会挡住其他包读取
+或索引访问。读取端在操作真正结束后清理副本（失败也清理）；关闭保险库
+先停止新读取，再等待已接纳的读取结束。索引写入的串行顺序、本地和远端
+CAS 保持不变。返回的包仍由调用方持有，使用后必须清理。
 
 ## 平台端口
 
@@ -150,6 +164,9 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 ### LedgerSync
 
+可选 `ingest(page, checkpoint)` 将内联原件交给普通读取所用的同一个 feed，验证后持久化。
+调用方提供独立检查点及当前精确请求位置；此入口不授予权限，也不证明新鲜度。
+
 `refresh()` 独立选择目标检查点，并把本地 feed 读到该检查点；`current()` 返回已存状态。`WorkspaceControl` 与 `E2eeWorkspace` 使用它，工作区由它派生 `LedgerViewSource`。
 
 ## 本地存储端口
@@ -179,6 +196,8 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 
 `LedgerFeedStore.rebase` 比对完整的预期末尾，在同一事务内替换起点和长度、删除
 已覆盖记录，并写入和读回核对新末尾。末尾不符返回 conflict，不修改数据。
+可选的 `rebuild` 在工作流独立重放并证明最高检查点后，以同样的原子方式替换
+缓存；它不修改 pin 或其他日志。
 
 ## 浏览器曲线适配
 
@@ -189,6 +208,10 @@ ClientKeyCustody 仅提供 status/create/wrap/unwrap/delete。status 不创建�
 句柄仅在当前 isolate 内供 core HPKE 使用，不能导出、structured-clone 或交给原生
 WebCrypto。close 立即拒绝新操作，等待已准入 HPKE 真正完成后清理私钥；Scope
 释放会自动 close。此适配不提供持久保护、设备批准或主机准入。
+`withTransportSeed(open)` 是唯一一个用途受限的种子交接：把 Ed25519 种子的副本交给
+移动端原生 iroh 打开函数（其 EndpointId 就是这把签名公钥），`open` 结束后擦除副本，
+close 之后拒绝，close 会等待已准入的交接完成。打开函数不可中断，调用方用
+`acquireRelease` 获取其资源。宿主不得交给任何其他调用方。
 
 ## 浏览器账本与原件存储
 
@@ -229,11 +252,14 @@ WebKit 测试不能替代 iOS 16.4 实机或断电验收，也不保证浏览器
 
 ## 浏览器保管与安装
 
-`browserClientWriter({ accountId, workspaceId })` 在 `WorkspaceScope` 下提供
+`browserClientWriter({ accountId, workspaceId, queueTimeout? })` 在 `WorkspaceScope` 下提供
 `ClientCustodyWriter`。宿主先进入 `writer.run` 再分配安装，持有到有限的本地保护/
 存储工作真正结束，网络等待前释放。Web Lock 按 origin 内账号/工作区/genesis 跨
-标签页和 Worker 互斥，不按数据库名或设备分锁。忙时 conflict，不排队、不抢占。
-仅持锁的同一 fiber 可重入；子 fiber 必须自己拿物理锁，父 fiber 持有期间返回 conflict。
+标签页和 Worker 互斥，不按数据库名或设备分锁。同一标签页的调用先按顺序排队再申请锁，
+内容读取不会和同标签页的密钥轮撞上；等待上限为 `queueTimeout`（默认 15 秒，`0` 表示
+不等待），超时、被中断或写者关闭时结束，以 conflict 失败。其他标签页遇到锁忙立即
+conflict。任何情况下都不抢占持有者，也不对持有者计时。
+仅持锁的同一 fiber 可重入；子 fiber 必须自己拿物理锁，父 fiber 持有期间立即返回 conflict。
 关闭阻止新调用，等待实际原生调用结束。
 
 `indexedDbClientInstallationStore(options)` 先捕获稳定作用域，再由宿主读取身份。
@@ -300,3 +326,5 @@ strict durability 仍只是提示；这些测试不证明 iOS 16.4 真机、断�
 端口不包含私有 credential、授权判断、网络操作，也不在 IDB 事务内等待密码/网络。
 可选 [`@lody/e2ee-client`](../../e2ee-client/README.zh.md) host 负责证明验证、实际
 保管读回、审批、当前成员状态及确认/ACK。
+
+`SubmissionJournal.prepare` 返回新槽位的唯一修订号；同一待定原件返回 null。`observe` 每次推进修订号（检查点不变也推进）；`rejectUnsent` 仅在原件、检查点、修订号全部匹配且未完成时清理槽位，保留 pin。只有 P09 已确认首次尝试在 CAS 前限流的流程使用它。

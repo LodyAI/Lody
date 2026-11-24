@@ -1,3 +1,10 @@
+import {
+  captureStoredHistory,
+  matchesRollbackReceipt,
+  prepareReplacement,
+  prepareStoredHistoryCopy,
+} from '@lody/shared/history-writer';
+import { isMissingHistoryUserTurn } from '@lody/shared';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { readRoostHistoryPatches } from './roost-history-patches';
@@ -15,16 +22,13 @@ import {
   type SessionPlanEntry,
   type SessionHistoryInput,
   type SessionGoalMessage,
-  captureStoredHistory,
-  prepareStoredHistoryCopy,
-  matchesRollbackReceipt,
-  prepareReplacement,
   HistoryEntryWriteSchema,
   HistoryWriteError,
   parseHistoryWrite,
   PermissionOutcomeSchema,
   isSessionHistoryStatusAwaitingStart,
   createReplayPromptBuilder,
+  type SessionHistoryChanges,
   type SessionHistoryInspectionQuery,
   type SessionHistoryReadResponse,
 } from '@lody/shared';
@@ -91,6 +95,11 @@ import {
   type RoostSessionBackendServices,
 } from './roost-session-backend';
 import { adaptRoostProjectedMessage, encodeRoostContent } from './roost-history-port';
+import {
+  readInlineRoostHistory,
+  RoostHistoryCatchup,
+  type RoostCatchupQuery,
+} from './roost-history-catchup';
 import { registerSessionBackendFactory } from './session-backend';
 import { RoostHistoryGeneration } from './roost-history-generation';
 import { RoostHistoryHead } from './roost-history-head';
@@ -108,7 +117,11 @@ import {
   type SessionDispatchSelection,
   type SessionDispatchSelector,
 } from './session-dispatch-history';
-import { createRoostHistoryChanges } from './roost-history-changes';
+import {
+  createRoostHistoryChanges,
+  roostCheckpointCursor,
+  ROOST_HISTORY_RECEIPT_PAGE_SIZE,
+} from './roost-history-changes';
 import {
   roostContentPatches,
   agentReceiptPut,
@@ -153,23 +166,23 @@ const defaultDatabase = (): string =>
   process.env.LODY_ROOST_DB_PATH?.trim() ||
   join(getLodyDataDir(undefined, homedir()), 'roost-history.sqlite3');
 
-let ownerPool:
-  | {
-      key: string;
-      client: RoostNativeClient;
-      owner: Uint8Array;
-      projectionLanes: Semaphore.Semaphore;
-      refs: number;
-      closePromise?: Promise<void>;
-    }
-  | undefined;
+type OwnerPool = {
+  client: RoostNativeClient;
+  owner: Uint8Array;
+  projectionLanes: Semaphore.Semaphore;
+  refs: number;
+};
+const ownerPools = new Map<string, OwnerPool>();
 
 const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerLease> => {
   const dbPath = resolve(options.dbPath ?? defaultDatabase());
   const seed = await loadRoostOwnerSeedLegacy(dbPath, options.seed);
   const owner = Identity.fromSeed(seed).owner();
-  const key = `${dbPath}:${bytesHex(owner)}`;
-  if (ownerPool?.key === key && !ownerPool.closePromise) {
+  const key = dbPath;
+  const ownerPool = ownerPools.get(key);
+  if (ownerPool) {
+    if (bytesHex(ownerPool.owner) !== bytesHex(owner))
+      throw new Error('Roost owner identity changed while open');
     ownerPool.refs += 1;
     return {
       client: ownerPool.client,
@@ -178,7 +191,6 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
       release: async () => releaseOwner(key),
     };
   }
-  if (ownerPool) await releaseOwnerUnlocked(ownerPool.key, true);
   await mkdir(dirname(dbPath), { recursive: true });
   const client = new RoostNativeClient({
     dbPath,
@@ -211,7 +223,7 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
   const projectionLanes = Effect.runSync(
     Semaphore.make(Math.max(1, Math.min(8, Math.floor((options.maxQueuedRequests ?? 32) / 2))))
   );
-  ownerPool = { key, client, owner, projectionLanes, refs: 1 };
+  ownerPools.set(key, { client, owner, projectionLanes, refs: 1 });
   return {
     client,
     owner: owner.slice(),
@@ -234,23 +246,19 @@ const acquireOwner = (options: RoostNativeOptions): Promise<OwnerLease> => {
   return serializeOwnerTransition(() => acquireOwnerUnlocked(options));
 };
 
-const releaseOwnerUnlocked = async (key: string, force = false): Promise<void> => {
-  if (!ownerPool || ownerPool.key !== key) return;
-  if (!force) ownerPool.refs = Math.max(0, ownerPool.refs - 1);
-  if (!force && ownerPool.refs > 0) return;
-  const current = ownerPool;
-  ownerPool = undefined;
-  current.closePromise ??= current.client.close();
-  try {
-    await current.closePromise;
-  } catch (error) {
-    reportRoostHistoryFailure(error, { stage: 'close' });
-    throw error;
-  }
-};
-
-const releaseOwner = (key: string, force = false): Promise<void> =>
-  serializeOwnerTransition(() => releaseOwnerUnlocked(key, force));
+const releaseOwner = (key: string): Promise<void> =>
+  serializeOwnerTransition(async () => {
+    const pool = ownerPools.get(key);
+    if (!pool || --pool.refs > 0) return;
+    try {
+      await pool.client.close();
+    } catch (error) {
+      reportRoostHistoryFailure(error, { stage: 'close' });
+      throw error;
+    } finally {
+      ownerPools.delete(key);
+    }
+  });
 
 const clone = <T>(value: T): T => structuredClone(value);
 
@@ -284,10 +292,13 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const identityKey = (identity: { businessId: string; segmentId: string }): string =>
   `${identity.businessId}\u0000${identity.segmentId}`;
 
+const historyCatchup = new RoostHistoryCatchup();
+
 const createNodeServicesForLease = async (
   sessionDoc: SessionDocument,
   lease: OwnerLease
 ): Promise<RoostSessionBackendServices> => {
+  const catchupOwner = Symbol();
   const historyGeneration = new RoostHistoryGeneration(
     lease.client,
     lease.owner,
@@ -778,6 +789,7 @@ const createNodeServicesForLease = async (
     const preservedGoal = operationCursor === undefined ? undefined : goalProjection;
     if (await historyGeneration.resolve()) {
       branchCursors.clear();
+      historyCatchup.release(catchupOwner);
     }
     roostHistory = historyGeneration.history;
     historyHost = historyGeneration.host;
@@ -1053,7 +1065,7 @@ const createNodeServicesForLease = async (
     );
   };
 
-  const readyTurn = (turn: SessionEntry): SessionTurnRead => ({
+  const readyTurn = (turn: SessionEntry): Extract<SessionTurnRead, { state: 'ready' }> => ({
     state: 'ready',
     turn: clone(turn) as SessionTurn,
   });
@@ -1224,165 +1236,186 @@ const createNodeServicesForLease = async (
           : readMetadataPage({ latest: true, limit })
       )
     );
-  const readBodyRange = (from: number, to: number): Promise<SessionEntry[]> =>
-    onOwner(() =>
-      readStable(async () => {
-        const source = roostHistory,
-          host = historyHost,
-          generation = readGeneration;
-        const cursor = await source.observedEventCursor();
-        const start = Math.max(0, Math.min(from, totalHistoryCount)),
-          end = Math.max(start, Math.min(to, totalHistoryCount));
-        const index = dispatchIndex(),
-          checkpoint = await index.checkpoint(cursor, totalHistoryCount);
-        const result: SessionEntry[] = [];
-        if (
-          cursor === knownCursor &&
-          start >= loadedStartPosition &&
-          end <= loadedStartPosition + entries.length
-        ) {
-          return entries
-            .slice(start - loadedStartPosition, end - loadedStartPosition)
-            .map((entry) => clone(entry));
-        }
-        let useIndex = Boolean(checkpoint);
-        for (let position = start; position < end; position += 500) {
-          const stop = Math.min(end, position + 500);
-          let selected: SessionEntry[] | undefined;
-          if (useIndex && checkpoint)
-            try {
-              selected = await readIndexedEntries(
-                source,
-                await index.range(checkpoint, position, stop)
-              );
-            } catch (error) {
-              if (
-                !(error instanceof z.ZodError) &&
-                !(error instanceof SyntaxError) &&
-                !(error instanceof RoostDispatchIndexCorrupt)
-              )
-                throw error;
-              index.forget();
-              useIndex = false;
-            }
-          if (!selected) {
-            const page = await source.readActiveBranchPage(viewId, {
-              from: position,
-              limit: stop - position,
-            });
-            if (page.totalCount !== totalHistoryCount) {
-              needsRefresh = true;
-              throw staleRead();
-            }
-            if (!page.complete || page.startPosition !== position)
-              throw new Error('Roost requested history range is incomplete');
-            selected = await projectBranchPage(page, decodeMessages(page.messages), false);
-            if (selected.length !== stop - position)
-              throw new Error('Roost requested history range is incomplete');
+  const readBodyRangeOnOwner = (from: number, to: number): Promise<SessionEntry[]> =>
+    readStable(async () => {
+      const source = roostHistory,
+        host = historyHost,
+        generation = readGeneration;
+      const cursor = await source.observedEventCursor();
+      const start = Math.max(0, Math.min(from, totalHistoryCount)),
+        end = Math.max(start, Math.min(to, totalHistoryCount));
+      const index = dispatchIndex(),
+        checkpoint = await index.checkpoint(cursor, totalHistoryCount);
+      const result: SessionEntry[] = [];
+      if (
+        cursor === knownCursor &&
+        start >= loadedStartPosition &&
+        end <= loadedStartPosition + entries.length
+      ) {
+        return entries
+          .slice(start - loadedStartPosition, end - loadedStartPosition)
+          .map((entry) => clone(entry));
+      }
+      let useIndex = Boolean(checkpoint);
+      for (let position = start; position < end; position += 500) {
+        const stop = Math.min(end, position + 500);
+        let selected: SessionEntry[] | undefined;
+        if (useIndex && checkpoint)
+          try {
+            selected = await readIndexedEntries(
+              source,
+              await index.range(checkpoint, position, stop)
+            );
+          } catch (error) {
+            if (
+              !(error instanceof z.ZodError) &&
+              !(error instanceof SyntaxError) &&
+              !(error instanceof RoostDispatchIndexCorrupt)
+            )
+              throw error;
+            index.forget();
+            useIndex = false;
           }
-          result.push(...selected);
+        if (!selected) {
+          const page = await source.readActiveBranchPage(viewId, {
+            from: position,
+            limit: stop - position,
+          });
+          if (page.totalCount !== totalHistoryCount) {
+            needsRefresh = true;
+            throw staleRead();
+          }
+          if (!page.complete || page.startPosition !== position)
+            throw new Error('Roost requested history range is incomplete');
+          selected = await projectBranchPage(page, decodeMessages(page.messages), false);
+          if (selected.length !== stop - position)
+            throw new Error('Roost requested history range is incomplete');
         }
-        if (useIndex && checkpoint) await index.validate(checkpoint);
-        await historyGeneration.resolve();
-        if (
-          source !== historyGeneration.history ||
-          host !== historyGeneration.host ||
-          generation !== readGeneration ||
-          cursor !== (await source.observedEventCursor())
-        ) {
-          needsRefresh = true;
-          throw staleRead();
-        }
-        rememberPageEntries(start, result);
-        return result;
-      })
+        result.push(...selected);
+      }
+      if (useIndex && checkpoint) await index.validate(checkpoint);
+      await historyGeneration.resolve();
+      if (
+        source !== historyGeneration.history ||
+        host !== historyGeneration.host ||
+        generation !== readGeneration ||
+        cursor !== (await source.observedEventCursor())
+      ) {
+        needsRefresh = true;
+        throw staleRead();
+      }
+      rememberPageEntries(start, result);
+      return result;
+    });
+  const readBodyRange = (from: number, to: number) => onOwner(() => readBodyRangeOnOwner(from, to));
+  const getHistoryPublication = (signal?: AbortSignal) =>
+    readStable(async () => {
+      signal?.throwIfAborted();
+      const cursor = await publishedNativeCursor();
+      const head = publication.current();
+      if (head?.cursor !== cursor.toString()) throw staleRead();
+      return {
+        checkpoint: await historyChanges.checkpoint(cursor, signal),
+        historyRevision: head.historyRevision,
+        historyCount: head.historyCount,
+        historyChange:
+          head.change?.kind === 'changed'
+            ? { kind: 'changed' as const, ids: [...head.change.businessIds] }
+            : head.change,
+      };
+    });
+
+  const withHistoryPatches = async (
+    changes: SessionHistoryChanges,
+    checkpoint: string,
+    through: bigint,
+    signal?: AbortSignal
+  ): Promise<SessionHistoryChanges> => {
+    if (changes.state !== 'ready' || changes.from !== undefined || !changes.ids.length)
+      return changes;
+    for (const row of currentBranch().messages) {
+      signal?.throwIfAborted();
+      if (
+        row.segmentId === 'primary' &&
+        !row.sealed &&
+        changes.ids.includes(row.businessId) &&
+        (await readState(row))
+      )
+        return changes;
+    }
+    const patches = await readRoostHistoryPatches(
+      historyHost,
+      currentBranch().messages,
+      changes,
+      checkpoint,
+      through
     );
+    return patches ? { ...changes, patches } : changes;
+  };
+
+  const readBodyTurns = (turnIds: readonly string[]) =>
+    readStable(async () => {
+      const result = new Map<string, ReturnType<typeof readyTurn>>();
+      if (!turnIds.length) return result;
+      const source = roostHistory,
+        host = historyHost,
+        generation = readGeneration;
+      const cursor = await source.observedEventCursor();
+      const uncached: string[] = [];
+      for (const turnId of turnIds) {
+        const position = positionById.get(turnId);
+        const cached = position === undefined ? pageEntries.get(turnId)?.turn : entries[position];
+        if (cached && cursor === knownCursor) result.set(turnId, readyTurn(cached));
+        else uncached.push(turnId);
+      }
+      if (!uncached.length) return result;
+      const messages = await source.readActiveBranchMessages(viewId, uncached);
+      for (const entry of await projectMessages(messages)) result.set(entry.id, readyTurn(entry));
+      await historyGeneration.resolve();
+      if (
+        source !== historyGeneration.history ||
+        host !== historyGeneration.host ||
+        generation !== readGeneration ||
+        cursor !== (await source.observedEventCursor())
+      ) {
+        needsRefresh = true;
+        throw staleRead();
+      }
+      return result;
+    });
+
   const history: SessionHistoryReader = {
-    waitForChanges: async (checkpoint, waitMs, signal) => {
-      if (closing || disposed || signal?.aborted) throw new Error('History observer closed');
+    waitForChanges: async (checkpoint, signal) => {
+      if (closing || disposed || signal.aborted) throw new Error('History observer closed');
       let wake!: () => void;
       const changed = new Promise<void>((observed) => {
         wake = observed;
       });
       checkpointObservers.add(wake);
-      const timer = setTimeout(wake, Math.min(15_000, Math.max(0, waitMs)));
-      signal?.addEventListener('abort', wake, { once: true });
+      signal.addEventListener('abort', wake, { once: true });
       try {
         if ((await history.getCheckpoint!()) === checkpoint) await changed;
-        if (closing || disposed || signal?.aborted) throw new Error('History observer closed');
+        if (closing || disposed || signal.aborted) throw new Error('History observer closed');
       } finally {
-        clearTimeout(timer);
         checkpointObservers.delete(wake);
-        signal?.removeEventListener('abort', wake);
+        signal.removeEventListener('abort', wake);
       }
     },
-    getPublication: () =>
-      readStable(async () => {
-        const cursor = await publishedNativeCursor();
-        const head = publication.current()!;
-        return {
-          checkpoint: await historyChanges.checkpoint(cursor),
-          historyRevision: head.historyRevision,
-          historyCount: head.historyCount,
-          historyChange:
-            head.change?.kind === 'changed'
-              ? { kind: 'changed' as const, ids: [...head.change.businessIds] }
-              : head.change,
-        };
-      }),
+    getPublication: getHistoryPublication,
     getCheckpoint: () =>
       readStable(async () => historyChanges.checkpoint(await publishedNativeCursor())),
     readChanges: (checkpoint, options) =>
       readStable(async () => {
         const through = await publishedNativeCursor();
         const changes = await historyChanges.read(checkpoint, through);
-        if (changes.state !== 'ready' || !options?.withPatches) return changes;
-        for (const row of currentBranch().messages) {
-          if (
-            row.segmentId === 'primary' &&
-            !row.sealed &&
-            changes.ids.includes(row.businessId) &&
-            (await readState(row))
-          )
-            return changes;
-        }
-        const patches = await readRoostHistoryPatches(
-          historyHost,
-          currentBranch().messages,
-          changes,
-          checkpoint,
-          through
-        );
-        return patches ? { ...changes, patches } : changes;
+        return options?.withPatches ? withHistoryPatches(changes, checkpoint, through) : changes;
       }),
     count: () => readStable(async () => totalHistoryCount),
     readAt: async (position) => {
       const [entry] = await readBodyRange(position, position + 1);
       return entry ? readyTurn(entry) : { state: 'missing' };
     },
-    readTurn: (turnId) =>
-      readStable(async () => {
-        const source = roostHistory,
-          host = historyHost,
-          generation = readGeneration;
-        const cursor = await source.observedEventCursor();
-        const position = positionById.get(turnId);
-        const cached = position === undefined ? pageEntries.get(turnId)?.turn : entries[position];
-        if (cached && cursor === knownCursor) return readyTurn(cached);
-        const messages = await source.readActiveBranchMessages(viewId, [turnId]);
-        const [entry] = await projectMessages(messages);
-        await historyGeneration.resolve();
-        if (
-          source !== historyGeneration.history ||
-          host !== historyGeneration.host ||
-          generation !== readGeneration ||
-          cursor !== (await source.observedEventCursor())
-        ) {
-          needsRefresh = true;
-          throw staleRead();
-        }
-        return entry ? readyTurn(entry) : { state: 'missing' as const };
-      }),
+    readTurn: async (turnId) => (await readBodyTurns([turnId])).get(turnId) ?? { state: 'missing' },
     readRange: async (from, to) => (await readBodyRange(from, to)).map(readyTurn),
     readDirectory: (from, to) =>
       inspectHistory(async (index, checkpoint) => {
@@ -1533,11 +1566,11 @@ const createNodeServicesForLease = async (
 
   const inspectionCheckpoint = async (index: RoostDispatchIndex, cursor: bigint) => {
     let checkpoint = await index.checkpoint(cursor, totalHistoryCount);
-    if (checkpoint?.header.inspectionVersion !== 1) {
+    if (checkpoint?.header.inspectionVersion !== 2) {
       await rebuildDispatchIndex(index, cursor);
       checkpoint = await index.checkpoint(cursor, totalHistoryCount);
     }
-    if (!checkpoint || checkpoint.header.inspectionVersion !== 1) throw staleRead();
+    if (!checkpoint || checkpoint.header.inspectionVersion !== 2) throw staleRead();
     return checkpoint;
   };
   const validateInspection = async (
@@ -1987,6 +2020,9 @@ const createNodeServicesForLease = async (
           const stale = error instanceof Error && 'code' in error && error.code === 'stale';
           if (idempotent) idempotent.optimistic = false;
           if (!stale || attempt >= 2) {
+            // A failed reply can follow a durable commit. Wake the observers
+            // to read a verified head without replaying the operation.
+            for (const wake of checkpointObservers) wake();
             reportRoostHistoryFailure(error, {
               stage: 'write',
               sessionId: viewId,
@@ -3512,7 +3548,8 @@ const createNodeServicesForLease = async (
   };
   const acceptInput = async (
     entry: SessionTurn,
-    dispatch = false
+    dispatch = false,
+    assertCurrent?: () => void
   ): Promise<SessionInputAcceptanceResult> => {
     const identity = inputIdentity(entry);
     await withWrites(
@@ -3538,15 +3575,18 @@ const createNodeServicesForLease = async (
           const existing = (await sessionDoc.getDocState())?.humanInputReceipts?.[entry.id];
           if (existing && existing.userId !== userId)
             throw new HistoryWriteError([{ path: ['userId'], code: 'input_identity_conflict' }]);
+          assertCurrent?.();
           sessionDoc.recordHumanInputReceipt(entry.id, userId);
         }
         if (!prior) {
           const branch = await ensureHeadSealed();
+          const parents = await parentForHead(branch);
+          assertCurrent?.();
           const accepted = await roostHistory.acceptInputToView({
             ...identity,
             expectedRevision: branch.state.revision,
             expectedHead: branch.state.head,
-            input: { ...identity.input, parents: await parentForHead(branch) },
+            input: { ...identity.input, parents },
           });
           created = accepted.created;
           await refreshProjectedMessage(accepted.turnId, accepted);
@@ -3572,13 +3612,15 @@ const createNodeServicesForLease = async (
             if (
               meta &&
               !meta.isArchived &&
-              meta.lastMissingHistoryUserMsgId !== entry.id &&
+              !isMissingHistoryUserTurn(meta, entry.id) &&
               meta.lastHandledUserMsgId !== entry.id
             ) {
               // The existing writer queue orders this check and activation with
               // every competing accept. A recovered older input cannot move it back.
-              if (latest?.id === entry.id && meta.latestUserMsgId !== entry.id)
+              if (latest?.id === entry.id && meta.latestUserMsgId !== entry.id) {
+                assertCurrent?.();
                 await sessionDoc.publishUserTurnActivation(entry.id);
+              }
             }
           }
         }
@@ -3602,8 +3644,8 @@ const createNodeServicesForLease = async (
           }
         : { status: 'unobserved' };
     },
-    accept: (entry) => acceptInput(entry),
-    acceptAndDispatch: (entry) => acceptInput(entry, true),
+    accept: (entry, assertCurrent) => acceptInput(entry, false, assertCurrent),
+    acceptAndDispatch: (entry, assertCurrent) => acceptInput(entry, true, assertCurrent),
   };
 
   const sessionData: RoostSessionData = createRoostSessionData({
@@ -3628,6 +3670,139 @@ const createNodeServicesForLease = async (
   // Admission follows registration. Its fresh bootstrap hint checks the gap
   // after the private initial load; no consumer checkpoint has been exposed yet.
   refreshCommitSubscription();
+  const readHistoryCatchup = async (query: RoostCatchupQuery, signal?: AbortSignal) => {
+    const assertAvailable = (readSignal?: AbortSignal) => {
+      readSignal?.throwIfAborted();
+      if (closing || disposed) throw new Error('Roost session backend is disposed');
+    };
+    assertAvailable(signal);
+    if (query.kind !== 'readChanges') return historyCatchup.read(catchupOwner, query);
+    const resumed = historyCatchup.resume(catchupOwner, query, signal);
+    if (resumed) return resumed;
+    const scan = async (checkpoint: string, readSignal?: AbortSignal) => {
+      assertAvailable(readSignal);
+      const before = await getHistoryPublication(readSignal);
+      const through = roostCheckpointCursor(before.checkpoint);
+      const changes = await historyChanges.read(checkpoint, through, readSignal);
+      assertAvailable(readSignal);
+      if (changes.checkpoint !== before.checkpoint) throw staleRead();
+      return { through, changes };
+    };
+    const extend = async (interval: Awaited<ReturnType<typeof scan>>, readSignal?: AbortSignal) => {
+      assertAvailable(readSignal);
+      const published = await getHistoryPublication(readSignal);
+      const through = roostCheckpointCursor(published.checkpoint);
+      if (published.checkpoint === interval.changes.checkpoint)
+        return { published, through, changes: interval.changes };
+      if (
+        interval.changes.state !== 'ready' ||
+        through <= interval.through ||
+        through - interval.through > ROOST_HISTORY_RECEIPT_PAGE_SIZE
+      )
+        throw staleRead();
+      const changes = await historyChanges.read(interval.changes, through, readSignal);
+      if (changes.state !== 'ready' || changes.checkpoint !== published.checkpoint)
+        throw staleRead();
+      return { published, through, changes };
+    };
+    const reply = (
+      published: Awaited<ReturnType<typeof getHistoryPublication>>,
+      result: SessionHistoryChanges
+    ) => ({
+      type: 'session/history-read_response' as const,
+      sessionId: sessionDoc.sessionId,
+      success: true,
+      result,
+      historyRevision: published.historyRevision,
+      historyCount: published.historyCount,
+      historyChange: published.historyChange,
+    });
+    const validate = async (
+      expected: { result: SessionHistoryChanges },
+      readSignal?: AbortSignal
+    ) => {
+      if ((await getHistoryPublication(readSignal)).checkpoint !== expected.result.checkpoint)
+        throw staleRead();
+      assertAvailable(readSignal);
+    };
+    const bodies = {
+      query,
+      readRange: async (from: number, to: number) =>
+        (await readBodyRangeOnOwner(from, to)).map(readyTurn),
+      readTurns: readBodyTurns,
+      validate,
+      signal,
+    };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        // The receipts describe a fixed range. Scanning them does not need the writer.
+        const interval = await scan(query.checkpoint, signal);
+        const finish = async () => {
+          const { published, through, changes: verified } = await extend(interval, signal);
+          let changes = verified;
+          if (query.withPatches)
+            changes = await withHistoryPatches(changes, query.checkpoint, through, signal);
+          const response = reply(published, changes);
+          const inline = await readInlineRoostHistory({ ...bodies, response });
+          if (inline) return inline;
+          await validate(response, signal);
+          return response;
+        };
+        const response = await (interval.changes.state === 'ready' &&
+        query.includeBodiesFrom !== undefined
+          ? onOwner(finish)
+          : finish());
+        const initial = response.result;
+        if (
+          initial.state !== 'ready' ||
+          initial.bodies ||
+          query.includeBodiesFrom === undefined ||
+          query.inlineOnly
+        )
+          return response;
+        const source = roostHistory;
+        const scope = historyScope;
+        return await historyCatchup.prepare({
+          ...bodies,
+          response,
+          owner: catchupOwner,
+          assertAvailable,
+          onOwner: (read, readSignal) =>
+            onOwner(async () => {
+              assertAvailable(readSignal);
+              const result = await read();
+              assertAvailable(readSignal);
+              if (roostHistory !== source || historyScope !== scope) throw staleRead();
+              return result;
+            }),
+          finish: async (capture, readSignal) => {
+            const scanned = await scan(initial.checkpoint, readSignal);
+            return onOwner(async () => {
+              const { published, changes: tail } = await extend(scanned, readSignal);
+              if (tail.state !== 'ready' || roostHistory !== source || historyScope !== scope)
+                throw staleRead();
+              if (tail.checkpoint === initial.checkpoint) return capture(response, tail);
+              const from = Math.min(initial.from ?? Infinity, tail.from ?? Infinity);
+              return capture(
+                reply(published, {
+                  state: 'ready',
+                  checkpoint: tail.checkpoint,
+                  ids: [...new Set([...initial.ids, ...tail.ids])],
+                  ...(from < Infinity ? { from } : {}),
+                }),
+                tail
+              );
+            });
+          },
+        });
+      } catch (error) {
+        assertAvailable(signal);
+        if (attempt >= 2 || !(error instanceof Error && 'code' in error && error.code === 'stale'))
+          throw error;
+      }
+    }
+  };
+
   const readHistoryInspection = (
     query: SessionHistoryInspectionQuery
   ): Promise<SessionHistoryReadResponse> =>
@@ -3730,6 +3905,7 @@ const createNodeServicesForLease = async (
   return {
     sessionData,
     readHistoryInspection,
+    readHistoryCatchup,
     readHistoryReplay: (excludeTurnId) =>
       readObservedHistory(() => readReplayFromMembers(roostHistory, excludeTurnId)),
     readLatestGoal,
@@ -3782,6 +3958,7 @@ const createNodeServicesForLease = async (
     },
     dispose: async () => {
       closing = true;
+      historyCatchup.release(catchupOwner);
       for (const wake of checkpointObservers) wake();
       unsubscribeCommits();
       try {
@@ -3806,7 +3983,11 @@ const createNodeServices = async (
   try {
     if (sessionDoc.handle?.doc.getByPath('roostHistoryCursor/cursor') !== undefined)
       throw new Error('Unsupported Roost control publication format; create a new test session');
-    lease = await acquireOwner(ownerOptions);
+    lease = await acquireOwner(
+      sessionDoc.encryptedRepositoryDirectory
+        ? { dbPath: join(sessionDoc.encryptedRepositoryDirectory, 'roost', 'history.sqlite3') }
+        : ownerOptions
+    );
     return await createNodeServicesForLease(sessionDoc, lease);
   } catch (error) {
     reportRoostHistoryFailure(error, { stage: 'initialize', sessionId: sessionDoc.sessionId });

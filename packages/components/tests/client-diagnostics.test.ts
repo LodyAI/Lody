@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  recordStreamsHttpFallback,
+  resetStreamsHttpFallbackCounts,
+} from '@lody/shared/streams-transport-diagnostics';
 import { collectClientDiagnostics } from '../src/lib/client-diagnostics';
 import { readClientLog } from '../src/lib/client-log';
 vi.mock('../src/lib/client-log', async (original) => ({
@@ -73,5 +76,25 @@ describe('reporting client environment and existing renderer log', () => {
     expect(desktop).toContain('44.0');
     expect(desktop).not.toContain('/private/home');
     expect(desktop).not.toContain('private-host');
+  });
+
+  it('includes streamsHttpFallbacks debug counters in collected client diagnostics', async () => {
+    resetStreamsHttpFallbackCounts();
+    recordStreamsHttpFallback('forced-sync');
+    recordStreamsHttpFallback('snapshot-probe');
+    recordStreamsHttpFallback('snapshot-probe');
+    recordStreamsHttpFallback('no-ws');
+
+    const report = await collectClientDiagnostics();
+    const jsonStart = report.indexOf('{');
+    const jsonEnd = report.indexOf('\n\nRenderer diagnostic log tail');
+    const parsed = JSON.parse(report.slice(jsonStart, jsonEnd)) as {
+      streamsHttpFallbacks?: Record<string, number>;
+    };
+    expect(parsed.streamsHttpFallbacks).toEqual({
+      'forced-sync': 1,
+      'snapshot-probe': 2,
+      'no-ws': 1,
+    });
   });
 });

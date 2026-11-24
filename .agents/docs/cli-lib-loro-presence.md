@@ -69,6 +69,9 @@ form (at most 30); machine IDs are UUIDs or
 or identity. Non-UUID session IDs do not publish presence in minimal mode: the
 shape of a legacy fallback cannot prove its provenance. Supporting an actual legacy
 session would require trusted local session-record confirmation, not a route value.
+The renderer's `desktop-foreground` entry carries only user/instance IDs and
+`updatedAt`; an identity outside the allowlist publishes nothing, so the Host
+keeps sending the mobile push.
 Invalid viewing routes are discarded before retention/heartbeat and
 clear a previous viewing entry. CLI validates before retaining producer keys:
 Loro emits deletion updates even for absent keys, so filtering only set values
@@ -120,9 +123,11 @@ liveness over the local plane while offline.
 
 ## Session active presence has exactly one owner
 
-`session-active-presence.ts` alone owns session active presence. It starts once for a
-visible CLI turn, accepts phase updates, heartbeats while active, and clears on the
-owning Effect release. Never publish or clear session presence from `setStatus`, RPC
+`session-active-presence.ts` alone owns session active presence. It owns visible Turn leases and native agent activity. Turn phases take precedence; after
+a Turn releases, the latest native running or background level remains visible until the
+agent reports idle or its process exits. Native levels reconcile on a one-second timer and
+heartbeat while active, so repeated agent notifications cannot flood the shared channel.
+A Turn lease clears only on the owning Effect release. Never publish or clear session presence from `setStatus`, RPC
 dispatch, permission or image callbacks, or watcher recovery paths — a second writer
 makes the clear path unreliable and leaves sessions showing work that ended.
 
@@ -160,8 +165,14 @@ conditional. [Calibration decision](../notes/implemented/bug-fix/2026-10-17-pres
 
 Machine liveness is three-state, and the states are not interchangeable. A fresh
 heartbeat means online. The absence of one on a SYNCED transport means offline. An
-unsynced transport means unknown. `getOnlineMachineIds()` returning null means the
-presence room is not joined — status unknown, not offline.
+unsynced transport means unknown. `getMachinePresenceView()` returns the machines
+with a fresh heartbeat in the replica plus `synced`, whether the room is joined now.
+A received heartbeat stays valid evidence after the room leaves `joined`: the SDK
+reports one status for both directions, so every live-read recycle and every failed
+local POST leaves `joined` while remote heartbeats keep arriving or remain fresh.
+Absence from the set is offline only when `synced`. Why unknown is not offline:
+[presence channel budget](../notes/implemented/architecture/2026-09-20-ephemeral-presence-channel-budget.md)
+and [presence decides offline](../notes/implemented/bug-fix/2026-10-27-mcp-chat-machine-probe-timeout.md).
 
 Carry that distinction all the way to the consumer instead of flattening it. Only a
 definite offline may block work: the MCP dispatch guards refuse on `'offline'` alone,
@@ -170,6 +181,13 @@ against its own deadline if it really is down. `lody machine list` reports
 `onlineStatus` (`online` / `offline` / `unknown`) beside the legacy `online` boolean, so
 a `--json` consumer parsing stdout is no longer told a confident offline when the truth
 is that nothing could be checked.
+
+A presence restart replaces the renderer's store, so `WorkspacePresenceTransport` keeps
+the consumers' last snapshot until the new room reaches `joined`, while the sync state
+still reports the restart. Those entries age out through `LODY_PRESENCE_TTL_MS` like any
+other, and only terminal stops clear them. The chat landing additionally refuses to
+let liveness move a chosen machine after startup
+([decision](../notes/implemented/bug-fix/2026-11-05-landing-selection-presence-churn.md)).
 
 Durable `MachineMeta.lastSeen` is retired and is not written even at registration;
 machine online checks read presence only. Never reintroduce periodic doc-meta writes
@@ -211,6 +229,9 @@ Successful per-operation/heartbeat events use opt-in trace. SDK errors use debug
 bounded bootstrap/retry/stall diagnostics use warn. Unknown error text, payloads,
 tokens, URLs and Cause contents never enter structured fields. Effect annotations
 continue through the existing daemon file logger's allowlist; no telemetry sink is added.
+The `PresenceHost` sink is created at CLI import time, so it writes through a scoped
+logger that binds to the current root logger on every record; a logger bound at import
+kept the startup console sink and a daemon Worker discarded every presence diagnostic.
 
 `streams-crdt@0.17.0` with its `streams-client@0.10.0` dependency aborts owned I/O
 and retains raw work that ignores abort. Failed close forbids replacing that owner's

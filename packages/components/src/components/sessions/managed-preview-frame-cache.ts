@@ -7,7 +7,6 @@ type ManagedPreviewFrameEntry = {
   iframe: HTMLIFrameElement;
   viewerUrl: string;
   loaded: boolean;
-  evictionTimer: ReturnType<typeof setTimeout> | null;
 };
 
 type StatePreservingParent = HTMLElement & {
@@ -15,10 +14,17 @@ type StatePreservingParent = HTMLElement & {
 };
 
 const MAX_MANAGED_PREVIEW_FRAMES = 5;
-const DORMANT_FRAME_TTL_MS = 30 * 60 * 1000;
 const PRELOAD_FRAME_TTL_MS = 2 * 60 * 1000;
 
 const styles = stylex.create({
+  frame: {
+    display: 'block',
+    height: '100%',
+    width: '100%',
+    borderStyle: 'solid',
+    borderWidth: '0px',
+    backgroundColor: 'var(--color-white)',
+  },
   preload: {
     position: 'fixed',
     left: -10000,
@@ -51,14 +57,32 @@ const supportsStatePreservingMove = (): boolean =>
 export const supportsCredentiallessManagedPreviewFrames = (): boolean =>
   typeof HTMLIFrameElement !== 'undefined' && 'credentialless' in HTMLIFrameElement.prototype;
 
-const cancelDormantEviction = (entry: ManagedPreviewFrameEntry): void => {
-  if (entry.evictionTimer === null) return;
-  clearTimeout(entry.evictionTimer);
-  entry.evictionTimer = null;
+/**
+ * WebKit engines: desktop Safari and every iOS browser, including Chrome (CriOS),
+ * Edge (EdgiOS), and Firefox (FxiOS) on iOS. Desktop Chromium, Gecko, and
+ * Chromium-based WebViews are deliberately excluded.
+ */
+export const isWebKitUserAgent = (userAgent: string): boolean =>
+  /\bAppleWebKit\//u.test(userAgent) && !/\b(?:Chrome|Chromium|Firefox|Edg)\//u.test(userAgent);
+
+/**
+ * How a self-contained HTML document may execute its own scripts.
+ * - `automatic`: credentialless frames exist (Chromium), so a self-navigation
+ *   is still cookie-less and the preview may run without a separate opt-in.
+ * - `opt-in`: WebKit has no credentialless frames. A self-navigation would be an
+ *   ordinary request, and the frame shares the app's main thread, so scripts run
+ *   only after the user explicitly chooses to run them for this document.
+ * - `unsupported`: any other engine (including Gecko) stays read-only.
+ */
+export type ExecutableHtmlPreviewSupport = 'automatic' | 'opt-in' | 'unsupported';
+
+export const getExecutableHtmlPreviewSupport = (): ExecutableHtmlPreviewSupport => {
+  if (supportsCredentiallessManagedPreviewFrames()) return 'automatic';
+  if (typeof navigator !== 'undefined' && isWebKitUserAgent(navigator.userAgent)) return 'opt-in';
+  return 'unsupported';
 };
 
 const destroyEntry = (entry: ManagedPreviewFrameEntry): void => {
-  cancelDormantEviction(entry);
   entry.iframe.remove();
 };
 
@@ -68,6 +92,14 @@ const frames = new LRUCache<SessionId, ManagedPreviewFrameEntry>(MAX_MANAGED_PRE
 
 export const canPrepareManagedPreviewFrame = (sessionId: SessionId): boolean =>
   supportsStatePreservingMove() && !frames.has(sessionId);
+
+export const getCachedManagedPreviewFrameUrl = (sessionId: SessionId): string | null => {
+  if (!supportsStatePreservingMove()) return null;
+  const cached = frames.get(sessionId);
+  if (cached) return cached.viewerUrl;
+  if (preload?.sessionId === sessionId) return preload.entry.viewerUrl;
+  return null;
+};
 
 let parkingLot: HTMLDivElement | null = null;
 
@@ -111,9 +143,8 @@ const createEntry = (
     iframe,
     viewerUrl,
     loaded: false,
-    evictionTimer: null,
   };
-  iframe.className = 'block h-full w-full border-0 bg-white';
+  iframe.className = stylex.props(styles.frame).className ?? '';
   iframe.title = title;
   iframe.setAttribute('data-lody-managed-preview-frame', 'true');
   if (documentHtml !== undefined) {
@@ -122,7 +153,11 @@ const createEntry = (
     // storage, clipboard, fullscreen, or top-navigation privileges.
     iframe.setAttribute('sandbox', 'allow-scripts');
     // If source JavaScript navigates the iframe despite the self-contained
-    // contract, keep the resulting request in a credentialless context.
+    // contract, keep the resulting request in a credentialless context where the
+    // engine supports it. WebKit ignores the attribute: there a self-navigation
+    // leaves the policy CSP behind and is an ordinary request, which is why WebKit
+    // runs these documents only after an explicit user opt-in and the preview
+    // surface exits rendered mode on any unexpected document load.
     iframe.setAttribute('credentialless', '');
     iframe.referrerPolicy = 'no-referrer';
     iframe.setAttribute(
@@ -184,15 +219,27 @@ export const acquireManagedPreviewFrame = ({
   title,
   host,
   documentHtml,
+  scriptsOptedIn = false,
 }: {
-  sessionId: SessionId;
+  /** Cache key for application previews; static documents are never cached and need none. */
+  sessionId: SessionId | null;
   viewerUrl: string;
   title: string;
   host: HTMLElement;
   documentHtml?: string;
+  /** The user explicitly chose to run this static document's scripts. */
+  scriptsOptedIn?: boolean;
 }): { iframe: HTMLIFrameElement; loaded: boolean } => {
-  if (documentHtml !== undefined && !supportsCredentiallessManagedPreviewFrames()) {
-    throw new Error('Static HTML preview requires credentialless iframe support.');
+  if (documentHtml !== undefined) {
+    const support = getExecutableHtmlPreviewSupport();
+    if (support === 'unsupported') {
+      throw new Error('Static HTML preview is not supported by this browser engine.');
+    }
+    // Enforce the WebKit opt-in here, not only in the UI, so a new caller that
+    // passes a document cannot run repository scripts without consent.
+    if (support === 'opt-in' && !scriptsOptedIn) {
+      throw new Error('Static HTML preview scripts require an explicit opt-in on this engine.');
+    }
   }
   // Static documents can execute arbitrary user-authored JavaScript. Never
   // park them in the dormant-frame cache where they could keep running after
@@ -202,6 +249,7 @@ export const acquireManagedPreviewFrame = ({
     host.appendChild(entry.iframe);
     return { iframe: entry.iframe, loaded: false };
   }
+  if (sessionId === null) throw new Error('Managed application previews require a session.');
 
   const prepared = preload?.sessionId === sessionId ? preload : undefined;
   if (prepared && prepared.entry.viewerUrl !== viewerUrl) prepared.dispose();
@@ -210,7 +258,6 @@ export const acquireManagedPreviewFrame = ({
   if (!entry) {
     entry = createEntry(viewerUrl, title, documentHtml);
   } else {
-    cancelDormantEviction(entry);
     entry.iframe.title = title;
     if (entry.viewerUrl !== viewerUrl) {
       entry.viewerUrl = viewerUrl;
@@ -232,9 +279,14 @@ export const acquireManagedPreviewFrame = ({
 };
 
 export const releaseManagedPreviewFrame = (
-  sessionId: SessionId,
+  sessionId: SessionId | null,
   iframe: HTMLIFrameElement
 ): void => {
+  if (sessionId === null) {
+    // Static documents are never cached; their JavaScript dies with the surface.
+    iframe.remove();
+    return;
+  }
   const entry = frames.get(sessionId);
   if (!entry || entry.iframe !== iframe) {
     // Never cached (no atomic move) or already superseded: nothing to preserve.
@@ -242,11 +294,6 @@ export const releaseManagedPreviewFrame = (
     return;
   }
   moveFrame(getParkingLot(), entry);
-  entry.evictionTimer = setTimeout(() => {
-    entry.evictionTimer = null;
-    frames.delete(sessionId);
-    entry.iframe.remove();
-  }, DORMANT_FRAME_TTL_MS);
 };
 
 export const clearManagedPreviewFrame = (sessionId: SessionId): void => {
@@ -255,4 +302,12 @@ export const clearManagedPreviewFrame = (sessionId: SessionId): void => {
   if (!entry) return;
   frames.delete(sessionId);
   destroyEntry(entry);
+};
+
+export const clearAllManagedPreviewFrames = (): void => {
+  preload?.dispose();
+  for (const entry of frames.values()) {
+    destroyEntry(entry);
+  }
+  frames.clear();
 };

@@ -27,6 +27,10 @@ owner 修订的是 [#2131](https://github.com/LodyAI/Lody/pull/2131) 缺当前 k
 
 耗时 **>= 900,000 ms** 且仍缺当前 key 时返回可重试的 `key-update-required`；签名后返回旧帧前再次检查截止时间。SDK 保留编辑，由已有 owner 重试。宽限内成功回退不启动密钥提示；只有这个明确的失败 seal 信号才启动 #2138 的三十秒工作区提示，普通 I/O 错误不会误触发。key 安装后由既有 transition phase 清除；保存恢复成功也会清除失败提示，不启动接收请求。接收请求、重试所有权、token 失效和关闭等待规则不变；保存不等待网络接收 key。
 
+## 新钥匙到达前的读取（2026-11-05）
+
+B 组 ⑨ J07/rotate：manager 打开工作区时，它针对 owner 这次换代的收钥轮还在进行。打开新 epoch 的帧失败后，桌面边界把它报成终态 `invalid-ledger`；streams SDK 遇到任何载荷保护失败都会结束该房间的 join，于是钥匙装好之后会话也不会出现。SDK 的规则保持不变，是否重试由 Lody 决定。现在只有同时满足以下条件时，host 才返回 `key-pending`：本设备的已验证账本包含该帧的 epoch，本设备是当前成员设备，且已安装钥匙库确实缺这个 epoch 的钥匙。未知 epoch、钥匙不可读、认证失败和失权都保留原来的失败。内容 provider 收到 `key-pending` 时，所有等待的读取共享一次收钥（refresh，最多 30 秒，关闭或失权时中止），然后每个读取只重试一次。帧声称的 epoch 超出本地账本时仍然拒绝：那个 epoch 还没有经过认证。
+
 ## 证据与限制
 
 core 既有 crypto 测试使用真实签名账本、SQLite 和注入时钟，覆盖 update/snapshot、截止边界、host 重开、新时钟域、回拨、元数据缺失及当前 key 立即优先。CLI 与桌面原生测试走实际存储/crypto 绑定；便携 host 使用真实浏览器 IndexedDB 和托管。组件测试连接明确的截止失败、延迟非阻塞提示与安装清除。这些是本地确定性边界检查，不是打包桌面、OS keychain、WAN、休眠恢复或真实设备验收。

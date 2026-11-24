@@ -1,3 +1,4 @@
+import { preloadSettings as preloadSettingsCode } from '@/components/settings/settings-code';
 import { useCallback } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -103,6 +104,9 @@ export function useOpenSettings() {
         case 'agent-roles':
           void router.navigate({ to: '/$workspaceName/settings/agent-roles', params });
           return;
+        case 'lody-agent':
+          void router.navigate({ to: '/$workspaceName/settings/lody-agent', params });
+          return;
         case 'github':
           void router.navigate({ to: '/$workspaceName/settings/github', params });
           return;
@@ -135,5 +139,15 @@ export function useOpenSettings() {
     setOpen(false);
   }, [setOpen]);
 
-  return { openSettings, closeSettings };
+  const preloadSettings = useCallback(
+    (tab?: SettingsTabId) => {
+      if (!workspaceSlug) return;
+      void preloadSettingsCode(
+        tab ?? (cloudAccountAvailable ? SETTINGS_DEFAULT_TAB : 'preferences'),
+        isMobile
+      ).catch(() => {});
+    },
+    [workspaceSlug, cloudAccountAvailable, isMobile]
+  );
+  return { openSettings, closeSettings, preloadSettings };
 }

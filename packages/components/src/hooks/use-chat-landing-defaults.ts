@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
+  AgentConfigId,
   AgentConfigMeta,
   AgentRoleId,
   LocalProjectId,
@@ -23,6 +24,8 @@ type UseChatLandingDefaultsArgs = {
   machines: Map<string, MachineViewMeta>;
   /** Pre-filtered map of machines that are reachable AND own at least one agent config. */
   selectableMachines: Map<MachineId, MachineViewMeta>;
+  /** Whether absence from `selectableMachines` means a definite offline. */
+  presenceSynced: boolean;
   visibleMachinesLoading: boolean;
   docMetaCacheReady: boolean;
   repositories?: Array<{ fullName: string }>;
@@ -46,6 +49,12 @@ type UseChatLandingDefaultsArgs = {
   selectedAgentRoleId?: AgentRoleId | null;
 };
 
+/** A replacement the user did not ask for, and the target it stands in for. */
+type AutomaticFallback = { intended: AgentSelection; fallback: AgentSelection };
+
+const isSameSelection = (left: AgentSelection | null, right: AgentSelection | null): boolean =>
+  left?.agentId === right?.agentId && left?.machineId === right?.machineId;
+
 function pickPreferredMachineId(
   selectable: Map<MachineId, MachineViewMeta>,
   candidates: Array<MachineId | null | undefined>
@@ -64,6 +73,7 @@ export function useChatLandingDefaults({
   executorConfigs,
   machines,
   selectableMachines,
+  presenceSynced,
   visibleMachinesLoading,
   docMetaCacheReady,
   repositories,
@@ -81,6 +91,8 @@ export function useChatLandingDefaults({
   selectedAgentRoleId,
 }: UseChatLandingDefaultsArgs) {
   const initializedRef = useRef(false);
+  const automaticFallbackRef = useRef<AutomaticFallback | null>(null);
+  const startupLivenessSettledRef = useRef(false);
   const initializedWorkspaceIdRef = useRef<string | null>(null);
   /* The contextType restore is a RENDER-PHASE state adjustment ("adjusting
      state when a prop changes" — react.dev/learn/you-might-not-need-an-effect),
@@ -113,6 +125,8 @@ export function useChatLandingDefaults({
     if (initializedWorkspaceIdRef.current === workspaceId) return;
     initializedWorkspaceIdRef.current = workspaceId;
     initializedRef.current = false;
+    automaticFallbackRef.current = null;
+    startupLivenessSettledRef.current = false;
     setCanPersist(false);
     setRepoDefaultsReady(false);
   }, [workspaceId]);
@@ -248,11 +262,17 @@ export function useChatLandingDefaults({
     // restore the exact agent once the flock configs arrive (or the machine comes
     // back online).
     const previous = readChatLandingDefaults(workspaceId);
+    // A fallback only covers the current view; the remembered target stays stored.
+    const automaticFallback = automaticFallbackRef.current;
+    const persistedAgent =
+      automaticFallback && isSameSelection(selectedAgent, automaticFallback.fallback)
+        ? automaticFallback.intended
+        : selectedAgent;
     writeChatLandingDefaults(workspaceId, {
       lastUsedProject: previous?.lastUsedProject,
       contextType,
-      agentId: selectedAgent?.agentId ?? previous?.agentId ?? null,
-      machineId: selectedAgent?.machineId ?? previous?.machineId ?? null,
+      agentId: persistedAgent?.agentId ?? previous?.agentId ?? null,
+      machineId: persistedAgent?.machineId ?? previous?.machineId ?? null,
       repoFullName: selectedRepo ?? null,
       branch: selectedBranch ?? null,
       localMachineId: selectedLocalProject?.machineId ?? null,
@@ -274,11 +294,16 @@ export function useChatLandingDefaults({
   ]);
 
   // After the initial defaults pass completes, the current `selectedAgent` may
-  // still refer to a machine that just went offline, lost its config, or hadn't
+  // still refer to a machine or config that no longer exists, or one that hadn't
   // appeared yet when defaults loaded (e.g. machines stream in asynchronously
   // after relogin). Re-resolve a valid selection from the currently selectable
   // machines so the user sees a reachable default instead of a stale or empty
   // selector. Runs after `defaultsReady` so we never overwrite the restore.
+  //
+  // Liveness alone moves a selection once: when presence first answers that the
+  // restored machine is offline. After that a chosen machine stays selected and
+  // the composer reports it offline, so presence churn cannot change where the
+  // next chat starts.
   const requiredMachineId = useMemo(
     () =>
       contextType === 'local'
@@ -295,10 +320,42 @@ export function useChatLandingDefaults({
         config.id === selectedAgent.agentId && config.machineId === selectedAgent.machineId
     );
   }, [executorConfigs, requiredMachineId, selectableMachines, selectedAgent]);
+  const hasExistingAgent = useMemo(() => {
+    if (!selectedAgent) return false;
+    if (requiredMachineId && selectedAgent.machineId !== requiredMachineId) return false;
+    if (!machines.has(selectedAgent.machineId)) return false;
+    return executorConfigs.some(
+      (config) =>
+        config.id === selectedAgent.agentId && config.machineId === selectedAgent.machineId
+    );
+  }, [executorConfigs, machines, requiredMachineId, selectedAgent]);
 
   useEffect(() => {
     if (!canPersist || visibleMachinesLoading) return;
+
+    const automaticFallback = automaticFallbackRef.current;
+    if (automaticFallback && !isSameSelection(selectedAgent, automaticFallback.fallback)) {
+      automaticFallbackRef.current = null;
+    }
+    const remembered = automaticFallbackRef.current?.intended;
+    if (
+      remembered &&
+      (!requiredMachineId || remembered.machineId === requiredMachineId) &&
+      selectableMachines.has(remembered.machineId) &&
+      executorConfigs.some(
+        (config) => config.id === remembered.agentId && config.machineId === remembered.machineId
+      )
+    ) {
+      automaticFallbackRef.current = null;
+      setSelectedAgent(remembered);
+      return;
+    }
+
+    const livenessUnanswered = !presenceSynced;
+    const livenessAlreadySettled = startupLivenessSettledRef.current;
+    if (hasExistingAgent && presenceSynced) startupLivenessSettledRef.current = true;
     if (hasSelectableAgent) return;
+    if (hasExistingAgent && (livenessUnanswered || livenessAlreadySettled)) return;
     if (selectableMachines.size === 0) return;
 
     const stored = readChatLandingDefaults(workspaceId);
@@ -320,12 +377,26 @@ export function useChatLandingDefaults({
       (nextSelection.agentId !== selectedAgent?.agentId ||
         nextSelection.machineId !== selectedAgent?.machineId)
     ) {
+      if (!requiredMachineId) {
+        const intended = hasExistingAgent
+          ? selectedAgent
+          : stored?.agentId && stored.machineId
+            ? { agentId: stored.agentId as AgentConfigId, machineId: storedMachineId! }
+            : null;
+        automaticFallbackRef.current =
+          automaticFallbackRef.current ??
+          (intended && !isSameSelection(intended, nextSelection)
+            ? { intended, fallback: nextSelection }
+            : null);
+      }
       setSelectedAgent(nextSelection);
     }
   }, [
     canPersist,
     executorConfigs,
+    hasExistingAgent,
     hasSelectableAgent,
+    presenceSynced,
     requiredMachineId,
     selectableMachines,
     selectedAgent,

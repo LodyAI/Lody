@@ -6,10 +6,15 @@ import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { verifySignatureEffect } from '../src/internal/foundation/signature';
 import { signVerified } from '../src/internal/foundation/signing';
 import {
+  accountIdFromUserId,
+  accountUserId,
   Bytes,
   deviceCredentialBindingBytes,
   signDeviceCredentialBinding,
   verifyDeviceCredentialBinding,
+  executionIntentBytes,
+  signExecutionIntent,
+  verifyExecutionIntent,
   decodeCbor,
   encodeCbor,
   encodeDocumentContext,
@@ -26,6 +31,13 @@ import {
   type ContentPurpose,
   type CborValue,
 } from '../src/protocol';
+import {
+  decodeCandidateEnvelopesCbor,
+  encodeCandidateEnvelopesCbor,
+  decodeSnapshotCbor,
+  encodeSnapshotCbor,
+  MAX_SNAPSHOT_BYTES,
+} from '../src/internal/foundation/cbor';
 import vector from './content-vector.json';
 
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, 'hex'));
@@ -106,6 +118,49 @@ describe('bounded canonical CBOR', () => {
       expect(Result.isFailure(decodeCbor(hex(wire)))).toBe(true);
     expect(Result.isFailure(decodeCbor(new Uint8Array(8193)))).toBe(true);
     expect(Result.isFailure(encodeCbor([new Uint8Array(257)]))).toBe(true);
+  });
+  it('keeps candidate envelopes compatible while isolating their count and byte budgets', () => {
+    const entry = [new Uint8Array(32), new Uint8Array(256)];
+    const legacy = Array.from({ length: 32 }, () => entry);
+    const legacyBytes = ok(encodeSnapshotCbor(legacy));
+    expect(ok(encodeCandidateEnvelopesCbor(legacy))).toEqual(legacyBytes);
+    expect(ok(decodeCandidateEnvelopesCbor(legacyBytes))).toEqual(legacy);
+
+    const envelopes = Array.from({ length: 4096 }, () => entry);
+    const bytes = ok(encodeCandidateEnvelopesCbor(envelopes));
+    expect(ok(decodeCandidateEnvelopesCbor(bytes))).toEqual(envelopes);
+    for (const result of [
+      encodeCbor(envelopes),
+      encodeSnapshotCbor(envelopes),
+      decodeCbor(bytes),
+      decodeSnapshotCbor(bytes),
+    ])
+      expect(Result.isFailure(result) && result.failure.code).toBe('oversize');
+    envelopes.push(entry);
+    const tooMany = new Uint8Array([
+      ...hex('991001'),
+      ...bytes.subarray(3),
+      ...ok(encodeCandidateEnvelopesCbor(entry)),
+    ]);
+    for (const result of [
+      encodeCandidateEnvelopesCbor(envelopes),
+      decodeCandidateEnvelopesCbor(tooMany),
+    ])
+      expect(Result.isFailure(result) && result.failure.code).toBe('oversize');
+
+    // Array header + bstr header + payload exactly fills the local candidate budget.
+    const exact = [new Uint8Array(MAX_SNAPSHOT_BYTES - 6)];
+    const full = ok(encodeCandidateEnvelopesCbor(exact));
+    expect(full.byteLength).toBe(MAX_SNAPSHOT_BYTES);
+    expect(ok(decodeCandidateEnvelopesCbor(full))).toEqual(exact);
+    expect(
+      Result.isFailure(encodeCandidateEnvelopesCbor([new Uint8Array(MAX_SNAPSHOT_BYTES - 5)]))
+    ).toBe(true);
+    expect(
+      Result.isFailure(decodeCandidateEnvelopesCbor(new Uint8Array(MAX_SNAPSHOT_BYTES + 1)))
+    ).toBe(true);
+    for (const wire of ['9817' + '80'.repeat(23), '9f80ff', '80ff', '824100'])
+      expect(Result.isFailure(decodeCandidateEnvelopesCbor(hex(wire)))).toBe(true);
   });
   it('rejects shared expansion before exhausting the traversal budget', () => {
     // The guard keeps a regression from killing the test runner. It is not a
@@ -762,4 +817,154 @@ describe('device credential binding v1', () => {
     badSignature[63] = 255;
     expect(Result.isFailure(verifyDeviceCredentialBinding(context, badSignature))).toBe(true);
   });
+});
+
+describe('execution intent v1', () => {
+  const publicKey = ok(
+    Bytes.signingPublicKey(hex('d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a'))
+  );
+  const privateKey = createPrivateKey({
+    format: 'der',
+    type: 'pkcs8',
+    key: Buffer.from(
+      '302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60',
+      'hex'
+    ),
+  });
+  const intent = {
+    kind: 1,
+    genesis: ok(Bytes.genesisHash(new Uint8Array(32).fill(0x11))),
+    workspaceId: 'workspace',
+    targetMachineId: 'machine',
+    scope: 'session',
+    messageId: 'turn',
+    contentDigest: new Uint8Array(32).fill(0x44),
+  };
+  const signatureHex =
+    '72a84795066233dc6e7a51d99c0108fb97fa33f852b2a9aa5b00afcdbfb12306c6abd3ca9f696d039f5cdd965ff40ebb6c230d265178f6c61d40bc2a8c5bd40b';
+  it('matches the fixed encoding and Ed25519 vector', async () => {
+    const field = (text: string) =>
+      Buffer.from([0, text.length]).toString('hex') + Buffer.from(text).toString('hex');
+    expect(toHex(ok(executionIntentBytes(intent)))).toBe(
+      Buffer.from('lody-e2ee/execution-intent/v1\0').toString('hex') +
+        '01' +
+        '11'.repeat(32) +
+        field('workspace') +
+        field('machine') +
+        field('session') +
+        field('turn') +
+        '44'.repeat(32)
+    );
+    const signature = await Effect.runPromise(
+      signExecutionIntent({
+        ...intent,
+        signer: {
+          publicKey,
+          sign: (message) => Effect.succeed(ok(Bytes.signature(sign(null, message, privateKey)))),
+        },
+      })
+    );
+    expect(toHex(signature.toBytes())).toBe(signatureHex);
+    expect(
+      Result.isSuccess(verifyExecutionIntent(intent, publicKey.toBytes(), hex(signatureHex)))
+    ).toBe(true);
+  });
+  it('rejects any other kind, scope, message, target, workspace, genesis or content', () => {
+    for (const altered of [
+      { ...intent, kind: 2 },
+      { ...intent, scope: 'other-session' },
+      { ...intent, messageId: 'other-turn' },
+      { ...intent, targetMachineId: 'other-machine' },
+      { ...intent, workspaceId: 'other-workspace' },
+      { ...intent, genesis: ok(Bytes.genesisHash(new Uint8Array(32).fill(0x12))) },
+      { ...intent, contentDigest: new Uint8Array(32).fill(0x45) },
+      // Field boundaries are length-prefixed, so moving bytes between fields changes the message.
+      { ...intent, workspaceId: 'workspacem', targetMachineId: 'achine' },
+    ])
+      expect(
+        Result.isFailure(verifyExecutionIntent(altered, publicKey.toBytes(), hex(signatureHex)))
+      ).toBe(true);
+    for (const malformed of [
+      { ...intent, kind: 4 },
+      { ...intent, contentDigest: new Uint8Array(31) },
+      { ...intent, messageId: 'x'.repeat(1025) },
+    ])
+      expect(Result.isFailure(executionIntentBytes(malformed))).toBe(true);
+  });
+});
+
+describe('account user ID encoding', () => {
+  // Generated independently by Python's RFC 4648 base32, translated to the account
+  // alphabet. Frozen with ledger v1: a change here makes shipped ledgers unreadable.
+  const vectors = [
+    [
+      '2w8hg7s65mt3pgj9a1bnwsbcedx48wr',
+      '1f1711181f262d343b424950575e656c737a4473000000000000000000000000',
+    ],
+    [
+      'zzzzzzr7mppb7ep1s37xdqf4xfsfj0071reaj',
+      '25ffffffff07a5acb3bac1c8cfd6dde4ebf2f900070e1ca90000000000000000',
+    ],
+  ] as const;
+
+  it.each(vectors)('freezes the bytes and restores %s', (accountId, encoded) => {
+    const userId = ok(accountUserId(accountId));
+    expect(toHex(userId.toBytes())).toBe(encoded);
+    expect(ok(accountIdFromUserId(ok(Bytes.userId(hex(encoded)))))).toBe(accountId);
+  });
+
+  it('keeps every supported length and final bit pattern distinct', () => {
+    const seen = new Set<string>();
+    for (const accountId of [
+      '0',
+      '00',
+      'z',
+      'zz',
+      'z'.repeat(48),
+      'z'.repeat(49),
+      '0'.repeat(49),
+    ]) {
+      const userId = ok(accountUserId(accountId));
+      expect(ok(accountIdFromUserId(userId))).toBe(accountId);
+      seen.add(toHex(userId.toBytes()));
+    }
+    expect(seen.size).toBe(7);
+  });
+
+  it.each(['', 'z'.repeat(50), 'user-1', 'Abc', 'io', ' abc', 'abc\n'])(
+    'refuses %j instead of normalizing it',
+    (accountId) => {
+      const result = accountUserId(accountId);
+      expect(Result.isFailure(result) && result.failure.code).toBe('canonical');
+    }
+  );
+
+  it('refuses bytes no account ID produces', () => {
+    const decoded = (edit: (bytes: Uint8Array) => void) => {
+      const bytes = hex('02' + '00'.repeat(31));
+      edit(bytes);
+      const result = accountIdFromUserId(ok(Bytes.userId(bytes)));
+      return Result.isFailure(result) && result.failure.code;
+    };
+    expect(decoded((b) => (b[0] = 0))).toBe('canonical');
+    expect(decoded((b) => (b[0] = 50))).toBe('canonical');
+    // Two characters use ten bits: the rest of the second byte must be zero.
+    expect(decoded((b) => (b[2] = 1))).toBe('canonical');
+    expect(decoded((b) => (b[31] = 1))).toBe('canonical');
+  });
+});
+
+it('rejects the complete canonical X25519 low-order set and noncanonical field aliases', () => {
+  const rejected = [
+    '00'.repeat(32),
+    '01' + '00'.repeat(31),
+    'e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800',
+    '5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157',
+    ...['ec', 'ed', 'ee'].map((prefix) => prefix + 'ff'.repeat(30) + '7f'),
+    '09' + '00'.repeat(30) + '80',
+    'ff'.repeat(32),
+  ];
+  for (const value of rejected)
+    expect(Result.isFailure(Bytes.encryptionPublicKey(hex(value)))).toBe(true);
+  expect(Result.isSuccess(Bytes.encryptionPublicKey(hex('09' + '00'.repeat(31))))).toBe(true);
 });

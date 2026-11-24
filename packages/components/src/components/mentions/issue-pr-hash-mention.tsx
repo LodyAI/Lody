@@ -1,11 +1,21 @@
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../../style/theme-scale.stylex';
 import * as React from 'react';
 import { useAtomValue } from 'jotai';
 import { CircleDot, Github, GitPullRequest } from 'lucide-react';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import { githubFetchIssuesAndPRs, type GitHubIssueOrPR } from '@lody/shared';
 import type { IssuePRMention } from '@lody/shared';
 
+import { CloudCapabilityUnavailableError } from '@lody/platform';
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { normalizeGithubFetchErrorCode } from '@/components/mentions/mention-analytics';
@@ -14,14 +24,15 @@ import {
   useMentionHydration,
   type HydratedMentions,
 } from '@/components/mentions/mention-hydration';
-import { withGitHubTokenRetry } from '@/lib/github-token';
-import { cn } from '@/lib/utils';
-import { useMentionContext } from '@/ui/mention';
-import { Popover } from '@lody/ui/popover';
+import {
+  GitHubClientTokenError,
+  subscribeGitHubWorkspaceInvalidation,
+  withGitHubTokenRetry,
+} from '@/lib/github-token';
 
-// ============================================================================
-// Types
-// ============================================================================
+import { useMentionContext } from '@/ui/mention';
+import { getComposerCaretRect, getComposerRangeRects } from '@/ui/mention/composer-input';
+import { Popover } from '@lody/ui/popover';
 
 type IssueOrPR = {
   number: number;
@@ -61,7 +72,7 @@ export type IssuePrKnownItem = {
 
 export type IssuePrMentionData = {
   entry: RepoIssuesAndPRsResult | null;
-  status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'error';
+  status: 'idle' | 'loading' | 'ready' | 'refreshing' | 'unavailable' | 'error';
   error?: string;
 };
 
@@ -70,10 +81,6 @@ type UseRepoIssuesAndPRsResult = IssuePrMentionData & {
   refresh: (options?: { force?: boolean }) => Promise<void>;
 };
 
-// ============================================================================
-// Cache + Fetch
-// ============================================================================
-
 const MAX_ISSUE_PR_SUGGESTIONS = 50;
 
 const ISSUE_PR_DB_NAME = 'lody:repo-issues-prs';
@@ -81,7 +88,25 @@ const DB_VERSION = 1;
 
 const issuePrMemoryCache = new Map<string, RepoIssuesAndPRsResult>();
 const issuePrInFlightRequests = new Map<string, Promise<RepoIssuesAndPRsResult>>();
+const issuePrUnavailableKeys = new Set<string>();
 const issuePrCacheListeners = new Map<string, Set<(entry: RepoIssuesAndPRsResult) => void>>();
+
+subscribeGitHubWorkspaceInvalidation((workspaceId) => {
+  const prefix = `${workspaceId}:`;
+  for (const key of issuePrUnavailableKeys) {
+    if (key.startsWith(prefix)) issuePrUnavailableKeys.delete(key);
+  }
+});
+
+export function isUnlinkedIssuePrRepoError(err: unknown): boolean {
+  if (err instanceof CloudCapabilityUnavailableError) return true;
+  return (
+    err instanceof GitHubClientTokenError &&
+    (err.code === 'repo_not_linked' ||
+      err.code === 'installation_not_found' ||
+      err.code === 'repo_not_authorized')
+  );
+}
 
 /**
  * How long a completed fetch stays authoritative.
@@ -103,11 +128,8 @@ function isIssuePrEntryFresh(entry: RepoIssuesAndPRsResult, now: number) {
 export function __resetIssuePrFetchFreshnessForTests() {
   issuePrMemoryCache.clear();
   issuePrInFlightRequests.clear();
+  issuePrUnavailableKeys.clear();
 }
-
-// ============================================================================
-// Analytics
-// ============================================================================
 
 function fnv1a32(value: string) {
   let hash = 0x811c9dc5;
@@ -201,15 +223,12 @@ function subscribeIssuePrCache(key: string, listener: (entry: RepoIssuesAndPRsRe
 }
 
 function publishIssuePrCacheEntry(key: string, entry: RepoIssuesAndPRsResult) {
+  issuePrUnavailableKeys.delete(key);
   issuePrMemoryCache.set(key, entry);
   void idbSet(ISSUE_PR_DB_NAME, key, entry);
   const listeners = issuePrCacheListeners.get(key);
   listeners?.forEach((listener) => listener(entry));
 }
-
-// ============================================================================
-// Mention Utils
-// ============================================================================
 
 export function buildItemSuggestions(items: IssueOrPR[]): ItemSuggestion[] {
   return items.map((item) => {
@@ -379,10 +398,6 @@ export function extractIssuePRMentionsFromText(
   return mentions;
 }
 
-// ============================================================================
-// Data Hook
-// ============================================================================
-
 function toRepoIssuesAndPRsResult(
   repoFullName: string,
   items: GitHubIssueOrPR[]
@@ -426,6 +441,14 @@ export function useRepoIssuesAndPRs(
         setData((prev) => (prev.entry === cached ? prev : { entry: cached, status: 'ready' }));
         return;
       }
+      if (!options?.force && !cached && issuePrUnavailableKeys.has(key)) {
+        setData((prev) =>
+          prev.status === 'unavailable' && prev.entry === null
+            ? prev
+            : { entry: null, status: 'unavailable' }
+        );
+        return;
+      }
 
       setData((prev) => ({
         entry: prev.entry,
@@ -439,6 +462,13 @@ export function useRepoIssuesAndPRs(
           const entry = await existingRequest;
           setData({ entry, status: 'ready' });
         } catch (err) {
+          if (isUnlinkedIssuePrRepoError(err)) {
+            issuePrUnavailableKeys.add(key);
+            setData((prev) =>
+              prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+            );
+            return;
+          }
           const message = toErrorMessage(err);
           setData((prev) => {
             if (prev.entry) {
@@ -483,6 +513,13 @@ export function useRepoIssuesAndPRs(
       try {
         await request;
       } catch (err) {
+        if (isUnlinkedIssuePrRepoError(err)) {
+          issuePrUnavailableKeys.add(key);
+          setData((prev) =>
+            prev.entry ? { entry: prev.entry, status: 'ready' } : { entry: null, status: 'unavailable' }
+          );
+          return;
+        }
         const message = toErrorMessage(err);
         setData((prev) => ({
           entry: prev.entry,
@@ -521,12 +558,20 @@ export function useRepoIssuesAndPRs(
       if (cancelled) return;
       setData({ entry, status: 'ready' });
     });
+    const unsubscribeInvalidation = subscribeGitHubWorkspaceInvalidation((invalidatedId) => {
+      if (cancelled || invalidatedId !== workspaceIdValue) return;
+      setData((prev) =>
+        prev.status === 'unavailable' ? { entry: null, status: 'loading' } : prev
+      );
+    });
 
     async function run() {
       const mem = issuePrMemoryCache.get(key);
 
       if (mem) {
         setData({ entry: mem, status: 'ready' });
+      } else if (issuePrUnavailableKeys.has(key)) {
+        setData({ entry: null, status: 'unavailable' });
       } else {
         setData((prev) => ({ ...prev, status: 'loading' }));
         const persisted = await idbGet<RepoIssuesAndPRsResult>(ISSUE_PR_DB_NAME, key);
@@ -546,6 +591,7 @@ export function useRepoIssuesAndPRs(
     return () => {
       cancelled = true;
       unsubscribe();
+      unsubscribeInvalidation();
     };
   }, [isPublic, postHog, refresh, repoFullName, workspaceId]);
 
@@ -576,10 +622,6 @@ export function useKnownIssuePrItems(repoFullName?: string, isPublic?: boolean) 
   return { knownItems, issuePrData, status: issuePrData.status, error: issuePrData.error };
 }
 
-// ============================================================================
-// Hydrator
-// ============================================================================
-
 export function IssuePrMentionHydrator({
   text,
   knownItems,
@@ -599,15 +641,11 @@ export function IssuePrMentionHydrator({
   return null;
 }
 
-// ============================================================================
-// UI Components
-// ============================================================================
-
 function getItemIconMeta(type: 'issue' | 'pr') {
   if (type === 'pr') {
-    return { Icon: GitPullRequest, iconClassName: 'text-github-open' };
+    return { Icon: GitPullRequest, iconStyle: styles.pr };
   }
-  return { Icon: CircleDot, iconClassName: 'text-status-info' };
+  return { Icon: CircleDot, iconStyle: styles.issue };
 }
 
 const ISSUE_PR_TITLE_HINT_CLOSE_DELAY_MS = 650;
@@ -622,126 +660,10 @@ type IssuePrMentionMeta = {
   type: 'issue' | 'pr';
 };
 
-function getLineHeight(input: HTMLTextAreaElement) {
-  const style = window.getComputedStyle(input);
-  const parsed = Number.parseInt(style.lineHeight, 10);
-  return Number.isFinite(parsed) ? parsed : input.offsetHeight;
-}
-
-function getTextWidth(text: string, input: HTMLTextAreaElement) {
-  const style = window.getComputedStyle(input);
-  const measureSpan = document.createElement('span');
-  measureSpan.style.cssText = `
-    position: absolute;
-    visibility: hidden;
-    white-space: pre;
-    font: ${style.font};
-    letter-spacing: ${style.letterSpacing};
-    text-transform: ${style.textTransform};
-  `;
-  measureSpan.textContent = text;
-  document.body.appendChild(measureSpan);
-  const width = measureSpan.offsetWidth;
-  document.body.removeChild(measureSpan);
-  return width;
-}
-
-function rectFromEdges({
-  left,
-  top,
-  right,
-  bottom,
-}: {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}) {
-  return DOMRect.fromRect({
-    x: left,
-    y: top,
-    width: Math.max(0, right - left),
-    height: Math.max(0, bottom - top),
-  });
-}
-
-function calculateCaretRect(input: HTMLTextAreaElement, cursorPosition: number) {
-  const rect = input.getBoundingClientRect();
-  const textBeforeCursor = input.value.slice(0, cursorPosition);
-  const lines = textBeforeCursor.split('\n');
-  const currentLine = lines.length - 1;
-  const currentLineText = lines[currentLine] ?? '';
-  const textWidth = getTextWidth(currentLineText, input);
-
-  const style = window.getComputedStyle(input);
-  const lineHeight = getLineHeight(input);
-  const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-  const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-  const paddingTop = Number.parseFloat(style.getPropertyValue('padding-top') ?? '0');
-
-  const containerWidth = input.clientWidth - paddingLeft - paddingRight;
-  const wrappedLines = containerWidth > 0 ? Math.floor(textWidth / containerWidth) : 0;
-  const totalLines = currentLine + wrappedLines;
-
-  const scrollTop = input.scrollTop;
-  const scrollLeft = input.scrollLeft;
-
-  const effectiveTextWidth = containerWidth > 0 ? textWidth % containerWidth : textWidth;
-  const isRTL = style.direction === 'rtl';
-  const x = isRTL
-    ? Math.min(rect.right - paddingRight - effectiveTextWidth + scrollLeft, rect.right - 10)
-    : Math.min(rect.left + paddingLeft + effectiveTextWidth - scrollLeft, rect.right - 10);
-  const y = rect.top + paddingTop + (totalLines * lineHeight - scrollTop);
-
-  return rectFromEdges({ left: x, top: y, right: x, bottom: y + lineHeight });
-}
-
 function pointInRect(clientX: number, clientY: number, rect: DOMRect) {
   return (
     clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
   );
-}
-
-function getMentionHitRects(input: HTMLTextAreaElement, start: number, end: number) {
-  const startRect = calculateCaretRect(input, start);
-  const endRect = calculateCaretRect(input, end);
-  const lineHeight = getLineHeight(input);
-  const style = window.getComputedStyle(input);
-  const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-  const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-
-  const inputRect = input.getBoundingClientRect();
-  const singleLine = Math.abs(endRect.top - startRect.top) < lineHeight / 2;
-
-  if (singleLine) {
-    const right = Math.max(endRect.left, startRect.left + 1);
-    return [
-      rectFromEdges({
-        left: startRect.left,
-        right,
-        top: startRect.top,
-        bottom: startRect.top + lineHeight,
-      }),
-    ];
-  }
-
-  // Wrapped: split into two hit rects (mentions are short, so 2 lines max is a safe approximation).
-  const firstLineRight = inputRect.right - paddingRight;
-  const secondLineLeft = inputRect.left + paddingLeft;
-  return [
-    rectFromEdges({
-      left: startRect.left,
-      right: firstLineRight,
-      top: startRect.top,
-      bottom: startRect.top + lineHeight,
-    }),
-    rectFromEdges({
-      left: secondLineLeft,
-      right: Math.max(endRect.left, secondLineLeft + 1),
-      top: endRect.top,
-      bottom: endRect.top + lineHeight,
-    }),
-  ];
 }
 
 export function IssuePrMentionTitleHint({
@@ -833,10 +755,10 @@ export function IssuePrMentionTitleHint({
       if (issuePrMentions.length === 0) return false;
 
       for (const meta of issuePrMentions) {
-        const rects = getMentionHitRects(input, meta.start, meta.end);
+        const rects = getComposerRangeRects(input, meta.start, meta.end);
         if (rects.some((r) => pointInRect(clientX, clientY, r))) {
           cancelScheduledClose();
-          const anchorRect = calculateCaretRect(input, meta.start);
+          const anchorRect = getComposerCaretRect(input, meta.start);
           setActive({ meta, anchor: { left: anchorRect.left, top: anchorRect.top } });
           setOpen(true);
           return true;
@@ -849,7 +771,7 @@ export function IssuePrMentionTitleHint({
   );
 
   React.useEffect(() => {
-    const input = context.inputRef.current;
+    const input: HTMLElement | null = context.inputRef.current;
     if (!input) return undefined;
     if (!enabled) return undefined;
 
@@ -915,7 +837,7 @@ export function IssuePrMentionTitleHint({
 
   if (!open || !active) return null;
 
-  const { Icon, iconClassName } = getItemIconMeta(active.meta.type);
+  const { Icon, iconStyle } = getItemIconMeta(active.meta.type);
 
   return (
     <Popover.Root
@@ -924,21 +846,25 @@ export function IssuePrMentionTitleHint({
         if (!next) close();
       }}
     >
-      <Popover.Trigger render={<span
-          aria-hidden="true"
-          style={{
-            position: 'fixed',
-            left: active.anchor.left,
-            top: active.anchor.top,
-            width: 1,
-            height: 1,
-            pointerEvents: 'none',
-          }}
-        />}/>
+      <Popover.Trigger
+        render={
+          <span
+            aria-hidden="true"
+            style={{
+              position: 'fixed',
+              left: active.anchor.left,
+              top: active.anchor.top,
+              width: 1,
+              height: 1,
+              pointerEvents: 'none',
+            }}
+          />
+        }
+      />
       <Popover.Content
         side="top"
         align="start"
-        className="max-w-[320px] p-3"
+        {...stylex.props(styles.content)}
         onPointerEnter={() => {
           cancelScheduledClose();
         }}
@@ -946,33 +872,74 @@ export function IssuePrMentionTitleHint({
           scheduleClose();
         }}
       >
-        <div className="flex items-center justify-between gap-3">
-          <span className="shrink-0 rounded-xs border border-border/60 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-            #{active.meta.number}
-          </span>
+        <div {...stylex.props(styles.header)}>
+          <span {...stylex.props(styles.number)}>#{active.meta.number}</span>
           {active.meta.url ? (
             <a
               href={active.meta.url}
               target="_blank"
               rel="noopener noreferrer"
-              className={cn(
-                'inline-flex items-center gap-1 rounded-xs px-1 py-0.5 text-xs text-muted-foreground hover:text-foreground'
-              )}
+              {...stylex.props(styles.link)}
             >
-              <Github className="h-3.5 w-3.5" />
+              <Github {...stylex.props(styles.github)} />
               <span>{t('mention.issuePr.openOnGitHub', 'Open on GitHub')}</span>
             </a>
           ) : (
             <span />
           )}
         </div>
-        <div className="mt-2 flex items-start gap-2">
-          <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', iconClassName)} />
-          <p className="min-w-0 break-words text-sm font-medium leading-snug">
-            {active.meta.title}
-          </p>
+        <div {...stylex.props(styles.body)}>
+          <Icon {...stylex.props(styles.icon, iconStyle)} />
+          <p {...stylex.props(styles.title)}>{active.meta.title}</p>
         </div>
       </Popover.Content>
     </Popover.Root>
   );
 }
+
+const styles = stylex.create({
+  content: { maxWidth: '320px', padding: themeSpace[3] },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[3],
+  },
+  number: {
+    flexShrink: 0,
+    borderRadius: themeRadius.xs,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    paddingInline: themeSpace[1.5],
+    paddingBlock: themeSpace[0.5],
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  link: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: themeSpace[1],
+    borderRadius: themeRadius.xs,
+    paddingInline: themeSpace[1],
+    paddingBlock: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: { default: themeColors.mutedForeground, ':hover': themeColors.foreground },
+  },
+  github: { height: themeSpace[3.5], width: themeSpace[3.5] },
+  body: { marginTop: themeSpace[2], display: 'flex', alignItems: 'flex-start', gap: themeSpace[2] },
+  icon: { marginTop: themeSpace[0.5], height: themeSpace[4], width: themeSpace[4], flexShrink: 0 },
+  pr: { color: themeColors.githubOpen },
+  issue: { color: themeColors.statusInfo },
+  title: {
+    minWidth: 0,
+    overflowWrap: 'break-word',
+    fontSize: themeFontSize.sm,
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 1.375,
+  },
+});

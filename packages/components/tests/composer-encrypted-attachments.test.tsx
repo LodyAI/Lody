@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { File, Blob } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
 import { URL as NodeURL } from 'node:url';
@@ -8,13 +9,15 @@ import { Provider, createStore } from 'jotai';
 import { IDBFactory } from 'fake-indexeddb';
 import { LoroDoc } from 'loro-crdt';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createStore as createPlatformStore, type PlatformProvider } from '@lody/platform';
+import { createStore as createPlatformStore } from '@lody/platform';
 import { installAttachmentWorkspaceAccess } from '../src/lib/attachment-workspace-access';
 import {
+  buildSessionTurnInputConfig,
   SESSION_IMAGE_MAX_COUNT,
   SESSION_FILE_MAX_COUNT,
   SESSION_IMAGE_MAX_SIZE_BYTES,
   type SessionHistory,
+  type SessionInputBlock,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -32,6 +35,8 @@ import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
+import i18next from 'i18next';
+import { encryptedDispatchSigner } from './helpers/encrypted-dispatch-signer';
 import { protectedAttachmentBlob } from '../src/lib/encrypted-session-attachment';
 import { clearSessionImageCache, getSessionImageBlobUrl } from '../src/lib/session-image-cache';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
@@ -40,6 +45,7 @@ import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { fetchSessionFilePreview } from '../src/lib/session-file-download';
 import { initI18n } from '../src/i18n';
+import { prepareScheduledMessage } from '../src/components/schedules/scheduled-message-write';
 
 vi.mock('../src/components/mentions/mention-session-source', async (original) => ({
   ...(await original<object>()),
@@ -49,7 +55,8 @@ vi.mock('../src/components/mentions/mention-agent-role-source', async (original)
   ...(await original<object>()),
   useAgentRoleMentionItems: () => [],
 }));
-const local = vi.hoisted(() => ({ files: [] as string[] }));
+const local = vi.hoisted(() => ({ enabled: false, files: [] as string[] }));
+vi.mock('../src/lib/electron', () => ({ isElectronRenderer: () => local.enabled }));
 vi.mock('../src/lib/electron-session-file-sender', () => ({
   canUseElectronLocalFileSend: () => true,
   sendSessionFileToLocalRuntime: async ({ file }: { file: File }) => {
@@ -90,6 +97,7 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
   local.files = [];
+  local.enabled = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -116,9 +124,11 @@ function fixture(contentMode: 'e2ee' | 'plaintext' = 'e2ee') {
       }) as never,
     releaseRef: () => {},
   });
+  const signer = encryptedDispatchSigner();
   const runtime = {
     workspaceId,
     contentMode,
+    prepareEncryptedDispatch: signer.prepareEncryptedDispatch,
     attachmentToken: async () => 'attachment-only-token',
     sendResources,
     repo: { getDocMeta: async (id: string) => ({ meta: metas.get(id) }) },
@@ -160,7 +170,7 @@ function fixture(contentMode: 'e2ee' | 'plaintext' = 'e2ee') {
       const stop = runtime.pendingSends!.subscribe(check);
       check();
     });
-  return { runtime, doc, session, metas, until };
+  return { runtime, doc, session, metas, until, signer };
 }
 
 function Composer({ runtime, slug = 'encrypted' }: { runtime: WorkspaceRuntime; slug?: string }) {
@@ -190,7 +200,7 @@ function Composer({ runtime, slug = 'encrypted' }: { runtime: WorkspaceRuntime; 
     images.addFiles(parts.images);
     files.addFiles(parts.attachments);
   };
-  const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+  const paste = (event: ClipboardEvent<HTMLElement>) => {
     const values = Array.from(event.clipboardData.items)
       .map((item) => item.getAsFile())
       .filter((file): file is globalThis.File => !!file);
@@ -213,7 +223,12 @@ function Composer({ runtime, slug = 'encrypted' }: { runtime: WorkspaceRuntime; 
         timestamp: '2026-10-29T00:00:00Z',
         items: [],
         fileDiff: [],
-        inputConfig: { inputBlocks: [{ type: 'text', text: 'keep draft' }] },
+        // As the real composer builds it: the selected agent is always named.
+        inputConfig: buildSessionTurnInputConfig({
+          inputBlocks: [{ type: 'text', text: 'keep draft' }],
+          cliType: 'builtin',
+          agentType: 'codex',
+        }),
       } as unknown as SessionHistory;
       await acceptSessionUserTurn(
         runtime,
@@ -280,10 +295,7 @@ async function attach(method: 'paste' | 'drop' | 'select', files: globalThis.Fil
           items: files.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
         },
       });
-      (method === 'paste'
-        ? container.querySelector('textarea')!
-        : container.querySelector('.group.relative')!
-      ).dispatchEvent(event);
+      container.querySelector('[data-composer-editor], textarea')!.dispatchEvent(event);
     }
   });
 }
@@ -335,6 +347,154 @@ function relay() {
   };
 }
 
+it.each(['send', 'schedule'] as const)(
+  'uploads same-machine Electron %s attachments encrypted with the attachment grant',
+  async (kind) => {
+    local.enabled = true;
+    const f = fixture();
+    const server = relay();
+    let sessionId = 'session' as SessionId;
+    let inputBlocks: SessionInputBlock[];
+    const files = [
+      new File([imageBytes], 'secret.png', { type: 'image/png' }),
+      new File(['private file bytes'], 'secret.txt', { type: 'text/plain' }),
+    ];
+    if (kind === 'send') {
+      await mount(f.runtime);
+      await attach('select', files);
+      await submit();
+      expect(container.querySelector('output')!.textContent).toBe('');
+      await f.until(
+        () =>
+          f.session.historyWriter.readStored().length > 0 ||
+          !!f.runtime.pendingSends!.getSnapshot()[0]?.error
+      );
+      expect(f.runtime.pendingSends!.getSnapshot()).toEqual([]);
+      const [turn] = f.session.historyWriter.readStored();
+      expect(turn).toBeDefined();
+      inputBlocks = turn!.inputConfig!.inputBlocks!;
+      sessionId = [...f.metas.values()][0]!.id as SessionId;
+    } else {
+      inputBlocks = (
+        await prepareScheduledMessage({
+          runtime: f.runtime,
+          scheduleId: 'schedule',
+          sessionId,
+          machineId: 'machine' as never,
+          actorId: 'account',
+          inputBlocks: [],
+          attachments: files.map((file, index) => ({
+            id: file.name,
+            kind: index === 0 ? 'image' : 'file',
+            source: file,
+            name: file.name,
+            mimeType: file.type,
+            lastModified: file.lastModified,
+          })),
+          token: 'ordinary-token',
+          localMachineId: 'machine' as never,
+          signal: new AbortController().signal,
+          onAttachments: () => {},
+        })
+      ).inputBlocks;
+    }
+    const attachments = inputBlocks.filter(
+      (block) => block.type === 'image' || block.type === 'file'
+    );
+    expect(attachments.map((block) => block.type)).toEqual(['image', 'file']);
+    expect(local.files).toEqual([]);
+    expect(server.requests).toHaveLength(2);
+    for (const request of server.requests) {
+      expect(request.url).toContain('/session-encrypted-');
+      expect(request.headers.get('Authorization')).toBe('Bearer attachment-only-token');
+      expect(new TextDecoder().decode(request.bytes)).not.toContain('private file bytes');
+    }
+    for (const block of attachments) {
+      if (block.type !== 'image' && block.type !== 'file') throw new Error('Expected attachment');
+      expect(block.transport).not.toBe('local');
+      expect(block.encryption).toBeDefined();
+      const blob = await protectedAttachmentBlob({
+        workspaceId,
+        sessionId,
+        encryption: block.encryption!,
+        attachmentToken: f.runtime.attachmentToken,
+      });
+      expect(await blob.text()).toBe(block.type === 'image' ? imageContent : 'private file bytes');
+    }
+  }
+);
+
+it.each(['input-only', 'ready-only', 'mixed-ready'] as const)(
+  'rejects unencrypted scheduled attachments when preparation returns early: %s',
+  async (source) => {
+    const f = fixture();
+    const server = relay();
+    const image: SessionInputBlock = {
+      type: 'image',
+      imageId: 'plaintext-image',
+      fileName: 'secret.png',
+      mimeType: 'image/png',
+      sizeBytes: imageBytes.length,
+    };
+    const file: SessionInputBlock = {
+      type: 'file',
+      fileId: 'plaintext-file',
+      fileName: 'secret.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 7,
+      sha256: 'a'.repeat(64),
+      textPreview: false,
+      uploadedAt: 1,
+      transport: 'r2',
+    };
+    await expect(
+      prepareScheduledMessage({
+        runtime: f.runtime,
+        scheduleId: 'schedule',
+        sessionId: 'session' as SessionId,
+        machineId: 'machine' as never,
+        actorId: 'account',
+        inputBlocks: source === 'ready-only' ? [] : [image],
+        attachments:
+          source === 'input-only'
+            ? []
+            : [
+                {
+                  id: 'ready-file',
+                  kind: 'file',
+                  name: 'secret.txt',
+                  mimeType: 'text/plain',
+                  lastModified: 1,
+                  ready: file,
+                },
+              ],
+        token: 'ordinary-token',
+        localMachineId: 'machine' as never,
+        signal: new AbortController().signal,
+        onAttachments: () => {},
+      })
+    ).rejects.toThrow('e2ee_attachment_unprotected');
+    expect(server.requests).toEqual([]);
+    expect(f.session.historyWriter.readStored()).toEqual([]);
+  }
+);
+
+it('fails a send visibly, writing nothing, when the host refuses to sign it', async () => {
+  const f = fixture();
+  relay();
+  Object.assign(f.runtime, {
+    prepareEncryptedDispatch: async () => {
+      throw new Error('e2ee_rpc_invalid');
+    },
+  });
+  await mount(f.runtime);
+  await attach('select', [new File(['private file bytes'], 'secret.txt', { type: 'text/plain' })]);
+  await submit();
+  await f.until(() => Boolean(f.runtime.pendingSends!.getSnapshot()[0]?.error));
+  expect(f.runtime.pendingSends!.getSnapshot()[0]?.error).toBe(i18next.t('sessions.sendError'));
+  expect(f.session.historyWriter.readStored()).toEqual([]);
+});
+
 it.each(['paste', 'drop', 'select'] as const)(
   'sends new image and file through the real composer and protected pending queue via %s',
   async (method) => {
@@ -350,6 +510,12 @@ it.each(['paste', 'drop', 'select'] as const)(
     expect(container.querySelector('output')!.textContent).toBe('');
     await f.until(() => !f.runtime.pendingSends!.getSnapshot().length);
     expect(f.session.historyWriter.readStored()).toHaveLength(1);
+    // The signed input carries both protected attachments, so the machine runs them.
+    expect(f.signer.signed[0]?.inputConfig.inputBlocks?.map((block) => block.type).sort()).toEqual([
+      'file',
+      'image',
+      'text',
+    ]);
     expect(local.files).toEqual([]);
     expect(server.requests).toHaveLength(2);
     expect(
@@ -552,7 +718,10 @@ it('preserves the original workspace draft across an unknown-mode wait and works
         started.resolve();
         return described.promise;
       },
-    } as PlatformProvider['e2eeWorkspaces'],
+      create: unexpectedE2eeWorkspaceOperation,
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
+      history: unexpectedE2eeWorkspaceOperation,
+    },
   });
   close.push(async () => remove());
   const store = await mount(f.runtime);

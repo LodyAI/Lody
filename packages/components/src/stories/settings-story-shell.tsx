@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   RouterProvider,
   createMemoryHistory,
@@ -65,30 +65,38 @@ const localStoryPlatform = createLocalPlatformProvider({
   }),
 });
 
-const storyAuthClient = {
-  useSession: () => ({
-    data: settingsStorySession,
-    isPending: false,
-    error: null,
-    refetch: async () => ({ data: settingsStorySession, error: null }),
-  }),
-  useListOrganizations: () => ({
-    data: [settingsStoryOrganization],
-    isPending: false,
-    error: null,
-    refetch: async () => ({ data: [settingsStoryOrganization], error: null }),
-  }),
-  useActiveOrganization: () => ({
-    data: settingsStoryOrganization,
-    isPending: false,
-    error: null,
-    refetch: async () => ({ data: settingsStoryOrganization, error: null }),
-  }),
-  organization: {
-    setActive: async () => ({ data: settingsStoryOrganization, error: null }),
-  },
-  signOut: async () => undefined,
-} as unknown as LodyAuthClient;
+function createStoryAuthClient(role: 'owner' | 'member') {
+  const organization = {
+    ...settingsStoryOrganization,
+    role,
+    members: settingsStoryOrganization.members.map((member) => ({ ...member, role })),
+  };
+  const organizations = [organization];
+  return {
+    useSession: () => ({
+      data: settingsStorySession,
+      isPending: false,
+      error: null,
+      refetch: async () => ({ data: settingsStorySession, error: null }),
+    }),
+    useListOrganizations: () => ({
+      data: organizations,
+      isPending: false,
+      error: null,
+      refetch: async () => ({ data: organizations, error: null }),
+    }),
+    useActiveOrganization: () => ({
+      data: organization,
+      isPending: false,
+      error: null,
+      refetch: async () => ({ data: organization, error: null }),
+    }),
+    organization: {
+      setActive: async () => ({ data: organization, error: null }),
+    },
+    signOut: async () => undefined,
+  } as unknown as LodyAuthClient;
+}
 
 const storyStableSessionValue = {
   data: settingsStorySession,
@@ -111,19 +119,72 @@ const storyStableSessionValue = {
  */
 export function SettingsStoryProviders({
   capabilities = [],
+  role = 'owner',
+  multiMember = false,
   children,
 }: {
   capabilities?: readonly PlatformCapability[];
+  role?: 'owner' | 'member';
+  multiMember?: boolean;
   children: ReactNode;
 }) {
+  const storyAuthClient = useMemo(() => createStoryAuthClient(role), [role]);
+  const [organization] = useState(() =>
+    multiMember
+      ? {
+          ...settingsStoryOrganization,
+          members: [
+            ...settingsStoryOrganization.members,
+            {
+              id: 'settings-story-teammate-membership',
+              userId: 'settings-story-teammate',
+              organizationId: settingsStoryOrganization.id,
+              role: 'member' as const,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ],
+        }
+      : settingsStoryOrganization
+  );
+  const [authClient] = useState(() =>
+    multiMember
+      ? ({
+          ...storyAuthClient,
+          useActiveOrganization: () => ({
+            data: organization,
+            isPending: false,
+            error: null,
+            refetch: async () => ({ data: organization, error: null }),
+          }),
+          useListOrganizations: () => ({
+            data: [organization],
+            isPending: false,
+            error: null,
+            refetch: async () => ({ data: [organization], error: null }),
+          }),
+        } as unknown as LodyAuthClient)
+      : storyAuthClient
+  );
   const [platform] = useState(() => ({
     ...localStoryPlatform,
+    ...(multiMember
+      ? {
+          workspaces: {
+            ...localStoryPlatform.workspaces,
+            state: createStaticStore({
+              status: 'ready' as const,
+              workspaces: [organization],
+              activeWorkspaceId: organization.id,
+            }),
+          },
+        }
+      : {}),
     capabilities: createCapabilitySet([...localStoryPlatform.capabilities.list(), ...capabilities]),
   }));
 
   return (
     <PlatformContext.Provider value={platform}>
-      <AuthProvider authClient={storyAuthClient}>
+      <AuthProvider authClient={authClient}>
         <StableSessionContext.Provider value={storyStableSessionValue}>
           {children}
         </StableSessionContext.Provider>

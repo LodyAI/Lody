@@ -22,6 +22,7 @@ const request = {
   source: 'email' as const,
   state: 'pending' as const,
   expiresAt: offer.expiresAt,
+  offer,
 };
 const meta = {
   title: 'Components/E2eeTeamJoining',
@@ -196,6 +197,30 @@ export const KeyDelivery: Story = {
             requestId,
             state: 'pending',
           }),
+        }}
+      />
+    </div>
+  ),
+};
+export const ApprovalPaymentRequired: Story = {
+  globals: { locale: 'zh_CN' },
+  render: () => (
+    <div style={settingsFrame}>
+      <E2eeTeamSettings
+        workspaceId={offer.workspaceId}
+        onOpenBilling={() => {}}
+        onRefreshBilling={async () => {}}
+        runtime={{
+          ...settingsRuntime,
+          setMemberRole: async () => {},
+          memberJoinRequests: async () => ({
+            ...pending,
+            seatPreview: {
+              ...pending.seatPreview!,
+              paymentAction: 'payment_required',
+            } as E2eeMemberReplies['pending']['seatPreview'],
+          }),
+          approveMemberJoin: async () => ({ admitted: true, keyPending: true }),
         }}
       />
     </div>

@@ -86,7 +86,6 @@ const freeOverview: BillingOverviewData = {
   effectivePlanTier: 'free',
   entitlementSource: 'free',
   offerKey: null,
-  yearlyEarlyBirdEligible: false,
   promotionalEntitlementEndsAt: null,
   giftStartsAt: null,
   giftEndsAt: null,
@@ -118,7 +117,6 @@ const paidOverview: BillingOverviewData = {
   effectivePlanTier: 'plus',
   entitlementSource: 'stripe',
   offerKey: null,
-  yearlyEarlyBirdEligible: false,
   promotionalEntitlementEndsAt: null,
   giftStartsAt: null,
   giftEndsAt: null,
@@ -262,7 +260,6 @@ export const FreeWithLockedPrices: Story = {
   args: {
     overview: {
       ...freeOverview,
-      yearlyEarlyBirdEligible: true,
       pricing: {
         monthlyAmountCents: 500,
         yearlyAmountCents: 6000,
@@ -442,7 +439,6 @@ export const PaidYearlyEarlyBirdUpcomingInvoice: Story = {
       ...paidOverview,
       billingInterval: 'year',
       offerKey: 'early_bird_yearly_6000_forever',
-      yearlyEarlyBirdEligible: true,
       pricing: {
         ...paidOverview.pricing,
         yearlyAmountCents: 6000,

@@ -7,11 +7,14 @@ import {
   makeEncryptedStreamsRpc,
   makeEncryptedRpcListener,
 } from '@lody/loro-streams-rpc/e2ee-streams';
-import type { LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
+import { LoroStreamsGatewayError, type LoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { encryptedRpcFixture } from '../../../../../packages/loro-streams-rpc/tests/fixtures/e2ee-native-fixture';
 import { RealtimeJournal } from './realtime-journal';
 import { makeEncryptedAgentExecution } from './agent-execution';
 import { makeEncryptedRpcReceiver } from './realtime-rpc';
+import { runMachineIrohListener } from './iroh-listener';
+import { randomBytes } from 'node:crypto';
+import { developmentNativePath, loadIrohNative } from '@lody/iroh-native';
 
 const fixtures: ReturnType<typeof encryptedRpcFixture>[] = [];
 afterEach(() => {
@@ -61,6 +64,7 @@ function fixture(options?: { guest?: boolean }) {
     });
   const gate = (journal = execution) =>
     makeEncryptedAgentExecution({
+      machineUserId: 'synthetic-machine-account',
       workspaceId: f.workspaceId,
       genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
       targetMachineId: f.machineId,
@@ -129,6 +133,66 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     expect(f.published[1]).toEqual(ack);
   });
 
+  // Built by `pnpm --filter @lody/iroh-native build`; skipped where no module exists.
+  const iroh = loadIrohNative(developmentNativePath());
+  it.skipIf(!iroh)(
+    'serves one original over iroh and Streams with a single offer and the same verified ACK',
+    async () => {
+      const f = fixture();
+      const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
+      const receive = f.receiver();
+      const opened = await Effect.runPromise(Deferred.make<{ id: string; addrs: string[] }>());
+      const listener = Effect.runFork(
+        Effect.scoped(
+          runMachineIrohListener({
+            native: iroh!,
+            relays: { urls: [] },
+            withSeed: (open) => Effect.promise(() => open(randomBytes(32))),
+            handle: (envelope, sink) =>
+              receive(envelope, sink).pipe(Effect.ensuring(Effect.promise(() => sink.end()))),
+            onOpen: (endpoint) =>
+              Deferred.doneUnsafe(
+                opened,
+                Effect.succeed({ id: endpoint.endpointId, addrs: endpoint.directAddrs() })
+              ),
+          })
+        )
+      );
+      const machine = await Effect.runPromise(Deferred.await(opened));
+      const dialer = await iroh!.openEndpoint(randomBytes(32), { relayUrls: [], accept: false });
+      try {
+        const call = await dialer.call(
+          { endpointId: machine.id, directAddrs: machine.addrs },
+          Buffer.from(JSON.stringify({ id: original.requestId, frame: original.frameHex })),
+          10_000
+        );
+        const replies: { id: string; frame: string }[] = [];
+        for (let reply = await call.nextReply(); reply; reply = await call.nextReply())
+          replies.push(JSON.parse(reply.toString('utf8')));
+        expect(replies).toHaveLength(1);
+        expect(replies[0]!.id).toBe(original.requestId);
+        expect(
+          await Effect.runPromise(f.sender.acceptResponse(f.machineId, f.input, replies[0]!.frame))
+        ).toEqual(f.ack);
+        // The same original over Streams replays the retained ACK without a second offer.
+        await Effect.runPromise(receive({ id: original.requestId, frame: original.frameHex }));
+        expect(f.offers()).toBe(1);
+        expect(f.published).toEqual([replies[0]]);
+        // A malformed request ends its stream without replies or an offer.
+        const bad = await dialer.call(
+          { endpointId: machine.id, directAddrs: machine.addrs },
+          Buffer.from('not an envelope'),
+          10_000
+        );
+        expect(await bad.nextReply()).toBeNull();
+        expect(f.offers()).toBe(1);
+      } finally {
+        await dialer.close();
+        await Effect.runPromise(Fiber.interrupt(listener));
+      }
+    }
+  );
+
   it('lets simultaneous durable/realtime execution paths claim the same business turn once, including after restart', async () => {
     const f = fixture();
     const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
@@ -175,7 +239,7 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     ]);
   });
 
-  it('rejects expired/revoked/bad requests and admits the next legitimate call without a workspace fence', async () => {
+  it('rejects revoked/bad requests, admits a late delivery and the next legitimate call without a workspace fence', async () => {
     const f = fixture();
     const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));
     const frame = { id: original.requestId, frame: original.frameHex };
@@ -186,17 +250,19 @@ describe('encrypted dispatch receiver and the shared actual-start journal', () =
     await expect(
       Effect.runPromise(f.receiver()({ ...frame, id: 'ff'.repeat(16) }))
     ).rejects.toThrow();
-    f.now(original.expiresAt);
+    // Signed originals carry no deadline: three days late, it still starts once.
+    const late = Date.parse(f.input.timestamp) + 3 * 24 * 60 * 60_000;
+    f.now(late);
     await Effect.runPromise(f.receiver()(frame));
-    expect(f.offers()).toBe(0);
+    expect(f.offers()).toBe(1);
     const nextInput = {
       ...f.input,
       userTurnId: 'new-turn',
-      timestamp: new Date(original.expiresAt).toISOString(),
+      timestamp: new Date(late).toISOString(),
     };
     const next = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, nextInput));
     await Effect.runPromise(f.receiver()({ id: next.requestId, frame: next.frameHex }));
-    expect(f.offers()).toBe(1);
+    expect(f.offers()).toBe(2);
   });
 });
 
@@ -268,6 +334,81 @@ function memoryStreams() {
     activeReads: () => [...listeners.values()].reduce((count, set) => count + set.size, 0),
   };
 }
+
+effectIt.effect.each([
+  {
+    name: 'gateway 502/503',
+    req: [503],
+    ensure: [0, 503],
+    res: [502],
+    acked: true,
+    attempts: [2, 4, 2],
+  },
+  { name: 'origin 500', req: [500], ensure: [], res: [], acked: false, attempts: [1, 1, 0] },
+])(
+  'retries encrypted request appends and response stream setup only after a $name, with bounded backoff',
+  ({ req, ensure, res, acked, attempts }) =>
+    Effect.gen(function* () {
+      const f = fixture();
+      const streams = memoryStreams();
+      const failing = { req: [...req], res: [...res], ensure: [...ensure] };
+      const tried = { req: 0, res: 0, ensure: 0 };
+      const client: LoroStreamsJsonStreamClient = {
+        ...streams.client,
+        ensureJsonStream: async (stream, retention) => {
+          if (stream.includes(':res:')) {
+            tried.ensure++;
+            const status = failing.ensure.shift();
+            if (status) throw new LoroStreamsGatewayError('synthetic gateway', status);
+          }
+          return streams.client.ensureJsonStream(stream, retention);
+        },
+        appendJson: async (stream, value) => {
+          const lane = stream.includes(':req:') ? 'req' : 'res';
+          tried[lane]++;
+          const status = failing[lane].shift();
+          if (status) throw new LoroStreamsGatewayError('synthetic gateway', status);
+          return streams.client.appendJson(stream, value);
+        },
+      };
+      const original = yield* f.sender.prepareDispatch(f.machineId, f.input);
+      const receive = makeEncryptedRpcReceiver({
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.succeed({ _tag: 'Authorized' }),
+        isOpen: () => true,
+        client,
+        offer: async () => f.ack,
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* makeEncryptedRpcListener({
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            client,
+            receive,
+          });
+          const sender = yield* makeEncryptedStreamsRpc({
+            workspaceId: f.workspaceId,
+            requesterDevice: original.requesterDevice,
+            client,
+            acceptResponse: (prepared, input, frame) =>
+              Effect.runPromise(f.sender.acceptResponse(prepared.targetMachineId, input, frame)),
+          });
+          const pending = yield* Effect.forkChild(sender.send(original, f.input, 5_000));
+          for (let elapsed = 0; elapsed < 5_000; elapsed += 30) yield* TestClock.adjust(30);
+          expect(yield* Fiber.join(pending)).toEqual(acked ? f.ack : null);
+        })
+      );
+      expect([tried.req, tried.ensure, tried.res]).toEqual(attempts);
+      expect(streams.writes.filter((write) => write.stream.includes(':req:'))).toHaveLength(
+        acked ? 1 : 0
+      );
+    })
+);
 
 effectIt.effect(
   'routes ciphertext-only Streams ACKs, falls back on timeout, then replays the exact original safely',
@@ -423,6 +564,691 @@ effectIt.effect(
     })
 );
 
+effectIt.effect(
+  'forks for a shared member under session-scoped authority and the verified signer identity',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver, makeEncryptedFeatureAuthorization } =
+        yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const streams = memoryStreams();
+      const spec = {
+        sourceSessionId: f.input.sessionId,
+        sourceTurnId: 'assistant-1',
+        targetSessionId: '00000000-0000-4000-8000-0000000000f3',
+        requestedByUserId: 'member-account',
+      };
+      const input = {
+        requestId: '66'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'session/fork' as const,
+          params: spec,
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const scopes: string[][] = [];
+      let projectAllowed = (project: string | undefined) => project !== 'unshared';
+      // The real scope authorizer, over a member grant that names no owner principal.
+      const authorization = makeEncryptedFeatureAuthorization({
+        authorization: {
+          authorizeOwnedExecution: () => Effect.die('fork used owner-only authority'),
+          authorizeRead: () => Effect.die('fork used read authority'),
+          authorizeExecution: (_workspace: string, _device: string, project?: string) =>
+            Effect.sync(() => {
+              scopes.at(-1)?.push(project ?? '<machine>');
+              return projectAllowed(project)
+                ? { _tag: 'Authorized' as const }
+                : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' };
+            }),
+          authorizeSessionRead: () => Effect.die('fork used session read authority'),
+          authoritySignal: new AbortController().signal,
+        },
+        executionAuthoritySignal: () => new AbortController().signal,
+        resolveSessionExecutionScope: async (sessionId) => {
+          expect(sessionId).toBe(spec.sourceSessionId);
+          scopes.push([]);
+          return ['shared-a', 'shared-b'];
+        },
+      });
+      const handled: unknown[] = [];
+      let identity: { accountId: string; executionUserId: string } | undefined = {
+        accountId: 'member-account',
+        executionUserId: 'e2ee-member:aa',
+      };
+      const receiveOptions = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.die('fork used owner-only authority'),
+        authorizeRead: () => Effect.die('fork used read authority'),
+        authorizeSessionExecution: authorization.authorizeSessionExecution,
+        requesterIdentity: () => Effect.sync(() => identity),
+        isOpen: () => true,
+        client: streams.client,
+        handle: async (
+          request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+          context: import('./feature-rpc').EncryptedFeatureContext
+        ) => {
+          handled.push({ method: request.method, requester: context.requester });
+          return {
+            ok: true as const,
+            result: {
+              type: 'session/fork_response' as const,
+              sourceSessionId: spec.sourceSessionId,
+              targetSessionId: spec.targetSessionId,
+              success: true,
+              disposition: 'completed' as const,
+              partial: false,
+              warnings: [],
+            },
+          };
+        },
+      };
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive({ id: original.requestId, frame: original.frameHex });
+          yield* streams.waitResponse(original.requestId, 1);
+        })
+      );
+      expect(handled).toEqual([
+        {
+          method: 'session/fork',
+          requester: { accountId: 'member-account', executionUserId: 'e2ee-member:aa' },
+        },
+      ]);
+      expect(scopes[0]).toEqual(['shared-a', 'shared-b']);
+      const reply = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+        ?.value as { frame: string };
+      expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toMatchObject({
+        ok: true,
+      });
+
+      // One unshared project the session reaches refuses the fork before any work, and the
+      // sender gets that definite answer instead of waiting out its deadline.
+      projectAllowed = (project) => project !== 'shared-b';
+      const unshared = { ...input, requestId: '67'.repeat(16) };
+      const unsharedOriginal = yield* f.sender.prepareFeature(unshared);
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+          yield* receive({ id: unsharedOriginal.requestId, frame: unsharedOriginal.frameHex });
+          yield* streams.waitResponse(unsharedOriginal.requestId, 1);
+        })
+      );
+      expect(handled).toHaveLength(1);
+      const refusal = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+        ?.value as { id: string; frame: string };
+      expect(refusal.id).toBe(unsharedOriginal.requestId);
+      expect(yield* f.sender.acceptFeatureResponse(unshared, refusal.frame)).toMatchObject({
+        ok: false,
+        code: 'e2ee_machine_not_shared',
+      });
+
+      // A signer without a ledger account is never attributed from the request, and it
+      // gets no answer at all.
+      projectAllowed = () => true;
+      identity = undefined;
+      const anonymous = yield* f.sender.prepareFeature({ ...input, requestId: '68'.repeat(16) });
+      const before = streams.writes.length;
+      const checked = yield* Deferred.make<void>();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const receive = yield* makeEncryptedFeatureReceiver({
+            ...receiveOptions,
+            requesterIdentity: () => Deferred.succeed(checked, undefined).pipe(Effect.as(identity)),
+          });
+          yield* receive({ id: anonymous.requestId, frame: anonymous.frameHex });
+          yield* Deferred.await(checked);
+        })
+      );
+      expect(handled).toHaveLength(1);
+      expect(
+        streams.writes.slice(before).filter((write) => write.stream.includes(':res:'))
+      ).toEqual([]);
+    })
+);
+
+effectIt.effect(
+  'authorizes remote Session control and project reads against what they name, as the verified signer',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const streams = memoryStreams();
+      const asked = new Set<string>();
+      const handled: unknown[] = [];
+      const authority = new AbortController();
+      let writable = true;
+      const receiveOptions = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.die('Session control used owner-only authority'),
+        authorizeRead: () => Effect.die('a project read used machine read authority'),
+        authoritySignal: () => authority.signal,
+        authorizeSessionExecution: (_workspace: string, _device: string, sessionId: string) =>
+          Effect.sync(() => {
+            asked.add(`session:${sessionId}`);
+            return writable
+              ? { _tag: 'Authorized' as const, isCurrent: () => writable }
+              : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' };
+          }),
+        authorizeProjectExecution: (_workspace: string, _device: string, project?: string) =>
+          Effect.sync(() => {
+            asked.add(`project:${project}`);
+            return project === 'project-1'
+              ? { _tag: 'Authorized' as const }
+              : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' as const };
+          }),
+        requesterIdentity: () =>
+          Effect.succeed({ accountId: 'member-account', executionUserId: 'e2ee-member:aa' }),
+        isOpen: () => true,
+        client: streams.client,
+        handle: async (
+          request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+          context: import('./feature-rpc').EncryptedFeatureContext
+        ) => {
+          handled.push({ method: request.method, requester: context.requester });
+          return { ok: false as const, error: 'SYNTHETIC_HANDLED' };
+        },
+      };
+      const call = (id: string, method: string, params: unknown, delivery = 1) =>
+        Effect.gen(function* () {
+          const input = {
+            requestId: id.repeat(16),
+            request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+          } as import('@lody/shared/e2ee-rpc').E2eeFeatureInput;
+          const original = yield* f.sender.prepareFeature(input);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+              yield* receive({ id: original.requestId, frame: original.frameHex });
+              yield* streams.waitResponse(original.requestId, delivery);
+            })
+          );
+          const reply = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+            ?.value as { frame: string };
+          return yield* f.sender.acceptFeatureResponse(input, reply.frame);
+        });
+      const sessionId = f.input.sessionId;
+      for (const [id, method, params] of [
+        ['71', 'session/cancel', { sessionId, turnId: 'assistant-1', subagentTaskId: 'task-1' }],
+        [
+          '72',
+          'session/steer',
+          {
+            sessionId,
+            expectedTurnId: 'assistant-1',
+            userTurnId: 'user-2',
+            userId: 'member-account',
+            timestamp: '2026-11-13T00:00:00.000Z',
+            inputConfig: { prompt: 'SYNTHETIC_STEER' },
+          },
+        ],
+        [
+          '73',
+          'local-project/git-state',
+          { localProjectId: 'project-1', requestedByUserId: 'member-account' },
+        ],
+      ] as const)
+        expect(yield* call(id, method, params)).toMatchObject({ error: 'SYNTHETIC_HANDLED' });
+      expect([...asked]).toEqual([`session:${sessionId}`, 'project:project-1']);
+      const requester = { accountId: 'member-account', executionUserId: 'e2ee-member:aa' };
+      expect(handled).toEqual([
+        { method: 'session/cancel', requester },
+        { method: 'session/steer', requester },
+        { method: 'local-project/git-state', requester },
+      ]);
+      expect(
+        yield* call('74', 'project/probe-local-member', { localProjectId: 'project-2' })
+      ).toMatchObject({ ok: false, code: 'e2ee_machine_not_shared' });
+      expect(handled).toHaveLength(3);
+      const params = {
+        sessionId,
+        operation: 'accept_input',
+        payload: { entry: { role: 'user', id: 'sample' } },
+      };
+      expect(yield* call('75', 'session/history-write', params)).toMatchObject({
+        error: 'SYNTHETIC_HANDLED',
+      });
+      expect(yield* call('75', 'session/history-write', params, 2)).toMatchObject({
+        error: 'SYNTHETIC_HANDLED',
+      });
+      writable = false;
+      expect(yield* call('76', 'session/history-write', params)).toMatchObject({
+        code: 'e2ee_machine_not_shared',
+      });
+      expect(handled.slice(3)).toEqual([{ method: 'session/history-write', requester }]);
+    })
+);
+
+effectIt.effect(
+  "serves a shared Session's diff to a Guest only under a current read grant, never its writes",
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver, makeEncryptedFeatureAuthorization } =
+        yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const streams = memoryStreams();
+      const sessionId = f.input.sessionId;
+      let shared = true;
+      let grantCurrent = true;
+      let decisions = 0;
+      const waiting: { count: number; done: Deferred.Deferred<void> }[] = [];
+      const decided = () =>
+        Effect.sync(() => {
+          decisions++;
+          for (const waiter of waiting)
+            if (decisions >= waiter.count) Deferred.doneUnsafe(waiter.done, Effect.void);
+        });
+      const decisionsReach = (count: number) =>
+        Effect.gen(function* () {
+          const done = yield* Deferred.make<void>();
+          waiting.push({ count, done });
+          if (decisions >= count) yield* Deferred.succeed(done, undefined);
+          yield* Deferred.await(done);
+        });
+      const authorization = makeEncryptedFeatureAuthorization({
+        authorization: {
+          authorizeOwnedExecution: () =>
+            decided().pipe(
+              Effect.as({ _tag: 'Denied' as const, reason: 'e2ee_machine_not_owned' as const })
+            ),
+          authorizeRead: () => Effect.die('a session read used machine read authority'),
+          authorizeExecution: () =>
+            Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const }),
+          authorizeSessionRead: (_workspace: string, _device: string, root: string) =>
+            decided().pipe(
+              Effect.as(
+                shared && root === sessionId
+                  ? { _tag: 'Authorized' as const, isCurrent: () => grantCurrent }
+                  : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' as const }
+              )
+            ),
+          authoritySignal: new AbortController().signal,
+        },
+        executionAuthoritySignal: () => new AbortController().signal,
+        resolveHistoryTarget: async (id) => {
+          if (id === sessionId) return { rootSessionId: id };
+          await Effect.runPromise(decided());
+          throw new Error('session_history_read_denied');
+        },
+      });
+      const handled: string[] = [];
+      const receiveOptions = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        ...authorization,
+        isOpen: () => true,
+        client: streams.client,
+        handle: async (
+          request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+        ) => {
+          handled.push(request.method);
+          if (request.method === 'code-collab/read-blob') grantCurrent = false;
+          return {
+            ok: true as const,
+            result: { status: 'ok' as const, entries: [], nextCursor: null },
+          };
+        },
+      };
+      const replies = (id: string) =>
+        streams.writes.filter(
+          (write) => write.stream.includes(':res:') && (write.value as { id: string }).id === id
+        );
+      const call = (
+        id: string,
+        method: string,
+        params: unknown,
+        until: (requestId: string, before: number) => Effect.Effect<void>
+      ) =>
+        Effect.gen(function* () {
+          const before = decisions;
+          const input = {
+            requestId: id.repeat(16),
+            request: { workspaceId: f.workspaceId, machineId: f.machineId, method, params },
+          } as import('@lody/shared/e2ee-rpc').E2eeFeatureInput;
+          const original = yield* f.sender.prepareFeature(input);
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+              yield* receive({ id: original.requestId, frame: original.frameHex });
+              yield* until(original.requestId, before);
+            })
+          );
+          return { input, original };
+        });
+      const manifest = { sessionId, path: 'a.ts' };
+      const granted = yield* call('81', 'code-collab/open-diff-manifest', manifest, (requestId) =>
+        streams.waitResponse(requestId, 1)
+      );
+      const reply = replies(granted.original.requestId).at(-1)?.value as { frame: string };
+      expect(yield* f.sender.acceptFeatureResponse(granted.input, reply.frame)).toMatchObject({
+        ok: true,
+      });
+      const revoked = yield* call(
+        '82',
+        'code-collab/read-blob',
+        { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
+        (_id, before) => decisionsReach(before + 2)
+      );
+      grantCurrent = true;
+      shared = false;
+      const unshared = yield* call(
+        '83',
+        'code-collab/open-diff-manifest',
+        manifest,
+        (_id, before) => decisionsReach(before + 1)
+      );
+      shared = true;
+      const unknown = yield* call(
+        '84',
+        'code-collab/open-diff-manifest',
+        { sessionId: 'unknown-session', path: 'a.ts' },
+        (_id, before) => decisionsReach(before + 1)
+      );
+      const currentDiff = yield* call(
+        '85',
+        'code-collab/open-current-diff',
+        manifest,
+        (_id, before) => decisionsReach(before + 1)
+      );
+      const initDirectory = yield* call(
+        '86',
+        'code-collab/init-directory',
+        { sessionId, path: 'src' },
+        (_id, before) => decisionsReach(before + 1)
+      );
+      expect(handled).toEqual(['code-collab/open-diff-manifest', 'code-collab/read-blob']);
+      for (const { original } of [revoked, unshared, unknown, currentDiff, initDirectory])
+        expect(replies(original.requestId)).toEqual([]);
+    })
+);
+
+effectIt.effect(
+  'joins a live encrypted write across Iroh and Streams receivers without sealing uncertainty',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const input = {
+        requestId: 'd7'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'sorbet/credentials-logout' as const,
+          params: { configId: 'config', providerId: 'provider' },
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const streams = memoryStreams();
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const fallbackAdmitted = yield* Deferred.make<void>();
+      const irohdone = yield* Deferred.make<void>();
+      const irohreplies: Uint8Array[] = [];
+      let executions = 0;
+      const options = {
+        workspaceId: f.workspaceId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        machineId: f.machineId,
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
+        authorizeRead: () => Effect.die('write used read authority'),
+        isOpen: () => true,
+        handle: async () => {
+          executions++;
+          Deferred.doneUnsafe(started, Effect.void);
+          await Effect.runPromise(Deferred.await(release));
+          return { ok: true as const, result: { type: 'sorbet/credentials-logout' as const } };
+        },
+      };
+      let receives = 0;
+      const receiveRecord = f.receipts.receive.bind(f.receipts);
+      vi.spyOn(f.receipts, 'receive').mockImplementation((request) => {
+        const record = receiveRecord(request);
+        if (++receives === 2) Deferred.doneUnsafe(fallbackAdmitted, Effect.void);
+        return record;
+      });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const iroh = yield* makeEncryptedFeatureReceiver(options);
+          const fallback = yield* makeEncryptedFeatureReceiver({
+            ...options,
+            client: streams.client,
+          });
+          const envelope = { id: original.requestId, frame: original.frameHex };
+          yield* iroh(envelope, {
+            deliver: async (_id, frame) => {
+              irohreplies.push(frame);
+            },
+            end: async () => {
+              Deferred.doneUnsafe(irohdone, Effect.void);
+            },
+          });
+          yield* Deferred.await(started);
+          yield* fallback(envelope);
+          yield* Deferred.await(fallbackAdmitted);
+          // The slow real write may now finish, after fallback admission observed its claim.
+          yield* Deferred.succeed(release, undefined);
+          yield* Deferred.await(irohdone);
+          yield* streams.waitResponse(original.requestId, 1);
+        })
+      );
+      expect(executions).toBe(1);
+      expect(irohreplies).toHaveLength(1);
+      const streamReply = streams.writes.find((write) => write.stream.includes(':res:'))?.value as {
+        frame: string;
+      };
+      expect(
+        yield* f.sender.acceptFeatureResponse(
+          input,
+          Buffer.from(irohreplies[0] ?? []).toString('hex')
+        )
+      ).toEqual({ ok: true, result: { type: 'sorbet/credentials-logout' } });
+      expect(yield* f.sender.acceptFeatureResponse(input, streamReply.frame)).toEqual({
+        ok: true,
+        result: { type: 'sorbet/credentials-logout' },
+      });
+      expect(streamReply.frame).toBe(Buffer.from(irohreplies[0] ?? []).toString('hex'));
+    })
+);
+
+effectIt.effect(
+  'returns an encrypted uncertain error for a write claimed before restart without replay',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver } = yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture();
+      const input = {
+        requestId: 'c7'.repeat(16),
+        request: {
+          workspaceId: f.workspaceId,
+          machineId: f.machineId,
+          method: 'sorbet/credentials-logout' as const,
+          params: { configId: 'config', providerId: 'provider' },
+        },
+      };
+      const original = yield* f.sender.prepareFeature(input);
+      const opened = yield* f.nativeReceiver.openFeature(f.machineId, original.frameHex);
+      if (!opened) throw new Error('synthetic feature did not open');
+      const request = {
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        workspaceId: f.workspaceId,
+        targetMachineId: f.machineId,
+        requestId: opened.requestId,
+        requester: opened.requesterDevice,
+        expiresAt: opened.expiresAt,
+        frame: Uint8Array.from(opened.frame),
+      };
+      f.receipts.receive(request);
+      expect(f.receipts.claim(request).state).toBe('claimed');
+      const journal = new RealtimeJournal(join(f.directory, 'receipts.sqlite'), () => 1000);
+      const streams = memoryStreams();
+      for (let retry = 1; retry <= 2; retry++) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver({
+              workspaceId: f.workspaceId,
+              genesis: request.genesis,
+              machineId: f.machineId,
+              native: f.nativeReceiver,
+              journal: () => journal,
+              authorize: () => Effect.succeed({ _tag: 'Authorized' as const }),
+              authorizeRead: () => Effect.die('write must not borrow read authority'),
+              isOpen: () => true,
+              client: streams.client,
+              handle: async () => {
+                throw new Error('uncertain write was replayed');
+              },
+            });
+            yield* receive({ id: original.requestId, frame: original.frameHex });
+            yield* streams.waitResponse(original.requestId, retry);
+          })
+        );
+        const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
+        const reply = replies[retry - 1]?.value as { frame: string };
+        expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toEqual({
+          ok: false,
+          code: 'e2ee_outcome_uncertain',
+          error:
+            'Previous execution of this request was interrupted before completion and will not be replayed automatically.',
+        });
+        expect(journal.read(request)?.state).toBe('uncertain');
+      }
+    })
+);
+
+for (const method of ['sorbet/credentials-list', 'sorbet/credentials-logout'] as const) {
+  effectIt.effect(
+    `journals encrypted ${method} and replays the outcome without another execution`,
+    () =>
+      Effect.gen(function* () {
+        const { makeEncryptedFeatureReceiver } = yield* Effect.promise(
+          () => import('./feature-rpc')
+        );
+        const f = fixture();
+        const streams = memoryStreams();
+        const input = {
+          requestId: (method === 'sorbet/credentials-list' ? 'a1' : 'a2').repeat(16),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            ...(method === 'sorbet/credentials-list'
+              ? { method, params: { configId: 'config' } }
+              : { method, params: { configId: 'config', providerId: 'provider' } }),
+          },
+        };
+        const original = yield* f.sender.prepareFeature(input);
+        const calls: string[] = [];
+        const signers: string[] = [];
+        let authorized = false;
+        let revokeDuringExecution = false;
+        const checked = yield* Deferred.make<void>();
+        let checkCount = 0;
+        const receiveOptions = {
+          workspaceId: f.workspaceId,
+          genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+          machineId: f.machineId,
+          native: f.nativeReceiver,
+          journal: () => f.receipts,
+          authorize: () =>
+            Effect.gen(function* () {
+              checkCount++;
+              if (!authorized) yield* Deferred.succeed(checked, undefined);
+              return authorized
+                ? { _tag: 'Authorized' as const }
+                : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_owned' as const };
+            }),
+          authorizeRead: () => Effect.die('credentials must not use read authority'),
+          isOpen: () => true,
+          client: streams.client,
+          handle: async (
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+            context: import('./feature-rpc').EncryptedFeatureContext
+          ) => {
+            calls.push(request.method);
+            signers.push(context.requesterDevice);
+            if (revokeDuringExecution) authorized = false;
+            return { ok: false as const, error: 'synthetic outcome' };
+          },
+        };
+        const envelope = { id: original.requestId, frame: original.frameHex };
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+            yield* receive(envelope);
+            yield* Deferred.await(checked);
+          })
+        );
+        expect(calls).toEqual([]);
+        expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual([]);
+        authorized = true;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+            yield* receive(envelope);
+            yield* streams.waitResponse(original.requestId, 1);
+          })
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver(receiveOptions);
+            yield* receive(envelope);
+            yield* streams.waitResponse(original.requestId, 2);
+          })
+        );
+        expect(calls).toEqual([method]);
+        expect(signers).toEqual([original.requesterDevice]);
+        const replies = streams.writes.filter((write) => write.stream.includes(':res:'));
+        expect(replies[1]).toEqual(replies[0]);
+        const reply = replies[0]?.value as { frame: string };
+        expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toEqual({
+          ok: false,
+          error: 'synthetic outcome',
+        });
+        const changed = {
+          ...input,
+          requestId: (method === 'sorbet/credentials-list' ? 'b1' : 'b2').repeat(16),
+        };
+        const changedOriginal = yield* f.sender.prepareFeature(changed);
+        const before = checkCount;
+        const revoked = yield* Deferred.make<void>();
+        revokeDuringExecution = true;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const receive = yield* makeEncryptedFeatureReceiver({
+              ...receiveOptions,
+              authorize: () =>
+                Effect.gen(function* () {
+                  checkCount++;
+                  if (checkCount === before + 2) yield* Deferred.succeed(revoked, undefined);
+                  return authorized
+                    ? { _tag: 'Authorized' as const }
+                    : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_owned' as const };
+                }),
+            });
+            yield* receive({ id: changedOriginal.requestId, frame: changedOriginal.frameHex });
+            yield* Deferred.await(revoked);
+          })
+        );
+        expect(calls).toEqual([method, method]);
+        expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual(replies);
+      })
+  );
+}
+
 it('connects the renderer feature facade to the CLI listener with large encrypted request and response chunks', async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(1000);
@@ -549,7 +1375,7 @@ it('shares the feature codec with the ordinary read adapter for a Guest, with co
     workspaceId: f.workspaceId,
     machineId: f.machineId,
     encryptedQuery: (method, params, timeoutMs) =>
-      renderer.query(f.machineId, method, params, timeoutMs),
+      renderer.query(f.machineId, method, params, timeoutMs, async () => true),
   });
   try {
     await Effect.runPromise(
@@ -627,4 +1453,53 @@ it('shares the feature codec with the ordinary read adapter for a Guest, with co
     await renderer.close();
     vi.useRealTimers();
   }
+});
+
+it('protects interaction progress from another workspace member and binds both directions to the signed identity', async () => {
+  const { createRpcSecretRecipient, encryptRpcSecret } = await import('@lody/loro-streams-rpc');
+  const { e2eeAcpInteractionInputContext, e2eeAcpInteractionResponseContext } =
+    await import('@lody/shared/e2ee-rpc');
+  const { E2eeAcpInteractionResultSchema } = await import('@lody/shared/local-machine-rpc');
+  const initiator = await createRpcSecretRecipient();
+  const other = await createRpcSecretRecipient();
+  const identity = {
+    workspaceId: 'workspace',
+    machineId: 'machine',
+    requesterDevice: 'a'.repeat(64),
+    interactionRequestId: 'b'.repeat(32),
+    requestId: 'c'.repeat(32),
+  };
+  const progress = JSON.stringify({
+    authorizationUrl: 'https://example.invalid/private',
+    userCode: 'SYNTHETIC-CODE',
+  });
+  const responseContext = e2eeAcpInteractionResponseContext(identity);
+  const envelope = await encryptRpcSecret(initiator.publicKey, progress, responseContext);
+  expect(await initiator.decrypt(envelope, responseContext)).toBe(progress);
+  await expect(other.decrypt(envelope, responseContext)).rejects.toThrow();
+  await expect(
+    initiator.decrypt(
+      envelope,
+      e2eeAcpInteractionResponseContext({ ...identity, requesterDevice: 'd'.repeat(64) })
+    )
+  ).rejects.toThrow();
+  const result = {
+    type: 'machine/acp-interaction',
+    interactionRequestId: identity.interactionRequestId,
+    state: 'running',
+    responseEnvelope: envelope,
+  };
+  expect(E2eeAcpInteractionResultSchema.safeParse(result).success).toBe(true);
+  expect(E2eeAcpInteractionResultSchema.safeParse({ ...result, progress }).success).toBe(false);
+  expect(JSON.stringify(result)).not.toContain('SYNTHETIC-CODE');
+  const target = await createRpcSecretRecipient();
+  const inputContext = e2eeAcpInteractionInputContext({
+    ...identity,
+    interactionId: 'interaction',
+  });
+  const input = await encryptRpcSecret(target.publicKey, 'SYNTHETIC-INPUT', inputContext);
+  expect(await target.decrypt(input, inputContext)).toBe('SYNTHETIC-INPUT');
+  await expect(
+    target.decrypt(input, e2eeAcpInteractionInputContext({ ...identity, interactionId: 'other' }))
+  ).rejects.toThrow();
 });

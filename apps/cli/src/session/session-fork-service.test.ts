@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { withHistoryPort } from '../../tests/history-port-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc, LoroMap } from 'loro-crdt';
@@ -230,12 +233,13 @@ function createForkHarness(
     cleanupForkWorktree: vi.fn(async () => undefined),
   };
   const logger = { error: vi.fn(), warn: vi.fn() };
+  const userResolver = {
+    resolve: vi.fn(async (_userId: string) => ({ name: 'User', email: 'user@example.com' })),
+  };
   const service = new SessionForkService({
     workspaceDocument: workspaceDocument as never,
     sessionManager: sessionManager as never,
-    userResolver: {
-      resolve: vi.fn(async () => ({ name: 'User', email: 'user@example.com' })),
-    } as never,
+    userResolver,
     logger: logger as never,
     workspaceId: 'workspace-1',
     machineId,
@@ -253,6 +257,7 @@ function createForkHarness(
   return {
     service,
     logger,
+    userResolver,
     persistPendingChanges,
     repo,
     sessionManager,
@@ -599,6 +604,29 @@ describe('SessionForkService durability boundary', () => {
     ]);
     expect(harness.targetDoc.waitUntilSynced).not.toHaveBeenCalled();
     expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
+  });
+
+  it('runs an encrypted member fork as the verified signer while the member account owns it', async () => {
+    const harness = createForkHarness();
+
+    const result = await harness.service.fork({
+      ...forkSpec,
+      requestedByUserId: 'member-account',
+      executionRequesterUserId: 'e2ee-member:aa',
+    });
+
+    expect(result.success).toBe(true);
+    expect(harness.repo.upsertDocMeta).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ userId: 'member-account' })
+    );
+    expect(harness.sessionManager.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ requesterUserId: 'e2ee-member:aa' }),
+      expect.any(Object)
+    );
+    expect(harness.userResolver.resolve).toHaveBeenCalledWith('e2ee-member:aa');
+    expect(harness.userResolver.resolve).not.toHaveBeenCalledWith('member-account');
   });
 
   it('persists a side-panel placement without changing workspace ownership', async () => {
@@ -1251,4 +1279,37 @@ describe('SessionForkService fork operation recovery', () => {
     );
     await vi.waitFor(() => expect(harness.markers).toEqual([]));
   });
+});
+
+it('preserves direct local file payloads in a same-machine fork', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'fork-local-'));
+  const target = createLoroSessionData({ sessionId: targetSessionId, doc: new LoroDoc() });
+  try {
+    const source = path.join(root, 'input.txt');
+    await writeFile(source, 'synthetic');
+    const attachment = {
+      type: 'local_attachment' as const,
+      machineId,
+      path: source,
+      kind: 'file' as const,
+      fileName: 'input.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 9,
+    };
+    const history = structuredClone(sourceHistory);
+    history[0]!.items = [attachment];
+    history[0]!.inputConfig = { inputBlocks: [attachment] };
+    const harness = createForkHarness(undefined, {
+      sourceHistory: history,
+    });
+    harness.targetDoc.sessionData.snapshots.copyFrom = target.snapshots.copyFrom;
+    expect((await harness.service.fork(forkSpec)).success).toBe(true);
+    const inherited = (await target.history.readAll()).find((entry) => entry.id === 'user-1')!;
+    expect(inherited.items).toEqual([attachment]);
+    expect(inherited.inputConfig?.inputBlocks).toEqual([attachment]);
+    expect(history[0]!.items).toEqual([attachment]);
+  } finally {
+    target.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
 });

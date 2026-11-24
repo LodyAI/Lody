@@ -18,8 +18,16 @@ replace the Session as the continuation target.
 | Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
 | Execution authority | [Session authority](../session/session-automation-authority.ts)                                                                                     | Admission barriers, release proof, group settlement and exact-input cancellation              |
 
-Automations currently run in plaintext workspaces. Encrypted workspaces remain unsupported
-under the shared workspace content policy; Fleet creates no automation runtime there.
+Automations run in plaintext and encrypted workspaces. In an encrypted workspace, the
+[Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
+machine, and encrypted admission refuses an automation input without that signature, as it
+does for scheduled runs. The ledger stays machine-local, and continuation text enters the
+Session through its encrypted history. The local PR poller uses the account’s repository-scoped GitHub credentials and feeds
+PR/CI observations into the local automation ledger. PR state stays in protected Loro metadata;
+hosted PR association and content caches remain disabled. Device-only machine composition
+keeps its existing lack of account GitHub credentials. Remote control rides workspace Machine RPC, which encrypted
+workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
+remote controls, only where the shared content policy supports `rpc`.
 
 ## Register a condition
 
@@ -51,10 +59,10 @@ lody automation cancel AUTOMATION_ID
 Managed sessions supply `LODY_SESSION_ID` and `LODY_WORKSPACE_ID`. Outside a Session,
 pass `--session SESSION_ID --workspace WORKSPACE_ID`. MCP `lody_automation` accepts
 `{command: {type: "register", program: "async ({ctx}) => ..."}}` and binds the
-current Session automatically. Its caller cannot redirect the result to another
-Session. CLI and MCP share the same local control endpoint. The Electron Session
+current Session by default. Pass `sessionId` to target another owned Session on the
+same machine; continuations return to the target Session. CLI and MCP share the same local control endpoint. The Electron Session
 UI uses that endpoint for local-machine waits and settings, and the remote machine
-control bridge for eligible remote Sessions. Encrypted workspaces and Web remain unsupported.
+control bridge for eligible remote Sessions. Encrypted workspaces have local-machine controls only; Web remains unsupported.
 The [general availability decision](../../../../.agents/notes/implemented/feature/2026-10-30-session-continuation-general-availability.md) explains the UI gate removal; the [UI design](../../../../.agents/notes/proposed/feature/2026-10-27-session-continuation-note-ui.md) records its presentation trade-offs.
 
 Optional `reason`, `intervalMs` (default 30 seconds, minimum 1 second) and
@@ -82,18 +90,17 @@ catalog of business conditions.
 
 All other resources/parameters are rejected. A new resource adapter belongs beside
 its existing owner and must define its scope, freshness and admission evidence.
-Programs cannot select another Session or access Node, shell, filesystem, arbitrary
-network endpoints or the daemon environment. Credentials stay with existing source
-owners. The [external checks proposal](../../../../.agents/notes/proposed/architecture/2026-10-28-automation-external-checks.md) explores broader host capabilities, and the [interpreter decision](../../../../.agents/notes/proposed/architecture/2026-10-28-codemode-automation-interpreter.md) records the CodeMode trade-offs. Await every read. See [CI](examples/wait-for-ci.js) and
+Programs cannot select another Session or directly access Node or the daemon environment. Credentials stay with existing source owners. `ctx.fetch(url, options?)` performs an HTTP or HTTPS GET or HEAD and returns `ok`, `status`, `url`, selected `headers`, and repeatable `text()` and `json()` methods. Only `accept` and `accept-language` request headers are accepted. URL credentials and redirects are rejected. A response body is limited to 64 KiB; HTTP error statuses are returned, while transport failures fail the check. Requests can reach services accessible to the Host, including local services, and may repeat. Do not put secrets in program text or use endpoints with side effects. Await every operation. The [interpreter decision](../../../../.agents/notes/proposed/architecture/2026-10-28-codemode-automation-interpreter.md) records the CodeMode trade-offs. See [CI](examples/wait-for-ci.js) and
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
-Each check has a 30-second deadline, at most 32 reads, four concurrent read calls
-and a 128-KiB bound per observation. Cancellation interrupts the interpreter and
-joins in-flight owner reads. Five consecutive check errors
+`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment (`PATH`, home/temp directories, and host proxy variables `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials, while excluding unrelated host or Agent credentials). Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
+
+Each check has a 30-second deadline, at most 32 read, fetch or exec calls, four concurrent calls
+and a 128-KiB bound per operation. Cancellation interrupts the interpreter and
+joins in-flight operations. Five consecutive check errors
 end the wait as `failed`; successful checks reset the error count. `show` retains
-the error, check count, next check time and continuation state. Host restart retries
-interrupted checks. Checks are read-only and may repeat.
+the error, check count, next check time and continuation state.
 
 CI reads request observations through the existing PR poller, using its credential,
 quota and cooldown owners. Active demand shortens the observation interval under
@@ -103,6 +110,31 @@ Run attempt and source revision are captured by the Host, separately from the
 program's result. Accepted continuations keep observation demand alive. A changed
 HEAD or rerun supersedes old evidence; dispatch checks it again, and CI continuations also verify the referenced checkouts immediately before the native
 prompt, resolving Project members through their existing scoped worktree paths.
+
+## Run a long command
+
+`run` hands a long command to the Host instead of a check: `lody automation run --
+pnpm test`, or MCP `{command: {type: "run", command, args?, cwd?, env?, reason?}}`.
+It is a wait without a program, so it shares `list`, `show`, `cancel`, the
+Session group's unsettled state and the continuation path above. The
+[run owner](runtime/managed-runs.ts) starts the process on the first check, in the
+Session workdir or a `cwd` inside it, with no shell and an explicit environment:
+the login-shell and daemon `PATH`, home/temp variables, host proxy variables (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials), plus the caller's `env`.
+Output goes to `<data dir>/automations/runs/<workspace>/<wait>.log`, capped at
+16 MiB; logs older than seven days are removed when another run starts.
+
+The start is persisted before spawn. The exit, or a failure to start, is recorded
+with the bounded output tail and makes the wait due at once; the next check
+completes it with facts only: command, outcome, exit code or signal, duration,
+log path and tail. Cancel interrupts the owner, which terminates the process tree.
+Closing the owner terminates every run without recording an exit. A restarted owner
+reports each started, unfinished run as interrupted, with its pid, and never starts
+it again; a Host crash can leave that process running. Identical unfinished runs in
+one Session deduplicate. The [run decision](../../../../.agents/notes/implemented/feature/2026-11-16-managed-long-runs.md)
+records the ownership, no-restart and environment trade-offs.
+[Agent guidance](../../../../.agents/notes/implemented/simplification/2026-11-21-automation-guidance-scope.md)
+limits `run` to work that must continue beyond the current turn and resume the
+Session on exit; ordinary commands stay in the current turn.
 
 ## Completion and cancellation
 
@@ -141,6 +173,7 @@ Lody code and is not a caller-authored rule graph.
 {
   "recoverCapacity": true,
   "archiveAfterMerge": true,
+  "autoDeliver": { "fixCi": true, "resolveConflicts": true, "merge": false },
   "compactWhenIdle": {
     "contextTokens": 300000,
     "cacheTtlMs": 600000,
@@ -169,6 +202,23 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   evidence. Archive waits for the entire Session group, including children, queues,
   Goals and native/automation work, then rechecks under existing admission barriers
   and commits the root last.
+- **Auto delivery:** the user's click or request turns it on for the Session's current
+  pull request ([Spec](../../../../specs/session-auto-delivery.md)). [`policies/delivery.ts`](policies/delivery.ts)
+  decides each step from PR poller checkpoints, which now record CI and merge state,
+  and keeps attempts per enablement in its own checkpoint. A step publishes one
+  `session.delivery.step` event with a deterministic id before progress is recorded,
+  so a crash repeats nothing. The policy turns the event into the existing Create PR,
+  Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
+  is settled and while the PR head still matches. Progress is written to
+  `SessionMeta.autoDelivery` at transitions only, under a `Semaphore` that `configure`
+  also holds, so a pass never republishes a status the user cleared. Only an open or
+  draft current PR binds an enablement; a head with no reported check waits out
+  `DELIVERY_CI_REPORT_GRACE_MS` before it counts as having no CI, and uncommitted or
+  unpushed work stops with `workspace_unpushed`. Turning it off cancels a request that
+  has not reached the Session queue, since a disabled rule's receipt would stay
+  `blocked` and keep the group from settling. The daemon never mutates GitHub;
+  the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
+  there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same
   idle turn must still be current and the native adapter must advertise `/compact`.
   New input or the deadline invalidates maintenance. `cacheTtlMs` is an operator

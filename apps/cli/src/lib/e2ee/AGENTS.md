@@ -3,7 +3,8 @@
 `CLAUDE.md` aliases this; CLI rules apply.
 
 - Lazy machine-only; ordinary startup never probes keyring.
-- Creation probes OS keystore write/read; fixes OS/file protection permanently.
+- Creation reads, or writes and reads back, the KEK keyring entry in one helper process;
+  never replace an existing entry. It fixes OS/file protection permanently.
   Reopen: original selector/KEK; no re-probe/switch.
 - File protection: owner-only dirs/files, no symlinks. Windows: owner/DACL via official
   process Layer, never Unix mode bits.
@@ -12,6 +13,7 @@
 - Disclose file protection pre-approval.
 
 - Keyring: 10s timeout, stdin secrets; confirm termination before fallback, retain failed owners.
+  A read KEK is remembered per process, never absence; opens still check disk.
 - Batch Windows ACL checks; bound async SQLite BUSY retries. No blocking busy_timeout in keyring work.
 
 - Resume first Windows ACL setup only with empty custody; otherwise validate.
@@ -21,28 +23,34 @@
 - Encrypted claims authorize every machine-resolved local project the turn reaches, never
   the request alone. [Scope](../../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#project-scope-at-the-receiving-machine).
 - Execution: `authorizeExecution`; same membership or verified owner-signed machine/project policy; authenticated read;
-  RAM-only <15min/read-start. Credential revoke: fence/clear grants before drain,
+  RAM-only <15min/read-start; [outage](../../../../../specs/e2ee/execution-freshness-outage.md). Credential revoke: fence/clear grants before drain,
   never network-retry.
   A shared grant pins the ledger generation after its policy check, then rechecks the
   signer and machine against that ledger; a later ingest fails `isCurrent()`.
-  Claims record the principal; history `userId` is display data. A shared member's
-  derivation is written with signed `derivedFrom`, same-machine only, and starts with
-  that member's rights ([derivation](../../../../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
-- Journal originals before feed/pin; rebase core pin first after 64 records.
-  Retired cache cleanup must fail closed.
+  Claims record verified principals, never history `userId`. Signed `derivedFrom` names
+  the human root; member delegation stays on this machine and rechecks the root's rights.
+  Members share 20 durable reservations across restart/reset; Owners remain unbounded
+  ([derivation](../../../../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)).
+  Origins bind signatures to content ([intent](../../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+- Retain originals before feed/pin. Pin before compaction, attempted every
+  64 records; its failures only warn. Retired cache cleanup must fail closed.
+- Iroh and Streams receivers share journal claims and live write completions, registered before
+  invocation. Only ownerless uncertain writes return errors; see [iroh rules](../../../../../packages/iroh-native/AGENTS.md).
+- Follow [Schedule rules](../schedules/AGENTS.md).
 - No plaintext RPC/attachments/schedules before encryption. Presence: shared minimal
   plaintext publish/receive allowlists, ordinary adaptor/90s TTL.
 - `realtime-journal.ts`: schema 3/no migration; SQLite recovery before empty-v0 init.
   Retire readable current keys before intact archive; unreadable keys refuse reset.
   No auto-replace/GC/archive replay/import. Exact originals/first outcome;
   uncertain=unknown/no takeover; independent IDs. Floors: genesis/workspace.
-  Before writes reject local >10min ahead of authenticated now, never frame
-  time; no reference: scoped max/reset. Reset: stop owners, archive/new ID;
+  Feature writes reject local >10min ahead of authenticated now, never frame
+  time; no reference: current local time, no retained peak. Execution records (`expiresAt` 0) skip that clock. Reset: stop owners, archive/new ID;
   keep control/retired IDs/intent. Shared calls/exclusive reset; keep locks on
   failed main close. Bound permits/cleanup; reply before send; exact retries.
   `agent-execution.ts`: userTurnId claim for RPC/Meta/history; verified signer + host
   authority. UI accounts are display-only. No capability: deny.
-  Missing origin: backfill/retry pending to original expiry. No snapshot-author
+  Unreadable ledger: pending, rechecked on events. Missing or invalid intents refuse with
+  their reason; no time window. No snapshot-author
   substitution or uncertain ACP retry.
   [Recovery](../../../README.md#local-encrypted-execution-log-recovery).
 - `prepareCliE2eeMachineLegacy` binds the retained credential hash to the exact
@@ -52,6 +60,7 @@
   IDs stay outside possession and ledger records; old developer formats need recreation.
   Local prepare/activate: OS-user socket; remote: signed offer/scoped port. Fleet checks account/workspace/genesis first.
   Activation refreshes verified ledger/mailbox; ACK only an installed current key. Failure keeps pairing retryable.
+  Local activation answers after `activation.json`; Fleet's start owner finishes startup.
   The local catalog never refuses that check: a workspace it lacks or binds to another
   genesis waits for the first authoritative list outcome (list, rejection, subscription
   error or shutdown), then fails closed; a cached match proceeds offline
@@ -76,14 +85,21 @@
   Logs carry only both epochs.
   [M3 selection](../../../../../.agents/notes/implemented/architecture/2026-10-27-e2ee-epoch-receive-barrier.md).
 - Prepared bindings cannot start content replicas. Activate only the native ledger/key
-  receiver: verify current installed key, close temporary owner, THEN write `activation.json`
-  before Fleet attaches rooms. Marker grants no authority; match genesis/device.
+  receiver: verify current installed key, THEN write `activation.json` before Fleet attaches
+  rooms. Remote activation closes its owner; local activation promotes that leased owner into
+  Fleet's start, which closes it unless a runtime adopts it. A desktop ledger handoff is untrusted
+  bytes verified from the pinned genesis; rejection falls back to history, and it never confirms
+  authority. Marker grants no authority; match genesis/device.
   Activated workspaces reopen offline. Join identical per-workspace intents; Fleet shutdown
   drains activation before cloud-port close.
 
-- Never register Fleet PR pollers for encrypted workspaces.
-- Encrypted cloud ports omit hosted GitHub tokens. SessionManager uses host git/gh
-  credentials; never send decrypted repository names through its credential broker.
+- Encrypted pollers publish protected Loro metadata, with null hosted PR association.
+- `runtime-cloud-port.ts` closes plaintext cloud channels for encrypted runtimes but keeps
+  the attachment relay URL and the preview tunnel, whose ordinary proof verifier rejects.
+  MessageHandler fences plaintext attachment reads.
+- Edit-and-resend replacements carry this machine's `signMachineInput` intent in the same
+  commit; an unsigned one is never written.
+- Account E2EE ports retain repo-scoped GitHub credentials. Personal requests stay account-bound; other accounts use App tokens. Device-only ports omit GitHub.
 
 - Fleet/Lody/one-shot commands load `workspace-legacy` only in the encrypted branch.
   Keep custody/core off the ordinary entry graph; CLI plus maps must fit the 2 GiB heap.
@@ -96,9 +112,15 @@
   before custody init; stale hints never probe keyrings. Other errors retain Fleet
   retry; never cache transient I/O as missing pairing.
 - Ingest failure fences new seals until verified refresh; keep the last verified view
-  and healthy readers. Retry at most three times per failure episode; explicit refresh
-  restarts that budget. Seal may request retry but never await it in the SDK save queue.
+  and healthy readers. Retries double up to five minutes and never stop while open;
+  explicit refresh restarts the backoff. Seal may request retry but never await it in the SDK save queue.
   Never skip rejected records or reset pins. Close cancels pending retry timers.
+- An encrypted workspace keeps one bounded background authority check: credential
+  plus verified-ledger refresh, joined to the existing single-flight owner. Exact
+  member/device refusal stops that owner through the durable receipt; a generic failure
+  keeps the last verified view. Inbound machine-control frames request it; transient
+  history retries double from 1 s to 5 min without fencing seals. Never depend on token expiry, and
+  keep the read-only client-loss probe from triggering I/O.
 
 ## Local machine pairing
 
@@ -124,6 +146,7 @@
 
 - Same-context `creating=-1` means `prepare-superseded`; other errors stay errors. Main
   archives only the matching all-null unsigned attempt before fresh consent. Keep CLI originals.
+- A readable `binding.json` outranks listed mode: contradicting rows never start, relabel, revoke or rewrite cache; unreadable bindings block opens and retry (`retained-binding.ts`).
 - Never cache an unimplemented content mode. `export` decrypts locally; `export` and
   `sync` include encrypted Schedule documents and Registry
   ([note](../../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-cli-review-fixes.md)).
@@ -131,11 +154,11 @@
 - Reset: same-user socket; drain, exclusive sibling lease, archive whole dir;
   fresh approval/KEK. OS/unknown stays OS.
 
-Member removal: verify identity/persist receipt before custody release. Drain execution/sync;
-erase only account/genesis/device content under identity lease/pairing mutex. Retry busy
-cleanup before open; preserve projects. Rejoin with new member/keys.
+Verify member removal and persist its receipt before custody release. Drain execution/sync; erase scoped content under identity lease/pairing mutex. Retry before open, preserve projects, and rejoin with fresh keys. [Roost cleanup](../../session/README.md#encrypted-roost-history).
 
 - `client-loss-observer.ts` is read-only E2E diagnostics, requiring nonrelease build
   opt-in and runtime `LODY_E2E=1`. Bind baseline requester identity to verified ledger
   state; never refresh authority or stop owners for observation. Track raw watcher
   and ACP promises after cancellation/map clearing; timeout never means drained.
+
+E2EE notification ports forward only the CLI account’s recipients. Live Activity summaries omit HTTP approval IDs; permission responses require signed in-App device actions.

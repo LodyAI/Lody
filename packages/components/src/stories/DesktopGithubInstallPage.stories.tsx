@@ -26,3 +26,10 @@ export const WaitingForDeepLink: Story = {
     deepLink: null,
   },
 };
+
+export const InstallationCouldNotBeConnected: Story = {
+  args: {
+    deepLink:
+      'lody://github-install?workspaceSlug=team&github_install_error=temporarily_unavailable',
+  },
+};

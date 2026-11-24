@@ -5,10 +5,23 @@ import { getWorkspaceFlockDocId } from '../src/workspace-flock';
 import type { MachineId, WorkspaceId } from '../src/ids';
 import {
   encryptedWorkspaceRoom,
+  encryptedWorkspaceResolver,
+  workspaceSupports,
   createWorkspaceEpochTransitionLegacy,
 } from '../src/workspace-streams-content';
 
 describe('encrypted workspace room domains', () => {
+  it('admits protected shortcut index and body rooms', () => {
+    const resolve = encryptedWorkspaceResolver('workspace', () => native(0));
+    expect(workspaceSupports({ mode: 'protected' }, 'shortcuts')).toBe(true);
+    expect(resolve({ kind: 'flock', flockDocId: 'workspace:shortcut-index' }).mode).toBe(
+      'protected'
+    );
+    expect(
+      encryptedWorkspaceRoom('workspace', { kind: 'doc', docId: 'workspace:shortcut:body' })
+    ).toEqual({ resource: 'doc:workspace:shortcut:body', model: 'loro' });
+    expect(() => resolve({ kind: 'flock', flockDocId: 'other:shortcut-index' })).toThrow();
+  });
   const workspace = 'room-owner' as WorkspaceId;
   it('rejects other workspaces and all unimplemented Flock domains', () => {
     for (const flockDocId of [
@@ -66,6 +79,37 @@ describe('availability-first epoch selection', () => {
       release.resolve(status);
       await release.promise;
       await Promise.resolve();
+      expect(gate.epoch()).toBe(0);
+      expect(await gate.transition({ install: async () => status })).toBe(true);
+      expect(gate.epoch()).toBe(1);
+    } finally {
+      release.resolve(status);
+      await gate.close();
+      vi.useRealTimers();
+    }
+  });
+  it('asks its owner to transition again once a timed-out installation settles', async () => {
+    vi.useFakeTimers();
+    let settled = 0;
+    const gate = createWorkspaceEpochTransitionLegacy({
+      epoch: 0,
+      timeoutMs: 20,
+      onLateInstallation: () => {
+        settled++;
+      },
+    });
+    const release = Promise.withResolvers<typeof status>();
+    try {
+      gate.observe(status);
+      const work = gate.transition({ install: () => release.promise });
+      const result = work.catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(await result).toBe('e2ee_key_update_timeout');
+      expect(settled).toBe(0);
+      // Slow, not failed: the installation finishes after its deadline.
+      release.resolve(status);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(1);
       expect(gate.epoch()).toBe(0);
       expect(await gate.transition({ install: async () => status })).toBe(true);
       expect(gate.epoch()).toBe(1);

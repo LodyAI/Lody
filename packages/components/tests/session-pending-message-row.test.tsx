@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-
 // A failed pending send is an ordinary user message, not an error report: the
 // same reason must appear exactly ONCE (on the attachment that failed), the
 // message level must stay a short status, and an attachment that finished must
 // not be dragged into the failure. Regressions here are what made the row read
 // like a debug panel.
 
-// @vitest-environment jsdom
 // A failed pending send is an ordinary user message, not an error report: the
 // same reason must appear exactly ONCE (on the attachment that failed), the
 // message level must stay a short status, and an attachment that finished must
@@ -33,6 +31,7 @@ import {
 
 import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
 import { MessageRowView } from '../src/components/ai-gui/view';
+import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
 
 import {
   PendingMessageRow,
@@ -285,9 +284,12 @@ describe('PendingMessageRow failure presentation', () => {
     const host = await render(record({ error: REASON, attachments: [readyImage] }));
 
     expect(reasonNodes(host)).toHaveLength(1);
-    expect(
-      host.querySelector('.border-destructive\\/30')?.contains(host.querySelector('img'))
-    ).toBe(false);
+    // The reason is not inside the image's own frame: the image card says
+    // what failed, the row notice says why.
+    const reason = reasonNodes(host)[0];
+    const image = host.querySelector('img');
+    expect(reason?.contains(image)).toBe(false);
+    expect(image?.contains(reason)).toBe(false);
   });
 
   // Image frames match the delivered image and carry no caption, so a failed
@@ -328,6 +330,64 @@ describe('PendingMessageRow failure presentation', () => {
     await act(async () => root?.render(null));
     await render(prepared);
     expect(host.querySelector('img')?.getAttribute('src')).toBe(url);
+  });
+
+  it('preserves sender name and desktop profile trigger across uploading, accepted local input and committed history', async () => {
+    const sender = { name: 'Maya Chen', email: 'maya.chen@example.com', image: null };
+    const draw = async (node: ReturnType<typeof createElement>) => {
+      await act(async () => {
+        root?.render(createElement(ForceDesktopLayoutProvider, null, node));
+      });
+    };
+
+    await draw(
+      createElement(PendingMessageRow, {
+        record: record({
+          attachments: [{ ...readyImage, ready: undefined, progress: 30 }],
+        }),
+        user: sender,
+        showSenderIdentity: true,
+        onRetry,
+        onCancel,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+
+    await draw(
+      createElement(PendingMessageRow, {
+        record: record({ inputState: 'sending', historyBackend: 'roost' }),
+        user: sender,
+        showSenderIdentity: true,
+        onRetry,
+        onCancel,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
+
+    await draw(
+      createElement(MessageRowView, {
+        sessionId,
+        message: { ...record().entry, status: 'seen' } as unknown as SessionHistoryParsed,
+        user: sender,
+        showSenderIdentity: true,
+      })
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Maya Chen');
+    expect(
+      container?.querySelector('button[aria-label="View profile for Maya Chen"]')
+    ).not.toBeNull();
   });
 });
 

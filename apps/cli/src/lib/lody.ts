@@ -1,9 +1,12 @@
+import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
 import { daemonLossObserver } from './e2ee/client-loss-observer';
 import type { AuthorizeEncryptedExecution, EncryptedAgentExecution } from './e2ee/agent-execution';
 import { workspaceSupports } from '@lody/shared/workspace-streams-content';
 import type { CliE2eeWorkspaceLegacy } from './e2ee/workspace-legacy';
+import type { AuthorityStamp } from './e2ee/authority-clock';
 import { LoroDocumentManager } from '@/lib/loro/doc';
 import { MachineRuntime } from '@/lib/machine-runtime';
+import { createSorbetCredentialsHandler } from '@/lib/sorbet-credentials';
 import { Logger } from '@/utils/logger';
 import {
   CliType,
@@ -33,12 +36,21 @@ import { traceAsync } from '@/utils/trace-span';
 import type { MemoryPressureSnapshotSource } from '@/monitor/memory-pressure-sampler';
 import type { WorkspaceWatchCoordinatorApi } from '@/lib/code-collab/workspace-watch-coordinator';
 import type { CloudPort } from '@lody/platform';
+import { assertRetainedE2eeModeAllowsOpen } from '@/lib/e2ee/retained-binding';
+import { encryptedRuntimeCloudPort } from '@/lib/e2ee/runtime-cloud-port';
 import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
 interface LodyOptions {
+  /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
+  onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
+  /** True while execution relies on an outage window, with that window's ends. */
+  onEncryptedWindowNotice?: (
+    active: boolean,
+    window?: import('./e2ee/execution-authorization').E2eeAccessWindow
+  ) => void;
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
     control: (input: {
@@ -64,7 +76,15 @@ interface LodyOptions {
   localWorkspaceCatalog?: LocalWorkspaceCatalogService;
   memoryPressure: MemoryPressureSnapshotSource;
   machineLifecycleCapability: MachineLifecycleCapability;
+  hostsEncryptedWorkspace?: () => boolean;
+  prepareManagedUpgrade?: (
+    requestId: string,
+    target: string,
+    upgrade?: ManagedDaemonUpgradeOptions
+  ) => Promise<string>;
   closeSessionTerminals?: (sessionId: SessionId) => void;
+  /** See `MessageHandlerConfig.readHostedPresenceStates`. */
+  readHostedPresenceStates?: () => LodyPresenceStateMap[];
   cleanupLocalProjectWorktreeSetupIfUnreferenced?: (
     localProjectId: LocalProjectId
   ) => Promise<void>;
@@ -72,12 +92,22 @@ interface LodyOptions {
   onStorageWriteFailure?: (error: Error) => void;
   onInboxAvailabilityChange?: (message: string | undefined) => void;
   /** Drain this owner on confirmed member removal or device revocation.
+   * `member-removed` ends the account's membership; `device-revoked` retires only
+   * this machine identity, so the workspace may re-enrol with a fresh one.
    * The workspace host alone owns receipt-verified member-data erasure. */
-  onEncryptedMemberRemoved?: (owner: Lody) => Promise<void>;
+  onEncryptedAccessLost?: (
+    owner: Lody,
+    reason: 'member-removed' | 'device-revoked'
+  ) => Promise<void>;
   onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
+  isMachineIdentityRestoreIdle?: () => boolean;
+  sealMachineIdentityRestore?: () => boolean;
   workspaceWatchCoordinator?: WorkspaceWatchCoordinatorApi;
   readWorkspaceAccess?: () => DaemonWorkspaceAccess;
   cloudPort: CloudPort;
+  /** A verified encrypted owner promoted in place by local pairing activation. `create`
+   * takes ownership: it closes this handle itself if it fails before returning. */
+  encryptedWorkspace?: CliE2eeWorkspaceLegacy;
 }
 export class Lody {
   private logger: Logger;
@@ -101,6 +131,19 @@ export class Lody {
   private builtinAgentRegistrationStarted = false;
 
   static async create(options: LodyOptions): Promise<Lody> {
+    const handed = options.encryptedWorkspace;
+    if (!handed) return Lody.createOwned(options);
+    try {
+      if (options.contentMode !== 'e2ee') throw new Error('e2ee_workspace_unavailable');
+      return await Lody.createOwned(options);
+    } catch (error) {
+      // Close is idempotent: an owner that already closed it returns the same receipt.
+      await handed.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private static async createOwned(options: LodyOptions): Promise<Lody> {
     // Register the optional local Roost adapter before any session document can
     // resolve its backend. The selector remains metadata-driven, so legacy and
     // new Loro sessions continue to use the built-in backend by default.
@@ -111,6 +154,13 @@ export class Lody {
       options.contentMode !== 'e2ee'
     )
       throw new Error('workspace_mode_unsupported');
+    // Every runtime start re-checks the retained pairing binding, so neither a
+    // listing nor a stale cached row can open an encrypted workspace as plaintext.
+    assertRetainedE2eeModeAllowsOpen(options.userId, {
+      id: options.workspaceId,
+      contentMode: options.contentMode,
+      genesisHash: options.genesisHash,
+    });
     const encrypted = options.contentMode === 'e2ee';
     let e2ee: CliE2eeWorkspaceLegacy | undefined;
     let resolveRemovalOwner: (value: Lody | null) => void = () => {};
@@ -120,22 +170,23 @@ export class Lody {
     if (!workspaceSupports({ mode: encrypted ? 'protected' : 'plaintext' }, 'rpc')) {
       if (!options.genesisHash || !options.cloudPort.e2ee)
         throw new Error('e2ee_workspace_unavailable');
-      const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
-      e2ee = await openCliE2eeWorkspaceLegacy({
-        accountId: options.userId,
-        workspaceId: options.workspaceId,
-        genesisHash: options.genesisHash,
-        cloud: options.cloudPort.e2ee,
+      const callbacks = {
         onUnavailable: () => options.logger.debug('e2ee_background_unavailable'),
-        onRemoved: async (reason) => {
+        onAuthorityConfirmed: options.onEncryptedAuthorityConfirmed,
+        onRemoved: async (
+          reason: 'member-removed' | 'device-revoked',
+          recorded: boolean
+        ): Promise<void> => {
           const owner = await removalOwner;
           if (!owner) return;
           owner.encryptedRevocation =
             reason === 'device-revoked' ? 'e2ee_device_revoked' : 'e2ee_member_removed';
-          owner.clientLossReceipt?.loss(owner.encryptedRevocation);
+          // The probe may fence only a durable exact receipt. Cleanup still stops
+          // the owner when that write failed, but it is not a drain proof.
+          if (recorded) owner.clientLossReceipt?.loss(owner.encryptedRevocation);
           try {
             await owner.startReceipt?.catch(() => undefined);
-            if (options.onEncryptedMemberRemoved) await options.onEncryptedMemberRemoved(owner);
+            if (options.onEncryptedAccessLost) await options.onEncryptedAccessLost(owner, reason);
             else await owner.cleanup();
             if (!owner.startReceipt) await owner.documentManager.cleanUp();
             owner.clientLossReceipt?.retired();
@@ -144,21 +195,26 @@ export class Lody {
             throw cause;
           }
         },
-      });
-      // Unimplemented channels cannot inherit their ordinary plaintext sinks.
+      };
+      if (options.encryptedWorkspace) {
+        // Activation already verified admission and the current key on this owner.
+        e2ee = options.encryptedWorkspace;
+        e2ee.adopt(callbacks);
+      } else {
+        const { openCliE2eeWorkspaceLegacy } = await import('./e2ee/workspace-legacy');
+        e2ee = await openCliE2eeWorkspaceLegacy({
+          machineId: options.machineId,
+          accountId: options.userId,
+          workspaceId: options.workspaceId,
+          genesisHash: options.genesisHash,
+          cloud: options.cloudPort.e2ee,
+          onWindowNotice: options.onEncryptedWindowNotice,
+          ...callbacks,
+        });
+      }
       options = {
         ...options,
-        cloudPort: {
-          ...options.cloudPort,
-          streamsTokens: null,
-          notifications: null,
-          attachmentUpload: null,
-          remotePreview: null,
-          remoteAutomation: undefined,
-          sessionSharing: null,
-          prAssociation: null,
-          githubTokens: null,
-        },
+        cloudPort: encryptedRuntimeCloudPort(options.cloudPort, options.userId),
       };
     }
     let manager: LoroDocumentManager | undefined;
@@ -173,6 +229,12 @@ export class Lody {
         genesis: options.genesisHash,
         workspaceId: options.workspaceId,
         targetMachineId: options.machineId,
+        machineUserId: options.cloudPort.identity.userId,
+        ledgerIdentity: e2ee.ledgerIdentity,
+        authorizeMachineTarget: e2ee.authorizeMachineTarget,
+        ...(typeof e2ee.subscribeExecutionEvidence === 'function'
+          ? { subscribeEvidence: e2ee.subscribeExecutionEvidence }
+          : {}),
         journal: lazyExecutionJournal(join(e2ee.repositoryDirectory, 'execution.sqlite'), Date.now),
         authorizeExecution: options.authorizeEncryptedExecution ?? e2ee.authorizeExecution,
         isExecutionOpen: e2ee.isExecutionOpen,
@@ -207,17 +269,38 @@ export class Lody {
           }),
         resolveVerifiedOriginal: (intent, lookup) => {
           const owner = manager;
-          const loaded = owner?.sessions.get(intent.sessionId as SessionId)?.handle?.doc;
+          const loaded = owner?.sessions.get(intent.sessionId as SessionId);
           if (!e2ee || typeof e2ee.resolveVerifiedExecutionOriginal !== 'function')
             return Effect.succeed(undefined);
           const resolve = e2ee.resolveVerifiedExecutionOriginal;
-          if (loaded || !lookup?.origin || !owner) return resolve(intent, loaded, lookup);
+          const fromSession = (session: typeof loaded) => {
+            const backend = session?.getSessionBackend?.();
+            if (backend?.kind !== 'roost') return resolve(intent, session?.handle?.doc, lookup);
+            return resolve(
+              intent,
+              {
+                readUserTurn: async (id) => {
+                  const result = await backend.readTurn(id);
+                  if (
+                    result.state === 'ready' &&
+                    result.turn.role === 'user' &&
+                    result.turn.id === id
+                  )
+                    return result.turn;
+                  if (result.state !== 'missing') throw new Error('e2ee_history_turn_unavailable');
+                  return undefined;
+                },
+              },
+              lookup
+            );
+          };
+          if (loaded || !lookup?.origin || !owner) return fromSession(loaded);
           // A derivation origin may live in a session this daemon has not opened yet.
           return Effect.tryPromise({
             try: () => owner.getOrCreateSessionDoc(intent.sessionId as SessionId),
             catch: (cause) => cause,
           }).pipe(
-            Effect.flatMap((session) => resolve(intent, session.handle?.doc, lookup)),
+            Effect.flatMap(fromSession),
             Effect.catch(() => Effect.succeed(undefined))
           );
         },
@@ -276,6 +359,7 @@ export class Lody {
           machineId: options.machineId,
           accountId: options.userId,
           workspaceId: options.workspaceId,
+          deviceKey: e2ee.signingPublicKey,
         },
         () => {
           const work = lody.runtime.inspectClientLoss();
@@ -316,6 +400,7 @@ export class Lody {
       workspaceDocument: documentManager,
       memoryPressure: options.memoryPressure,
       handlerConfig: {
+        sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
         encryptedExecution: options.contentMode === 'e2ee' ? encryptedExecution : undefined,
@@ -326,16 +411,21 @@ export class Lody {
         machineName: this.machineName,
         cliVersion: pkg.version,
         machineLifecycleCapability: options.machineLifecycleCapability,
+        hostsEncryptedWorkspace: options.hostsEncryptedWorkspace,
+        prepareManagedUpgrade: options.prepareManagedUpgrade,
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         ...(options.localWorkspaceCatalog
           ? { localWorkspaceCatalog: options.localWorkspaceCatalog }
           : {}),
         closeSessionTerminals: options.closeSessionTerminals,
+        readHostedPresenceStates: options.readHostedPresenceStates,
         cleanupLocalProjectWorktreeSetupIfUnreferenced:
           options.cleanupLocalProjectWorktreeSetupIfUnreferenced,
         onInboxAvailabilityChange: options.onInboxAvailabilityChange,
         onFatalAuthFailure: options.onFatalAuthFailure,
         onProcessLifecycleAction: options.onProcessLifecycleAction,
+        isMachineIdentityRestoreIdle: options.isMachineIdentityRestoreIdle,
+        sealMachineIdentityRestore: options.sealMachineIdentityRestore,
         workspaceWatchCoordinator: options.workspaceWatchCoordinator,
         readWorkspaceAccess: options.readWorkspaceAccess,
         remoteAutomation: options.remoteAutomation,
@@ -366,7 +456,9 @@ export class Lody {
       this.machineId,
       (input) => this.runtime.offerEncryptedRpcTurn(input),
       (event) => this.logger.debug('[e2ee-rpc-timing]', event),
-      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context)
+      (request, context) => this.runtime.handleEncryptedFeatureRpc(request, context),
+      (sessionId) => this.runtime.resolveSessionHistoryAccessTarget(sessionId),
+      (sessionId) => this.runtime.resolveSessionExecutionScope(sessionId)
     );
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
@@ -544,6 +636,7 @@ export class Lody {
   }
 
   prepareForShutdown = () => this.runtime.prepareForShutdown();
+  stopNewIdentityRestoreDispatch = () => this.runtime.stopNewIdentityRestoreDispatch();
 
   cleanup = async () => {
     this.cleanedUp = true;
@@ -570,9 +663,10 @@ export class Lody {
   }
 
   async dispatchLocalMachineRpc(
-    message: LocalMachineRpcRequestValidated
+    message: LocalMachineRpcRequestValidated,
+    signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
-    return await this.runtime.dispatchLocalMachineRpc(message);
+    return await this.runtime.dispatchLocalMachineRpc(message, signal);
   }
 
   isControlPlaneReady(): boolean {
@@ -594,6 +688,10 @@ export class Lody {
 
   getActiveSessionCount(): number {
     return this.runtime.getActiveSessionCount();
+  }
+
+  isMachineIdentityRestoreIdle(): boolean {
+    return this.runtime.isMachineIdentityRestoreIdle();
   }
 
   async authorizeScheduleExecution(request: ScheduleAuthorizationRequest): Promise<boolean> {
@@ -686,8 +784,9 @@ export class Lody {
     return await this.runtime.resolveSessionWorkdir(sessionId);
   }
 
-  onSessionTerminated(handler: (sessionId: SessionId) => void): () => void {
-    return this.runtime.onSessionTerminated(handler);
+  async resolveAutomationWorkdir(sessionId: SessionId): Promise<string | null> {
+    const manager = this.runtime.getSessionManager();
+    return manager ? await manager.resolveSessionWorkdir(sessionId) : null;
   }
 
   getConnectedRoomCount(): number {

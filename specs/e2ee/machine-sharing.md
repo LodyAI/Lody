@@ -45,7 +45,7 @@ withholding the newer policy could delay it. The owner accepted this risk on
 
 ## Removal and re-pairing
 
-- A removed and re-paired machine is a new *generation* (a fresh identity in the
+- A removed and re-paired machine is a new _generation_ (a fresh identity in the
   ledger). It starts private with no old grants; the owner must share it again.
 - Atomic key replacement (swapping the machine's key without removal) keeps the
   same generation and its policy.
@@ -69,7 +69,7 @@ No two-member, two-machine product run is claimed.
 
 - Notes: [machine sharing](../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md)
   (details, limits and threat model), [ledger binding](../../.agents/notes/proposed/architecture/2026-10-27-e2ee-machine-ledger-binding.md),
-  [derived work](../../.agents/notes/proposed/architecture/2026-10-31-e2ee-shared-member-derivation.md).
+  [derived work](../../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md).
 - PRs: [#2014](https://github.com/LodyAI/Lody/pull/2014), [#2018](https://github.com/LodyAI/Lody/pull/2018),
   [#2033](https://github.com/LodyAI/Lody/pull/2033), [#2144](https://github.com/LodyAI/Lody/pull/2144),
   [#2147](https://github.com/LodyAI/Lody/pull/2147), [#2171](https://github.com/LodyAI/Lody/pull/2171),

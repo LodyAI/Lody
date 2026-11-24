@@ -1,9 +1,10 @@
-import { Link } from '@tanstack/react-router';
-import { useLegacyWorkspaceQueryStatus } from '@/hooks/use-workspace-feature';
 import {
-  useLegacyWorkspaceQuery,
-  useLegacyWorkspaceAction,
-} from '@/hooks/use-legacy-workspace-query';
+  useGithubWorkspaceQuery,
+  useGithubWorkspaceAction,
+  useGithubWorkspaceStatus,
+} from '@/hooks/use-github-workspace';
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
+import { Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -324,17 +325,22 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
   const analytics = useOnboardingAnalytics();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
-  const legacyStatus = useLegacyWorkspaceQueryStatus(workspaceId);
+  const legacyStatus = useGithubWorkspaceStatus(workspaceId);
+  const githubManageStatus = useGithubWorkspaceStatus(workspaceId, true);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localCliStarting = useAtomValue(localCliStartingAtom);
   const setLocalProbeResult = useSetAtom(localProbeResultAtom);
   const getConvexErrorMessage = useConvexErrorMessage();
-  const repos = useLegacyWorkspaceQuery(
+  const repos = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );
-  const createGitHubInstallState = useLegacyWorkspaceAction(
+  const personalOperationSettings = useGithubWorkspaceQuery(
+    cloudOperations.github.getPersonalOperationSettings,
+    workspaceId ? { workspaceId } : 'skip'
+  );
+  const createGitHubInstallState = useGithubWorkspaceAction(
     cloudOperations.github.createGitHubInstallState
   );
   const canUseGitHub = usePlatformCapability('githubIntegration');
@@ -469,6 +475,14 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
 
   const handleConnectGitHub = useCallback(() => {
     if (workspaceId === null || legacyStatus !== 'allowed') return;
+    if (personalOperationSettings === undefined) return;
+    if (personalOperationSettings?.authorization.state !== 'authorized') {
+      if (!workspaceSlug) return;
+      const url = new URL(getPersonalGitHubAuthorizationUrl(workspaceSlug));
+      url.searchParams.set('github_install_error', 'authorization_required');
+      void openExternalUrl(url.toString());
+      return;
+    }
     const startedAtMs = analytics.now();
     analytics.capture('onboarding/operation_started', {
       step: 'projects',
@@ -520,6 +534,7 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
     })();
   }, [
     analytics,
+    personalOperationSettings,
     createGitHubInstallState,
     getConvexErrorMessage,
     isElectron,
@@ -561,7 +576,7 @@ export function ProjectsScreen({ onBack, onSkip, onComplete }: ProjectsScreenPro
       connectingGitHub={connectingGitHub}
       canImportLocal={canImportLocal}
       localImportDisabledHint={localImportDisabledHint}
-      canConnectGitHub={canUseGitHub && workspaceId !== null && legacyStatus === 'allowed'}
+      canConnectGitHub={canUseGitHub && workspaceId !== null && githubManageStatus === 'allowed'}
       encryptedWorkspaceId={legacyStatus === 'blocked' && workspaceId ? workspaceId : undefined}
       loadingRepos={
         canUseGitHub && workspaceId !== null && legacyStatus !== 'blocked' && repos === undefined

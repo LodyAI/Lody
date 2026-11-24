@@ -1,12 +1,12 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import * as stylex from '@stylexjs/stylex';
 import { Dialog } from '@/ui/dialog';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
-import { cn } from '@/lib/utils';
+import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
 import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
@@ -25,9 +25,16 @@ import {
   useSessionMentionSource,
   type UseSessionMentionSourceArgs,
 } from '@/hooks/use-session-mention-source';
+import { card } from '@lody/ui/card/card.tokens.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace } from '../../style/theme-scale.stylex';
+import {
+  type ComposerInputElement,
+  getComposerText,
+  setComposerSelection,
+} from '@/ui/mention/composer-input';
 
-/** Grows with the text instead of reserving a fixed empty block. */
-const MAX_TEXTAREA_HEIGHT_PX = 320;
 const styles = stylex.create({
   snapshot: {
     whiteSpace: 'pre-wrap',
@@ -35,7 +42,46 @@ const styles = stylex.create({
     maxHeight: '60vh',
     overflowY: 'auto',
   },
+  card: {
+    display: 'flex',
+    width: '32rem',
+    maxWidth: '100%',
+    flexDirection: 'column',
+    borderRadius: card.radius,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: card.background,
+    cornerShape: corner.round,
+    '--mention-chip-surface': card.background,
+    '--mention-chip-overlay': 'none',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2.5],
+    boxShadow: {
+      default: card.shadow,
+      ':has(textarea:focus)': `0 0 0 2px ${colors.accent}, ${card.shadow}`,
+    },
+    transitionProperty: 'background-color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  input: {
+    fontSize: textScale.bodySize,
+    lineHeight: textScale.bodyLeading,
+    fontWeight: 400,
+    letterSpacing: 'normal',
+  },
+  inputSaving: { color: colors.secondaryLabel },
+  actions: {
+    marginTop: themeSpace[2],
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: themeSpace[1],
+  },
 });
+
+/** Grows with the text instead of reserving a fixed empty block. */
+const MAX_TEXTAREA_HEIGHT_PX = 320;
 
 export type UserMessageEditorProps = {
   value: string;
@@ -87,7 +133,8 @@ function UserMessageEditorContent({
   onQuoteDraftsChange,
 }: UserMessageEditorProps) {
   const { t } = useTranslation();
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const shortcutsEnabled = useWorkspaceFeature('shortcuts');
+  const textareaRef = useRef<ComposerInputElement | null>(null);
   // Live ranges the before-send rewrite needs; they only leave the component
   // on save, alongside the text they were measured against.
   const mentionRangesRef = useRef<MentionRange[]>([]);
@@ -115,11 +162,16 @@ function UserMessageEditorContent({
 
   // Put the caret at the end rather than selecting everything, so the common
   // case (appending a clarification) needs no extra click.
-  const focusAtEnd = useCallback((el: HTMLTextAreaElement | null) => {
+  const focusAtEnd = useCallback((el: ComposerInputElement | null) => {
     textareaRef.current = el;
     if (!el) return;
     el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    // The editor registers its text once it has mounted on the element.
+    requestAnimationFrame(() => {
+      if (textareaRef.current !== el) return;
+      const end = getComposerText(el).length;
+      setComposerSelection(el, end, end);
+    });
   }, []);
 
   const handleSave = useCallback(() => {
@@ -138,16 +190,7 @@ function UserMessageEditorContent({
   }, [canSave, expandMentions, onSave, quoteDrafts, value]);
 
   return (
-    <div
-      className={cn(
-        'flex w-[32rem] max-w-full flex-col',
-        'rounded-2xl border-[0.5px] border-foreground/[0.10] bg-background px-3 py-2.5',
-        'shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-16px_hsl(0_0%_0%/0.12)]',
-        'transition-colors duration-150 focus-within:border-foreground/25',
-        'dark:border-input-border/70 dark:bg-input/90 dark:focus-within:border-input-border'
-      )}
-      aria-busy={isSaving || undefined}
-    >
+    <div {...stylex.props(styles.card)} aria-busy={isSaving || undefined}>
       <CombinedMentionTextarea
         ref={focusAtEnd}
         // Bare textarea inside the editor card — the card is the well.
@@ -159,6 +202,7 @@ function UserMessageEditorContent({
         readOnly={isSaving}
         mentionSource={mentionSource}
         availableCommands={availableCommands}
+        enablePromptShortcuts={shortcutsEnabled}
         skillAgent={skillAgent}
         currentSessionId={currentSessionId}
         mentionSurface="session_chat"
@@ -209,13 +253,8 @@ function UserMessageEditorContent({
             handleSave();
           }
         }}
-        className={cn(
-          // The card carries the focus edge; the textarea itself must not draw
-          // a second outline/ring inside it (MentionInput is a bare primitive,
-          // not the styled Textarea).
-          'input-scrollbar leading-relaxed focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-          isSaving && 'text-muted-foreground'
-        )}
+        className="input-scrollbar"
+        xstyle={[styles.input, isSaving && styles.inputSaving]}
         style={conversationTextFontSizeStyle(conversationFontSize)}
         aria-label={t('sessions.editMessage', 'Edit message')}
       />
@@ -233,7 +272,7 @@ function UserMessageEditorContent({
           <div {...stylex.props(styles.snapshot)}>{preview?.text}</div>
         </Dialog.Content>
       </Dialog.Root>
-      <div className="mt-2 flex items-center justify-end gap-1">
+      <div {...stylex.props(styles.actions)}>
         <Button
           type="button"
           variant="ghost"
@@ -252,7 +291,7 @@ function UserMessageEditorContent({
           disabled={!canSave}
           onClick={handleSave}
         >
-          {isSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
+          {isSaving ? <Spinner diameter="calc(var(--spacing) * 3.5)" /> : null}
           {t('sessions.send', 'Send')}
         </Button>
       </div>

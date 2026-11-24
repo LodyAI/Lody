@@ -1,6 +1,9 @@
 import { CodeMode, Tool } from '@opencode/codemode';
 import { parse } from 'acorn';
 import { Effect, Schema, Semaphore } from 'effect';
+import { fetchAutomationContext } from '../context/fetch';
+import type { AutomationExecInput } from '../context/exec';
+import { z } from 'zod';
 import {
   automationReadRequestSchema,
   automationReadResponseSchema,
@@ -30,7 +33,8 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
   program: string,
   context: AutomationProgramContext,
   read: (input: AutomationReadRequest) => Effect.Effect<AutomationReadResponse, unknown>,
-  validateOnly = false
+  validateOnly = false,
+  exec?: (input: AutomationExecInput) => Effect.Effect<unknown, unknown>
 ): Effect.fn.Return<AutomationResult, unknown> {
   const source = yield* Effect.try(() => conditionSource(program));
   if (validateOnly) return false;
@@ -49,12 +53,52 @@ export const evaluateAutomationProgram = Effect.fn('Automations.evaluate')(funct
         Effect.flatMap((output) => Effect.try(() => automationReadResponseSchema.parse(output)))
       ),
   });
+  const fetchTool = Tool.make({
+    description: 'Fetch an HTTP observation',
+    input: Schema.Unknown,
+    output: Schema.Unknown,
+    execute: (input) =>
+      slots.withPermit(
+        Effect.tryPromise({
+          try: (signal) => fetchAutomationContext(input, signal),
+          catch: () => new Error('AUTOMATION_FETCH_FAILED'),
+        })
+      ),
+  });
+  const execTool = Tool.make({
+    description: 'Run a command in the current session workspace',
+    input: Schema.Unknown,
+    output: Schema.Unknown,
+    execute: (input) =>
+      Effect.try(() =>
+        z
+          .object({
+            command: z.string().min(1),
+            args: z.array(z.string()).optional(),
+            cwd: z.string().optional(),
+          })
+          .strict()
+          .parse(input)
+      ).pipe(
+        Effect.flatMap((request) =>
+          slots.withPermit(
+            exec ? exec(request) : Effect.fail(new Error('AUTOMATION_EXEC_UNAVAILABLE'))
+          )
+        )
+      ),
+  });
   const code = `const condition = (${source});
     const ctx = { ...${JSON.stringify(context)},
-      read: (resource, parameters = {}) => tools.context.read({ resource, parameters }) };
+      read: (resource, parameters = {}) => tools.context.read({ resource, parameters }),
+      exec: (options) => tools.context.exec(options),
+      fetch: async (url, options = {}) => {
+        const result = await tools.context.fetch({ url, options });
+        return { ok: result.ok, status: result.status, headers: result.headers, url: result.url,
+          text: async () => result.body, json: async () => JSON.parse(result.body) };
+      } };
     return await condition({ ctx });`;
   const runtime = CodeMode.make({
-    tools: { context: { read: tool } },
+    tools: { context: { read: tool, fetch: fetchTool, exec: execTool } },
     limits: { timeoutMs: 30_000, maxToolCalls: 32, maxOutputBytes: 128 * 1024 },
   });
   const result = yield* runtime.execute(code);

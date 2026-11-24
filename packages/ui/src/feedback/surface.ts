@@ -41,7 +41,6 @@ const spin = stylex.keyframes({
 });
 
 export const feedbackSurface = stylex.create({
-  // ── The message ──────────────────────────────────────────────────────────
   /** The block: the mark, and the words beside it. */
   message: {
     display: 'flex',
@@ -182,7 +181,10 @@ export const feedbackSurface = stylex.create({
    */
   viewport: {
     position: 'fixed',
-    insetBlockStart: `calc(${feedback.viewportInset} + env(safe-area-inset-top, 0px))`,
+    insetBlockStart: {
+      default: `calc(${feedback.viewportInset} + env(safe-area-inset-top, 0px))`,
+      '@media (max-width: 767px)': `calc(3.75rem + ${space[2]} + env(safe-area-inset-top, 0px))`,
+    },
     insetInlineStart: '50%',
     translate: '-50% 0',
     display: 'flex',
@@ -196,7 +198,6 @@ export const feedbackSurface = stylex.create({
     outlineStyle: 'none',
   },
 
-  // ── The wait ─────────────────────────────────────────────────────────────
   progress: {
     display: 'flex',
     flexDirection: 'column',
@@ -287,7 +288,26 @@ export const feedbackSurface = stylex.create({
     cornerShape: corner.shape,
   },
   skeletonBlock: { borderRadius: radius.medium, cornerShape: corner.shape },
+  skeletonBar: {
+    height: text.bodyLeading,
+    borderTopLeftRadius: '3px',
+    borderTopRightRadius: '3px',
+    borderBottomLeftRadius: radius.mini,
+    borderBottomRightRadius: radius.mini,
+    cornerShape: corner.shape,
+  },
+  skeletonTile: { borderRadius: '20%', cornerShape: corner.shape },
+  skeletonInline: { display: 'inline-block' },
   skeletonCircle: { borderRadius: radius.full, cornerShape: corner.round },
+  skeletonRing: {
+    aspectRatio: '1 / 1',
+    borderWidth: '2px',
+    borderStyle: 'solid',
+    borderColor: feedback.skeleton,
+    backgroundColor: 'transparent',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+  },
 
   /**
    * The spinner, in `currentColor`: it takes the ink of whatever holds it, so a

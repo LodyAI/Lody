@@ -61,10 +61,12 @@ callers still await `retryCleanup` and the close receipt before replacing the ow
 
 The optional cache stays encrypted and partitioned by endpoint/workspace, with
 credential and rejected-token publication fences. Its storage/crypto failures remain
-cache misses, while interruption and cleanup failure propagate. Only the explicit
-Legacy facade's old-protocol callback maps a nonempty Cause consisting entirely of
-credential auth failures to undefined. Mixed Causes remain failures without dropping
-their non-auth reasons; native callbacks never perform this projection.
+cache misses, while interruption and cleanup failure propagate. Native and Legacy
+callbacks both preserve credential auth failures. Returning `undefined` authorizes
+an anonymous transport request; it must never represent rejected cloud credentials.
+The same credential's terminal rejection suppresses token endpoint requests until
+credentials change or `invalidate()` runs. Transport owners observe failure and
+retain their existing reconnect paths; the provider does not add a retry loop.
 
 `provider.health: Effect.Effect<LoroStreamsTokenHealth>` snapshots lifecycle,
 generation, read/lease counts, raw-work/cache presence and terminal auth status.
@@ -74,6 +76,19 @@ providers in the same parent Scope. `describeLoroStreamsTokenCause(cause)` retur
 sorted failure kinds and 401/403 statuses, including nested shutdown/release Causes.
 Both diagnostic outputs omit credentials, JWTs, URLs, messages, stacks and recovery
 owners. Preserve the original Cause separately for recovery; log the safe summary.
+
+Producer diagnostics observe the final Exit after I/O finalizers. An explicit
+provider close records `owner_released` before interrupting its readers; only a
+pure interruption then emits the content-free `fetch-cancelled` event instead of
+`fetch-failure`. The renderer's existing logger handles it as a debug lifecycle
+event. A previous stop keeps its unknown reason, and timeout, transport, capacity,
+mixed Causes and failed cleanup remain failures. Waiters still receive their
+original failure; no request is retried or treated as a successful write.
+These callbacks are local diagnostics, not PostHog events: handled retry attempts
+must not each call exception capture. A terminal observation belongs to its
+operation/episode owner; a later recovered-then-failed episode remains reportable.
+This local owner proof cannot classify Convex platform `Client disconnected`
+events, which do not carry the client's cancellation reason.
 
 Renderer workspace runtime, CLI durable transports and Machine RPC still use
 `createLoroStreamsTokenProviderLegacy` / `createTokenProviderLegacy` (the CLI ones borrow

@@ -8,6 +8,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LocalMachineRpcRequest } from '@lody/shared/local-machine-rpc';
+import { isE2eeFeatureMethod } from '@lody/shared/e2ee-rpc';
+import { encryptedRemoteEditAndResendAvailable } from '../src/lib/encrypted-machine-controls';
 import { createWorkspaceMachineRpcFacade } from '../src/providers/workspace-machine-rpc-facade';
 import { CodeCollabSessionFileProvider } from '../src/lib/code-collab-session-file-provider';
 import { mintPreviewControlProof } from '../src/lib/preview-control-api';
@@ -26,6 +28,176 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('binds protected history retries to the owner, operation and turn on either plane', async () => {
+    let version: number | undefined;
+    let failure: 'outer' | 'inner' | undefined;
+    const ids: string[] = [];
+    const entry = {
+      id: 'turn-1',
+      role: 'user',
+      userId: 'account',
+      e2eeIntent: 'test-signature',
+      inputConfig: { inputBlocks: [] },
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineProtocolCapabilities: async () =>
+        version === undefined ? {} : { e2eeRoostHistory: version },
+      getMachineRpcClient: async () => {
+        throw new Error('unexpected plaintext RPC');
+      },
+      requestEncryptedFeature: async (request, options) => {
+        expect(request.machineId).toBe(remoteMachineId);
+        expect(request.workspaceId).toBe(workspaceId);
+        if (failure === 'outer') return { ok: false, error: 'denied' };
+        if (request.method === 'session/history-read')
+          return {
+            ok: true,
+            result: {
+              type: 'session/history-read_response',
+              sessionId,
+              success: failure !== 'inner',
+              result: [],
+              historyRevision: 1,
+              historyCount: 0,
+            },
+          };
+        if (request.method !== 'session/history-write') throw new Error('unexpected method');
+        expect(request.params.payload.entry).toEqual(entry);
+        ids.push(options!.requestId);
+        return {
+          ok: true,
+          result: {
+            type: 'session/history-write_response',
+            sessionId,
+            operation: request.params.operation,
+            success: failure !== 'inner',
+            result: { status: 'accepted', turnId: entry.id, active: true },
+            historyRevision: 1,
+            historyCount: 1,
+            historyChange: null,
+          },
+        };
+      },
+    });
+    const read = () =>
+      facade.requestSessionHistoryRead(remoteMachineId, sessionId, { kind: 'readMetadata' });
+    const write = (operation: 'accept_input' | 'accept_input_and_dispatch') =>
+      facade.requestSessionHistoryWrite(remoteMachineId, {
+        sessionId,
+        operation,
+        payload: { entry },
+      });
+    for (version of [undefined, 0]) {
+      await expect(read()).rejects.toThrow();
+      await expect(write('accept_input')).rejects.toThrow();
+    }
+    version = 2;
+    await expect(read()).resolves.toMatchObject({ success: true, result: [] });
+    for (const operation of ['accept_input', 'accept_input', 'accept_input_and_dispatch'] as const)
+      await expect(write(operation)).resolves.toMatchObject({
+        result: { status: 'accepted', turnId: 'turn-1', active: true },
+      });
+    expect(ids[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+    for (failure of ['inner', 'outer'] as const) {
+      await expect(read()).rejects.toThrow();
+      await expect(write('accept_input')).rejects.toThrow();
+    }
+  });
+
+  it('negotiates blob persistence and read-classified encrypted diff calls', async () => {
+    for (const [plane, protectedContent, supported, persist] of [
+      ['local', false, true, false],
+      ['cloud', false, true, true],
+      ['cloud', true, true, false],
+      ['cloud', false, false, true],
+    ] as const) {
+      let role: 'read' | 'write' = 'read';
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent,
+        protectedCodeCollabRole: () => role,
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Plaintext fallback opened.');
+        },
+        requestEncryptedFeature: async (request) => {
+          expect(request.ownerSessionId).toBe('parent');
+          expect(request.params).toHaveProperty('sessionId', sessionId);
+          if (request.method === 'code-collab/open-diff-manifest')
+            return { ok: true, result: { status: 'ok', entries: [], nextCursor: null } };
+          if (request.method === 'code-collab/read-blob')
+            return {
+              ok: true,
+              result: { offset: 0, length: 0, totalBytes: 0, encoding: 'gzip-base64', data: '' },
+            };
+          throw new Error('Unexpected action.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        persist,
+        scope: workspaceId,
+      });
+      if (protectedContent) {
+        for (const access of ['read', 'write'] as const) {
+          role = access;
+          expect(
+            await facade.requestCodeCollabOpenDiffManifest(
+              remoteMachineId,
+              { sessionId, path: 'a.ts' },
+              { ownerSessionId: 'parent' }
+            )
+          ).toEqual({ status: 'ok', entries: [], nextCursor: null });
+          expect(
+            await facade.requestCodeCollabReadBlob(
+              remoteMachineId,
+              { sessionId, key: `sha256:${'1'.repeat(64)}`, offset: 0, length: 100 },
+              { ownerSessionId: 'parent' }
+            )
+          ).toMatchObject({ offset: 0, length: 0, totalBytes: 0 });
+        }
+      }
+    }
+  });
+
+  it.each([true, false])(
+    'does not wait for cold routing to classify the optional blob cache (supported=%s)',
+    async (supported) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          supported ? { codeCollabDiffBlobs: 1 } : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => null,
+          resolvePlaneForMachine: async () => {
+            throw new Error('workspace_target_pending');
+          },
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('No body RPC expected.');
+        },
+      });
+      expect(await facade.getDiffBlobTransportOptions(remoteMachineId)).toEqual({
+        supported,
+        scope: workspaceId,
+        persist: false,
+      });
+    }
+  );
+
   it('retrieves every remote wait page using a separately authorized cursor', async () => {
     const claims: unknown[] = [];
     const uninstall = installCloudHttpPort({
@@ -166,6 +338,72 @@ describe('createWorkspaceMachineRpcFacade', () => {
         offset: 0,
       })
     ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('requires localAttachmentDownload support before sending a local reference to an older daemon', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ fileDownload: 1 }),
+      getMachineRpcClient: async () => {
+        throw new Error('Local references must not become path downloads on an old daemon');
+      },
+    });
+    expect(
+      await facade.requestFileDownloadChunk(remoteMachineId, {
+        sessionId,
+        path: 'input.txt',
+        offset: 0,
+        attachment: {
+          type: 'local_attachment',
+          path: '/synthetic/input.txt',
+          machineId: remoteMachineId,
+          kind: 'file',
+          fileName: 'input.txt',
+          mimeType: 'text/plain',
+          sizeBytes: 1,
+        },
+      })
+    ).toEqual({ status: 'error', code: 'unsupported_protocol' });
+  });
+
+  it('keeps file search and skill fingerprints away from daemons that cannot parse them', async () => {
+    vi.stubGlobal('window', {});
+    const sent: unknown[] = [];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({}),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestLocalProjectControl: async ({ request }: { request: { type: string } }) => {
+            sent.push(request);
+            return { ok: true, type: request.type, result: { groups: [] } };
+          },
+        }) as never,
+    });
+
+    const search = await facade.requestLocalProjectControl({
+      type: 'local-project/search-files',
+      machineId: remoteMachineId,
+      workspaceId,
+      localProjectId: 'lp-1' as never,
+      query: 'btn',
+    });
+    expect(search).toMatchObject({ ok: false, data: { reason: 'unsupported_protocol' } });
+
+    await facade.requestLocalProjectControl({
+      type: 'local-project/list-global-skills',
+      machineId: remoteMachineId,
+      workspaceId,
+      magpieGatewayUrl: 'http://127.0.0.1:3425',
+      knownFingerprint: 'fp',
+    });
+    expect(sent).toEqual([
+      { type: 'local-project/list-global-skills', machineId: remoteMachineId, workspaceId },
+    ]);
   });
 
   it('does not fall back to cloud for a local file download without IPC', async () => {
@@ -924,6 +1162,115 @@ describe('machine bug report client log', () => {
 });
 
 describe('local MCP discovery routing', () => {
+  it.each(['local', 'cloud', 'unsupported'] as const)(
+    'limits Sorbet credentials to a capable local target (%s)',
+    async (route) => {
+      const sent: unknown[] = [];
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async (_channel: string, request: unknown) => {
+            sent.push(request);
+            return {
+              ok: true,
+              result: {
+                type: 'sorbet/credentials-list',
+                credentials: [{ providerId: 'openai', type: 'oauth' }],
+              },
+            };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          route === 'unsupported' ? {} : { sorbetCredentials: 1 },
+        targetRouter: {
+          getPlaneForMachine: () => (route === 'cloud' ? 'cloud' : 'local'),
+          resolvePlaneForMachine: async () => (route === 'cloud' ? 'cloud' : 'local'),
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('remote RPC forbidden');
+        },
+      });
+      const promise = facade.requestLocalSorbetCredentials(localMachineId, {
+        method: 'sorbet/credentials-list',
+        params: { configId: 'config' },
+      });
+      if (route === 'local') {
+        expect(await promise).toEqual({
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth' }],
+        });
+        expect(sent).toEqual([
+          expect.objectContaining({
+            machineId: localMachineId,
+            workspaceId,
+            method: 'sorbet/credentials-list',
+            params: { configId: 'config' },
+          }),
+        ]);
+      } else {
+        await expect(promise).rejects.toThrow('unsupported on this machine');
+        expect(sent).toEqual([]);
+      }
+    }
+  );
+  it.each(['sorbet/credentials-list', 'sorbet/credentials-logout'] as const)(
+    'routes remote %s only through encrypted feature RPC',
+    async (method) => {
+      const received: unknown[] = [];
+      const base = {
+        workspaceId,
+        getMachineProtocolCapabilities: async () => ({ sorbetCredentialsRemote: 1 }),
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud' as const,
+          resolvePlaneForMachine: async () => 'cloud' as const,
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('plaintext RPC forbidden');
+        },
+      };
+      const request =
+        method === 'sorbet/credentials-list'
+          ? ({ method, params: { configId: 'config' } } as const)
+          : ({ method, params: { configId: 'config', providerId: 'openai' } } as const);
+      const facade = createWorkspaceMachineRpcFacade({
+        ...base,
+        requestEncryptedFeature: async (value) => {
+          received.push(value);
+          return {
+            ok: true,
+            result:
+              method === 'sorbet/credentials-list'
+                ? { type: method, credentials: [] }
+                : { type: method },
+          };
+        },
+      });
+      expect(await facade.requestLocalSorbetCredentials(remoteMachineId, request)).toMatchObject({
+        type: method,
+      });
+      expect(received).toEqual([
+        expect.objectContaining({ ...request, machineId: remoteMachineId, workspaceId }),
+      ]);
+      await expect(
+        createWorkspaceMachineRpcFacade(base).requestLocalSorbetCredentials(
+          remoteMachineId,
+          request
+        )
+      ).rejects.toThrow('transport unavailable');
+      await expect(
+        createWorkspaceMachineRpcFacade({
+          ...base,
+          getMachineProtocolCapabilities: async () => ({ sorbetCredentials: 1 }),
+          requestEncryptedFeature: async () => {
+            throw new Error('should not send');
+          },
+        }).requestLocalSorbetCredentials(remoteMachineId, request)
+      ).rejects.toThrow('unsupported');
+    }
+  );
   const server = {
     id: 'test' as McpServerId,
     name: 'Test',
@@ -1148,6 +1495,299 @@ describe('encrypted file and preview routing', () => {
       await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner')
     ).toMatchObject({ success: true, connection: { status: 'closed', closedReason: 'revoked' } });
     expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it('omits stopProcess on ordinary preview revoke and signs stopProcess: true only when explicitly requested', async () => {
+    const runtimeNonce = '00000000-0000-4000-8000-000000000009';
+    const rpcRevoke = vi.fn(async () => ({
+      type: 'session/preview-revoke_response' as const,
+      sessionId,
+      success: true,
+    }));
+    vi.mocked(mintPreviewControlProof).mockImplementation(async (intent) => ({
+      runtimeNonce: intent.runtimeNonce,
+      requestId: intent.requestId,
+      requestToken: 'tok-revoke',
+    }));
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'test-login-token',
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestPreviewControl: async () => ({ success: true, runtimeNonce }),
+          requestSessionPreviewRevoke: rpcRevoke,
+        }) as never,
+    });
+
+    await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner', {
+      reason: 'user_revoked',
+    });
+    expect(mintPreviewControlProof).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: { action: 'revoke' } }),
+      'test-login-token'
+    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ stopProcess: expect.anything() })
+    );
+
+    await facade.requestSessionPreviewRevoke(remoteMachineId, sessionId, 'owner', {
+      reason: 'user_revoked',
+      stopProcess: true,
+    });
+    expect(mintPreviewControlProof).toHaveBeenLastCalledWith(
+      expect.objectContaining({ operation: { action: 'revoke', stopProcess: true } }),
+      'test-login-token'
+    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(expect.objectContaining({ stopProcess: true }));
+  });
+
+  it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {
+    const spec = {
+      sourceSessionId: sessionId,
+      sourceTurnId: 'turn-1',
+      targetSessionId: '00000000-0000-4000-8000-0000000000f2' as SessionId,
+      requestedByUserId: 'owner',
+      targetContext: { kind: 'shared' as const },
+    };
+    const requests: unknown[] = [];
+    const facade = (
+      requestEncryptedFeature?: (request: never) => Promise<never>,
+      capabilities: Record<string, number> = {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionFork: 1,
+      }
+    ) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('e2ee_rpc_unavailable');
+        },
+        ...(requestEncryptedFeature ? { requestEncryptedFeature } : {}),
+      });
+    const forked = await facade(async (request) => {
+      requests.push(request);
+      return {
+        ok: true,
+        result: {
+          type: 'session/fork_response',
+          sourceSessionId: spec.sourceSessionId,
+          targetSessionId: spec.targetSessionId,
+          success: true,
+          disposition: 'completed',
+          partial: false,
+          warnings: [],
+        },
+      } as never;
+    }).requestSessionFork(remoteMachineId, spec);
+    expect(forked).toMatchObject({ success: true, targetSessionId: spec.targetSessionId });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/fork',
+        params: spec,
+        timeoutMs: 120_000,
+      },
+    ]);
+    expect(isE2eeFeatureMethod('session/fork')).toBe(true);
+
+    // The machine's sharing refusal is an access answer, not a transport error to retry.
+    expect(
+      await facade(
+        async () =>
+          ({
+            ok: false,
+            code: 'e2ee_machine_not_shared',
+            error: 'This machine or one of its projects is not shared with you.',
+          }) as never
+      ).requestSessionFork(remoteMachineId, spec)
+    ).toMatchObject({
+      success: false,
+      error: {
+        code: 'MACHINE_ACCESS_DENIED',
+        message: 'This machine or one of its projects is not shared with you.',
+      },
+    });
+    const rejected = await facade(
+      async () => ({ ok: false, error: 'Fork access verification denied.' }) as never
+    ).requestSessionFork(remoteMachineId, spec);
+    expect(rejected).toMatchObject({
+      success: false,
+      error: { message: 'Fork access verification denied.' },
+    });
+    expect(await facade().requestSessionFork(remoteMachineId, spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_feature_unavailable' },
+    });
+    // An older machine drops the unknown method without replying: refuse at once, unsigned.
+    const unsigned: unknown[] = [];
+    expect(
+      await facade(async (request) => {
+        unsigned.push(request);
+        return { ok: true } as never;
+      }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionFork(remoteMachineId, spec)
+    ).toMatchObject({ success: false, error: { code: 'FORK_UNAVAILABLE' } });
+    expect(unsigned).toEqual([]);
+  });
+
+  it('refuses an encrypted steer before sending when no encrypted channel exists', async () => {
+    const steer = {
+      sessionId,
+      expectedTurnId: 'assistant-1',
+      userTurnId: 'user-2',
+      userId: 'owner',
+      timestamp: '2026-11-13T00:00:00.000Z',
+      inputConfig: { prompt: 'SYNTHETIC_STEER' } as never,
+    };
+    const sent: unknown[] = [];
+    const facade = (capabilities: Record<string, number>, feature: boolean) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () =>
+          ({
+            requestSessionSteer: async (args: unknown) => {
+              sent.push(args);
+              return {
+                type: 'session/steer_response',
+                sessionId,
+                userTurnId: 'user-2',
+                applied: true,
+                disposition: 'applied',
+              };
+            },
+          }) as never,
+        ...(feature ? { requestEncryptedFeature: async () => ({ ok: false, error: 'x' }) } : {}),
+      });
+    expect(
+      await facade(
+        { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRemoteControl: 1 },
+        false
+      ).requestSessionSteer(remoteMachineId, steer)
+    ).toMatchObject({ applied: false, disposition: 'unsupported' });
+    expect(sent).toEqual([]);
+    expect(
+      await facade(
+        { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRemoteControl: 1 },
+        true
+      ).requestSessionSteer(remoteMachineId, steer)
+    ).toMatchObject({ applied: true });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('offers remote encrypted edit and resend only to an updated machine owner', () => {
+    const machine = {
+      ownerUserId: 'owner-account',
+      protocolCapabilities: {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionEditAndResend: 1,
+      },
+    };
+    const available = (
+      overrides: Partial<Parameters<typeof encryptedRemoteEditAndResendAvailable>[0]>
+    ) =>
+      encryptedRemoteEditAndResendAvailable({
+        contentMode: 'e2ee',
+        accountId: 'owner-account',
+        machine,
+        ...overrides,
+      });
+    expect(available({})).toBe(true);
+    // A member's edit would be signed by the machine and could run only as its owner.
+    expect(available({ accountId: 'member-account' })).toBe(false);
+    // An older machine drops the method without answering.
+    expect(
+      available({
+        machine: { ...machine, protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      })
+    ).toBe(false);
+    expect(available({ machine: undefined })).toBe(false);
+    expect(available({ accountId: null })).toBe(false);
+    // Ordinary workspaces keep their existing RPC gate.
+    expect(available({ contentMode: 'plaintext' })).toBe(false);
+  });
+
+  it('edits and resends an encrypted message through the protected feature channel, never ordinary RPC', async () => {
+    const spec = {
+      sessionId,
+      expectedUserTurnId: 'user-2',
+      replacementUserTurnId: 'user-3',
+      requestedByUserId: 'owner',
+      timestamp: '2026-11-13T00:00:00.000Z',
+      inputConfig: { prompt: 'edited' },
+    };
+    const requests: unknown[] = [];
+    const facade = (
+      requestEncryptedFeature?: (request: never) => Promise<never>,
+      capabilities: Record<string, number> = {
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        e2eeSessionEditAndResend: 1,
+      }
+    ) =>
+      createWorkspaceMachineRpcFacade({
+        workspaceId,
+        protectedContent: true,
+        getMachineProtocolCapabilities: async () => capabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('e2ee_rpc_unavailable');
+        },
+        ...(requestEncryptedFeature ? { requestEncryptedFeature } : {}),
+      });
+    const resent = await facade(async (request) => {
+      requests.push(request);
+      return {
+        ok: true,
+        result: {
+          type: 'session/edit-and-resend_response',
+          sessionId,
+          replacementUserTurnId: spec.replacementUserTurnId,
+          success: true,
+        },
+      } as never;
+    }).requestSessionEditAndResend(remoteMachineId, spec);
+    expect(resent).toMatchObject({ success: true });
+    expect(requests).toEqual([
+      {
+        machineId: remoteMachineId,
+        workspaceId,
+        method: 'session/edit-and-resend',
+        params: spec,
+        timeoutMs: 120_000,
+      },
+    ]);
+    expect(isE2eeFeatureMethod('session/edit-and-resend')).toBe(true);
+    expect(await facade().requestSessionEditAndResend(remoteMachineId, spec)).toMatchObject({
+      success: false,
+      error: { message: 'e2ee_feature_unavailable' },
+    });
+    const unsigned: unknown[] = [];
+    expect(
+      await facade(async (request) => {
+        unsigned.push(request);
+        return { ok: true } as never;
+      }, CURRENT_MACHINE_PROTOCOL_CAPABILITIES).requestSessionEditAndResend(remoteMachineId, spec)
+    ).toMatchObject({ success: false });
+    expect(unsigned).toEqual([]);
   });
 
   it.each(['create', 'status', 'revoke'] as const)(
@@ -1473,7 +2113,7 @@ describe('encrypted remote files from a browser or mobile device', () => {
     });
   });
 
-  it('refuses Guest writes and diffs before signing, while reads stay available', async () => {
+  it('refuses Guest writes and legacy diff actions before signing, while reads stay available', async () => {
     let role: 'read' | 'write' = 'write';
     const machine = encryptedMachine({ 'src/app.ts': 'one\n' });
     const facade = encryptedFacade(machine, () => role);
@@ -1494,7 +2134,7 @@ describe('encrypted remote files from a browser or mobile device', () => {
       code: 'permission_denied',
       retryable: false,
       message:
-        'Guests have read-only file access: saving, comparing changes, loading folders and change history are unavailable.',
+        "Guests can view a shared session's changes read-only, but cannot save, load folders or open change history.",
     };
     expect(save).toEqual(denied);
     expect(
@@ -1552,3 +2192,79 @@ describe('encrypted remote files from a browser or mobile device', () => {
     });
   });
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'routes encrypted remote %s previews without ordinary RPC or preview proof',
+  async (platform) => {
+    const requests: unknown[] = [];
+    let access: 'write' | 'read' = 'write';
+    let outcome: unknown = {
+      type: `${platform}/control_response`,
+      sessionId,
+      success: true,
+      preview: {
+        operationId: 'operation',
+        ...(platform === 'ios-simulator'
+          ? { udid: '00000000-0000-4000-8000-000000000001' }
+          : { id: 'Pixel_A' }),
+        phase: 'ready',
+        transport: 'remote',
+        viewerUrl: 'https://preview.example.test/viewer#synthetic',
+      },
+    };
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      protectedCodeCollabRole: () => access,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('ordinary RPC must stay closed');
+      },
+      requestEncryptedFeature: async (request) => {
+        requests.push(request);
+        return { ok: true, result: outcome } as never;
+      },
+    });
+    const control =
+      platform === 'ios-simulator'
+        ? facade.requestIosSimulatorControl
+        : facade.requestAndroidEmulatorControl;
+    const args = {
+      machineId: remoteMachineId,
+      sessionId,
+      requestedByUserId: 'owner',
+      command: { action: 'status' as const },
+    };
+    expect(await control(args)).toMatchObject({
+      success: true,
+      preview: { transport: 'remote', viewerUrl: 'https://preview.example.test/viewer#synthetic' },
+    });
+    expect(requests).toEqual([
+      {
+        workspaceId,
+        machineId: remoteMachineId,
+        method: `${platform}/control`,
+        params: { sessionId, requestedByUserId: 'owner', command: args.command },
+        timeoutMs: 15000,
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+    access = 'read';
+    expect(await control(args)).toMatchObject({ success: false });
+    expect(requests).toHaveLength(1);
+    access = 'write';
+    outcome = { type: `${platform}/control_response`, sessionId: 'other-session', success: true };
+    expect(await control(args)).toMatchObject({ success: false });
+    outcome = {
+      type: `${platform}/control_response`,
+      sessionId,
+      success: true,
+      preview: { viewerUrl: 'invalid' },
+    };
+    expect(await control(args)).toMatchObject({ success: false });
+  }
+);

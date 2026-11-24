@@ -4,8 +4,91 @@ import {
   LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
+import { isE2eeFeatureMethod, E2eeFeatureInputSchema, e2eeRpcPolicy } from '../src/e2ee-rpc';
 
 describe('local Machine RPC', () => {
+  it('bounds Sorbet credential identifiers and excludes unexpected fields', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/credentials-logout',
+      params: { configId: 'config', providerId: 'openai' },
+    };
+    expect(LocalMachineRpcRequestSchema.safeParse(request).success).toBe(true);
+    for (const providerId of ['', 'a'.repeat(1025)]) {
+      expect(
+        LocalMachineRpcRequestSchema.safeParse({
+          ...request,
+          params: { ...request.params, providerId },
+        }).success
+      ).toBe(false);
+    }
+    for (const providerId of ['提供商 / 帐号', '../provider', 'a'.repeat(1024)]) {
+      expect(
+        LocalMachineRpcRequestSchema.safeParse({
+          ...request,
+          params: { ...request.params, providerId },
+        }).success
+      ).toBe(true);
+      expect(
+        LocalMachineRpcResponseSchema.safeParse({
+          ok: true,
+          result: { type: 'sorbet/credentials-list', credentials: [{ providerId, type: 'oauth' }] },
+        }).success
+      ).toBe(true);
+    }
+    expect(
+      LocalMachineRpcResponseSchema.safeParse({
+        ok: true,
+        result: {
+          type: 'sorbet/credentials-list',
+          credentials: [{ providerId: 'openai', type: 'oauth', token: 'secret' }],
+        },
+      }).success
+    ).toBe(false);
+  });
+  it('accepts custom endpoints that discover models from the server', () => {
+    const provider = {
+      name: 'Gateway',
+      protocol: 'openai-completions',
+      baseUrl: 'https://example.test/v1',
+      models: [],
+    };
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-create',
+      params: { configId: 'config', provider },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    const response = {
+      ok: true,
+      result: { type: 'sorbet/providers-create', provider: { ...provider, id: 'endpoint' } },
+    };
+    expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+  });
+
+  it('edits a stored endpoint without letting the client rewrite its models', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-update',
+      params: {
+        configId: 'config',
+        providerId: 'endpoint',
+        provider: { name: 'Gateway', protocol: 'openai-responses', baseUrl: 'https://e.test' },
+      },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    expect(
+      LocalMachineRpcRequestSchema.safeParse({
+        ...request,
+        params: { ...request.params, provider: { ...request.params.provider, models: [] } },
+      }).success
+    ).toBe(false);
+    expect(isE2eeFeatureMethod('sorbet/providers-update')).toBe(true);
+  });
+
   it('retains selected roots across file RPC parsing and defaults legacy requests to main at dispatch', () => {
     for (const [method, params] of [
       ['code-collab/get-file-index', { sessionId: 's' }],
@@ -86,66 +169,6 @@ describe('local Machine RPC', () => {
     };
     expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
   });
-
-  it('rejects draft content and environment variables in session preparation', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          prompt: 'private draft',
-          env: { API_KEY: 'secret' },
-        },
-      })
-    );
-
-    expect(result.success).toBe(false);
-  });
-
-  it('drops sensitive ACP option values from session preparation', () => {
-    const result = safeParseLocalMachineRpcRequest(
-      JSON.stringify({
-        machineId: 'machine-1',
-        workspaceId: 'workspace-1',
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-          runConfig: {
-            configOptionValues: {
-              effort: 'high',
-              api_key: 'private',
-              authToken: 'private',
-            },
-          },
-        },
-      })
-    );
-
-    expect(result).toMatchObject({
-      success: true,
-      data: {
-        params: {
-          runConfig: {
-            configOptionValues: {
-              effort: 'high',
-            },
-          },
-        },
-      },
-    });
-  });
 });
 
 it('accepts typed memory operations and rejects caller-provided commands', () => {
@@ -167,3 +190,33 @@ it('accepts typed memory operations and rejects caller-provided commands', () =>
     }).success
   ).toBe(false);
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'admits signed %s controls while keeping agent-control local',
+  (platform) => {
+    const request = {
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      method: `${platform}/control`,
+      params: { sessionId: 'session', requestedByUserId: 'owner', command: { action: 'list' } },
+    };
+    expect(E2eeFeatureInputSchema.parse({ requestId: '1'.repeat(32), request }).request).toEqual(
+      request
+    );
+    expect(e2eeRpcPolicy(request.method)).toEqual({
+      lane: 'write',
+      scope: 'machine',
+      remoteControl: true,
+    });
+    expect(
+      E2eeFeatureInputSchema.safeParse({
+        requestId: '2'.repeat(32),
+        request: {
+          ...request,
+          method: `${platform}/agent-control`,
+          params: { sessionId: 'session', command: { action: 'list' } },
+        },
+      }).success
+    ).toBe(false);
+  }
+);

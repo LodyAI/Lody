@@ -29,7 +29,6 @@ import {
 } from '@/lib/composer-agent-roles';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
-import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Switch } from '@lody/ui/switch';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
@@ -48,6 +47,7 @@ import {
 } from './mobile-inline-picker';
 
 const styles = stylex.create({
+  sheet: { height: 'auto' },
   header: { paddingInline: space[4], paddingTop: space[2], paddingBottom: space[1] },
   title: {
     margin: 0,
@@ -67,6 +67,18 @@ const styles = stylex.create({
     paddingTop: space[2],
   },
   rows: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  /** Said to a screen reader and to nobody else. */
+  srOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
   /**
    * One labelled setting: the card rung, so the sheet's rows lift off the modal
    * the way a settings card does. Picker rows drop their inline expansion
@@ -188,11 +200,11 @@ export function MobileRunConfigSheet({
         style={{
           maxHeight: `min(${maxHeight}, calc(100dvh - var(--native-keyboard-height, 0px)))`,
         }}
-        className={cn('h-auto! rounded-t-2xl border-border/60', keyboard.contentClassName)}
+        xstyle={[styles.sheet, keyboard.contentXstyle]}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        <DrawerTitle className="sr-only">{title}</DrawerTitle>
-        <DrawerDescription className="sr-only">{title}</DrawerDescription>
+        <DrawerTitle {...stylex.props(styles.srOnly)}>{title}</DrawerTitle>
+        <DrawerDescription {...stylex.props(styles.srOnly)}>{title}</DrawerDescription>
         <header {...stylex.props(styles.header)}>
           <h2 {...stylex.props(styles.title)}>{title}</h2>
         </header>
@@ -256,6 +268,7 @@ function MobileRunConfigSheetRows({
     modelSelectors,
     interactionModeSelectors,
     thoughtLevelSelectors,
+    speedTierSelectors,
     planModeSelectors,
     fastModeSelectors,
     otherSelectors,
@@ -442,6 +455,31 @@ function MobileRunConfigSheetRows({
   const thinkingLabel = useMemo(
     () => thinkingOptions.find((option) => option.value === thinkingValue)?.label ?? thinkingValue,
     [thinkingOptions, thinkingValue]
+  );
+
+  /* ── Speed tier (when model supports multiple speed tiers, e.g. Fast + Ultrafast) ── */
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
+  const speedTierOptions = useMemo<MobileInlinePickerOption<string>[]>(
+    () =>
+      (speedTierSelector?.options ?? []).map((option) => ({
+        value: option.value,
+        label: option.label,
+        searchText: option.label,
+        description: option.description,
+        disabled: option.disabled,
+      })),
+    [speedTierSelector]
+  );
+  const speedTierLabel = useMemo(
+    () =>
+      speedTierOptions.find((option) => option.value === speedTierValue)?.label ?? speedTierValue,
+    [speedTierOptions, speedTierValue]
   );
 
   /* ── Permission / mode — resolved by the one shared rule, so the sheet, the
@@ -677,6 +715,25 @@ function MobileRunConfigSheetRows({
         </RunConfigRow>
       ) : null}
 
+      {speedTierSelector && speedTierOptions.length > 0 ? (
+        <RunConfigRow label={speedTierSelector.label}>
+          <MobileInlinePicker<string>
+            id="run-config-speed"
+            value={speedTierValue}
+            onChange={(value) =>
+              onConfigOptionChange?.(speedTierSelector.configId, value as AcpConfigOptionValue)
+            }
+            options={speedTierOptions}
+            ariaLabel={speedTierSelector.label}
+            triggerContent={
+              <span {...stylex.props(composerSurface.truncate)}>
+                {speedTierLabel ?? speedTierSelector.label}
+              </span>
+            }
+          />
+        </RunConfigRow>
+      ) : null}
+
       {permissionOptions.length > 0 ? (
         <RunConfigRow label={permissionRowLabel}>
           <MobileInlinePicker<string>
@@ -786,12 +843,7 @@ function ToggleRow({
       <span {...stylex.props(styles.label)}>{label}</span>
       <div {...stylex.props(styles.toggleControl)}>
         <span {...stylex.props(styles.toggleMark, checked && styles.toggleMarkOn)}>{icon}</span>
-        <Switch
-          checked={checked}
-          onCheckedChange={onCheckedChange}
-          aria-label={ariaLabel}
-          className="shrink-0"
-        />
+        <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={ariaLabel} />
       </div>
     </div>
   );

@@ -10,7 +10,9 @@ import en from '../../../locales/en.json';
 import { userAtom } from '../src/atoms';
 import { localMachineIdAtom } from '../src/atoms/local-probe';
 import { runtimeAtom } from '../src/atoms/runtime';
+import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 import { SessionLimitContinueAction } from '../src/components/schedules/quota-continue-action';
+import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
 import {
   findClaudeSessionLimit,
   isClaudeSessionLimitMessage,
@@ -112,6 +114,59 @@ describe('Claude quota recovery action', () => {
     state.turns = [user, failure, { ...user, id: 'new-user' }];
     await render();
     expect(container.textContent).toBe('');
+  });
+  it('offers recovery for an encrypted Session on this machine, but not across machines', async () => {
+    getDefaultStore().set(runtimeAtom, { workspaceId: 'workspace', contentMode: 'e2ee' } as never);
+    await render();
+    expect(container.textContent).toContain('Enable automatic recovery');
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://synthetic.invalid',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async () => {
+        throw new Error('not minted in this test');
+      },
+    });
+    try {
+      getDefaultStore().set(localMachineIdAtom, 'other-machine' as never);
+      await render();
+      // Remote control rides workspace Machine RPC, which encrypted workspaces withhold.
+      expect(container.textContent).toBe('');
+      getDefaultStore().set(runtimeAtom, {
+        workspaceId: 'workspace',
+        contentMode: 'plaintext',
+      } as never);
+      await render();
+      expect(container.textContent).toContain('Enable automatic recovery');
+    } finally {
+      uninstall();
+    }
+  });
+  it('offers recovery to a teammate editing a Session on another machine, never to a reader', async () => {
+    getDefaultStore().set(userAtom, { id: 'teammate' } as never);
+    getDefaultStore().set(localMachineIdAtom, 'other-machine' as never);
+    const uninstall = installCloudHttpPort({
+      authBaseUrl: 'https://synthetic.invalid',
+      serverBaseUrl: null,
+      mintAutomationControlProof: async () => {
+        throw new Error('not minted in this test');
+      },
+    });
+    try {
+      await render();
+      expect(container.textContent).toContain('Enable automatic recovery');
+      await act(async () =>
+        root.render(
+          <SessionReadonlyContext.Provider
+            value={{ renderImage: () => null, renderFiles: () => null }}
+          >
+            <SessionLimitContinueAction session={{ ...session }} entryId="failure" />
+          </SessionReadonlyContext.Provider>
+        )
+      );
+      expect(container.textContent).toBe('');
+    } finally {
+      uninstall();
+    }
   });
   it('does not interpret user prose or unrelated errors as a quota failure', () => {
     expect(findClaudeSessionLimit([{ ...user, items: failure.items }])).toBeNull();

@@ -1,24 +1,17 @@
+// @vitest-environment jsdom
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';
 import { SessionChatStreamView } from '../src/components/ai-gui/view';
 import { buildChatStreamItems as buildFromView } from '../src/components/ai-gui/build-chat-stream-items';
-import { initI18n } from '../src/i18n';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionForkDestinationMenu } from '../src/components/sessions/session-fork-destination-menu';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  useTranslation: () => ({
-    t: (key: string, fallback?: string): string => (typeof fallback === 'string' ? fallback : key),
-    i18n: { language: 'en' },
-  }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -53,15 +46,18 @@ describe('SessionForkDestinationMenu', () => {
   ): Promise<void> => {
     await act(async () => {
       root.render(
-        createElement(
-          SessionForkDestinationMenu,
-          {
-            open: true,
-            worktreeAvailability: 'available',
-            onSelect: vi.fn(),
-            ...props,
-          },
-          createElement('button', { type: 'button' }, 'Fork')
+        withTestI18n(
+          createElement(
+            SessionForkDestinationMenu,
+            {
+              open: true,
+              worktreeAvailability: 'available',
+              onSelect: vi.fn(),
+              ...props,
+            },
+            createElement('button', { type: 'button' }, 'Fork')
+          ),
+          testI18n
         )
       );
       // Base UI defers the portal mount to a frame; jsdom's rAF is a real timer.
@@ -94,7 +90,6 @@ describe('SessionForkDestinationMenu', () => {
     expect(copied).toBe(true);
   });
   it.each([false, true])('exposes context copying for a turn (finished=%s)', async (finished) => {
-    await initI18n('en');
     const sessionId = 'copy-stream' as SessionId;
     const history = [
       {
@@ -116,18 +111,21 @@ describe('SessionForkDestinationMenu', () => {
     let copied: string | undefined;
     await act(async () =>
       root.render(
-        createElement(SessionChatStreamView, {
-          items,
-          sessionId,
-          renderMessageRow: () => null,
-          onCopyContext: (id) => {
-            copied = id;
-          },
-          onForkLastAssistant: () => undefined,
-          lastAssistantMessageId: 'partial',
-          lastCompletedAssistantMessageId: finished ? 'partial' : null,
-          forkingAssistantMessageId: finished ? null : 'partial',
-        })
+        withTestI18n(
+          createElement(SessionChatStreamView, {
+            items,
+            sessionId,
+            renderMessageRow: () => null,
+            onCopyContext: (id) => {
+              copied = id;
+            },
+            onForkLastAssistant: () => undefined,
+            lastAssistantMessageId: 'partial',
+            lastCompletedAssistantMessageId: finished ? 'partial' : null,
+            forkingAssistantMessageId: finished ? null : 'partial',
+          }),
+          testI18n
+        )
       )
     );
 
@@ -138,9 +136,6 @@ describe('SessionForkDestinationMenu', () => {
     } else {
       expect(fork).toBeNull();
       expect(container.querySelector('[aria-label="Copy response"]')).toBeNull();
-      expect(
-        container.querySelector('[data-assistant-turn-actions]')?.classList.contains('opacity-100')
-      ).toBe(false);
     }
     const copy = finished
       ? [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>

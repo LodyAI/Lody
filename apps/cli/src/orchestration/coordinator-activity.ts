@@ -10,6 +10,7 @@ export class CoordinatorActivity extends Context.Service<
     cancel(key: string): Effect.Effect<void>;
     cancelWhere(predicate: (key: string) => boolean): Effect.Effect<void>;
     has(key: string): boolean;
+    hasPending(): boolean;
     drain: Effect.Effect<void, unknown>;
   }
 >()('lody/orchestration/CoordinatorActivity') {
@@ -64,6 +65,7 @@ export class CoordinatorActivity extends Context.Service<
           wake,
           signal,
           has: (key: string) => timers.has(key),
+          hasPending: () => pending.size > 0,
           cancel,
           cancelWhere: (predicate) =>
             Effect.forEach([...timers.keys()].filter(predicate), cancel, { discard: true }),

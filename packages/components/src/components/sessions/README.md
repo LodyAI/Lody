@@ -70,13 +70,19 @@ records the label budget, interaction trade-off, and verification limits.
 
 ## Info bar, status, and session actions
 
+The related-session tree keeps each root and its contained Tabs together on one
+horizontally scrolling row. Pills retain the agent logo, live status and full title
+in their hover title; visible titles are capped at 16ch. Each row hides its scrollbar
+and fades only the edges with more content. Only opened-by relations create child
+rows; Tab navigation retains both the root and exact Tab ids.
+
 `session-machine-info.tsx` shows a monitor icon and machine name on desktop,
 or a compact icon button on mobile. Tap/click (also hover on desktop) opens its
 owner, device and connection details. A machine-only info bar has no raised
 background. The
 [draft Spec](../../../../../specs/composer-machine-owner.md) and
-[proposal](../../../../../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.md)
-record the presentation decision awaiting visual review.
+[decision note](../../../../../.agents/notes/implemented/feature/2026-10-11-composer-machine-info-card.md)
+record the presentation, which still awaits visual review.
 In narrow mobile bars the private-access badge keeps its lock and sharing action,
 with the full access description in its accessible name/title.
 
@@ -98,6 +104,9 @@ with the full access description in its accessible name/title.
 | `use-capacity-auto-retry.ts`                                                 | Capacity-error retry behaviour                                                                       |
 
 ## File, diff, and browser surfaces
+
+Opening Changes reads the complete paged Branch list through the file provider.
+The list and composer share its totals; file diff bodies load when opened.
 
 | File                                                                                                                                      | Responsibility                                                                           |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -181,10 +190,12 @@ with a reason-specific next step. See the
 Binary previews share `SessionFileNoticeCard` with unavailable-file states, including
 the same card spacing, full-width actions and Copy file path callback.
 
-The [video viewer](session-file-video-preview.tsx) uses native controls for
-browser-decodable WebM, MP4/M4V, MOV, and OGV. It consumes authorized bytes or
-resource URLs, releases the player when inactive, and preserves file actions on
-failure. The mobile project browser uses the same player.
+The [video viewer](session-file-video-preview.tsx) uses the shared custom
+[video player](../shared/video-player.tsx) (play/pause, scrubbing progress bar,
+time, volume, playback rate, fullscreen) for browser-decodable WebM, MP4/M4V,
+MOV, and OGV. It consumes authorized bytes or resource URLs, pauses and releases
+the player when inactive, and preserves file actions on failure. Both
+conversation video attachments and the mobile project browser share this player.
 
 ## Usage reset time
 

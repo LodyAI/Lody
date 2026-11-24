@@ -56,9 +56,10 @@
   `form` reasons sit beside Save and disable it; everything else lets Save
   run the guard, mark and focus the first empty field. There is no project
   mark: beside the project chip it reads as "a project is required".
-- Time and date are typed only: the native picker button is hidden
-  (`[&::-webkit-calendar-picker-indicator]:hidden`). Prompt: no resize handle;
-  grow from 4 lines to `max(6lh, 50dvh)`, then scroll. Field marks are absolute.
+- Time/date: typed only. `display: none` on
+  `::-webkit-calendar-picker-indicator` removes Chromium's popup. Prompt: no
+  resize handle; grow from 4 lines to `max(6lh, 50dvh)`, then scroll.
+  Absolute field marks never narrow text.
 - No time zone control. Input, preview and kind changes use `MachineMeta.timeZone`
   (device zone for older CLIs). Once retains its instant across machine changes;
   calendar rules retain wall time. [Time contract](../../../../../specs/schedule-time.md).
@@ -90,7 +91,7 @@
   chat destination is a button that opens the chat) and status in words from
   `describeScheduleState`; colour and glyph mark only states needing a look.
   A scheduled message shows its own text (the stored title is fallback only)
-  on the viewer's clock. No status pills or dots, no resizable columns. Project
+  on the viewer's clock. No status pills or dots, no resizable columns. Project, ownership (`ownerId`),
   and status filters and sort sit above the sections. Every row has a ⋯ menu and the same
   context menu (open, run, pause/resume, open chat, last run, delete); delete
   always confirms. The hover action is Run for a manual task, Pause/Resume

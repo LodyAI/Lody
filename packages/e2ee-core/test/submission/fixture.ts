@@ -3,7 +3,12 @@ import Database from 'better-sqlite3';
 import { Effect, Result } from 'effect';
 import * as Bytes from '../../src/internal/foundation/bytes';
 import { encodeCbor, bytesEqual, type CborValue } from '../../src/internal/foundation/cbor';
-import { hashRecordBytes, verifyLedger, type LedgerCheckpoint } from '../../src/internal/ledger';
+import {
+  hashRecordBytes,
+  verifyLedger,
+  possessionSigningBytes,
+  type LedgerCheckpoint,
+} from '../../src/internal/ledger';
 import { LedgerLog, LedgerLogError } from '@lody/e2ee-core/services';
 const ok = Result.getOrThrow;
 export const filled = (n: number, length = 32) => new Uint8Array(length).fill(n);
@@ -86,3 +91,22 @@ export {
   resumeSubmission,
   acknowledgeSubmission,
 } from '../../src/internal/testing/submission';
+
+export function selfAdmission() {
+  const target = keys(2),
+    enc = filled(102);
+  const proof = ok(
+    possessionSigningBytes({
+      genesis: anchor,
+      targetMembershipId: ok(Bytes.membershipId(filled(10, 16))),
+      signingPublicKey: ok(Bytes.signingPublicKey(target.pk)),
+      encryptionPublicKey: ok(Bytes.encryptionPublicKey(enc)),
+      kind: 'personal',
+    })
+  );
+  return signed([
+    hashRecordBytes(genesis).toBytes(),
+    owner.pk,
+    [4, 0, target.pk, enc, target.sign(proof)],
+  ]);
+}

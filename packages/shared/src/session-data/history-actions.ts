@@ -49,7 +49,7 @@ export type HistoryAction =
       kind: 'user-status';
       turnId: string;
       status: SessionTurnStatus;
-      cancellationReason?: 'user_stop';
+      cancellationReason?: 'user_stop' | 'machine_update';
       requeueUndelivered?: boolean;
       onlyPendingApply?: boolean;
       /** Settle only input no execution has claimed: every copy is still pending or seen. */
@@ -74,6 +74,12 @@ export type HistoryAction =
   | { kind: 'upsert-turn'; turn: SessionEntry; beforeTurnId?: string; beforeLastUser?: boolean }
   | { kind: 'remove-turn'; turnId: string }
   | { kind: 'agent-warning'; turn: SessionEntry; message: string }
+  | {
+      kind: 'image-backfilled';
+      localImageId: string;
+      machineId: string;
+      image: import('../ai').SessionImagePayload;
+    }
   | {
       kind: 'file-backfilled';
       fileId: string;
@@ -327,6 +333,23 @@ export function applyHistoryAction(
       )
         return { turns: history, matched: false };
       return { turns: [...history, action.turn], matched: true };
+    }
+    case 'image-backfilled': {
+      let matched = false;
+      for (const entry of history)
+        for (const item of [...(entry.items ?? []), ...(entry.inputConfig?.inputBlocks ?? [])]) {
+          if (
+            item.type === 'image' &&
+            item.localImageId === action.localImageId &&
+            item.machineId === action.machineId &&
+            item.storageSessionId === action.image.storageSessionId &&
+            item.transport === 'local'
+          ) {
+            Object.assign(item, action.image);
+            matched = true;
+          }
+        }
+      return { turns: history, matched };
     }
     case 'file-backfilled': {
       let matched = false;

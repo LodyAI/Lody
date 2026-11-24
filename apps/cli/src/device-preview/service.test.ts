@@ -259,3 +259,72 @@ it('expires an agent start with no first viewer after boot, without opening capt
     vi.useRealTimers();
   }
 });
+
+it.each(['ios', 'android'] as const)(
+  'refuses revoked encrypted %s control after metadata lookup, before acquiring a device',
+  async (platform) => {
+    const metadata = deferred();
+    const entered = deferred();
+    let current = true;
+    const leases = new DeviceControlLeases();
+    const service = new DevicePreviewService({
+      workspaceId: 'workspace',
+      runtimeBaseUrl: 'https://example.test',
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        success() {},
+        setDebug() {},
+        child() {
+          return this;
+        },
+        async close() {},
+      },
+      leases,
+      authorize: async () => {
+        entered.resolve();
+        await metadata.promise;
+      },
+      localProxy: {
+        acquire: async () => {
+          throw new Error('unexpected local endpoint');
+        },
+        closeSession: async () => {},
+      },
+      adapter: {
+        platform,
+        normalize: (id) => id,
+        environmentMessage: 'unavailable',
+        list: async () => [],
+        prepare: async () => {
+          throw new Error('unexpected preparation');
+        },
+        boot: async () => {},
+        open: async () => {
+          throw new Error('unexpected capture');
+        },
+      },
+    });
+    service.enableRemote();
+    const control = service.control(
+      {
+        sessionId: 'session',
+        requestedByUserId: 'owner',
+        command: { action: 'start', id: 'device' },
+      },
+      true,
+      async () => {},
+      () => current
+    );
+    await entered.promise;
+    current = false;
+    metadata.resolve();
+    expect(await control).toMatchObject({ success: false });
+    expect(leases.occupancy(`${platform}:device`, JSON.stringify(['workspace', 'session']))).toBe(
+      'available'
+    );
+    await service.closeAll();
+  }
+);

@@ -2,7 +2,9 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { machineSupportsLocalProjectRemovalProtocol, type MachineId } from '@lody/shared';
-import { ChevronRight, Wrench } from 'lucide-react';
+import { AlertCircle, ChevronRight, LockKeyhole, Users, Wrench } from 'lucide-react';
+import { Badge } from '@lody/ui/badge';
+import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -24,6 +26,46 @@ import { MobileProjectSkillsRow } from '@/components/mobile/mobile-project-skill
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getHistoryProviderLabel } from '@/components/settings/project-settings';
 import { useAppCapability } from '@/lib/app-platform';
+// The theme tokens are imported by path, not by the `@/` alias: the StyleX
+// compiler links a theme file on its own and does not follow bundler aliases.
+import { themeFontWeight, themeSpace } from '../../style/theme-scale.stylex';
+import { mobileSurface } from './surface';
+
+const styles = stylex.create({
+  foldClearance: {
+    paddingBottom: 'calc(var(--mobile-tabbar-height) + var(--k-safe-area-bottom,0px) + 1rem)',
+  },
+  /** The share toggle's box: the switch, and its spinner when it works. */
+  shareControl: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
+  shareStatusIcon: { width: '100%', height: '100%' },
+  pendingSpinner: { color: 'hsl(var(--muted-foreground) / 1)' },
+  identityTileInk: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+  },
+  chevronInk: {
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+  },
+  /** The row that destroys the project. */
+  deleteButton: {
+    display: 'block',
+    width: '100%',
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    textAlign: 'center',
+    fontSize: '0.95rem',
+    fontWeight: themeFontWeight.medium,
+    color: 'hsl(var(--destructive) / 1)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration)',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    backgroundColor: {
+      default: null,
+      ':active': 'color-mix(in oklab, hsl(var(--destructive) / 1) 10%, transparent)',
+    },
+  },
+});
 
 export type MobileLocalProjectSettingsProps = {
   /** The machine that owns the project we're viewing. */
@@ -66,6 +108,9 @@ export function MobileLocalProjectSettings({
   // Team sharing is cloud-only; the whole sharing section hides on the local
   // (open-source) platform.
   const teamSharingAvailable = useAppCapability('teamSharing');
+  // Script reads follow the sheet, rather than mounting the project settings.
+  const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
+  const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const {
     sections,
     isLoading,
@@ -76,10 +121,9 @@ export function MobileLocalProjectSettings({
     onHistorySelectionChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
-  } = useLocalProjectsAdmin();
+  } = useLocalProjectsAdmin(worktreeSheetOpen ? projectKey : null);
   const { removeLocalProject } = useRemoveLocalProject();
 
-  const projectKey = getLocalProjectVisibilityKey(machineId, projectId);
   const skillsSource: ProjectSkillsSource | null = workspaceId
     ? { kind: 'local', workspaceId, machineId, localProjectId: projectId }
     : null;
@@ -93,17 +137,13 @@ export function MobileLocalProjectSettings({
 
   /* Which provider the user has drilled into. `null` = list view. */
   const [selectedProviderKey, setSelectedProviderKey] = useState<string | null>(null);
-  /* Worktree setup + cleanup live behind a single drill-in row that opens
-     this sheet, so the Settings tab's first level stays a short list. */
-  const [worktreeSheetOpen, setWorktreeSheetOpen] = useState(false);
-
   if (isLoading && !row) {
     return (
       <>
         {intro}
         <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
-          <div className="flex items-center justify-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-            <Spinner className="h-4 w-4" />
+          <div {...stylex.props(mobileSurface.notice)}>
+            <Spinner diameter="calc(var(--spacing) * 4)" />
             {t('workspace.projects.loading', 'Loading local projects')}
           </div>
         </MobileSettingsSection>
@@ -116,8 +156,8 @@ export function MobileLocalProjectSettings({
       <>
         {intro}
         <MobileSettingsSection title={t('workspace.projects.title', 'Project')}>
-          <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-            <p className="text-sm text-muted-foreground">
+          <div {...stylex.props(mobileSurface.empty)}>
+            <p {...stylex.props(mobileSurface.emptyText)}>
               {t('workspace.projects.notAvailable', '此项目在当前机器上不可用')}
             </p>
           </div>
@@ -139,52 +179,119 @@ export function MobileLocalProjectSettings({
   return (
     <Tooltip.Provider delay={200}>
       <MobileSettingsFoldPanels
-        lowerClassName="pb-[calc(var(--mobile-tabbar-height)+var(--k-safe-area-bottom,0px)+1rem)]"
+        lowerXstyle={styles.foldClearance}
         upper={
           <>
             {intro}
-            {teamSharingAvailable && (
-              <MobileSettingsSection
-                title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
-                description={
-                  row.canUpdateSharing
-                    ? undefined
-                    : t(
-                        'workspace.projects.sharePreparing',
-                        'Sharing will be available when this machine finishes connecting.'
+            {teamSharingAvailable &&
+              (() => {
+                const toggleLabel = t('workspace.projects.shareToggle', 'Share project with team');
+                const machinePrivate = row.machineSharedWithTeam === false;
+                const blockedByPrivateMachine =
+                  row.canUpdateSharing && row.sharedWithTeam && machinePrivate;
+                const shareHelper = !row.canUpdateSharing
+                  ? t(
+                      'workspace.projects.sharePreparing',
+                      'Sharing will be available when this machine finishes connecting.'
+                    )
+                  : blockedByPrivateMachine
+                    ? t(
+                        'workspace.projects.shareMachinePrivateWarning',
+                        'Project sharing is on, but {{machine}} is private, so teammates cannot access this project yet.',
+                        { machine: row.machineName }
                       )
-                }
-              >
-                <MobileSettingsRow label={t('workspace.projects.shareToggle', '与团队共享')}>
-                  <div className="flex items-center gap-2">
-                    {row.isUpdating ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null}
-                    <Switch
-                      checked={row.sharedWithTeam}
-                      disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
-                      aria-label={t('workspace.projects.shareToggle', '与团队共享')}
-                      onCheckedChange={(checked) => {
-                        void onSharedWithTeamChange?.(row, checked);
-                      }}
-                    />
-                  </div>
-                </MobileSettingsRow>
-              </MobileSettingsSection>
-            )}
+                    : row.sharedWithTeam
+                      ? t(
+                          'workspace.projects.shareEnabledSummary',
+                          'Teammates can open and continue conversations in this project.'
+                        )
+                      : machinePrivate
+                        ? t(
+                            'workspace.projects.shareEnableWithMachineHint',
+                            'Turning this on also shares {{machine}}, which teammates need to open and continue conversations.',
+                            { machine: row.machineName }
+                          )
+                        : t(
+                            'workspace.projects.shareEnableHint',
+                            'Turning this on lets teammates open and continue conversations in this project.'
+                          );
+                const statusBadge = !row.canUpdateSharing ? null : blockedByPrivateMachine ? (
+                  <Badge
+                    tone="warning"
+                    icon={
+                      <AlertCircle {...stylex.props(styles.shareStatusIcon)} aria-hidden="true" />
+                    }
+                  >
+                    {t('workspace.projects.shareState.machinePrivate', 'Machine private')}
+                  </Badge>
+                ) : row.sharedWithTeam ? (
+                  <Badge
+                    tone="success"
+                    icon={<Users {...stylex.props(styles.shareStatusIcon)} aria-hidden="true" />}
+                  >
+                    {t('workspace.projects.shareState.shared', 'Shared')}
+                  </Badge>
+                ) : (
+                  <Badge
+                    tone="neutral"
+                    icon={
+                      <LockKeyhole {...stylex.props(styles.shareStatusIcon)} aria-hidden="true" />
+                    }
+                  >
+                    {t('workspace.projects.shareState.private', 'Private')}
+                  </Badge>
+                );
+
+                return (
+                  <MobileSettingsSection
+                    title={t('workspace.projects.workspaceShareTitle', '工作区共享')}
+                  >
+                    <MobileSettingsRow label={toggleLabel} helper={shareHelper}>
+                      <div {...stylex.props(styles.shareControl)}>
+                        {row.isUpdating ? (
+                          <Spinner
+                            diameter="calc(var(--spacing) * 4)"
+                            className={stylex.props(styles.pendingSpinner).className}
+                          />
+                        ) : null}
+                        {statusBadge}
+                        <Switch
+                          checked={row.sharedWithTeam}
+                          disabled={
+                            row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange
+                          }
+                          aria-label={toggleLabel}
+                          onCheckedChange={(checked) => {
+                            void onSharedWithTeamChange?.(row, checked);
+                          }}
+                        />
+                      </div>
+                    </MobileSettingsRow>
+                  </MobileSettingsSection>
+                );
+              })()}
 
             <MobileSettingsSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
               <MobileSettingsRow
                 label={
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Wrench className="h-[1.05rem] w-[1.05rem]" />
+                  <div {...stylex.props(mobileSurface.identity)}>
+                    <div {...stylex.props(mobileSurface.identityTile, styles.identityTileInk)}>
+                      <Wrench {...stylex.props(mobileSurface.identityGlyph)} />
                     </div>
-                    <span className="truncate text-[0.95rem] font-medium leading-tight">
+                    <span
+                      {...stylex.props(
+                        mobileSurface.identityLabel,
+                        mobileSurface.identityLabelTight
+                      )}
+                    >
                       {t('workspace.projects.worktreeConfigRow', 'Worktree setup & cleanup')}
                     </span>
                   </div>
                 }
                 onClick={() => setWorktreeSheetOpen(true)}
-                trailing={<ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+                trailing={
+                  <ChevronRight {...stylex.props(mobileSurface.chevron, styles.chevronInk)} />
+                }
               />
             </MobileSettingsSection>
           </>
@@ -206,22 +313,29 @@ export function MobileLocalProjectSettings({
                     <MobileSettingsRow
                       key={state.providerKey}
                       label={
-                        <div className="flex min-w-0 items-center gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                        <div {...stylex.props(mobileSurface.identity)}>
+                          <div
+                            {...stylex.props(mobileSurface.identityTile, styles.identityTileInk)}
+                          >
                             <AgentIcon
                               cliType={state.provider.cliType}
                               agentType={state.provider.agentType}
-                              className="h-[1.05rem] w-[1.05rem]"
+                              className={stylex.props(mobileSurface.identityGlyph).className}
                             />
                           </div>
-                          <span className="truncate text-[0.95rem] font-medium leading-tight">
+                          <span
+                            {...stylex.props(
+                              mobileSurface.identityLabel,
+                              mobileSurface.identityLabelTight
+                            )}
+                          >
                             {state.providerLabel ?? getHistoryProviderLabel(state.provider)}
                           </span>
                         </div>
                       }
                       onClick={() => setSelectedProviderKey(state.providerKey)}
                       trailing={
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" />
+                        <ChevronRight {...stylex.props(mobileSurface.chevron, styles.chevronInk)} />
                       }
                     />
                   ))}
@@ -243,7 +357,7 @@ export function MobileLocalProjectSettings({
                       if (removed) onRemoved?.();
                     });
                   }}
-                  className="block w-full px-4 py-3 text-center text-[0.95rem] font-medium text-destructive transition-colors active:bg-destructive/10"
+                  {...stylex.props(styles.deleteButton)}
                 >
                   {t('workspace.projects.delete', 'Delete project')}
                 </button>

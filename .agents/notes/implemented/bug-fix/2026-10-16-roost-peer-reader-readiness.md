@@ -25,22 +25,15 @@ merged by PR #1626 (`a4de9a264`). They concern the new observation and recovery
 paths, independently of the unrelated Inbox host-sampling failures. This follow-up
 fixes them without changing the protocol, history storage, or dependency versions.
 
-- **Local watch deadline.** Electron now derives the control timeout from the whole
-  validated request. A watch gets its requested wait plus the ordinary ten-second
-  read allowance; ordinary reads and existing long-running control requests keep
-  their previous budgets. The renderer test uses this production policy, completes
-  an idle 15-second watch successfully, then observes the next reply immediately.
-  A pending nonzero recovery timer can also be shortened by a fresh hint or wake;
-  zero-delay work remains coalesced.
-- **Shutdown cancellation.** MessageHandler owns a separate watch cancellation
-  controller. MachineRuntime stops admission and cancels parked watches before
-  draining the processor; the full handler owner signal remains available to shared
-  writes until normal cleanup. Tests cancel a watch while a writer awaits the same
-  metadata and prove that writer still commits. A second test runs the real runtime,
-  handler, native waiter and ACP buffer across two sessions: shutdown cancels the
-  observer synchronously, drains it and persists the other session's buffered output.
-  Reopening native history returns that output. No batch, watch or native I/O
-  deadline is advanced to make shutdown finish.
+- **Local deadline.** Electron derives its timeout from the validated control
+  request. The subscription lease completes inside the IPC response budget.
+  Tests cover renewal from the applied checkpoint and cancellation on release.
+  A pending nonzero recovery timer can also be shortened by a fresh hint or wake.
+- **Shutdown cancellation.** MachineRuntime cancels parked history observers
+  before draining the processor. Shared writers retain their owner signal until
+  normal cleanup. Tests cancel a subscription and let a writer waiting on the same
+  metadata commit. A second test reopens Native history after shutdown and
+  reads the other session's buffered output.
 - **Live display during replacement.** Unknown checkpoint coverage still stages a
   complete, coherent replacement while retaining the previous durable cache. During
   that replacement, display reads use the owner rather than the old projection and
@@ -149,38 +142,27 @@ metadata changes; it does not re-await the completed barrier or select legacy
 history. Both initial tombstones and later deletion retire the pending reader.
 
 A Roost reader observes its owner's capability metadata for its lifetime.
-Incremental and watch capabilities are evaluated when work starts, and capability
+Incremental and subscription capabilities are evaluated when work starts, and capability
 arrival wakes the existing bridge. Missing capabilities retain legacy reads;
 release stops their observers. A newly available checkpoint path stops unnecessary
 older-page warming while preserving a staged reset's atomic replacement.
 
 ## Checkpoint observation
 
-The separately advertised `sessionHistoryWatch: 1` requires
-`sessionHistoryIncremental: 1`. Local control uses `watchChanges` on
-`session/history-read`; remote RPC uses the independently classifiable
-`session/history-watch` method. Its request, result and history error handling
-retain owner-session encryption and ownership validation.
+The separately advertised `sessionHistorySubscription: 1` requires
+`sessionHistoryIncremental: 1`. One owner lease registers native waiters outside
+writer capacity and sends its initial checkpoint plus subsequent committed
+checkpoints. Owner authentication is current at publication. Local control uses
+`session/history-subscription`; remote RPC uses owner-encrypted
+`session/history-subscribe` and `session/history-unsubscribe`.
 
-The native backend registers a waiter before checking the supplied checkpoint.
-A changed checkpoint returns immediately; otherwise publication wakes the waiter.
-The read then uses the same durable `readChanges` and coherent-body response as
-ordinary recovery. This covers changes between the initial read and watch
-admission, missed hints, and reconnects. Cache content, membership and checkpoint
-commit atomically before the next observation. An unchanged checkpoint reads no
-history bodies, writes no cache replacement and emits no body invalidation.
-Successful delta repair also finishes immediately when only the history tail is
-cached; it does not follow the repair with another full latest-page read.
-
-Waits last at most 15 seconds, with a 45-second remote response budget. Local
-desktop requests include the requested wait plus a ten-second read allowance. Remote
-admission is bounded at 128 watches, separate from ordinary read admission.
-MessageHandler also bounds parked owner waits at 128 across transports. Waits
-park in JavaScript outside the native Worker and writer queue; after waking,
-actual reads acquire ordinary RPC permits or the bounded local watch-read pool.
-Local watches for the same session use independent lanes, so one idle viewer
-cannot serialize another viewer's observation. No new per-view SSE transport is
-created: remote requests reuse the workspace Machine RPC transport.
+A changed checkpoint is visible even if the write acknowledgement was lost.
+The reader applies a bounded inline delta when its base and window match the
+current cache. Otherwise the checkpoint drives the same durable `readChanges`
+or bounded reset. Membership, bodies and checkpoint advance atomically. Renewals
+start at the last applied checkpoint. An unchanged checkpoint leaves the cache intact.
+See the [transport map](../../../docs/rpc-loro-streams-rpc.md#request-scheduling)
+for admission and lease limits.
 
 ## Lifecycle and recovery
 
@@ -191,7 +173,7 @@ created: remote requests reuse the workspace Machine RPC transport.
 - Cancellation: hidden/offline remote views start no new observations; local IPC
   remains usable offline. Unsubscribe/dispose fences later publication. A dispatched
   viewer request settles or reaches its bounded deadline; server stop and backend
-  close abort parked waits. Runtime shutdown cancels its dedicated watch signal
+  close abort parked waits. Runtime shutdown cancels its subscription signal
   before processor drain; shared writers retain their normal owner. Retiring a
   metadata waiter releases only its wait.
 - Handoff: durable owner journal precedes the checkpoint response, and atomic
@@ -258,4 +240,4 @@ remains draft; implementation does not approve it.
 Related decisions: [incremental recovery](2026-10-16-roost-incremental-history.md),
 [write amplification](2026-10-16-roost-storage-write-amplification.md),
 [native runtime](../../proposed/architecture/2026-10-09-roost-native-runtime.md),
-[creation feature gate](../../proposed/feature/2026-10-08-roost-history-feature-gate.md).
+[creation feature gate](../feature/2026-10-08-roost-history-feature-gate.md).

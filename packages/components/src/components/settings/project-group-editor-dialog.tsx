@@ -50,7 +50,7 @@ import { ProjectCreateWizard } from './project-create-wizard';
 import { ProjectGroupView } from './project-group-form';
 import { useProjectMemberSourceNames } from './project-member-source-names';
 import { useSettingsPane } from './settings-page-header';
-import { SETTINGS_EDITOR_DIALOG_LAYOUT, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
+import { settingsEditorDialogStyles, SETTINGS_EDITOR_DIALOG_WIDTH } from './surface';
 
 /** A `create` carries its id from the moment it opens, like the Role editor. */
 export type ProjectGroupEditorState =
@@ -451,7 +451,7 @@ export function ProjectGroupEditorDialog({
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
           style={{ height: 'min(680px, 88dvh)' }}
         >
           {/* Creating and editing walk the same questions; only someone who

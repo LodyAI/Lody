@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { useState, useEffect, useMemo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -27,7 +27,6 @@ interface GitHubReposSelectorProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
-  tone?: 'light' | 'dark';
   latestMessageAtByRepo?: ReadonlyMap<string, number>;
   autoSelectSingle?: boolean; // 是否在只有一个仓库时自动选中
   onConnectGitRepo?: () => void;
@@ -42,7 +41,6 @@ export function GitHubReposSelector({
   placeholder,
   className,
   disabled = false,
-  tone = 'light',
   latestMessageAtByRepo,
   autoSelectSingle = false,
   onConnectGitRepo,
@@ -56,7 +54,7 @@ export function GitHubReposSelector({
   const setCacheAtom = useSetAtom(setWorkspaceReposCacheAtom);
 
   // Fetch fresh data from server
-  const freshRepositories = useLegacyWorkspaceQuery(
+  const freshRepositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     currentWorkspaceId ? { workspaceId: currentWorkspaceId } : 'skip'
   );
@@ -75,7 +73,9 @@ export function GitHubReposSelector({
   }, [freshRepositories, currentWorkspaceId, setCacheAtom]);
 
   // Use fresh data if available, otherwise fall back to cache
-  const repositories = freshRepositories ?? cachedRepositories;
+  const githubStatus = useGithubWorkspaceStatus(currentWorkspaceId);
+  const repositories =
+    githubStatus === 'allowed' ? (freshRepositories ?? cachedRepositories) : undefined;
   const sortedRepositories = useMemo(() => {
     const items = [...(repositories ?? [])];
     if (!latestMessageAtByRepo) {
@@ -151,7 +151,6 @@ export function GitHubReposSelector({
       }}
       placeholder={placeholder || t('chat.repoPlaceholder', { defaultValue: 'Select repository' })}
       placeholderIcon={Github}
-      tone={tone}
       appearance="field"
       className={className}
       // Nothing to pick (no repos, and no "Connect repositories" affordance) → keep the
@@ -161,7 +160,8 @@ export function GitHubReposSelector({
       autoFocusSearch={false}
       searchPlaceholder={t('repos.search', { defaultValue: 'Search repositories' })}
       emptyText={t('repos.none', { defaultValue: 'No repositories found' })}
-      contentClassName="min-w-[16rem] max-w-[min(28rem,calc(100vw-2rem))]"
+      contentMinWidth="16rem"
+      contentMaxWidth="min(28rem, calc(100vw - 2rem))"
       renderOption={(option) => (
         <>
           <span {...stylex.props(composerSurface.rowIcon)}>{option.startContent}</span>

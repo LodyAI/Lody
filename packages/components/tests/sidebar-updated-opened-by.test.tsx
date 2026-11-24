@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'react-dom';
@@ -9,7 +7,7 @@ import { createStore, Provider } from 'jotai';
 import {
   countUpdatedItemRoots,
   getVisibleUpdatedItems,
-  SHOW_FULL_BUCKET_THRESHOLD,
+  UPDATED_BUCKET_PREVIEW_MAX,
   SidebarUpdatedSessionList,
   sortUpdatedItems,
   updatedBucketOverflowsPreview,
@@ -67,7 +65,7 @@ describe('updated bucket opened-by tree', () => {
       }),
     ]);
 
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
+    expect(getVisibleUpdatedItems(ordered, true, 0).map((item) => item.id)).toEqual([
       'stale-opener',
       'fresh-opened',
       'standalone',
@@ -80,7 +78,7 @@ describe('updated bucket opened-by tree', () => {
       makeItem({ id: 'opened', openedBySessionId: 'pinned-opener' }),
       makeItem({ id: 'other' }),
     ]);
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
+    expect(getVisibleUpdatedItems(ordered, true, 0).map((item) => item.id)).toEqual([
       'opened',
       'other',
     ]);
@@ -90,22 +88,22 @@ describe('updated bucket opened-by tree', () => {
   it('measures the preview threshold in top-level rows', () => {
     const openerGroup = sortUpdatedItems([
       makeItem({ id: 'opener' }),
-      ...Array.from({ length: SHOW_FULL_BUCKET_THRESHOLD }, (_unused, index) =>
+      ...Array.from({ length: UPDATED_BUCKET_PREVIEW_MAX }, (_unused, index) =>
         makeItem({ id: `opened-${index}`, openedBySessionId: 'opener' })
       ),
     ]);
     expect(updatedBucketOverflowsPreview(openerGroup)).toBe(false);
-    expect(getVisibleUpdatedItems(openerGroup, true, false)).toHaveLength(
-      SHOW_FULL_BUCKET_THRESHOLD + 1
+    expect(getVisibleUpdatedItems(openerGroup, true, 0)).toHaveLength(
+      UPDATED_BUCKET_PREVIEW_MAX + 1
     );
 
     const flat = sortUpdatedItems(
-      Array.from({ length: SHOW_FULL_BUCKET_THRESHOLD + 1 }, (_unused, index) =>
+      Array.from({ length: UPDATED_BUCKET_PREVIEW_MAX + 1 }, (_unused, index) =>
         makeItem({ id: `flat-${index}` })
       )
     );
     expect(updatedBucketOverflowsPreview(flat)).toBe(true);
-    expect(getVisibleUpdatedItems(flat, true, false)).toHaveLength(SHOW_FULL_BUCKET_THRESHOLD);
+    expect(getVisibleUpdatedItems(flat, true, 0)).toHaveLength(UPDATED_BUCKET_PREVIEW_MAX);
   });
 });
 

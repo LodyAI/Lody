@@ -98,6 +98,13 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 
 ## Local file resources
 
+- Local attachments carry machine identity, a path and display metadata; Electron
+  must not register, resolve or inherit reference IDs or submission bindings.
+  Original files use their paths directly without preparation IPC. Only generated
+  bytes enter attachment preparation and remain staged until it returns the durable path.
+  Read paths through the existing machine-authorized local file boundary. Image
+  snapshots keep their separate preparation and resolution protocol.
+
 - Markdown link discovery uses the shared resolver after disk-machine validation.
   It returns identities without resources; the selected path is reauthorized on read.
 
@@ -114,3 +121,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   cross-origin readers can inspect `Accept-Ranges` and `Content-Range`.
   Raster header dimensions bound decode cost.
   The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.
+- Direct HTML preview (`local-html-preview.ts`) is the one exception: after user
+  consent it serves the file’s folder or its explicitly authorized workspace from a random per-preview
+  `lody-html-preview://` origin. Scripts run only when the user allowed them. Preview frames
+  cannot navigate off that scheme and receive no permissions. It never
+  serves dot-files or paths outside the authorized folder, including through symlinks, and its tokens share the resource owner's lifetime.

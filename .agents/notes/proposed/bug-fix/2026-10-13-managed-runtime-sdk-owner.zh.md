@@ -15,4 +15,4 @@ Claude adapter 拥有内置启动使用的 SDK，因此预期 SDK 与 Claude Cod
 
 Codex、Claude、Grok 和 Pi 清单在文件哈希和大小校验后刷新。锁文件与已提交的 adapter 依赖声明对齐，依赖发布等待期规则没有改变。两个托管 runtime 测试文件使用新清单及 adapter 元数据导入，39 个测试全部通过。完整仓库检查完成后记录在 PR 中。
 
-本次修复与[登录下载取消提案](2026-09-21-acp-auth-runtime-download.zh.md)不同：修改的是清单的版本来源，不是登录进度或取消行为。原生平台执行、Windows 桌面引导与合并后的 main CI 仍需分别验证。
+本次修复与[登录下载取消提案](../../implemented/bug-fix/2026-09-21-acp-auth-runtime-download.zh.md)不同：修改的是清单的版本来源，不是登录进度或取消行为。原生平台执行、Windows 桌面引导与合并后的 main CI 仍需分别验证。

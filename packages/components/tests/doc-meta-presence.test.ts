@@ -24,12 +24,16 @@ import {
   sessionMetaCacheAtom,
 } from '../src/atoms/doc-meta';
 import {
+  clearLodyPresenceStatesAtom,
   lodyPresenceStatesAtom,
   lodyPresenceSyncStateAtom,
+  MACHINE_RECENTLY_ONLINE_MS,
   machineOnlineStatusAtomFamily,
   onlineMachineIdsAtom,
+  presumedOnlineMachineIdsAtom,
   sessionLiveStatusAtomFamily,
   setLodyPresenceNowMsAtom,
+  setLodyPresenceStatesAtom,
 } from '../src/atoms/presence';
 
 describe('doc meta presence overlay', () => {
@@ -147,5 +151,60 @@ describe('doc meta presence overlay', () => {
     store.set(setLodyPresenceNowMsAtom, now + LODY_PRESENCE_TTL_MS + 1);
 
     expect(store.get(sessionLiveStatusAtomFamily(sessionId))).toBeNull();
+  });
+});
+
+describe('presumed machine liveness while presence is unknown', () => {
+  const machineId = 'machine-recent' as MachineId;
+
+  const storeWithHeartbeat = () => {
+    const store = createStore();
+    const now = getServerNow();
+    const instanceId = 'instance-recent' as LodyPresenceInstanceId;
+    store.set(setLodyPresenceStatesAtom, {
+      [getLodyMachinePresenceKey(machineId, instanceId)]: {
+        kind: 'machine',
+        machineId,
+        instanceId,
+        updatedAt: now,
+      },
+    });
+    return { store, now };
+  };
+
+  it('keeps a machine online for ten minutes after its last heartbeat, then offline', () => {
+    const { store, now } = storeWithHeartbeat();
+    store.set(lodyPresenceSyncStateAtom, 'disconnected');
+
+    store.set(setLodyPresenceNowMsAtom, now + MACHINE_RECENTLY_ONLINE_MS - 1_000);
+    expect(store.get(presumedOnlineMachineIdsAtom).has(machineId)).toBe(true);
+
+    store.set(setLodyPresenceNowMsAtom, now + MACHINE_RECENTLY_ONLINE_MS + LODY_PRESENCE_TTL_MS);
+    expect(store.get(presumedOnlineMachineIdsAtom).has(machineId)).toBe(false);
+  });
+
+  it('remembers the heartbeat across a presence restart that clears the snapshot', () => {
+    const { store } = storeWithHeartbeat();
+
+    store.set(clearLodyPresenceStatesAtom);
+
+    expect(store.get(onlineMachineIdsAtom).has(machineId)).toBe(false);
+    expect(store.get(presumedOnlineMachineIdsAtom).has(machineId)).toBe(true);
+  });
+
+  it('treats a machine never seen online as offline', () => {
+    const store = createStore();
+    store.set(lodyPresenceSyncStateAtom, 'disconnected');
+
+    expect(store.get(presumedOnlineMachineIdsAtom).has(machineId)).toBe(false);
+  });
+
+  it('trusts a synced room over the remembered heartbeat', () => {
+    const { store, now } = storeWithHeartbeat();
+    store.set(lodyPresenceSyncStateAtom, 'synced');
+
+    store.set(setLodyPresenceNowMsAtom, now + LODY_PRESENCE_TTL_MS + 1);
+
+    expect(store.get(presumedOnlineMachineIdsAtom).has(machineId)).toBe(false);
   });
 });

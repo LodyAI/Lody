@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { SessionId } from '@lody/shared';
@@ -157,6 +155,17 @@ describe('live agent status', () => {
   const liveNow = (): HistoryLiveWindow => ({ sync: 'live', since: Date.now() });
 
   const statusRow = () => container.querySelector('[data-agent-activity-row]');
+  const expandActivityGroup = async () => {
+    const disclosures = container.querySelectorAll<HTMLButtonElement>(
+      '[data-conversation-disclosure="group"]'
+    );
+    // A live segment may also render an outer "Working" disclosure first.
+    const disclosure = disclosures[disclosures.length - 1];
+    expect(disclosure).toBeDefined();
+    if (disclosure!.getAttribute('aria-expanded') === 'false') {
+      await act(async () => disclosure!.click());
+    }
+  };
   const shimmering = () =>
     Array.from(container.querySelectorAll('.agent-shimmer')).map((el) => el.textContent);
 
@@ -175,6 +184,85 @@ describe('live agent status', () => {
     expect(statusRow()?.textContent).toBe('Working (Worked for 5m 00s)');
     await advance(219_900);
     expect(statusRow()?.textContent).toBe('Working (Worked for 8m 40s · no output for 4m)');
+  });
+
+  it('measures a streaming thought and its live status as one virtual row', async () => {
+    await render(
+      liveTurn([
+        {
+          type: 'thought',
+          text: '1. Back up the binary and configuration.\n2. Confirm the backup is readable.',
+        },
+      ]),
+      { label: 'Thinking' }
+    );
+    await expandActivityGroup();
+
+    await vi.waitFor(() =>
+      expect(
+        [...container.querySelectorAll('ol')].find((list) =>
+          list.textContent?.includes('Confirm the backup is readable')
+        )
+      ).toBeDefined()
+    );
+    const thought = [...container.querySelectorAll('ol')].find((list) =>
+      list.textContent?.includes('Confirm the backup is readable')
+    );
+    const status = container.querySelector('[data-agent-activity-status]');
+    expect(status).not.toBeNull();
+    expect(status!.closest('[data-virtual-index]')).toBe(thought!.closest('[data-virtual-index]'));
+    expect(status!.closest('.markdown-renderer')).toBeNull();
+    expect(container.querySelectorAll('[data-agent-activity-row]')).toHaveLength(1);
+  });
+
+  it('keeps the measured status before a trailing subagent summary and footer', async () => {
+    await render(
+      liveTurn(
+        [
+          {
+            type: 'thought',
+            text: '1. Inspect the worker state.\n2. Keep the live summary in view.',
+          },
+          {
+            type: 'subagent_task',
+            taskId: 'worker-1',
+            status: 'in_progress',
+            taskType: 'subagent',
+            subagentType: 'Explore',
+            description: 'Trace the streaming worker',
+            isBackgrounded: true,
+          },
+        ],
+        { modelInfo: { modelId: 'deepseek-chat', name: 'DeepSeek' } }
+      ),
+      { label: 'Thinking' }
+    );
+    await expandActivityGroup();
+
+    await vi.waitFor(() =>
+      expect(
+        [...container.querySelectorAll('ol')].find((list) =>
+          list.textContent?.includes('Keep the live summary in view')
+        )
+      ).toBeDefined()
+    );
+    const thought = [...container.querySelectorAll('ol')].find((list) =>
+      list.textContent?.includes('Keep the live summary in view')
+    );
+    const status = container.querySelector('[data-agent-activity-status]');
+    const subagent = container.querySelector('[data-subagent-task-id="worker-1"]');
+    const footerAction = container.querySelector('[aria-label="Turn configuration"]');
+    expect(status).not.toBeNull();
+    expect(subagent).not.toBeNull();
+    expect(footerAction).not.toBeNull();
+    expect(status!.closest('[data-virtual-index]')).toBe(thought!.closest('[data-virtual-index]'));
+    expect(
+      status!.compareDocumentPosition(subagent!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      subagent!.compareDocumentPosition(footerAction!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(container.querySelectorAll('[data-agent-activity-row]')).toHaveLength(1);
   });
 
   it('never reports silence while the agent waits on the user', async () => {
@@ -210,7 +298,9 @@ describe('live agent status', () => {
     );
     const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
     expect(button).not.toBeNull();
-    expect(button!.querySelector('.animate-spin')).not.toBeNull();
+    expect(
+      button!.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')
+    ).not.toBeNull();
     expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
     await act(async () => button!.click());
     expect(container.querySelector('[data-scroll-to-latest]')).toBeNull();
@@ -246,7 +336,6 @@ describe('live agent status', () => {
 
   const openTurnInfo = async () => {
     const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
-    // Row overlays mount once their row is armed by a pointer entry.
     await act(async () => {
       info!
         .closest('[data-virtual-index]')!
@@ -499,8 +588,6 @@ describe('live agent status', () => {
     );
     // Token usage alone is enough to offer the turn details.
     const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
-    // Row overlays mount once their row is armed by a pointer entry, as in the
-    // app; arming remounts the trigger, so click the live one.
     await act(async () => {
       info!
         .closest('[data-virtual-index]')!
@@ -524,5 +611,47 @@ describe('live agent status', () => {
     expect(value('Cost estimate')?.textContent).toBe('$0.0182');
     expect(value('Cost estimate')?.getAttribute('title')).toContain('not an invoice');
     expect(document.body.textContent).not.toContain('No configuration recorded');
+  });
+
+  it('keeps a live-expanded thought group open when the turn completes, without snapping the outer group shut on inner collapse', async () => {
+    const turnId = 'assistant-turn-live-thought';
+    const thought = { type: 'thought' as const, text: 'Investigating scroll anchor state.' };
+    const work = [thought, toolCall('t-live')];
+
+    await render(liveTurn(work, { id: turnId, finished: false }), { label: 'Thinking' });
+    const disclosureButtons = () => [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        'button[data-conversation-disclosure="group"]'
+      ),
+    ];
+    const groupButton = () =>
+      disclosureButtons().find((btn) => btn.textContent?.includes('Ran 1 command'))!;
+    expect(groupButton().getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => groupButton().click());
+    expect(groupButton().getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Investigating scroll anchor state.');
+
+    await render(
+      liveTurn([...work, { type: 'text' as const, text: 'All fixed.' }], {
+        id: turnId,
+        finished: true,
+      }),
+      { label: 'Done' }
+    );
+    const workedButton = () =>
+      disclosureButtons().find((btn) => btn.textContent?.includes('Finished working'))!;
+    expect(workedButton().getAttribute('aria-expanded')).toBe('true');
+    expect(groupButton().getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Investigating scroll anchor state.');
+    expect(container.textContent).toContain('All fixed.');
+
+    await act(async () => groupButton().click());
+    expect(workedButton().getAttribute('aria-expanded')).toBe('true');
+    expect(groupButton().getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Investigating scroll anchor state.');
+
+    await act(async () => workedButton().click());
+    expect(workedButton().getAttribute('aria-expanded')).toBe('false');
   });
 });

@@ -13,18 +13,11 @@ export const PROMPT_SHORTCUT_LIMITS = {
 } as const;
 
 /**
- * A real default rather than a blank slot: every Shortcut then reads the same
- * way in the list, and the picker is a change rather than a decision the author
- * has to make before the Shortcut looks finished.
- */
-export const DEFAULT_PROMPT_SHORTCUT_EMOJI = '📝';
-
-/**
  * Keep an emoji to one short, whitespace-free glyph.
  *
- * Capped and stripped rather than validated against an emoji table: the field
- * is decoration, so the only real requirements are that it cannot smuggle a
- * second line of text into a row and cannot carry invisible characters.
+ * The product no longer sets or shows a Shortcut emoji, but stored rows may
+ * carry one, so the field stays in the strict schema and keeps its rule:
+ * capped and stripped, never a second line of text or invisible characters.
  */
 export const normalizeShortcutEmoji = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -96,13 +89,32 @@ export const PromptShortcutMentionSchema = z
   })
   .strict();
 
-export const PromptShortcutSchema = z
+/**
+ * Strip legacy `visibility: 'private' | 'workspace'` persisted before Prompt Shortcuts
+ * unified onto workspace-visible streams, while keeping `.strict()` rejection for unknown fields.
+ */
+export const stripLegacyShortcutVisibility = (value: unknown): unknown => {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'visibility' in value &&
+    ((value as { visibility?: unknown }).visibility === 'private' ||
+      (value as { visibility?: unknown }).visibility === 'workspace' ||
+      (value as { visibility?: unknown }).visibility === undefined)
+  ) {
+    const { visibility: _legacyVisibility, ...rest } = value as Record<string, unknown>;
+    return rest;
+  }
+  return value;
+};
+
+export const PromptShortcutObjectSchema = z
   .object({
     v: z.literal(1),
     id: identifier,
     workspaceId: identifier,
     ownerUserId: identifier,
-    visibility: z.enum(['private', 'workspace']),
     name: z.string().trim().min(1).max(PROMPT_SHORTCUT_LIMITS.name),
     // Stored normalized: a synced row from another client is rejected rather
     // than silently repaired, so every reader sees the same glyph.
@@ -126,10 +138,13 @@ export const PromptShortcutSchema = z
   })
   .strict();
 
-export type PromptShortcut = z.infer<typeof PromptShortcutSchema>;
+export const PromptShortcutSchema = z.preprocess(
+  stripLegacyShortcutVisibility,
+  PromptShortcutObjectSchema
+);
 
-export const getShortcutEmoji = (shortcut: Pick<PromptShortcut, 'emoji'>): string =>
-  shortcut.emoji || DEFAULT_PROMPT_SHORTCUT_EMOJI;
+export type PromptShortcut = z.output<typeof PromptShortcutObjectSchema>;
+
 export type PromptShortcutScope = z.infer<typeof PromptShortcutScopeSchema>;
 export type PromptShortcutProject = z.infer<typeof projectSchema>;
 export type PromptShortcutTarget = z.infer<typeof PromptShortcutTargetSchema>;
@@ -241,18 +256,14 @@ export type ShortcutAvailability =
   | { kind: 'unavailable'; reason: string };
 
 export function resolveShortcutAvailability(input: {
-  shortcut: Pick<PromptShortcut, 'workspaceId' | 'ownerUserId' | 'visibility' | 'scope'>;
+  shortcut: Pick<PromptShortcut, 'workspaceId' | 'ownerUserId' | 'scope'>;
   dependencies: readonly PromptShortcutTarget[];
   context: { workspaceId: string; userId: string; scope: PromptShortcutScope };
   canRead: boolean;
   resolveDependency: (target: PromptShortcutTarget) => ShortcutAvailability;
 }): ShortcutAvailability {
   const { shortcut, context, dependencies } = input;
-  if (
-    !input.canRead ||
-    shortcut.workspaceId !== context.workspaceId ||
-    (shortcut.visibility === 'private' && shortcut.ownerUserId !== context.userId)
-  ) {
+  if (!input.canRead || shortcut.workspaceId !== context.workspaceId) {
     return { kind: 'unavailable', reason: 'permission_denied' };
   }
   for (const target of dependencies) {

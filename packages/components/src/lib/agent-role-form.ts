@@ -4,6 +4,8 @@ import {
   getAgentRoleMentionSlug,
   isAcpThoughtLevelConfigOption,
   isAgentRoleContentEqual,
+  isModelScopedSessionDefaultConfigId,
+  isPerModelControlConfigId,
   isSensitiveAgentRoleConfigOptionKey,
   normalizeAgentRoleEmoji,
   normalizeAgentRoleDescription,
@@ -22,10 +24,21 @@ import {
   type MemoryBinding,
 } from '@lody/shared';
 import {
+  coerceFastModeConfigOptionValue,
   isConfigOptionValueValid,
+  isFastModeSelector,
+  isSpeedTierSelector,
+  isThoughtLevelSelector,
   type AcpConfigOptionSelector,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
+
+const isModelDependentRoleSelector = (selector: AcpConfigOptionSelector): boolean =>
+  isThoughtLevelSelector(selector) ||
+  isFastModeSelector(selector) ||
+  isSpeedTierSelector(selector) ||
+  isPerModelControlConfigId(selector.configId) ||
+  isModelScopedSessionDefaultConfigId(selector.configId);
 
 /**
  * The authoring state of one Agent Role, and the pure rules around it.
@@ -374,18 +387,24 @@ const prepareAgentRoleTargetForSave = (
 ): AgentRoleTargetFormValue => {
   // Provisional static defaults cannot establish that a stored option was removed.
   if (selectorOptions?.capabilityAuthority !== 'authoritative') return value;
+  const borrowedModelOptions = selectorOptions.modelConfigOptionsSource === 'borrowed';
+  const nextEntries: Array<[string, string | boolean]> = [];
+  for (const selector of selectAuthorableAgentRoleConfigOptions(
+    selectorOptions.configOptionSelectors
+  )) {
+    const current = value.configOptionValues[selector.configId];
+    if (borrowedModelOptions && current === undefined && isModelDependentRoleSelector(selector)) {
+      continue;
+    }
+    const coerced = coerceFastModeConfigOptionValue(selector, current);
+    nextEntries.push([
+      selector.configId,
+      isConfigOptionValueValid(selector, coerced) ? coerced : selector.currentValue,
+    ]);
+  }
   return {
     ...value,
-    configOptionValues: Object.fromEntries(
-      selectAuthorableAgentRoleConfigOptions(selectorOptions.configOptionSelectors).map(
-        (selector) => [
-          selector.configId,
-          isConfigOptionValueValid(selector, value.configOptionValues[selector.configId])
-            ? value.configOptionValues[selector.configId]
-            : selector.currentValue,
-        ]
-      )
-    ),
+    configOptionValues: Object.fromEntries(nextEntries),
   };
 };
 
@@ -400,7 +419,9 @@ const prepareAgentRoleTargetForSave = (
  *
  * Only unset fields are filled: a saved Role keeps its stored selection even
  * when it differs from the agent's current default, which is what makes an
- * incompatible value visible instead of silently replaced.
+ * incompatible value visible instead of silently replaced. Model-dependent
+ * controls (`thought_level`, `fast-mode`, etc.) borrowed from another model's
+ * snapshot are never auto-seeded until the target model's own schema is known.
  */
 export const applyAgentRoleRunConfigDefaults = (
   value: AgentRoleTargetFormValue,
@@ -419,11 +440,13 @@ export const applyAgentRoleRunConfigDefaults = (
       ? (selectorOptions.defaultModeId ?? selectorOptions.modeOptions[0]?.value ?? null)
       : null);
 
+  const borrowedModelOptions = selectorOptions.modelConfigOptionsSource === 'borrowed';
   const configOptionValues = { ...value.configOptionValues };
   for (const selector of selectAuthorableAgentRoleConfigOptions(
     selectorOptions.configOptionSelectors
   )) {
     if (configOptionValues[selector.configId] !== undefined) continue;
+    if (borrowedModelOptions && isModelDependentRoleSelector(selector)) continue;
     configOptionValues[selector.configId] = selector.currentValue;
   }
 
@@ -441,18 +464,22 @@ export const carryAgentRoleOptionsToModel = (
   values: AgentRoleTargetFormValue['configOptionValues'],
   outgoing: readonly AcpConfigOptionSelector[],
   incoming: readonly AcpConfigOptionSelector[]
-): AgentRoleTargetFormValue['configOptionValues'] =>
-  Object.fromEntries(
-    Object.entries(values).filter(([configId, value]) => {
-      if (!outgoing.some((selector) => selector.configId === configId)) return true;
-      const next = incoming.find((selector) => selector.configId === configId);
-      return next !== undefined && isConfigOptionValueValid(next, value);
-    })
-  );
-
-// ---------------------------------------------------------------------------
-// Capability compatibility
-// ---------------------------------------------------------------------------
+): AgentRoleTargetFormValue['configOptionValues'] => {
+  const carried: AgentRoleTargetFormValue['configOptionValues'] = {};
+  for (const [configId, value] of Object.entries(values)) {
+    if (!outgoing.some((selector) => selector.configId === configId)) {
+      carried[configId] = value;
+      continue;
+    }
+    const next = incoming.find((selector) => selector.configId === configId);
+    if (!next) continue;
+    const coerced = coerceFastModeConfigOptionValue(next, value);
+    if (isConfigOptionValueValid(next, coerced)) {
+      carried[configId] = coerced;
+    }
+  }
+  return carried;
+};
 
 export type AgentRoleRunConfigIssue =
   /** The agent's capabilities are unknown, so nothing can be judged compatible. */
@@ -502,7 +529,7 @@ export const findAgentRoleRunConfigIssues = (
       issues.push({ kind: 'option_unsupported', configId });
       continue;
     }
-    if (!isConfigOptionValueValid(selector, value)) {
+    if (!isConfigOptionValueValid(selector, coerceFastModeConfigOptionValue(selector, value))) {
       issues.push({ kind: 'option_value_unsupported', configId, value: String(value) });
     }
   }
@@ -519,10 +546,6 @@ export const selectAuthorableAgentRoleConfigOptions = <T extends { configId: str
   selectors: readonly T[]
 ): T[] => selectors.filter((selector) => !isSensitiveAgentRoleConfigOptionKey(selector.configId));
 
-// ---------------------------------------------------------------------------
-// Row summary
-// ---------------------------------------------------------------------------
-
 /**
  * What a Role's row says it will run, in reading order: model, reasoning, then
  * whatever else it pins.
@@ -534,7 +557,10 @@ export const selectAuthorableAgentRoleConfigOptions = <T extends { configId: str
  * same. A boolean that is OFF is dropped instead, because "fast mode: false"
  * says nothing a missing chip does not.
  */
-export const buildAgentRoleRunConfigSummary = (runConfig: AgentRoleRunConfig): string[] => {
+export const buildAgentRoleRunConfigSummary = (
+  runConfig: AgentRoleRunConfig,
+  selectors?: Pick<AcpSelectorOptions, 'modelOptions' | 'modeOptions' | 'configOptionSelectors'>
+): string[] => {
   // A Role stores option IDS only — the capability's `category` is not part of
   // the row — so the id is tested as both, which also matches an agent whose
   // reasoning option is literally named after the category.
@@ -546,15 +572,28 @@ export const buildAgentRoleRunConfigSummary = (runConfig: AgentRoleRunConfig): s
 
   const describe = (entries: [string, string | boolean][]): string[] =>
     entries.flatMap(([configId, value]) => {
-      if (typeof value === 'boolean') return value ? [configId] : [];
+      const selector = selectors?.configOptionSelectors.find(
+        (entry) => entry.configId === configId
+      );
+      if (typeof value === 'boolean') return value ? [selector?.label ?? configId] : [];
       if (value === ACP_CONFIG_OPTION_OFF_VALUE) return [];
-      return [value];
+      return [selector?.options.find((option) => option.value === value)?.label ?? value];
     });
 
   return [
-    ...(runConfig.modelId ? [runConfig.modelId] : []),
+    ...(runConfig.modelId
+      ? [
+          selectors?.modelOptions.find((option) => option.value === runConfig.modelId)?.label ??
+            runConfig.modelId,
+        ]
+      : []),
     ...describe(reasoning),
-    ...(runConfig.modeId ? [runConfig.modeId] : []),
+    ...(runConfig.modeId
+      ? [
+          selectors?.modeOptions.find((option) => option.value === runConfig.modeId)?.label ??
+            runConfig.modeId,
+        ]
+      : []),
     ...describe(rest),
   ];
 };

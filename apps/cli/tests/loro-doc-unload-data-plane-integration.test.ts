@@ -1,3 +1,4 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import { bindTestPresenceApplication } from './presence-application-fixture';
 import { updateTestHistory } from './history-port-fixture';
 /**
@@ -43,7 +44,6 @@ import {
   bytesToBase64,
   getSessionRoomId,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-  sessionDocSchema,
   type LocalLoroDataPlaneRoom,
   type LocalLoroDataPlaneServerLegacy,
   type LocalLoroDataPlaneServerMessage,
@@ -51,8 +51,7 @@ import {
   type SessionDoc,
   type SessionHistoryInput,
   type SessionId,
-  type WorkspaceId,
-} from '@lody/shared';
+  type WorkspaceId} from '@lody/shared';
 
 import {
   applyLocalPlatformEnv,
@@ -60,6 +59,7 @@ import {
   loadOrCreateLocalIdentity,
 } from '../src/lib/cli-platform';
 import { LoroDocumentManager } from '../src/lib/loro/doc';
+import { combineGCSessionSources, SessionGCManager } from '../src/lib/session-gc-manager';
 import { makeLocalWorkspaceCatalog } from '../src/lib/local-workspace-catalog';
 import type { Logger } from '../src/utils/logger';
 
@@ -335,6 +335,101 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
     }
   };
 
+  it('idle GC unloads Session docs that only a reader cached, by their last hand-out', async () => {
+    applyLocalPlatformEnv();
+    const logger = createSilentLogger();
+    const identity = await loadOrCreateLocalIdentity(logger);
+    const catalog = makeLocalWorkspaceCatalog({
+      filePath: path.join(tempDir, '.lody-oss', 'workspace-catalog.json'),
+      lockName: `doc-cached-gc-${process.pid}`,
+      cacheTtlMs: Number.POSITIVE_INFINITY,
+    });
+    const workspace = await ensureImplicitLocalWorkspace({
+      catalog,
+      identity,
+      machineId: 'local-machine',
+      machineName: 'local-host',
+      logger,
+    });
+    const cloudPort = createLocalCloudPort({
+      identity: { userId: identity.userId },
+      workspaces: [workspace],
+    });
+    const manager = await LoroDocumentManager.create(workspace.id, identity.userId, logger, {
+      streamsTokens: cloudPort.streamsTokens,
+      cloudBilling: cloudPort.billing,
+    });
+    // Only Date is faked: the repo's SQLite and room I/O still need real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const minute = 60_000;
+      const start = Date.now();
+      const stale = await manager.createSession('local-machine', 'builtin', 'claude');
+      const reread = await manager.createSession('local-machine', 'builtin', 'claude');
+      // Readers such as same-machine MCP tools adopt docs that no turn ever tracks.
+      await manager.getOrCreateSessionDoc(stale);
+      await manager.getOrCreateSessionDoc(reread);
+      const unloadDoc = vi.spyOn(manager.repo, 'unloadDoc');
+      const noWork = async () => false;
+      const gc = new SessionGCManager(
+        {
+          idleTimeoutMs: 20 * minute,
+          sweepIntervalMs: minute,
+          nativeBackgroundMaxIdleMs: 24 * 60 * minute,
+          enabled: true,
+          memoryThresholdBytes: 1024 ** 3,
+          maxEvictionsPerCall: 3,
+          pressureRecheckAttempts: 0,
+          pressureRecheckDelayMs: 0,
+          wasmPressureHeapBytes: 3 * 1024 ** 3,
+          wasmPressureIdleTimeoutMs: 2 * minute,
+        },
+        {
+          ...combineGCSessionSources(
+            { sessionIds: () => [], has: () => false, lastActivityMs: () => undefined },
+            {
+              sessionIds: () => manager.cachedSessionDocIds(),
+              lastActivityMs: (sessionId) => manager.cachedSessionDocLastAccessMs(sessionId),
+            }
+          ),
+          getNativeWork: () => null,
+          hasActiveTurn: () => false,
+          hasActiveGoal: noWork,
+          hasPendingUpdates: () => false,
+          hasPendingUserWork: noWork,
+          isArchiveInFlight: () => false,
+          cleanSession: (sessionId) => manager.cleanSessionDoc(sessionId, { preserveStatus: true }),
+          memoryPressure: {
+            getLatest: async () => ({ availableMemoryBytes: 64 * 1024 ** 3 }),
+            refresh: async () => ({ availableMemoryBytes: 64 * 1024 ** 3 }),
+          },
+          logger,
+        }
+      );
+
+      vi.setSystemTime(start + 15 * minute);
+      await manager.getOrCreateSessionDoc(reread);
+      // Observing a cached doc, as GC's own eligibility checks do, is not an access.
+      expect(manager.peekSessionDoc(stale)).toBeDefined();
+      expect(manager.cachedSessionDocLastAccessMs(stale)).toBe(start);
+
+      vi.setSystemTime(start + 21 * minute);
+      await gc.sweep();
+
+      expect(unloadDoc).toHaveBeenCalledWith(getSessionRoomId(stale));
+      expect(unloadDoc).not.toHaveBeenCalledWith(getSessionRoomId(reread));
+      expect(manager.cachedSessionDocIds()).toEqual([reread]);
+
+      vi.setSystemTime(start + 36 * minute);
+      await gc.sweep();
+      expect(manager.cachedSessionDocIds()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      await manager.cleanUp({ fast: true, preserveSessionStatus: true });
+      await cloudPort.dispose();
+    }
+  });
+
   it('bounds and releases renderer-only cloud reconciles without SessionDocuments', async () => {
     applyLocalPlatformEnv();
     const logger = createSilentLogger();
@@ -606,6 +701,199 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
       ).toEqual(roomStatuses);
     } finally {
       await harness.dispose();
+    }
+  });
+
+  it('does not let a hung cloud joinDocRoom block local getOrCreateSessionDoc or leak a late room lease, and keeps re-joined renderer rooms loaded across queued leave', async () => {
+    applyLocalPlatformEnv();
+    const logger = createSilentLogger();
+    const identity = await loadOrCreateLocalIdentity(logger);
+    const catalog = makeLocalWorkspaceCatalog({
+      filePath: path.join(tempDir, '.lody-oss', 'workspace-catalog.json'),
+      lockName: `doc-hung-bridge-${process.pid}`,
+      cacheTtlMs: Number.POSITIVE_INFINITY,
+    });
+    const workspace = await ensureImplicitLocalWorkspace({
+      catalog,
+      identity,
+      machineId: 'local-machine',
+      machineName: 'local-host',
+      logger,
+    });
+    const cloudPort = createLocalCloudPort({
+      identity: { userId: identity.userId },
+      workspaces: [workspace],
+    });
+    const workspaceId = workspace.id as WorkspaceId;
+    const manager = await LoroDocumentManager.create(workspaceId, identity.userId, logger, {
+      streamsTokens: cloudPort.streamsTokens,
+      cloudBilling: cloudPort.billing,
+    });
+
+    const hungSessionId = 'local-session-cloud-hung' as SessionId;
+    const hungDocId = getSessionRoomId(hungSessionId);
+    const hungJoinEntered = createDeferred();
+    const hungJoin = createDeferred();
+    let lateCloudUnsubscribed = false;
+
+    const slotGates = new Map<
+      string,
+      { entered: ReturnType<typeof createDeferred>; release: ReturnType<typeof createDeferred> }
+    >();
+    const realJoinDocRoom = manager.repo.joinDocRoom.bind(manager.repo);
+    const joinSpy = vi
+      .spyOn(manager.repo, 'joinDocRoom')
+      .mockImplementation(async (docId, params) => {
+        if (docId === hungDocId) {
+          hungJoinEntered.resolve();
+          await hungJoin.promise;
+          return {
+            status: 'joined',
+            firstSyncedWithRemote: Promise.resolve(),
+            onStatusChange: () => () => {},
+            unsubscribe: () => {
+              lateCloudUnsubscribed = true;
+            },
+            waitUntilSynced: async () => {},
+            waitFor: async () => ({ status: 'complete' as const }),
+            rejoin: async () => {},
+            subscription: () => ({
+              transportId: 'cloud',
+              status: 'joined',
+              firstSyncedWithRemote: Promise.resolve(),
+              onStatusChange: () => () => {},
+              waitUntilSynced: async () => {},
+              waitFor: async () => ({ status: 'complete' as const }),
+              rejoin: async () => {},
+            }),
+          } as unknown as Awaited<ReturnType<typeof realJoinDocRoom>>;
+        }
+        const slot = slotGates.get(docId);
+        if (slot) {
+          slot.entered.resolve();
+          await slot.release.promise;
+        }
+        return await realJoinDocRoom(docId, params);
+      });
+
+    try {
+      const rendererConn = new FakeRendererConnection();
+      const engine = manager.getLocalLoroDataPlaneServer();
+      if (!engine) throw new Error('Expected a local data-plane engine');
+
+      const hungPeer = new FakeRendererPeer(engine, rendererConn, workspaceId, {
+        scope: 'doc',
+        docId: hungDocId,
+      });
+
+      // 1. Renderer joins the local room -> handleLocalDocRoomJoin enters
+      // withLocalDocOwnership(hungDocId) and awaits repo.joinDocRoom(hungDocId).
+      await hungPeer.joinAndSync();
+      await hungJoinEntered.promise;
+
+      // 2. Local CLI dispatch calls getOrCreateSessionDoc(hungSessionId) while
+      // the cloud joinDocRoom is still hung: it MUST cancel the bridge and
+      // acquire ownership without waiting for hungJoin to settle!
+      joinSpy.mockImplementation(async (docId, params) => {
+        const slot = slotGates.get(docId);
+        if (slot) {
+          slot.entered.resolve();
+          await slot.release.promise;
+        }
+        return await realJoinDocRoom(docId, params);
+      });
+      let localActivated = false;
+      const activating = manager.getOrCreateSessionDoc(hungSessionId).then((doc) => {
+        localActivated = true;
+        return doc;
+      });
+      // Deterministic SQLite turn on the same repo (no wall-clock sleep): if
+      // activating is not blocked on hungJoin, it finishes alongside control.
+      await manager.getOrCreateSessionDoc('control-session-1' as SessionId);
+      await manager.getOrCreateSessionDoc('control-session-2' as SessionId);
+      expect(localActivated).toBe(true);
+      await activating;
+
+      // Resolving the hung cloud join later must immediately unsubscribe the stale lease.
+      hungJoin.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(lateCloudUnsubscribed).toBe(true);
+
+      // 3. Occupy all 4 hydrate-queue slots so a renderer leave is queued, then
+      // have the renderer re-join while pendingSessionDocs is active (and later
+      // rejects) so localRendererDocRooms holds the doc without a bridge entry.
+      const slotPeers: FakeRendererPeer[] = [];
+      for (let i = 0; i < 4; i += 1) {
+        const slotDocId = getSessionRoomId(`hydrate-slot-${i}` as SessionId);
+        const gate = { entered: createDeferred(), release: createDeferred() };
+        slotGates.set(slotDocId, gate);
+        const slotPeer = new FakeRendererPeer(engine, rendererConn, workspaceId, {
+          scope: 'doc',
+          docId: slotDocId,
+        });
+        slotPeers.push(slotPeer);
+        await slotPeer.joinAndSync();
+        await gate.entered.promise;
+      }
+
+      const rejoinSessionId = 'rejoin-during-queued-leave' as SessionId;
+      const rejoinDocId = getSessionRoomId(rejoinSessionId);
+      const rejoinPeer = new FakeRendererPeer(engine, rendererConn, workspaceId, {
+        scope: 'doc',
+        docId: rejoinDocId,
+      });
+      await rejoinPeer.joinAndSync();
+      await rejoinPeer.leave();
+
+      // Park a transient getOrCreateSessionDoc failure so pendingSessionDocs
+      // contains rejoinSessionId while rejoinPeer re-joins (skipping bridge
+      // creation) and then clears without activating sessions.
+      const realOpen = manager.repo.openPersistedDoc.bind(manager.repo);
+      const failOpenGate = { entered: createDeferred(), reject: createDeferred() };
+      let failOpenOnce = false;
+      const openSpy = vi.spyOn(manager.repo, 'openPersistedDoc').mockImplementation(async (id) => {
+        if (id === rejoinDocId && failOpenOnce) {
+          failOpenOnce = false;
+          failOpenGate.entered.resolve();
+          await failOpenGate.reject.promise;
+          throw new Error('synthetic open failure');
+        }
+        return await realOpen(id);
+      });
+      failOpenOnce = true;
+      const failingActivation = manager.getOrCreateSessionDoc(rejoinSessionId);
+      await failOpenGate.entered.promise;
+      await rejoinPeer.joinAndSync();
+      failOpenGate.reject.resolve();
+      await expect(failingActivation).rejects.toThrow('synthetic open failure');
+      openSpy.mockRestore();
+
+      const unloadSpy = vi.spyOn(manager.repo, 'unloadDoc');
+      for (const gate of slotGates.values()) gate.release.resolve();
+      await Promise.all(slotPeers.map((peer) => peer.leave()));
+      // Enqueue and await a sentinel leave to deterministically drain the queue.
+      const sentinelSessionId = 'hydrate-drain-sentinel' as SessionId;
+      const sentinelDocId = getSessionRoomId(sentinelSessionId);
+      const sentinelUnloaded = createDeferred();
+      unloadSpy.mockImplementation(async (id) => {
+        if (id === sentinelDocId) sentinelUnloaded.resolve();
+      });
+      const sentinelPeer = new FakeRendererPeer(engine, rendererConn, workspaceId, {
+        scope: 'doc',
+        docId: sentinelDocId,
+      });
+      await sentinelPeer.joinAndSync();
+      await sentinelPeer.leave();
+      await sentinelUnloaded.promise;
+
+      expect(unloadSpy).not.toHaveBeenCalledWith(rejoinDocId);
+    } finally {
+      hungJoin.resolve();
+      for (const gate of slotGates.values()) gate.release.resolve();
+      joinSpy.mockRestore();
+      await manager.cleanUp({ fast: true, preserveSessionStatus: true });
+      await cloudPort.dispose();
     }
   });
 });

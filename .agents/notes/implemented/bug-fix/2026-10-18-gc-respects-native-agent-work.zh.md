@@ -54,6 +54,12 @@ Monitor 任务。因此 GC 会把三种情况当成空闲：
    输出仍不更新：turn 本身已经保护了会话。不上报该状态的 agent 沿用"只有用户操作
    和 turn 结束才算活动"的旧规则，其 GC 行为不变。
 
+## 完成信号
+
+2026-11-16 补充，2026-11-17 加固。同一个活动级别也决定一个 Turn 在读者眼里何时算完成。Turn 结束时，如果它的 agent 仍报告 `running` 或 `background`，释放时不再把会话标为未读，也不发成功通知；`SessionExecutionService` 等待这个 agent 实例的生命周期事件（不靠计时器），在 agent 报告空闲后才发布，并使用那之后的活动时间。如果进程先结束（空闲 GC 到 24 小时上限、内存压力、崩溃，或 ACP 子进程未走 `Session.terminate` 直接退出），对话会先写入一条 `nativeWorkInterrupted` 提示再刷写完成状态，会话照样标为未读，用户收到的是“结果未知”（`native_work_interrupted`）提醒而不是成功。若 GC 销毁了旧的 `SessionDocument`，发布完成状态会重新获取存活文档（已归档或已删除的会话除外）。会话上开始新的 Turn、点击 Stop、归档或删除会话时都会撤销这次等待，避免主动清理发出误报。
+
+这次等待不算完成簿记：它不持有任何写入，所以不计入 `inspectClientLoss` 和关停排空，否则一个后台开发服务器就能把它们拖住一整天。只有等待之后的发布是受管工作。关停时撤销等待且不发布任何东西；守护进程重启会丢掉等待，所以重启时后台仍在运行的 Turn 不会得到完成信号。不报告该级别的 agent 仍立即完成，与 GC 一致。失败和取消的提醒不变，从不等待。
+
 ## 备选方案
 
 - **调大 `LODY_SESSION_GC_IDLE_TIMEOUT_MS`。** 不用改代码，但所有空闲会话都会
@@ -62,6 +68,8 @@ Monitor 任务。因此 GC 会把三种情况当成空闲：
   turn 都长，prompt 将永远无法结束。
 - **从 history 推断后台工作。** 后台 Bash 的工具调用在 history 里，但 history 无法
   可靠地说明任务何时结束。只有 SDK 的存活任务状态能做到。
+- **释放时照常发布完成，只在侧边栏行上显示后台工作。** 行上的运行标记本来就显示
+  原生工作，但未读标记和通知仍在工作进行中时告诉用户已经完成。
 - **根据 history 保护待触发的 wakeup 和 cron。** history 已足以算出下次触发时间
   （`collectPendingScheduledTasksFromHistory`）。这部分留给单独的改动。
 
@@ -74,6 +82,13 @@ Monitor 任务。因此 GC 会把三种情况当成空闲：
   未经验证。
 - 该状态需要声明 `sessionActivity` 的 Claude 适配器版本，以及定义它的 Core 版本。
   旧适配器和其他 provider 不上报，GC 行为与之前完全相同，包括迟到输出不算活动。
+- 2026-11-17 补充（[#2797](https://github.com/LodyAI/Lody/issues/2797)）：DeepSeek
+  Harness 适配器也上报该状态，来源是原生 `agent/status` 和根会话存活的 job。它原先
+  强制 `quiet` 的 job 完成投递，并拒绝 prompt 之外的所有根 step，所以空闲时结束的
+  job 要等下一条用户消息才会被模型看到，空闲 GC 还会在 20 分钟后连同内存中的 job
+  注册表一起回收进程。现在它保留原生 `wakeup` 投递，只放行领取了完成通知的那个
+  turn。job 仍随 ACP 进程一起消失（驱逐、崩溃、守护进程重启）；Harness 没有跨进程
+  的 job 注册表。
 - 适配器发送状态时不 await，SDK 消息循环不会在这些位置让出。顺序依然成立，
   因为每次发送都在第一个 `await` 之前交给了连接。
 

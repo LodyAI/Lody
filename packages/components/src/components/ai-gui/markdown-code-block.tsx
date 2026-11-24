@@ -248,7 +248,7 @@ const MarkdownCodeBody = memo(function MarkdownCodeBody({
     <CodeBlockBody data-language={language}>
       {lines.map((line, lineIndex) => (
         // Lines only append while a fence streams, so position is stable.
-        <span key={lineIndex} {...stylex.props(typography.line)}>
+        <span key={lineIndex} data-markdown-code-line="" {...stylex.props(typography.line)}>
           {line.length === 0 || (line.length === 1 && line[0]?.content === '')
             ? '\n'
             : line.map((token, tokenIndex) => (

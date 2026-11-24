@@ -1,3 +1,4 @@
+import { isContainedSession } from '@/lib/session-visibility';
 import { atom, type createStore, type PrimitiveAtom } from 'jotai';
 
 type JotaiStore = ReturnType<typeof createStore>;
@@ -29,7 +30,6 @@ import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
 import { describeErrorType } from '@/lib/workspace-data-scope';
 
-// ---------------------------------------------------------------------------
 // Runtime guard for metadata entering the cache.
 //
 // The CRDT metadata store may not always include the `id` field — it can be
@@ -40,7 +40,6 @@ import { describeErrorType } from '@/lib/workspace-data-scope';
 //
 // When the data is not even a valid object, the entry is dropped and an async
 // error is reported so it surfaces in monitoring without crashing the render.
-// ---------------------------------------------------------------------------
 
 function stringifyForReport(data: unknown): string {
   try {
@@ -118,6 +117,11 @@ const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'isArchived',
   'isTabClosed',
   'isPinned',
+  'pinSectionId',
+  'orderKey',
+  'snoozedUntil',
+  'settledAt',
+  'focusRestoredAt',
   'diffStats',
   'pullRequests',
   'pullRequestState',
@@ -127,6 +131,8 @@ const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'openedBySessionId',
   'openedByRootSessionId',
   'latestUserMsgId',
+  'lastHandledUserMsgId',
+  'lastFailedUserMsgId',
   'awaitingUserSince',
   'lastCanceledTurn',
 ] as const;
@@ -422,14 +428,18 @@ export const allActiveSessionsAtom = atom((get) => {
 // Every per-parent child projection is the same memoized filter over the meta
 // cache; only the predicate (and optional ordering) differs.
 function createChildSessionsAtomFamily(
-  match: (session: SessionMeta, parentId: SessionId) => boolean,
+  match: (
+    session: SessionMeta,
+    parentId: SessionId,
+    cache: Readonly<Record<string, SessionMeta>>
+  ) => boolean,
   compare?: (left: SessionMeta, right: SessionMeta) => number
 ) {
   return atomFamily((parentId: SessionId) => {
     let previous: SessionMeta[] = [];
     return atom((get) => {
       const cache = get(visibleSessionMetaCacheAtom);
-      const next = Object.values(cache).filter((session) => match(session, parentId));
+      const next = Object.values(cache).filter((session) => match(session, parentId, cache));
       if (compare) next.sort(compare);
       if (sessionMetaArrayEqual(previous, next)) {
         return previous;
@@ -440,8 +450,13 @@ function createChildSessionsAtomFamily(
   });
 }
 
-const isTopTabChild = (session: SessionMeta, parentId: SessionId): boolean =>
-  session.parentSessionId === parentId && session.childSessionPlacement !== 'side-panel';
+const isTopTabChild = (
+  session: SessionMeta,
+  parentId: SessionId,
+  cache: Readonly<Record<string, SessionMeta>>
+): boolean =>
+  isContainedSession(session, cache[getSessionRoomId(parentId)]) &&
+  session.childSessionPlacement !== 'side-panel';
 
 // `createdAt` is an ISO string, so byte order is chronological order; Intl
 // collation would only add cost.
@@ -450,13 +465,13 @@ const byCreatedAtAscending = (left: SessionMeta, right: SessionMeta): number =>
 
 // Child sessions for a given parent session — used by the multi-tab UI
 export const childSessionsAtomFamily = createChildSessionsAtomFamily(
-  (session, parentId) => isTopTabChild(session, parentId) && !session.isArchived,
+  (session, parentId, cache) => isTopTabChild(session, parentId, cache) && !session.isArchived,
   byCreatedAtAscending
 );
 
 // Archived child sessions for a given parent — used by the tab archive popover
 export const archivedChildSessionsAtomFamily = createChildSessionsAtomFamily(
-  (session, parentId) => isTopTabChild(session, parentId) && !!session.isArchived
+  (session, parentId, cache) => isTopTabChild(session, parentId, cache) && !!session.isArchived
 );
 
 /**
@@ -478,8 +493,8 @@ export const openedSessionsAtomFamily = createChildSessionsAtomFamily(
 // Durable side-session conversations share the parent workspace like ordinary
 // child tabs, but are projected only into the right panel.
 export const sideSessionsAtomFamily = createChildSessionsAtomFamily(
-  (session, parentId) =>
-    session.parentSessionId === parentId &&
+  (session, parentId, cache) =>
+    isContainedSession(session, cache[getSessionRoomId(parentId)]) &&
     session.childSessionPlacement === 'side-panel' &&
     !session.isArchived,
   byCreatedAtAscending

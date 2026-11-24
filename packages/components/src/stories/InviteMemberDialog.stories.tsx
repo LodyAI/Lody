@@ -7,6 +7,8 @@ import {
 const monthlySeatPreview: SeatInvitePreview = {
   status: 'billed',
   interval: 'month',
+  addedSeats: 1,
+  invoiceAt: new Date('2026-08-28T00:00:00Z').getTime(),
   unitAmount: 1000,
   proratedAmount: 581,
   currentPeriodEnd: new Date('2026-08-28T00:00:00Z').getTime(),
@@ -18,6 +20,8 @@ const monthlySeatPreview: SeatInvitePreview = {
 const yearlySeatPreview: SeatInvitePreview = {
   status: 'billed',
   interval: 'year',
+  addedSeats: 1,
+  invoiceAt: new Date('2026-11-14T00:00:00Z').getTime(),
   unitAmount: 9600,
   proratedAmount: 3120,
   currentPeriodEnd: new Date('2027-02-14T00:00:00Z').getTime(),
@@ -94,4 +98,39 @@ export const DarkMode: Story = {
 export const DarkModeLimitReached: Story = {
   globals: { theme: 'dark' },
   args: { memberLimit: 3, memberLimitReached: true },
+};
+
+export const NativePaidYearly: Story = {
+  globals: { locale: 'zh_CN' },
+  args: { billingUiAvailable: false, seatPreview: yearlySeatPreview },
+};
+export const VacantCapacity: Story = {
+  globals: { locale: 'zh_CN' },
+  args: { seatPreview: { status: 'not_billed', reason: 'covered', availableSeats: 1 } },
+};
+export const UnavailableSeatCost: Story = {
+  globals: { locale: 'zh_CN' },
+  args: { seatPreview: null },
+};
+
+export const PaymentMethodMissing: Story = {
+  globals: { locale: 'zh_CN' },
+  args: {
+    ...NativePaidYearly.args,
+    billingUiAvailable: true,
+    hasAdminPermission: true,
+    onOpenBilling: () => {},
+    seatPreview: {
+      ...PaidYearly.args!.seatPreview!,
+      status: 'billed',
+      interval: 'year',
+      unitAmount: 9600,
+      proratedAmount: 8469,
+      currentPeriodEnd: Date.UTC(2027, 8, 24),
+      seatCount: 2,
+      nextSeatCount: 3,
+      nextRenewalAmount: 28800,
+      paymentAction: 'method_required',
+    },
+  },
 };

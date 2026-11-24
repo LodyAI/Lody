@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -12,6 +11,8 @@ import type {
 } from '@lody/shared';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { MemorySetting, RoleMemoryPicker } from '../src/components/settings/memory-setting';
+import { MemoryAgentConnectList } from '../src/components/settings/memory-agent-connect';
+import { MemoryInstallCard } from '../src/components/settings/memory-install';
 import { initI18n } from '../src/i18n';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -36,9 +37,13 @@ const mocks = vi.hoisted(() => ({
       memories: [],
     } as MemoryProviderResponse,
     busy: false,
+    signIn: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
+    signInPoll: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     update: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     create: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
   },
+  /** Per-provider hook state; providers absent here share `provider`. */
+  byProvider: {} as Record<string, unknown>,
   openExternalUrl: vi.fn(async () => true),
 }));
 
@@ -62,7 +67,8 @@ vi.mock('../src/hooks/use-machine-online-status', () => ({
   useOnlineMachineIds: () => mocks.onlineIds,
 }));
 vi.mock('../src/hooks/use-memory-provider', () => ({
-  useMemoryProvider: () => mocks.provider,
+  useMemoryProvider: (_machineId: string, providerId: string) =>
+    mocks.byProvider[providerId] ?? mocks.provider,
 }));
 vi.mock('../src/hooks/use-memory-associations', () => ({
   useMemoryAssociations: (machineId: string) => ({
@@ -107,7 +113,7 @@ function machine(id: MachineId, name: string, supported = true): MachineViewMeta
     os: 'macOS',
     sessions: [],
     raceLimits: {},
-    protocolCapabilities: supported ? { memoryProviders: 1 } : {},
+    protocolCapabilities: supported ? { memoryProviders: 2 } : {},
   };
 }
 
@@ -145,7 +151,10 @@ beforeEach(async () => {
     memories: [],
   };
   mocks.provider.busy = false;
+  mocks.byProvider = {};
   mocks.provider.create.mockReset();
+  mocks.provider.signIn.mockReset();
+  mocks.provider.signInPoll.mockReset();
   mocks.openExternalUrl.mockClear();
   stubResizeObserver();
   container = document.createElement('div');
@@ -157,6 +166,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function renderSetting() {
@@ -218,13 +228,174 @@ const saved = {
   description: 'Review lessons',
 };
 
-it('keeps Add available for provider selection but disables creation when nmem is missing', async () => {
+it('offers no way to add a memory to a provider this machine cannot reach', async () => {
+  // The step belongs to the provider's own block, so it only exists once that
+  // provider can answer. A page-level Add opened an editor with nothing in it.
   await renderSetting();
-  await click('Add memory');
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Memory providers');
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
-    'Nowledge Mem CLI is not installed'
+  expect([...container.querySelectorAll('button')].map((node) => node.textContent)).not.toContain(
+    'Add memory'
   );
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(mocks.entries).toEqual([]);
+});
+
+it('holds each provider block to its heading until its own machine answers', async () => {
+  const labels = () => [...container.querySelectorAll('button')].map((node) => node.textContent);
+  mocks.provider.result = undefined as unknown as MemoryProviderResponse;
+  await renderSetting();
+  // Both providers are named at once, and neither says anything it may take back.
+  expect(container.textContent).toContain('Memory per role');
+  expect(container.textContent).toContain('One memory per account');
+  expect(labels()).not.toContain('Get Nowledge Mem');
+  expect(labels()).not.toContain('One-click download');
+  expect(labels()).not.toContain('Install manually');
+  mocks.provider.result = { type: 'machine/memory', status: 'not_installed', memories: [] };
+  await renderSetting();
+  expect(labels()).toContain('Get Nowledge Mem');
+  // EverMe offers its in-place download beside the manual route to its own page.
+  expect(labels()).toContain('One-click download');
+  expect(labels()).toContain('Install manually');
+});
+
+it('shows an answered provider at once while another is still asking', async () => {
+  // Waiting for the slowest provider hid memories the user could already
+  // edit for up to four seconds.
+  mocks.entries = [saved];
+  mocks.byProvider['nowledge-mem'] = {
+    ...mocks.provider,
+    result: {
+      type: 'machine/memory',
+      status: 'ready',
+      memories: [{ id: 'reviewer', name: 'Reviewer', description: 'Review lessons' }],
+    },
+  };
+  mocks.byProvider.everme = { ...mocks.provider, result: undefined };
+  await renderSetting();
+  expect(container.textContent).toContain('Review lessons');
+  // EverMe has said nothing yet, so its block still offers nothing.
+  const labels = [...container.querySelectorAll('button')].map((node) => node.textContent);
+  expect(labels).not.toContain('One-click download');
+});
+
+it('waits for the install receipt before asking after the job', async () => {
+  // A first reply slower than one poll interval used to be overtaken by the
+  // poll and read as a failed install while the machine was still installing.
+  vi.useFakeTimers();
+  let answerInstall!: (value: MemoryProviderResponse) => void;
+  let landed = false;
+  let installed = false;
+  const reply = (overrides: Partial<MemoryProviderResponse>): MemoryProviderResponse => ({
+    type: 'machine/memory',
+    status: 'not_installed',
+    memories: [],
+    ...overrides,
+  });
+  const state = {
+    ...mocks.provider,
+    install: () =>
+      new Promise<MemoryProviderResponse>((resolve) => {
+        answerInstall = resolve;
+      }),
+    installPoll: async () =>
+      landed
+        ? reply({ status: 'not_running', install: { status: 'done' } })
+        : // A poll before the receipt finds no job yet.
+          reply({ install: { status: 'failed' } }),
+  } as unknown as Parameters<typeof MemoryInstallCard>[0]['state'];
+  await act(async () =>
+    root.render(
+      <MemoryInstallCard
+        name="EverMe"
+        providerKey="everme"
+        installUrl="https://evermind.ai/everme"
+        reason="missing"
+        onInstalled={() => {
+          installed = true;
+        }}
+        state={state}
+      />
+    )
+  );
+  await click('One-click download');
+  await act(async () => vi.advanceTimersByTime(12_000));
+  expect(container.textContent).not.toContain('could not install');
+  expect(button('One-click download').disabled).toBe(true);
+  await act(async () => answerInstall(reply({ install: { status: 'running', step: 'provider' } })));
+  landed = true;
+  await act(async () => vi.advanceTimersByTime(5_000));
+  expect(installed).toBe(true);
+  expect(button('One-click download').disabled).toBe(false);
+});
+
+it('keeps a connect pending until the job on the machine reports back', async () => {
+  vi.useFakeTimers();
+  const agent = (id: string, displayName: string, connected: boolean) => ({
+    id,
+    displayName,
+    integration: 'hook' as const,
+    supported: true,
+    connectable: true,
+    connected,
+  });
+  const before = [agent('claude', 'Claude Code', true), agent('codex', 'Codex', false)];
+  const after = [agent('claude', 'Claude Code', true), agent('codex', 'Codex', true)];
+  let job: 'running' | 'done' = 'running';
+  const state = {
+    ...mocks.provider,
+    result: { type: 'machine/memory' as const, status: 'ready' as const, memories: [], agents: before },
+    connect: vi.fn(async () => ({
+      type: 'machine/memory' as const,
+      status: 'ready' as const,
+      memories: [],
+      agentsJob: { status: 'running' as const },
+    })),
+    connectPoll: async () => ({
+      type: 'machine/memory' as const,
+      status: 'ready' as const,
+      memories: [],
+      agentsJob: { status: job },
+      ...(job === 'done' ? { agents: after } : {}),
+    }),
+  } as unknown as Parameters<typeof MemoryAgentConnectList>[0]['state'];
+  await act(async () =>
+    root.render(
+      <MemoryAgentConnectList
+        name="EverMe"
+        providerKey="everme"
+        configs={[
+          { agentType: 'claude', name: 'Claude Code' },
+          { agentType: 'codex', name: 'Codex' },
+        ]}
+        agents={before}
+        state={state}
+        disabled={false}
+      />
+    )
+  );
+  await click('Connect Codex');
+  const codex = () => button('Connect Codex');
+  expect(codex().getAttribute('aria-busy')).toBe('true');
+  // The request came back long ago; the machine is still running the job.
+  await act(async () => vi.advanceTimersByTime(2_000));
+  expect(codex().getAttribute('aria-busy')).toBe('true');
+  job = 'done';
+  await act(async () => vi.advanceTimersByTime(2_000));
+  expect(codex().getAttribute('aria-busy')).toBe('false');
+});
+
+it('keeps a stopped provider named and says to start it when asked to add a memory', async () => {
+  mocks.provider.result = { type: 'machine/memory', status: 'not_running', memories: [] };
+  await renderSetting();
+  const page = container.textContent ?? '';
+  const heading = page.indexOf('Memory per role');
+  const status = page.indexOf('Start Nowledge Mem on this machine');
+  expect(heading).toBeGreaterThan(-1);
+  expect(status).toBeGreaterThan(heading);
+  // Add stays available, as it was before the block existed; the editor is
+  // where a stopped provider is explained, and it offers nothing to submit.
+  await click('Add memory');
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog?.textContent).toContain('Start Nowledge Mem on this machine');
   expect(button('Create and import').disabled).toBe(true);
   expect(mocks.entries).toEqual([]);
 });
@@ -253,7 +424,9 @@ it('shows only saved associations and links exactly one external identity using 
     '[role="checkbox"][aria-label="Designer"]'
   )!;
   expect(linked.disabled).toBe(true);
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Designer · Imported');
+  // Already imported is a fact beside the name, not part of what it is called.
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Designer');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Imported');
 });
 
 function checkbox(name: string) {
@@ -373,7 +546,10 @@ it('updates the provider profile and Lody metadata, then removes only the import
   expect(mocks.provider.result.memories[0]?.name).toBe('My reviewer');
   await click('Remove My reviewer from Lody');
   await renderSetting();
-  expect(container.textContent).toContain('No memories imported yet');
+  // Emptied, the block offers the step rather than describing the absence —
+  // the same full-width control the other provider offers in its own empty
+  // state, so the two read as one page.
+  expect(button('Add memory')).toBeTruthy();
   expect(mocks.provider.result.memories.map((value) => value.id)).toContain('reviewer');
 });
 
@@ -389,6 +565,17 @@ it('warns after a successful missing-identity probe but not after a transport fa
   await renderSetting();
   expect(container.textContent).not.toContain('no longer exists');
   expect(container.textContent).toContain('Review lessons');
+});
+
+it('keeps saved memories listed after their provider is removed from the machine', async () => {
+  mocks.entries = [saved];
+  await renderSetting();
+  // The default reply is `not_installed`. What Lody saved outlives the
+  // provider, and the list is the only place it can be edited or removed.
+  expect(container.textContent).toContain('Review lessons');
+  expect(container.textContent).toContain('Nowledge Mem is not installed on this machine');
+  expect(button('Get Nowledge Mem')).toBeTruthy();
+  expect(button(`Remove ${saved.name} from Lody`)).toBeTruthy();
 });
 
 it('uses only associated identities in the Role picker and prevents selecting a deleted provider identity', async () => {
@@ -410,4 +597,159 @@ it('uses only associated identities in the Role picker and prevents selecting a 
   );
   expect(container.textContent).toContain('Review lessons');
   expect(button('Link').disabled).toBe(true);
+});
+
+it.each(['approved', 'expired'] as const)(
+  'keeps polling through transient errors until sign-in is %s',
+  async (outcome) => {
+    mocks.provider.result = { type: 'machine/memory', status: 'not_running', memories: [] };
+    mocks.provider.signIn.mockResolvedValue({
+      type: 'machine/memory',
+      status: 'not_running',
+      memories: [],
+      signIn: {
+        status: 'pending',
+        verificationUrl: 'https://example.com/approve',
+        expiresInSec: 60,
+      },
+    });
+    mocks.provider.signInPoll.mockImplementation(async () => {
+      const result: MemoryProviderResponse = {
+        type: 'machine/memory',
+        status: outcome === 'approved' ? 'ready' : 'not_running',
+        memories: [],
+        signIn: { status: outcome },
+        agents: [],
+      };
+      mocks.provider.result = result;
+      return result;
+    });
+    await renderSetting();
+    vi.useFakeTimers();
+    await click('Sign in to EverMe');
+    expect(container.textContent).toContain('Waiting for your browser');
+    for (let i = 0; i < 3; i++) {
+      mocks.provider.result = { type: 'machine/memory', status: 'error', memories: [] };
+      await renderSetting();
+      expect(container.textContent).toContain('Waiting for your browser');
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    await renderSetting();
+    expect(mocks.provider.result.signIn?.status).toBe(outcome);
+    expect(container.textContent).not.toContain('Waiting for your browser');
+    if (outcome === 'expired') expect(container.textContent).toContain('This sign-in expired');
+  }
+);
+
+it('shows the provider’s current name and description after the identity is edited in nmem', async () => {
+  ready();
+  mocks.entries = [saved];
+  mocks.provider.result.memories = [
+    { id: 'reviewer', name: 'Gate reviewer', description: 'Read-only review of diffs' },
+  ];
+  await renderSetting();
+  expect(container.textContent).toContain('Gate reviewer');
+  expect(container.textContent).toContain('Read-only review of diffs');
+  expect(container.textContent).not.toContain('Review lessons');
+  mocks.provider.result = { type: 'machine/memory', status: 'error', memories: [] };
+  await renderSetting();
+  expect(container.textContent).toContain('Review lessons');
+});
+
+async function renderPicker(initial?: { providerId: string; memoryId: string }) {
+  let value = initial;
+  const changes: unknown[] = [];
+  const draw = () =>
+    root.render(
+      <Provider store={createStore()}>
+        <RoleMemoryPicker
+          machineId={localId}
+          value={value}
+          onChange={(next) => {
+            changes.push(next);
+            value = next;
+            draw();
+          }}
+        />
+      </Provider>
+    );
+  await act(async () => draw());
+  return { changes, current: () => value };
+}
+function rowNames() {
+  return [...container.querySelectorAll('[aria-pressed]')]
+    .filter((node) => node.tagName === 'BUTTON' && !node.textContent?.match(/^(Link|Linked)$/))
+    .map((node) => node.textContent);
+}
+function manyMemories(count: number) {
+  const memories = Array.from({ length: count }, (_, index) => ({
+    id: `role-${index}`,
+    name: `Role ${index}`,
+    description: index === 3 ? 'Finds root causes' : undefined,
+  }));
+  mocks.provider.result = { type: 'machine/memory', status: 'ready', memories };
+  mocks.entries = memories.map((memory) => ({
+    ...saved,
+    memoryId: memory.id,
+    name: memory.name,
+    description: memory.description,
+  }));
+}
+
+it('unlinks a Role memory by pressing its Linked button again', async () => {
+  ready();
+  mocks.entries = [saved];
+  const picker = await renderPicker({ providerId: 'nowledge-mem', memoryId: 'reviewer' });
+  await click('Linked');
+  expect(picker.current()).toBeUndefined();
+  await click('Link');
+  expect(picker.current()).toEqual({ providerId: 'nowledge-mem', memoryId: 'reviewer' });
+});
+
+it('lets a Role unlink a memory whose provider identity was deleted', async () => {
+  ready();
+  mocks.entries = [saved];
+  mocks.provider.result.memories = [];
+  const picker = await renderPicker({ providerId: 'nowledge-mem', memoryId: 'reviewer' });
+  await click('Linked');
+  expect(picker.current()).toBeUndefined();
+  expect(button('Link').disabled).toBe(true);
+});
+
+it('filters a long Role memory list by name or description and lists the linked memory first', async () => {
+  manyMemories(10);
+  const picker = await renderPicker({ providerId: 'nowledge-mem', memoryId: 'role-8' });
+  expect(rowNames()[0]).toContain('Role 8');
+  await fill('Search memories', 'root cause');
+  expect(rowNames()).toHaveLength(1);
+  expect(rowNames()[0]).toContain('Role 3');
+  await click('Link');
+  expect(picker.current()).toEqual({ providerId: 'nowledge-mem', memoryId: 'role-3' });
+  await fill('Search memories', 'nothing like this');
+  expect(container.textContent).toContain('No memories match');
+});
+
+it('omits search for a short Role memory list', async () => {
+  ready();
+  mocks.entries = [saved];
+  await renderPicker();
+  expect(document.querySelector('[aria-label="Search memories"]')).toBeNull();
+});
+
+it('adds search to the Memory page only above seven imported memories on the machine', async () => {
+  manyMemories(7);
+  await renderSetting();
+  expect(document.querySelector('[aria-label="Search memories"]')).toBeNull();
+  manyMemories(8);
+  await renderSetting();
+  await fill('Search memories', 'ROOT CAUSE');
+  expect(container.textContent).toContain('Role 3');
+  expect(container.textContent).not.toContain('Role 7');
+  await fill('Search memories', 'role-7');
+  expect(container.textContent).toContain('Role 7');
+  expect(container.textContent).not.toContain('Role 3');
+  await fill('Search memories', 'nothing like this');
+  expect(container.textContent).toContain('No memories match');
 });

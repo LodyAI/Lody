@@ -1,3 +1,5 @@
+import { PromptShortcutsList } from '../src/components/settings/prompt-shortcuts-setting';
+import { projectShortcutIndex } from '@lody/shared/prompt-shortcuts';
 // @vitest-environment jsdom
 
 import { act } from 'react';
@@ -12,7 +14,6 @@ const shortcut = (overrides: Partial<PromptShortcut> = {}): PromptShortcut => ({
   id: 'shortcut-1',
   workspaceId: 'workspace-1',
   ownerUserId: 'user-1',
-  visibility: 'private',
   name: 'Review PR',
   slug: 'review-pr',
   prompt: 'Review the current diff.',
@@ -47,16 +48,19 @@ describe('PromptShortcutForm command field', () => {
     vi.restoreAllMocks();
   });
 
-  const renderForm = async (initial: PromptShortcut, isNew = false) => {
+  const renderForm = async (
+    initial: PromptShortcut,
+    isNew = false,
+    onSave: (value: PromptShortcut) => Promise<void> = vi.fn(async () => {})
+  ) => {
     await act(async () => {
       root?.render(
         <PromptShortcutForm
           initial={initial}
           options={{ projects: [], machines: [], providers: [] }}
-          canShare={false}
           saving={false}
           isNew={isNew}
-          onSave={vi.fn(async () => {})}
+          onSave={onSave}
           onCancel={vi.fn()}
         />
       );
@@ -81,6 +85,35 @@ describe('PromptShortcutForm command field', () => {
     Array.from(document.body.querySelectorAll('div')).some((el) =>
       el.textContent?.includes(RULE_TEXT)
     );
+
+  it('shows owned encrypted prompts as read-only and exposes no guest mutation actions', async () => {
+    await act(async () =>
+      root?.render(
+        <PromptShortcutsList
+          entries={[projectShortcutIndex(shortcut(), 'body')]}
+          currentUserId="user-1"
+          loading={false}
+          busy={false}
+          canCreate={false}
+          onCreate={() => {
+            throw new Error('guest create');
+          }}
+          onOpen={() => {}}
+          onDelete={() => {
+            throw new Error('guest delete');
+          }}
+        />
+      )
+    );
+    expect(container?.textContent).toContain('Read-only');
+    expect(container?.querySelector('[aria-label="Edit"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Delete Prompt"]')).toBeNull();
+    const create = [...container!.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('New Prompt')
+    );
+    expect(create?.disabled).toBe(true);
+    expect(container?.querySelector('[aria-label="View"]')).not.toBeNull();
+  });
 
   it('keeps a mid-token dash while typing a command', async () => {
     await renderForm(shortcut());
@@ -124,5 +157,30 @@ describe('PromptShortcutForm command field', () => {
     await type(nameInput, 'My Command');
     expect(input.value).toBe('my-command');
     expect(warningVisible()).toBe(false);
+  });
+
+  it('keeps an unnamed Prompt unsaved and says so beside the name', async () => {
+    const saved: PromptShortcut[] = [];
+    await renderForm(shortcut({ name: '', slug: 'draft' }), true, async (value) => {
+      saved.push(value);
+    });
+    const form = document.body.querySelector('form');
+    if (!form) throw new Error('shortcut form missing');
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    const nameInput = document.body.querySelector<HTMLInputElement>('#shortcut-name');
+    expect(saved).toEqual([]);
+    expect(nameInput?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe(
+      'Give this Prompt a name.'
+    );
+
+    await type(nameInput!, 'Draft');
+    expect(document.body.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(saved.map((value) => value.name)).toEqual(['Draft']);
   });
 });

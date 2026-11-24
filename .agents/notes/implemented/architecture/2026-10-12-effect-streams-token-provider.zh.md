@@ -29,8 +29,8 @@ WebCrypto 完成后在存储写入前同步检查凭据与拒绝标记。Schema�
   凭据替换/关闭必须确认清理后才替换拥有者槽。独立准入快照按解析次序设 fence，结束前各自保留拥有者。
 - 交接：发布前同步检查 generation、credential、rejection；关闭共享 Deferred 回执。
   失败关闭保留同一失败与子 Scope；显式 retryCleanup 等待真实资源结束后才重新准入。
-- 失败/恢复：auth、HTTP/credential/response、deadline、取消保持区别；原生 getToken/auth 保留 typed auth failure；
-  仅显式 Legacy 旧协议 callback 将非空全 auth Cause 投影为 undefined。释放 defect 保留 raw owner；关停 defect 保留 provider 与完整 Cause，
+- 失败/恢复：auth、HTTP/credential/response、deadline、取消保持区别；原生与 Legacy getToken/auth 均保留 typed auth failure。Streams client 将 undefined 解释为允许匿名 HTTP，
+  因此云端凭据被拒绝时必须失败。同一凭据的终止拒绝抑制 issuer 请求；凭据轮换或手动 invalidate 后恢复。释放 defect 保留 raw owner；关停 defect 保留 provider 与完整 Cause，
   包括 timeout/interruption 和释放失败同时发生的情形。
 
 拒绝外层 tryPromise(getToken)，因为它会保留旧 Lody Promise 编排。考虑过 RcMap/FiberMap，
@@ -57,6 +57,13 @@ createTokenProviderLegacy port/type。删除旧无 Legacy 名 factory 和 Promis
 Renderer 拆除在丢弃 provider 前等待 close；官方 CLI root 在 dispose 前保留 Legacy provider，
 失败实例保留供恢复。Runtime 与 provider 的 abort signal 合并，不再相互覆盖。
 
+Renderer ephemeral 启动在 join 前检查已有 auth callback。锁定的 streams-crdt 0.23.0
+Promise 适配层将回调拒绝包装为可重试的 auth-provider 错误，房间合并状态可能停在 connecting。
+启动检查让拒绝进入已有的房间 error 处理路径，不发送 HTTP；凭据轮换后由 workspace 重连拥有者重试。
+已退休 generation 的启动不能继续 join。Eager-sync 父进程捕获鉴权拒绝并将 worker 结束为 failed；
+durable Streams client 在 fetch 前返回操作失败。CLI presence 使用原生 auth；machine-monitor 与 prompt suggestions 保留 Promise callback，
+其拒绝仍由 SDK join/retry 路径处理。
+
 待这些调用方及应用拥有者组合原生 Effect 后，删除 Legacy 门面、兼容凭据适配和 provider registry。
 使用本内核不代表上层或 daemon 端到端所有权原生化。根路线图由协调者单独维护。
 
@@ -70,7 +77,13 @@ Direct getToken 没有 callback fallback。旧 token 的晚到 callback 不抹�
 嵌套 retained Cause 迭代遍历并按对象身份去重；恢复仍保留原始完整 Cause。关闭/超时清理失败后
 health 仍可观察，成功 retryCleanup 清除阻塞。同一 parent Scope 的后继 provider 使用独立 close
 receipt。Retained release failure 在新 credential I/O 准入前设置 fence，而非只阻止 producer
-替换。不修改 P1 拥有的 logger/presence 文件。
+替换。
+
+Producer 诊断观察完整 Exit，包括中断及 I/O finalizer 失败。只有第一次停止意图是
+owner 显式关闭、且结果为纯中断，才记录固定且不含业务内容的
+`fetch-cancelled` / `owner_released` 生命周期事件。未知停止、deadline 和混合失败继续报告，
+不按错误名称判断取消；waiter 的返回结果与清理所有权保持原样。
+这个证明只在 provider 内成立，不能推断平台侧断开的原因。
 
 Raw HTTP receipt 包括 success-body EOF 与 error-body 取消；body 释放拒绝保留 owner 和
 I/O failure，401/403 同时保留 typed auth 原因与 terminal suppression。Cleanup 报告已经结束
@@ -111,7 +124,7 @@ pnpm run docs check、i18n、Code Collab、platform、CLI process 和 public-bou
 
 独占临时 overlay 中 baseline/restored auth suite 通过；分别移除共享 lease 保护、raw settlement
 join、rejected-token storage fence、late unauthorized matching、加密后 credential fence、
-完整 raw-owner Cause 聚合，均使对应行为回归失败；增补还消融 native auth 失败保留、Legacy all-auth 投影、诊断脱敏、credential 准入、
+完整 raw-owner Cause 聚合，均使对应行为回归失败；增补还消融 native auth 失败保留、当时的 Legacy all-auth 投影（后因允许匿名云端请求而移除）、诊断脱敏、credential 准入、
 observer Cause 合并、success/error-body 等待与 release-owner 登记，共 14 项。消融脚本和日志不进入产品/仓库。
 未验证真实 cloud/issuer、生产服务、npm 发布、已安装桌面、Windows/macOS 打包，或整个
 Session/Turn/durable 生命周期。

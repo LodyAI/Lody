@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -16,10 +14,10 @@ import { initI18n } from '../src/i18n';
 
 /**
  * Every bucket of the mobile chat list previews at most
- * `MOBILE_CHAT_PREVIEW_MAX_ROOTS` TOP-LEVEL rows and ends in a "Show all (N)"
- * toggle — the same model the desktop sidebar's `MAX_VISIBLE_SESSIONS` applies
- * per group. Without it, one busy project buries every other project and
- * worktree below the fold.
+ * `MOBILE_CHAT_PREVIEW_MAX_ROOTS` TOP-LEVEL rows and offers "Show more" — one
+ * more page per tap, with "Show less" returning to the preview. The same model
+ * the desktop sidebar's `MAX_VISIBLE_SESSIONS` applies per group. Without it,
+ * one busy project buries every other project and worktree below the fold.
  */
 
 const HOUR = 60 * 60 * 1000;
@@ -118,6 +116,16 @@ function toggleLabels(): string[] {
   return toggles().map((button) => button.textContent?.trim() ?? '');
 }
 
+function collapseToggles(): HTMLButtonElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLButtonElement>('[data-chat-list-preview-collapse]')
+  );
+}
+
+function collapseLabels(): string[] {
+  return collapseToggles().map((button) => button.textContent?.trim() ?? '');
+}
+
 describe('mobile chat list group preview cap', () => {
   it('caps only when the caller opts in, independently of grouping', () => {
     // Both directions matter, and neither follows from the other. The
@@ -133,28 +141,37 @@ describe('mobile chat list group preview cap', () => {
 
     render(makeProjectItems(9, 'p1'), { groupBy: 'none' });
     expect(rows()).toHaveLength(MOBILE_CHAT_PREVIEW_MAX_ROOTS);
-    expect(toggleLabels()).toEqual(['Show all (9)']);
+    expect(toggleLabels()).toEqual(['Show more']);
+    expect(collapseLabels()).toEqual([]);
   });
 
-  it('expands and re-collapses only the bucket that was tapped', () => {
-    render([...makeProjectItems(9, 'p1'), ...makeProjectItems(8, 'p2')]);
-    expect(toggleLabels()).toEqual(['Show all (9)', 'Show all (8)']);
+  it('reveals one page per tap and collapses back to the preview in one tap', () => {
+    render([...makeProjectItems(12, 'p1'), ...makeProjectItems(8, 'p2')]);
+    expect(toggleLabels()).toEqual(['Show more', 'Show more']);
 
     act(() => {
       toggles()[0]!.click();
     });
-    expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(9);
+    expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(10);
     // The untapped bucket keeps its preview.
     expect(titles().filter((title) => title.includes('p2-'))).toHaveLength(5);
-    expect(toggleLabels()).toEqual(['Show less', 'Show all (8)']);
+    expect(toggleLabels()).toEqual(['Show more', 'Show more']);
+    expect(collapseLabels()).toEqual(['Show less']);
     expect(toggles()[0]!.getAttribute('aria-expanded')).toBe('true');
 
     act(() => {
       toggles()[0]!.click();
     });
+    expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(12);
+    expect(toggleLabels()).toEqual(['Show more']);
+    expect(collapseLabels()).toEqual(['Show less']);
+
+    act(() => {
+      collapseToggles()[0]!.click();
+    });
     expect(titles().filter((title) => title.includes('p1-'))).toHaveLength(5);
-    expect(toggleLabels()).toEqual(['Show all (9)', 'Show all (8)']);
-    expect(toggles()[0]!.getAttribute('aria-expanded')).toBe('false');
+    expect(toggleLabels()).toEqual(['Show more', 'Show more']);
+    expect(collapseLabels()).toEqual([]);
   });
 
   it('counts top-level rows, so a preview never splits an opener', () => {
@@ -210,7 +227,7 @@ describe('mobile chat list group preview cap', () => {
     render(chats);
     expect(titles()).not.toContain('Session opener');
     expect(titles()).not.toContain('Session opened-a');
-    expect(toggleLabels()).toEqual(['Show all (8)']);
+    expect(toggleLabels()).toEqual(['Show more']);
 
     act(() => {
       toggles()[0]!.click();
@@ -240,7 +257,7 @@ describe('mobile chat list group preview cap', () => {
       'Session p1-3',
       'Session p1-4',
     ]);
-    expect(toggleLabels()).toEqual(['Show all (6)']);
+    expect(toggleLabels()).toEqual(['Show more']);
   });
 
   it('does not write the preview state into the shared opener-fold atom', () => {
@@ -278,5 +295,55 @@ describe('mobile chat list group preview cap', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('mobile pin sections', () => {
+  it('splits pinned rows into their sections, keeping the manual order', () => {
+    render(
+      [
+        makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+        makeItem({
+          id: 'deps-bump',
+          title: 'deps-bump',
+          isPinned: true,
+          pinSectionId: 'maintenance',
+          orderKey: '81',
+          latestMessageAt: NOW,
+        }),
+        makeItem({
+          id: 'weekly-mirror',
+          title: 'weekly-mirror',
+          isPinned: true,
+          pinSectionId: 'maintenance',
+          orderKey: '80',
+          latestMessageAt: NOW - 50 * HOUR,
+        }),
+        ...makeProjectItems(1),
+      ],
+      { pinSections: [{ id: 'maintenance', name: 'Maintenance', orderKey: '80' }] }
+    );
+    expect(titles().slice(0, 3)).toEqual(['loose', 'weekly-mirror', 'deps-bump']);
+    const text = container.textContent ?? '';
+    expect(text.indexOf('Pinned')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('Maintenance')).toBeGreaterThan(text.indexOf('Pinned'));
+  });
+});
+
+describe('mobile pin sections before the sections are read', () => {
+  it('holds back a sectioned pin instead of showing it unsectioned', () => {
+    // No workspace runtime: the section catalog has not been read.
+    render([
+      makeItem({ id: 'loose', title: 'loose', isPinned: true, latestMessageAt: NOW }),
+      makeItem({
+        id: 'weekly-mirror',
+        title: 'weekly-mirror',
+        isPinned: true,
+        pinSectionId: 'maintenance',
+        orderKey: '80',
+        latestMessageAt: NOW,
+      }),
+    ]);
+    expect(titles()).toEqual(['loose']);
   });
 });

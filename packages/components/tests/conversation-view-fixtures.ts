@@ -1,4 +1,5 @@
-import { sessionDocSchema, type SessionHistory, type SessionId } from '@lody/shared';
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
+import { type SessionHistory, type SessionId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 

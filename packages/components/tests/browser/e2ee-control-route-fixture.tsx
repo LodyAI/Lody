@@ -1,3 +1,4 @@
+import { unexpectedE2eeWorkspaceOperation } from '../fixtures/e2ee-workspaces';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Result } from 'effect';
@@ -76,6 +77,8 @@ export async function reopen(paused: 'describe' | 'history') {
     histories = 0,
     released = false;
   fixture.port = {
+    create: unexpectedE2eeWorkspaceOperation,
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     describe: async () => {
       if (++descriptions === 1 && paused === 'describe') {
         entered.resolve();
@@ -104,6 +107,7 @@ export async function reopen(paused: 'describe' | 'history') {
         closed.resolve();
       },
       ledgerView: async () => local,
+      status: async () => local.status,
       ingestLedgerRecords: async (_workspace, received) => {
         ingested.push(received.recordsHex);
         return local.status;

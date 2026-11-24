@@ -1,10 +1,10 @@
+import { clsx } from 'clsx';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space, radius } from '@lody/ui/tokens/scales.stylex';
 import { tabPillStyles } from '../shared/tab-pill-strip';
 import { Plus, X, History, Undo2, FileDiff, Hand, ArchiveRestore } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
@@ -43,6 +43,7 @@ import {
 import { isArchivedOutsideWorkspace, isSessionTabClosed } from '@/lib/session-tab-url';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
 import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
+import { dndPointerPoint } from '@/lib/dnd-pointer';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -105,6 +106,7 @@ interface SessionTabBarProps {
 const savingPulse = stylex.keyframes({ '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } });
 
 const styles = stylex.create({
+  workingSpinner: { color: 'hsl(var(--tab-active-accent) / 1)' },
   tab: {
     position: 'relative',
     display: 'flex',
@@ -122,7 +124,7 @@ const styles = stylex.create({
     fontSize: '0.9em',
     cursor: 'default',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
@@ -261,7 +263,7 @@ const styles = stylex.create({
       },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     backgroundColor: {
@@ -328,7 +330,7 @@ const styles = stylex.create({
     textAlign: 'left',
     fontSize: '0.9em',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     backgroundColor: {
@@ -374,20 +376,6 @@ const styles = stylex.create({
     maxHeight: '15rem',
   },
 });
-
-function clientPointFromDragEnd(event: DragEndEvent): { x: number; y: number } | null {
-  const source = event.activatorEvent;
-  if (
-    !source ||
-    !('clientX' in source) ||
-    !('clientY' in source) ||
-    typeof source.clientX !== 'number' ||
-    typeof source.clientY !== 'number'
-  ) {
-    return null;
-  }
-  return { x: source.clientX + event.delta.x, y: source.clientY + event.delta.y };
-}
 
 function getTabLabel(
   session: SessionMeta,
@@ -490,7 +478,7 @@ function TabContent({
             }
           : undefined
       }
-      className={cn(
+      className={clsx(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -527,7 +515,10 @@ function TabContent({
         {isWaiting ? (
           <Hand {...stylex.props(styles.waitingIcon)} />
         ) : isWorking ? (
-          <Spinner className="h-3 w-3 text-tab-active-accent" />
+          <Spinner
+            diameter="calc(var(--spacing) * 3)"
+            className={stylex.props(styles.workingSpinner).className}
+          />
         ) : isUnread ? (
           <span
             data-session-tab-unread=""
@@ -620,7 +611,7 @@ function DraftTabContent({
       data-id={`draft-tab:${draft.id}`}
       data-scope-item="row"
       aria-label={label}
-      className={cn(
+      className={clsx(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -703,7 +694,7 @@ function ViewerTabContent({
       data-id={`viewer-tab:${tab.id}`}
       data-scope-item="row"
       aria-label={saveStateLabel ? `${tab.label}, ${saveStateLabel}` : tab.label}
-      className={cn(
+      className={clsx(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -949,7 +940,7 @@ export const SessionTabBar = memo(function SessionTabBar({
       const { active, over } = event;
       const activeId = String(active.id);
       const overId = over ? String(over.id) : null;
-      const point = clientPointFromDragEnd(event);
+      const point = dndPointerPoint(event);
       // Tab droppables stay the closest collision even when the pointer is in
       // the conversation below, so mention wins whenever the pointer is there.
       const droppedOnConversation =
@@ -1007,7 +998,7 @@ export const SessionTabBar = memo(function SessionTabBar({
   const newTabButton = showNewTabButton ? (
     <button
       type="button"
-      className={cn(stylex.props(styles.barAction).className, WINDOW_DRAG_EXEMPT_CLASS)}
+      className={clsx(stylex.props(styles.barAction).className, WINDOW_DRAG_EXEMPT_CLASS)}
       onClick={() => {
         void onNewTab();
       }}
@@ -1019,7 +1010,7 @@ export const SessionTabBar = memo(function SessionTabBar({
 
   return (
     <div
-      className={cn(
+      className={clsx(
         SESSION_PAGE_CONTAINER_CLASS,
         stylex.props(styles.bar).className,
         windowDragClass,
@@ -1028,7 +1019,7 @@ export const SessionTabBar = memo(function SessionTabBar({
     >
       {leftSlot ? (
         <div
-          className={cn(
+          className={clsx(
             stylex.props(styles.leadingSlot, !soloTab && styles.leadingSlotRegular).className,
             WINDOW_DRAG_EXEMPT_CLASS
           )}
@@ -1043,10 +1034,11 @@ export const SessionTabBar = memo(function SessionTabBar({
         aria-label={t('sessions.tabs.label', 'Session tabs')}
         // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
         className={stylex.props(styles.adaptiveStrip).className}
-        // The first tab sits in the workspace card's 14px corner: its 3px left inset
-        // matches the ~3.5px top inset of a 32px tab centred in the 38px row, and
-        // its 10px radius is concentric with the card (14 - 3.5).
-        paddingLeft={3}
+        // A filled first pill needs more than the 6px inter-tab gap from the
+        // workspace card's left edge, or it hugs the card's 14px corner. A solo tab
+        // has no fill, and a leading slot already supplies its own 8px gap, so
+        // those keep the tight 3px inset that leaves the label where it was.
+        paddingLeft={soloTab || leftSlot ? 3 : 8}
         paddingRight={3}
       >
         {showParentTab && (
@@ -1110,7 +1102,9 @@ export const SessionTabBar = memo(function SessionTabBar({
       </AdaptiveTabStrip>
       {/* Pinned right cluster: new-tab, then the archived-tabs history (only
           when closed tabs exist), then the caller's toolbar ("…" etc.). */}
-      <div className={cn(stylex.props(styles.trailingCluster).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+      <div
+        className={clsx(stylex.props(styles.trailingCluster).className, WINDOW_DRAG_EXEMPT_CLASS)}
+      >
         {newTabButton}
         {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
           <ClosedTabsPopover
@@ -1152,7 +1146,7 @@ export function ClosedTabsPopover({
               render={
                 <button
                   type="button"
-                  className={cn(
+                  className={clsx(
                     stylex.props(styles.barAction, styles.barActionRelative).className,
                     WINDOW_DRAG_EXEMPT_CLASS
                   )}
@@ -1179,7 +1173,7 @@ export function ClosedTabsPopover({
           {t('sessions.tabs.closedTabs', 'Closed conversations')}
         </Tooltip.Content>
       </Tooltip.Root>
-      <Popover.Content align="end" className="w-72 p-0" sideOffset={4}>
+      <Popover.Content align="end" padding="none" width="calc(var(--spacing) * 72)" sideOffset={4}>
         <div {...stylex.props(styles.popoverHeader)}>
           <p {...stylex.props(styles.popoverTitle)}>
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
@@ -1231,7 +1225,7 @@ function ClosedConversationStatus({ session }: { session: SessionMeta }) {
         aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
       />
     );
-  if (status) return <Spinner className="h-3 w-3" />;
+  if (status) return <Spinner diameter="calc(var(--spacing) * 3)" />;
   if (closedSessionHasUnreadMessages(session))
     return (
       <span

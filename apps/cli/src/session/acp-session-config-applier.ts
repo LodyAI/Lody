@@ -1,7 +1,11 @@
 import {
+  ACP_CONFIG_OPTION_OFF_VALUE,
+  ACP_CONFIG_OPTION_ON_VALUE,
+  ACP_FAST_MODE_VALUE_FAST,
   ACP_PLAN_PERMISSION_MODE_ID,
   ACP_REASONING_EFFORT_CONFIG_ID,
   isAcpFastModeConfigId,
+  isAcpNormalSpeedAlias,
   isAcpPlanModeConfigOption,
   isAcpThoughtLevelConfigOption,
   isSensitiveAcpConfigOptionId,
@@ -40,8 +44,89 @@ function shouldSkipFableFastModeDisable(args: {
   return (
     args.modelId?.toLowerCase().includes('fable') === true &&
     isAcpFastModeConfigId(args.configId) &&
-    args.value === false
+    (args.value === false || isAcpNormalSpeedAlias(args.value))
   );
+}
+
+type LiveConfigOption = {
+  id: string;
+  type?: string;
+  options?: ReadonlyArray<{ value?: string; options?: ReadonlyArray<{ value?: string }> }>;
+};
+
+function collectLiveSelectOptionValues(option: LiveConfigOption): Set<string> {
+  const values = new Set<string>();
+  for (const entry of option.options ?? []) {
+    if (typeof entry.value === 'string') {
+      values.add(entry.value);
+    } else if (Array.isArray(entry.options)) {
+      for (const child of entry.options) {
+        if (typeof child.value === 'string') {
+          values.add(child.value);
+        }
+      }
+    }
+  }
+  return values;
+}
+
+/**
+ * Reconciles a fast-mode / speed-tier value against the live target model's
+ * advertised config option so legacy boolean settings work on multi-tier speed
+ * selects and unsupported tiers are never submitted to a model that lacks them.
+ */
+function resolveLiveFastModeValue(
+  configId: string,
+  value: AcpConfigOptionValue,
+  liveOptions: readonly LiveConfigOption[]
+): { skip: true } | { skip: false; value: AcpConfigOptionValue } {
+  if (!isAcpFastModeConfigId(configId) || liveOptions.length === 0) {
+    return { skip: false, value };
+  }
+  const liveOption = liveOptions.find((candidate) => candidate.id === configId);
+  if (!liveOption) {
+    return { skip: true };
+  }
+  if (liveOption.type === 'boolean') {
+    if (typeof value === 'boolean') return { skip: false, value };
+    if (value === ACP_CONFIG_OPTION_ON_VALUE || value === ACP_FAST_MODE_VALUE_FAST) {
+      return { skip: false, value: true };
+    }
+    if (isAcpNormalSpeedAlias(value)) {
+      return { skip: false, value: false };
+    }
+    return { skip: true };
+  }
+  if (liveOption.type === 'select') {
+    const allowed = collectLiveSelectOptionValues(liveOption);
+    if (typeof value === 'string') {
+      if (allowed.has(value)) return { skip: false, value };
+      if (isAcpNormalSpeedAlias(value) && allowed.has(ACP_CONFIG_OPTION_OFF_VALUE)) {
+        return { skip: false, value: ACP_CONFIG_OPTION_OFF_VALUE };
+      }
+      if (value === ACP_CONFIG_OPTION_ON_VALUE && allowed.has(ACP_FAST_MODE_VALUE_FAST)) {
+        return { skip: false, value: ACP_FAST_MODE_VALUE_FAST };
+      }
+      if (value === ACP_FAST_MODE_VALUE_FAST && allowed.has(ACP_CONFIG_OPTION_ON_VALUE)) {
+        return { skip: false, value: ACP_CONFIG_OPTION_ON_VALUE };
+      }
+      return { skip: true };
+    }
+    if (value === true) {
+      if (allowed.has(ACP_FAST_MODE_VALUE_FAST)) {
+        return { skip: false, value: ACP_FAST_MODE_VALUE_FAST };
+      }
+      if (allowed.has(ACP_CONFIG_OPTION_ON_VALUE)) {
+        return { skip: false, value: ACP_CONFIG_OPTION_ON_VALUE };
+      }
+      return { skip: true };
+    }
+    if (allowed.has(ACP_CONFIG_OPTION_OFF_VALUE)) {
+      return { skip: false, value: ACP_CONFIG_OPTION_OFF_VALUE };
+    }
+    return { skip: true };
+  }
+  return { skip: false, value };
 }
 
 export type AcpSessionConfigTarget = {
@@ -58,7 +143,7 @@ export type AcpSessionRunConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
 };
 
-type AcpSessionRunConfigApplyResult = {
+export type AcpSessionRunConfigApplyResult = {
   /** Every selection rejected by the agent, retained for diagnostics. */
   rejectedSelections: string[];
   /** Rejections that should become a user-visible Agent warning. */
@@ -179,14 +264,23 @@ export async function applyAcpSessionRunConfig(args: {
     assertNotAborted();
   }
 
-  for (const [configId, value] of configOptionEntries) {
+  const liveConfigOptions = (agentClient.getConfigOptions?.() ?? []) as readonly LiveConfigOption[];
+  for (const [configId, rawValue] of configOptionEntries) {
     assertNotAborted();
     if (configId === modeConfigId || configId === modelConfigId) {
       continue;
     }
-    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value })) {
+    if (shouldSkipFableFastModeDisable({ modelId: targetModelId, configId, value: rawValue })) {
       continue;
     }
+    const resolvedFast = resolveLiveFastModeValue(configId, rawValue, liveConfigOptions);
+    if (resolvedFast.skip) {
+      logger.debug(
+        `[${sessionId}] Skipping unsupported ACP speed option ${configId}=${formatAcpConfigValueForLog(configId, rawValue)} for model=${targetModelId ?? 'current'}`
+      );
+      continue;
+    }
+    const value = resolvedFast.value;
     try {
       await agentClient.setSessionConfigOption(acpSessionId, configId, value);
     } catch (error) {

@@ -188,8 +188,6 @@ const renderPlanModeToggle = (
   );
 };
 
-// ── Footer selectors (inside the input box): model, think level, other ──
-
 export interface AcpFooterSelectorGroupProps {
   tone: 'light' | 'dark';
   modelOptions?: AcpSessionSelectOption[];
@@ -211,8 +209,13 @@ export function AcpFooterSelectorGroup({
   onConfigOptionChange,
   contentClassName,
 }: AcpFooterSelectorGroupProps) {
-  const { modelSelectors, thoughtLevelSelectors, booleanSelectors, otherSelectors } =
-    orderAcpConfigOptionSelectors(configOptionSelectors);
+  const {
+    modelSelectors,
+    thoughtLevelSelectors,
+    speedTierSelectors,
+    booleanSelectors,
+    otherSelectors,
+  } = orderAcpConfigOptionSelectors(configOptionSelectors);
 
   return (
     <>
@@ -255,6 +258,15 @@ export function AcpFooterSelectorGroup({
             })
       )}
 
+      {speedTierSelectors.map((selector) =>
+        renderConfigSelector(selector, {
+          tone,
+          values: configOptionValues,
+          onChange: onConfigOptionChange,
+          contentClassName,
+        })
+      )}
+
       {booleanSelectors.map((selector) =>
         renderBooleanToggle(selector, {
           values: configOptionValues,
@@ -278,8 +290,6 @@ export function AcpFooterSelectorGroup({
     </>
   );
 }
-
-// ── Bottom bar mode selectors (below the input box, no border) ──
 
 export interface AcpBottomBarModeSelectorProps {
   tone: 'light' | 'dark';
@@ -367,8 +377,6 @@ export function AcpBottomBarModeSelector({
     </>
   );
 }
-
-// ── Legacy combined group (re-export for backward compat) ──
 
 export interface AcpInlineSelectorGroupProps {
   tone: 'light' | 'dark';

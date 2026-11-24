@@ -1,3 +1,4 @@
+import { SessionLocalAttachmentSchema } from '@lody/shared/message-schemas';
 import { SESSION_IMAGE_MAX_COUNT, type MessageContent } from '@lody/shared';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -106,6 +107,8 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
             typeof item.sizeBytes === 'number'
         )
       );
+    case 'local_attachment':
+      return SessionLocalAttachmentSchema.safeParse(value).success;
     case 'file':
       return (
         typeof value.fileId === 'string' &&

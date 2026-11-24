@@ -1,3 +1,4 @@
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Result } from 'effect';
@@ -94,7 +95,7 @@ function historyFixture(commitment = 6) {
     [7, 2, fill(32, 10), fill(72, 11)],
   ]);
   // A genuine Owner capability declaration that this client version cannot verify past.
-  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [2]]]);
+  const declaration = signed([hashRecordBytes(second).toBytes(), publicKey, [9, [3]]]);
   const checkpoint = { headHash: bytesToHex(hashRecordBytes(second).toBytes()), length: 2 };
   const firstPage: E2eeWorkspaceHistoryPage = {
     workspaceId: 'workspace-1',
@@ -267,6 +268,7 @@ describe('encrypted workspace creation recovery', () => {
         deviceCredentialHash: 'cc'.repeat(32),
         genesisHashHex: genesisHash,
       }),
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create,
       describe: async () => result,
       history: async () => {
@@ -448,6 +450,30 @@ describe('encrypted workspace recovery classification', () => {
     expect(paged.view).toBe(first.view);
   });
 
+  it('treats a briefly unavailable ledger store as unreachable, not as records that failed verification', () => {
+    // Seen on a local stack whose storage database went down: the members tab said the
+    // records did not match. The workspace is only unreachable for now.
+    const convexError = Object.assign(new Error('[CONVEX] Uncaught ConvexError'), {
+      data: { code: 'e2ee_ledger_unavailable' },
+    });
+    expect(classifyE2eeControlFailure(convexError)).toEqual({
+      kind: 'network',
+      code: 'e2ee_ledger_unavailable',
+    });
+    expect(classifyE2eeControlFailure(new Error('e2ee_ledger_unavailable'))).toEqual({
+      kind: 'network',
+      code: 'e2ee_ledger_unavailable',
+    });
+    // Records that genuinely fail verification still stop management.
+    expect(
+      classifyE2eeControlFailure(
+        Object.assign(new Error('[CONVEX] Uncaught ConvexError'), {
+          data: { code: 'e2ee_invalid_record' },
+        })
+      )
+    ).toEqual({ kind: 'server', code: 'e2ee_invalid_record' });
+  });
+
   it('separates identity conflicts, rollbacks and invalid server history', () => {
     const fixture = historyFixture();
     expect(classifyE2eeControlFailure(new Error('e2ee_conflict'))).toEqual({
@@ -578,6 +604,7 @@ describe('encrypted workspace recovery classification', () => {
           user: { id: 'account', email: 'a@example.invalid', name: 'A', image: null },
         }),
         remote: {
+          deleteWorkspace: unexpectedE2eeWorkspaceOperation,
           create: () => Promise.reject(new Error('unused')),
           describe: () => Promise.resolve(descriptor as never),
           history: () => Promise.reject(new Error('unused')),
@@ -629,6 +656,7 @@ describe('saved creation requests after a server refusal', () => {
         deviceCredentialHash: 'cc'.repeat(32),
         genesisHashHex: 'bb'.repeat(32),
       }),
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw failure;
       },
@@ -699,6 +727,7 @@ it('keeps the prepared credential hash immutable before invoking the cloud creat
       deviceCredentialHash: 'cc'.repeat(32),
     }),
     remote: {
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async (input) => {
         received.push(input);
         throw new Error('synthetic temporary outage');
@@ -793,3 +822,22 @@ it('shows a portable continuity conflict as stopped verification rather than a n
     code: 'history-conflict',
   });
 });
+it.each([
+  ['invalid-input', 'server', 'invalid-input'],
+  ['corrupt', 'local-identity', 'e2ee_corrupt'],
+  ['storage', 'local-identity', 'e2ee_storage'],
+  ['unsupported', 'upgrade', 'unsupported'],
+  ['unauthorized', 'auth', 'unauthorized'],
+  ['revoked', 'approval-required', 'revoked'],
+  // Only a host failure that says so is an availability problem.
+  ['network', 'network', undefined],
+  ['closed', 'network', undefined],
+] as const)(
+  'shows a portable %s failure as %s, never as offline unless it is',
+  (code, kind, shown) => {
+    expect(classifyE2eeControlFailure(new PersonalHostError({ code }))).toMatchObject({
+      kind,
+      ...(shown ? { code: shown } : {}),
+    });
+  }
+);

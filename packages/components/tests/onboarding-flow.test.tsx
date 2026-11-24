@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+import { getFunctionName } from 'convex/server';
 import {
   createRouter,
   createRootRoute,
@@ -6,9 +8,7 @@ import {
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router';
-// @vitest-environment jsdom
 
-// @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, ProviderSetupTask, WorkspaceId } from '@lody/shared';
 
 const mocks = vi.hoisted(() => ({
+  personalAuthorization: 'authorized',
   createGitHubInstallState: vi.fn(),
   getCliState: vi.fn(),
   onCliState: vi.fn(),
@@ -31,7 +32,10 @@ vi.mock('convex/react', async (importOriginal) => ({
 
 vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
   usePublicConvexQuery: () => undefined,
-  useRecoverableConvexQuery: () => [],
+  useRecoverableConvexQuery: (ref: unknown) =>
+    getFunctionName(ref as never) === 'github:getPersonalOperationSettings'
+      ? { enabled: false, authorization: { state: mocks.personalAuthorization } }
+      : [],
 }));
 
 vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
@@ -39,6 +43,7 @@ vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
   return {
     ...actual,
     useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
+    useOptionalAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
   };
 });
 
@@ -59,15 +64,26 @@ import {
 } from '../src/components/onboarding/onboarding-overlay';
 
 import { getDesktopOnboardingSteps } from '../src/components/onboarding/onboarding-steps';
+import { LoginScreen } from '../src/components/onboarding/screens/login-screen';
 import { ProjectsScreen } from '../src/components/onboarding/screens/projects-screen';
 import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
 import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
 import { PlatformContext } from '@lody/platform/react';
-import { createStaticStore, type CloudApi } from '@lody/platform';
+import {
+  createStaticStore,
+  createStore as createPlatformStore,
+  type CloudApi,
+  type PlatformSessionState,
+} from '@lody/platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
-import { userAtom } from '../src/atoms';
+import {
+  electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
+  electronLoginPhaseAtom,
+  userAtom,
+} from '../src/atoms';
 import { ErrorBoundary } from '../src/components/error-boundary';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
@@ -119,6 +135,7 @@ describe('desktop onboarding flow', () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     await initI18n('en');
     localStorage.clear();
+    mocks.personalAuthorization = 'authorized';
     mocks.createGitHubInstallState.mockResolvedValue({ state: 'github-state-1' });
     mocks.openExternalUrl.mockResolvedValue(true);
     mocks.useVisibleLocalProjects.mockReturnValue({ projects: new Map() });
@@ -344,6 +361,24 @@ describe('desktop onboarding flow', () => {
     expect(container.textContent).toContain('Control and pairing');
   });
 
+  it('guides missing personal GitHub authorization to settings before starting App installation', async () => {
+    mocks.personalAuthorization = 'missing';
+    await act(async () =>
+      root?.render(
+        <TestCloudPlatformProvider>
+          <Provider store={store}>
+            <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
+          </Provider>
+        </TestCloudPlatformProvider>
+      )
+    );
+    await act(async () => findButton(container, 'Connect a GitHub repository').click());
+    expect(mocks.openExternalUrl.mock.calls.at(-1)?.[0]).toContain(
+      '/workspace-1/settings/github?github_install_error=authorization_required'
+    );
+    expect(mocks.createGitHubInstallState).not.toHaveBeenCalled();
+  });
+
   it('keeps GitHub available while the local agent is not ready', async () => {
     store.set(localProbeResultAtom, null);
     store.set(localCliStartingAtom, false);
@@ -465,5 +500,79 @@ describe('desktop onboarding flow', () => {
       await Promise.resolve();
     });
     expect(retry).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces main-process browser sign-in failures during onboarding and stays retryable while waiting', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const sessionState = createPlatformStore<PlatformSessionState>({ status: 'unauthenticated' });
+    const detail = 'safeStorage.isEncryptionAvailable() returned false';
+    const signInSocial = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => {
+        store.set(electronLoginPhaseAtom, 'error');
+        store.set(electronLoginErrorAtom, 'secure_storage_unavailable');
+        store.set(electronLoginErrorDetailAtom, detail);
+      })
+      .mockImplementationOnce(async () => {
+        sessionState.set({ status: 'loading' });
+        store.set(electronLoginPhaseAtom, 'waiting');
+        store.set(electronLoginErrorAtom, null);
+        store.set(electronLoginErrorDetailAtom, null);
+      });
+    const base = createRootRoute({ component: Outlet });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ['/onboarding'] }),
+      context: { authClient: { signIn: { social: signInSocial } } },
+      routeTree: base.addChildren([
+        createRoute({
+          getParentRoute: () => base,
+          path: '/onboarding',
+          component: () => <LoginScreen onBack={vi.fn()} onNext={vi.fn()} />,
+        }),
+      ]),
+    });
+
+    await act(async () => {
+      await router.load();
+      root?.render(
+        <PlatformContext.Provider value={{ ...TEST_CLOUD_PLATFORM, session: sessionState }}>
+          <Provider store={store}>
+            <RouterProvider router={router} />
+          </Provider>
+        </PlatformContext.Provider>
+      );
+    });
+
+    await act(async () => {
+      findButton(container, 'Continue in browser').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const alertText = container.querySelector('[role="alert"]')?.textContent;
+    expect(alertText).toContain(
+      "Lody can't save your sign-in because this system's secure storage is unavailable."
+    );
+    expect(alertText).toContain(`Details: ${detail}`);
+    expect(container.textContent).not.toContain('Complete sign-in in the browser to continue.');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[onboarding] Failed to sign in with browser:',
+      'secure_storage_unavailable',
+      detail
+    );
+    const retryButton = findButton(container, 'Continue in browser');
+    expect(retryButton.disabled).toBe(false);
+
+    await act(async () => {
+      retryButton.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(signInSocial).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('Complete sign-in in the browser to continue.');
+    expect(findButton(container, 'Open browser again').disabled).toBe(false);
+    expect(findButton(container, 'Back').disabled).toBe(false);
   });
 });

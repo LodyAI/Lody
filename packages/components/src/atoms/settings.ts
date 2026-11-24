@@ -211,6 +211,13 @@ export const electronSessionCompletionNotificationsEnabledAtom = atomWithStorage
   true
 );
 
+// Desktop app, per computer: while this window is focused, the Host that finishes
+// one of your turns skips the mobile push (published as `desktop-foreground` presence).
+export const electronSuppressMobilePushWhenFocusedAtom = atomWithStorage<boolean>(
+  'lody-electron-suppress-mobile-push-when-focused',
+  true
+);
+
 // File viewer (Monaco) line-wrap toggle. Defaults on so a long single line
 // (e.g. an unwrapped Markdown paragraph) stays readable without horizontal
 // scrolling — especially on mobile. Shared by every SessionMonacoTextViewer
@@ -305,6 +312,16 @@ export const e2eeWorkspaceCreationFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(e2eeWorkspaceCreationEnabledAtom)
 );
 
+/** Account recovery vault controls, enabled by default. Main independently honors LODY_E2EE_RECOVERY_VAULT=off as a kill switch. */
+export const e2eeRecoveryVaultEnabledAtom = atomWithStorage<boolean>(
+  'lody-e2ee-recovery-vault-v2-enabled',
+  true,
+  undefined,
+  { getOnInit: true }
+);
+
+export const e2eeRecoveryVaultFeatureEnabledAtom = atom((get) => get(e2eeRecoveryVaultEnabledAtom));
+
 export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
   'lody-semantic-shortcuts-beta-enabled',
   false,
@@ -335,6 +352,22 @@ export const experimentalFeaturesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
+/** Opt-in for the Today outline notes (specs/today-outline.md). */
+export const todayExperimentEnabledAtom = atomWithStorage<boolean>(
+  'lody-today-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+/**
+ * The single gate for every Today surface. Turning the master switch off hides
+ * Today without clearing its opt-in; data keeps syncing either way.
+ */
+export const todayFeatureEnabledAtom = atom(
+  (get) => get(experimentalFeaturesEnabledAtom) && get(todayExperimentEnabledAtom)
+);
+
 /** Opt-in for Roost-backed history on newly created sessions. */
 export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
   ROOST_HISTORY_EXPERIMENT_STORAGE_KEY,
@@ -346,4 +379,15 @@ export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
 /** The single gate for selecting Roost when a new session is accepted. */
 export const roostHistoryFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
+);
+
+export const lodyAgentBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-agent-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const lodyAgentFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(lodyAgentBetaEnabledAtom)
 );

@@ -1,11 +1,15 @@
+import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
+import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { ScheduleMentionForm } from './schedule-mention-form';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { ScheduledMessageEditor } from './scheduled-message-editor';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
+import { markMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -22,7 +26,7 @@ import {
   machineSupportsSchedulesProtocol,
   machineSupportsScheduledMessagesProtocol,
   scheduleOwnSessionId,
-  ScheduleRepository,
+  type ScheduleRepository,
   type SessionId,
   type SessionMeta,
   type AgentConfigId,
@@ -178,6 +182,7 @@ function SupportedSchedulesWorkspace({
   const runtime =
     scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
   const user = useAtomValue(userAtom);
+  const { members } = useWorkspaceMembers();
   const slug = useAtomValue(currentWorkspaceSlugAtom);
   const navigate = useNavigate();
   const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
@@ -213,15 +218,30 @@ function SupportedSchedulesWorkspace({
     confirmLabel?: string;
   }>();
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
-  const repository = useMemo(
-    () =>
-      runtime
-        ? new ScheduleRepository(runtime.repo, runtime.workspaceId, {
-            protectedContent: runtime.contentMode === 'e2ee',
-          })
-        : null,
-    [runtime]
-  );
+  // ScheduleRepository builds a Mirror over the schedule doc, so the class is
+  // lazy-loaded: a static import would keep `loro-crdt` (WASM) in the boot
+  // chunk. The repository is null until the module resolves; every consumer
+  // already guards on it.
+  const [repository, setRepository] = useState<ScheduleRepository | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!runtime) {
+      setRepository(null);
+      return;
+    }
+    void import('@lody/shared/schedule-repository').then(({ ScheduleRepository }) => {
+      if (cancelled) return;
+      setRepository(
+        new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+          protectedContent: runtime.contentMode === 'e2ee',
+          signDeclaration: runtime.signScheduleDeclaration,
+        })
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [runtime]);
   // Phone list lives on the home schedules tab (workspace switch, search,
   // settings, bottom bar). Closing or saving replaces this page with that
   // tab. Desktop still returns to the schedules route.
@@ -245,6 +265,13 @@ function SupportedSchedulesWorkspace({
         : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
     );
   };
+  useMobileBackHandler(
+    () => {
+      markMobileBackNavigation();
+      open();
+    },
+    { enabled: Boolean(mobile && scheduleId), layer: 'page' }
+  );
   if (createScheduleRef) createScheduleRef.current = () => open('new');
   useEffect(() => {
     if (!createScheduleRef) return undefined;
@@ -400,6 +427,7 @@ function SupportedSchedulesWorkspace({
     };
   };
   const contextForRow = (item: ScheduleRegistryRow): ScheduleRowContext => ({
+    owner: members.find((member) => member.userId === item.ownerId)?.name ?? item.ownerId,
     machine: machines.get(item.machineId as never)?.name ?? item.machineId,
     timeZone: machines.get(item.machineId as never)?.timeZone,
     agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
@@ -601,6 +629,7 @@ function SupportedSchedulesWorkspace({
   );
   const list = (
     <ScheduleListView
+      currentUserId={user?.id}
       {...registry}
       selectedId={scheduleId}
       onOpen={open}
@@ -687,7 +716,7 @@ function ScheduleEditor({
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
   const local = useVisibleLocalProjects({ includeMachineFlock: true });
-  const repos = useLegacyWorkspaceQuery(
+  const repos = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     runtime ? { workspaceId: runtime.workspaceId } : 'skip'
   ) as { repoFullName?: string; fullName?: string }[] | null | undefined;
@@ -866,11 +895,13 @@ function ScheduleEditor({
     setSaving(true);
     setError(undefined);
     try {
+      const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
       await runtime.withScheduleStore(
         identity.scheduleId,
         () =>
           new ScheduleRepository(runtime.repo, runtime.workspaceId, {
             protectedContent: runtime.contentMode === 'e2ee',
+            signDeclaration: runtime.signScheduleDeclaration,
           }).save({
             ...identity,
             actorId: user.id,
@@ -932,20 +963,30 @@ function ScheduleEditor({
     <ScheduleMentionForm
       mentionSource={
         mentionProject?.kind === 'github'
-          ? { kind: 'github', repoFullName: mentionProject.repoFullName }
+          ? {
+              kind: 'github',
+              repoFullName: mentionProject.repoFullName,
+              issuePrEnabled:
+                repos === undefined ||
+                Boolean(resolveLinkedWorkspaceGitHubRepo(mentionProject.repoFullName, repos)),
+            }
           : mentionProject?.kind === 'local' && machineId && runtime
             ? {
                 kind: 'local',
                 machineId,
                 workspaceId: runtime.workspaceId,
                 localProjectId: mentionProject.localProjectId,
-                githubRepoFullName: mentionProject.githubRepoFullName,
+                githubRepoFullName: resolveLinkedWorkspaceGitHubRepo(
+                  mentionProject.githubRepoFullName,
+                  repos
+                )?.fullName,
               }
             : undefined
       }
       skillAgent={
         selected?.cliType && selected.agentType
           ? {
+              magpieGatewayUrl: selected.magpieGatewayUrl,
               cliType: selected.cliType,
               agentType: selected.agentType,
               machineId: selected.machineId,

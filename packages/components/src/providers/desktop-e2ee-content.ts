@@ -1,5 +1,6 @@
 import { e2eeAccessLoss, type E2eeAccessLoss } from '../lib/e2ee-member-removal';
 import { clientLossEffects } from '../lib/e2ee-client-loss-effects';
+import { personalHostFailureCode } from '../lib/e2ee-control-failure';
 import type { PayloadProtectionProvider } from '@loro-dev/streams-crdt';
 import type { E2eeRuntimeStatus, E2eeWorkspaceRuntime } from '@lody/platform';
 import { createLoroStreamsTokenProviderLegacy, LoroStreamsTokenRequestSchema } from '@lody/shared';
@@ -17,6 +18,64 @@ const NO_TOKEN_STORAGE = {
   removeItem: () => {},
 };
 
+/**
+ * Settles with `work`, or rejects with the first abort reason. The caller abandons
+ * an uncancellable host call; its late result or rejection is handled and dropped.
+ */
+function untilAborted<A>(
+  work: Promise<A>,
+  signals: ReadonlyArray<AbortSignal | null | undefined>
+): Promise<A> {
+  const owned = signals.filter((signal): signal is AbortSignal => signal != null);
+  return new Promise<A>((resolve, reject) => {
+    const detach = () => {
+      for (const signal of owned) signal.removeEventListener('abort', onAbort);
+    };
+    function onAbort(this: AbortSignal) {
+      detach();
+      reject(this.reason);
+    }
+    const aborted = owned.find((signal) => signal.aborted);
+    if (aborted) {
+      work.catch(() => {});
+      reject(aborted.reason);
+      return;
+    }
+    for (const signal of owned) signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => {
+        detach();
+        resolve(value);
+      },
+      (error) => {
+        detach();
+        reject(error);
+      }
+    );
+  });
+}
+
+/**
+ * Upper bound on waiting for this device's key to an epoch its verified ledger already
+ * holds (a rotation not received yet). One reception, then one retry of the open.
+ */
+export const KEY_PENDING_WAIT_MS = 30_000;
+/**
+ * Minimum spacing between pending-key receptions of one workspace content. A frame the
+ * ledger has not caught up with (Streams ahead of the ledger feed) also reads as pending,
+ * so a peer streaming unverifiable frames could otherwise drive a refresh per frame; with
+ * this spacing it costs at most one ledger/key refresh per interval. Waiting reads join the
+ * next reception, still inside {@link KEY_PENDING_WAIT_MS}.
+ */
+export const KEY_PENDING_REFRESH_INTERVAL_MS = 3_000;
+const keyPending = (error: unknown) =>
+  // A portable host reports its typed failure; the desktop its exact IPC result.
+  personalHostFailureCode(error) === 'key-pending' ||
+  (error instanceof Error &&
+    /^(?:Error invoking remote method 'e2ee[.:]openContent': Error: )?e2ee_key-pending$/.test(
+      error.message
+    ));
+
 /** Shared purpose-bound providers. Keys and credentials stay inside the injected host runtime. */
 export function createE2eeContent(input: {
   runtime: E2eeWorkspaceRuntime;
@@ -29,7 +88,6 @@ export function createE2eeContent(input: {
   onKeyUpdateRequired?: (source?: 'seal' | 'seal-complete') => void;
   /** Credential-authenticated member removal or revocation of this device. */
   onMemberRemoved?: (reason: E2eeAccessLoss) => void;
-  onSnapshotRecoveryChange?: (pending: boolean) => void;
   onPhase?: (phase: WorkspaceEpochPhase) => void;
 }) {
   if (!/^[0-9a-f]{64}$/.test(input.genesisHash)) throw new Error('e2ee_invalid_genesis');
@@ -38,6 +96,8 @@ export function createE2eeContent(input: {
   let currentKeyMissing = false;
   let lost: E2eeAccessLoss | null = null,
     closed = false;
+  // Close and access loss abort a pending key wait; the room never outlives its owner.
+  const stopped = new AbortController();
   const assertOpen = () => {
     if (closed || lost) throw new Error('e2ee_closed');
   };
@@ -53,6 +113,7 @@ export function createE2eeContent(input: {
     if (!lost) {
       setMemberRole(null);
       lost = reason;
+      stopped.abort(new Error('e2ee_closed'));
       try {
         input.onMemberRemoved?.(reason);
       } catch {
@@ -63,30 +124,56 @@ export function createE2eeContent(input: {
   };
   // E2E-only: absent outside an automation window whose main registered the probe.
   const effects = clientLossEffects(input.workspaceId);
-  const recovering = new Set<string>();
-  const requested = new Map<string, number>();
-  const recovery = (stream: string, pending: boolean) => {
-    if (pending) recovering.add(stream);
-    else recovering.delete(stream);
-    try {
-      input.onSnapshotRecoveryChange?.(recovering.size > 0);
-    } catch {
-      /* Observational only. */
-    }
-  };
-  const snapshotRecovery = (stream: string, pending: boolean) => {
-    if (closed) return;
-    recovery(stream, pending);
-    if (!pending) return;
-    const now = Date.now();
-    if (now - (requested.get(stream) ?? -Infinity) < 30_000) return;
-    requested.set(stream, now);
-    // The existing host action relays fixed hints for read-only devices too.
-    void input.runtime.contentStreamsToken(input.workspaceId, undefined, stream).catch((error) => {
-      if (observeRemoval(error)) return;
-      console.warn('[e2ee] snapshot repair request failed; will retry');
-    });
-  };
+  // One shared reception for every open waiting on a not-yet-received key.
+  let reception: Promise<void> | undefined;
+  let lastReception: number | undefined;
+  const receiveKey = () =>
+    (reception ??= (async () => {
+      const deadline = new AbortController();
+      const timer = setTimeout(
+        () => deadline.abort(new Error('e2ee_key_pending_timeout')),
+        KEY_PENDING_WAIT_MS
+      );
+      let spacing: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // Clamped: a wall clock moved backwards never stretches the spacing.
+        const wait =
+          lastReception === undefined
+            ? 0
+            : Math.min(
+                KEY_PENDING_REFRESH_INTERVAL_MS,
+                lastReception + KEY_PENDING_REFRESH_INTERVAL_MS - Date.now()
+              );
+        if (wait > 0)
+          await untilAborted(
+            new Promise<void>((resolve) => {
+              spacing = setTimeout(resolve, wait);
+            }),
+            [stopped.signal, deadline.signal]
+          );
+      } catch (error) {
+        clearTimeout(spacing);
+        clearTimeout(timer);
+        throw error;
+      }
+      try {
+        // Both hosts receive and install only this device's key; omitted options would
+        // skip the key round on a portable host.
+        await untilAborted(input.runtime.refresh(input.workspaceId, { keyMode: 'receive' }), [
+          stopped.signal,
+          deadline.signal,
+        ]);
+      } catch (error) {
+        if (observeRemoval(error) || stopped.signal.aborted || deadline.signal.aborted) throw error;
+        // A failed round can still have installed the key (e.g. from a staged
+        // group); the single retry below decides.
+      } finally {
+        lastReception = Date.now();
+        clearTimeout(timer);
+      }
+    })().finally(() => {
+      reception = undefined;
+    }));
   const tokens = new Set<ReturnType<typeof createLoroStreamsTokenProviderLegacy>>();
   const transition = createWorkspaceEpochTransitionLegacy({
     epoch: input.epoch,
@@ -101,12 +188,13 @@ export function createE2eeContent(input: {
   // machine still applies its own ledger check to every signed request.
   let memberRole: E2eeRuntimeStatus['memberRole'] = null;
   const roleListeners = new Set<() => void>();
+  const verifiedMemberRole = () => (!closed && !lost ? (memberRole ?? null) : null);
   const codeCollabRole = (): 'read' | 'write' =>
     !closed && !lost && memberRole && memberRole !== 'guest' ? 'write' : 'read';
   const setMemberRole = (next: E2eeRuntimeStatus['memberRole']) => {
-    const before = codeCollabRole();
+    const before = verifiedMemberRole();
     memberRole = next;
-    if (codeCollabRole() === before) return;
+    if (verifiedMemberRole() === before) return;
     for (const listener of [...roleListeners]) {
       try {
         listener();
@@ -134,17 +222,12 @@ export function createE2eeContent(input: {
     mode: 'protected',
     namespace: encryptedWorkspaceNamespace(input.genesisHash),
     snapshotUpload: {
-      // SDK rejection also covers absent/malformed envelopes before provider.open.
-      onSnapshotRecovery: (streamUrl, pending) =>
-        snapshotRecovery(
-          decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1)!),
-          pending
-        ),
-      // SDK schedules only after local writes, suppresses a competing writer,
-      // and checks the remote snapshot before exporting a new one.
+      // SDK schedules only after local writes, suppresses a competing writer
+      // until maxBytesSinceRemoteSnapshot, and checks the remote snapshot before exporting a new one.
       canUpload: () => !closed && !lost && transition.phase() !== 'closed',
       debounceMs: 30_000,
       minBytesSinceRemoteSnapshot: 1024 * 1024,
+      maxBytesSinceRemoteSnapshot: 4 * 1024 * 1024,
     },
     resolve: encryptedWorkspaceResolver(input.workspaceId, (room) =>
       transition.provider(
@@ -198,9 +281,19 @@ export function createE2eeContent(input: {
                 throw error;
               }
             },
-            open: (request) => {
+            open: async (request) => {
               const open = () => input.runtime.openContent(input.workspaceId, { room, ...request });
-              return effects ? effects.track('read', open) : open();
+              const read = () => (effects ? effects.track('read', open) : open());
+              try {
+                return await read();
+              } catch (error) {
+                // Only the host's verified missing-key answer waits; every other
+                // failure, including access loss, keeps its terminal meaning.
+                if (closed || lost || !keyPending(error)) throw error;
+                await receiveKey();
+                assertOpen();
+                return read();
+              }
             },
           }) satisfies PayloadProtectionProvider
       )
@@ -218,8 +311,11 @@ export function createE2eeContent(input: {
       // the host, and every mint re-checks the host's current admission.
       storage: NO_TOKEN_STORAGE,
       fetchImpl: async (_url, init) => {
-        // No native combined-signal API is needed: this adapter only checks
-        // cancellation before/after the owned host call, rather than passing it on.
+        // No native combined-signal API is needed (AbortSignal.any is optional).
+        // The host call is an Electron IPC invoke with no cancellation channel and
+        // can queue behind other account work longer than the token kernel's
+        // release bound. On abort this adapter therefore settles at once and
+        // abandons the host answer: no token, bucket or storage write leaves it.
         const assertActive = () => {
           assertOpen();
           signal.throwIfAborted();
@@ -229,19 +325,17 @@ export function createE2eeContent(input: {
         const request = LoroStreamsTokenRequestSchema.parse(JSON.parse(String(init?.body)));
         if (request.workspaceId !== input.workspaceId)
           throw new Error('e2ee_content_configuration');
-        const response = await (
-          rpcOnly
-            ? input.runtime.contentStreamsToken(
-                input.workspaceId,
-                request.rejectedToken,
-                undefined,
-                true
-              )
+        const response = await untilAborted(
+          (rpcOnly
+            ? input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken, true)
             : input.runtime.contentStreamsToken(input.workspaceId, request.rejectedToken)
-        ).catch((error) => {
-          observeRemoval(error);
-          throw error;
-        });
+          ).catch((error) => {
+            // Access loss stays observed even when this request was abandoned.
+            observeRemoval(error);
+            throw error;
+          }),
+          [signal, init?.signal]
+        );
         assertActive();
         if (
           !response.bucketId ||
@@ -287,6 +381,7 @@ export function createE2eeContent(input: {
     close: () => {
       setMemberRole(null);
       closed = true;
+      stopped.abort(new Error('e2ee_closed'));
       return transition.close();
     },
     e2ee: {
@@ -336,6 +431,19 @@ export function createE2eeContent(input: {
           input.runtime.prepareDispatch!(input.workspaceId, machineId, args)
         );
       },
+      signScheduleDeclaration: (
+        document: Pick<
+          import('@lody/shared').ScheduleDocument,
+          'definition' | 'prompt' | 'message'
+        >,
+        manualRunKey?: string
+      ) => {
+        if (!input.runtime.signScheduleDeclaration)
+          return Promise.reject(new Error('e2ee_signature_unavailable'));
+        return withinContent(() =>
+          input.runtime.signScheduleDeclaration!(input.workspaceId, document, manualRunKey)
+        );
+      },
       acceptDispatchResponse: (
         machineId: string,
         args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput,
@@ -346,6 +454,35 @@ export function createE2eeContent(input: {
         return withinContent(() =>
           input.runtime.acceptDispatchResponse!(input.workspaceId, machineId, args, frame)
         );
+      },
+      ...(input.runtime.irohReady && input.runtime.irohCall
+        ? {
+            irohPath: (machineId: string) =>
+              withinContent(
+                () =>
+                  input.runtime.irohPath?.(input.workspaceId, machineId) ??
+                  Promise.resolve('none' as const)
+              ),
+            irohReady: (machineId: string) =>
+              withinContent(() => input.runtime.irohReady!(input.workspaceId, machineId)),
+            irohCall: (
+              machineId: string,
+              envelope: { id: string; frame: string },
+              timeoutMs: number
+            ) =>
+              withinContent(() =>
+                input.runtime.irohCall!(input.workspaceId, machineId, envelope, timeoutMs)
+              ),
+          }
+        : {}),
+      memberRole: {
+        get: verifiedMemberRole,
+        subscribe: (listener: () => void) => {
+          roleListeners.add(listener);
+          return () => {
+            roleListeners.delete(listener);
+          };
+        },
       },
       codeCollabRole: {
         get: codeCollabRole,

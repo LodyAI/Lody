@@ -9,14 +9,16 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
   Result/system-Turn ids include both key parts, never the Session-scoped
   `operationId` alone.
 - Target input creation is fenced by the SQLite item-materialization claim.
-  Acceptance owns new claims; the lease Worker only adopts absent/expired
-  claims. Loro history evidence clears the claim. Before an adopted claim may
-  treat a missing fixed Turn as permission to write, confirm authority: cloud
-  requires remote Streams catch-up (local transport sync is insufficient); OSS
-  uses the daemon repo that owns every MCP write. A failed confirmation is
-  uncertainty and arms the same owned bounded-backoff wake as a materializer
-  error; unrelated SQLite/Meta watch hints must not be the only retry path, and
-  every retry rechecks the fixed user Turn id first.
+  Acceptance owns new claims; the lease Worker adopts absent or expired claims,
+  and clean pre-dispatch transient failures may release their own claim token.
+  Loro history clears claims, and `updateItems` monotonically preserves
+  `inputDurable`. Before replaying a missing Turn, confirm authority: OSS and
+  Cloud same-machine daemon targets flush the authoritative daemon repo
+  ([availability trade-off](../../../../.agents/notes/implemented/architecture/2026-11-21-cloud-same-machine-recovery-authority.md)); remote
+  or cold Cloud targets require Streams catch-up. Materialization runs in scoped
+  `FiberMap` fibers with Effect Clock timeout and bounded concurrency so slow
+  syncs never block unrelated reconciliation; retries arm bounded backoff and
+  recheck the fixed user Turn id first.
 - Successful item completion copies only visible assistant text into an 8 KiB
   `output` preview. The store may further head/tail-bound it to keep the whole
   completion at 64 KiB; preserve both per-output and aggregate omission metadata.
@@ -57,9 +59,16 @@ Root/CLI rules apply; `specs/session-orchestration.md` owns behavior.
 - Receipts coalesce into one intent when idle, unpaused and released; busy Sessions wait
   for normal release. Claim requires a wakeable result and freezes all available members.
   Later arrivals wait; pause, empty queues and duplicates cannot wake.
+- The Inbox continuation prompt and `batchPreview` header only describe the delegated
+  results: what they are, that they are reference data, and where omitted ones are read.
+  They must not tell the agent to review, verify or re-dispatch them, nor to skip doing
+  so: any such instruction steers every batch, and a review request starts another pass.
 - `inbox/service.ts` is native Effect v4. Scope owns its signal/fibers and repository connection;
   one per-Session admission covers Stop, fresh input acceptance and actual transport start.
   Core imports no platform/consumers; registered bridges execute. Submit/settle through execution owners.
+  Retry independent receipts and prepare independent batches even after another fails; retain failed
+  receipts and report the combined Cause without making it a prerequisite for workspace scanning.
+  Shared SQLite BUSY ends that pass and arms one scope-owned asynchronous retry; it never fences explicit admission.
 - Stop pauses queues; legacy Stop cancels execution. Fresh human/
   Agent-chat clears pause; Host `automation` cannot and yields to humans. Never
   revive canceled execution or discard prepared input. Automation release proof

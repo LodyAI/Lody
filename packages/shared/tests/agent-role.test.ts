@@ -11,6 +11,7 @@ import {
   canManageAgentRole,
   formatAgentRoleMentionValue,
   getAgentRoleTargets,
+  reconcileAgentRoleRunConfig,
   resolveAgentRoleMentionValue,
   canReadAgentRole,
   isAgentRoleContentEqual,
@@ -21,9 +22,11 @@ import {
   normalizeAgentRoleMentionSlug,
   normalizeAgentRoleRunConfig,
   resolveAgentRoleAvailability,
+  selectAgentRoleCapability,
   type AgentRole,
   type AgentRoleAvailabilityContext,
 } from '../src/agent-role';
+import type { AcpCapabilityCacheEntry } from '../src/ai';
 import type { AgentConfigId, AgentRoleId, MachineId } from '../src/ids';
 
 const role = (overrides: Partial<AgentRole> = {}): AgentRole => ({
@@ -108,6 +111,178 @@ describe('agent role run config', () => {
       configOptionValues: { thought_level: 'high', fast: true },
     });
   });
+
+  it('reconciles away borrowed per-model options the target model does not support while keeping permission pins', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'custom',
+      agentType: 'antigravity',
+      provenance: 'runtime',
+      modes: [],
+      models: [
+        { modelId: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+        { modelId: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gemini-3.1-pro',
+          options: [
+            { value: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
+            { value: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+          ],
+        },
+        {
+          id: 'mode',
+          name: 'Permission',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'agent-auto-review',
+          options: [
+            { value: 'agent-auto-review', name: 'Agent (Auto Review)' },
+            { value: 'yolo', name: 'YOLO' },
+          ],
+        },
+        {
+          id: 'thought_level',
+          name: 'Thinking Level',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      observedModelConfigOptions: {
+        'gemini-pro-orchestrator': [
+          {
+            id: 'mode',
+            name: 'Permission',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'agent-auto-review',
+            options: [{ value: 'agent-auto-review', name: 'Agent (Auto Review)' }],
+          },
+        ],
+      },
+      fetchedAt: 1,
+    };
+
+    const reconciled = reconcileAgentRoleRunConfig(
+      {
+        modelId: 'gemini-pro-orchestrator',
+        modeId: 'yolo',
+        configOptionValues: {
+          mode: 'yolo',
+          thought_level: 'medium',
+        },
+      },
+      capability
+    );
+    expect(reconciled).toEqual({
+      modelId: 'gemini-pro-orchestrator',
+      modeId: 'yolo',
+      configOptionValues: {
+        mode: 'yolo',
+      },
+    });
+  });
+
+  it('drops effort or fast option keys declared absent on the target model while preserving advertised values', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6.2-sol',
+          options: [
+            { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+            { value: 'no-controls-model', name: 'No Controls' },
+            { value: 'effort-only-model', name: 'Effort Only' },
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+        {
+          id: 'fast-mode',
+          name: 'Speed',
+          category: 'model_config',
+          type: 'select',
+          currentValue: 'off',
+          options: [
+            { value: 'off', name: 'Standard' },
+            { value: 'fast', name: 'Fast' },
+          ],
+        },
+      ],
+      declaredModelControls: {
+        'no-controls-model': {
+          effortValues: [],
+          fastMode: false,
+        },
+        'effort-only-model': {
+          effortValues: ['low'],
+          fastMode: false,
+        },
+      },
+      fetchedAt: 1,
+    };
+
+    expect(
+      reconcileAgentRoleRunConfig(
+        {
+          modelId: 'no-controls-model',
+          configOptionValues: {
+            reasoning_effort: 'high',
+            'fast-mode': 'fast',
+          },
+        },
+        capability
+      )
+    ).toEqual({
+      modelId: 'no-controls-model',
+      configOptionValues: {},
+    });
+
+    expect(
+      reconcileAgentRoleRunConfig(
+        {
+          modelId: 'effort-only-model',
+          configOptionValues: {
+            reasoning_effort: 'xhigh',
+            'fast-mode': 'fast',
+          },
+        },
+        capability
+      )
+    ).toEqual({
+      modelId: 'effort-only-model',
+      configOptionValues: {
+        reasoning_effort: 'xhigh',
+      },
+    });
+  });
 });
 
 describe('agent role visibility', () => {
@@ -189,6 +364,72 @@ it('preserves memory references, revises identity changes, and gates older machi
   expect(
     normalizeAgentRole({ ...configured, runConfig: { memory: { providerId: 'nowledge-mem' } } })
   ).toBeUndefined();
+});
+
+describe('agent role run config availability', () => {
+  const capability = (overrides: Partial<AcpCapabilityCacheEntry> = {}) =>
+    ({
+      agentType: 'codex',
+      cliType: 'builtin',
+      provenance: 'runtime',
+      models: [{ modelId: 'model-new', name: 'New' }],
+      modes: [{ id: 'mode-new', name: 'New' }],
+      fetchedAt: 1,
+      ...overrides,
+    }) as AcpCapabilityCacheEntry;
+  const config = { agentType: 'codex', cliType: 'builtin' } as const;
+  const judged = (entry: AcpCapabilityCacheEntry | undefined, runConfig: AgentRole['runConfig']) =>
+    resolveAgentRoleAvailability(
+      role({ runConfig }),
+      context({ runConfigCapability: () => selectAgentRoleCapability(entry, config) })
+    );
+
+  it('disables a Role whose pinned model the agent stopped offering', () => {
+    expect(judged(capability(), { modelId: 'model-old' })).toEqual({
+      kind: 'unavailable',
+      reason: 'model_unavailable',
+    });
+    expect(judged(capability(), { modelId: 'model-new' })).toEqual({ kind: 'available' });
+  });
+
+  it('disables a Role whose pinned mode or permission is gone', () => {
+    expect(judged(capability(), { modeId: 'mode-old' })).toEqual({
+      kind: 'unavailable',
+      reason: 'mode_unavailable',
+    });
+    expect(
+      judged(
+        capability({
+          configOptions: [
+            {
+              id: 'permission_mode',
+              category: '_permission',
+              type: 'select',
+              options: [{ value: 'ask', name: 'Ask' }],
+            },
+          ] as AcpCapabilityCacheEntry['configOptions'],
+        }),
+        { configOptionValues: { permission_mode: 'yolo' } }
+      )
+    ).toEqual({ kind: 'unavailable', reason: 'mode_unavailable' });
+  });
+
+  it('never judges a pin against capabilities that do not prove it is gone', () => {
+    const pin = { modelId: 'model-old' };
+    expect(judged(undefined, pin)).toEqual({ kind: 'available' });
+    expect(judged(capability({ provenance: undefined }), pin)).toEqual({ kind: 'available' });
+    expect(judged(capability({ models: [], modes: [] }), pin)).toEqual({ kind: 'available' });
+    expect(judged(capability({ agentType: 'claude' }), pin)).toEqual({ kind: 'available' });
+  });
+
+  it('keeps the binding reason ahead of the run config one', () => {
+    expect(
+      resolveAgentRoleAvailability(
+        role({ runConfig: { modelId: 'model-old' } }),
+        context({ onlineMachineIds: new Set(), runConfigCapability: () => capability() })
+      )
+    ).toEqual({ kind: 'unavailable', reason: 'machine_offline' });
+  });
 });
 
 describe('agent role machine targets', () => {

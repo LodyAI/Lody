@@ -45,7 +45,9 @@ as the last applied update.
   is emitted. After the window the current raw state is published.
 - A terminal state (`error`, `disconnected`) is published immediately.
 - `start()` replaces the store, so its `connecting` state bypasses the grace;
-  the new store's empty snapshot must not inherit the old room's authority.
+  an unconfirmed new room must not inherit the old room's authority. Consumers keep
+  the last snapshot until `joined`, as of the
+  [landing selection fix](2026-11-05-landing-selection-presence-churn.md).
 - `stop()` publishes `idle` immediately and clears the timer.
 
 `RuntimeProvider` feeds the display state to `lodyPresenceSyncStateAtom`; the

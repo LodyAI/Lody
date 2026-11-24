@@ -74,7 +74,8 @@ export function getStaticHtmlPreviewLogicalUrl(filePath: string): string {
   return logicalUrl.toString();
 }
 
-/** Non-executable preview for engines without credentialless frames.
+/** Non-executable preview: attachments, engines that may not run preview scripts,
+ * and WebKit/mobile-project HTML until the user explicitly opts in to scripts.
  * Keep CSS and embedded media, but remove document-driven navigation even when
  * activated by a user. The iframe must also have an empty sandbox permission set.
  */

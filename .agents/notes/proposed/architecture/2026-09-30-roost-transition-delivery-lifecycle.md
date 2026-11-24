@@ -8,11 +8,11 @@ Translation: current
 
 ## Abstract
 
-Lody now uses the Lody-owned session backend boundary for both history implementations. New sessions select Roost, while sessions without a persisted discriminator remain pinned to Loro for compatibility. Queue promotion, steer reconciliation, history reads, assistant writes, renderer composition, and backend lifecycle all resolve through the stored session choice. Roost-specific storage and projection stay behind the adapter; callers consume the same logical history contract. Whole-history directory leases, target-aware restoration and a durable renderer read projection now cover the identified user-visible gaps. A synthetic benchmark measured a 7.8x faster latest-window read at 10,000 turns, with higher short-history startup and paging costs; complete product UX equivalence remains unverified.
+Lody now uses the Lody-owned session backend boundary for both history implementations. New sessions default to Loro and select Roost only through the Developer-mode [feature gate](../../implemented/feature/2026-10-08-roost-history-feature-gate.md), while sessions without a persisted discriminator remain pinned to Loro for compatibility. Queue promotion, steer reconciliation, history reads, assistant writes, renderer composition, and backend lifecycle all resolve through the stored session choice. Roost-specific storage and projection stay behind the adapter; callers consume the same logical history contract. Whole-history directory leases, target-aware restoration and a durable renderer read projection now cover the identified user-visible gaps. A synthetic benchmark measured a 7.8x faster latest-window read at 10,000 turns, with higher short-history startup and paging costs; complete product UX equivalence remains unverified.
 
 ## Decision and scope
 
-The product boundary is active without a history migration. Existing sessions without a discriminator continue to use Loro, and new sessions write `historyBackend: 'roost'` before accepting their first turn. The backend choice is immutable for an opened session and is resolved from persisted metadata after restart. Every later history, queue, steer, and assistant-output operation resolves the bound backend; call sites do not branch on Roost versus Loro.
+The product boundary is active without a history migration. Existing sessions without a discriminator continue to use Loro, and a new session writes its `historyBackend` choice before accepting its first turn; that choice is Roost only behind the Developer-mode gate. The backend choice is immutable for an opened session and is resolved from persisted metadata after restart. Every later history, queue, steer, and assistant-output operation resolves the bound backend; call sites do not branch on Roost versus Loro.
 
 The transition must preserve the current product contract:
 
@@ -61,7 +61,7 @@ The selection rules are:
 | Session                                                  | Backend before Roost launch  | Backend after Roost launch                                                    |
 | -------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------- |
 | Existing Loro session                                    | Loro                         | Loro                                                                          |
-| New session                                              | Loro                         | Roost                                                                         |
+| New session                                              | Loro                         | Loro by default; Roost only behind the Developer-mode gate                    |
 | A session created during a failed backend initialization | No partially-created session | No silent mixed backend; creation reports a normal failure and may be retried |
 
 There is no per-message fallback from Roost to Loro. Such a fallback would split one logical conversation across two histories and make queue, steer, and late-output recovery ambiguous. A backend migration, if ever needed, is a separate operation with an explicit snapshot and verification protocol.
@@ -240,7 +240,7 @@ comparison remains a separate measurement activity.
 - Implement Roost history acceptance, durable delivery operation records, assistant segment projection, and recovery behind the same contracts.
 - Validate `businessId` grouping, sealed primary plus late segments, restart recovery at every queue phase, and idempotent steer settlement.
 - Bind the Node owner and renderer bridge through the production factory.
-- New sessions use Roost; legacy sessions without a discriminator remain pinned to Loro.
+- New sessions default to Loro and use Roost only behind the Developer-mode gate; legacy sessions without a discriminator remain pinned to Loro.
 - Treat missing runtime artifacts, owner startup failure, and unsupported backend operations as explicit failures. There is no per-message fallback to Loro.
 
 ## Verification plan
@@ -325,8 +325,8 @@ runtime configuration still use the Loro control plane.
 The owner seed is host configuration (`LODY_ROOST_SEED_HEX`); the adapter does
 not derive it from a user secret. The Node client, owner binary, and database
 path may be overridden with `LODY_ROOST_NODE_CLIENT`, `LODY_ROOST_NODE_OWNER`,
-and `LODY_ROOST_DB_PATH`. New session creation selects Roost, while sessions
-without a discriminator remain on Loro. There is no silent fallback when the
+and `LODY_ROOST_DB_PATH`. New session creation defaults to Loro and selects Roost
+only behind the Developer-mode gate, while sessions without a discriminator remain on Loro. There is no silent fallback when the
 selected Roost runtime cannot start.
 
 The desktop renderer composes Roost `SessionData` through an Electron
@@ -350,13 +350,13 @@ serializable session operation and Roost `forkAndActivate`.
 
 ### Ownership that is fixed now
 
-| Responsibility | Owner |
-| --- | --- |
-| Session metadata, backend discriminator, queue rows, activation pointer, runtime configuration, session status, fork-operation control, and wakeups | Lody control plane (the existing Loro session document and metadata) |
-| Logical message history, physical Roost segments, segment sealing, branch view, history projection, permission responses, and history-local recovery | Roost history adapter |
-| Queue/steer operation identity and recovery phases that span the two stores | `SessionBackend` delivery ledger; the record is durable and backend-owned, never an in-memory MessageHandler map |
-| Provider acceptance or refusal of a steer | ACP/AgentClient; history acceptance alone is not provider delivery evidence |
-| Conversation windows, MCP history, and session orchestration | Existing Lody readers and services through `SessionBackend`/`SessionData`; they never inspect segment IDs |
+| Responsibility                                                                                                                                       | Owner                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Session metadata, backend discriminator, queue rows, activation pointer, runtime configuration, session status, fork-operation control, and wakeups  | Lody control plane (the existing Loro session document and metadata)                                             |
+| Logical message history, physical Roost segments, segment sealing, branch view, history projection, permission responses, and history-local recovery | Roost history adapter                                                                                            |
+| Queue/steer operation identity and recovery phases that span the two stores                                                                          | `SessionBackend` delivery ledger; the record is durable and backend-owned, never an in-memory MessageHandler map |
+| Provider acceptance or refusal of a steer                                                                                                            | ACP/AgentClient; history acceptance alone is not provider delivery evidence                                      |
+| Conversation windows, MCP history, and session orchestration                                                                                         | Existing Lody readers and services through `SessionBackend`/`SessionData`; they never inspect segment IDs        |
 
 The ledger owner is the adapter because the same queue and steer state machine
 must run for Loro and Roost, while the persistence mechanism may differ. Its
@@ -462,8 +462,8 @@ continues to receive one boolean result.
 4. Existing sessions without `historyBackend` remain on Loro. There is no
    migration or per-message fallback.
 
-The current code selects Roost for new sessions and keeps legacy sessions
-pinned to Loro. CLI callers may explicitly request either backend with
+The current code defaults new sessions to Loro, selects Roost only behind the
+Developer-mode gate, and keeps legacy sessions pinned to Loro. CLI callers may explicitly request either backend with
 `session create --history-backend <kind>`; the persisted session discriminator
 wins for an already-open session.
 
@@ -603,10 +603,10 @@ to the visible unsealed assistant. The Roost latest-page path performed one 40-r
 page read and zero full-branch reads at every size.
 
 | Logical turns | Loro readable | Roost readable | Loro older | Roost older | Loro stream | Roost stream |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 8.20 | 43.47 | 0.29 | 31.18 | 0.19 | 3.90 |
-| 1,000 | 68.85 | 61.82 | 0.29 | 35.39 | 0.16 | 4.30 |
-| 10,000 | 795.21 | 101.53 | 0.36 | 41.96 | 0.16 | 4.50 |
+| ------------: | ------------: | -------------: | ---------: | ----------: | ----------: | -----------: |
+|           100 |          8.20 |          43.47 |       0.29 |       31.18 |        0.19 |         3.90 |
+|         1,000 |         68.85 |          61.82 |       0.29 |       35.39 |        0.16 |         4.30 |
+|        10,000 |        795.21 |         101.53 |       0.36 |       41.96 |        0.16 |         4.50 |
 
 At 10,000 turns, the bounded Roost path is about 7.8x faster to a readable latest
 window; its view-only hydration is 3.01 ms versus Loro's 74.26 ms after import.
@@ -643,7 +643,7 @@ the warmed measurements above. This run does not exercise concurrent branch rewr
 - The benchmark runner type-check passed with the CLI configuration; the final run
   used `BENCH_SIZES=100,1000,10000`, two warmups, seven samples, 4 KiB synthetic
   bodies, and the release owner. Roost `cargo fmt --check`, `cargo clippy --locked
-  --all-targets -- -D warnings`, and TypeScript build also passed.
+--all-targets -- -D warnings`, and TypeScript build also passed.
 - Tests and release procedures were excluded by the user and were not run. Local
   commits are recorded in the following checkpoint; no push was performed.
 - The parity changes passed CLI TypeScript, scoped formatting, documentation and
@@ -789,9 +789,10 @@ local source/API checks.
 
 The earlier transition decision made Roost the unconditional default for newly
 created sessions. That default is superseded by the opt-in gate recorded in
-[the Roost history feature-gate note](../feature/2026-10-08-roost-history-feature-gate.md):
+[the Roost history feature-gate note](../../implemented/feature/2026-10-08-roost-history-feature-gate.md):
 Loro is now the shared default, and the renderer writes `historyBackend: 'roost'`
-only when both Experimental features and Roost history are enabled. Persisted
+only when both Developer mode and the Roost history switch are enabled (fact
+correction: [#1578](https://github.com/LodyAI/Lody/pull/1578) moved the gate out of Experimental features). Persisted
 session choices remain immutable, so changing the switch does not change an
 existing conversation. This is a creation-policy revision; the backend
 ownership, logical-history, synchronization, and lifecycle boundaries above are

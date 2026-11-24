@@ -7,7 +7,7 @@ import { LocalPreviewProxyManager } from '@/preview/local-preview-proxy';
 import { ensureBaguetteBinary } from './baguette-binary';
 import { startBaguetteProcess } from './baguette-process';
 import { createSimulatorGateway } from './gateway';
-import { listSimulatorDevices, bootSimulator } from './devices';
+import { listSimulatorDevices, bootSimulator, shutdownSimulator } from './devices';
 import { type SimulatorControlLeases } from './control-leases';
 
 type Dependencies = {
@@ -23,6 +23,7 @@ type Dependencies = {
   now?: () => number;
   list?: typeof listSimulatorDevices;
   boot?: typeof bootSimulator;
+  shutdown?: typeof shutdownSimulator;
   exterior?: typeof readIdleSimulatorExterior;
   binary?: (signal: AbortSignal) => Promise<string>;
   process?: typeof startBaguetteProcess;
@@ -77,6 +78,7 @@ export class IosSimulatorService {
         prepare: (signal) =>
           deps.binary?.(signal) ?? ensureBaguetteBinary(signal, deps.runtimeBaseUrl),
         boot: deps.boot ?? bootSimulator,
+        shutdown: deps.shutdown ?? shutdownSimulator,
         exterior: async (id, signal) => {
           const binary = await (deps.binary?.(signal) ??
             ensureBaguetteBinary(signal, deps.runtimeBaseUrl));
@@ -106,9 +108,12 @@ export class IosSimulatorService {
   async control(
     request: IosSimulatorRequest,
     remote: boolean,
-    authorizeRemote?: () => Promise<unknown>
+    authorizeRemote?: () => Promise<unknown>,
+    isRemoteCurrent?: () => boolean
   ) {
-    return response(await this.core.control(fromRequest(request), remote, authorizeRemote));
+    return response(
+      await this.core.control(fromRequest(request), remote, authorizeRemote, isRemoteCurrent)
+    );
   }
   closeSession(sessionId: string) {
     return this.core.closeSession(sessionId);

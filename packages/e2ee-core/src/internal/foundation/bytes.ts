@@ -7,7 +7,7 @@ import { OwnedBytes } from './owned-bytes';
 
 /** A device's Ed25519 public key (32 bytes); also its device id in hex. */
 export type SigningPublicKey = OwnedBytes<'SigningPublicKey'>;
-/** A nonzero 32-byte X25519 public key; shape validation alone does not establish device membership. */
+/** A canonical, non-low-order 32-byte X25519 public key; shape validation alone does not establish device membership. */
 export type EncryptionPublicKey = OwnedBytes<'EncryptionPublicKey'>;
 /** A 64-byte Ed25519 signature frame; its length alone proves neither validity nor authority. */
 export type Signature = OwnedBytes<'Signature'>;
@@ -24,7 +24,7 @@ export type MembershipId = OwnedBytes<'MembershipId'>;
 export type RequestId = OwnedBytes<'RequestId'>;
 /** A 16-byte stable envelope delivery identifier, reused for retries of the same original. */
 export type DeliveryId = OwnedBytes<'DeliveryId'>;
-/** A 32-byte user identifier; it does not by itself prove an account or membership. */
+/** A 32-byte user identifier encoding an account ID; it does not by itself prove an account or membership. */
 export type UserId = OwnedBytes<'UserId'>;
 /** An unsigned 32-bit integer epoch number; parse with epochNumber before use. */
 export type EpochNumber = number & Brand.Brand<'EpochNumber'>;
@@ -77,14 +77,26 @@ export function signingPublicKey(input: unknown): Result.Result<SigningPublicKey
   });
 }
 
-/** Copy a nonzero 32-byte X25519 key under the current wire policy; does not prove ownership or perform ledger authorization. */
+// Complete canonical low-order Montgomery u-coordinates (the other RFC7748
+// aliases are excluded by the canonical field encoding check below).
+const lowOrderEncryptionKeys = new Set([
+  '00'.repeat(32),
+  '01' + '00'.repeat(31),
+  'e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800',
+  '5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157',
+  'ec' + 'ff'.repeat(30) + '7f',
+]);
+/** Copy a canonical X25519 key and reject every low-order point; this grants no membership or ownership. */
 export function encryptionPublicKey(
   input: unknown
 ): Result.Result<EncryptionPublicKey, ValidationError> {
   return Result.gen(function* () {
     const key = yield* exact('EncryptionPublicKey', 32, input);
-    // Preserve the current wire policy; low-order hardening is a separate change.
-    if (!key.toBytes().some((byte) => byte !== 0)) {
+    const bytes = key.toBytes();
+    let coordinate = 0n;
+    for (let index = 31; index >= 0; index--)
+      coordinate = (coordinate << 8n) | BigInt(bytes[index]!);
+    if (coordinate >= (1n << 255n) - 19n || lowOrderEncryptionKeys.has(keyId(bytes))) {
       return yield* Result.fail(new ValidationError({ code: 'invalid-key' }));
     }
     return key;

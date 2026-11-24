@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act } from 'react';
+import type { ILinkProvider } from '@xterm/xterm';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     customKeyEventHandler?: (event: KeyboardEvent) => boolean;
     selectionChangeHandler?: () => void;
     dataHandler?: (data: string) => void;
+    linkProvider?: ILinkProvider;
   }>,
   fit: vi.fn(),
 }));
@@ -34,6 +34,8 @@ vi.mock('@xterm/addon-fit', () => ({
     fit = mocks.fit;
   },
 }));
+
+vi.mock('../src/lib/native-browser', () => ({ openExternalUrl: vi.fn() }));
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
@@ -62,6 +64,11 @@ vi.mock('@xterm/xterm', () => ({
       mocks.terminalInstances.push(this);
     }
 
+    linkProvider?: ILinkProvider;
+    registerLinkProvider(provider: ILinkProvider) {
+      this.linkProvider = provider;
+      return { dispose: () => { this.linkProvider = undefined; } };
+    }
     loadAddon() {}
     open() {}
     focus() {}

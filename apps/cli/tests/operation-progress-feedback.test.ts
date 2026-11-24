@@ -1,10 +1,9 @@
+import { sessionDocSchema } from '@lody/shared/session-doc-schemas';
 import {
   getSessionRoomId,
-  sessionDocSchema,
   type SessionHistoryInput,
   type SessionId,
-  type StoredLodyOperation,
-} from '@lody/shared';
+  type StoredLodyOperation} from '@lody/shared';
 import { Loro } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
 import { mkdtempSync, rmSync } from 'node:fs';

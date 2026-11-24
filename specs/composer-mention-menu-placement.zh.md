@@ -30,5 +30,5 @@ composer 框之上，且不得越过视口顶部留白。
 - [菜单调用方](../packages/components/src/components/mentions/mention-two-level-menu.tsx)
 - [光标锚点](../packages/components/src/ui/mention/mention-input.tsx)
 - [Composer 定位测试](../packages/components/tests/e2e/composer-mention-placement.spec.ts)
-- [光标锚点测试](../packages/components/tests/mention-ref-stability.test.tsx)
+- [光标落字与输入法测试](../packages/components/tests/e2e/composer-editor.spec.ts)
 - [移动端定位测试](../packages/components/tests/mention-two-level-menu.test.tsx)

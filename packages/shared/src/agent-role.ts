@@ -1,6 +1,21 @@
 import { MemoryBindingSchema, type MemoryBinding } from './memory-provider';
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
 import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
+import { isBuiltinEffortConfigId } from './acp-model-capabilities';
+import { resolveAcpConfigOptionsForModel } from './acp-model-config-options';
+import {
+  ACP_REASONING_EFFORT_CONFIG_ID,
+  getAcpModelEffortChoices,
+  getAcpModelSpeedTiers,
+  isAcpFastModeConfigId,
+  isAcpThoughtLevelConfigOption,
+  summarizeAgentRunConfigCapabilities,
+} from './acp-run-config';
+import {
+  getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
+  type AcpCapabilityCacheEntry,
+} from './ai';
+import type { AgentConfigMeta } from './schema';
 
 /**
  * Agent Role — a named, mentionable preset for *creating* a Session.
@@ -100,10 +115,6 @@ const isFiniteNumber = (value: unknown): value is number =>
 export const isAgentRoleVisibility = (value: unknown): value is AgentRoleVisibility =>
   value === 'private' || value === 'workspace';
 
-// ---------------------------------------------------------------------------
-// Name, emoji, and the mention token derived from them
-// ---------------------------------------------------------------------------
-
 /** Long enough to stay readable inline, short enough not to dominate a prompt. */
 export const AGENT_ROLE_MENTION_SLUG_MAX_LENGTH = 40;
 export const AGENT_ROLE_NAME_MAX_LENGTH = 60;
@@ -131,6 +142,25 @@ export const AGENT_ROLE_EMOJI_MAX_LENGTH = 8;
  */
 export const getAgentRoleMentionSlug = (role: Pick<AgentRole, 'name'>): string =>
   normalizeAgentRoleMentionSlug(role.name);
+
+/**
+ * The `@` token for one target of a Role.
+ *
+ * A single-target Role is mentioned by its name. On several machines each
+ * target is its own mention — the alias, or the name and machine — so the
+ * token names where the work runs. Settings shows this exact token beside each
+ * machine, and the composer completes it, so the two can never disagree.
+ */
+export const getAgentRoleTargetMentionSlug = (input: {
+  roleName: string;
+  alias?: string;
+  machineName: string;
+  multiTarget: boolean;
+}): string =>
+  input.multiTarget
+    ? normalizeAgentRoleMentionSlug(input.alias || `${input.roleName} ${input.machineName}`) ||
+      normalizeAgentRoleMentionSlug(input.roleName)
+    : normalizeAgentRoleMentionSlug(input.roleName);
 
 /**
  * Normalize a name into a token the composer can carry.
@@ -178,10 +208,6 @@ export const normalizeAgentRoleEmoji = (value: unknown): string | undefined => {
   const capped = Array.from(stripped).slice(0, AGENT_ROLE_EMOJI_MAX_LENGTH).join('');
   return capped || undefined;
 };
-
-// ---------------------------------------------------------------------------
-// Run config
-// ---------------------------------------------------------------------------
 
 /**
  * Option keys a Role may never persist.
@@ -239,6 +265,64 @@ export const normalizeAgentRoleRunConfig = (value: unknown): AgentRoleRunConfig 
 };
 
 /**
+ * Reconciles a Role's `runConfig` against a runtime capability schema.
+ *
+ * Only removes non-permission option keys that the target model's schema
+ * provably does not offer (either from its own observed/snapshot option list or
+ * from per-model control declarations). Values of advertised fields, model pins,
+ * and permission/approval/sandbox pins remain untouched.
+ */
+export const reconcileAgentRoleRunConfig = (
+  runConfig: AgentRoleRunConfig,
+  capability: AcpCapabilityCacheEntry
+): AgentRoleRunConfig => {
+  if (capability.provenance !== 'runtime' || !capability.configOptions) return runConfig;
+  const resolved = resolveAcpConfigOptionsForModel(
+    capability.configOptions,
+    capability.observedModelConfigOptions,
+    runConfig.modelId
+  );
+  const effectiveOptions = resolved.configOptions ?? capability.configOptions;
+  const advertised = new Set(effectiveOptions.map((option) => option.id));
+  const modelSchemaKnown = resolved.source !== 'borrowed';
+  const targetEfforts = getAcpModelEffortChoices(capability, runConfig.modelId);
+  const targetSpeedTiers = getAcpModelSpeedTiers(capability, runConfig.modelId);
+  const snapshotEffortOptionIds = new Set(
+    capability.configOptions.filter(isAcpThoughtLevelConfigOption).map((option) => option.id)
+  );
+  const values = { ...runConfig.configOptionValues };
+  let changed = false;
+  const hasPlan = effectiveOptions.some(
+    (option) => option.id === 'plan_mode' && option.type === 'boolean'
+  );
+  if (hasPlan && values.plan_mode === undefined) {
+    const legacy = !advertised.has('collaboration_mode') ? values.collaboration_mode : undefined;
+    if (legacy === 'plan' || legacy === 'default') values.plan_mode = legacy === 'plan';
+    else if (!advertised.has('interaction_mode') && values.interaction_mode === 'plan') {
+      values.plan_mode = true;
+    }
+  }
+  for (const key of Object.keys(values)) {
+    if (/(permission|approval|sandbox)/i.test(key) || key === 'mode') continue;
+    const isEffortKey =
+      snapshotEffortOptionIds.has(key) ||
+      key === ACP_REASONING_EFFORT_CONFIG_ID ||
+      isBuiltinEffortConfigId(key);
+    const provablyUnsupportedModelControl =
+      (isEffortKey && targetEfforts?.length === 0) ||
+      (isAcpFastModeConfigId(key) && targetSpeedTiers?.length === 0);
+    if (advertised.has(key) && !provablyUnsupportedModelControl) continue;
+    const retiredPlanField =
+      hasPlan && (key === 'collaboration_mode' || key === 'interaction_mode');
+    if (!modelSchemaKnown && !retiredPlanField && !provablyUnsupportedModelControl) continue;
+    delete values[key];
+    changed = true;
+  }
+  if (!changed) return runConfig;
+  return { ...runConfig, configOptionValues: values };
+};
+
+/**
  * Stable serialization of a run config, so two configs that differ only in the
  * order their option keys were authored in do not read as an edit — which would
  * bump `revision` even though the effective Role configuration is unchanged.
@@ -258,10 +342,6 @@ const serializeRunConfig = (value: AgentRoleRunConfig): string => {
 
 const runConfigsEqual = (left: AgentRoleRunConfig, right: AgentRoleRunConfig): boolean =>
   serializeRunConfig(left) === serializeRunConfig(right);
-
-// ---------------------------------------------------------------------------
-// Role validation
-// ---------------------------------------------------------------------------
 
 const isStoredRunConfig = (value: unknown): boolean =>
   value === undefined ||
@@ -538,10 +618,6 @@ export const isAgentRoleContentEqual = (left: AgentRole, right: AgentRole): bool
   );
 };
 
-// ---------------------------------------------------------------------------
-// Visibility and ownership
-// ---------------------------------------------------------------------------
-
 /**
  * The authoritative trusted-UI discovery rule for Settings and the mention menu.
  */
@@ -557,16 +633,14 @@ export const listAccessibleAgentRoles = (
   userId: string | null | undefined
 ): AgentRole[] => roles.filter((role) => canReadAgentRole(role, userId));
 
-// ---------------------------------------------------------------------------
-// Availability
-// ---------------------------------------------------------------------------
-
 export type AgentRoleUnavailableReason =
   | 'memory_unsupported'
   | 'machine_unknown'
   | 'machine_offline'
   | 'agent_config_missing'
-  | 'agent_config_machine_mismatch';
+  | 'agent_config_machine_mismatch'
+  | 'model_unavailable'
+  | 'mode_unavailable';
 
 export type AgentRoleAvailability =
   | { kind: 'available' }
@@ -588,6 +662,60 @@ export type AgentRoleAvailabilityContext = {
    * falling back to another config.
    */
   loadedAgentConfigMachineIds: ReadonlySet<MachineId>;
+  /**
+   * What the Role's bound agent provably offers. Undefined means the pins cannot
+   * be judged, which leaves the Role available: `selectAgentRoleCapability`.
+   */
+  runConfigCapability?: (role: AgentRole) => AcpCapabilityCacheEntry | undefined;
+};
+
+/**
+ * A capability entry that can prove a pin is gone: a runtime probe of this exact
+ * agent that lists something. Saved model and permission pins outlive provider
+ * updates on purpose, so a static default or an empty probe disabling a working
+ * Role would be worse than the dispatch error it tried to prevent.
+ */
+export const selectAgentRoleCapability = (
+  entry: AcpCapabilityCacheEntry | undefined,
+  config: Pick<AgentConfigMeta, 'agentType' | 'cliType' | 'runtimeOverrides'>
+): AcpCapabilityCacheEntry | undefined => {
+  const readable = getReadableAcpCapabilityCacheEntryForRuntimeOverrides(
+    entry,
+    config.runtimeOverrides
+  );
+  if (
+    readable?.provenance !== 'runtime' ||
+    readable.agentType !== config.agentType ||
+    readable.cliType !== config.cliType
+  ) {
+    return undefined;
+  }
+  const { models, modes } = summarizeAgentRunConfigCapabilities(readable);
+  return models.length > 0 || modes.length > 0 ? readable : undefined;
+};
+
+/** Which saved pin the agent no longer offers; dispatch would reject the same one. */
+export const findAgentRoleRunConfigIssue = (
+  role: Pick<AgentRole, 'runConfig'>,
+  capability: AcpCapabilityCacheEntry
+): Extract<AgentRoleUnavailableReason, 'model_unavailable' | 'mode_unavailable'> | undefined => {
+  const { modelId, modeId, configOptionValues } = role.runConfig;
+  const { models } = summarizeAgentRunConfigCapabilities(capability);
+  if (modelId && !models.some((model) => model.id === modelId)) return 'model_unavailable';
+  // A Role pins permission as `modeId` (legacy modes or a `mode` option) or as
+  // the value of the agent's `_permission` option, e.g. Grok's `permission_mode`.
+  // Check each pin against the knob that carries it.
+  const modeOption = capability.configOptions?.find((option) => option.category === 'mode');
+  const modeOffered = modeOption
+    ? modeOption.options.some((option) => option.value === modeId)
+    : capability.modes.some((mode) => mode.id === modeId);
+  if (modeId && !modeOffered) return 'mode_unavailable';
+  const permissionGone = (capability.configOptions ?? []).some((option) => {
+    if (option.category !== '_permission') return false;
+    const value = configOptionValues?.[option.id];
+    return value !== undefined && !option.options.some((candidate) => candidate.value === value);
+  });
+  return permissionGone ? 'mode_unavailable' : undefined;
 };
 
 export const resolveAgentRoleAvailability = (
@@ -612,5 +740,7 @@ export const resolveAgentRoleAvailability = (
   }
   if (role.runConfig.memory && !context.memoryProviderMachineIds?.has(role.machineId))
     return { kind: 'unavailable', reason: 'memory_unsupported' };
-  return { kind: 'available' };
+  const capability = context.runConfigCapability?.(role);
+  const issue = capability && findAgentRoleRunConfigIssue(role, capability);
+  return issue ? { kind: 'unavailable', reason: issue } : { kind: 'available' };
 };

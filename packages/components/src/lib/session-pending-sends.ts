@@ -12,7 +12,7 @@ export type PendingSessionSend = UserTurnSend & {
   /** The user turn id (`entry.id`). */
   id: string;
   workspaceId: string;
-  /** Machine that runs the conversation; decides the same-machine image fallback. */
+  /** Machine that runs the conversation; selects local preparation or transfer. */
   targetMachineId?: MachineId;
   attachments: SessionAttachmentDraft[];
   /** Set when preparation or the local write failed; blocks the conversation's FIFO. */
@@ -41,6 +41,8 @@ export type PendingSessionSendsPorts = {
 };
 
 export type PendingSessionSends = ReturnType<typeof createPendingSessionSends> & {
+  /** Admission may skip cloud attachment proof only for a known native local target. */
+  canPrepareAttachmentsLocally?: (machineId: MachineId) => boolean;
   acknowledgeLanded?: (ids: Iterable<string>) => Promise<void>;
   resume?: () => Promise<void>;
   /** The input coordinator keeps delivery ownership after its visible row is gone. */

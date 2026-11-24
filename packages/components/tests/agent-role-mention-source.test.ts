@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it, vi } from 'vitest';
@@ -9,13 +7,19 @@ import {
   applyTextRewrites,
   resolveAgentRoleAvailability,
   type AgentConfigId,
+  type AgentConfigMeta,
   type AgentRole,
   type AgentRoleId,
   type LocalProjectId,
   type MachineId,
+  type MachineViewMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import { buildAgentRoleCandidates } from '../src/components/mentions/mention-registry';
+import {
+  AGENT_ROLE_UNAVAILABLE_REASON_KEYS,
+  createAgentRoleCapabilityResolver,
+} from '../src/lib/composer-agent-roles';
 import {
   buildAgentRoleMentionItems,
   buildAgentRoleMentionPrompt,
@@ -167,6 +171,62 @@ describe('agent role availability in mentions', () => {
 });
 
 describe('agent role menu rows', () => {
+  it('explains and blocks a Role whose agent retired its pinned model', () => {
+    const stale = role({ runConfig: { modelId: 'model-old' } });
+    const machine = {
+      name: 'MacBook',
+      acpCapabilities: {
+        'config-1': {
+          agentType: 'codex',
+          cliType: 'builtin',
+          provenance: 'runtime',
+          models: [{ modelId: 'model-new', name: 'New' }],
+          modes: [],
+          fetchedAt: 1,
+        },
+      },
+    } as unknown as MachineViewMeta;
+    const config = {
+      id: 'config-1',
+      name: 'Codex',
+      agentType: 'codex',
+      cliType: 'builtin',
+      machineId,
+    } as AgentConfigMeta;
+    const list = buildAgentRoleMentionItems([stale], {
+      availability: (entry) =>
+        resolveAgentRoleAvailability(entry, {
+          authorizedMachineIds: new Set([machineId]),
+          onlineMachineIds: new Set([machineId]),
+          agentConfigMachineIds: new Map([[config.id, machineId]]),
+          loadedAgentConfigMachineIds: new Set([machineId]),
+          runConfigCapability: createAgentRoleCapabilityResolver(
+            [config],
+            new Map([[machineId, machine]])
+          ),
+        }),
+      machine: () => machine,
+      agentConfig: () => config,
+    });
+    const [candidate] = buildAgentRoleCandidates(list, '', undefined, ({ availability }) =>
+      availability.kind === 'unavailable'
+        ? AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]
+        : undefined
+    );
+    expect(candidate).toMatchObject({
+      disabled: true,
+      subtitle: 'settings.agentRoles.unavailable.modelUnavailable',
+      subtitleTone: 'warning',
+    });
+    expect(
+      buildAgentRoleMentionRewrites(
+        '@Code-Reviewer',
+        [{ start: 0, end: 14, kind: 'agent_role', value: 'role-1' }],
+        list
+      )
+    ).toEqual([]);
+  });
+
   it.each([{ kind: 'unknown' }, { kind: 'unavailable', reason: 'machine_offline' }] as const)(
     'disables unavailable/loading rows and carries the reason below the title',
     (availability) => {
@@ -193,7 +253,7 @@ describe('agent role before-send expansion', () => {
   const text = 'please @Code-Reviewer this diff';
   const mention = { start: 7, end: 21, kind: 'agent_role', value: 'role-1' };
 
-  it('rewrites the range into an id-bearing instruction and keeps the chip label', () => {
+  it('rewrites the range into an id-bearing reference and keeps the chip label', () => {
     const expanded = applyTextRewrites(
       text,
       buildAgentRoleMentionRewrites(text, [mention], items(role()))
@@ -265,6 +325,42 @@ describe('a role on several machines', () => {
     expect(rows[1]?.role).toMatchObject({ machineId: 'machine-2', agentConfigId: 'config-2' });
   });
 
+  it('shows in settings the exact @ token the composer completes for each machine', async () => {
+    const { AgentRoleForm } = await import('../src/components/settings/agent-role-form');
+    const { buildAgentRoleFormValue } = await import('../src/lib/agent-role-form');
+    const { initI18n } = await import('../src/i18n');
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(AgentRoleForm, {
+          value: { ...buildAgentRoleFormValue(multi), activeMachineId: null },
+          onChange: () => undefined,
+          machines: Object.entries(names).map(([id, label]) => ({
+            machineId: id as MachineId,
+            label,
+            online: true,
+          })),
+          agentConfigs: [],
+          selectorOptions: null,
+          issues: [],
+          errors: [],
+          onSubmit: () => undefined,
+          onCancel: () => undefined,
+        })
+      );
+    });
+    const shown = [...container.querySelectorAll('[data-machine-id]')].map((row) => [
+      row.getAttribute('data-machine-id'),
+      row.textContent?.match(/@\S+/u)?.[0],
+    ]);
+    expect(shown).toEqual(targetItems().map((item) => [item.role.machineId, `@${item.slug}`]));
+    act(() => root.unmount());
+    container.remove();
+  });
+
   it("puts the composer's own machine first", () => {
     expect(targetItems('machine-2' as MachineId).map((item) => item.value)).toEqual([
       'role-1@machine-2',
@@ -272,7 +368,7 @@ describe('a role on several machines', () => {
     ]);
   });
 
-  it('names the picked machine in the instruction and on the frozen span', () => {
+  it('names the picked machine in the reference and on the frozen span', () => {
     const text = 'ask @Reviewer-Linux';
     const rewrites = buildAgentRoleMentionRewrites(
       text,
@@ -280,7 +376,7 @@ describe('a role on several machines', () => {
       targetItems()
     );
     expect(rewrites[0]?.replacement).toBe(
-      'use lody mcp to create a session with agent role[id: role-1, agentRoleMachineId: machine-2, name: Code Reviewer]'
+      '[Agent Role: Code Reviewer (agentRoleId: role-1, agentRoleMachineId: machine-2)]'
     );
     expect(rewrites[0]?.span?.target).toBe('role-1@machine-2');
     // A bare id from an older draft names no machine: it stays plain text.

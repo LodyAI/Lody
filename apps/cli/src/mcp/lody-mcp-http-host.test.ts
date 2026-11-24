@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type http from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
@@ -135,6 +138,35 @@ describe('MCP HTTP host wire behavior', () => {
     });
   };
 
+  it.each([undefined, '/synthetic/explicit.sock'])(
+    'accepts HTTP MCP context without daemon metadata on Windows (override=%s)',
+    async (override) => {
+      const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-mcp-http-direct-'));
+      vi.stubEnv('LODY_DATA_DIR', directory);
+      vi.stubEnv('LODY_MCP_SOCKET_PATH', override ?? '');
+      try {
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        vi.spyOn(scheduleCommands, 'sendDaemonScheduleCommand').mockImplementation(async () => ({
+          context: __lodyMcpServerInternals.getSessionContext(),
+        }));
+        const response = await callTool('2026-07-28', 'session-direct', 'lody_catalog', {
+          action: 'schedules',
+        });
+        expect(response.status).toBe(200);
+        const payload = await response.json();
+        expect(payload.result.isError).not.toBe(true);
+        const result = JSON.parse(payload.result.content[0].text);
+        expect(result.context.sessionId).toBe('session-direct');
+        expect(result.context.localControlSocketPath).toBe(override);
+      } finally {
+        if (descriptor) Object.defineProperty(process, 'platform', descriptor);
+        vi.unstubAllEnvs();
+        fs.rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
   it.each(['2025-06-18', '2026-07-28'])(
     'isolates concurrent contexts and survives an aborted %s request',
     async (version) => {
@@ -158,12 +190,21 @@ describe('MCP HTTP host wire behavior', () => {
         }
       );
       const abort = new AbortController();
-      const requestA = callTool(version, 'session-a', 'lody_schedule_list', {}, abort.signal);
+      const requestA = callTool(
+        version,
+        'session-a',
+        'lody_catalog',
+        { action: 'schedules' },
+        abort.signal
+      );
       // Observe rejection immediately so an abort never becomes unhandled.
       const aborted = expect(requestA).rejects.toMatchObject({ name: 'AbortError' });
       try {
         await startedA.promise;
-        const requestB = callTool(version, 'session-b', 'lody_schedule_list', { query: 'second' });
+        const requestB = callTool(version, 'session-b', 'lody_catalog', {
+          action: 'schedules',
+          arguments: { query: 'second' },
+        });
         await startedB.promise;
         abort.abort();
         await aborted;
@@ -191,11 +232,14 @@ describe('MCP HTTP host wire behavior', () => {
           before: context,
           after: context,
         });
-        const next = await callTool(version, 'session-c', 'lody_schedule_propose', {
-          requestId: 'proposal-c',
-          title: '  Trimmed title  ',
-          prompt: 'Synthetic task',
-          rule: { kind: 'manual' },
+        const next = await callTool(version, 'session-c', 'lody_schedule', {
+          action: 'propose',
+          arguments: {
+            requestId: 'proposal-c',
+            title: '  Trimmed title  ',
+            prompt: 'Synthetic task',
+            rule: { kind: 'manual' },
+          },
         });
         const nextPayload = await next.json();
         expect(nextPayload.result.isError).not.toBe(true);
@@ -217,17 +261,31 @@ describe('MCP HTTP host wire behavior', () => {
     'retains shared schema validation on the %s wire',
     async (version) => {
       const cases: [string, Record<string, unknown>][] = [
-        ['lody_schedule_list', { limit: 0 }],
-        ['lody_schedule_get', { scheduleId: 'bad/id' }],
-        ['lody_schedule_pause', { scheduleId: 'valid', requestId: '' }],
+        ['lody_catalog', { action: 'schedules', arguments: { limit: 0 } }],
+        ['lody_catalog', { action: 'schedules', arguments: { scheduleId: 'bad/id' } }],
+        ['lody_schedule', { action: 'pause', arguments: { scheduleId: 'valid', requestId: '' } }],
         [
-          'lody_schedule_propose',
-          { requestId: 'valid', title: '   ', prompt: 'task', rule: { kind: 'manual' } },
+          'lody_schedule',
+          {
+            action: 'propose',
+            arguments: {
+              requestId: 'valid',
+              title: '   ',
+              prompt: 'task',
+              rule: { kind: 'manual' },
+            },
+          },
         ],
-        ['lody_agent_config_get', { id: '  ' }],
-        ['lody_agent_role_get', { id: 'valid', unexpected: true }],
-        ['lody_session_share', { requestId: 'valid', purpose: 'share', workspaceId: 'other' }],
-        ['lody_operation_batch_get', { batchId: 'not-a-uuid' }],
+        ['lody_catalog', { action: 'agent_configs', arguments: { id: '  ' } }],
+        ['lody_catalog', { action: 'agent_roles', arguments: { id: 'valid', unexpected: true } }],
+        [
+          'lody_session_manage',
+          {
+            action: 'share',
+            arguments: { requestId: 'valid', purpose: 'share', workspaceId: 'other' },
+          },
+        ],
+        ['lody_operation', { action: 'batch', arguments: { batchId: 'not-a-uuid' } }],
       ];
       for (const [name, args] of cases) {
         const response = await callTool(version, 'validation-session', name, args);

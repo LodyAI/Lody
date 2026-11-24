@@ -20,7 +20,7 @@ and are recorded below. Combobox ships with no in-repo caller.
 
 ## Problem
 
-`packages/components/src/ui/select.tsx` was Radix with Tailwind classes reaching
+The deleted Radix `select.tsx` (now `packages/ui/src/field/select.tsx`) was built with Tailwind classes reaching
 for a vocabulary the token rules do not have: `border-input-border`,
 `bg-popover`, `focus:ring-1 focus:ring-ring`, `shadow-md`, `bg-hover` and a
 `rounded-xs` row inside a `rounded-md` popup. Twelve files imported it. Its
@@ -75,7 +75,7 @@ against 0.256 in Vesper: the same step in both directions.
 a flag, so `@lody/ui` needs no knowledge of which modal implementation a host
 uses. `@lody/components`' `DialogContent` names its own panel once, and every
 Select and Combobox under it mounts inside the panel. Without it a Base UI list
-portalled to the body is *outside* the Radix dialog: the dialog's focus scope
+portalled to the body is _outside_ the Radix dialog: the dialog's focus scope
 drags focus back the moment the list opens, and its scroll lock swallows the
 wheel before the list sees it.
 
@@ -155,7 +155,7 @@ or the product was opened in Chromium.
 ## Correction: four more the board found after review
 
 The slice was opened for review with the board looking right at rest. Pulling it
-down and *clicking* the controls found four more, all of them the same class of
+down and _clicking_ the controls found four more, all of them the same class of
 bug as the three above — a popup is not where it was written, so anything that
 depends on where it is breaks quietly.
 

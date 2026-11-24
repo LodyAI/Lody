@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
@@ -34,9 +34,38 @@ async function root() {
   return d;
 }
 describe('Magpie runtime preparation', () => {
+  it('exposes only installed Magpie skills, preserves local entries and removes stale links', async () => {
+    const home = await root();
+    const directory = join(home, 'magpie');
+    const native = join(home, '.codex', 'skills');
+    for (const name of ['magpie-skills', 'magpie-setup', 'private-skill']) {
+      await mkdir(join(native, name), { recursive: true });
+      await writeFile(join(native, name, 'SKILL.md'), name);
+    }
+    const launch = () =>
+      prepareMagpieRuntime('codex', gateway, undefined, directory, fetcher, home);
+    const skills = join((await launch()).env.CODEX_HOME!, 'skills');
+    expect((await readdir(skills)).sort()).toEqual(['magpie-setup', 'magpie-skills']);
+    expect(await readFile(join(skills, 'magpie-skills/SKILL.md'), 'utf8')).toBe('magpie-skills');
+    await rm(join(skills, 'magpie-setup'));
+    await mkdir(join(skills, 'magpie-setup'));
+    await writeFile(join(skills, 'magpie-setup/SKILL.md'), 'user-owned');
+    await rm(native, { recursive: true });
+    await launch();
+    expect(await readdir(skills)).toEqual(['magpie-setup']);
+    expect(await readFile(join(skills, 'magpie-setup/SKILL.md'), 'utf8')).toBe('user-owned');
+  });
+
   it('produces isolated usable Codex and Pi profiles from the gateway catalog', async () => {
     const directory = await root();
-    const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, fetcher);
+    const codex = await prepareMagpieRuntime(
+      'codex',
+      gateway,
+      undefined,
+      directory,
+      fetcher,
+      directory
+    );
     const config = JSON.parse(codex.env.CODEX_CONFIG ?? '{}');
     expect(config.model_provider).toBe('magpie');
     expect(config.model_catalog_json).toBeUndefined();
@@ -119,6 +148,79 @@ describe('Magpie runtime preparation', () => {
     });
     expect(Object.keys(g.model as object)).toEqual([selected, 'magpie/second/model']);
   });
+  it('accepts unbounded vendor metadata and scopes Grok to its own ladder', async () => {
+    const directory = await root();
+    const catalog: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({
+            data: [
+              {
+                id: 'auto/group-free',
+                reasoning: true,
+                supported_reasoning_levels: [
+                  { effort: 'light' },
+                  { effort: 'balanced' },
+                  { effort: 'deep' },
+                ],
+              },
+              {
+                id: 'vendor/wide-model',
+                display_name: 'w'.repeat(300),
+                context_window: 200_000_000,
+                supported_reasoning_levels: [
+                  '',
+                  ...Array.from({ length: 19 }, (_, i) => `tier-${i}`),
+                  'high',
+                ].map((effort) => ({ effort })),
+                modalities: {
+                  input: ['text', 'audio', 'video', 'pdf', 'file', 'csv', 'docx', 'xlsx', 'image'],
+                },
+              },
+              {
+                id: 'vendor/free-model',
+                reasoning: true,
+                supported_reasoning_levels: [
+                  { effort: 'disabled' },
+                  { effort: 'low' },
+                  { effort: 'medium' },
+                  { effort: 'high' },
+                ],
+              },
+            ],
+          })
+        : fetcher(input, init);
+    expect(await readMagpieModels(gateway, undefined, catalog)).toHaveLength(3);
+    const kimi = await prepareMagpieRuntime('kimi', gateway, undefined, directory, catalog);
+    const k = parseToml(await readFile(join(kimi.env.KIMI_CODE_HOME!, 'config.toml'), 'utf8'));
+    expect(k).toMatchObject({
+      models: {
+        'magpie/auto/group-free': {
+          support_efforts: ['light', 'balanced', 'deep'],
+          default_effort: 'light',
+          capabilities: ['tool_use', 'thinking'],
+        },
+        'magpie/vendor/free-model': {
+          support_efforts: ['disabled', 'low', 'medium', 'high'],
+          default_effort: 'medium',
+        },
+        'magpie/vendor/wide-model': {
+          max_context_size: 200_000_000,
+          capabilities: ['tool_use', 'image_in', 'thinking'],
+          support_efforts: [...Array.from({ length: 19 }, (_, i) => `tier-${i}`), 'high'],
+          default_effort: 'tier-0',
+        },
+      },
+    });
+    const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, catalog);
+    const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
+    const grokModels = g.model as Record<string, Record<string, unknown>>;
+    // Vendor words stay out of Grok's picker; its own ladder is kept.
+    expect(grokModels['magpie/auto/group-free']).not.toHaveProperty('reasoning_efforts');
+    expect(grokModels['magpie/vendor/free-model']).toMatchObject({
+      reasoning_efforts: ['low', 'medium', 'high'],
+    });
+    expect(grokModels['magpie/vendor/wide-model']).toMatchObject({ reasoning_efforts: ['high'] });
+  });
   it('configures Bub through its native OpenAI environment without enabling fallback models', async () => {
     const directory = await root();
     vi.stubEnv('NO_PROXY', 'corp.internal');
@@ -172,7 +274,14 @@ describe('Magpie runtime preparation', () => {
       'bare/model',
       'vision/model',
     ]);
-    const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, mixed);
+    const codex = await prepareMagpieRuntime(
+      'codex',
+      gateway,
+      undefined,
+      directory,
+      mixed,
+      directory
+    );
     expect(
       JSON.parse(codex.env.CODEX_CONFIG ?? '{}').model_providers.magpie.model_catalog_url
     ).toBe(`${gateway}/v1/codex/models?agent=lody`);

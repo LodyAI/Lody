@@ -1,5 +1,5 @@
+import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import {
-  ScheduleRepository,
   scheduleDefinitionFingerprint,
   type SessionId,
   type WorkspaceId,

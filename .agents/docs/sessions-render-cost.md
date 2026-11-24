@@ -22,6 +22,20 @@ this page is the full text of the rules summarised there.
   their shared close or leaving the root session. The root controller also owns
   the toolbar; a pending fork target can mount before selection to report readiness.
   URL selection remains synchronous and is never mirrored in an Effect.
+- Retained chat surfaces release optional history-fact and complete-directory leases
+  when hidden, including document visibility changes. Reopening reuses unchanged facts;
+  deferred backfill yields before its first hydration batch. Hidden edits invalidate
+  facts without deriving bodies. Disabled directory hooks retain their snapshot without
+  scanning on incidental renders. Independent visible consumers retain their own leases.
+- Loro display projections reuse unchanged item arrays and item values through weak,
+  bounded caches. Content events refresh reported item positions. Append-only deltas
+  extend cached membership; other list edits rebuild membership while reusing unchanged
+  item values. Changed container ancestry invalidates values even when items move.
+  Pending local operations invalidate the cached projection. Complete stored
+  reads and writes never use these display caches.
+- Hydration and live replacement yield between body reads after an elapsed work budget
+  of 4 ms, in addition to turn/item limits. Asynchronous reads still launch concurrently;
+  a single synchronous Loro import or body conversion remains indivisible.
 - Each mounted chat surface keeps a stable imperative ref. Event wrappers for
   browser, simulator, fork, annotation submission, comments, PR/changes and session
   navigation read the latest committed handlers. Toolbar objects and slots retain
@@ -68,19 +82,18 @@ readiness requirement.
 
 ## Desktop windows
 
-`MainLayout` uses one Web Lock per workspace for completion notifications, dock
-badge, PR auto-archive and Task status checks. The lock releases on renderer exit;
-Task Index stays mounted in every workspace window because visible Tasks pages
-also consume it. Sidebar hiding unmounts the sidebar subtree and disables the
+`MainLayout` uses one Web Lock per workspace for completion notifications, the
+dock badge and Agent Role schema reconciliation. The lock releases on renderer
+exit. Sidebar hiding unmounts the sidebar subtree and disables the
 runtime eager-sync environment until it is shown again. Current Session sync is
 independent of that prefetch gate. See [window behavior](../../specs/desktop-windows.zh.md).
 
 Background prefetch does not materialize UI stores. The workspace runtime sends
 room identity and transport configuration to `eager-sync-worker-client.ts`; one
 disposable worker at a time imports/syncs a raw Loro Doc and persists a snapshot.
-The worker sends only completion status back, and retains no warm Doc or Mirror.
+The Worker entry registers its message handler before lazily importing the WASM task, so an immediate start message survives initialization. The worker sends only completion status back, and retains no warm Doc or Mirror.
 The independent IndexedDB cache holds at most 128 MiB / 64 snapshots; each row
-atomically stores binary state and its activity checkpoint. Before constructing a
+atomically stores binary state, its activity checkpoint and, for cloud downloads, a versioned stream cursor with the snapshot version vector. Older rows without a cursor remain snapshot-only inputs. The database schema stays at version 1; adding the optional field requires no blocked upgrade. Before constructing a
 worker (and its Loro WASM), the parent checks that checkpoint and skips already
 covered activity; the worker checks it again for cross-window races. Cache keys
 use workspace plus room, so auxiliary windows reuse rather than duplicate rows.
@@ -91,17 +104,29 @@ Foreground store creation cancels that room's prefetch, reads a completed
 snapshot, and merges it into the renderer's own document before creating its
 Mirror. Existing cached UI stores are excluded from prefetch so a background
 result cannot silently leave their in-memory state stale. The main repo and its
-unsent writes remain separate.
+unsent writes remain separate. Cloud workers use one-shot `catchup()` with a task-local
+cursor store and never append or upload snapshots. A failed or interrupted task keeps
+the previous complete cache row. Unresolved imports cannot advance activity progress.
+
+Cold foreground loads can copy a covered cloud checkpoint after the merged document
+is durable, including when disk already contains the cached snapshot. Scope, room,
+plaintext mode, snapshot version and the mounted transport's exact stream URL must
+agree. Web Locks serialize conditional insertion with regular cursor writes across
+tabs sharing a database; an existing UI cursor is never replaced. Missing Web Locks,
+cache errors or failed adoption leave normal bootstrap available. Live documents
+never adopt cached progress. The cursor stores remain independent: the worker never
+opens a foreground database. See the [ownership decision](../notes/implemented/architecture/2026-09-12-session-prefetch-worker.md).
 
 The coordinator uses concurrency/batch size 1, with 1.5-second batch cooldowns on
 desktop/web and 3 seconds on mobile. A renderer-wide queue also serializes runtime
 instances across workspace transitions; separate windows each have their own slot
-but share workspace cache rows. Cancellation kills the worker even during
+but share workspace cache rows. A twenty-second task deadline reports failure and releases the serial slot; dependency-incomplete catch-up also fails without updating the cache. Cancellation kills the worker even during
 synchronous WASM work, and the parent withdraws its local peer. Local targets use
 the existing local readiness plane; remote targets use the same configured Streams
 endpoint as the mounted foreground transport. This isolates background
-materialization from UI execution, but does not remove foreground full-history
-import/Mirror cost or daemon-side document loading.
+materialization from UI execution, but does not remove foreground document import,
+history projection cost or daemon-side document loading. The control-plane Mirror
+excludes history.
 
 Intent: [background prefetch](../../specs/session-background-prefetch.zh.md).
 

@@ -1,7 +1,12 @@
 import type { SessionId } from '@lody/shared';
+import { lazy, Suspense } from 'react';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { AppThemeShell } from '@/components/app-theme-shell';
-import SessionDetail from '@/components/sessions/session-detail';
+
+/* Lazy so the multi-MB session-detail graph is not modulepreloaded at app
+   entry; it loads when this route's component first renders. Only the render
+   is deferred — `validateSearch`/`beforeLoad` below stay synchronous. */
+const SessionDetail = lazy(() => import('@/components/sessions/session-detail'));
 import { useIsMobile } from '@/hooks/use-mobile';
 import { readStoredLastActiveTabState } from '@/lib/session-draft-tabs';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
@@ -43,13 +48,15 @@ const SessionDetailRoute = () => {
 
   return (
     <AppThemeShell>
-      <SessionDetail
-        sessionId={sessionId as SessionId}
-        urlTab={search.tab}
-        urlPrNumber={search.pr}
-        urlBrowser={search.browser}
-        urlSimulator={search.simulator}
-      />
+      <Suspense fallback={null}>
+        <SessionDetail
+          sessionId={sessionId as SessionId}
+          urlTab={search.tab}
+          urlPrNumber={search.pr}
+          urlBrowser={search.browser}
+          urlSimulator={search.simulator}
+        />
+      </Suspense>
     </AppThemeShell>
   );
 };

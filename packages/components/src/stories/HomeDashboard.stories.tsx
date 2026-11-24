@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 
@@ -14,6 +15,16 @@ import {
   homeWeekFixture,
   homeWeekUsageFixture,
 } from './fixtures/home-week';
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': '100%',
+    'border-radius': 'var(--radius-2xl)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 10)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const meta = {
   title: 'Chat/HomeDashboard',
@@ -25,7 +36,7 @@ const meta = {
       context.parameters.layout === 'fullscreen' ? (
         <Story />
       ) : (
-        <div className="w-[720px] max-w-full rounded-2xl bg-background p-10 text-foreground">
+        <div {...stylex.props(storyLayout.frame)}>
           <Story />
         </div>
       ),
@@ -47,14 +58,22 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** What the agents are doing: what needs you, the plan usage, what runs, what finished, what to pick back up. */
+/**
+ * What the agents are doing: what needs you, the plan usage, what runs, what finished, what to
+ * pick back up. The usage tile draws the plan's two segments side by side — the 5-hour one and the
+ * week — each with its own percent used and its own reset; the week's used to be dropped.
+ */
 export const Now: Story = {};
 
 export const NoAgentsRunning: Story = {
   args: { now: homeNowFixture('idle') },
 };
 
-/** The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. */
+/**
+ * The 5-hour window is nearly spent; the Codex reset the forecast knows about sits beside it. In
+ * the half tile two meters no longer fit, so the week's reset reads as a countdown ("Weekly in
+ * 20h") in the head.
+ */
 export const NowNearReset: Story = {
   args: {
     usage: homeWeekUsageFixture('nearReset'),

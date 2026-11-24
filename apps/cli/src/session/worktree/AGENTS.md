@@ -26,6 +26,17 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Git credential broker
 
+- The broker binds only `127.0.0.1`; every credential and health request requires
+  its bearer token. Current session execution has no Docker bridge consumer.
+
+- GitHub auth: conversation-owner personal → matching-owner machine → repo App,
+  once per source. Failures advance without a policy RPC; local context grants
+  machine eligibility. Never persist managed tokens or replay uncertain writes.
+  Checkout/LFS share the pinned helper context. Contract: [identity fallback](../../../../../specs/github-identity-fallback.md).
+
+- INVARIANT: agent PATH merges keep the session's `gh` shim dir first
+  ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-gh-shim-broker-and-path.md)).
+
 - Local projects/worktrees and locally resolved Members use native Git/GitHub
   auth. Never enroll them on refresh; pin `repositoryCheckout` through archive/restore.
 
@@ -95,12 +106,6 @@ and file responsibilities: [../README.md](../README.md).
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.
-- Nothing writes speculative-worktree markers any more; `legacy-speculative-worktrees.ts`
-  handles those older daemons left. Creation claims its marker before probing the directory
-  and reruns setup before dropping it. NEVER destroy a worktree a Session adopted
-  (`durable-pending-setup`, or a `restoreBranchName`) over a target mismatch: removal deletes
-  the branch resume restores. Only unadopted mismatches rebuild. The sweep removes orphans of
-  non-durable, inactive Sessions under the shared per-session lock, re-checking liveness.
 - `worktree-config-resolver.ts` follows the durable launch-config rule in
   [../AGENTS.md](../AGENTS.md): do not write per-session `sessionLaunchConfig`.
 - Worktree archive/delete keeps branches and requires a backup commit. `worktree-gc.ts`

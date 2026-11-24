@@ -16,7 +16,7 @@ import {
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt';
 import { RepoSyncError, RepoTransportError, type RepoSyncReport } from 'loro-repo';
 
-import { Effect, Layer } from 'effect';
+import { Cause, Effect, Layer } from 'effect';
 import {
   makeLoroStreamsTokenProvider,
   makeLoroStreamsTokenWebPorts,
@@ -26,6 +26,7 @@ import {
 import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
 import {
   PresenceHost,
+  PresenceReleaseFailed,
   PresenceTransport,
   WorkspacePresenceOwnersLive,
 } from '../src/lib/loro/workspace-presence';
@@ -140,6 +141,8 @@ vi.mock('loro-repo/transport/streams', () => {
       mocks.transportOptions.push(options);
     }
 
+    joinFlockDocRoom = vi.fn();
+    syncFlockDoc = vi.fn();
     connect = vi.fn(async () => {});
     close = mocks.transportClose;
     isConnected = vi.fn(() => mocks.transportStatus === 'connected');
@@ -166,6 +169,7 @@ vi.mock('loro-repo/storage/sqlite', () => ({
       save: vi.fn(async () => {}),
       delete: vi.fn(async () => {}),
     };
+    createProcessDocumentCursorStore = () => this.cursorStore;
     close = mocks.sqliteClose;
   },
 }));
@@ -186,7 +190,10 @@ vi.mock('@/utils/http-transport', () => ({
 
 import { LoroDocumentManager } from '../src/lib/loro/doc';
 import { withWorkspaceManager } from '../src/lib/command-runtime';
-import { createCliSqliteRepoStore } from '../src/lib/loro/sqlite-repo-store';
+import {
+  ProcessDocumentRemoteCursorStore,
+  createCliSqliteRepoStore,
+} from '../src/lib/loro/sqlite-repo-store';
 import * as timeoutUtils from '../src/lib/loro/timeout-utils';
 
 const testStreamsTokens = {
@@ -668,8 +675,11 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       }
     );
     try {
-      // No remote room means unknown, even though local entries are already authored.
-      expect(await manager.getOnlineMachineIds({ timeoutMs: 1 })).toBeNull();
+      // No remote room proves no absence, even though local entries are already authored.
+      expect(await manager.getMachinePresenceView({ timeoutMs: 1 })).toEqual({
+        online: new Set(),
+        synced: false,
+      });
       manager.publishSessionPresence(
         '01020304-1111-4222-8333-010203040507' as SessionId,
         '01020304-1111-4222-8333-010203040508' as MachineId,
@@ -691,7 +701,10 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       ]);
       await manager.attachRemoteStreamsTransport();
       // The real owner has joined; absent remote machine heartbeats now form a known empty set.
-      expect(await manager.getOnlineMachineIds({ timeoutMs: 100 })).toEqual(new Set());
+      expect(await manager.getMachinePresenceView({ timeoutMs: 100 })).toEqual({
+        online: new Set(),
+        synced: true,
+      });
       expect(repo.addTransport).toHaveBeenCalledWith('streams', expect.anything(), {
         ephemeral: true,
       });
@@ -727,7 +740,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     // One-shot commands do not pass a cursor scope: their LoroDoc progress must
     // stay in this process's memory, never the daemon's shared SQLite cursors.
     expect(mocks.transportOptions[0]).toMatchObject({
-      persistence: { documentRemoteCursorStore: expect.any(InMemoryRemoteCursorStore) },
+      persistence: { documentRemoteCursorStore: expect.any(ProcessDocumentRemoteCursorStore) },
     });
 
     await manager.cleanUp({ fast: true });
@@ -983,6 +996,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     manager.machine = {
       destroy: async () => {
         events.push('machine');
+        throw Object.assign(new Error('private detail TOKEN=synthetic-secret'), { code: 'EACCES' });
       },
     } as never;
     Object.assign(manager, {
@@ -995,9 +1009,56 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     const failure = await manager.cleanUp({ fast: true }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(AggregateError);
     expect((failure as AggregateError).errors[0].message).toContain(failed);
+    expect((failure as Error).message).toContain('Session unsaved-session: disk is full');
+    expect((failure as Error).message).toContain('Machine document: permission denied');
+    expect((failure as Error).message).toContain('persistence unconfirmed');
+    expect((failure as Error).message).not.toContain('synthetic-secret');
     expect(events).toEqual(['failed', 'sibling', 'machine', 'repo', 'encrypted']);
     await manager.cleanUp({ fast: true });
     expect(manager.getConnectedRoomCount()).toBe(0);
+  });
+
+  it('reports the presence release timeout retained inside the Effect cause', async () => {
+    const manager = new LoroDocumentManager({
+      repo: { destroy: async () => {} } as unknown as LoroDocumentManager['repo'],
+      workspaceId: 'cleanup-presence' as WorkspaceId,
+      userId: 'user-1',
+      metaSub: createMetaSubscription(),
+      logger: createSilentLogger(),
+      initialTransportStatus: 'connected',
+      initialMetaSyncPromise: Promise.resolve(true),
+      initialMetaSyncCompleted: true,
+    });
+    const presenceFailure = new WorkspacePresenceLegacyFailure(
+      Cause.fail(
+        new PresenceReleaseFailed({
+          cause: Cause.fail(new Cause.TimeoutError()),
+          owner: {} as never,
+          generation: 1,
+        })
+      )
+    );
+    Object.assign(manager, {
+      catalogSync: {
+        close: async () => {
+          throw new Error('unclassified failure with TOKEN=synthetic-secret');
+        },
+      },
+      presenceRuntime: {
+        stop: async () => {
+          throw presenceFailure;
+        },
+      },
+    });
+
+    const failure = await manager.cleanUp({ fast: true }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as Error).message).toContain(
+      'Catalog subscriptions: underlying reason unavailable'
+    );
+    expect((failure as Error).message).toContain('Presence release: timed out');
+    expect((failure as Error).message).not.toContain('synthetic-secret');
+    expect((failure as AggregateError).errors[1].cause).toBe(presenceFailure);
   });
 
   it('settles a queued manual reconnect when cleanup runs first', async () => {

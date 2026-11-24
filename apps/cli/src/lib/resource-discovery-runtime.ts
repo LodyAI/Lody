@@ -117,12 +117,12 @@ export async function createResourceDiscovery(args: {
       workspace: baselines.get(getWorkspaceFlockDocId(workspaceId)) !== false,
       machines: machineBaselines,
     }),
-    onlineMachineIds: async () =>
+    machinePresence: async () =>
       getSessionCommandEnvironment()
-        ? new Set([auth.machineId])
+        ? { online: new Set([auth.machineId]), synced: true }
         : args.offline
-          ? null
-          : manager.getOnlineMachineIds(),
+          ? { online: new Set(), synced: false }
+          : manager.getMachinePresenceView(),
     canAccess: async (machineId, localProjectId) =>
       (
         await readSessionMachineAccess({

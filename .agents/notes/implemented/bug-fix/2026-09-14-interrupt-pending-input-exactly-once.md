@@ -11,7 +11,7 @@ PR: [#693](https://github.com/LodyAI/Lody/pull/693)
 Stopping a turn could not safely decide whether a concurrently submitted steer had entered the
 provider, so replay risk and lost input were coupled to generic cancellation state. The fix makes
 the adapter return a three-state delivery outcome and gives cancellation an explicit pending-input
-policy. User Stop promotes only a proven `not-applied` steer; internal cancellations and unknown
+policy. An explicit promotion policy promotes only a proven `not-applied` steer; internal cancellations and unknown
 delivery preserve it. Durable Session hold, Goal hold, Operation hold, and Resume are deliberately
 outside this decision.
 
@@ -28,8 +28,9 @@ provider exception types to reclassify delivery. The Codex adapter therefore ret
 only for a proven refusal; unexpected adapter failures reject the request and remain `unknown`
 ([adapter PR #43](https://github.com/LodyAI/acp-extension-codex/pull/43)).
 
-`cancelSession` defaults to `pendingInput: 'preserve'`. User-facing Stop paths opt into
-`'promote'`; Edit & Resend and access revocation stay on `'preserve'`. A promoted user turn uses
+`cancelSession` defaults to `pendingInput: 'preserve'`. User Stop, Edit & Resend and access revocation retain `'preserve'`. Stop pauses queued drafts;
+only an explicit queue action reissues a selected draft under a fresh input id. Promotion remains
+available for boundaries that explicitly select `'promote'`. A promoted user turn uses
 the existing ordinary dispatch pointer and history status, so there is no second execution path.
 Late `applied` and `unknown` outcomes never publish that pointer.
 

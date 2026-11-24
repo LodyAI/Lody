@@ -28,6 +28,10 @@ reads the raw history list; composition injects the shared reader.
 Full-history actions use the authoritative consistent full-read operation.
 Performance comparisons must use the current full-Mirror baseline.
 
+## Image previews
+
+Pending local images use only scoped host previews. Published `r2` images retain local-first previews and authenticated cloud fallback when unavailable. Follow [rendering](components/ai-gui/session-files-rendering.md) for image publication and cache behavior. Sends, schedules, and replay preserve image identity without capability preflights. Plaintext desktop sends prepare known matching targets locally; protected sends and schedules always use encrypted transfer for unprepared attachments.
+
 ## Conversation exports
 
 Conversation Markdown/PNG exports use `usePlaintextCopy` before capture and
@@ -128,11 +132,9 @@ Cancellation retains selection and cannot remove a user destination.
 
 ## ACP selectors
 
-- Built-in Codex reasoning selectors normalize cached options against exact model support
-  in `components/shared/acp-selector-options.ts`: GPT-6 Astra/Sol and GPT-5.6 Sol/Terra
-  expose Max/Ultra; GPT-6 Luna and GPT-5.6 Luna expose Max only. Keep this aligned with
-  the ACP model catalog; a model version threshold cannot represent per-model differences,
-  and cached efforts may belong to a different selected model.
+- Effort ladders follow the selected model: its recorded options, then the adapter's
+  per-model declaration, then `modelReasoningEfforts` (`components/shared/acp-selector-options.ts`).
+  Never hard-code a provider's per-model tiers; cached efforts may belong to another model.
 
 ## ACP authentication
 

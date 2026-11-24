@@ -50,7 +50,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run --no-file-parallelism",
+    "test": "vitest run",
     "check": "pnpm typecheck && pnpm test",
     "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts' 'test/**/*.mts'",
     "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts' 'test/**/*.mts'",
@@ -69,11 +69,12 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "3.2.4",
+    "vitest": "catalog:",
     "oxfmt": "^0.65.0",
     "tsx": "4.23.7",
     "@types/better-sqlite3": "catalog:",
-    "@lody/cloud-api": "workspace:*"
+    "@lody/cloud-api": "workspace:*",
+    "@lody/e2ee-client": "workspace:*"
   },
   "bin": {
     "e2ee-lab": "./bin/e2ee-lab.mjs"

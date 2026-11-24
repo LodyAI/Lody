@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
@@ -17,13 +15,9 @@ import {
   type PrTabViewData,
   type PrTabViewState,
 } from '../src/components/sessions/pr-tab-view';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string, opts?: Record<string, unknown>) =>
-      (fallback ?? _key).replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(opts?.[name])),
-  }),
-}));
+const testI18n = createTestI18n();
 
 // Markdown mounts start browser-only lazy imports (including KaTeX copy-tex).
 // Keep this suite's document alive until those imports finish, even when a
@@ -100,14 +94,17 @@ describe('PrTabView refresh button', () => {
 
     flushSync(() => {
       root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: props.state,
-          data: 'data' in props ? props.data : data,
-          isRefreshing: props.isRefreshing,
-          onRefresh,
-        })
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            state: props.state,
+            data: 'data' in props ? props.data : data,
+            isRefreshing: props.isRefreshing,
+            onRefresh,
+          }),
+          testI18n
+        )
       );
     });
 
@@ -157,7 +154,7 @@ describe('PrTabView refresh button', () => {
     const { button, onRefresh } = renderView({ state: 'loading', data: null });
 
     expect(button.disabled).toBe(false);
-    expect(button.querySelector('.animate-spin')).not.toBeNull();
+    expect(button.querySelector('[data-slot="icon-spinner"][data-spinning="true"]')).not.toBeNull();
 
     flushSync(() => {
       button.click();
@@ -229,12 +226,15 @@ describe('PrTabView document', () => {
     root = createRoot(container);
     flushSync(() => {
       root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: 'ready',
-          data: viewData,
-        })
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            state: 'ready',
+            data: viewData,
+          }),
+          testI18n
+        )
       );
     });
     return container;
@@ -307,11 +307,14 @@ describe('PrTabView load failure', () => {
     }
     flushSync(() => {
       root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          ...props,
-        })
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            ...props,
+          }),
+          testI18n
+        )
       );
     });
     return container;
@@ -405,15 +408,18 @@ describe('PrTabView merge card', () => {
     root = createRoot(container);
     flushSync(() => {
       root?.render(
-        createElement(PrTabView, {
-          repoFullName: 'loro-dev/lody',
-          prNumber: 42,
-          state: 'ready',
-          data: { ...data, pullRequest: pr },
-          onMerge: vi.fn(),
-          onSetState: vi.fn(),
-          ...extra,
-        })
+        withTestI18n(
+          createElement(PrTabView, {
+            repoFullName: 'loro-dev/lody',
+            prNumber: 42,
+            state: 'ready',
+            data: { ...data, pullRequest: pr },
+            onMerge: vi.fn(),
+            onSetState: vi.fn(),
+            ...extra,
+          }),
+          testI18n
+        )
       );
     });
     const el = container;

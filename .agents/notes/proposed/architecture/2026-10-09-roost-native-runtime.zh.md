@@ -41,7 +41,7 @@ Electron 将其放在 `resources/cli/node_modules`，签名前复制到 `app.asa
 但本仓库没有组装 IndexedDB 副本，也不因此新增同步调度器。
 Web/移动应用源码不属于本公开仓库范围。
 
-[功能开关](../feature/2026-10-08-roost-history-feature-gate.zh.md) 继续决定新会话选择。
+[功能开关](../../implemented/feature/2026-10-08-roost-history-feature-gate.zh.md) 继续决定新会话选择。
 Loro 仍是默认后端；既有会话的后端标识、历史、Loro 控制元数据及传输授权保持原契约。
 
 ## 失败诊断

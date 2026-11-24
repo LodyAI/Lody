@@ -1,4 +1,5 @@
 import { getSessionRoomId, type SessionId, type SessionStatus } from '@lody/shared';
+import { CACHE_REJECTION_COOLDOWN_MS, FAILED_PREFETCH_COOLDOWN_MS } from './eager-sync-admission';
 import type { EagerSyncPolicy } from './eager-sync-policy';
 
 /**
@@ -33,7 +34,12 @@ export interface SessionActivitySnapshot {
   parentSessionId?: SessionId;
 }
 
-export type PrefetchOutcome = 'synced' | 'skipped' | 'failed';
+export type PrefetchOutcome =
+  | 'synced'
+  | 'skipped'
+  | 'failed'
+  | 'cache_rejected'
+  | 'apply_incomplete';
 
 /** The subset of the room-sync registry the coordinator depends on. */
 export interface CoordinatorRegistryView {
@@ -56,6 +62,7 @@ export interface BackgroundSyncCoordinatorDeps {
   };
   registry: CoordinatorRegistryView;
   prefetcher: {
+    getRetryAt?(sessionId: SessionId): number | undefined;
     /**
      * One-shot catch-up: hold a replica until caught up (or the signal aborts /
      * a timeout fires), persist and release. Resolves with the
@@ -93,8 +100,6 @@ export {
   DEFAULT_EAGER_SYNC_POLICY,
   DESKTOP_EAGER_SYNC_POLICY,
   EAGER_SYNC_CANDIDATE_WINDOW,
-  FULL_EAGER_SYNC_CANDIDATE_WINDOW,
-  FULL_EAGER_SYNC_POLICY,
   MOBILE_EAGER_SYNC_POLICY,
   WEB_EAGER_SYNC_CANDIDATE_WINDOW,
   WEB_EAGER_SYNC_POLICY,
@@ -139,6 +144,7 @@ export function createBackgroundSyncCoordinator(
   const latest = new Map<SessionId, SessionActivitySnapshot>();
   // lastMessageAt value we have already caught up through (Linear's lastSyncId analog).
   const syncedThrough = new Map<SessionId, number>();
+  const cacheRejected = new Map<SessionId, { activity: number; until: number }>();
   // Sessions waiting to be prefetched, with the snapshot that qualified them.
   const queued = new Map<SessionId, SessionActivitySnapshot>();
   const inFlight = new Set<SessionId>();
@@ -305,6 +311,10 @@ export function createBackgroundSyncCoordinator(
     if (snap.lastMessageAt == null) {
       return false;
     }
+    const rejected = cacheRejected.get(snap.sessionId);
+    if (rejected && clock.now() < rejected.until) {
+      return false;
+    }
     const synced = getSyncedThrough(snap.sessionId);
     if (synced != null && snap.lastMessageAt <= synced) {
       return false;
@@ -369,7 +379,7 @@ export function createBackgroundSyncCoordinator(
     controllers.set(sessionId, controller);
 
     const timeoutHandle = scheduler.setTimeout(() => {
-      controller.abort();
+      controller.abort(new DOMException('Eager-sync task timed out', 'TimeoutError'));
     }, policy.prefetchTimeoutMs);
 
     void prefetcher
@@ -380,6 +390,23 @@ export function createBackgroundSyncCoordinator(
           // pre-queue index. The parent also checks the snapshot checkpoint
           // before it creates a worker.
           recordSyncedThrough(sessionId, lastMessageAt);
+        }
+        if (
+          outcome === 'cache_rejected' ||
+          outcome === 'failed' ||
+          outcome === 'apply_incomplete'
+        ) {
+          cacheRejected.delete(sessionId);
+          cacheRejected.set(sessionId, {
+            activity: lastMessageAt,
+            until:
+              prefetcher.getRetryAt?.(sessionId) ??
+              clock.now() +
+                (outcome === 'cache_rejected'
+                  ? CACHE_REJECTION_COOLDOWN_MS
+                  : FAILED_PREFETCH_COOLDOWN_MS),
+          });
+          if (cacheRejected.size > 1000) cacheRejected.delete(cacheRejected.keys().next().value!);
         }
         logger?.debug('[eager-sync] prefetch', sessionId, outcome);
       })

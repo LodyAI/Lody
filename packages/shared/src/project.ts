@@ -57,7 +57,35 @@ export type LocalProjectGitState =
       defaultBranch: string | null;
       branches: string[];
       githubRepoFullName: string | null;
-      workingTree: LocalProjectWorkingTreeState;
+      workingTree?: LocalProjectWorkingTreeState;
+    };
+
+export type LocalProjectGitSummary =
+  | { git: false }
+  | {
+      git: true;
+      currentBranch: string | null;
+      defaultBranch: string | null;
+      githubRepoFullName: string | null;
+    };
+
+export type LocalProjectListBranchesOptions = {
+  query?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export type LocalProjectBranchListResult =
+  | { git: false }
+  | {
+      git: true;
+      currentBranch: string | null;
+      defaultBranch: string | null;
+      pinnedBranches: string[];
+      branches: string[];
+      truncated: boolean;
+      nextCursor?: string;
+      totalCount: number;
     };
 
 export type LocalProjectHistoryProvider = {
@@ -151,6 +179,9 @@ export type LocalProjectMeta = {
   githubRepoFullName?: string;
   /** Explicit standalone membership; false for folder-only imports. Legacy rows default true. */
   standaloneVisible?: boolean;
+  git?: boolean;
+  defaultBranch?: string | null;
+  currentBranch?: string | null;
 };
 
 const DEFAULT_BASE_BRANCH = 'main';

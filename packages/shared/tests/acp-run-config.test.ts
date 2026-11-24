@@ -4,10 +4,21 @@ import { createPlanModeConfigOption } from 'acp-extension-core';
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
   getStaticBuiltinAcpCapabilities,
+  resolveAcpConfigOptionsForModel,
   resolveAgentRunConfigSelection,
   summarizeAgentRunConfigCapabilities,
   type AcpCapabilityCacheEntry,
 } from '../src';
+import {
+  classifyPermissionModeFace,
+  getBuiltinDefaultModeId,
+  getManagedBuiltinRuntimeByAgentType,
+  getManagedBuiltinRuntimeByRuntimeName,
+  hasBuiltinRuntimeOverrideValues,
+  isBuiltinAgentType,
+  isManagedBuiltinAgentType,
+  supportsBuiltinProviderSetup,
+} from '../src/ai';
 
 describe('builtin independent Plan preflight', () => {
   it.each(['codex', 'grok', 'kimi', 'deepseek'] as const)(
@@ -484,5 +495,266 @@ describe('MCP run config against declared per-model controls', () => {
         probedClaudeCapability()
       ).configOptionValues
     ).toBeUndefined();
+  });
+});
+
+describe('observed per-model option lists', () => {
+  const thoughtLevel = (values: string[], currentValue = values[0] ?? '') => ({
+    id: 'thought_level',
+    name: 'Thinking',
+    category: 'thought_level',
+    type: 'select' as const,
+    currentValue,
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const modelSelect = (currentValue: string) => ({
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select' as const,
+    currentValue,
+    options: ['swe-2-high', 'fusion', 'adaptive'].map((value) => ({ value, name: value })),
+  });
+  const fast = {
+    id: 'fast',
+    name: 'Fast',
+    type: 'boolean' as const,
+    currentValue: false,
+    options: [],
+  };
+  // Probed on swe-2-high (medium/high/max), as in LodyAI/Lody#1215.
+  const capability: AcpCapabilityCacheEntry = {
+    cliType: 'builtin',
+    agentType: 'devin',
+    modes: [],
+    models: [],
+    fetchedAt: 1,
+    configOptions: [modelSelect('swe-2-high'), thoughtLevel(['medium', 'high', 'max'])],
+    observedModelConfigOptions: {
+      fusion: [thoughtLevel(['low', 'medium', 'high', 'xhigh', 'max']), fast],
+      adaptive: [],
+    },
+  };
+
+  it('composes the target model’s own options and keeps the snapshot’s model selector', () => {
+    expect(
+      resolveAcpConfigOptionsForModel(
+        capability.configOptions,
+        capability.observedModelConfigOptions,
+        'fusion'
+      )
+    ).toEqual({
+      source: 'observed',
+      configOptions: [
+        modelSelect('swe-2-high'),
+        thoughtLevel(['low', 'medium', 'high', 'xhigh', 'max']),
+        fast,
+      ],
+    });
+    expect(
+      resolveAcpConfigOptionsForModel(
+        capability.configOptions,
+        capability.observedModelConfigOptions,
+        'swe-2-high'
+      ).source
+    ).toBe('snapshot');
+    expect(resolveAcpConfigOptionsForModel(capability.configOptions, {}, 'fusion')).toEqual({
+      source: 'borrowed',
+      configOptions: capability.configOptions,
+    });
+  });
+
+  it('validates effort and Fast against the target model’s observed list', () => {
+    expect(
+      resolveAgentRunConfigSelection(
+        { modelId: 'fusion', reasoningEffort: 'low', fastMode: true },
+        capability
+      )
+    ).toEqual({
+      modelId: 'fusion',
+      configOptionValues: { thought_level: 'low', fast: true },
+      validatedConfigIds: ['thought_level', 'fast'],
+    });
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'fusion', reasoningEffort: 'ultra' }, capability)
+    ).toThrow('Invalid reasoning effort for model fusion: ultra.');
+    // The agent reported no effort and no Fast for this model.
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'adaptive', reasoningEffort: 'low' }, capability)
+    ).toThrow('Model adaptive does not offer a reasoning effort option.');
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'adaptive', fastMode: true }, capability)
+    ).toThrow('Model adaptive does not offer fast mode.');
+  });
+
+  it('lists each observed model’s effort values for discovery', () => {
+    expect(summarizeAgentRunConfigCapabilities(capability).models).toEqual([
+      { id: 'swe-2-high', name: 'swe-2-high' },
+      {
+        id: 'fusion',
+        name: 'fusion',
+        reasoningEffortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+      },
+      { id: 'adaptive', name: 'adaptive', reasoningEffortValues: [] },
+    ]);
+  });
+});
+
+describe('builtin agent static contracts', () => {
+  it('waits for a live probe before advertising DeepSeek or Bub endpoint-dependent options', () => {
+    const deepseek = getStaticBuiltinAcpCapabilities('builtin', 'deepseek');
+    expect(deepseek?.models).toEqual([]);
+    expect(deepseek?.configOptions.map((option) => option.id)).toEqual([
+      'plan_mode',
+      'mode',
+      'agent_preset',
+    ]);
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'bub')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'bub')).toBeUndefined();
+  });
+
+  it('accepts Sorbet into the verification queue without treating it as a managed runtime', () => {
+    expect(isBuiltinAgentType('sorbet')).toBe(true);
+    expect(isManagedBuiltinAgentType('sorbet')).toBe(false);
+    expect(supportsBuiltinProviderSetup('sorbet')).toBe(true);
+    expect(supportsBuiltinProviderSetup('unknown')).toBe(false);
+  });
+
+  it('maps Grok and Kimi builtins to managed runtimes, approval faces, defaults, and override invalidation', () => {
+    expect(isBuiltinAgentType('grok')).toBe(true);
+    expect(getManagedBuiltinRuntimeByAgentType('grok')).toEqual({
+      runtimeName: 'grok-build',
+      agentType: 'grok',
+      displayName: 'Grok',
+    });
+    expect(getManagedBuiltinRuntimeByRuntimeName('grok-build')?.agentType).toBe('grok');
+    expect(classifyPermissionModeFace('always-approve')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
+    expect(hasBuiltinRuntimeOverrideValues({ grokPath: ' /opt/grok ' })).toBe(true);
+    expect(
+      getStaticBuiltinAcpCapabilities('builtin', 'grok', { grokPath: '/opt/grok' })
+    ).toBeUndefined();
+
+    expect(isBuiltinAgentType('kimi')).toBe(true);
+    expect(getManagedBuiltinRuntimeByAgentType('kimi')?.runtimeName).toBe('kimi-code');
+    expect(getManagedBuiltinRuntimeByRuntimeName('kimi-code')?.agentType).toBe('kimi');
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'kimi')?.models).toEqual([]);
+    expect(classifyPermissionModeFace('yolo')).toEqual({
+      kind: 'full-access',
+      tone: 'warning',
+      render: 'icon',
+    });
+    expect(getBuiltinDefaultModeId('builtin', 'codex')).toBe('agent-auto-review');
+    expect(getBuiltinDefaultModeId('builtin', 'claude')).toBe('auto');
+    expect(getBuiltinDefaultModeId('builtin', 'kimi')).toBe('auto');
+    expect(getBuiltinDefaultModeId('registry', 'codex')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'other')).toBeUndefined();
+    expect(hasBuiltinRuntimeOverrideValues({ kimiPath: ' /opt/kimi ' })).toBe(true);
+    expect(
+      getStaticBuiltinAcpCapabilities('builtin', 'kimi', { kimiPath: '/opt/kimi' })
+    ).toBeUndefined();
+  });
+});
+
+describe('multi-tier speed options', () => {
+  const capability = {
+    cliType: 'builtin' as const,
+    agentType: 'codex',
+    modes: [{ id: 'agent', name: 'Agent' }],
+    models: [
+      { modelId: 'gpt-6.2-sol', name: '6.2 Sol' },
+      { modelId: 'gpt-6.2-astra', name: '6.2 Astra' },
+      { modelId: 'slow-model', name: 'Slow' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select' as const,
+        currentValue: 'gpt-6.2-sol',
+        options: [
+          { value: 'gpt-6.2-sol', name: '6.2 Sol' },
+          { value: 'gpt-6.2-astra', name: '6.2 Astra' },
+          { value: 'slow-model', name: 'Slow' },
+        ],
+      },
+      {
+        id: 'fast-mode',
+        name: 'Speed',
+        category: 'model_config',
+        type: 'select' as const,
+        currentValue: 'off',
+        options: [
+          { value: 'off', name: 'Standard' },
+          { value: 'fast', name: 'Fast' },
+          { value: 'ultrafast', name: 'Ultrafast' },
+        ],
+      },
+    ],
+    declaredModelControls: {
+      'gpt-6.2-sol': { fastMode: true, speedTiers: ['fast', 'ultrafast'] },
+      'gpt-6.2-astra': { fastMode: true },
+      'slow-model': { fastMode: false },
+    },
+  };
+
+  it('maps semantic fastMode boolean onto a multi-tier speed select', () => {
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', fastMode: true }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'fast' });
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', fastMode: false }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'off' });
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'slow-model', fastMode: true }, capability)
+    ).toThrow('Model slow-model does not offer fast mode.');
+  });
+
+  it('maps normal, fast, and ultrafast speedTier selections and validates per model', () => {
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', speedTier: 'ultrafast' }, capability)
+    ).toEqual({
+      modelId: 'gpt-6.2-sol',
+      configOptionValues: { 'fast-mode': 'ultrafast' },
+      validatedConfigIds: ['fast-mode'],
+    });
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', speedTier: 'normal' }, capability)
+        .configOptionValues
+    ).toEqual({ 'fast-mode': 'off' });
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gpt-6.2-astra', speedTier: 'ultrafast' },
+        capability
+      )
+    ).toThrow(
+      'Model gpt-6.2-astra does not offer speed tier ultrafast. Allowed values: normal, fast.'
+    );
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'slow-model', speedTier: 'fast' }, capability)
+    ).toThrow('Model slow-model does not offer fast speed tier.');
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gpt-6.2-sol', fastMode: false, speedTier: 'ultrafast' },
+        capability
+      )
+    ).toThrow(/Conflicting fastMode/);
+    expect(() =>
+      resolveAgentRunConfigSelection({ modelId: 'gpt-6.2-sol', speedTier: 'warp' }, capability)
+    ).toThrow(/Invalid speed tier: warp/);
+
+    const summary = summarizeAgentRunConfigCapabilities(capability);
+    expect(summary.speedTiers).toEqual(['fast', 'ultrafast']);
+    expect(summary.models).toEqual([
+      { id: 'gpt-6.2-sol', name: '6.2 Sol', speedTiers: ['fast', 'ultrafast'] },
+      { id: 'gpt-6.2-astra', name: '6.2 Astra', speedTiers: ['fast'] },
+      { id: 'slow-model', name: 'Slow', speedTiers: [] },
+    ]);
   });
 });

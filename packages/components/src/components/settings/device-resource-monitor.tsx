@@ -312,7 +312,7 @@ export function DeviceResourceMonitor({
         )}
         {t(
           'settings.devices.monitor.offline',
-          'Resource monitoring is available while the device is online.'
+          'Resource monitoring is available while the machine is online.'
         )}
       </div>
     );
@@ -351,7 +351,7 @@ export function DeviceResourceMonitor({
             <div {...stylex.props(styles.metricHeader)}>
               <Gauge {...stylex.props(styles.metricIcon)} />
               <span {...stylex.props(styles.truncate)}>
-                {t('settings.devices.resources.deviceInfo', 'Device info')}
+                {t('settings.devices.resources.deviceInfo', 'Machine info')}
               </span>
               {os && <span {...stylex.props(styles.truncate, styles.hint)}>· {os}</span>}
             </div>

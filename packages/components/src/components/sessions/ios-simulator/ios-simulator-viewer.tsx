@@ -1,4 +1,12 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   IosSimulatorExteriorSchema,
   IOS_SIMULATOR_BEZEL_MAX_BYTES,
@@ -34,9 +42,20 @@ import type {
   IosSimulatorViewerState,
   IosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-types';
+import {
+  acquireDevicePreviewFrame,
+  releaseDevicePreviewFrame,
+  supportsDevicePreviewFrameCache,
+  type DevicePreviewFrameEntry,
+} from './device-preview-cache';
 import { IosSimulatorDeviceFrame } from './ios-simulator-device-frame';
 
 const styles = stylex.create({
+  frameHost: {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+  },
   frame: {
     display: 'block',
     width: '100%',
@@ -56,6 +75,8 @@ export type IosSimulatorViewerHandle = {
 };
 
 export type IosSimulatorViewerProps = {
+  /** Cache key used to keep the live viewer iframe alive across session switches. */
+  cacheKey?: string;
   viewerUrl: string;
   /** Exact origin of `viewerUrl`, already checked not to be the app's own. */
   viewerOrigin: string;
@@ -68,6 +89,8 @@ export type IosSimulatorViewerProps = {
   rotateWithDevice?: boolean;
   /** The panel is on screen. Combined with the document's own visibility. */
   visible: boolean;
+  /** True when the viewer stream has already painted a frame (e.g. resumed from cache). */
+  alreadyReady?: boolean;
   onStateChange: (
     state: IosSimulatorViewerState,
     diagnostics?: IosSimulatorViewerDiagnostics | null
@@ -99,12 +122,14 @@ function useDocumentVisible(): boolean {
  *
  * After each load the panel sends `init` to the frame's exact origin, and from
  * then on accepts `state` and `capture-result` only from that frame's window,
- * that origin and that operation. Hiding the panel does not unmount the frame —
- * it tells the viewer it is hidden, and the viewer pauses its stream.
+ * that origin and that operation. Switching conversations or side-panel tabs
+ * keeps the live stream alive in memory (via atomic `moveBefore` parking when
+ * supported) until explicitly stopped or the browser document itself hides.
  */
 export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimulatorViewerProps>(
   function IosSimulatorViewer(
     {
+      cacheKey,
       viewerUrl,
       viewerOrigin,
       operationId,
@@ -114,6 +139,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       bezel,
       rotateWithDevice = true,
       visible,
+      alreadyReady = false,
       onStateChange,
       onRotationChange,
       onFullscreenChange,
@@ -123,8 +149,11 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     },
     ref
   ) {
+    const useCachedFrame = Boolean(cacheKey) && supportsDevicePreviewFrameCache();
     const stageRef = useRef<HTMLDivElement>(null);
-    const frameRef = useRef<HTMLIFrameElement>(null);
+    const hostRef = useRef<HTMLDivElement>(null);
+    const frameRef = useRef<HTMLIFrameElement | null>(null);
+    const cachedEntryRef = useRef<DevicePreviewFrameEntry | null>(null);
     const parentPort = useRef<MessagePort | null>(null);
     const receivePort = useRef<(event: MessageEvent) => void>(() => {});
     const [loaded, setLoaded] = useState(false);
@@ -135,27 +164,137 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       imageUrl: string;
     }>();
     const exteriorUrl = useRef<string | undefined>(undefined);
-    useEffect(
-      () => () => {
-        if (exteriorUrl.current) URL.revokeObjectURL(exteriorUrl.current);
-        exteriorUrl.current = undefined;
-      },
-      [operationId, viewerUrl]
-    );
     const [screenAspect, setScreenAspect] = useState<number | null>(null);
     const [fullscreen, setFullscreen] = useState(false);
     const firstFrameTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const sentVisibleRef = useRef<boolean | null>(null);
     const documentVisible = useDocumentVisible();
-    const effectiveVisible = visible && documentVisible;
-    const visibleRef = useRef(effectiveVisible);
-    visibleRef.current = effectiveVisible;
+    const documentVisibleRef = useRef(documentVisible);
+    documentVisibleRef.current = documentVisible;
+    // Interactive controls & capture require the panel to be on screen AND the document visible.
+    const interactiveVisible = visible && documentVisible;
+    const interactiveVisibleRef = useRef(interactiveVisible);
+    interactiveVisibleRef.current = interactiveVisible;
+    const alreadyReadyRef = useRef(alreadyReady);
+    alreadyReadyRef.current = alreadyReady;
     const onStateChangeRef = useRef(onStateChange);
     onStateChangeRef.current = onStateChange;
     const onRotationChangeRef = useRef(onRotationChange);
     onRotationChangeRef.current = onRotationChange;
     const onFullscreenChangeRef = useRef(onFullscreenChange);
     onFullscreenChangeRef.current = onFullscreenChange;
+
+    const pendingReplies = useRef(new Set<() => void>());
+    const controlPending = useRef(false);
+
+    const handleLoad = useCallback(() => {
+      for (const cancel of [...pendingReplies.current]) cancel();
+      const targetVisible = documentVisibleRef.current;
+      sentVisibleRef.current = targetVisible;
+      parentPort.current?.close();
+      parentPort.current = null;
+      const frameWindow = frameRef.current?.contentWindow;
+      if (!frameWindow) return;
+      const init = {
+        type: IOS_SIMULATOR_VIEWER_INIT,
+        operationId,
+        visible: targetVisible,
+        rotateWithDevice,
+      };
+      // file:// has no addressable origin. The port is delivered only to this
+      // viewer's exact origin and dies with this document's navigation/unmount.
+      // Electron reports file:// here but serializes message origins as null.
+      if (window.location.protocol === 'file:' || window.origin === 'null') {
+        const channel = new MessageChannel();
+        parentPort.current = channel.port1;
+        channel.port1.onmessage = (event) => {
+          if (parentPort.current === channel.port1) receivePort.current(event);
+        };
+        frameWindow.postMessage(init, viewerOrigin, [channel.port2]);
+      } else frameWindow.postMessage(init, viewerOrigin);
+      loadedRef.current = true;
+      if (cachedEntryRef.current) {
+        cachedEntryRef.current.loaded = true;
+        cachedEntryRef.current.parentPort = parentPort.current;
+        cachedEntryRef.current.sentVisible = targetVisible;
+      }
+      setLoaded(true);
+    }, [operationId, rotateWithDevice, viewerOrigin]);
+
+    const handleLoadRef = useRef(handleLoad);
+    handleLoadRef.current = handleLoad;
+
+    useLayoutEffect(() => {
+      if (!useCachedFrame || !cacheKey) return undefined;
+      const host = hostRef.current;
+      if (!host) return undefined;
+      const frameClassName = stylex.props(styles.frame).className;
+      const { entry, reused } = acquireDevicePreviewFrame({
+        cacheKey,
+        viewerUrl,
+        viewerOrigin,
+        operationId,
+        title,
+        frameClassName,
+        host,
+      });
+      cachedEntryRef.current = entry;
+      frameRef.current = entry.iframe;
+      const onFrameLoad = () => handleLoadRef.current();
+      entry.iframe.addEventListener('load', onFrameLoad);
+      if (reused) {
+        parentPort.current = entry.parentPort;
+        if (entry.parentPort) {
+          const port = entry.parentPort;
+          port.onmessage = (event) => {
+            if (parentPort.current === port) receivePort.current(event);
+          };
+        }
+        sentVisibleRef.current = entry.sentVisible;
+        loadedRef.current = true;
+        setLoaded(true);
+        if (entry.screenAspect !== null) setScreenAspect(entry.screenAspect);
+        if (entry.exterior) {
+          exteriorUrl.current = entry.exterior.imageUrl;
+          setExterior(entry.exterior);
+        }
+      } else {
+        parentPort.current = null;
+        sentVisibleRef.current = null;
+        loadedRef.current = false;
+        setLoaded(false);
+        setScreenAspect(null);
+        setExterior(undefined);
+        exteriorUrl.current = undefined;
+      }
+
+      return () => {
+        entry.iframe.removeEventListener('load', onFrameLoad);
+        for (const cancel of [...pendingReplies.current]) cancel();
+        entry.parentPort = parentPort.current;
+        entry.sentVisible = sentVisibleRef.current;
+        entry.loaded = loadedRef.current;
+        const parked = releaseDevicePreviewFrame(cacheKey, entry.iframe);
+        if (!parked) {
+          parentPort.current?.close();
+          if (exteriorUrl.current) URL.revokeObjectURL(exteriorUrl.current);
+        }
+        parentPort.current = null;
+        exteriorUrl.current = undefined;
+        cachedEntryRef.current = null;
+        frameRef.current = null;
+        loadedRef.current = false;
+      };
+    }, [cacheKey, operationId, title, useCachedFrame, viewerOrigin, viewerUrl]);
+
+    useEffect(
+      () => () => {
+        if (useCachedFrame) return;
+        if (exteriorUrl.current) URL.revokeObjectURL(exteriorUrl.current);
+        exteriorUrl.current = undefined;
+      },
+      [operationId, useCachedFrame, viewerUrl]
+    );
 
     useEffect(() => {
       const receive = (event: MessageEvent) => {
@@ -176,7 +315,9 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
           if (exteriorUrl.current) URL.revokeObjectURL(exteriorUrl.current);
           const imageUrl = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
           exteriorUrl.current = imageUrl;
-          setExterior({ geometry: parsed.data, imageUrl });
+          const nextExterior = { geometry: parsed.data, imageUrl };
+          if (cachedEntryRef.current) cachedEntryRef.current.exterior = nextExterior;
+          setExterior(nextExterior);
           return;
         }
         const state = parseIosSimulatorViewerState(event.data, operationId);
@@ -192,7 +333,9 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
           width <= 16384 &&
           height <= 16384
         ) {
-          setScreenAspect(width / height);
+          const aspect = width / height;
+          if (cachedEntryRef.current) cachedEntryRef.current.screenAspect = aspect;
+          setScreenAspect(aspect);
           const rotation: unknown = event.data.rotation;
           if (rotation === 0 || rotation === 90 || rotation === 180 || rotation === 270) {
             onRotationChangeRef.current?.(
@@ -220,31 +363,40 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     }, [operationId, viewerOrigin]);
 
     // A failed iframe navigation may never send a state. Offer Restore instead of
-    // leaving a blank screen indefinitely, including after returning to the panel.
+    // leaving a blank screen indefinitely, unless a resumed cached stream is
+    // already ready on screen.
     useEffect(() => {
-      if (!effectiveVisible) return undefined;
+      if (!interactiveVisible || alreadyReadyRef.current) return undefined;
       firstFrameTimer.current = setTimeout(() => onStateChangeRef.current('error'), 25_000);
       return () => clearTimeout(firstFrameTimer.current);
-    }, [effectiveVisible, viewerUrl, operationId]);
+    }, [interactiveVisible, viewerUrl, operationId]);
 
     // A new address is a new document: it has to be greeted again.
+    const previousViewerUrlRef = useRef(viewerUrl);
     useEffect(() => {
+      if (previousViewerUrlRef.current === viewerUrl) return;
+      previousViewerUrlRef.current = viewerUrl;
+      if (useCachedFrame) return;
       setLoaded(false);
       setScreenAspect(null);
       setExterior(undefined);
-    }, [viewerUrl]);
+    }, [useCachedFrame, viewerUrl]);
 
+    // Keep the stream connected while switching conversations or side-panel tabs
+    // inside the app; only pause/resume the viewer when the browser/app document
+    // itself becomes hidden or visible again.
     useEffect(() => {
-      if (!loaded || sentVisibleRef.current === effectiveVisible) return;
-      sentVisibleRef.current = effectiveVisible;
+      if (!loaded || sentVisibleRef.current === documentVisible) return;
+      sentVisibleRef.current = documentVisible;
+      if (cachedEntryRef.current) cachedEntryRef.current.sentVisible = documentVisible;
       const message = {
         type: IOS_SIMULATOR_VIEWER_VISIBILITY,
         operationId,
-        visible: effectiveVisible,
+        visible: documentVisible,
       };
       if (parentPort.current) parentPort.current.postMessage(message);
       else frameRef.current?.contentWindow?.postMessage(message, viewerOrigin);
-    }, [effectiveVisible, loaded, operationId, viewerOrigin]);
+    }, [documentVisible, loaded, operationId, viewerOrigin]);
 
     useEffect(() => {
       const update = () => {
@@ -256,16 +408,15 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       return () => document.removeEventListener('fullscreenchange', update);
     }, []);
 
-    const pendingReplies = useRef(new Set<() => void>());
-    const controlPending = useRef(false);
     useEffect(
       () => () => {
+        if (useCachedFrame) return;
         for (const cancel of [...pendingReplies.current]) cancel();
         parentPort.current?.close();
         parentPort.current = null;
         loadedRef.current = false;
       },
-      [operationId, viewerOrigin, viewerUrl]
+      [operationId, useCachedFrame, viewerOrigin, viewerUrl]
     );
 
     const requestReply = useCallback(
@@ -279,7 +430,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       ) =>
         new Promise<Result>((resolve) => {
           const frameWindow = frameRef.current?.contentWindow;
-          if (!frameWindow || !loadedRef.current || !visibleRef.current) {
+          if (!frameWindow || !loadedRef.current || !interactiveVisibleRef.current) {
             resolve(unavailable);
             return;
           }
@@ -369,34 +520,6 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       [capture, control]
     );
 
-    const handleLoad = () => {
-      for (const cancel of [...pendingReplies.current]) cancel();
-      sentVisibleRef.current = visibleRef.current;
-      parentPort.current?.close();
-      parentPort.current = null;
-      const frameWindow = frameRef.current?.contentWindow;
-      if (!frameWindow) return;
-      const init = {
-        type: IOS_SIMULATOR_VIEWER_INIT,
-        operationId,
-        visible: visibleRef.current,
-        rotateWithDevice,
-      };
-      // file:// has no addressable origin. The port is delivered only to this
-      // viewer's exact origin and dies with this document's navigation/unmount.
-      // Electron reports file:// here but serializes message origins as null.
-      if (window.location.protocol === 'file:' || window.origin === 'null') {
-        const channel = new MessageChannel();
-        parentPort.current = channel.port1;
-        channel.port1.onmessage = (event) => {
-          if (parentPort.current === channel.port1) receivePort.current(event);
-        };
-        frameWindow.postMessage(init, viewerOrigin, [channel.port2]);
-      } else frameWindow.postMessage(init, viewerOrigin);
-      loadedRef.current = true;
-      setLoaded(true);
-    };
-
     return (
       <IosSimulatorDeviceFrame
         ref={stageRef}
@@ -410,20 +533,24 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
         isPressAvailable={isPressAvailable}
         buttonLabel={buttonLabel}
       >
-        <iframe
-          ref={frameRef}
-          {...stylex.props(styles.frame)}
-          src={viewerUrl}
-          title={title}
-          draggable={false}
-          referrerPolicy="no-referrer"
-          // The handshake names the viewer's exact origin, so the frame keeps it.
-          // That is safe only because `getIosSimulatorViewerOrigin` rejects a
-          // viewer on the app's own origin; everything else stays sandboxed.
-          // oxlint-disable-next-line react/iframe-missing-sandbox
-          sandbox="allow-scripts allow-same-origin"
-          onLoad={handleLoad}
-        />
+        {useCachedFrame ? (
+          <div ref={hostRef} {...stylex.props(styles.frameHost)} />
+        ) : (
+          <iframe
+            ref={frameRef}
+            {...stylex.props(styles.frame)}
+            src={viewerUrl}
+            title={title}
+            draggable={false}
+            referrerPolicy="no-referrer"
+            // The handshake names the viewer's exact origin, so the frame keeps it.
+            // That is safe only because `getIosSimulatorViewerOrigin` rejects a
+            // viewer on the app's own origin; everything else stays sandboxed.
+            // oxlint-disable-next-line react/iframe-missing-sandbox
+            sandbox="allow-scripts allow-same-origin"
+            onLoad={handleLoad}
+          />
+        )}
       </IosSimulatorDeviceFrame>
     );
   }

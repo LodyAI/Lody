@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
 
 import { createSessionMirror } from '../src/session-mirror';
-import { type SessionHistory } from '../src/schema';
+import { normalizeSessionTurnInputConfig } from '../src/message-schemas';
+import { type SessionHistory, type SessionHistoryInput } from '../src/schema';
 import type { SessionId } from '../src/ids';
 import { createHistoryWriter, type StoredHistorySnapshot } from '../src/history-writer';
 import { applyNotificationOnHistory } from '../src/acp/history-apply';
@@ -29,6 +30,43 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('persists ACP phases in Loro history across reopening', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const writer = mirror.historyWriter;
+    writer.append({ ...entry('phase-turn'), role: 'assistant', items: [] });
+    for (const [text, messagePhase] of [
+      ['Working', 'commentary'],
+      ['Done', 'final_answer'],
+    ] as const) {
+      const notification = parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text },
+          _meta: { lody: { messagePhase } },
+        },
+      });
+      writer.updateEntry(
+        'phase-turn',
+        (turn) =>
+          applyNotificationOnHistory([turn], [notification], undefined, {
+            targetAssistantEntryId: 'phase-turn',
+          })[0]!
+      );
+    }
+    const bytes = doc.export({ mode: 'snapshot' });
+    mirror.dispose();
+    const restarted = new Loro();
+    restarted.import(bytes);
+    const reopened = open(restarted);
+    expect(reopened.historyWriter.read('phase-turn')?.items).toEqual([
+      { type: 'text', text: 'Working', messagePhase: 'commentary' },
+      { type: 'text', text: 'Done', messagePhase: 'final_answer' },
+    ]);
+    reopened.dispose();
+  });
+
   it('retains quoted snapshots through the writer, a restart and execution projection', () => {
     const snapshot = '  Unicode 引文 👩🏽‍💻\n\n> nested\nEnd of quoted message.\n';
     const quote = formatMessageQuote(snapshot);
@@ -1648,4 +1686,232 @@ describe('single history writer', () => {
       mirror.dispose();
     }
   );
+
+  it('persists stored steer provenance and keeps it readable after peer import', () => {
+    const steerEntry: SessionHistoryInput = {
+      id: 'guide',
+      role: 'user',
+      timestamp: '2026-01-01',
+      status: 'processing',
+      read: true,
+      items: [{ type: 'text', text: 'synthetic guide' }],
+      inputConfig: { prompt: 'synthetic guide', _lodyDeliveryKind: 'steer' },
+    };
+    const doc = new Loro();
+    const mirror = open(doc);
+    try {
+      mirror.historyWriter.append(steerEntry);
+      const peer = new Loro();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      const stored = peer.getList('history').toJSON()[0];
+      expect(stored.inputConfig._lodyDeliveryKind).toBe('steer');
+      expect(normalizeSessionTurnInputConfig(stored.inputConfig)?._lodyDeliveryKind).toBe('steer');
+    } finally {
+      mirror.dispose();
+    }
+  });
+  it('bounds oversized tool payloads, base64 URIs, switch_mode plans, proposed_plan markdown, and no-op plans', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    try {
+      const writer = mirror.historyWriter;
+      writer.append({ ...entry('bloat-turn'), role: 'assistant', items: [] });
+
+      const oversizedText = `head:${'x'.repeat(300_000)}data:image/png;base64,${'A'.repeat(2048)}:tail`;
+      const notifications = [
+        parseSessionNotification({
+          sessionId: 'root',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'other-huge',
+            title: 'Other tool',
+            kind: 'other',
+            status: 'completed',
+            content: [
+              { type: 'content', content: { type: 'text', text: oversizedText } },
+              {
+                type: 'content',
+                content: { type: 'audio', data: 'B'.repeat(32 * 1024), mimeType: 'audio/mp3' },
+              },
+              {
+                type: 'content',
+                content: {
+                  type: 'resource',
+                  resource: { uri: 'https://example.com/big', text: 'R'.repeat(600_000) },
+                },
+              },
+              {
+                type: 'diff',
+                path: 'out.txt',
+                oldText: 'O'.repeat(400_000),
+                newText: 'N'.repeat(400_000),
+              },
+            ],
+          },
+        }),
+        parseSessionNotification({
+          sessionId: 'root',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'mode-huge',
+            title: 'Switch mode',
+            kind: 'switch_mode',
+            status: 'completed',
+            rawInput: { plan: 'P'.repeat(600_000) },
+          },
+        }),
+        parseSessionNotification({
+          sessionId: 'root',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'sched-huge',
+            title: 'CronCreate',
+            kind: 'other',
+            status: 'completed',
+            _meta: { claudeCode: { toolName: 'CronCreate' } },
+            rawInput: { note: 'S'.repeat(600_000) },
+            rawOutput: { detail: 'T'.repeat(600_000) },
+          },
+        }),
+        parseSessionNotification({
+          sessionId: 'root',
+          update: {
+            sessionUpdate: 'plan_update',
+            plan: { type: 'markdown', planId: 'plan-1', content: 'M'.repeat(600_000) },
+          },
+        }),
+        parseSessionNotification({
+          sessionId: 'root',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'text',
+              text: `\n<proposed_plan>\n${'Q'.repeat(600_000)}\n</proposed_plan>\n`,
+            },
+          },
+        }),
+      ];
+
+      writer.updateEntry(
+        'bloat-turn',
+        (turn) =>
+          applyNotificationOnHistory([turn], notifications, undefined, {
+            targetAssistantEntryId: 'bloat-turn',
+          })[0]!
+      );
+
+      const stored = writer.read('bloat-turn')!;
+      const otherTool = stored.items?.find(
+        (item): item is Extract<MessageContent, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'other-huge'
+      );
+      expect(otherTool?.content).toBeDefined();
+      const textBlock = otherTool!.content![0];
+      expect(textBlock?.type).toBe('content');
+      if (
+        textBlock?.type === 'content' &&
+        'content' in textBlock &&
+        textBlock.content.type === 'text'
+      ) {
+        expect(textBlock.content.text).toContain('[truncated');
+        expect(textBlock.content.text).not.toContain('data:image/png;base64');
+        expect(Buffer.byteLength(textBlock.content.text, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+      const audioBlock = otherTool!.content![1];
+      if (
+        audioBlock?.type === 'content' &&
+        'content' in audioBlock &&
+        audioBlock.content.type === 'audio'
+      ) {
+        expect(audioBlock.content.data).toBe('');
+      }
+      const resourceBlock = otherTool!.content![2];
+      if (
+        resourceBlock?.type === 'content' &&
+        'content' in resourceBlock &&
+        resourceBlock.content.type === 'resource' &&
+        'text' in resourceBlock.content.resource
+      ) {
+        expect(Buffer.byteLength(resourceBlock.content.resource.text, 'utf8')).toBeLessThanOrEqual(
+          256 * 1024
+        );
+      }
+      const diffBlock = otherTool!.content![3];
+      if (diffBlock?.type === 'diff') {
+        expect(Buffer.byteLength(diffBlock.oldText ?? '', 'utf8')).toBeLessThanOrEqual(256 * 1024);
+        expect(Buffer.byteLength(diffBlock.newText, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+
+      const modeTool = stored.items?.find(
+        (item): item is Extract<MessageContent, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'mode-huge'
+      );
+      expect(
+        Buffer.byteLength((modeTool?.rawInput as { plan: string }).plan, 'utf8')
+      ).toBeLessThanOrEqual(256 * 1024);
+
+      const schedTool = stored.items?.find(
+        (item): item is Extract<MessageContent, { type: 'tool_call' }> =>
+          item.type === 'tool_call' && item.toolCallId === 'sched-huge'
+      );
+      expect(
+        Buffer.byteLength((schedTool?.rawInput as { note: string }).note, 'utf8')
+      ).toBeLessThanOrEqual(256 * 1024);
+      expect(
+        Buffer.byteLength((schedTool?.rawOutput as { detail: string }).detail, 'utf8')
+      ).toBeLessThanOrEqual(256 * 1024);
+
+      const proposedPlans =
+        stored.items?.filter(
+          (item): item is Extract<MessageContent, { type: 'proposed_plan' }> =>
+            item.type === 'proposed_plan'
+        ) ?? [];
+      expect(proposedPlans.length).toBeGreaterThanOrEqual(1);
+      for (const planItem of proposedPlans) {
+        expect(Buffer.byteLength(planItem.markdown, 'utf8')).toBeLessThanOrEqual(256 * 1024);
+      }
+
+      // Repeating identical plans must not append redundant CRDT ops.
+      const planNotification = parseSessionNotification({
+        sessionId: 'root',
+        update: {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'Step 1', priority: 'high', status: 'in_progress' }],
+        },
+      });
+      writer.updateEntry(
+        'bloat-turn',
+        (turn) =>
+          applyNotificationOnHistory([turn], [planNotification], undefined, {
+            targetAssistantEntryId: 'bloat-turn',
+          })[0]!
+      );
+      const opsAfterFirstPlan = doc.opCount();
+      for (let i = 0; i < 20; i += 1) {
+        const currentTurn = writer.read('bloat-turn')!;
+        const nextHistory = applyNotificationOnHistory(
+          [currentTurn],
+          [planNotification],
+          undefined,
+          {
+            targetAssistantEntryId: 'bloat-turn',
+          }
+        );
+        expect(nextHistory[0]).toBe(currentTurn);
+        writer.updateEntry(
+          'bloat-turn',
+          (turn) =>
+            applyNotificationOnHistory([turn], [planNotification], undefined, {
+              targetAssistantEntryId: 'bloat-turn',
+            })[0]!
+        );
+      }
+      expect(doc.opCount()).toBe(opsAfterFirstPlan);
+
+      // Total CRDT snapshot stays bounded well under raw multi-MB inputs (~4 MB submitted).
+      expect(doc.export({ mode: 'snapshot' }).length).toBeLessThan(2 * 1024 * 1024);
+    } finally {
+      mirror.dispose();
+    }
+  });
 });

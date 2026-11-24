@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -15,6 +16,18 @@ import {
 import { MachineDetailPane } from '@/components/settings/machine-detail-pane';
 import { lodyPresenceStatesAtom, lodyPresenceSyncStateAtom } from '@/atoms/presence';
 
+const storyStyles = stylex.create({
+  panel: {
+    height: 620,
+    width: 720,
+    overflow: 'hidden',
+    borderRadius: 'var(--radius-lg)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab,hsl(var(--border) / 1) 60%,transparent)',
+    backgroundColor: 'color-mix(in oklab,hsl(var(--card) / 1) 40%,transparent)',
+  },
+});
 const machineId = 'machine-story' as MachineId;
 const resetIn = (seconds: number) => Math.floor(getServerNow() / 1000) + seconds;
 
@@ -73,6 +86,7 @@ type StoryProps = {
    * anything gated on it, like the daemon-update banner) reads true. */
   presenceOnline?: boolean;
   showUpdate?: boolean;
+  showIdentityRestore?: boolean;
 };
 
 function StoryWrapper({
@@ -87,6 +101,7 @@ function StoryWrapper({
   canRevokeCredentials = false,
   presenceOnline = false,
   showUpdate = false,
+  showIdentityRestore = false,
 }: StoryProps) {
   const [store] = useState(() => {
     const nextStore = createStore();
@@ -105,12 +120,31 @@ function StoryWrapper({
   });
   return (
     <Provider store={store}>
-      <div className="h-[620px] w-[720px] overflow-hidden rounded-lg border border-border/60 bg-card/40">
+      <div {...stylex.props(storyStyles.panel)}>
         <MachineDetailPane
+          mode={showIdentityRestore ? 'devices' : 'agents'}
+          onRestoreIdentity={
+            showIdentityRestore
+              ? async () => {
+                  throw new Error('Preview only: no daemon was changed.');
+                }
+              : undefined
+          }
+          restoreIdentityCandidates={
+            showIdentityRestore
+              ? [
+                  {
+                    ...baseMachine,
+                    id: 'retired-windows-machine' as MachineId,
+                    name: 'Windows before reinstall',
+                  },
+                ]
+              : []
+          }
           machine={machine}
           configs={storyConfigs}
           isOwn={isOwn}
-          isLocal={isOwn}
+          isLocal={isOwn && !showIdentityRestore}
           ownerName={ownerName}
           sharedWithTeam={sharedWithTeam}
           canDelete={canDelete}
@@ -167,11 +201,7 @@ export const OwnWithProviders: Story = {
             },
           ],
         },
-        [getRateLimitEntryKey(
-          'codex',
-          CODEX_SPARK_LIMIT_ID,
-          'cfg-codex' as AgentConfigId
-        )]: {
+        [getRateLimitEntryKey('codex', CODEX_SPARK_LIMIT_ID, 'cfg-codex' as AgentConfigId)]: {
           limitId: CODEX_SPARK_LIMIT_ID,
           scope: { providerId: 'codex' },
           planName: 'Codex Spark',
@@ -240,5 +270,15 @@ export const DesktopDaemonUpdateBanner: Story = {
     canDelete: true,
     presenceOnline: true,
     showUpdate: true,
+  },
+};
+
+export const IdentityRecovery: Story = {
+  args: {
+    machine: { ...baseMachine, name: 'Remote Windows daemon', os: 'Windows' },
+    configs: [],
+    presenceOnline: true,
+    showRestart: true,
+    showIdentityRestore: true,
   },
 };

@@ -34,11 +34,6 @@ export type E2eeMachineSharingReadResult =
   | E2eeMachineSharingVersion
   | E2eeMachineSharingRemovedHead
   | null;
-/** Account-authenticated display data only. It cannot renew device execution freshness or establish permission. */
-export type E2eeMachineSharingLatestForMember =
-  | (E2eeMachineSharingVersion & { status: 'active' })
-  | E2eeMachineSharingRemovedHead
-  | null;
 /** Device-authenticated control operations; account login alone is insufficient. Each new generation starts at revision 1/null parent.
  * commit atomically inserts original bytes and CASes head; exact retries return the original receipt even after
  * later commits, or a removal barrier after cleanup. Retain lightweight request intent digests for this check.
@@ -46,14 +41,14 @@ export type E2eeMachineSharingLatestForMember =
  * to full-head CAS; a removed or superseded generation always conflicts. Exact old receipts may report removed.
  * Reusing requestId with different intent/bytes fails. A confirmed conflict never auto-rebases. Only explicit
  * Removed generations are terminal. Re-admission creates a different generation/resource and fresh owner
- * intent starts its revision 1/null parent; never resume an old generation at n+1 or migrate its pins/grants.
- * The separate account read returns only ciphertext/routing metadata, never execution authority. */
+ * intent starts its revision 1/null parent; never resume an old generation at n+1 or migrate its pins/grants. */
 export type E2eeMachineSharingRequests = {
-  readHead: E2eeDeviceAccess & E2eeMachineSharingScope;
+  /** `includeVersion` asks a backend that supports it to inline the active head's original,
+   * saving the separate `readVersion` round trip. Older backends may reject the field;
+   * callers then retry without it. */
+  readHead: E2eeDeviceAccess & E2eeMachineSharingScope & { includeVersion?: true };
   readVersion: E2eeDeviceAccess & E2eeMachineSharingScope & { revision: number };
   readRequest: E2eeDeviceAccess & E2eeMachineSharingScope & { requestId: string };
-  /** Current account workspace membership is checked by the server; no credential or cliToken is accepted. */
-  latestForMember: E2eeMachineSharingScope;
   commit: E2eeDeviceAccess &
     E2eeMachineSharingScope & {
       expectedHead: E2eeMachineSharingHeadState | null;
@@ -67,11 +62,17 @@ export type E2eeMachineSharingRequests = {
 };
 /** A commit acknowledgement is storage evidence only. Clients independently verify every returned head/frame. */
 export type E2eeMachineSharingReplies = {
-  readHead: E2eeMachineSharingHeadState | null;
+  /** An active head may inline its original (`includeVersion`). Clients verify it exactly as a
+   * `readVersion` reply and never persist it as part of the head. */
+  readHead:
+    | (Extract<E2eeMachineSharingHeadState, { status: 'active' }> & {
+        version?: E2eeMachineSharingVersion;
+      })
+    | E2eeMachineSharingRemovedHead
+    | null;
   /** Missing or purged ciphertext may return null; readHead still preserves the removed high water. */
   readVersion: E2eeMachineSharingReadResult;
   readRequest: E2eeMachineSharingReadResult;
-  latestForMember: E2eeMachineSharingLatestForMember;
   commit:
     | { status: 'committed'; version: E2eeMachineSharingVersion }
     | { status: 'conflict'; head: E2eeMachineSharingHeadState | null }

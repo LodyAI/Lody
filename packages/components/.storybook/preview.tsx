@@ -1,5 +1,6 @@
 import type { Preview } from '@storybook/react-vite';
 import React, { useEffect, useLayoutEffect } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import {
   Outlet,
   RouterContextProvider,
@@ -17,10 +18,19 @@ import {
 import { ThemeProvider, useTheme, type Theme } from '../src/theme-provider';
 import { Tooltip } from '@lody/ui/tooltip';
 import { installFocusModality } from '@lody/ui/focus-modality';
+import { installScrollbarPresence } from '@lody/ui/scrollbar-presence';
 import { I18nextProvider } from 'react-i18next';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { resources, defaultNS } from '../src/i18n';
+import { resources, defaultNS, ensureLanguageResources } from '../src/i18n';
+
+const styles = stylex.create({
+  canvas: {
+    height: '100%',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 function StorybookThemeMode({ theme, children }: { theme: Theme; children: React.ReactNode }) {
   const { previewTheme } = useTheme();
@@ -141,6 +151,7 @@ void i18next.use(initReactI18next).init({
 
 // The app installs this in AppInitializer; stories render outside it.
 installFocusModality();
+installScrollbarPresence();
 
 const preview: Preview = {
   decorators: [
@@ -149,7 +160,21 @@ const preview: Preview = {
       const locale = context.globals.locale || 'en';
 
       useEffect(() => {
-        void i18next.changeLanguage(locale);
+        /* zh_CN is lazy-loaded; switching before its bundle arrives falls
+           back to English (see `setAppLanguage`). */
+        let cancelled = false;
+        ensureLanguageResources(locale).then(
+          () => {
+            if (!cancelled) void i18next.changeLanguage(locale);
+          },
+          (error: unknown) => {
+            /* Surface the failed bundle instead of silently staying in English. */
+            console.error(`Storybook could not load the ${locale} locale bundle`, error);
+          }
+        );
+        return () => {
+          cancelled = true;
+        };
       }, [locale]);
 
       return (
@@ -164,7 +189,7 @@ const preview: Preview = {
                 >
                   <StorybookThemeMode theme={theme}>
                     <Tooltip.Provider>
-                      <div className="h-full bg-background text-foreground">
+                      <div {...stylex.props(styles.canvas)}>
                         <Story />
                       </div>
                     </Tooltip.Provider>

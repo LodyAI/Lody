@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import type { IosSimulatorDevice, IosSimulatorResponse } from '@lody/shared';
 import {
@@ -55,6 +53,22 @@ describe('iOS Simulator availability', () => {
     expect(getIosSimulatorPanelAvailability(null)).toBe('hidden');
     expect(
       getIosSimulatorPanelAvailability({ os: 'linux', protocolCapabilities: { iosSimulator: 1 } })
+    ).toBe('hidden');
+  });
+
+  it('keeps encrypted Mac tabs available and preserves upgrade and platform checks', () => {
+    expect(getIosSimulatorPanelAvailability({ os: 'darwin' }, 'e2ee')).toBe('upgrade-required');
+    expect(
+      getIosSimulatorPanelAvailability(
+        { os: 'darwin', protocolCapabilities: { iosSimulator: 1 } },
+        'e2ee'
+      )
+    ).toBe('available');
+    expect(
+      getIosSimulatorPanelAvailability(
+        { os: 'linux', protocolCapabilities: { iosSimulator: 1 } },
+        'e2ee'
+      )
     ).toBe('hidden');
   });
 

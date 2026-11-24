@@ -1,6 +1,7 @@
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
+import { replaceQueueItem } from '../lib/session-send-delivery';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
@@ -34,8 +35,16 @@ declare global {
 
 export type PushMessageQueueInput = Omit<
   MessageQueueItemInput,
-  '$cid' | 'timestamp' | 'userTurnId' | 'operationId' | 'isEditing' | 'editingStartedAt'
+  | '$cid'
+  | 'timestamp'
+  | 'userTurnId'
+  | 'operationId'
+  | 'isEditing'
+  | 'editingStartedAt'
+  | 'e2eeIntent'
 > & {
+  /** Signed by the send path itself in encrypted workspaces, never by the composer. */
+  e2eeIntent?: string;
   isEditing?: boolean;
   editingStartedAt?: number;
   timestamp?: string;
@@ -45,6 +54,7 @@ export type PushMessageQueueInput = Omit<
 };
 
 export type UseSessionDocResult = {
+  loadError?: boolean;
   /** Control-plane state (session, queue, preview, fork, cursor, runtime config). */
   doc: SessionDocState;
   /**
@@ -123,6 +133,7 @@ export function useSessionDoc(
       mq: [],
       humanInputReceipts: {},
       rpcDispatchOriginals: {},
+      queueDispatchOriginals: {},
       cancelRequest: undefined,
       forkOperation: undefined,
       notification: undefined,
@@ -138,6 +149,7 @@ export function useSessionDoc(
     () => (enabled && runtime?.peekSessionStore?.(sessionId)) || null
   );
   const [ready, setReady] = useState(() => loadedStore !== null);
+  const [loadError, setLoadError] = useState(false);
   const [syncState, setSyncState] = useState<RoomSyncState>(
     () => loadedStore?.getSyncState() ?? 'idle'
   );
@@ -146,6 +158,7 @@ export function useSessionDoc(
   );
   useEffect(() => {
     let cancelled = false;
+    setLoadError(false);
     let acquiredStore = false;
     let unsubscribe: (() => void) | null = null;
     let unsubscribeSyncState: (() => void) | null = null;
@@ -220,6 +233,7 @@ export function useSessionDoc(
           },
         });
       } catch (error) {
+        if (!cancelled) setLoadError(true);
         console.error('Failed to load session doc', { sessionId, error });
       }
     })();
@@ -340,6 +354,7 @@ export function useSessionDoc(
         userTurnId,
         operationId: item.operationId ?? `queue:${userTurnId}`,
         timestamp: item.timestamp ?? new Date(getServerNow()).toISOString(),
+        e2eeIntent: item.e2eeIntent,
       };
 
       const inputConfig = normalizeSessionTurnInputConfig(entry.acpSessionConfig);
@@ -351,7 +366,10 @@ export function useSessionDoc(
       const pendingTurn = buildDraftUserHistoryEntry(
         {
           userId: entry.userId,
-          inputBlocks: normalizeSessionInputBlocks(inputConfig?.inputBlocks, entry.task),
+          inputBlocks: normalizeSessionInputBlocks(
+            inputConfig?.inputBlocks,
+            entry.acpSessionConfig?.prompt ?? (attachments?.length ? '' : entry.task)
+          ),
           timestamp: entry.timestamp,
           inputConfig,
         },
@@ -403,11 +421,7 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      await runtime.writer.updateSessionMessage(
-        sessionId,
-        cid,
-        next as unknown as Record<string, unknown>
-      );
+      await replaceQueueItem(runtime, sessionId, cid, current, next);
     },
     [withStore, runtime, sessionId]
   );
@@ -459,6 +473,7 @@ export function useSessionDoc(
 
   return {
     doc: state,
+    loadError,
     history,
     addHistory,
     pushMessageQueue,

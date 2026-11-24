@@ -48,6 +48,10 @@ Loro, Flock, session-schema, or network dependency.
   databases; only the exact legacy Loro fingerprint is accepted without that marker.
   Initialization classifies the complete `sqlite_master` schema while holding `BEGIN
 IMMEDIATE`; unowned lookalikes are never modified, and owned resets/version writes are atomic.
+- Descriptor and byte reads select an owner/path/side under retention before checking
+  the requested hash. A hash alone never authorizes a read. Read-only connections
+  require an existing, exactly recognized schema and perform no initialization,
+  migration, mutation or garbage collection.
 - The current pre-FastCDC Loro schema is intentionally replaced in place. Do not add
   a partial reader or mix the two schemas.
 

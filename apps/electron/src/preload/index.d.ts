@@ -1,4 +1,3 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
 import type { BootProfilerBridge } from './boot-profiler'
 
 type LodyPlatformInfo = {
@@ -66,7 +65,6 @@ declare global {
     __LODY_E2E_BOOT__?: BootProfilerBridge
     /** E2E-only: main registered the client-loss probe for this window. */
     __LODY_E2E_CLIENT_LOSS__?: true
-    electron: ElectronAPI
     ipc: LodyIpcBridge
   }
 }

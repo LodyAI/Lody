@@ -4,7 +4,27 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Bound Session command access
+
+Ordinary daemon-hosted Session history and metadata management borrow the existing
+workspace admission. A same-account caller on that daemon's own machine can use its
+local owner capability, corroborated by the current machine row; Session authorship
+never supplies this permission. Revoked workspace access still refuses. Other
+accounts and target machines use control-plane authorization, and missing cloud
+configuration refuses only that dependent operation. Encrypted workspaces retain
+their verified-ledger path. Roost sessions owned by this daemon keep the installed
+local backend; remote history still requires a signed proof.
+
+Cloud authorization adapters own endpoint validation. Tests inject synthetic
+endpoints or the authorization adapter itself, so a mocked port is not gated by a
+process-global deployment variable. Release CLI builds inject cloud endpoints;
+embedded clients pass them at startup, while local builds do not require them.
+
 ## Local persistence
+
+- `private-credential-file.ts` — publishes complete owner-only credential files
+  on POSIX using an exclusive temporary file and rename. Login and Git broker
+  state share it so replacement also removes permissive legacy file modes.
 
 - `local-workspace-catalog.ts` — cached workspace/identity discovery; mutations
   compose native FileLocks and keep the file write inside its lease. Read-cache
@@ -15,6 +35,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   rebuild it behind the invalid marker; offline and ordinary operations retain the error.
   [Recovery decision](../../../../.agents/notes/implemented/bug-fix/2026-10-27-e2ee-catalog-recovery.md).
 
+- `machine-identity-restore.ts` — retained daemon restart intent and credential
+  backup/publication. Only the next supervised daemon worker commits the accepted
+  cloud operation, before opening runtimes. Unknown results retain their original
+  request and credentials. This remains in the existing Promise-based startup and
+  lifecycle boundary; it does not migrate Fleet or restart ownership to Effect.
+
 ## Resource discovery
 
 - `workspace-command-manager.ts` — overlapping standalone commands borrow one
@@ -22,6 +48,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   cleanup. Authorization scopes stay separate; a failed cleanup is reported once
   and never blocks later commands. Daemon-executed commands borrow the daemon's
   replica through `session-command-environment.ts` instead.
+  Workspace cleanup errors identify failed stages and recognized safe causes;
+  document failures also report unconfirmed persistence. Unknown raw error text
+  is not copied into messages that may reach MCP or synced history.
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
   shared Session title/Machine/Agent/Role filters.
 - `resource-discovery.ts` — readable directory projections, Role availability,
@@ -67,6 +96,19 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 and per-agent installs from slow probes; restart/upgrade share one lifecycle lane.
 Unlisted requests retain their existing ordering. [Local control lane decision](../../../../.agents/notes/implemented/bug-fix/2026-09-20-acp-authenticate-queue-lane.md).
 
+`e2ee/acp-interaction-owner.ts` owns encrypted remote ACP capability probes and
+interactive authentication for one workspace and machine. The signed feature RPC
+requires the target machine owner's current authority and binds subsequent controls to
+the initiating device. `start` prepares an interaction; `activate` starts the probe or
+login; `poll` acknowledges ordered progress; `submit` and `cancel` control the same
+interaction. A probe is execution and uses the feature journal's duplicate protection.
+The requesting device supplies an ephemeral response key: progress and results use a
+separate recipient envelope, while input uses the target's ephemeral key. Both directions
+bind the workspace, machine, device and interaction; the workspace epoch alone does not
+protect these values from other members. The owner bounds interaction lifetime and queued
+progress, cancels work on revocation or shutdown, and retains unfinished work until it
+settles. A lost response does not authorize repeating an uncertain execution.
+
 - `github-git-transport.ts` — generated Git wrapper and HTTP credential adapters.
   HTTP helper redispatch preserves the parent operation's read/write context;
   independent commands classify themselves, and missing/invalid helper context
@@ -88,13 +130,20 @@ Unlisted requests retain their existing ordering. [Local control lane decision](
 
 - `usage/usage-tracking-service.ts` — cumulative usage snapshot staging and
   acknowledgement-based retry retention; deltas are never added again.
-  Scope and limits: [usage delivery](../../../../specs/usage-delivery.md).
+  Scope and limits: [usage delivery](../../../../specs/usage-delivery.md). Codex
+  attributes each turn's new tokens to its submitted model:
+  [decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-codex-per-model-attribution.md).
 
 - `message-handler.ts` — the CLI's central message hub (largest file): session chat
   handling (`handleSessionChat`), ACP update buffering/flush, Code Collab v2 machine
   RPC wiring, local project control, session file upload/send, and the turn cloud
   side-effect gate. Turn execution itself lives in
   `../session/session-execution-service.ts`.
+  Context occupancy writes to workspace metadata show the first valid value
+  immediately, then at most once per 10 seconds when capacity changes or usage
+  differs from the last queued value by at least `max(1024 tokens, 1% of capacity)`.
+  Smaller changes remain buffered; permission wait and turn finalization flush
+  the exact latest value, including the completed-turn value used by idle compaction.
   Machine registration passes the daemon's `TZ` hint to `getDeviceTimeZone`:
   when Intl exposes no zone name, named zoneinfo paths and fixed whole-hour
   POSIX zones such as `HKT-8` are resolved before the legacy UTC fallback.
@@ -198,6 +247,9 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   waiting for causal dependencies through the existing SQLite journal. A durable
   save does not establish complete synchronization or advance another replica's
   cursor. See the [persistence decision](../../../../.agents/notes/implemented/bug-fix/2026-10-22-loro-pending-persistence.md).
+  Released streams-crdt and LoroRepo builds own storage-failure recovery: a failed save no
+  longer spins the live-read loop ([read-loop decision](../../../../.agents/notes/implemented/bug-fix/2026-10-19-streams-read-loop-spin.md))
+  or re-downloads applied updates ([release adoption](../../../../.agents/notes/implemented/bug-fix/2026-10-23-storage-recovery-release-adoption.md)).
   `sqlite-lock-diagnostics.ts` logs, at most once a minute, which processes hold a
   workspace `repo.sqlite3` open when loro-repo or streams-crdt reports
   `database is locked`; it only observes (`lsof`) and never retries or blocks.
@@ -210,6 +262,8 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   ([AGENTS.md](pr-poller/AGENTS.md)).
 - `analytics/`, `git/`, `notifications/`, `session-export/`, `usage/` — supporting
   services.
+- `workspace-bundle/` — lossless workspace export/import bundles
+  ([AGENTS.md](workspace-bundle/AGENTS.md)).
 
 ### Session active presence
 
@@ -218,3 +272,13 @@ initialization-stall signals. `loro/session-active-presence-legacy.ts` is the
 MessageHandler construction/analytics entry. Visible Turns acquire the native lease;
 other lifecycle callbacks may update phases but cannot release it. Shutdown awaits
 those leases before closing documents. See the [presence guide](../../../../.agents/docs/cli-lib-loro-presence.md).
+
+## Managed daemon updates
+
+`managed-daemon-release.ts` verifies product/distribution signatures, bounds and
+resumes downloads, and owns versioned installations and per-operation records.
+`managed-daemon-ipc.ts` carries preparation over existing private supervisor IPC.
+`managed-process-observation.ts` records owned process groups and refuses a clean
+drain receipt when their termination is unknown. The fixed entry in
+`commands/daemon-runner.ts` owns selection, the uninterrupted Host lease and rollback;
+`session/machine-turn-admission.ts` pauses new turns across all workspaces.

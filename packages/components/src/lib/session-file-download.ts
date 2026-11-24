@@ -31,7 +31,8 @@ const downloadSessionFileInBrowser = async (
 ): Promise<void> => {
   const { workspaceId, sessionId, fileId, token, fileName } = args;
   let blob: Blob;
-  if (args.encryption) blob = await protectedAttachmentBlob({ ...args, encryption: args.encryption });
+  if (args.encryption)
+    blob = await protectedAttachmentBlob({ ...args, encryption: args.encryption });
   else {
     const response = await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
       headers: { Authorization: `Bearer ${token}` },
@@ -61,6 +62,73 @@ export const downloadSessionFile = async (
     return;
   }
   await downloadSessionFileInBrowser(args);
+};
+
+export type SessionFileBlobProgress = {
+  loadedBytes: number;
+  totalBytes: number;
+};
+
+export const fetchSessionFileBlob = async (
+  args: FileFetchArgs & {
+    mimeType?: string;
+    sizeBytes?: number;
+    signal?: AbortSignal;
+    onProgress?: (progress: SessionFileBlobProgress) => void;
+  }
+): Promise<Blob> => {
+  const { workspaceId, sessionId, fileId, token, mimeType, sizeBytes, signal, onProgress } = args;
+  if (args.encryption) {
+    const parts: BlobPart[] = [];
+    let loadedBytes = 0;
+    const totalBytes = args.encryption.sizeBytes || sizeBytes || 0;
+    for await (const bytes of protectedAttachmentChunks({
+      ...args,
+      encryption: args.encryption,
+      signal,
+    })) {
+      parts.push(bytes as Uint8Array<ArrayBuffer>);
+      loadedBytes += bytes.byteLength;
+      onProgress?.({ loadedBytes, totalBytes });
+    }
+    return new Blob(parts, { type: mimeType || args.encryption.mimeType });
+  }
+
+  const response = await fetch(buildSessionFileDownloadUrl(workspaceId, sessionId, fileId), {
+    headers: { Authorization: `Bearer ${token}` },
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load file (${response.status})`);
+  }
+
+  const contentLength = Number(response.headers.get('Content-Length') ?? 0);
+  const totalBytes =
+    Number.isFinite(contentLength) && contentLength > 0 ? contentLength : (sizeBytes ?? 0);
+  const resolvedType = mimeType || response.headers.get('Content-Type') || '';
+  const body = response.body;
+  if (!body) {
+    const buffer = await response.arrayBuffer();
+    onProgress?.({ loadedBytes: buffer.byteLength, totalBytes: totalBytes || buffer.byteLength });
+    return new Blob([buffer], { type: resolvedType });
+  }
+
+  const reader = body.getReader();
+  const chunks: BlobPart[] = [];
+  let loadedBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+      chunks.push(value as Uint8Array<ArrayBuffer>);
+      loadedBytes += value.byteLength;
+      onProgress?.({ loadedBytes, totalBytes });
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return new Blob(chunks, { type: resolvedType });
 };
 
 export type SessionFilePreviewResult = {
@@ -120,15 +188,25 @@ export const fetchSessionFilePreview = async (
   const { workspaceId, sessionId, fileId, token, sizeBytes, signal } = args;
   const maxBytes = SESSION_FILE_PREVIEW_FETCH_BYTES;
   if (args.encryption) {
-    const parts: Uint8Array[] = []; let fetchedBytes = 0;
+    const parts: Uint8Array[] = [];
+    let fetchedBytes = 0;
     for await (const bytes of protectedAttachmentChunks({ ...args, encryption: args.encryption })) {
       const take = bytes.slice(0, maxBytes - fetchedBytes);
-      parts.push(take); fetchedBytes += take.length;
+      parts.push(take);
+      fetchedBytes += take.length;
       if (fetchedBytes >= maxBytes) break;
     }
-    const bytes = new Uint8Array(fetchedBytes); let offset = 0;
-    for (const part of parts) { bytes.set(part, offset); offset += part.length; }
-    return { text: new TextDecoder().decode(bytes), fetchedBytes, truncated: args.sizeBytes > fetchedBytes };
+    const bytes = new Uint8Array(fetchedBytes);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.length;
+    }
+    return {
+      text: new TextDecoder().decode(bytes),
+      fetchedBytes,
+      truncated: args.sizeBytes > fetchedBytes,
+    };
   }
   const response = await fetch(buildSessionFilePreviewUrl(workspaceId, sessionId, fileId), {
     headers: {

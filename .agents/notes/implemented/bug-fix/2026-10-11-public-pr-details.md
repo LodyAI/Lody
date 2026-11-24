@@ -25,7 +25,7 @@ The PR container omits mutation callbacks; operation dispatch also rejects write
 Authenticated caches are not reused by public reads. Public CI refresh slows to
 five minutes and skips rapid mergeability polling to conserve anonymous quota.
 
-This extends the [observation/association separation](../../proposed/bug-fix/2026-10-01-pr-observation-association.md):
+This extends the [observation/association separation](2026-10-01-pr-observation-association.md):
 a missing hosted association no longer implies public details are unreadable.
 Removing the identity gate globally would permit credentialed writes based on a
 name alone, so the public path instead stays anonymous. Existing React hook

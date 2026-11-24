@@ -1,5 +1,6 @@
 import {
   bindAgentRoleTarget,
+  getAcpCapabilityCacheKey,
   LODY_PLAN_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_CONFIG_ID,
   ACP_COLLABORATION_MODE_PLAN_VALUE,
@@ -9,7 +10,10 @@ import {
   type AgentRoleAvailability,
   type AgentRoleId,
   type AgentRoleUnavailableReason,
+  type AgentRoleAvailabilityContext,
   type MachineId,
+  type MachineViewMeta,
+  selectAgentRoleCapability,
 } from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 import type { AgentSelection } from '@/components/shared/agent-selector';
@@ -227,7 +231,24 @@ export const AGENT_ROLE_UNAVAILABLE_REASON_KEYS = {
   machine_offline: 'settings.agentRoles.unavailable.machineOffline',
   agent_config_missing: 'settings.agentRoles.unavailable.agentConfigMissing',
   agent_config_machine_mismatch: 'settings.agentRoles.unavailable.agentConfigMismatch',
+  model_unavailable: 'settings.agentRoles.unavailable.modelUnavailable',
+  mode_unavailable: 'settings.agentRoles.unavailable.modeUnavailable',
 } as const satisfies Record<AgentRoleUnavailableReason, string>;
+
+/** Each Role judged against the capabilities of its own machine and agent. */
+export const createAgentRoleCapabilityResolver = (
+  agentConfigs: readonly AgentConfigMeta[],
+  machines: ReadonlyMap<MachineId, Pick<MachineViewMeta, 'acpCapabilities'>>
+): NonNullable<AgentRoleAvailabilityContext['runConfigCapability']> => {
+  const configById = new Map(agentConfigs.map((config) => [config.id, config]));
+  return (role) => {
+    const config = configById.get(role.agentConfigId);
+    const capabilities = machines.get(role.machineId)?.acpCapabilities;
+    return config
+      ? selectAgentRoleCapability(capabilities?.[getAcpCapabilityCacheKey(config.id)], config)
+      : undefined;
+  };
+};
 
 export type ComposerRunConfigValues = {
   modeId: string | null;

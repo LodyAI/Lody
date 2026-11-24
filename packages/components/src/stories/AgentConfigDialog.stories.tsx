@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 import {
@@ -11,7 +12,6 @@ import {
 import {
   AgentConfigDialog,
   type AgentConfigDialogProps,
-  DEEPSEEK_CLAUDE_PRESET_ID,
   GLM_CLAUDE_PRESET_ID,
   GLM_ZAI_CREDENTIAL_MODE_ID,
   MIMO_CLAUDE_PRESET_ID,
@@ -19,6 +19,73 @@ import {
   MINIMAX_CLAUDE_PRESET_ID,
 } from '@/components/settings/agent-config-dialog';
 import { Dialog } from '@/ui/dialog';
+const storyLayoutStyles = stylex.create({
+  frame: {
+    width: 'calc(var(--spacing) * 56)',
+    'border-right-style': 'solid',
+    'border-right-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  canvas: {
+    'border-radius': 'var(--radius-lg)',
+    'background-color': 'hsl(var(--secondary) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 2)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    'font-weight': 'var(--font-weight-medium)',
+  },
+  caption: {
+    'font-size': 'var(--text-xl)',
+    'line-height': 'var(--text-xl--line-height)',
+    'font-weight': 'var(--font-weight-semibold)',
+  },
+  frame2: {
+    'margin-top': 'calc(var(--spacing) * 4)',
+    height: 'calc(var(--spacing) * 24)',
+    'border-radius': 'var(--radius-lg)',
+    'border-style': 'solid',
+    'border-width': '1px',
+    'border-color': 'hsl(var(--border) / 1)',
+    'background-color': 'hsl(var(--card) / 1)',
+  },
+  canvas2: {
+    'margin-top': 'calc(var(--spacing) * 6)',
+    'border-radius': 'var(--radius-md)',
+    'background-color': 'hsl(var(--primary))',
+    'padding-inline': 'calc(var(--spacing) * 3)',
+    'padding-block': 'calc(var(--spacing) * 1.5)',
+    'font-size': 'var(--text-sm)',
+    'line-height': 'var(--text-sm--line-height)',
+    color: 'hsl(var(--primary-foreground))',
+  },
+});
+
+const storyLayout = stylex.create({
+  nestedDialog: { height: 'min(90vh, 950px)', maxWidth: '1100px', overflow: 'hidden', padding: 0 },
+  hiddenLabel: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  row: {
+    display: 'flex',
+    height: '100%',
+  },
+  canvas: {
+    flex: '1',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 const machineId = 'machine-story' as MachineId;
 const existingConfigId = 'cfg-claude' as AgentConfigId;
@@ -103,22 +170,21 @@ function NestedCreateWrapper() {
 
   return (
     <Dialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
-      <Dialog.Content
-        noAnimation
-        className="h-[min(90vh,950px)] w-[84vw] max-w-[1100px] overflow-hidden p-0 sm:p-0"
-      >
-        <Dialog.Title className="sr-only">Settings</Dialog.Title>
-        <Dialog.Description className="sr-only">Nested provider dialog preview</Dialog.Description>
-        <div className="flex h-full">
-          <aside className="w-56 border-r border-border bg-background p-4">
-            <div className="rounded-lg bg-secondary px-3 py-2 text-sm font-medium">Agents</div>
+      <Dialog.Content noAnimation width="84vw" xstyle={storyLayout.nestedDialog}>
+        <Dialog.Title xstyle={storyLayout.hiddenLabel}>Settings</Dialog.Title>
+        <Dialog.Description xstyle={storyLayout.hiddenLabel}>
+          Nested provider dialog preview
+        </Dialog.Description>
+        <div {...stylex.props(storyLayout.row)}>
+          <aside {...stylex.props(storyLayoutStyles.frame)}>
+            <div {...stylex.props(storyLayoutStyles.canvas)}>Agents</div>
           </aside>
-          <main className="flex-1 bg-background p-8">
-            <h2 className="text-xl font-semibold">Agent Provider</h2>
-            <div className="mt-4 h-24 rounded-lg border border-border bg-card" />
+          <main {...stylex.props(storyLayout.canvas)}>
+            <h2 {...stylex.props(storyLayoutStyles.caption)}>Agent Provider</h2>
+            <div {...stylex.props(storyLayoutStyles.frame2)} />
             <button
               type="button"
-              className="mt-6 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground"
+              {...stylex.props(storyLayoutStyles.canvas2)}
               onClick={() => setProviderOpen(true)}
             >
               New provider
@@ -259,27 +325,6 @@ function EditLongOptionListsWrapper() {
         agentType: 'kimi',
         success: true,
       })}
-    />
-  );
-}
-
-function DeepSeekPresetWrapper() {
-  const [open, setOpen] = useState(true);
-  return (
-    <AgentConfigDialog
-      open={open}
-      onOpenChange={setOpen}
-      mode={{
-        kind: 'create',
-        initialForm: {
-          name: 'DeepSeek over Claude Code',
-          presetId: DEEPSEEK_CLAUDE_PRESET_ID,
-          presetToken: 'sk-storybook-demo-token',
-        },
-      }}
-      machine={makeMachineWithClaudeCaps()}
-      onSubmit={async () => {}}
-      onRefreshCapabilities={refreshCapabilities}
     />
   );
 }
@@ -496,6 +541,40 @@ function PiExtensionsWrapper({
   );
 }
 
+function AntigravitySkipPermissionsWrapper({
+  supported = true,
+  enabled = false,
+}: {
+  supported?: boolean;
+  enabled?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Antigravity',
+          agentType: 'antigravity',
+          ...(enabled ? { runtimeOverrides: { antigravitySkipPermissions: true } } : {}),
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { antigravitySkipPermissions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'antigravity',
+      })}
+    />
+  );
+}
+
 const meta = {
   title: 'Settings/AgentConfigDialog',
   parameters: { layout: 'fullscreen' },
@@ -510,6 +589,13 @@ export const PiExtensionsUnsupported: Story = {
   render: () => <PiExtensionsWrapper supported={false} />,
 };
 export const PiExtensionsScanError: Story = { render: () => <PiExtensionsWrapper scanError /> };
+
+export const AntigravitySkipPermissions: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper enabled />,
+};
+export const AntigravitySkipPermissionsUnsupported: Story = {
+  render: () => <AntigravitySkipPermissionsWrapper supported={false} />,
+};
 
 export const Create: Story = {
   render: () => <CreateWrapper />,
@@ -535,10 +621,6 @@ export const EditLongOptionLists: Story = {
 /** Signing in again lives here, not on the provider list row. */
 export const EditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
-};
-
-export const DeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
 };
 
 export const DeepSeekHarness: Story = {
@@ -611,13 +693,6 @@ export const MobileEdit: Story = {
 
 export const MobileEditEnvCredentialProvider: Story = {
   render: () => <EditWrapper config={envCredentialConfig} />,
-  parameters: {
-    viewport: { defaultViewport: 'mobile1' },
-  },
-};
-
-export const MobileDeepSeekPreset: Story = {
-  render: () => <DeepSeekPresetWrapper />,
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },

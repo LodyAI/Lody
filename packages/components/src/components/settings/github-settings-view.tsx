@@ -1,9 +1,10 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUpRight, Lock, Search } from 'lucide-react';
 import { Avatar } from '@lody/ui/avatar';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
@@ -66,6 +67,7 @@ export interface GitHubSettingsViewProps {
   /** The workspace session is ready for authenticated writes. */
   workspaceReady: boolean;
   connecting: boolean;
+  installationNotice?: ReactNode;
   onConnect: () => void;
   identity: GitHubPersonalIdentitySettingsCardProps;
   repos: SettingsWorkspaceRepoWithStatus[];
@@ -83,6 +85,7 @@ export function GitHubSettingsView({
   canManage,
   workspaceReady,
   connecting,
+  installationNotice,
   onConnect,
   identity,
   repos,
@@ -111,6 +114,7 @@ export function GitHubSettingsView({
 
   return (
     <div {...stylex.props(surface.container)}>
+      {installationNotice}
       <CompactSection>
         <CompactRow
           label="GitHub App"
@@ -275,7 +279,7 @@ function IdentityRow({
   ) : authorized ? (
     <span {...stylex.props(styles.identity)}>
       <Avatar.Root size="mini">
-        {avatarUrl ? <Avatar.Image src={avatarUrl} alt="" /> : null}
+        <CachedAvatarImage src={avatarUrl} alt="" />
         <Avatar.Fallback>{(profile?.login ?? '?').slice(0, 1).toUpperCase()}</Avatar.Fallback>
       </Avatar.Root>
       <span>
@@ -301,7 +305,7 @@ function IdentityRow({
       label={t('settings.integrations.github.personalIdentityRowLabel', 'Act as you')}
       helper={helper}
     >
-      {enabled && !authorized && canAuthorize ? (
+      {!authorized && canAuthorize ? (
         <Button
           variant="secondary"
           size="small"

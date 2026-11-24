@@ -1,3 +1,4 @@
+import { getCliNodeExecutable } from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -25,7 +26,8 @@ export interface WorkspaceWatchCoordinatorApi {
     workspaceId: string;
     ownerSessionId: string;
     workspaceRoot: string;
-    onDirty: (reason: WorkspaceWatchDirtyReason) => void;
+    /** `path` is the root-relative event path, present only for `event` dirt that has one. */
+    onDirty: (reason: WorkspaceWatchDirtyReason, path?: string) => void;
   }): Promise<WorkspaceWatchSubscription | null>;
   recordCoalescedRefresh?(): void;
 }
@@ -111,7 +113,7 @@ export function buildWorkspaceWatchWorkerEnvironment(
 export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
   private readonly subscriptions = new Map<
     string,
-    { root: string; onDirty: (reason: WorkspaceWatchDirtyReason) => void }
+    { root: string; onDirty: (reason: WorkspaceWatchDirtyReason, path?: string) => void }
   >();
   private readonly roots = new Map<string, RootState>();
   private worker: WorkspaceWatchChild | null = null;
@@ -146,7 +148,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
     workspaceId: string;
     ownerSessionId: string;
     workspaceRoot: string;
-    onDirty: (reason: WorkspaceWatchDirtyReason) => void;
+    onDirty: (reason: WorkspaceWatchDirtyReason, path?: string) => void;
   }): Promise<WorkspaceWatchSubscription | null> {
     if (this.disposed || this.phase === 'off') return null;
     let canonicalRoot: string;
@@ -317,7 +319,7 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
     const message = parseWorkspaceWatchChildMessage(raw);
     if (!message || message.generation !== generation) return;
     if (message.type === 'code-collab-watch/dirty') {
-      this.markRootDirty(message.root, 'event');
+      this.markRootDirty(message.root, 'event', message.path);
       return;
     }
     if (message.type === 'code-collab-watch/ready') {
@@ -412,11 +414,11 @@ export class WorkspaceWatchCoordinator implements WorkspaceWatchCoordinatorApi {
     this.cooldownTimer.unref?.();
   }
 
-  private markRootDirty(root: string, reason: WorkspaceWatchDirtyReason): void {
+  private markRootDirty(root: string, reason: WorkspaceWatchDirtyReason, path?: string): void {
     const state = this.roots.get(root);
     if (!state) return;
     this.dirtyEventCount += 1;
-    for (const key of state.subscribers) this.subscriptions.get(key)?.onDirty(reason);
+    for (const key of state.subscribers) this.subscriptions.get(key)?.onDirty(reason, path);
   }
 
   private markAllDirty(reason: WorkspaceWatchDirtyReason): void {
@@ -471,7 +473,7 @@ function launchWorkspaceWatchChild(_generation: number): WorkspaceWatchChild {
   if (existsSync(productionEntry)) {
     return startProcessLegacy(
       {
-        command: process.execPath,
+        command: getCliNodeExecutable(),
         args: [productionEntry],
         options: {
           env,

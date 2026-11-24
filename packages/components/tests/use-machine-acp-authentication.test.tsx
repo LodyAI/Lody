@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { createElement } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -8,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
 
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
-import { useMachineAcpAuthentication } from '../src/hooks/use-machine-acp-authentication';
+import {
+  AcpInputOutcomeUnknownError,
+  useMachineAcpAuthentication,
+} from '../src/hooks/use-machine-acp-authentication';
+import { createTestI18n, withTestI18n } from './test-i18n';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
-  }),
-}));
+const testI18n = createTestI18n();
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -47,6 +45,218 @@ describe('useMachineAcpAuthentication', () => {
     vi.restoreAllMocks();
   });
 
+  it.each(['not-running', 'cancelled'] as const)(
+    'finishes a silently dropped start after cancel returns %s and fences late progress',
+    async (disposition) => {
+      let resolveStart!: (value: any) => void;
+      let progress!: (value: any) => void;
+      const onProgress = vi.fn();
+      const runtime = {
+        sendControl: vi.fn(),
+        subscribeMachineAcpAuthenticationProgress: vi.fn((_machine, _request, listener) => {
+          progress = listener;
+          return () => {};
+        }),
+        waitForMachineAcpAuthenticateResponse: vi
+          .fn()
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                resolveStart = resolve;
+              })
+          )
+          .mockResolvedValueOnce({ success: true, disposition })
+          .mockResolvedValueOnce({ success: true, disposition: 'authenticated' }),
+      } as unknown as WorkspaceRuntime;
+      let controller!: AuthenticationController;
+      await act(async () => {
+        root?.render(
+          withTestI18n(
+            createElement(Probe, {
+              runtime,
+              workspaceId: 'workspace-1' as WorkspaceId,
+              onResult: (value) => {
+                controller = value;
+              },
+            }),
+            testI18n
+          )
+        );
+      });
+      const args = { machineId: 'machine-1' as MachineId, configId: 'config-1' as AgentConfigId };
+      const original = controller.startAuthentication({ ...args, onProgress });
+      controller.cancelAuthentication({
+        machineId: args.machineId,
+        authenticationRequestId: original.requestId,
+      });
+      await expect(original.promise).resolves.toMatchObject({ disposition: 'cancelled' });
+      progress({ status: 'authenticated' });
+      expect(onProgress).not.toHaveBeenCalled();
+      const retry = controller.startAuthentication(args);
+      resolveStart({ success: true, disposition: 'authenticated' });
+      await expect(retry.promise).resolves.toMatchObject({ disposition: 'authenticated' });
+    }
+  );
+
+  it.each([null, { success: false, disposition: 'error', error: 'Rejected' }])(
+    'retains the original owner when cancellation is unconfirmed (%j)',
+    async (cancelResponse) => {
+      let resolveStart!: (value: any) => void;
+      let resolveCancel!: (value: any) => void;
+      let controller!: AuthenticationController;
+      const runtime = {
+        sendControl: vi.fn(),
+        waitForMachineAcpAuthenticateResponse: vi
+          .fn()
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                resolveStart = resolve;
+              })
+          )
+          .mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                resolveCancel = resolve;
+              })
+          ),
+      } as unknown as WorkspaceRuntime;
+      await act(async () => {
+        root?.render(
+          withTestI18n(
+            createElement(Probe, {
+              runtime,
+              workspaceId: 'workspace-1' as WorkspaceId,
+              onResult: (value) => {
+                controller = value;
+              },
+            }),
+            testI18n
+          )
+        );
+      });
+      const machineId = 'machine-1' as MachineId;
+      const attempt = controller.startAuthentication({
+        machineId,
+        configId: 'config-1' as AgentConfigId,
+      });
+      let settled = false;
+      void attempt.promise.then(() => {
+        settled = true;
+      });
+      controller.cancelAuthentication({ machineId, authenticationRequestId: attempt.requestId });
+      await act(async () => {
+        resolveCancel(cancelResponse);
+      });
+      expect(settled).toBe(false);
+      resolveStart({ success: true, disposition: 'authenticated' });
+      await expect(attempt.promise).resolves.toMatchObject({ disposition: 'authenticated' });
+    }
+  );
+
+  it('reports a lost submit response as unknown rather than safe to retry', async () => {
+    const runtime = {
+      sendControl: vi.fn(),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => null),
+    } as unknown as WorkspaceRuntime;
+    let controller: AuthenticationController | undefined;
+    await act(async () => {
+      root?.render(
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
+      );
+    });
+    await expect(
+      controller!.submitAuthorizationCode({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        authorizationCode: 'synthetic',
+      })
+    ).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
+    await expect(
+      controller!.submitAuthenticationInput({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        interactionId: 'question',
+        input: { action: 'accept' },
+      })
+    ).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
+  });
+
+  it('does not report a finished authentication as a failed submission', async () => {
+    const runtime = {
+      sendControl: vi.fn(),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
+        success: true,
+        disposition: 'not-running',
+      })),
+    } as unknown as WorkspaceRuntime;
+    let controller: AuthenticationController | undefined;
+    await act(async () => {
+      root?.render(
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
+      );
+    });
+    await expect(
+      controller!.submitAuthenticationInput({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        interactionId: 'question',
+        input: { action: 'accept' },
+      })
+    ).rejects.toBeInstanceOf(AcpInputOutcomeUnknownError);
+  });
+
+  it('preserves a confirmed submit rejection', async () => {
+    const runtime = {
+      sendControl: vi.fn(),
+      waitForMachineAcpAuthenticateResponse: vi.fn(async () => ({
+        success: false,
+        disposition: 'error',
+        error: 'Rejected by machine',
+      })),
+    } as unknown as WorkspaceRuntime;
+    let controller: AuthenticationController | undefined;
+    await act(async () => {
+      root?.render(
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId: 'workspace-1' as WorkspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
+      );
+    });
+    await expect(
+      controller!.submitAuthorizationCode({
+        machineId: 'machine-1' as MachineId,
+        authenticationRequestId: 'request',
+        authorizationCode: 'synthetic',
+      })
+    ).rejects.toThrow('Rejected by machine');
+  });
+
   it('cancels the CLI login when the response registry times out', async () => {
     const sendControl = vi.fn();
     const unsubscribe = vi.fn();
@@ -61,13 +271,16 @@ describe('useMachineAcpAuthentication', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
 
@@ -108,13 +321,16 @@ describe('useMachineAcpAuthentication', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
 
@@ -151,13 +367,16 @@ describe('useMachineAcpAuthentication', () => {
 
     await act(async () => {
       root?.render(
-        createElement(Probe, {
-          runtime,
-          workspaceId,
-          onResult: (value) => {
-            controller = value;
-          },
-        })
+        withTestI18n(
+          createElement(Probe, {
+            runtime,
+            workspaceId,
+            onResult: (value) => {
+              controller = value;
+            },
+          }),
+          testI18n
+        )
       );
     });
 

@@ -80,9 +80,15 @@ export type { EpochStagedGroup } from './internal/keys/staging';
 export { RecoveryVaults } from './internal/recovery/vaults';
 export {
   makeWorkspaceRecovery,
+  abandonWorkspaceRecovery,
+  memoryRecoveryEpochKeys,
+  readWorkspaceRecoveryProgress,
   RecoveryVaultError,
+  type PasswordKdfParams,
   type RecoveryVault,
   type RecoveryEntryReference,
+  type RecoveryPasskeyReference,
+  type RecoveryPasswordReference,
   type RecoveryPrivatePackage,
   type WorkspaceRecoveryInput,
   type RecoveryCredentialRegistration,

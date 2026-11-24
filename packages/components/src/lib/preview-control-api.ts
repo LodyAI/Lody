@@ -25,10 +25,12 @@ export async function mintPreviewControlProof(
   });
   if (
     response.status === 400 &&
-    (intent.operation.action === 'ios-simulator' || intent.operation.action === 'android-emulator')
+    (intent.operation.action === 'ios-simulator' ||
+      intent.operation.action === 'android-emulator' ||
+      (intent.operation.action === 'revoke' && intent.operation.stopProcess === true))
   )
     throw new Error(
-      'Preview authorization failed (400): the Cloud authorization service rejected the validated device preview protocol. Update the connected Cloud backend to the matching version.'
+      'Preview authorization failed (400): the Cloud authorization service rejected the validated preview control protocol. Update the connected Cloud backend to the matching version.'
     );
   if (!response.ok) throw new Error(`Preview authorization failed (${response.status}).`);
   const token = TokenResponse.parse(await response.json());
@@ -38,4 +40,37 @@ export async function mintPreviewControlProof(
     requestId: intent.requestId,
     requestToken: token.requestToken,
   };
+}
+
+/** Only the short-lived read proof, never the app credential, crosses machine RPC. */
+export async function mintSessionHistoryReadProof(
+  intent: {
+    workspaceId: string;
+    machineId: string;
+    sessionId: string;
+    requestId?: string;
+    intentDigest?: string;
+  },
+  sessionToken: string | null,
+  edit = false
+): Promise<string> {
+  const baseUrl = requireCloudAuthBaseUrl('teamSharing');
+  if (!sessionToken) throw new Error('Session history authorization is unavailable.');
+  const response = await fetch(
+    new URL(
+      edit ? '/api/session-history/request-edit-token' : '/api/session-history/request-token',
+      baseUrl
+    ),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+      body: JSON.stringify(intent),
+      signal: AbortSignal.timeout(10_000),
+    }
+  );
+  if (!response.ok) throw new Error('Session history authorization was refused.');
+  return z
+    .object({ requestToken: z.string().min(1).max(8192) })
+    .strict()
+    .parse(await response.json()).requestToken;
 }

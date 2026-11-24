@@ -1,9 +1,11 @@
 import React, { forwardRef, type ComponentProps, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ArrowUpRight, ChevronRight } from 'lucide-react';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { settingsBoxed } from './material.stylex';
 import { settingsSurface as surface } from './surface';
+import { SettingsInfo } from './settings-info';
 
 /**
  * The settings card for a standalone catalog row (MCP server, Agent role,
@@ -27,6 +29,7 @@ interface CompactSectionProps {
   /** Free-form content on the right of the header (rendered as-is, unlike
    * `actions` which are coerced into icon buttons). */
   headerRight?: ReactNode;
+  headerRightUnclipped?: boolean;
   /** A group that destroys something — leave, transfer, delete — says so on its card. */
   tone?: 'default' | 'danger';
   /** A collection of records rather than preferences keeps its card on a flat page. */
@@ -34,6 +37,11 @@ interface CompactSectionProps {
   children: ReactNode;
   className?: string;
 }
+
+const rowStyles = stylex.create({
+  flush: { paddingInline: 0 },
+  labelLine: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
+});
 
 interface CompactRowProps {
   label: string;
@@ -43,9 +51,14 @@ interface CompactRowProps {
   labelId?: string;
   helperId?: string;
   helper?: ReactNode;
+  info?: ReactNode;
+  /** Interactive disclosure content needs a block container rather than a paragraph. */
+  helperBlock?: boolean;
   children?: ReactNode;
   className?: string;
   alignTop?: boolean;
+  /** The enclosing dialog or collapsible panel already owns horizontal padding. */
+  inset?: boolean;
   /**
    * The row's control cannot be used here. Its name steps back with the
    * control, and the helper should say why.
@@ -58,6 +71,7 @@ export function CompactSection({
   description,
   actions,
   headerRight,
+  headerRightUnclipped = false,
   tone = 'default',
   boxed = false,
   children,
@@ -91,7 +105,16 @@ export function CompactSection({
               <p {...stylex.props(surface.sectionDescription)}>{description}</p>
             ) : null}
           </div>
-          {headerRight ? <div {...stylex.props(surface.sectionAside)}>{headerRight}</div> : null}
+          {headerRight ? (
+            <div
+              {...stylex.props(
+                surface.sectionAside,
+                headerRightUnclipped && surface.sectionAsideUnclipped
+              )}
+            >
+              {headerRight}
+            </div>
+          ) : null}
           {actions ? (
             <div {...stylex.props(surface.sectionActions)}>
               {React.Children.map(actions, (child) => {
@@ -141,27 +164,37 @@ export function CompactRow({
   labelId,
   helperId,
   helper,
+  info,
+  helperBlock = false,
   children,
   className,
   alignTop = false,
+  inset = true,
   disabled = false,
 }: CompactRowProps) {
+  const Helper = helperBlock ? 'div' : 'p';
   const text = (
     <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
-      <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
-        {label}
-      </p>
-      {helper ? (
-        <p id={helperId} {...stylex.props(surface.rowHelper)}>
-          {helper}
+      <div {...stylex.props(rowStyles.labelLine)}>
+        <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
+          {label}
         </p>
+        {info != null ? <SettingsInfo label={label}>{info}</SettingsInfo> : null}
+      </div>
+      {helper ? (
+        <Helper id={helperId} {...stylex.props(surface.rowHelper)}>
+          {helper}
+        </Helper>
       ) : null}
     </div>
   );
 
   return (
     <div
-      {...withClassName(stylex.props(surface.row, alignTop && surface.rowTop), className)}
+      {...withClassName(
+        stylex.props(surface.row, alignTop && surface.rowTop, !inset && rowStyles.flush),
+        className
+      )}
       data-disabled={disabled ? '' : undefined}
     >
       {/* A bare label may use the whole column: long command names should not wrap early. */}
@@ -225,9 +258,9 @@ export const CompactLinkRow = forwardRef<HTMLButtonElement, CompactLinkRowProps>
 
 /**
  * An empty catalog, in its list's own geometry: the records card it will
- * hold, with one quiet line where the records will be. No centred icon and no
- * second copy of the page's add action; `action` is for the one list whose way
- * in is not the page's add (installing the GitHub App).
+ * hold, with one quiet line where the records will be. No centred icon. A
+ * catalog the page adds records to uses `SettingsEmptyState` instead; `action`
+ * is for a list whose way in is not the page's add (installing the GitHub App).
  */
 export function SettingsEmptyList({
   children,
@@ -246,6 +279,34 @@ export function SettingsEmptyList({
       ) : (
         <p {...stylex.props(surface.cardNote)}>{children}</p>
       )}
+    </div>
+  );
+}
+
+/**
+ * An empty catalog whose records the page adds (Agent Roles, MCP servers,
+ * Prompt Shortcuts): the records card it will hold, naming what is missing,
+ * what a record is for, and the add action. The page hides its header add
+ * button while this shows, so the action appears once.
+ */
+export function SettingsEmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  action: ReactNode;
+}) {
+  return (
+    <div {...stylex.props(settingsRecordsCard)}>
+      <div {...stylex.props(surface.emptyState)}>
+        <p {...stylex.props(surface.emptyStateTitle)}>{title}</p>
+        {description != null ? (
+          <p {...stylex.props(surface.emptyStateDescription)}>{description}</p>
+        ) : null}
+        <div {...stylex.props(surface.emptyStateAction)}>{action}</div>
+      </div>
     </div>
   );
 }

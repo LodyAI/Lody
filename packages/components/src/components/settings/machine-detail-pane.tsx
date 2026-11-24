@@ -1,3 +1,5 @@
+import type { ManagedDaemonUpdateStatus } from '@lody/shared';
+import { MachineIdentityRestore } from './machine-identity-restore';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
@@ -50,7 +52,7 @@ import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useMachineActionState } from '@/hooks/use-machine-action-state';
 import { MobileSettingsDetailHeader } from '@/components/mobile/mobile-settings-layout';
 import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { ProviderRow } from './provider-row';
+import { ProviderRow, type ProviderRefreshHandler } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
 import { CompactSection, SettingsEmptyList, settingsRecordsCard } from './compact-layout';
@@ -236,7 +238,7 @@ export type MachineProvidersSectionProps = {
   onAddConfig: () => void;
   onEditConfig: (config: AgentConfigMeta) => void;
   onDeleteConfig?: (config: AgentConfigMeta) => Promise<void>;
-  onRefreshConfig?: (config: AgentConfigMeta) => Promise<void>;
+  onRefreshConfig?: ProviderRefreshHandler;
   onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
   onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
@@ -289,10 +291,14 @@ function SupportedMachineProvidersSection({
     </Tooltip.Root>
   );
 
+  // A setup publishes its config under the same id, and the two briefly coexist
+  // (the daemon deletes a queued setup whose config already exists). Prefixed
+  // keys keep those siblings distinct: a duplicate key leaves React unable to
+  // remove the setup row, which then lingers as a stale "waiting" row.
   const providerLines = [
     ...setups.map((setup) => (
       <ProviderSetupRow
-        key={setup.id}
+        key={`setup:${setup.id}`}
         setup={setup}
         machine={machine}
         onRetry={onRetrySetup ?? (async () => undefined)}
@@ -301,7 +307,7 @@ function SupportedMachineProvidersSection({
     )),
     ...configs.map((config) => (
       <ProviderRow
-        key={config.id}
+        key={`config:${config.id}`}
         config={config}
         machine={machine}
         onEdit={onEditConfig}
@@ -395,13 +401,20 @@ export type MachineDetailPaneProps = {
   onAddConfig: () => void;
   onEditConfig: (config: AgentConfigMeta) => void;
   onDeleteConfig?: (config: AgentConfigMeta) => Promise<void>;
-  onRefreshConfig?: (config: AgentConfigMeta) => Promise<void>;
+  onRefreshConfig?: ProviderRefreshHandler;
   onRetrySetup?: (setup: ProviderSetupTask) => Promise<void>;
   onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
   onPing?: (machineId: MachineId) => Promise<number>;
   daemonUpdate?: { currentVersion: string; latestVersion: string };
   onRestartDaemon?: (machineId: MachineId) => Promise<void>;
-  onUpgradeDaemon?: (machineId: MachineId, targetVersion: string) => Promise<void>;
+  daemonUpdateStatus?: ManagedDaemonUpdateStatus | null;
+  onUpgradeDaemon?: (
+    machineId: MachineId,
+    targetVersion: string,
+    switchPolicy?: 'when-idle' | 'immediate'
+  ) => Promise<void>;
+  onRestoreIdentity?: (source: MachineId, target: MachineId) => Promise<void>;
+  restoreIdentityCandidates?: MachineViewMeta[];
   canRevokeCredentials?: boolean;
   /** Must reject on failure so the confirm dialog stays open; the callback owns
    *  surfacing the error (toast) exactly once. */
@@ -446,6 +459,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
     onPing,
     daemonUpdate,
     onRestartDaemon,
+    daemonUpdateStatus,
     onUpgradeDaemon,
     canRevokeCredentials = false,
     onRevokeCredentials,
@@ -536,7 +550,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
 
   const metaBadges = (
     <>
-      {isLocal && <Badge>{t('workspace.machines.thisDevice', 'This device')}</Badge>}
+      {isLocal && <Badge>{t('workspace.machines.thisDevice', 'This machine')}</Badge>}
       {ownerName && !isOwn && (
         <Badge icon={<UserRound {...stylex.props(styles.iconFill)} />}>{ownerName}</Badge>
       )}
@@ -933,6 +947,27 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
           ) : !isMobile ? (
             <div {...stylex.props(styles.metaRow)}>{metaBadges}</div>
           ) : null}
+          {daemonUpdateStatus && (
+            <div role="status" {...stylex.props(surface.formBlock, styles.update)}>
+              {t(`settings.agent.machineLifecycle.phase.${daemonUpdateStatus.phase}`, {
+                defaultValue: {
+                  preparing: 'Downloading and checking update',
+                  prepared: 'Update prepared',
+                  waiting: 'Waiting for running tasks to finish',
+                  switching: 'Switching daemon version',
+                  observing: 'Checking the new daemon',
+                  applied: 'Daemon updated to v{{version}}',
+                  'rollback-stop': 'Restoring the previous daemon',
+                  'rolled-back': 'Update failed; restored v{{previous}}',
+                  blocked: 'Update needs local recovery',
+                  failed: 'Update canceled or preparation failed; previous daemon retained',
+                  unconfirmed: 'Update outcome is not yet confirmed',
+                }[daemonUpdateStatus.phase],
+                version: daemonUpdateStatus.targetVersion,
+                previous: daemonUpdateStatus.previousVersion,
+              })}
+            </div>
+          )}
           {updateVisible && daemonUpdate && (
             <div {...stylex.props(surface.formBlock, styles.update)}>
               <div {...stylex.props(styles.updateText)}>
@@ -942,7 +977,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
                 <div {...stylex.props(styles.updateVersion)}>
                   {t(
                     'settings.agent.machineLifecycle.updateVersion',
-                    'v{{current}} -> v{{latest}}',
+                    'v{{current}} → v{{latest}}',
                     {
                       current: daemonUpdate.currentVersion,
                       latest: daemonUpdate.latestVersion,
@@ -960,7 +995,18 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
                 ) : (
                   <Download {...stylex.props(styles.icon14)} />
                 )}
-                {t('settings.agent.machineLifecycle.upgradeAndRestartButton', 'Update and restart')}
+                {t('settings.agent.machineLifecycle.upgradeAfterIdleButton', 'Update when idle')}
+              </Button>
+              <Button
+                size="small"
+                variant="ghost"
+                disabled={restartingDaemon || upgradingDaemon}
+                onClick={() => void handleUpgradeDaemon('immediate')}
+              >
+                {t(
+                  'settings.agent.machineLifecycle.upgradeImmediatelyButton',
+                  'Update now (interrupt conversations)'
+                )}
               </Button>
             </div>
           )}
@@ -997,6 +1043,16 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
           />
         )}
       </div>
+
+      {mode === 'devices' && isOwn && !readOnly && props.onRestoreIdentity ? (
+        <MachineIdentityRestore
+          key={machine.id}
+          machine={machine}
+          candidates={props.restoreIdentityCandidates ?? []}
+          encryptedWorkspace={!ordinarySharing}
+          onRestore={props.onRestoreIdentity}
+        />
+      ) : null}
 
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialog.Content>

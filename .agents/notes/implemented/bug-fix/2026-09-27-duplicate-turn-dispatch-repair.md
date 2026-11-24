@@ -30,7 +30,7 @@ already repaired; seeing one again logs a warning and returns no turn. Normal
 session notifications and recovery remain responsible for subsequent checks.
 Changing every duplicate or deleting rows was rejected because it would introduce
 new write/merge semantics and mutate historical data merely to select work.
-A later decision [keeps status copies in step](../../proposed/bug-fix/2026-09-27-duplicate-turn-copy-writes-and-queue-guard.md)
+A later decision [keeps status copies in step](2026-09-27-duplicate-turn-copy-writes-and-queue-guard.md)
 without deleting rows.
 
 The producer race remains: renderer native queue steering appends history before

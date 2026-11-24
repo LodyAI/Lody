@@ -30,3 +30,44 @@ export function describeDaemonWorkerStartupFailure(result: CliRunResult): string
   }
   return `CLI worker exited with code ${result.code ?? 'unknown'} before becoming ready`;
 }
+
+/** A versioned candidate (including rollback) cannot own an unbounded startup. */
+export function startManagedWorkerReadinessDeadline(options: {
+  timeoutMs: number;
+  shutdownGraceMs: number;
+  requestShutdown: () => void | Promise<void>;
+  terminate: () => Promise<void>;
+  onExpired: () => void;
+  onTerminationFailure: (error: unknown) => void;
+}): { readonly expired: boolean; clear: () => void } {
+  let expired = false;
+  let cleared = false;
+  let forceTimer: ReturnType<typeof setTimeout> | undefined;
+  const readyTimer = setTimeout(() => {
+    if (cleared) return;
+    expired = true;
+    options.onExpired();
+    // Arm escalation before requesting IPC shutdown: the callback itself may hang.
+    forceTimer = setTimeout(() => {
+      if (cleared) return;
+      void options.terminate().catch(options.onTerminationFailure);
+    }, options.shutdownGraceMs);
+    forceTimer.unref?.();
+    try {
+      void Promise.resolve(options.requestShutdown()).catch(() => {});
+    } catch {
+      /* Exact owned-tree escalation is already armed. */
+    }
+  }, options.timeoutMs);
+  readyTimer.unref?.();
+  return {
+    get expired() {
+      return expired;
+    },
+    clear() {
+      cleared = true;
+      clearTimeout(readyTimer);
+      if (forceTimer) clearTimeout(forceTimer);
+    },
+  };
+}

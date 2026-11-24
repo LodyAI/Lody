@@ -136,8 +136,13 @@ export function describeRunConfigSelection({
   configOptionSelectors: ReadonlyArray<AcpConfigOptionSelector>;
   configOptionValues: Record<string, AcpConfigOptionValue | undefined> | undefined;
 }): RunConfigFace {
-  const { modelSelectors, thoughtLevelSelectors, planModeSelectors, fastModeSelectors } =
-    orderAcpConfigOptionSelectors([...configOptionSelectors]);
+  const {
+    modelSelectors,
+    thoughtLevelSelectors,
+    speedTierSelectors,
+    planModeSelectors,
+    fastModeSelectors,
+  } = orderAcpConfigOptionSelectors([...configOptionSelectors]);
   const modelConfigSelector = modelSelectors[0];
   const pickerOptions =
     modelOptions.length > 0 ? modelOptions : (modelConfigSelector?.options ?? []);
@@ -161,6 +166,13 @@ export function describeRunConfigSelection({
     : null;
   const planSelector = planModeSelectors[0];
   const fastSelector = fastModeSelectors[0];
+  const speedTierSelector = speedTierSelectors[0];
+  const speedTierValue = speedTierSelector
+    ? ((resolveConfigOptionValue(
+        speedTierSelector,
+        configOptionValues?.[speedTierSelector.configId]
+      ) as string) ?? null)
+    : null;
   return {
     modelId: modelOptions.length > 0 ? selectedModelId : null,
     modelLabel:
@@ -174,7 +186,7 @@ export function describeRunConfigSelection({
       : false,
     fastOn: fastSelector
       ? resolveOnOffConfigOptionEnabled(fastSelector, configOptionValues?.[fastSelector.configId])
-      : false,
+      : Boolean(speedTierValue && speedTierValue !== 'off'),
   };
 }
 

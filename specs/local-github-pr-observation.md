@@ -85,9 +85,27 @@ mutation affordances require both loaded details and confirmed hosted identity. 
 event-driven; PR discovery and status use bounded background polling, not a new
 polling loop per view. Product-cloud requests remain forbidden in local mode.
 
+## Explicit links
+
+A Session can also hold pull requests that branch discovery cannot see, such as
+one its agent created from another directory, branch or fork. Link records are
+intent, kept per canonical PR URL: linked or unlinked, who wrote it, and when. A
+user can unlink a PR from the renderer; linking needs no user step. The machine writes
+records reported by the managed `gh` shim for the Session whose host-issued credential context made
+the request, never one named by the child process. A child Tab's PR belongs to its
+owner Session.
+
+A link becomes an association only after the provider returns that PR; the
+reconciler then appends it like a discovered PR. A PR the provider cannot read stays
+listed with a reason and never becomes an association. An unlinked URL is hidden by
+every reader and branch discovery never adds it back; a later link wins. PR identity
+is provider-neutral; only GitHub is supported, and other URLs are refused as not yet
+supported. Linking never changes the Session's working directory or branch state.
+
 ## Evidence
 
 - [Reconciler boundaries](../apps/cli/src/lib/pr-poller/AGENTS.md)
 - [Workspace Git observer](../apps/cli/src/session/workspace-git-service.ts)
 - [Decision](../.agents/notes/implemented/feature/2026-09-24-local-github-pr-observation.md)
-- [Hosted publication correction](../.agents/notes/proposed/bug-fix/2026-10-01-pr-observation-association.md)
+- [Hosted publication correction](../.agents/notes/implemented/bug-fix/2026-10-01-pr-observation-association.md)
+- [Explicit links decision](../.agents/notes/implemented/feature/2026-11-21-session-explicit-pr-links.md)

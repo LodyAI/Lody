@@ -44,7 +44,7 @@ answers to one question. Two of the worst are in
 `text-muted-foreground` and nothing else: a 24px icon button whose entire state
 is a shade of gray, standing in a row of eight that are never pressed.
 
-`packages/components/src/ui/toggle.tsx` — the Radix wrapper with a `cva` of two
+The deleted Radix `toggle.tsx` (now `packages/ui/src/toggle/toggle.tsx`) — the wrapper with a `cva` of two
 variants — had reached zero in-repo callers some time earlier and had not been
 deleted, so `@radix-ui/react-toggle` was still a production dependency of a
 package that never imported it.
@@ -205,7 +205,7 @@ the family:
   `ToggleGroup multiple wrap`. `toggleProperty` became `setVisibleProperties`,
   because a set reports every pressed member rather than the one that changed.
 
-`packages/components/src/ui/toggle.tsx` is deleted and `@radix-ui/react-toggle`
+The Radix `toggle.tsx` is deleted (now `packages/ui/src/toggle/toggle.tsx`) and `@radix-ui/react-toggle`
 removed from `packages/components/package.json`, per the rule that a Radix file
 goes when its in-repo callers reach zero. The lockfile entries were removed by
 hand rather than by re-resolving: `pnpm install --lockfile-only` on this branch

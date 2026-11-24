@@ -1,9 +1,10 @@
+import { seatBillingErrorKey } from './billing-errors';
 import {
   useLegacyWorkspaceMutation,
   useLegacyWorkspaceQuery,
 } from '@/hooks/use-legacy-workspace-query';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -16,11 +17,17 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
-import { SeatCostNotice } from './invite-member-dialog';
+import {
+  SeatCostNotice,
+  SeatAdmissionActions,
+  isSeatAdmissionReady,
+  type SeatInvitePreview,
+} from './invite-member-dialog';
 import { Select } from '@lody/ui/select';
 import { CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingsType as type } from './type.stylex';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const WIDE = '@media (min-width: 640px)';
 
@@ -97,7 +104,15 @@ const styles = stylex.create({
   glyph: { width: '100%', height: '100%' },
 });
 
-export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
+export function WorkspaceJoinRequestsSettings({
+  workspaceId,
+  onOpenBilling,
+  onMembersChanged,
+}: {
+  workspaceId: string;
+  onOpenBilling?: () => void;
+  onMembersChanged?: () => Promise<unknown>;
+}) {
   const { t } = useTranslation();
   const state = useLegacyWorkspaceQuery(cloudOperations.workspaceJoinRequests.getOwnerState, {
     workspaceId,
@@ -113,6 +128,45 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
     workspaceId,
   });
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const memberRefresh = useRef<Promise<void> | null>(null);
+  const memberRefreshPending = useRef(false);
+  const refreshMembers = useCallback(() => {
+    if (!live.current || !onMembersChanged) return Promise.resolve();
+    memberRefreshPending.current = true;
+    if (!memberRefresh.current) {
+      memberRefresh.current = Promise.resolve().then(async () => {
+        try {
+          while (memberRefreshPending.current && live.current) {
+            memberRefreshPending.current = false;
+            try {
+              await onMembersChanged();
+            } catch {
+              // A cache failure must not report a committed approval as failed.
+              console.warn('Workspace member list refresh pending');
+            }
+          }
+        } finally {
+          memberRefresh.current = null;
+        }
+      });
+    }
+    return memberRefresh.current;
+  }, [onMembersChanged]);
+  const observedVersion = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const version = state?.membershipVersion;
+    if (version === undefined) return;
+    const previous = observedVersion.current;
+    observedVersion.current = version;
+    if (previous !== version) void refreshMembers();
+  }, [state?.membershipVersion, refreshMembers]);
   const [expiresInDays, setExpiresInDays] = useState('30');
   const activeLink = state?.activeLink ?? null;
   const joinUrl = activeLink ? getAppShareUrl(`/join/${activeLink.token}`) : null;
@@ -127,7 +181,12 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
       await action();
     } catch (error) {
       console.error('Workspace join request action failed:', error);
-      toast.error(t('joinRequest.admin.actionFailed', 'Could not update join requests.'));
+      toast.error(
+        t(
+          seatBillingErrorKey(error) ?? 'joinRequest.admin.actionFailed',
+          'Could not update join requests.'
+        )
+      );
     } finally {
       setBusyAction(null);
     }
@@ -213,9 +272,9 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
             size="small"
             icon
             onClick={() => {
-              void navigator.clipboard
-                .writeText(joinUrl)
-                .then(() => toast.success(t('joinRequest.admin.copied', 'Link copied.')));
+              void copyTextToClipboard(joinUrl).then(() =>
+                toast.success(t('joinRequest.admin.copied', 'Link copied.'))
+              );
             }}
           >
             <Copy {...stylex.props(styles.glyph)} />
@@ -291,7 +350,6 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
               disabled={busyAction !== null}
               onClick={() =>
                 void run(`approve:${request.id}`, async () => {
-                  await refreshSeatTerms({ workspaceId });
                   setApprovalId(request.id);
                 })
               }
@@ -320,45 +378,26 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
 
   return (
     <>
-      <Dialog.Root
+      <SeatApprovalDialog
         open={approvalId !== null}
         onOpenChange={(open) => {
-          if (!open && busyAction === null) setApprovalId(null);
+          if (!open) setApprovalId(null);
         }}
-      >
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>{t('joinRequest.admin.approve')}</Dialog.Title>
-            <Dialog.Description>{t('billing.seatApprovalConfirm')}</Dialog.Description>
-          </Dialog.Header>
-          <SeatCostNotice preview={seatPreview} />
-          <Dialog.Footer>
-            <Button
-              variant="secondary"
-              disabled={busyAction !== null}
-              onClick={() => setApprovalId(null)}
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              disabled={
-                busyAction !== null ||
-                seatPreview === undefined ||
-                (seatPreview?.status === 'billed' && seatPreview.proratedAmount === null)
-              }
-              onClick={() => {
-                if (!approvalId) return;
-                void run(`approve:${approvalId}`, async () => {
-                  await reviewRequest({ requestId: approvalId, decision: 'approved' });
-                  setApprovalId(null);
-                });
-              }}
-            >
-              {t('joinRequest.admin.approve')}
-            </Button>
-          </Dialog.Footer>
-        </Dialog.Content>
-      </Dialog.Root>
+        preview={seatPreview}
+        pending={busyAction !== null}
+        onOpenBilling={onOpenBilling}
+        onRefresh={() => void run('refresh-billing', () => refreshSeatTerms({ workspaceId }))}
+        onApprove={() => {
+          if (!approvalId || !isSeatAdmissionReady(seatPreview)) return;
+          void run(`approve:${approvalId}`, async () => {
+            await refreshSeatTerms({ workspaceId });
+            await reviewRequest({ requestId: approvalId, decision: 'approved' });
+            if (!live.current) return;
+            setApprovalId(null);
+            void refreshMembers();
+          });
+        }}
+      />
       <CompactSection
         title={t('joinRequest.admin.title', 'Open join link')}
         description={t(
@@ -369,5 +408,61 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
         {lines}
       </CompactSection>
     </>
+  );
+}
+
+/** Shared presentational boundary: cloud work and retry sequencing stay in the controller. */
+export function SeatApprovalDialog({
+  open,
+  onOpenChange,
+  preview,
+  pending,
+  onOpenBilling,
+  onRefresh,
+  onApprove,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  preview?: SeatInvitePreview | null;
+  pending: boolean;
+  onOpenBilling?: () => void;
+  onRefresh: () => void;
+  onApprove: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(value) => {
+        if (!pending) onOpenChange(value);
+      }}
+    >
+      <Dialog.Content>
+        <Dialog.Header>
+          <Dialog.Title>{t('joinRequest.admin.approve')}</Dialog.Title>
+          <Dialog.Description>{t('billing.seatApprovalConfirm')}</Dialog.Description>
+        </Dialog.Header>
+        <SeatCostNotice preview={preview} />
+        <Dialog.Footer>
+          <Button variant="ghost" disabled={pending} onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            disabled={pending || !isSeatAdmissionReady(preview)}
+            onClick={() => {
+              if (!pending && isSeatAdmissionReady(preview)) onApprove();
+            }}
+          >
+            {t('joinRequest.admin.approve')}
+          </Button>
+          <SeatAdmissionActions
+            preview={preview}
+            pending={pending}
+            onOpenBilling={onOpenBilling}
+            onRefresh={onRefresh}
+          />
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

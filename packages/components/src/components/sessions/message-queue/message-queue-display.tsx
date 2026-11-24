@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import * as stylex from '@stylexjs/stylex';
 import {
   useCallback,
@@ -29,7 +30,6 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { duration, ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   NO_SCROLL_EDGE_OVERFLOW,
@@ -56,6 +56,7 @@ export type MessageQueueDisplayProps = {
   showSteerAction?: boolean;
   /** Native acknowledged steer: lets every queued row steer, not just the first. */
   nativeSteerAvailable?: boolean;
+  sendWhileIdle?: boolean;
   renderItemFooter?: (item: MessageQueueItem) => ReactNode;
   /** Dedicated reservations, kept out of the executable mq list. */
   scheduledItems?: readonly ScheduledQueueItem[];
@@ -66,16 +67,51 @@ export type MessageQueueDisplayProps = {
   roomy?: boolean | 'airy';
   title?: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const FADE_PX = 20;
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+/** The list scrolls inside this. The mask must not live on the scroller. */
+const LIST_MAX_HEIGHT = 'min(25vh, 240px)';
 /** Below this sheet width, row actions fold into one More button. */
 const INLINE_ACTIONS_MIN_WIDTH = 520;
 const TOUCH = '@media (pointer: coarse), (max-width: 600px)';
+const COARSE = '@media (pointer: coarse)';
+
+/** Move focus onto the disclosure without leaving the iOS focus ring up. */
+function focusQueueDisclosure(element: HTMLElement) {
+  // `focusVisible` is not in this project's DOM lib yet. Passing it keeps
+  // browsers that understand it from painting the ring after a tap.
+  element.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
+}
+
 const styles = stylex.create({
+  sheet: {
+    overflow: 'hidden',
+    borderTopLeftRadius: 'var(--radius-lg)',
+    borderTopRightRadius: 'var(--radius-lg)',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderBottomWidth: 0,
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input-border) / 1) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--composer))',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input) / 1) 70%, transparent)',
+    },
+  },
   joinedSheet: { paddingBottom: space[4], marginBottom: `calc(-1 * ${space[4]})` },
   // The header's chevron sits in the rows' 16 px gutter, so the disclosure,
   // the indices and the Scheduled label share one left edge.
+  // A tap focuses the header so folding does not blur-save a row draft. On
+  // iOS that focus keeps the inset ring, which reads as a blue box around the
+  // sheet. Coarse pointers skip it; a keyboard still gets it.
   header: {
     display: 'flex',
     alignItems: 'center',
@@ -88,7 +124,13 @@ const styles = stylex.create({
     fontSize: text.footnoteSize,
     textAlign: 'start',
     cursor: 'pointer',
-    boxShadow: { default: 'none', ':focus-visible': `inset 0 0 0 2px ${colors.accent}` },
+    boxShadow: {
+      default: 'none',
+      ':focus-visible': {
+        default: `inset 0 0 0 2px ${colors.accent}`,
+        [COARSE]: 'none',
+      },
+    },
   },
   chevron: {
     display: 'flex',
@@ -113,6 +155,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   failed: { color: colors.destructive },
+  scrollRegion: { overflowY: 'auto' },
 });
 
 export function MessageQueueDisplay({
@@ -126,6 +169,7 @@ export function MessageQueueDisplay({
   onSteer,
   showSteerAction = false,
   nativeSteerAvailable = false,
+  sendWhileIdle = false,
   renderItemFooter,
   scheduledItems: dedicatedScheduledItems = [],
   onOpenScheduled,
@@ -135,6 +179,7 @@ export function MessageQueueDisplay({
   roomy = false,
   title,
   className,
+  xstyle,
 }: MessageQueueDisplayProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -229,6 +274,7 @@ export function MessageQueueDisplay({
         isFirst={index === 0}
         showSteerAction={showSteerAction}
         nativeSteerAvailable={nativeSteerAvailable}
+        sendWhileIdle={sendWhileIdle}
         canReorder={canReorder}
         isEditing={isEditing}
         editValue={isEditing ? editing.editValue : ''}
@@ -259,20 +305,19 @@ export function MessageQueueDisplay({
       <Collapsible.Root
         open={expanded}
         onOpenChange={setExpanded}
-        className={cn(
-          'overflow-hidden rounded-t-lg rounded-b-none border-[0.5px] border-b-0',
-          'border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/45 dark:bg-input/70',
-          roomy && stylex.props(styles.joinedSheet).className,
+        className={clsx(
+          stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).className,
           className
         )}
+        style={stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).style}
       >
         <Collapsible.Trigger
           {...stylex.props(styles.header)}
           data-message-queue-toggle=""
           onPointerDown={(event) => {
-            if (event.button === 0) event.currentTarget.focus();
+            if (event.button === 0) focusQueueDisclosure(event.currentTarget);
           }}
-          onClick={(event) => event.currentTarget.focus()}
+          onClick={(event) => focusQueueDisclosure(event.currentTarget)}
         >
           <span {...stylex.props(styles.chevron, expanded && styles.chevronOpen)}>
             <ChevronDown size={14} strokeWidth={1.75} aria-hidden="true" />
@@ -326,52 +371,61 @@ export function MessageQueueDisplay({
         </Collapsible.Trigger>
 
         <Collapsible.Panel keepMounted>
+          {/* Mask the viewport, scroll the child. WKWebView paints an
+              `overflow: auto` element that also carries `mask-image` as a
+              solid black tile — the queued list, with one line peeking out. */}
           <div
-            ref={scrollRef}
-            className={cn(stylex.props(queueSurface.list).className, 'overflow-y-auto')}
             style={{
-              maxHeight: 'min(25vh, 240px)',
+              maxHeight: LIST_MAX_HEIGHT,
+              overflow: 'hidden',
               maskImage: fadeMask,
               WebkitMaskImage: fadeMask,
             }}
           >
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
+            <div
+              ref={scrollRef}
+              data-message-queue-scroll-region=""
+              {...stylex.props(queueSurface.list, styles.scrollRegion)}
+              style={{ maxHeight: LIST_MAX_HEIGHT }}
             >
-              <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-                {ordinaryItems.map(renderRow)}
-              </SortableContext>
-              {/* Local rows stay outside the sortable list: they are not queue items
-              yet, and the real item is appended at exactly this position. */}
-              {pending.map((record, index) => (
-                <PendingQueueRow
-                  key={record.id}
-                  record={record}
-                  index={ordinaryItems.length + index}
-                  busy={pendingActions.busyId === record.id}
-                  onRetry={() => void pendingActions.run(record, 'retry')}
-                  onCancel={() => void pendingActions.run(record, 'cancel')}
-                />
-              ))}
-              {!onlyScheduled && dedicatedScheduled.length > 0 ? (
-                <div {...stylex.props(queueSurface.sectionLabel)}>
-                  {t('sessions.messageQueue.scheduledTitle', 'Scheduled')}
-                </div>
-              ) : null}
-              {dedicatedScheduled.map((item) => (
-                <ScheduledQueueRow
-                  key={item.scheduleId}
-                  item={item}
-                  roomy={roomy}
-                  compact={compact}
-                  onOpen={onOpenScheduled}
-                  onEditTime={onEditScheduledTime}
-                  onCancel={onCancelScheduled}
-                />
-              ))}
-            </DndContext>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+                  {ordinaryItems.map(renderRow)}
+                </SortableContext>
+                {/* Local rows stay outside the sortable list: they are not queue items
+                yet, and the real item is appended at exactly this position. */}
+                {pending.map((record, index) => (
+                  <PendingQueueRow
+                    key={record.id}
+                    record={record}
+                    index={ordinaryItems.length + index}
+                    busy={pendingActions.busyId === record.id}
+                    onRetry={() => void pendingActions.run(record, 'retry')}
+                    onCancel={() => void pendingActions.run(record, 'cancel')}
+                  />
+                ))}
+                {!onlyScheduled && dedicatedScheduled.length > 0 ? (
+                  <div {...stylex.props(queueSurface.sectionLabel)}>
+                    {t('sessions.messageQueue.scheduledTitle', 'Scheduled')}
+                  </div>
+                ) : null}
+                {dedicatedScheduled.map((item) => (
+                  <ScheduledQueueRow
+                    key={item.scheduleId}
+                    item={item}
+                    roomy={roomy}
+                    compact={compact}
+                    onOpen={onOpenScheduled}
+                    onEditTime={onEditScheduledTime}
+                    onCancel={onCancelScheduled}
+                  />
+                ))}
+              </DndContext>
+            </div>
           </div>
         </Collapsible.Panel>
       </Collapsible.Root>

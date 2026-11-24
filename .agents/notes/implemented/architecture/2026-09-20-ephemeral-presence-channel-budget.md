@@ -95,9 +95,10 @@ snapshots at write time. It is the template for fixing the three above.
 
 ### Unknown liveness is not offline
 
-The write side was only half the contract. `getOnlineMachineIds()` returns null when
-the presence room could not be joined, which the scoped rules define as status UNKNOWN,
-and the MCP server collapsed that null to offline with `?.has(id) === true`. One helper
+The write side was only half the contract. The presence reader (then
+`getOnlineMachineIds()`, now `getMachinePresenceView()`) reported an unjoined room as
+null, which the scoped rules define as status UNKNOWN, and the MCP server collapsed that
+null to offline with `?.has(id) === true`. One helper
 fanned out to five agent-visible consequences: single-command dispatch and both batch
 paths threw `MACHINE_OFFLINE`, the session list reported `temporarily_blocked`, and the
 options path silently dropped every remote Machine from the candidate list. The null
@@ -116,9 +117,9 @@ a confident offline. `online` keeps its meaning and an additive `onlineStatus` n
 carries all three states. `--online-only` still filters on proven-online, which is
 correct for that flag, and the warning still fires.
 
-The reverse mapping was deliberately left alone: `session_status_many` derives
-`machineOnline` from the live RPC rather than from presence, so it is a different
-source and not part of this contract.
+`session_status_many` was first left alone as a different source. It now takes its
+Machine state from presence as well, and keeps unknown through an unanswered RPC; see
+[the status-reader decision](../bug-fix/2026-10-27-mcp-chat-machine-probe-timeout.md).
 
 ## Verification
 

@@ -16,6 +16,34 @@ const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
 
 describe('buildHistoryReplayImport', () => {
+  it('retains phase boundaries in imported assistant history', () => {
+    const result = buildHistoryReplayImport(
+      [
+        makeNotification({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Hi' },
+        }),
+        ...(
+          [
+            ['Working', 'commentary'],
+            ['Done', 'final_answer'],
+          ] as const
+        ).map(([text, messagePhase]) =>
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text },
+            _meta: { lody: { messagePhase } },
+          })
+        ),
+      ],
+      { provider: codexProvider, acpSessionId: 'codex-session-1', mode: 'imported_snapshot' }
+    );
+    expect(contentsOf(result.history[1]!)).toEqual([
+      { type: 'text', text: 'Working', messagePhase: 'commentary' },
+      { type: 'text', text: 'Done', messagePhase: 'final_answer' },
+    ]);
+  });
+
   it('drops tool images from imported history without dropping tool state or text', () => {
     const result = buildHistoryReplayImport(
       [

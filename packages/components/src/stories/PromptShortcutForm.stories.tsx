@@ -2,15 +2,15 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent } from 'storybook/test';
 import type { PromptShortcut } from '@lody/shared/prompt-shortcuts/model';
 import { PromptShortcutForm } from '@/components/settings/prompt-shortcut-form';
+import { SettingsEditorDialogFrame } from './settings-editor-dialog-frame';
+
 
 const shortcut: PromptShortcut = {
   v: 1,
   id: 'shortcut-review',
   workspaceId: 'workspace-story',
   ownerUserId: 'user-story',
-  visibility: 'private',
   name: 'Review PR',
-  emoji: '🔍',
   slug: 'review-pr',
   description: 'Review the current diff as a pull request.',
   prompt: 'Review the current diff. Report correctness issues first, then style.',
@@ -24,20 +24,33 @@ const shortcut: PromptShortcut = {
 const meta = {
   title: 'Settings/PromptShortcutForm',
   component: PromptShortcutForm,
-  parameters: { layout: 'centered' },
+  parameters: { layout: 'fullscreen' },
   args: {
     initial: shortcut,
-    options: { projects: [], machines: [], providers: [] },
-    canShare: true,
+    options: {
+      projects: [{ value: { kind: 'github', repository: 'lodyai/lody' }, label: 'lodyai/lody' }],
+      machines: [
+        { value: 'machine-studio', label: 'Studio' },
+        { value: 'machine-build', label: 'Build box' },
+      ],
+      providers: [
+        { value: 'codex:codex', label: 'Codex' },
+        { value: 'claude:claude', label: 'Claude Code' },
+      ],
+    },
     saving: false,
     onSave: fn(async () => {}),
     onCancel: fn(),
   },
   decorators: [
-    (Story) => (
-      <div className="w-[520px] rounded-lg bg-background p-4 shadow-lg">
+    (Story, { args }) => (
+      <SettingsEditorDialogFrame
+        title={args.isNew ? 'New Prompt' : 'Edit Prompt'}
+        description="Saved to this workspace and sent as one message."
+      >
+
         <Story />
-      </div>
+      </SettingsEditorDialogFrame>
     ),
   ],
 } satisfies Meta<typeof PromptShortcutForm>;
@@ -65,5 +78,33 @@ export const InvalidCommandWarning: Story = {
     if (!command) throw new Error('shortcut command field missing');
     await userEvent.clear(command);
     await userEvent.type(command, 'a b');
+  },
+};
+
+/** Narrowed to one repository and one agent; the machine stays open. */
+export const Scoped: Story = {
+  args: {
+    initial: {
+      ...shortcut,
+      scope: { project: { kind: 'github', repository: 'lodyai/lody' }, providerKey: 'codex:codex' },
+    },
+  },
+};
+
+/** A local-only host has one machine, so that axis is a switch. */
+export const LocalOnlyMachine: Story = {
+  args: {
+    allowMachineSelection: false,
+    options: { projects: [], machines: [{ value: 'machine-local', label: 'This Mac' }], providers: [] },
+  },
+};
+
+/** Creating without a name says so beside the field, in the form's own voice. */
+export const NameRequired: Story = {
+  args: NewShortcut.args,
+  play: async ({ canvasElement }) => {
+    const create = canvasElement.querySelector<HTMLButtonElement>('button[type="submit"]');
+    if (!create) throw new Error('create button missing');
+    await userEvent.click(create);
   },
 };

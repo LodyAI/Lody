@@ -6,7 +6,7 @@ export type TriggerCandidate = {
 export function findTriggerCandidates(
   value: string,
   triggers: string[],
-  fromIndex: number,
+  fromIndex: number
 ): TriggerCandidate[] {
   const clampedFromIndex = Math.max(0, Math.min(fromIndex, value.length));
   const candidates: TriggerCandidate[] = [];

@@ -126,6 +126,10 @@ export class SessionAttachmentTransfer {
     private readonly serverBaseUrl?: string,
     private readonly encrypted?: { token(): Promise<string> }
   ) {}
+  get contentMode(): 'plaintext' | 'protected' {
+    return this.encrypted ? 'protected' : 'plaintext';
+  }
+
   private resolveServerBaseUrl(): string {
     const url = this.serverBaseUrl?.trim();
     if (!url) throw new Error('cloud_attachment_upload_unavailable');
@@ -197,6 +201,7 @@ export class SessionAttachmentTransfer {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
     file: UploadableImageFile;
+    signal?: AbortSignal;
   }): Promise<UploadedSessionImage> {
     if (this.encrypted) {
       const result = await this.uploadProtected({
@@ -232,6 +237,7 @@ export class SessionAttachmentTransfer {
         Authorization: `Bearer ${this.token}`,
       },
       body: formData,
+      signal: args.signal,
     });
 
     if (!response.ok) {

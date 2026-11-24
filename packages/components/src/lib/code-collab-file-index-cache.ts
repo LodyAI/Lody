@@ -1,10 +1,14 @@
+import {
+  readCodeCollabFileIndexSnapshotFromFlock,
+  applyCodeCollabFileGenerationEvents,
+  type CodeCollabFileGenerations,
+} from '@lody/shared';
 import { Cause, Duration, Effect, Exit, Scope, ScopedCache } from 'effect';
 import type { Flock } from '@loro-dev/flock-wasm';
 import { ResourceBusyError, type RepoRoomSubscription } from 'loro-repo';
 import {
   applyCodeCollabFileIndexFlockEvents,
   getServerNow,
-  readCodeCollabFileIndexFromFlock,
   type CodeCollabV2FileIndexState,
 } from '@lody/shared';
 import {
@@ -24,6 +28,7 @@ const FILE_INDEX_CACHE_CAPACITY = 8;
 export type CodeCollabFileIndexSnapshot = {
   readonly resourceKey: object;
   readonly fileIndex: CodeCollabV2FileIndexState;
+  readonly generations?: CodeCollabFileGenerations;
   readonly revision: number;
   readonly updatedAtMs: number;
 };
@@ -73,6 +78,7 @@ async function openCodeCollabFileIndexResource(
   const resourceKey = {};
   let state: CodeCollabFileIndexLoadState = { status: 'loading' };
   let currentFileIndex: CodeCollabV2FileIndexState = {};
+  let generations: CodeCollabFileGenerations = {};
   let materializedVersion: FlockVersionToken | null = null;
   let revision = 0;
   let remoteSynced = false;
@@ -143,13 +149,19 @@ async function openCodeCollabFileIndexResource(
     currentFileIndex = fileIndex;
     if (!options.allowEmpty && Object.keys(fileIndex).length === 0) return;
     const previous = state.status === 'ready' ? state.snapshot.fileIndex : null;
-    if (previous === fileIndex) return;
+    if (
+      previous === fileIndex &&
+      state.status === 'ready' &&
+      state.snapshot.generations === generations
+    )
+      return;
     revision += 1;
     publishState({
       status: 'ready',
       snapshot: {
         resourceKey,
         fileIndex,
+        generations,
         revision,
         updatedAtMs: options.updatedAtMs ?? getServerNow(),
       },
@@ -161,12 +173,15 @@ async function openCodeCollabFileIndexResource(
   try {
     unsubscribeFlock = repoLease.flock.subscribe((batch) => {
       if (disposed) return;
+      generations = applyCodeCollabFileGenerationEvents(generations, batch.events);
       const nextFileIndex = applyCodeCollabFileIndexFlockEvents(currentFileIndex, batch.events);
       materializedVersion = readFlockVersionToken(repoLease.flock);
       publishFileIndex(nextFileIndex, { allowEmpty: remoteSynced });
     });
 
-    currentFileIndex = readCodeCollabFileIndexFromFlock(repoLease.flock);
+    ({ generations, fileIndex: currentFileIndex } = readCodeCollabFileIndexSnapshotFromFlock(
+      repoLease.flock
+    ));
     materializedVersion = readFlockVersionToken(repoLease.flock);
     publishFileIndex(currentFileIndex, { allowEmpty: false });
   } catch (error) {
@@ -203,7 +218,9 @@ async function openCodeCollabFileIndexResource(
 
     const remoteVersion = readFlockVersionToken(repoLease.flock);
     if (!flockVersionTokensEqual(materializedVersion, remoteVersion)) {
-      currentFileIndex = readCodeCollabFileIndexFromFlock(repoLease.flock);
+      ({ generations, fileIndex: currentFileIndex } = readCodeCollabFileIndexSnapshotFromFlock(
+        repoLease.flock
+      ));
       materializedVersion = remoteVersion;
     }
     publishFileIndex(currentFileIndex, { allowEmpty: true });

@@ -49,7 +49,8 @@ PR 发现与状态使用有界后台轮询，不为每个视图增加轮询循�
 - [协调器边界](../apps/cli/src/lib/pr-poller/AGENTS.md)
 - [工作目录 Git 观测](../apps/cli/src/session/workspace-git-service.ts)
 - [决策](../.agents/notes/implemented/feature/2026-09-24-local-github-pr-observation.zh.md)
-- [托管发布修正](../.agents/notes/proposed/bug-fix/2026-10-01-pr-observation-association.zh.md)
+- [托管发布修正](../.agents/notes/implemented/bug-fix/2026-10-01-pr-observation-association.zh.md)
+- [显式关联决策](../.agents/notes/implemented/feature/2026-11-21-session-explicit-pr-links.zh.md)
 
 ## 关联与生命周期职责
 
@@ -66,3 +67,15 @@ GitHub 秒级时间戳无法确定同一秒内的先后顺序。后续提供方�
 记录，随会话生命周期保留，不累积事件历史。机器离线时，托管观察仍更新新客户端摘要。
 旧客户端读取兼容数组，可能需要等待机器刷新；所有活动客户端均需升级，才能移除旧版
 渲染端的列表写入路径。
+
+## 显式关联
+
+会话还可以持有分支发现看不到的拉取请求，例如代理在其他目录、分支或 fork 中创建的 PR。
+关联记录表达意图，按规范 PR URL 保存：已关联或已取消关联、写入者及时间。用户可在渲染端
+取消关联；关联无需用户操作。机器只为发起请求的宿主签发凭据上下文所属的会话写入托管 `gh` shim 报告的
+记录，绝不采用子进程指定的会话。子 Tab 的 PR 属于所属会话。
+
+只有提供方返回该 PR 后，关联记录才成为关联；协调器随后像发现的 PR 一样追加它。提供方
+无法读取的 PR 带原因保留在列表中，绝不成为关联。已取消关联的 URL 对所有读取方隐藏，分支
+发现也不会重新加入；之后的关联记录优先。PR 身份与提供方无关；目前只支持 GitHub，其他链接
+以“暂不支持”拒绝。关联不改变会话的工作目录或分支状态。

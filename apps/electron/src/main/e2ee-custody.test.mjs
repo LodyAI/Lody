@@ -65,6 +65,49 @@ const candidateBody = () => {
   body.fill(98, header + 41)
   return body
 }
+void test('custody creation and reopen leave no unwiped Buffer copies of KEK or credentials', async (t) => {
+  const directory = await fixture(t)
+  const secrets = new Set()
+  const allocations = []
+  const originalFrom = Buffer.from
+  t.mock.method(Buffer, 'from', function (...args) {
+    const buffer = Reflect.apply(originalFrom, Buffer, args)
+    if (buffer.length === 32) {
+      allocations.push({ buffer, hex: buffer.toString('hex') })
+    }
+    return buffer
+  })
+  const storage = backend({
+    encryptStringAsync: async (value) => {
+      secrets.add(value)
+      return backend().encryptStringAsync(value)
+    }
+  })
+  let retained
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await execute(
+      Effect.gen(function* () {
+        const owner = yield* makeDesktopE2eeCustody({
+          directory,
+          platform: 'linux',
+          safeStorage: storage
+        })
+        const device =
+          attempt === 0 ? yield* owner.createDevice(hash()) : yield* owner.openDevice(hash())
+        const credential = yield* owner.prepareDeviceCredential(hash(), device.publicKey)
+        secrets.add(credential.credential)
+        assert.equal(yield* owner.deviceCredential(hash(), device.publicKey), credential.credential)
+        if (retained) assert.deepEqual(credential, retained)
+        retained = credential
+      })
+    )
+  }
+  // Inspect the actual allocations after their owning scopes have closed.
+  for (const { buffer, hex } of allocations) {
+    if (secrets.has(hex))
+      assert.deepEqual(buffer, Buffer.alloc(32), 'secret Buffer copy survived close')
+  }
+})
 void test('rejects unavailable and basic_text before creating any storage', async (t) => {
   const directory = await fixture(t)
   for (const [changes, code] of [
@@ -413,7 +456,7 @@ void test('hard process exit releases the OS mutex and preserves the same KEK be
         command: process.execPath,
         args: [
           '--import',
-          import.meta.resolve('tsx'),
+          new URL('../../scripts/node-test-ts-resolve.mjs', import.meta.url).href,
           '--input-type=module',
           '-e',
           child,
@@ -762,7 +805,7 @@ void test('another OS process reopens encrypted identity and epoch data without 
     })));
     console.log(JSON.stringify(result));
   `
-  const loader = import.meta.resolve('tsx')
+  const loader = new URL('../../scripts/node-test-ts-resolve.mjs', import.meta.url).href
   const result = await Effect.runPromise(
     runCommandOk({
       command: process.execPath,
@@ -833,7 +876,14 @@ void test('recovers a journaled replacement after a crash when only the old nati
   const ended = await Effect.runPromise(
     runCommand({
       command: process.execPath,
-      args: ['--import', import.meta.resolve('tsx'), '--input-type=module', '-e', child, directory],
+      args: [
+        '--import',
+        new URL('../../scripts/node-test-ts-resolve.mjs', import.meta.url).href,
+        '--input-type=module',
+        '-e',
+        child,
+        directory
+      ],
       cwd: new URL('../../', import.meta.url).pathname,
       env: { ...process.env },
       maxOutputBytes: 65536

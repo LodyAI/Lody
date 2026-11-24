@@ -79,11 +79,13 @@ function syntheticWorkspace() {
     pkg('@lody/turn-diff-store', 'packages/turn-diff-store'),
     pkg('@lody/site-docs', 'site-docs', { deps: ['@lody/components', '@lody/shared'] }),
     pkg('@lody/e2e', 'e2e', { test: false, typecheck: false }),
+    pkg('@lody/mobile', 'apps/mobile', { test: false, typecheck: false }),
     pkg('acp-extension-claude', 'packages/acp-extension-claude'),
     pkg('acp-extension-codex', 'packages/acp-extension-codex'),
-    pkg('acp-extension-core', 'packages/acp-extension-core', { test: false, typecheck: false }),
-    pkg('acp-extension-dsh', 'packages/acp-extension-dsh', { test: false, typecheck: false }),
-    pkg('acp-extension-grok', 'packages/acp-extension-grok', { test: false, typecheck: false }),
+    pkg('acp-extension-core', 'packages/acp-extension-core'),
+    pkg('acp-extension-devin', 'packages/acp-extension-devin'),
+    pkg('acp-extension-dsh', 'packages/acp-extension-dsh'),
+    pkg('acp-extension-grok', 'packages/acp-extension-grok'),
   ]);
 }
 
@@ -442,4 +444,49 @@ void test('platform source log includes helper and site-docs', () => {
     '@lody/site-docs',
     'lody',
   ]);
+});
+
+void test('scripts docs and word-budget metadata are skip-tests while executable scripts stay full', () => {
+  const docsScope = select([
+    'scripts/AGENTS.md',
+    'scripts/CLAUDE.md',
+    'scripts/docs/agents-budgets.json',
+    'packages/configs/AGENTS.md',
+  ]);
+  assert.equal(docsScope.mode, 'skip-tests');
+  assert.equal(docsScope.runTests, false);
+  assert.equal(docsScope.runTypecheck, false);
+  assert.equal(docsScope.runCheckQuick, false);
+
+  assert.equal(select(['scripts/check-public-boundary.mjs']).mode, 'full');
+  assert.equal(select(['scripts/docs/main.mjs']).mode, 'full');
+});
+
+void test('apps/mobile code and tests run check:quick without workspace test shards or typecheck', () => {
+  for (const files of [
+    ['apps/mobile/ios/apps/ios/src/index.ts'],
+    ['apps/mobile/ios'],
+    ['apps/mobile/android'],
+    ['apps/mobile/android/runtime/test/runtime.test.mjs'],
+  ]) {
+    const scope = select(files);
+    assert.equal(scope.mode, 'affected');
+    assert.equal(scope.runTests, false);
+    assert.equal(scope.runTypecheck, false);
+    assert.equal(scope.runCheckQuick, true);
+    assert.equal(scope.prepareAcpAdapters, false);
+  }
+  assert.equal(select(['apps/mobile/AGENTS.md', 'apps/mobile/README.md']).mode, 'skip-tests');
+
+  const mixed = select(['apps/mobile/backend-config.mjs', 'apps/cli/src/index.ts']);
+  assert.equal(mixed.mode, 'affected');
+  assert.deepEqual(mixed.testPackages, ['lody']);
+});
+
+void test('loadWorkspace on the real repo classifies apps/mobile as @lody/mobile', () => {
+  const loaded = loadWorkspace(REPO_ROOT);
+  assert.ok(loaded.byName.has('@lody/mobile'));
+  const mapped = classifyPath('apps/mobile/backend-config.mjs', loaded);
+  assert.equal(mapped.kind, 'source');
+  assert.deepEqual(mapped.packages, ['@lody/mobile']);
 });

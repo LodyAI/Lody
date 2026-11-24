@@ -26,10 +26,14 @@ import {
 import { WorkspaceId } from '@lody/shared';
 import { useStableSession } from '@/hooks/useStableSession';
 import { useAuthClient } from '../providers/convex-provider';
-import { resolveWorkspaceRemovalTransition } from '@/lib/workspace-removal-transition';
+import {
+  deleteAccountWorkspace,
+  hasEncryptedContentMode,
+  resolveWorkspaceRemovalTransition,
+} from '@/lib/workspace-removal-transition';
 import type { LodyAuthClient } from '@/lib/auth';
 import type { PlatformUser, WorkspaceSummary } from '@lody/platform';
-import { usePlatformSession } from '@lody/platform/react';
+import { usePlatform, usePlatformSession } from '@lody/platform/react';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useImplicitLocalWorkspace } from '../providers/local-platform-provider';
 
@@ -38,6 +42,11 @@ type UseOrganizationOptions = {
 };
 
 const selectedEncryptedWorkspaceAtom = atom<{ accountId: string; id: string } | null>(null);
+
+// A retained directory or a late Better Auth refresh can still publish a deleted workspace.
+const deletedEncryptedWorkspacesAtom = atom<{ accountId: string; ids: ReadonlySet<string> } | null>(
+  null
+);
 
 const inFlightSetActiveRequests = new Map<string, Promise<void>>();
 let completedUnobservedSetActiveRequestKey: string | null = null;
@@ -213,6 +222,7 @@ function useLocalOrganizationState(): UseOrganizationResult {
 
 function useCloudOrganizationState(options?: UseOrganizationOptions) {
   const authClient = useAuthClient();
+  const { e2eeWorkspaces } = usePlatform();
   const targetSlug = options?.targetSlug;
   const [isMutating, setIsMutating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -234,7 +244,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     refetch: refetchOrganizations,
   } = authClient.useListOrganizations();
   const {
-    data: ordinaryActiveOrganization,
+    data: listedActiveOrganization,
     isPending: activeOrganizationIsPending,
     refetch: refetchActiveOrganization,
     error: activeOrganizationQueryError,
@@ -256,30 +266,40 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   const [selectedEncryptedWorkspace, setSelectedEncryptedWorkspace] = useAtom(
     selectedEncryptedWorkspaceAtom
   );
+  const [deletedEncrypted, setDeletedEncrypted] = useAtom(deletedEncryptedWorkspacesAtom);
+  const deletedIds = deletedEncrypted?.accountId === user?.id ? deletedEncrypted?.ids : undefined;
+  const ordinaryActiveOrganization =
+    listedActiveOrganization && deletedIds?.has(listedActiveOrganization.id)
+      ? null
+      : listedActiveOrganization;
   const encryptedOrganizations = useMemo(
     () =>
-      encryptedWorkspaces?.map((workspace) => ({
-        ...workspace,
-        logo: null,
-        createdAt: LOCAL_ORGANIZATION_EPOCH,
-        metadata: null,
-        members: workspace.members.map((member) => ({
-          ...member,
-          organizationId: workspace.id,
+      encryptedWorkspaces
+        ?.filter((workspace) => !deletedIds?.has(workspace.id))
+        .map((workspace) => ({
+          ...workspace,
+          logo: null,
           createdAt: LOCAL_ORGANIZATION_EPOCH,
+          metadata: null,
+          members: workspace.members.map((member) => ({
+            ...member,
+            organizationId: workspace.id,
+            createdAt: LOCAL_ORGANIZATION_EPOCH,
+          })),
+          invitations: [],
         })),
-        invitations: [],
-      })),
-    [encryptedWorkspaces]
+    [deletedIds, encryptedWorkspaces]
   );
   const organizationsRaw = useMemo(() => {
     if (!ordinaryOrganizations) return ordinaryOrganizations;
     const encryptedIds = new Set(encryptedOrganizations?.map((workspace) => workspace.id));
     return [
-      ...ordinaryOrganizations.filter((workspace) => !encryptedIds.has(workspace.id)),
+      ...ordinaryOrganizations.filter(
+        (workspace) => !encryptedIds.has(workspace.id) && !deletedIds?.has(workspace.id)
+      ),
       ...(encryptedOrganizations ?? []),
     ];
-  }, [ordinaryOrganizations, encryptedOrganizations]);
+  }, [ordinaryOrganizations, encryptedOrganizations, deletedIds]);
   const directoryNeeded =
     Boolean(user) &&
     (targetSlug
@@ -782,13 +802,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
    * Delete organization (owner only).
    */
   const deleteOrganization = useCallback(
-    async (organizationId: string) => {
+    async (organizationId: string, options?: { isEncrypted?: boolean }) => {
       const draftOwner = workspaceContextStore.get(sessionRunConfigDraftAccountAtom);
       setIsMutating(true);
       setMutationError(null);
       const removalTransition = resolveWorkspaceRemovalTransition({
         organizationId,
-        organizations,
+        organizations: organizations ?? encryptedOrganizations,
         activeOrganization: resolvedActiveOrganization,
       });
       let didDelete = false;
@@ -800,11 +820,31 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         transitionRevision = setWorkspaceContext({ slug: null, workspaceId: null });
       }
       try {
-        const { data, error } = await authClient.organization.delete({
+        const isEncrypted =
+          options?.isEncrypted === true ||
+          encryptedOrganizations?.some((workspace) => workspace.id === organizationId) ||
+          organizations?.some(
+            (workspace) => workspace.id === organizationId && hasEncryptedContentMode(workspace)
+          ) ||
+          (resolvedActiveOrganization?.id === organizationId &&
+            hasEncryptedContentMode(resolvedActiveOrganization));
+        const { data, error } = await deleteAccountWorkspace(
           organizationId,
-        });
+          isEncrypted,
+          authClient,
+          e2eeWorkspaces
+        );
         if (data) {
           didDelete = true;
+          if (isEncrypted && user?.id) {
+            setDeletedEncrypted((previous) => ({
+              accountId: user.id,
+              ids: new Set(previous?.accountId === user.id ? previous.ids : []).add(organizationId),
+            }));
+          }
+          setSelectedEncryptedWorkspace((selected) =>
+            selected?.accountId === user?.id && selected?.id === organizationId ? null : selected
+          );
           if (draftOwner.accountId) {
             workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
               workspaceId: organizationId,
@@ -864,7 +904,6 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
               });
             }
           }
-          // TODO: delete local workspace data
           void refetchOrganizations();
           void refetchActiveOrganization();
         }
@@ -892,6 +931,11 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     },
     [
       authClient,
+      e2eeWorkspaces,
+      encryptedOrganizations,
+      setSelectedEncryptedWorkspace,
+      setDeletedEncrypted,
+      user?.id,
       organizations,
       refetchActiveOrganization,
       refetchOrganizations,

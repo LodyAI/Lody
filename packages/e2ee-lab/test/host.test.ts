@@ -13,7 +13,7 @@ import { signLedgerRecord } from '@lody/e2ee-core/protocol';
 import { frameLedgerRecord } from '@lody/e2ee-core/protocol';
 import { fixture } from './ledger-fixture';
 import { makeLabCredentials, labPossessionMessage } from '../src/platform/credentials';
-import { makeLabControlGateway } from '../src/platform/control-gateway';
+import { makeLabControlGateway, LabControlGatewayError } from '../src/platform/control-gateway';
 import { makeLabHttpHost } from '../src/platform/host';
 import { makeLabHttpIdentity } from '../src/platform/http-identity';
 import { authorizeLabStream } from '../src/platform/gateway';
@@ -65,6 +65,7 @@ describe('real loopback Lab credentials and control HTTP composition', () => {
                 anchor.equals(f.anchor) ? Effect.sync(currentView) : Effect.fail('unknown Org'),
             });
             const gateway = yield* makeLabControlGateway({
+              quotaPath: join(f.dir, 'ledger-quota.sqlite'),
               genesis: f.anchor,
               now: () => now,
               checkpoint: () =>
@@ -83,9 +84,20 @@ describe('real loopback Lab credentials and control HTTP composition', () => {
                 },
               },
             });
+            let forced: LabControlGatewayError['code'] | undefined;
             const host = yield* makeLabHttpHost({
               credentials,
-              control: (anchor) => (anchor.equals(f.anchor) ? gateway : undefined),
+              control: (anchor) =>
+                anchor.equals(f.anchor)
+                  ? {
+                      append: (request) =>
+                        forced
+                          ? Effect.fail(
+                              new LabControlGatewayError({ code: forced, retryAt: 3600000 })
+                            )
+                          : gateway.append(request),
+                    }
+                  : undefined,
             });
             const post = (path: string, value: unknown) =>
               Effect.promise(() =>
@@ -158,6 +170,22 @@ describe('real loopback Lab credentials and control HTTP composition', () => {
             bad[bad.length - 1] ^= 1;
             expect((yield* append(path, bad, token)).status).toBe(403);
             expect(originals.length).toBe(2);
+            for (const [code, status] of [
+              ['self-service-rate-limited', 429],
+              ['quota-storage', 500],
+              ['closed', 503],
+              ['transport', 502],
+            ] as const) {
+              forced = code;
+              const refusal = yield* append(path, frame, token);
+              expect(refusal.status).toBe(status);
+              if (code === 'self-service-rate-limited')
+                expect(yield* Effect.promise(() => refusal.json())).toEqual({
+                  error: code,
+                  retryAt: 3600000,
+                });
+            }
+            forced = undefined;
             const consumer = new StreamsClient({
               url: host.baseUrl + path.replace('/append-cas', ''),
               auth: token,

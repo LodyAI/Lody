@@ -1,0 +1,603 @@
+name: Publish Electron
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full commit SHA at the selected branch tip
+        required: true
+        type: string
+      expected_version:
+        description: Exact package version at that commit
+        required: true
+        type: string
+      source_run_id:
+        description: 'Production recovery: original failed release-clients run ID'
+        required: false
+        type: string
+permissions:
+  contents: read
+env:
+  NODE_VERSION: 22.23.4
+concurrency:
+  group: ${{ github.ref == 'refs/heads/release' && 'lody-production-release' || 'lody-staging-release' }}
+  cancel-in-progress: false
+jobs:
+  validate-target:
+    if:
+      github.repository == 'LodyAI/Lody' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release') &&
+      vars.CLIENT_RELEASES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      checkout_sha: ${{ steps.target.outputs.checkout_sha }}
+      build_number: ${{ steps.target.outputs.build_number }}
+      target_environment: ${{ steps.target.outputs.target_environment }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        id: target
+        env:
+          TARGET_INPUTS: ${{ toJSON(inputs) }}
+          COMPONENT: electron
+        with:
+          script: >
+            const { validateManualTarget } = await
+            import(`${process.env.GITHUB_WORKSPACE}/.github/scripts/client-release-target.mjs`);
+
+            const target = await validateManualTarget({github, context, inputs: JSON.parse(process.env.TARGET_INPUTS),
+            component: process.env.COMPONENT});
+
+            for (const [key, value] of Object.entries(target)) core.setOutput(key, value);
+  build-electron:
+    if: needs.validate-target.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: >-
+        ${{
+          fromJSON(
+            github.ref_name == 'release' &&
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64:release"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:staging"}]}'
+          )
+        }}
+    runs-on: ${{ matrix.os }}
+    environment: ${{ github.ref == 'refs/heads/release' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      LODY_ENV: ${{ github.ref_name == 'release' && 'production' || 'staging' }}
+      LODY_AUTH_URL: ${{ vars.LODY_AUTH_URL }}
+      LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
+      LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL }}
+      VITE_SITE_URL: ${{ vars.SITE_URL }}
+      VITE_SESSION_SHARE_ORIGIN: ${{ vars.VITE_SESSION_SHARE_ORIGIN }}
+      VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
+      VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
+      VITE_LODY_ENV: ${{ github.ref_name == 'release' && 'production' || 'staging' }}
+      VITE_ELECTRON_UPDATE_URL: |-
+        ${{
+          github.ref_name == 'release' &&
+          vars.ELECTRON_UPDATE_URL_PRODUCTION ||
+          vars.ELECTRON_UPDATE_URL_STAGING
+        }}
+      VITE_ELECTRON_UPDATE_CHANNEL: |-
+        ${{
+          github.ref_name == 'release' &&
+          'latest' ||
+          'next'
+        }}
+      ELECTRON_UPDATE_CHANNEL: |-
+        ${{
+          github.ref_name == 'release' &&
+          'latest' ||
+          'next'
+        }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NODE_OPTIONS: --max-old-space-size=6144
+      npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+          ref: ${{ needs.validate-target.outputs.checkout_sha }}
+      - name: Normalize Electron auth base URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw_site_url="${VITE_CONVEX_SITE_URL:-${VITE_CONVEX_DEPLOY_URL:-}}"
+          if [[ -z "${raw_site_url}" ]]; then
+            echo "VITE_CONVEX_SITE_URL=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          normalized_site_url="${raw_site_url%/}"
+          if [[ "${normalized_site_url}" == *".convex.cloud" ]]; then
+            normalized_site_url="${normalized_site_url/.convex.cloud/.convex.site}"
+          fi
+
+          echo "VITE_CONVEX_SITE_URL=${normalized_site_url}" >> "$GITHUB_ENV"
+
+          update_base_url="${VITE_ELECTRON_UPDATE_URL%/}"
+          {
+            echo "SPARKLE_APPCAST_URL=${update_base_url}/appcast.xml"
+            echo "SPARKLE_DOWNLOAD_URL_PREFIX=${update_base_url}/"
+            echo "SPARKLE_APPCAST_URL_ARM64=${update_base_url}/arm64/appcast.xml"
+            echo "SPARKLE_DOWNLOAD_URL_PREFIX_ARM64=${update_base_url}/arm64/"
+            echo "SPARKLE_APPCAST_URL_X64=${update_base_url}/x64/appcast.xml"
+            echo "SPARKLE_DOWNLOAD_URL_PREFIX_X64=${update_base_url}/x64/"
+          } >> "$GITHUB_ENV"
+      - name: Validate Electron build env
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "VITE_SERVER_URL"
+            "VITE_CONVEX_SITE_URL"
+            "VITE_CONVEX_DEPLOY_URL"
+            "VITE_SITE_URL"
+            "VITE_PUBLIC_POSTHOG_HOST"
+            "VITE_PUBLIC_POSTHOG_KEY"
+            "VITE_ELECTRON_UPDATE_URL"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required env: ${key}"
+              exit 1
+            fi
+          done
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Verify public daemon installation before client publication
+        run: node apps/cli/check-installer.mjs . ${{ github.ref_name == 'release' && 'stable' || 'next' }} "$EXPECTED_VERSION"
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile --prefer-offline
+      - name: Prepare macOS signing and notarization credentials
+        if: matrix.target == 'mac'
+        shell: bash
+        env:
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_P8: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_P8 || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "CSC_LINK"
+            "CSC_KEY_PASSWORD"
+            "APPLE_API_KEY_P8"
+            "APPLE_API_KEY_ID"
+            "APPLE_API_ISSUER"
+            "SPARKLE_ED_PUBLIC_KEY"
+            "SPARKLE_ED_PRIVATE_KEY"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required macOS signing or Sparkle secret: ${key}"
+              exit 1
+            fi
+          done
+
+          api_key_path="${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "${APPLE_API_KEY_P8}" > "${api_key_path}"
+          chmod 600 "${api_key_path}"
+          echo "APPLE_API_KEY=${api_key_path}" >> "$GITHUB_ENV"
+      - name: Remove previous macOS packaging outputs
+        if: matrix.target == 'mac'
+        run: rm -rf -- apps/electron/dist
+      - name: Validate Sparkle signing key pair before building
+        if: matrix.target == 'mac'
+        env:
+          SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: node apps/electron/sparkle-signing.mjs key-pair
+      - name: Build Electron package (${{ matrix.target }})
+        env:
+          CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.target == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+          SPARKLE_ED_PUBLIC_KEY: ${{ matrix.target == 'mac' && secrets.SPARKLE_ED_PUBLIC_KEY || '' }}
+          BUILD_SCRIPT: ${{ matrix.build_script }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            bash .github/scripts/observe-macos-build.sh corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          else
+            corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
+          fi
+      - name: Generate signed Sparkle appcast and deltas (staging)
+        if: matrix.target == 'mac' && github.ref_name != 'release'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          legacy-appcast-sha256: 6f23204c249f4c7ef5dc599a0ff2b6053dac43246b35ed0f3a1e3d972b1377d7
+          appcast-url: ${{ env.SPARKLE_APPCAST_URL }}
+          archive-dir: ${{ runner.temp }}/sparkle-appcast
+          dist-dir: apps/electron/dist
+          download-url-prefix: ${{ env.SPARKLE_DOWNLOAD_URL_PREFIX }}
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
+      - name: Generate signed Sparkle appcast and deltas (arm64)
+        if: matrix.target == 'mac' && github.ref_name == 'release'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          appcast-url: ${{ env.SPARKLE_APPCAST_URL_ARM64 }}
+          archive-dir: ${{ runner.temp }}/sparkle-appcast-arm64
+          dist-dir: apps/electron/dist
+          archive-pattern: '*-arm64.zip'
+          output-dir: apps/electron/dist/arm64
+          download-url-prefix: ${{ env.SPARKLE_DOWNLOAD_URL_PREFIX_ARM64 }}
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
+      - name: Generate signed Sparkle appcast and deltas (x64)
+        if: matrix.target == 'mac' && github.ref_name == 'release'
+        uses: ./.github/actions/generate-sparkle-appcast
+        with:
+          appcast-url: ${{ env.SPARKLE_APPCAST_URL_X64 }}
+          archive-dir: ${{ runner.temp }}/sparkle-appcast-x64
+          dist-dir: apps/electron/dist
+          archive-pattern: '*-x64.zip'
+          output-dir: apps/electron/dist/x64
+          download-url-prefix: ${{ env.SPARKLE_DOWNLOAD_URL_PREFIX_X64 }}
+          public-key: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
+          private-key: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          allow-missing-appcast: ${{ vars.SPARKLE_ALLOW_MISSING_APPCAST || 'false' }}
+      - name: Prepare channel metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${ELECTRON_UPDATE_CHANNEL}" != "next" ]]; then
+            exit 0
+          fi
+
+          shopt -s nullglob
+          next_metadata_files=(apps/electron/dist/next*.yml)
+          if [[ ${#next_metadata_files[@]} -gt 0 ]]; then
+            exit 0
+          fi
+
+          latest_metadata_files=(apps/electron/dist/latest*.yml)
+          if [[ ${#latest_metadata_files[@]} -eq 0 ]]; then
+            echo "No next*.yml or latest*.yml metadata generated by electron-builder"
+            exit 1
+          fi
+
+          for file in "${latest_metadata_files[@]}"; do
+            dir="$(dirname "$file")"
+            base="$(basename "$file")"
+            cp "$file" "${dir}/${base/latest/next}"
+          done
+      - name: Collect Electron release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p electron-release-assets
+          metadata_pattern='latest*.yml'
+          if [[ "${ELECTRON_UPDATE_CHANNEL}" == "next" ]]; then
+            metadata_pattern='next*.yml'
+          fi
+
+          find apps/electron/dist -type f \
+            \( \
+              -name "${metadata_pattern}" -o \
+              -name '*.blockmap' -o \
+              -name '*.exe' -o \
+              -name '*.dmg' -o \
+              -name '*.zip' -o \
+              -name '*.delta' -o \
+              -name 'appcast.xml' -o \
+              -name '*.AppImage' -o \
+              -name '*.deb' -o \
+              -name '*.snap' \
+            \) \
+            -print0 | while IFS= read -r -d '' file; do
+              relative_path="${file#apps/electron/dist/}"
+              destination="electron-release-assets/${relative_path}"
+              mkdir -p "$(dirname "${destination}")"
+              cp "$file" "${destination}"
+            done
+
+          if [[ -z "$(ls -A electron-release-assets)" ]]; then
+            echo "No electron release assets collected"
+            exit 1
+          fi
+      - name: Upload Electron release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: electron-release-assets-${{ matrix.target }}
+          path: electron-release-assets/*
+          if-no-files-found: error
+      - name: Remove macOS notarization key
+        env:
+          APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+        if: always() && matrix.target == 'mac'
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+    needs:
+      - validate-target
+  upload-electron-to-r2:
+    needs:
+      - build-electron
+      - validate-target
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/release' && 'cloud-production' || 'cloud-staging' }}
+    env:
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      R2_ELECTRON_UPDATE_PREFIX: |-
+        ${{
+          github.ref_name == 'release' &&
+          vars.R2_ELECTRON_UPDATE_PREFIX_PRODUCTION ||
+          vars.R2_ELECTRON_UPDATE_PREFIX_STAGING
+        }}
+      LODY_PLATFORM: cloud
+      VITE_LODY_PLATFORM: cloud
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Clear previous Electron upload artifacts
+        shell: bash
+        run: rm -rf -- electron-release-assets download-aliases
+      - name: Download Electron release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: electron-release-assets-*
+          path: electron-release-assets
+          merge-multiple: true
+      - name: Ensure AWS CLI
+        run: bash .github/scripts/setup-aws-cli.sh
+        shell: bash
+      - name: Upload Electron installers and updater metadata to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${R2_ACCOUNT_ID}" || -z "${R2_BUCKET}" || -z "${R2_ELECTRON_UPDATE_PREFIX}" ]]; then
+            echo "R2 configuration is incomplete"
+            exit 1
+          fi
+
+          endpoint_url="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          prefix="${R2_ELECTRON_UPDATE_PREFIX#/}"
+          prefix="${prefix%/}"
+
+          upload_asset() {
+            local file="$1"
+            local relative_path="${file#electron-release-assets/}"
+            local object_key="${relative_path}"
+            if [[ -n "${prefix}" ]]; then
+              object_key="${prefix}/${relative_path}"
+            fi
+            if [[ "$relative_path" =~ [0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              cache_control="public, max-age=31536000, immutable"
+              existing_file="$(mktemp "${RUNNER_TEMP}/lody-r2-existing.XXXXXX")"
+              head_error="$(mktemp "${RUNNER_TEMP}/lody-r2-head.XXXXXX")"
+              if aws s3api head-object \
+                --bucket "${R2_BUCKET}" \
+                --key "${object_key}" \
+                --endpoint-url "${endpoint_url}" \
+                >/dev/null 2>"${head_error}"; then
+                aws s3 cp "s3://${R2_BUCKET}/${object_key}" "${existing_file}" \
+                  --endpoint-url "${endpoint_url}" \
+                  --no-progress
+                if ! cmp -s "$file" "${existing_file}"; then
+                  echo "Refusing to overwrite immutable R2 object with different bytes: ${object_key}"
+                  rm -f "${existing_file}" "${head_error}"
+                  return 1
+                fi
+                echo "Immutable R2 object already matches, skipping: ${object_key}"
+                rm -f "${existing_file}" "${head_error}"
+                return 0
+              fi
+              if ! grep -Eqi '\(404\)|Not Found|NoSuchKey' "${head_error}"; then
+                cat "${head_error}" >&2
+                rm -f "${existing_file}" "${head_error}"
+                return 1
+              fi
+              rm -f "${existing_file}" "${head_error}"
+            else
+              cache_control="no-cache"
+            fi
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${object_key}" \
+              --endpoint-url "${endpoint_url}" \
+              --no-progress \
+              --cache-control "${cache_control}"
+          }
+
+          # Upload every referenced immutable asset before publishing mutable feed
+          # pointers, so clients never observe an appcast/latest file that points at 404s.
+          find electron-release-assets -type f \
+            \( \
+              -name '*.blockmap' -o \
+              -name '*.exe' -o \
+              -name '*.dmg' -o \
+              -name '*.zip' -o \
+              -name '*.delta' -o \
+              -name '*.AppImage' -o \
+              -name '*.deb' -o \
+              -name '*.snap' \
+            \) \
+            -print0 | while IFS= read -r -d '' file; do
+              upload_asset "$file"
+            done
+
+          find electron-release-assets -type f \
+            \( -name 'next*.yml' -o -name 'latest*.yml' \) \
+            -print0 | while IFS= read -r -d '' file; do
+              upload_asset "$file"
+            done
+
+          find electron-release-assets -type f -name 'appcast.xml' \
+            -print0 | while IFS= read -r -d '' file; do
+              upload_asset "$file"
+            done
+      - name: Upload stable download aliases and version metadata to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          endpoint_url="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          prefix="${R2_ELECTRON_UPDATE_PREFIX#/}"
+          prefix="${prefix%/}"
+
+          metadata_file=""
+          for f in electron-release-assets/latest-mac.yml \
+                   electron-release-assets/latest.yml \
+                   electron-release-assets/next-mac.yml \
+                   electron-release-assets/next.yml; do
+            if [[ -f "$f" ]]; then
+              metadata_file="$f"
+              break
+            fi
+          done
+
+          if [[ -z "$metadata_file" ]]; then
+            echo "No metadata file found - skipping download aliases"
+            exit 0
+          fi
+
+          version=$(grep '^version:' "$metadata_file" | head -1 | sed 's/^version: *//')
+          release_date=$(grep '^releaseDate:' "$metadata_file" | head -1 \
+            | sed "s/^releaseDate: *//" | sed "s/^'//" | sed "s/'$//")
+
+          echo "Creating download aliases for v${version} (${release_date})"
+
+          mkdir -p download-aliases
+
+          shopt -s nullglob
+          downloads_json=""
+          for file in electron-release-assets/Lody-*.{dmg,exe,AppImage,deb,snap}; do
+            filename=$(basename "$file")
+            alias_name="${filename/Lody-${version}-/Lody-latest-}"
+            cp "$file" "download-aliases/${alias_name}"
+            if [[ "$alias_name" != "$filename" ]]; then
+              if [[ -n "$downloads_json" ]]; then
+                downloads_json+=","
+              fi
+              downloads_json+="\"${alias_name}\":\"${filename}\""
+            fi
+          done
+
+          files_json="["
+          first=true
+          for f in download-aliases/Lody-*; do
+            fname=$(basename "$f")
+            if [[ "$first" == "true" ]]; then
+              first=false
+            else
+              files_json+=","
+            fi
+            files_json+="\"${fname}\""
+          done
+          files_json+="]"
+
+          cat > download-aliases/version.json <<VEOF
+          {
+            "version": "${version}",
+            "releaseDate": "${release_date}",
+            "files": ${files_json},
+            "downloads": {${downloads_json}}
+          }
+          VEOF
+
+          echo "Download aliases:"
+          ls -la download-aliases/
+
+          for file in download-aliases/*; do
+            filename=$(basename "$file")
+            if [[ -n "${prefix}" ]]; then
+              object_key="${prefix}/${filename}"
+            else
+              object_key="${filename}"
+            fi
+            extra_args=()
+            if [[ "$filename" == "version.json" ]]; then
+              extra_args=(--content-type application/json)
+            fi
+            aws s3 cp "$file" "s3://${R2_BUCKET}/${object_key}" \
+              --endpoint-url "${endpoint_url}" \
+              --no-progress \
+              --cache-control "no-cache" \
+              "${extra_args[@]}"
+          done
+  attach-electron-release:
+    needs:
+      - validate-target
+      - upload-electron-to-r2
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: electron-release-assets-*
+          path: electron-release-assets
+          merge-multiple: true
+      - name: Attach immutable Electron installers
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: >
+            const fs = require('node:fs/promises');
+
+            const path = require('node:path');
+
+            const {attachReleaseAssets} = await import(path.join(process.env.GITHUB_WORKSPACE,
+            '.github/scripts/github-release-assets.mjs'));
+
+            const root = 'electron-release-assets';
+
+            const files = await fs.readdir(root);
+
+            const metadata = files.find(name => name === 'latest-mac.yml' || name === 'next-mac.yml');
+
+            if (!metadata) throw new Error('Missing Electron release metadata');
+
+            const text = await fs.readFile(path.join(root, metadata), 'utf8');
+
+            const version = /^version: ["']?([^"'\s]+)["']?$/m.exec(text)?.[1];
+
+            const assets = files.filter(name => /\.(dmg|exe|AppImage|deb|snap|zip)$/.test(name)).map(name => ({name,
+            read: () => fs.readFile(path.join(root,name))}));
+
+            await attachReleaseAssets({github, repo: context.repo, version, assets});

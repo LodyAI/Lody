@@ -1,21 +1,16 @@
 // @vitest-environment jsdom
-
-// @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback: string) => fallback,
-  }),
-}));
-
 import { SessionFileBinaryPreview } from '../src/components/sessions/session-file-binary-preview';
 import Papa from 'papaparse';
 import { readXlsxSelectionClipboard } from '../src/components/sessions/session-file-xlsx-clipboard';
 import { createSpreadsheetClipboard } from '../src/components/sessions/session-file-spreadsheet-clipboard';
+import { createTestI18n, withTestI18n } from './test-i18n';
+
+const testI18n = createTestI18n();
 
 describe('spreadsheet clipboard', () => {
   it('preserves rectangular values in text and HTML without interpreting cell markup', () => {
@@ -160,15 +155,20 @@ describe('video preview lifecycle', () => {
     const bytes = Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3);
     const render = async (path: string, active = true) => {
       await act(async () =>
-        root.render(createElement(SessionFileBinaryPreview, { path, bytes, active }))
+        root.render(
+          withTestI18n(createElement(SessionFileBinaryPreview, { path, bytes, active }), testI18n)
+        )
       );
     };
     await render('clip.WEBM');
     const video = container.querySelector('video')!;
     expect(video).not.toBeNull();
-    expect(video.controls).toBe(true);
+    expect(video.controls).toBe(false);
     expect(video.playsInline).toBe(true);
     expect(video.autoplay).toBe(false);
+    expect(container.querySelector('button[aria-label="Play"]')).not.toBeNull();
+    expect(container.querySelector('input[aria-label="Seek"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Mute"]')).not.toBeNull();
     expect(blobs.get(video.src)).toMatchObject({ type: 'video/webm', size: bytes.length });
     Object.defineProperty(video, 'paused', { configurable: true, value: false });
     await render('clip.WEBM', false);
@@ -193,18 +193,21 @@ describe('video preview lifecycle', () => {
     const render = async (url: string) => {
       await act(async () =>
         root.render(
-          createElement(SessionFileBinaryPreview, {
-            path: 'clip.webm',
-            url,
-            fileActions: {
-              onCopyPath: () => {
-                copied = true;
+          withTestI18n(
+            createElement(SessionFileBinaryPreview, {
+              path: 'clip.webm',
+              url,
+              fileActions: {
+                onCopyPath: () => {
+                  copied = true;
+                },
+                onShare: () => {
+                  shared = true;
+                },
               },
-              onShare: () => {
-                shared = true;
-              },
-            },
-          })
+            }),
+            testI18n
+          )
         )
       );
     };
@@ -229,7 +232,10 @@ describe('video preview lifecycle', () => {
   it('pauses when the app backgrounds and does not resume automatically', async () => {
     await act(async () =>
       root.render(
-        createElement(SessionFileBinaryPreview, { path: 'clip.webm', url: 'blob:authorized' })
+        withTestI18n(
+          createElement(SessionFileBinaryPreview, { path: 'clip.webm', url: 'blob:authorized' }),
+          testI18n
+        )
       )
     );
     const video = container.querySelector('video')!;

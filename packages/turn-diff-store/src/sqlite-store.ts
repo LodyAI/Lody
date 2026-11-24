@@ -19,6 +19,10 @@ import {
   type RecordTurnDiffMetrics,
   type RecordTurnDiffResult,
   type SnapshotPathInput,
+  type SnapshotDescriptorInput,
+  type SnapshotDescriptor,
+  type SnapshotBytesInput,
+  type SnapshotBytes,
   type TurnDiffCompression,
   type TurnDiffFileSummary,
   type TurnDiffGcResult,
@@ -358,13 +362,28 @@ export class SqliteTurnDiffStore {
   private readonly db: Database.Database;
   private readonly options: NormalizedOptions;
   private closed = false;
+  private readonly readOnly: boolean;
 
   constructor(options: TurnDiffStoreOptions) {
     this.options = normalizeOptions(options);
-    mkdirSync(path.dirname(this.options.dbPath), { recursive: true });
-    this.db = new Database(this.options.dbPath, { timeout: 5_000 });
+    this.readOnly = options.readOnly === true;
+    if (!this.readOnly) mkdirSync(path.dirname(this.options.dbPath), { recursive: true });
+    this.db = new Database(this.options.dbPath, {
+      timeout: 5_000,
+      readonly: this.readOnly,
+      fileMustExist: this.readOnly,
+    });
     try {
-      this.initializeSchema();
+      if (this.readOnly) {
+        if (
+          this.db.pragma('application_id', { simple: true }) !== TURN_DIFF_APPLICATION_ID ||
+          this.db.pragma('user_version', { simple: true }) !== SCHEMA_VERSION ||
+          schemaFingerprint(readSchemaObjects(this.db)) !==
+            expectedSchemaFingerprint(CURRENT_SCHEMA_SQL)
+        ) {
+          throw this.unknownSchemaError();
+        }
+      } else this.initializeSchema();
     } catch (error) {
       this.db.close();
       throw error;
@@ -378,6 +397,7 @@ export class SqliteTurnDiffStore {
   }
 
   allocateHeadProof(): number {
+    this.assertWritable();
     this.assertOpen();
     const allocate = this.db.transaction(() => {
       const row = this.db
@@ -401,6 +421,7 @@ export class SqliteTurnDiffStore {
   recordTurn(
     input: RecordTurnDiffInput & { readonly capturedAtMs: number; readonly recordedAtMs: number }
   ): RecordTurnDiffResult {
+    this.assertWritable();
     this.assertOpen();
     validateRecordInput(input);
     const startedAt = performance.now();
@@ -571,6 +592,72 @@ export class SqliteTurnDiffStore {
     return rows.map((row) => row.path);
   }
 
+  getSnapshotDescriptor(
+    input: SnapshotDescriptorInput & { readonly nowMs: number }
+  ): SnapshotDescriptor {
+    this.assertOpen();
+    assertSnapshotReadLimit(input.maxRawBytes);
+    return this.db.transaction((): SnapshotDescriptor => {
+      const row = this.selectSnapshot(input);
+      if (!row) return { status: 'unavailable' };
+      if (exceedsSnapshotReadLimit(row.raw_size, input.maxRawBytes)) {
+        return { status: 'too_large', rawBytes: row.raw_size };
+      }
+      return {
+        status: 'ready',
+        snapshot:
+          row.snapshot_id === null
+            ? null
+            : {
+                hash: row.content_hash.toString('hex'),
+                rawBytes: row.raw_size,
+              },
+      };
+    })();
+  }
+
+  getSnapshotBytes(input: SnapshotBytesInput & { readonly nowMs: number }): SnapshotBytes {
+    this.assertOpen();
+    assertSnapshotReadLimit(input.maxRawBytes);
+    if (!/^[0-9a-f]{64}$/u.test(input.hash)) return { status: 'unavailable' };
+    return this.db.transaction((): SnapshotBytes => {
+      const row = this.selectSnapshot(input);
+      if (!row || row.snapshot_id === null || row.content_hash.toString('hex') !== input.hash) {
+        return { status: 'unavailable' };
+      }
+      if (exceedsSnapshotReadLimit(row.raw_size, input.maxRawBytes)) {
+        return { status: 'too_large', rawBytes: row.raw_size };
+      }
+      return { status: 'ready', bytes: this.readSnapshotBytes(row.snapshot_id) };
+    })();
+  }
+
+  private selectSnapshot(
+    input: SnapshotDescriptorInput & { readonly nowMs: number }
+  ): (NullableSnapshotSizeRow & { readonly content_hash: Buffer }) | undefined {
+    // Column names come from the closed side union, never interpolated input.
+    const side =
+      input.turnId !== undefined && input.side === 'new' ? 'new_snapshot_id' : 'old_snapshot_id';
+    return this.db
+      .prepare(`
+      SELECT tf.${side} AS snapshot_id, COALESCE(s.raw_size, 0) AS raw_size,
+             s.content_hash
+      FROM turn_files AS tf JOIN turns AS t ON t.id = tf.turn_id
+      LEFT JOIN snapshots AS s ON s.id = tf.${side}
+      WHERE t.owner_id = ? AND tf.path = ? AND t.evicted = 0 AND t.expires_at_ms > ?
+        ${input.turnId === undefined ? '' : 'AND t.turn_key = ?'}
+      ORDER BY t.order_key ASC, t.id ASC LIMIT 1
+    `)
+      .get(
+        ...[
+          input.ownerId,
+          input.path,
+          input.nowMs,
+          ...(input.turnId === undefined ? [] : [input.turnId]),
+        ]
+      ) as (NullableSnapshotSizeRow & { readonly content_hash: Buffer }) | undefined;
+  }
+
   getEarliestOldSnapshot(input: SnapshotPathInput & { readonly nowMs: number }): TurnDiffSnapshot {
     this.assertOpen();
     assertSnapshotReadLimit(input.maxRawBytes);
@@ -678,6 +765,7 @@ export class SqliteTurnDiffStore {
   }
 
   shouldRunGc(nowMs: number): boolean {
+    if (this.readOnly) return false;
     this.assertOpen();
     const expired = this.db
       .prepare('SELECT 1 AS id FROM turns WHERE expires_at_ms <= ? LIMIT 1')
@@ -694,6 +782,7 @@ export class SqliteTurnDiffStore {
   }
 
   beginGc(nowMs: number): TurnDiffGcCursor {
+    this.assertWritable();
     this.assertOpen();
     const before = this.storageBytes(true);
     return {
@@ -1200,6 +1289,10 @@ export class SqliteTurnDiffStore {
 
   private readSnapshotText(snapshotId: number | null): string | null {
     if (snapshotId === null) return null;
+    return this.readSnapshotBytes(snapshotId).toString('utf8');
+  }
+
+  private readSnapshotBytes(snapshotId: number): Buffer {
     const snapshot = this.db
       .prepare('SELECT id, content_hash, raw_size FROM snapshots WHERE id = ?')
       .get(snapshotId) as ReadableSnapshotRow | undefined;
@@ -1232,7 +1325,7 @@ export class SqliteTurnDiffStore {
     if (!contentHash.equals(snapshot.content_hash)) {
       throw new Error(`Turn-diff snapshot ${snapshotId} hash mismatch.`);
     }
-    return output.toString('utf8');
+    return output;
   }
 
   private deleteTurns(turnIds: readonly number[]): { snapshots: number; chunks: number } {
@@ -1397,6 +1490,10 @@ export class SqliteTurnDiffStore {
     const wal = fileSize(`${this.options.dbPath}-wal`);
     const shm = fileSize(`${this.options.dbPath}-shm`);
     return { database, wal, shm, total: database + wal + shm };
+  }
+
+  private assertWritable(): void {
+    if (this.readOnly) throw new Error('Turn-diff store is read-only.');
   }
 
   private assertOpen(): void {

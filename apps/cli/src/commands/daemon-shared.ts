@@ -1,4 +1,11 @@
+import {
+  getSeaContext,
+  getCliNodeExecutable,
+  managedDaemonRoot,
+  resolvePublishedManagedService,
+} from '@/lib/managed-daemon-release';
 import { toShared } from '@/platform/process-options';
+import { getCliPlatformKind } from '@/lib/cli-platform';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -13,8 +20,12 @@ import {
   LODY_SUPERVISOR_TOKEN_ENV,
 } from '@lody/shared/node/local-cli-supervisor';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { requestLocalCliHostShutdown } from '@lody/shared/node/local-cli-host-lease';
-import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
+import {
+  inspectLocalCliHost,
+  requestLocalCliHostShutdown,
+  type LocalCliHostRecord,
+} from '@lody/shared/node/local-cli-host-lease';
+import { resolveWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
 import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -26,7 +37,10 @@ export const DAEMON_PID_FILE = path.join(getLodyDataDir(), 'daemon.pid');
 // long-lived Worker. The worker limit is intentionally machine-relative so an
 // 8GB Mac cannot claim the same V8 heap as a 32GB development machine.
 export const DAEMON_WATCHDOG_MAX_OLD_SPACE_MB = 512;
-export const DAEMON_WORKER_MAX_OLD_SPACE_MB = calculateWorkerMaxOldSpaceMiB(os.totalmem());
+export const DAEMON_WORKER_MAX_OLD_SPACE_MB = resolveWorkerMaxOldSpaceMiB(
+  process.env,
+  os.totalmem()
+);
 
 // `<active installation data root>/daemon.pid` is the daemon Supervisor control record: diagnostics
 // plus the private Host-control token `lody daemon stop` authenticates with.
@@ -307,12 +321,32 @@ export async function spawnDaemonRunnerAndAwaitReady(
   options: {
     timeoutMs?: number;
     installation?: { bin: string; version: string };
+    /** Start this fixed managed service entry instead of the current installation. */
+    service?: string;
+    /** The managed service must report exactly this version to count as ready. */
+    expectedVersion?: string;
     /** Test seams: the OS process table and the daemon PID record location. */
     nodeProcess?: NodeProcessApi;
     pidFilePath?: string;
   } = {}
 ): Promise<SpawnDaemonRunnerResult> {
   const bin = options.installation?.bin ?? resolveLodyBin();
+  const sea = options.installation ? null : getSeaContext();
+  // An npm launcher forwards to a published managed service: after a relay
+  // migration, the user's own autostart keeps starting the managed daemon.
+  const fixedService =
+    options.service ??
+    (options.installation
+      ? null
+      : sea
+        ? path.join(managedDaemonRoot(), process.platform === 'win32' ? 'service.exe' : 'service')
+        : process.platform === 'win32'
+          ? null
+          : resolvePublishedManagedService(
+              getCliPlatformKind() === 'cloud' ? 'lody-cloud' : 'lody-oss'
+            ));
+  if (fixedService && !fs.existsSync(fixedService))
+    throw new Error('Run daemon install before starting the managed service.');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [DAEMON_RUNNER_READY_FD_ENV]: String(DAEMON_RUNNER_READY_FD),
@@ -329,10 +363,11 @@ export async function spawnDaemonRunnerAndAwaitReady(
   // Windows, so the runner outlives the terminal that started it.
   const runner = startProcessLegacy(
     {
-      command: process.execPath,
+      command: fixedService ?? getCliNodeExecutable(),
       args: [
-        `--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`,
-        bin,
+        ...(fixedService
+          ? [`--node-options=--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`]
+          : [`--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`, bin]),
         'daemon-runner',
         ...passthroughArgs,
       ],
@@ -399,7 +434,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
       const interpreted = interpretDaemonRunnerLaunchOutcome(
         outcome.data,
         runnerPid,
-        options.installation?.version
+        options.expectedVersion ?? options.installation?.version
       );
       finish(interpreted.outcome, interpreted.cancelRunner);
     });
@@ -423,4 +458,50 @@ export async function spawnDaemonRunnerAndAwaitReady(
   }
   child.unref();
   return result;
+}
+
+export type StopResult =
+  | { status: 'not_running' }
+  | { status: 'stale_pid_file'; pid: number }
+  | { status: 'stopped'; pid: number; attempts: number }
+  | { status: 'timeout'; pid: number; attempts: number }
+  | { status: 'host_mismatch'; pid: number; host: LocalCliHostRecord }
+  | { status: 'control_error'; pid: number; errorMessage: string };
+
+// The live Host endpoint is the only stop authority. The PID record supplies
+// the control token; PID liveness is never consulted and no signal is sent.
+export async function stopDaemonProcess(): Promise<StopResult> {
+  const pidRecord = readPidFileRecord();
+  if (!pidRecord) return { status: 'not_running' };
+  const pid = pidRecord.pid;
+
+  const host = await inspectLocalCliHost(undefined, 500);
+  if (!host) {
+    return { status: 'stale_pid_file', pid };
+  }
+  if (host.mode !== 'daemon' || host.pid !== pid || host.instanceId !== pidRecord.instanceId) {
+    return { status: 'host_mismatch', pid, host };
+  }
+
+  const requested = await requestLocalCliHostShutdown({
+    instanceId: pidRecord.instanceId,
+    token: pidRecord.controlToken,
+    expectedPid: pid,
+    expectedMode: 'daemon',
+  });
+  if (!requested.ok) {
+    return { status: 'control_error', pid, errorMessage: requested.error };
+  }
+
+  // The daemon Supervisor gives the Worker 30 seconds to drain before force
+  // killing it, then waits up to 5 seconds for confirmed exit.
+  const maxAttempts = 80;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const currentHost = await inspectLocalCliHost(undefined, 500);
+    if (!currentHost || currentHost.instanceId !== pidRecord.instanceId) {
+      return { status: 'stopped', pid, attempts: attempt };
+    }
+  }
+  return { status: 'timeout', pid, attempts: maxAttempts };
 }

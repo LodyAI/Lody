@@ -5,7 +5,7 @@ Translation: current
 
 [中文](2026-09-14-deferred-attachment-send.zh.md)
 
-Verdict (2026-09-29): implemented. The four-layer stack shipped through #705, #707, #709 and #719, so this note moved from `proposed/`. Partially superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): the durable journal, cross-window recovery, recovery-record compatibility and exit/logout/cache-clear gating were removed, and sends waiting for attachments are now held in memory only. Send-time attachment preparation, the workspace Effect resource owner and the submission boundary remain. The body below is the historical record.
+Verdict (2026-09-29): implemented. The four-layer stack shipped through #705, #707, #709 and #719, so this note moved from `proposed/`. Partially superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): the durable journal, cross-window recovery, recovery-record compatibility and exit/logout/cache-clear gating were removed, and sends waiting for attachments are now held in memory only. Send-time attachment preparation, the workspace Effect resource owner and the submission boundary remain. The body below is the historical record. The [local-reference implementation](../../../docs/cli-lib-session-files.md#native-local-references) now supplies the separately designed native route.
 
 ## Abstract
 
@@ -251,7 +251,7 @@ Desktop integration runs renderer draining before the existing CLI quit barrier;
 
 Review corrections: every committed ordinary pending turn now persists its activation pointer before sync, even when prior history or a queue defers the RPC fast path. The CLI remains the owner of history classification and execution order; legacy/imported `seen` rows cannot hide a new follow-up from its idle-session watcher. Electron send registration belongs to a renderer document, not the reused WebContents: confirmed process exit or committed navigation retires old requests, while timeout alone still blocks exit. Replacement product documents must register again. Regression tests exercise real Loro history plus journal receipts and CLI watch decisions, and native events plus the real reload boundary; no packaged crash-injection acceptance is claimed.
 
-Image fallback correction: deferred image preparation keeps the pre-existing same-machine Electron fallback after cloud image upload fails. It checkpoints the CLI's existing local file receipt, including source bytes and the rest of the message, without introducing a new transport or disabling backfill. Remote targets, absent local capability, cancellation and the existing file-count limit prohibit fallback; a failed local handoff retains the original upload error for retry. Tests use actual journal storage and Loro history to verify the resulting file block and retained message on failure.
+Native attachment routing now selects permanent local references before upload. The earlier cloud-first image fallback is superseded by the [local-reference boundary](../../../docs/cli-lib-session-files.md#native-local-references): same-machine images preserve ACP visual input and remain outside backfill. Remote inputs retain their existing transfer path. Draft lifetime and complete-message admission still belong to the preparation owner described here.
 
 ## CI test lifetimes
 

@@ -10,6 +10,7 @@ import {
 import type { SessionConfigOption, SessionConfigSelectGroup } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
 import { filterAcpConfigOptions } from '@/agent/acp-config-option-filter';
+import { getAntigravityQuotaCapability } from './antigravity-quota';
 
 export type AcpCapabilitiesResult = {
   modes: Array<{ id: string; name: string; description?: string }>;
@@ -41,7 +42,7 @@ export function normalizeConfigOptions(
   if (supported.length === 0) {
     return undefined;
   }
-  return supported.map((opt) => {
+  const normalized = supported.flatMap((opt) => {
     if (opt.type === 'boolean') {
       return {
         id: opt.id,
@@ -54,6 +55,9 @@ export function normalizeConfigOptions(
       };
     }
 
+    if (!Array.isArray(opt.options)) {
+      return [];
+    }
     const flatOptions: AcpConfigOptionSummary['options'] = [];
     for (const entry of opt.options) {
       if (isSelectGroup(entry)) {
@@ -83,6 +87,7 @@ export function normalizeConfigOptions(
       options: flatOptions,
     };
   });
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 const zLegacySessionModels = z.object({
@@ -193,7 +198,7 @@ export function readLodyModelReasoningEfforts(
 const usesCodexModelEffortIds = (agent?: { cliType: string; agentType: string }): boolean =>
   agent?.cliType === 'builtin' && agent.agentType === 'codex';
 
-/** Extract capabilities advertised by a real ACP new/load/resume session response. */
+/** Normalize probe and real-session capabilities, including Lody-owned compatibility readers. */
 export function normalizeAcpSessionCapabilities(
   sessionResponse: AcpSessionCapabilitiesResponse,
   lifecycleCapabilities: {
@@ -202,7 +207,7 @@ export function normalizeAcpSessionCapabilities(
     sessionTitle?: boolean;
     rateLimits?: LodyRateLimitsCapability;
     goalActions?: SessionGoalAction[];
-    /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
+    /** The agent that answered; selects provider compatibility and legacy model effort ids. */
     agent?: { cliType: string; agentType: string };
   } = {}
 ): AcpCapabilitiesResult {
@@ -241,7 +246,9 @@ export function normalizeAcpSessionCapabilities(
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
     sessionTitle: lifecycleCapabilities.sessionTitle === true,
-    rateLimits: lifecycleCapabilities.rateLimits,
+    rateLimits:
+      lifecycleCapabilities.rateLimits ??
+      getAntigravityQuotaCapability(lifecycleCapabilities.agent),
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }
       : {}),

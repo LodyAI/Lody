@@ -6,6 +6,18 @@ Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
 Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
+Snapshot compression is available only through `@lody/shared/streams-snapshot-codec`. Keep its runtime imports out of the shared root so Convex isolate bundles can use protocol helpers without loading Node compression dependencies.
+
+Meta/Flock catch-up keeps replica-bound checkpoints and merges into the live replica.
+[Streams catch-up](../../.agents/docs/workspace-catalog-durability.md#streams-catch-up)
+explains size selection and cursor-only timeout recovery.
+
+Every workspace-owned Loro Streams stream ID must start with `{workspaceId}:` before any
+feature discriminator; before adding or changing stream IDs, buckets, or token scopes,
+read [Loro Streams UserSpace](../../.agents/docs/loro-streams-user-space.md).
+
+Cloud auth callbacks reject credential failures; undefined permits anonymous transport requests.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.
@@ -58,7 +70,14 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   exists and no storage schema or write validation depends on it.
 - Subagent events must preserve run identity and root ownership.
 
+Missing-history acknowledgements are exact-ID receipts; only the serialized host watcher adds them. `isMissingHistoryUserTurn`
+reads the retained map and legacy scalar; new activation must not clear old acknowledgements.
+
+Stopped queue rows retain paused drafts; explicit resends use new input identities.
+
 ## Machine protocol negotiation
+
+- Sorbet credential metadata and per-provider logout use local Machine RPC or signed E2EE owned execution, gated remotely by `sorbetCredentialsRemote`. The target verifies the signing device belongs to its owner's membership; shared members and plaintext fallback are forbidden. Metadata does not imply credential validity or account identity.
 
 - Ask Question consumers must preserve Core note/replacement semantics and validate
   associations per the [notes contract](../../specs/ask-question-answer-notes.md).
@@ -69,6 +88,8 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   change permission policy.
 
 - Session automation readers require `sessionAutomations` locally or `remoteAutomationControl` remotely; unsupported machines expose no controls, polling or connection warning.
+- Before changing Code Collab diff methods or generation rows, read the
+  [file-index contracts](src/AGENTS.md#code-collab).
 - Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
   Missing means unsupported. Full-message schedules require v3 and `messageVersion: 1`.
 - An ACP capability entry may carry the agent's advertised `authMethods`; absence means no probe
@@ -79,6 +100,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 - ACP `cacheVersion` gates freshness, not readability. Preserve understood fields across
   versions and runtime-override matching; omit known-incompatible fields. Pre-v11 commands
   can contain project data: Machine Flock owns probe previews, Sessions own actual lists.
+- Machine Flock retains complete `acpCapability` rows for older readers. Same-source
+  option structures retain their stored current values; session selections live in Sessions.
+  Per-model option rows may share a same-source shape across different current values.
+  Quota deduplication compares reset jitter with the persisted baseline, never the last notification.
 - Quota: share `src/subscription-quota.ts`; key `agentConfigId + limitId`.
   Bound Providers ignore legacy; delete scoped rows.
 
@@ -96,33 +121,14 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
 
 ## Workspace MCP / Roles
 
-- MCP/UI: read [auth contracts](src/AGENTS.md).
-  Catalog/defaults: workspace Flock; selections: turns. Missing project rows inherit
-  workspace defaults; `[]` disables all. Resolve defaults only at authoring; no machine
-  bindings. Preserve `mcpServerIds: []`; send the driving turn's selection to ACP,
-  never reread history.
-- MCP/Role catalog writes resolve on local Flock durability, followed by explicit
-  upload. Settings neither await nor report upload; its failure never fails or rolls
-  back a durable write. CLI reports its sync result. See
-  [catalog explanation](../../.agents/docs/workspace-catalog-durability.md).
-- Roles use one workspace Flock `agentRole` family; sharing changes `visibility`.
-  No secrets, API keys, MCP selections or memory contents. Apply
-  `isSensitiveAgentRoleConfigOptionKey` on read/write. Permission pins use
-  `runConfig.modeId` or `_permission`: hide the composer permission button,
-  keep warning-tone markings. No Role-level auto-approval policy.
-  Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
-  lookup needs no mention grant.
-- Each Role target binds `machineId + agentConfigId`; never guess or fall back. One
-  target is a v1 row, more are v2 ([Spec](../../specs/agent-role-machine-targets.md)).
-  Unavailable targets stay listed, unmentionable. Freeze prompt/target/revision/config
-  at acceptance; retries ignore edits. Session Role metadata: provenance only.
-  `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
-- Memory stores provider/id references, frozen per turn; daemon/env rules:
-  [memory contract](../../specs/agent-role-memory.md).
-- Keep `author`, human `userId`, and recipient execution config separate.
-  [Contract](../../specs/message-author-identity.md).
+Before changing MCP/Role catalogs, their UI consumers, per-turn selection, Role
+creation/dispatch or authentication, read the [source contracts](src/AGENTS.md#workspace-mcp--roles).
 
 Presence: E2EE requires UUID session IDs and bounded plaintext allowlists on publish/receive;
 ordinary behavior stays unchanged. [Contract](../../.agents/docs/cli-lib-loro-presence.md).
 
 Encrypted attachment manifests contain secret per-file keys and belong only in protected conversation content or local recovery receipts. Relay requests use opaque metadata and attachment-only grants; never publish a manifest or key in a URL. Format and recovery rationale: [attachment decision](../../.agents/notes/implemented/architecture/2026-10-28-encrypted-attachments.md).
+
+Native `local_attachment` inputs require exact submission scope and explicit inheritance. Never backfill or silently discard them. [Contract](../../.agents/docs/cli-lib-session-files.md#native-local-references).
+
+Shortcut sync preserves handled token/auth causes through SDK refresh, rather than producing new generic exceptions; [diagnostic ownership](../../.agents/notes/implemented/bug-fix/2026-11-17-shortcut-token-retry-diagnostics.md) remains with the client operation.

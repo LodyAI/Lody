@@ -78,3 +78,29 @@ test('switches to the calendar with reduced motion', async ({ page }) => {
   await expect(page.locator('[data-usage-view="hourly"]')).toHaveCount(0);
   await expect(page.locator('[data-usage-view="skyline"] [role="gridcell"]')).toHaveCount(371);
 });
+
+test.describe('local time and UTC day detail', () => {
+  test.use({ timezoneId: 'Asia/Singapore' });
+
+  test('shows local dates and hours across all three charts', async ({ page }) => {
+    await page.setViewportSize({ width: 1180, height: 1300 });
+    await page.goto(
+      '/iframe.html?id=settings-statssettings--cross-day-utc&viewMode=story&globals=locale:en'
+    );
+    const range = page.getByTitle('Oct 1, 00:00 GMT+8 – Oct 2, 00:00 GMT+8');
+    await expect(range).toBeVisible();
+    const splitTicks = page.locator('.recharts-xAxis').getByText('Oct 1, 00:00 GMT+8', { exact: true });
+    await expect(splitTicks).toHaveCount(2);
+    const peak = page.getByRole('gridcell', {
+      name: 'Oct 1, 07:00 GMT+8 – Oct 1, 08:00 GMT+8 · 500',
+    });
+    await peak.click();
+    await expect(page.getByRole('region', { name: 'Day detail' })).toContainText(
+      'Wed, Sep 30, 2026 · UTC'
+    );
+
+    await page.setViewportSize({ width: 390, height: 1300 });
+    await expect.poll(() => range.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+    await expect(page.getByText('More', { exact: true })).toBeInViewport({ ratio: 1 });
+  });
+});

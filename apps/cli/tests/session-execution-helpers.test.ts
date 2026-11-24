@@ -2,14 +2,43 @@ import { describe, expect, it } from 'vitest';
 import { SessionProjectRunSchema, type LocalProjectId } from '@lody/shared';
 
 import { buildPrompt } from '../src/session/session-execution-helpers';
+import { TURN_BUDGETS } from '../src/session/turn-budgets';
 
 describe('session execution prompt helpers', () => {
-  it('replaces detailed Lody MCP guidance with a concise reminder', () => {
+  it('requires command-specific help before executing Lody commands', () => {
     const prompt = buildPrompt('inspect the UI');
 
     expect(prompt).toBe(
-      'inspect the UI\n\nUse the available Lody MCP tools when relevant; rely on their tool descriptions for complete, current capabilities and usage guidance.'
+      'inspect the UI\n\nUse the available Lody MCP tools when relevant. Before executing a Lody command, you MUST call lody_help({command: TOOL_NAME}) and read its successful command-specific response. The index and short summaries do not replace full help. Read help before issuing the command, never in parallel with it. Reuse full help already in the current context; after compaction or loss, fetch it again. lody_help itself is exempt.'
     );
+  });
+
+  describe('approved PR-link sentence', () => {
+    const tail = 'lody_help itself is exempt.';
+    const build = (options: { gitRepository?: boolean; managedGhShim?: boolean }) =>
+      buildPrompt('fix it', undefined, undefined, undefined, options);
+
+    it('excludes gh pr create, which already links, when the managed gh shim is on PATH', () => {
+      expect(
+        build({ gitRepository: true, managedGhShim: true }).endsWith(
+          `${tail} A pull or merge request this Session opened without gh pr create is linked to it with lody_session_manage action pr_link.`
+        )
+      ).toBe(true);
+    });
+
+    it('covers every pull or merge request when the Session has no gh shim', () => {
+      expect(
+        build({ gitRepository: true, managedGhShim: false }).endsWith(
+          `${tail} A pull or merge request this Session opens is linked to it with lody_session_manage action pr_link.`
+        )
+      ).toBe(true);
+    });
+
+    it('adds no sentence when the working directory is not a git repository', () => {
+      for (const managedGhShim of [true, false])
+        expect(build({ gitRepository: false, managedGhShim })).not.toContain('pr_link');
+      expect(buildPrompt('fix it')).not.toContain('pr_link');
+    });
   });
 
   it('injects the frozen project group instructions and ordered member directories', () => {
@@ -95,7 +124,7 @@ describe('session execution prompt helpers', () => {
     expect(prompt).toContain(
       'Fix the checkout observer\n\n\n- issue#42: Checkout observer (https://github.com/owner/repo/issues/42)\n'
     );
-    expect(prompt).toContain('The postId is feedback-1.');
+    expect(prompt).toContain('The feedback postId is feedback-1.');
     expect(prompt).toContain('git branch -m lody/12345678-abc-2 <name>');
     expect(prompt).not.toContain('inspect');
     expect(prompt).toContain(
@@ -103,5 +132,17 @@ describe('session execution prompt helpers', () => {
     );
     expect(prompt).toContain('if renaming fails, report it briefly and continue the task.');
     expect(prompt).not.toContain('gh pr create');
+  });
+});
+
+describe('turn release budgets', () => {
+  it('ends a Git observation before the shared workspace-statistics budget', () => {
+    expect(TURN_BUDGETS.gitObservationMs).toBeLessThan(TURN_BUDGETS.workspaceStatsMs);
+  });
+
+  it('writes shutdown release receipts inside the CLI shutdown budget', () => {
+    expect(
+      TURN_BUDGETS.shutdownReleaseWaitMs + TURN_BUDGETS.shutdownForcedWriteMs
+    ).toBeLessThanOrEqual(TURN_BUDGETS.cliShutdownMs);
   });
 });

@@ -206,7 +206,7 @@ unknown; do not restore guessed UI-model pricing just to fill the field.
 those events to the resolved thread/turn model and keeps only the thread-total
 remainder in `codex:unattributed`; a `$CODEX_HOME` sidecar restores the ledger on
 resume and fork source history is excluded. See
-[Codex per-model usage attribution](2026-09-15-codex-per-model-attribution.md).
+[Codex per-model usage attribution](../../implemented/bug-fix/2026-09-15-codex-per-model-attribution.md).
 The durable consumer accounting identity remains unresolved.
 
 ## Alternatives and limits

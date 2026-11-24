@@ -2,6 +2,9 @@
 
 `CLAUDE.md` links here; edit this file.
 
+The 1,380-word ceiling preserves dispatch identity, commit identity precedence, output lifetime,
+and the isolation of Roost reads alongside authorization and execution boundaries.
+
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
@@ -15,22 +18,31 @@
   never role/author. [Rules](../orchestration/AGENTS.md).
 - Host-scope Machine/Provider credentials. Use frozen Turn identity for attribution,
   authorization and commits; trusted conversation owner for GitHub network auth.
-- Git: owner uses local config, no profile query; others never read it.
+- Git: the owner's repository identity, an approved requester, the owner's native config,
+  then LodyAI. Only a decided identity is exported as env. Non-owners never read machine config.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Commit attribution never restarts ACP; owner changes retire the runtime.
+  Attribution preserves ACP. Owner changes replace ACP before prompt submission.
 
 ## Dispatch
 
 - Metadata reconciliation keeps four global slots and fills each free slot without waiting for siblings.
-- Queue promotion preserves frozen fields; remove only after history+activation succeed.
+- [Queue promotion](README.md#queue-promotion) preserves frozen fields; remove only after history+activation succeed.
 - Queue dispatch uses the same normalized input config as history dispatch. JavaScript-only
   undefined fields must not make an unchanged encrypted original fail equality.
+- Encrypted promotion marks the row `queuedInput` and copies the queue item's signed
+  `e2eeIntent`; start verifies that signature, never the row's writer, and encrypted rows
+  take their resume target from Session metadata. An encrypted start runs only its signed
+  input config, never the row's unsigned items. Only the owner principal may name the
+  machine account as requester
+  ([evidence](../../../../.agents/notes/implemented/architecture/2026-11-10-e2ee-signed-execution-intent.md)).
+- Encrypted requesters come from the verified signer; access is decided locally; row
+  `userId` is display only ([decision](../../../../.agents/notes/implemented/bug-fix/2026-11-06-e2ee-verified-requester.md)).
 - Absent meta is unknown, not foreign: hold the TTL-bounded RPC stash until meta lands or
   a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
   handler; history sync is the durable fallback.
-- Missing-history recovery never advances `lastHandledUserMsgId`: set that turn's permanent
-  one-shot `lastMissingHistoryUserMsgId` ack and surface `chat_failed`.
+- Missing-history recovery never advances `lastHandledUserMsgId`: retain failed IDs in
+  `missingHistoryUserMsgIds`, read legacy acknowledgements, and surface `chat_failed`.
 - Retire a terminal stale activation into `settledActivationUserMsgId`; never claim the
   marker or rewrite `latestUserMsgId`, and report settled only if none survives.
 - Never replay late history; recovery is a new send. Use last row per ID; stop no-progress repairs.
@@ -43,7 +55,12 @@
 
 ## Turn execution
 
-- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
+- Machine identity recovery seals actual Turn admission before restart. Recheck after
+  pre-owner awaits; sealed requests retain pending history and Inbox inputs without
+  marking them handled, failed or canceled. Registered Turns block recovery even
+  before presence publication.
+- Gate LIST writes on user-entry sync (`turn-history-gate.ts`, 60s), including pre-open
+  writes, never status/meta. Timeout preserves live metadata creation; disposal aborts it and releases waiters.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - Stop ends steer waits, not the owner fiber. Drain raw ACP or confirm termination before
   reusing an Agent. If release fails, detach that Agent, return the turn slot and report
@@ -55,10 +72,12 @@
 - Turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
 - Never steer after cancellation or infer delivery from it. Stop uses
-  preserve/discard and cancels pre-Stop queued eligibility; Edit & Resend uses preserve/keep,
+  preserve/discard; paused drafts require explicit resends; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
 - Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
-  Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
+  Unknown never replays; RPC ACKs never revive history. Encrypted recovery preserves terminal
+  decisions and newer pointers, closes partial replies with one notice, and isolates unrelated failures.
+- MCP selection changes retire ACP between prompts; changed-selection steer returns to dispatch for a new turn.
 - Config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
@@ -69,12 +88,12 @@
 - Completion publication follows [notification ownership](../lib/notifications/AGENTS.md).
 - No content: `recordSilentTurnFailure`, not `setDispatchHandled`. Await
   `turnProducedVisibleOutput` before `finalizeTurn`; finalize, advance pointers, fail open.
-- Diff content comes only from the CLI-local ACP evidence store; GitHub `diffStats` use PR compare
-  semantics; `session-diff-stats-target.ts` skips, never overwrites, a good total.
+- Turn summaries and diff content share CLI-local ACP evidence. Git statistics never populate turn history.
+  Workspace totals follow [Code Collab rules](../lib/code-collab/AGENTS.md#invariants).
 
 ## Lifecycle
 
-- Agent archive/restore uses negotiated Core capabilities and the saved native identity and Provider, after runtime release. Serialize transitions; distinguish native archive, title markers and unsupported agents. Synchronization failure must preserve Lody cleanup and remain visible. Document release shares it and spares restored Sessions; shutdown aborts and joins it. Never edit native storage directly. See [the decision](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
+- Only committed archive transitions authorize [native synchronization](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
 
 - Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
   Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.
@@ -83,6 +102,10 @@
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
+  Scan catch-up receipts outside the writer queue and yield between body pages.
+  Verify retained bodies against one checkpoint. Capture limits preserve verified coverage.
+  Repairs from the same applied checkpoint and retained window share bounded preparation through
+  caller timeouts. Generation retirement and owner shutdown cancel pending preparation.
 - `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
   unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:
@@ -95,8 +118,7 @@
 
 ## Sagas
 
-- ACP processes and worktrees start at dispatch, never while a draft is typed. Answer
-  `session/prepare`/`-cancel` at once as no-ops (prepare: accepted duplicate), with no access check
+- ACP processes and worktrees start at dispatch, never while a draft is typed
   ([decision](../../../../.agents/notes/implemented/simplification/2026-10-16-remove-draft-session-preparation.md)).
 - Credentials are runtime leases: a failed creation releases that generation; local has none.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.

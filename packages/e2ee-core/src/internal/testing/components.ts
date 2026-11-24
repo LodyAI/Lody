@@ -376,6 +376,7 @@ export const makeSqliteKeyDistribution = (
       const distributor = Context.get(context, KeyDistributor);
       return {
         ...recipientSurface(context),
+        prepareDelivery: distributor.prepareDelivery,
         reconcileCurrentEpoch: distributor.reconcileCurrentEpoch,
         resumePendingDeliveries: distributor.resumePendingDeliveries,
         deliveryResults: distributor.results,

@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 // Two rules this hook must not get wrong:
 //
 // 1. Reaching a shell needs a RESOLVED host path, not merely "Electron on the
@@ -9,7 +8,6 @@
 // 2. Oversized remote downloads use the paid chunk path when available;
 //    unsupported machines retain the explicit size-limit explanation.
 
-// @vitest-environment jsdom
 // Two rules this hook must not get wrong:
 //
 // 1. Reaching a shell needs a RESOLVED host path, not merely "Electron on the
@@ -28,13 +26,7 @@ import { atom, Provider } from 'jotai';
 let localHomeDir: string | null = '/home/dev';
 let localMachineId: string | null = null;
 let nativeShell = false;
-let sharedBytes: Uint8Array | undefined;
 vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => nativeShell }));
-vi.mock('../src/lib/session-file-native-save', () => ({
-  shareFileBytesNatively: async (_name: string, bytes: Uint8Array) => {
-    sharedBytes = bytes;
-  },
-}));
 
 vi.mock('../src/atoms/local-probe', () => ({
   localHomeDirAtom: atom(() => localHomeDir),
@@ -80,9 +72,9 @@ vi.mock('@/lib/toast', () => ({
   },
 }));
 
-const downloadBytesAsFile = vi.fn();
+const saveBytesAsFile = vi.fn(async (..._args: unknown[]) => ({ saved: true }));
 vi.mock('../src/lib/download-file', () => ({
-  downloadBytesAsFile: (...args: unknown[]) => downloadBytesAsFile(...args),
+  saveBytesAsFile: (...args: unknown[]) => saveBytesAsFile(...args),
   getDownloadFileName: (path: string) => path,
 }));
 
@@ -116,9 +108,8 @@ describe('remote file download action', () => {
   beforeEach(async () => {
     await initI18n('en');
     toastError.mockClear();
-    downloadBytesAsFile.mockClear();
+    saveBytesAsFile.mockClear();
     nativeShell = false;
-    sharedBytes = undefined;
     localHomeDir = '/home/dev';
     localMachineId = null;
     container = document.createElement('div');
@@ -217,18 +208,19 @@ describe('remote file download action', () => {
         release();
       });
       if (native) {
-        expect(sharedBytes).toEqual(Uint8Array.of(1));
-        expect(downloadBytesAsFile.mock.calls).toEqual([]);
+        expect(saveBytesAsFile.mock.calls).toEqual([['a.deb', Uint8Array.of(1)]]);
         await act(async () => {
           actions.download?.('b.deb');
         });
-        expect(sharedBytes).toEqual(Uint8Array.of(2));
-      } else {
-        expect(downloadBytesAsFile.mock.calls).toEqual([
+        expect(saveBytesAsFile.mock.calls).toEqual([
           ['a.deb', Uint8Array.of(1)],
           ['b.deb', Uint8Array.of(2)],
         ]);
-        expect(sharedBytes).toBeUndefined();
+      } else {
+        expect(saveBytesAsFile.mock.calls).toEqual([
+          ['a.deb', Uint8Array.of(1)],
+          ['b.deb', Uint8Array.of(2)],
+        ]);
       }
     }
   );
@@ -241,22 +233,21 @@ describe('remote file download action', () => {
       entry: { entryType: 'file', fileId: 'package.deb', path: 'package.deb' },
       snapshot: { kind: 'binary', bytes },
     } as unknown as FileWorkspaceOpenResult);
-    expect(sharedBytes).toEqual(bytes);
-    expect(downloadBytesAsFile).not.toHaveBeenCalled();
+    expect(saveBytesAsFile).toHaveBeenCalledWith('docs/huge.log', bytes);
     nativeShell = false;
   });
 
   it('downloads original bytes through the paid path when preview refuses a large file', async () => {
     const bytes = Uint8Array.of(0, 255, 128, 13, 10);
     await runDownload({ status: 'unavailable', reason: 'blob-too-large' }, async () => bytes);
-    expect(downloadBytesAsFile).toHaveBeenCalledWith('docs/huge.log', bytes);
+    expect(saveBytesAsFile).toHaveBeenCalledWith('docs/huge.log', bytes);
     expect(toastError).not.toHaveBeenCalled();
   });
 
   it('names the real ceiling when the file is past what one response carries', async () => {
     await runDownload({ status: 'unavailable', reason: 'text-too-large' });
 
-    expect(downloadBytesAsFile).not.toHaveBeenCalled();
+    expect(saveBytesAsFile).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith(
       'This file is too large to download from here. Open it on the machine that owns it.'
     );
@@ -270,7 +261,7 @@ describe('remote file download action', () => {
       snapshot: { kind: 'binary' },
     } as unknown as FileWorkspaceOpenResult);
 
-    expect(downloadBytesAsFile).not.toHaveBeenCalled();
+    expect(saveBytesAsFile).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith(
       'This file is too large to download from here. Open it on the machine that owns it.'
     );

@@ -35,12 +35,29 @@ Both paths use the same user turn and original frame; the CLI's existing
 `agent-start:<userTurnId>` journal and current membership authorization decide
 whether execution can start. A progress ACK confirms receipt, not execution.
 
+Request appends and CLI response delivery (`makeEncryptedStreamsEnvelopeDelivery`,
+which covers response-stream setup too) go through `retryTransientGateway`. It
+retries an explicit gateway status from `@lody/shared/transient-gateway` (502/503/504,
+60 ms then 150 ms) on Effect's clock, inside the caller's receipt deadline; the
+Electron and client-e2ee cloud clients use the same statuses and delays. Other statuses,
+refusals and raw network errors are not retried. A duplicate append is harmless
+because receivers journal the exact original and requesters settle each request id once.
+
 Scope close aborts and drains raw reads before releasing tokens. One rejected
 request does not stop the workspace. Originals and execution evidence are not
 automatically collected. See the [implementation decision and validation limits](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-streams-dispatch.md).
 
 The pure codecs in `src/e2ee-wire.ts` also define nested error and presence
 bodies; those codecs do not enable additional RPC methods or presence transport.
+
+Feature RPC signs an 11-minute read deadline or a 25-minute write deadline: the
+usual 1/15-minute TTL plus 10 minutes for a slow sender. Admission allows another
+10 minutes above that TTL for a fast sender. Thus relative clock offsets up to
+±10 minutes preserve the usual minimum lifetime. The receiver uses the original
+signed deadline throughout; query work still has its 45-second bound. This widens
+the time a delayed unclaimed frame can be admitted; exact originals, current
+authorization and at-most-once write claims remain required. Presence body codecs
+only bound the sender's issued-to-expiry interval; they do not compare device clocks.
 
 ## Request deadlines
 
@@ -92,6 +109,13 @@ codec with read authority and no execution journal. See the
 [read boundary](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-read-queries.md). The format,
 room boundaries and acceptance limits are recorded in the
 [availability decision](../../.agents/notes/implemented/feature/2026-10-28-e2ee-file-preview-availability.md).
+
+`ios-simulator/control` and `android-emulator/control` use this channel as owner-membership writes requiring `e2eeRemoteControl`; agent-control remains local-only. The receiver selects the remote viewer transport under live authority, and replies retain the platform schema and Session binding. Media keeps the existing private viewer transport and its security limits.
+
+`session/history-read` also permits requests to another member's machine, including
+from Guests. Preparation, retained-request reuse and response verification keep the
+same target signer. Streams and Iroh receivers share the actual-session authorization
+check; other feature methods retain the same-member machine restriction.
 
 The optional personal-device host in [`@lody/e2ee-client`](../e2ee-client/README.md)
 uses `ClientRpcOriginalStore`/IndexedDB for the same encrypted RPC implementation.

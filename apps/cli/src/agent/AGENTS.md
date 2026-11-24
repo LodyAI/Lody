@@ -9,7 +9,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 ## `agent-client.ts`
 
 - Consume Core extensions via `agentCapabilities._meta.lody`, session `_meta.lody`, and
-  `_lody/...`. Provider/pre-Core readers stay in `lody-acp-extension.ts`; consumers stay neutral.
+  `_lody/...`. Provider compatibility stays in `lody-acp-extension.ts` and `antigravity-*.ts`; consumers stay neutral.
 - Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
   the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
@@ -29,9 +29,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   daemon process.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via
   `/proc/net/tcp{,6}`, REJECT an unprovable peer, and refuse to start when it is
-  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio uses an explicit env allowlist: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
-  `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
-  assembly clear them before agent startup, and never add CLI credentials or secrets.
+  unreadable. `LODY_MCP_HTTP_DISABLED=1` forces stdio. Stdio forwards nonempty `LODY_PLATFORM`, `LODY_DATA_DIR`, `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL` and `LODY_SERVER_URL`. Discover control lazily unless `LODY_MCP_SOCKET_PATH` overrides it. Local assembly clears cloud endpoints before startup; never forward credentials or secrets.
 - Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
 - Workspace MCP resolution starts before `initialize` to overlap the handshake.
   Before the first remote baseline, complete selected rows may start locally with a
@@ -62,7 +60,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
   Never modify JSONL; mixed roots fail naming both paths.
 - `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
-  Reject version mismatches and unknown legacy fields; do not duplicate pins or weaken the schema.
+  Treat version mismatches and metadata failing the current schema as misses; never weaken the schema.
   Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
   Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
@@ -81,6 +79,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
   the yauzl endpoint, whose `destroy()` does not settle.
+- Antigravity follows its [runtime contract](README.md#managed-antigravity).
 - Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
@@ -89,14 +88,13 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 
 ## `acp-authentication.ts`
 
-- The per-agent slot covers preparation and the child; cancel/timeout wins through cleanup,
-  terminates the process, and releases Retry. Stop the process before success.
+- The per-agent slot is daemon-wide across workspace runtimes and covers preparation and the child; cancel/timeout wins through cleanup. Retain a child whose exit is unconfirmed until its exit event. Stop the process before success.
 - Authorization data must never enter logs, chat, Flock, or config; raw provider output and
   secret defaults must never reach retained progress.
 - Claude capability refresh runs its native status command first so missing credentials surface
   as structured auth-required state before adapter startup; explicit environment-authenticated
   paths bypass it.
-- Registry/custom/Devin advertises no terminal capability; only agent-driven methods run.
+- Protocol-authenticated providers advertise no terminal capability; only agent-driven methods run.
   Reject deprecated `env_var`; `terminal` needs a real Machine RPC interactive bridge.
   Keep method lists/elicitations on the original request, one pending interaction at a time.
   Replies carry interaction ids and use encrypted remote authentication-input. Bound URL schemes, sizes,

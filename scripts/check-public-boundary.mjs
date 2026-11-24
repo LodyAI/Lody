@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { listRepositoryFiles as listCheckedFiles } from './repository-files.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dependencyFields = [
@@ -15,7 +16,6 @@ const dependencyFields = [
 ];
 const forbiddenPathPrefixes = [
   'backend/',
-  'apps/mobile/',
   'apps/web/',
   'context/',
   'docs/',
@@ -43,19 +43,21 @@ const hostedPresetPattern =
 const publicRuntimeArtifactHostPattern = /api\.lody\.ai/u;
 const publicRuntimeArtifactHostAllowlist = new Set([
   'README.md',
+  // Native mobile clients use this host for public cloud APIs, not runtime downloads.
+  'apps/mobile/android/AGENTS.md',
+  'apps/mobile/backend-config.mjs',
+  'apps/mobile/ios/apps/ios/verification/kit/attachments/README.md',
+  'apps/mobile/ios/packages/cloud-runtime/src/runtime/sharing/runtime.ts',
+  'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/sharing/runtime.ts',
+  'apps/mobile/ios/packages/cloud-runtime/src/runtime/server-clock.ts',
+  'apps/mobile/android/runtime/vendor/cloud-runtime/src/runtime/server-clock.ts',
   'apps/cli/src/ios-simulator/baguette-manifest.json',
   'packages/platform/src/runtime-artifacts.ts',
 ]);
 const hostedScriptNamePattern = /(?:^|:)(?:cloud|prod|production|staging)(?:$|:)/u;
 
 function listRepositoryFiles() {
-  return execFileSync('git', ['ls-files', '-co', '--exclude-standard', '-z'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 40 * 1024 * 1024,
-  })
-    .split('\0')
-    .filter(Boolean)
+  return listCheckedFiles(repoRoot)
     .filter((file) => existsSync(path.join(repoRoot, file)))
     .sort();
 }
@@ -104,7 +106,11 @@ async function main() {
       }
     }
     for (const scriptName of Object.keys(manifest.scripts ?? {})) {
-      if (hostedScriptNamePattern.test(scriptName)) {
+      const clientBuild =
+        (file === 'apps/mobile-capacitor/package.json' &&
+          ['staging:ios', 'staging:android'].includes(scriptName)) ||
+        (file === 'apps/electron/package.json' && scriptName === 'build:mac:staging');
+      if (hostedScriptNamePattern.test(scriptName) && !clientBuild) {
         violations.push(`${file}: hosted deployment script ${scriptName} is not public`);
       }
     }
@@ -130,7 +136,13 @@ async function main() {
     if (internalPathPattern.test(content)) {
       violations.push(`${file}: publishable text contains an internal absolute path`);
     }
-    if (hostedPresetPattern.test(content)) {
+    // Native clients retain their public API default in one composition owner.
+    // Do not exempt any other hosted preset, even within that file.
+    const presetContent =
+      file === 'apps/mobile/backend-config.mjs'
+        ? content.replaceAll('https://convex.lody.ai', '')
+        : content;
+    if (hostedPresetPattern.test(presetContent)) {
       violations.push(`${file}: publishable text contains a hosted deployment preset`);
     }
     if (
@@ -146,9 +158,7 @@ async function main() {
     if (path.posix.basename(file) === 'CLAUDE.md') continue;
     if (documentationBoundaryAllowlist.has(file)) continue;
     const content = await readFile(path.join(repoRoot, file), 'utf8');
-    if (
-      /@lody\/convex|backend\/(?:convex|server|do)|apps\/(?:mobile|web)|site\/docs/u.test(content)
-    ) {
+    if (/@lody\/convex|backend\/(?:convex|server|do)|apps\/web|site\/docs/u.test(content)) {
       violations.push(`${file}: documentation references a closed implementation path`);
     }
     for (const match of content.matchAll(/\]\(([^)\s#?]+)(?:[?#][^)]*)?\)/gu)) {

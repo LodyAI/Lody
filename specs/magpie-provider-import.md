@@ -80,6 +80,9 @@ are not hot-reloaded when Magpie's model catalog changes.
   `model_catalog_url` points at Magpie's Codex-shaped catalog
   (`<gateway>/v1/codex/models`), so the capability projection is Magpie's and is not
   regenerated locally. It does not reuse a ChatGPT account binding.
+  At launch the profile links the installed native Codex entries for `magpie-skills`
+  and `magpie-setup`. Existing profile entries take precedence. The bound Provider's
+  skill picker resolves those same entries on the execution machine.
 - Pi receives a generated `models.json` in an isolated Lody-owned Pi profile, using
   OpenAI Chat Completions. Native global profile extensions/settings are not imported.
 - Kimi Code receives an isolated `KIMI_CODE_HOME/config.toml` with a provider and model catalog.

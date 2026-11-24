@@ -1,8 +1,10 @@
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import * as React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Mention, MentionInput } from '@/ui/mention';
+import { getComposerMentionChip } from '@/components/mentions/mention-chips';
 import { mentionSurface } from '@/ui/mention/mention-surface';
 import type { Mention as MentionRange } from '@/ui/mention/mention-root';
 import type { AgentRoleMentionItem } from '@/components/mentions/mention-agent-role-source';
@@ -29,6 +31,21 @@ import {
   type MachineId,
 } from '@lody/shared';
 
+const sessionRendering = stylex.create({
+  frame: {
+    backgroundColor: 'hsl(var(--input) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  input: {
+    width: '100%',
+    resize: 'none',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-base)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+  },
+});
+
 /* The menu body only renders inside a <Mention> root (its rows read the mention
    context). The harness mounts a forced-open root over a small textarea and
    renders the body directly, so every level and state is screenshot-verifiable
@@ -37,6 +54,19 @@ import {
    Candidates come from the real registry mappers, so a story breaks if the
    insert-text or detail mapping drifts. */
 
+const menuStory = stylex.create({
+  frame: { height: 460, width: 760, padding: 'calc(var(--spacing) * 6)' },
+  narrow: { width: 320, padding: 'calc(var(--spacing) * 3)' },
+  input: {
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--input-border) / 1)',
+    backgroundColor: 'hsl(var(--input) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 const SKILL_LABELS = {
   author: 'Author',
   path: 'Path',
@@ -244,6 +274,14 @@ const UNAVAILABLE_AGENT_ROLES: MentionCandidate[] = [
     }),
     'Unavailable: its machine is not available to you'
   ),
+  toAgentRoleCandidate(
+    roleItem({
+      slug: 'Retired-Model-Reviewer',
+      role: agentRole({ id: 'retired-model-role' as AgentRoleId, name: 'Retired Model Reviewer' }),
+      availability: { kind: 'unavailable', reason: 'model_unavailable' },
+    }),
+    'Unavailable: its agent no longer offers the saved model. Edit this Role to pick another'
+  ),
 ];
 
 const COMMANDS: MentionCandidate[] = [
@@ -345,7 +383,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
   const inputValue = `@${search}`;
 
   return (
-    <div className={narrow ? 'h-[460px] w-[320px] p-3' : 'h-[460px] w-[760px] p-6'}>
+    <div {...stylex.props(menuStory.frame, narrow && menuStory.narrow)}>
       <Mention
         open
         triggers={['@']}
@@ -362,7 +400,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
         <MentionInput
           value={inputValue}
           onChange={() => {}}
-          className="w-full rounded-md border border-input-border bg-input p-2"
+          xstyle={menuStory.input}
           aria-label="composer"
         />
         <div
@@ -511,7 +549,7 @@ function FloatingHarness({
           <MentionInput
             value={value}
             onChange={() => {}}
-            className="w-full rounded-md border border-input-border bg-input p-2"
+            xstyle={menuStory.input}
             aria-label="composer"
             rows={3}
           />
@@ -523,6 +561,84 @@ function FloatingHarness({
           />
         </Mention>
       </div>
+    </div>
+  );
+}
+
+const LONG_PROSE =
+  '对于DE的关于D1的问题，对其对我们的数学上的严谨性表示感谢，后，在两个证明里对应地修改了证明。（不用具体到如何进行证明的修改）在AE\n\n对于AE关于two-tier的意见，表示感谢，并且认可之前的写法可能会造成误解。例如，我们在abstract和introduction在命题之后的说明部分都进行了修改。\n'.repeat(
+    3
+  );
+
+/**
+ * A composer wired like the product one (chips, undo, click handling) that
+ * publishes its owner state, so browser tests can assert what the composer
+ * holds after real keyboard, pointer, clipboard and IME input.
+ */
+function EditorBehaviourHarness({
+  initialValue = '',
+  undoHistory = true,
+}: {
+  initialValue?: string;
+  undoHistory?: boolean;
+}) {
+  const [value, setValue] = React.useState(initialValue);
+  const [mentions, setMentions] = React.useState<MentionRange[]>([]);
+  const [selected, setSelected] = React.useState<string[]>([]);
+  const [clicked, setClicked] = React.useState<string | null>(null);
+  return (
+    <div {...stylex.props(harness.floatingPage)}>
+      <div
+        data-mention-frame=""
+        data-testid="editor-frame"
+        {...stylex.props(harness.composerFrame)}
+      >
+        <Mention
+          triggers={['@', '$', '/', '#']}
+          autoCloseOnEmpty={false}
+          inputValue={value}
+          onInputValueChange={setValue}
+          mentions={mentions}
+          onMentionsChange={setMentions}
+          value={selected}
+          onValueChange={setSelected}
+          onFilter={(options) => options}
+          getMentionChip={getComposerMentionChip}
+          onMentionClick={(mention) => setClicked(mention.value)}
+          undoHistory={undoHistory}
+        >
+          <MentionInput
+            value={value}
+            onChange={() => {}}
+            aria-label="composer"
+            placeholder="Message"
+            rows={3}
+            xstyle={mentionSceneStyles.input}
+          />
+          <MentionTwoLevelMenu
+            categories={FLOATING_CATEGORIES}
+            surface="unknown"
+            anchor="caret"
+            menuSide="bottom"
+          />
+        </Mention>
+      </div>
+      {/* The owner clearing its draft, as a composer does after a send. */}
+      <button type="button" onClick={() => setValue('')}>
+        Clear draft
+      </button>
+      <output data-testid="editor-state" hidden>
+        {JSON.stringify({
+          value,
+          mentions: mentions.map(({ start, end, value: id, kind }) => ({
+            start,
+            end,
+            value: id,
+            kind,
+          })),
+          clicked,
+        })}
+      </output>
     </div>
   );
 }
@@ -540,6 +656,46 @@ type Story = StoryObj<typeof meta>;
 export const Categories: Story = {
   args: { search: '' },
 };
+
+/** Real composer decorations with a synthetic mixed-language session reference. */
+export const SessionMentionRendering: Story = {
+  args: { search: '' },
+  render: () => <SessionMentionRenderingHarness />,
+};
+
+function SessionMentionRenderingHarness() {
+  const token = '@讨论-Sample-Agent-Renderer-输入框颜色与光标';
+  const prefix = 'review 这里的改动 ';
+  const [value, setValue] = React.useState(`${prefix}${token} 后续文字`);
+  const [mentions, setMentions] = React.useState<MentionRange[]>([
+    {
+      start: prefix.length,
+      end: prefix.length + token.length,
+      value: 'sample-session',
+      kind: 'session',
+    },
+  ]);
+  return (
+    <div {...stylex.props(sessionRendering.frame)} data-testid="session-mention-rendering">
+      <Mention
+        inputValue={value}
+        onInputValueChange={setValue}
+        mentions={mentions}
+        onMentionsChange={setMentions}
+        getMentionChip={getComposerMentionChip}
+      >
+        <MentionInput
+          value={value}
+          onChange={() => {}}
+          aria-label="Message"
+          placeholder="Message"
+          rows={5}
+          xstyle={sessionRendering.input}
+        />
+      </Mention>
+    </div>
+  );
+}
 
 /** `@mention` — one query answered across every category, Files first. */
 export const AggregateSearch: Story = {
@@ -657,6 +813,46 @@ export const CategoryError: Story = {
   },
 };
 
+/** `@op` with a full list while Issues and PRs fail: each wrapped error keeps its own height. */
+export const AggregateSearchSourceError: Story = {
+  args: {
+    search: 'op',
+    narrow: true,
+    categories: [
+      category(
+        'file',
+        'file',
+        'Files',
+        'file',
+        Array.from({ length: 4 }, (_, index) =>
+          toFileCandidate({
+            kind: 'file',
+            path: `apps/desktop-setup-notes-${index}/op.ts`,
+            token: `apps/desktop-setup-notes-${index}/op.ts`,
+          })
+        )
+      ),
+      category(
+        'command',
+        'cmd',
+        'Commands',
+        'command',
+        ['output-style', 'computer-use', 'compact-op', 'open-pr'].map((name) =>
+          toCommandCandidate({ name, description: `Run ${name}` })
+        ),
+        { directTrigger: '/' }
+      ),
+      ...(['issue', 'pr'] as const).map((type) =>
+        category(type, type, type === 'issue' ? 'Issues' : 'Pull Requests', type, [], {
+          status: 'error' as const,
+          message:
+            'GitHub could not list issues for "example/example-repository-with-a-long-name". Check the integration in Settings → Integrations and try again.',
+        })
+      ),
+    ],
+  },
+};
+
 /** A very large repo: the file list is truncated and says so. */
 export const FileCategoryTruncated: Story = {
   args: {
@@ -734,7 +930,7 @@ export const MainComposerRoleCatalogAtCaret: Story = {
   ),
 };
 
-/** Search `@review`, scroll to Roles, and hover between file and Role rows. */
+/** Search `@review`: Roles lead, then cross-source matches; hover previews details. */
 export const MainComposerAggregateRoles: Story = {
   args: { search: '' },
   render: () => (
@@ -788,3 +984,68 @@ export const PreparedShortcut: Story = {
   args: { search: '' },
   render: () => <FloatingHarness mainComposer preparedShortcut />,
 };
+
+/** Behaviour harness: an empty product-wired composer. */
+export const EditorBehaviour: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness />,
+};
+
+/** Behaviour harness holding long mixed-script prose that overflows its three rows. */
+export const EditorOverflow: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness initialValue={LONG_PROSE} />,
+};
+
+/** Behaviour harness with the editor's own undo, as a composer without quotes uses. */
+export const EditorBehaviourEditorUndo: Story = {
+  args: { search: '' },
+  render: () => <EditorBehaviourHarness undoHistory={false} />,
+};
+
+/**
+ * A Role on three machines is three rows, one per machine: picking a row picks
+ * where it runs. The alias replaces `name · machine`; an offline machine's row
+ * stays listed but cannot be chosen.
+ */
+const MULTI_MACHINE_ROLE = agentRole({
+  id: 'multi-role' as AgentRoleId,
+  name: 'Code Reviewer',
+  promptPrefix: 'Review the diff for correctness before style.',
+});
+const multiMachineRoleItem = (
+  machineId: string,
+  machineName: string,
+  alias?: string,
+  online = true
+) =>
+  toAgentRoleCandidate(
+    {
+      availability: online
+        ? { kind: 'available' }
+        : { kind: 'unavailable', reason: 'machine_offline' },
+      slug: alias ?? `Code-Reviewer-${machineName.replace(/\s+/g, '-')}`,
+      value: `${MULTI_MACHINE_ROLE.id}@${machineId}`,
+      label: alias ?? `${MULTI_MACHINE_ROLE.name} · ${machineName}`,
+      role: { ...MULTI_MACHINE_ROLE, machineId: machineId as MachineId },
+      machine: { name: machineName },
+      agentConfig: ROLE_AGENT_CONFIG,
+    },
+    online ? undefined : 'Unavailable: its machine is offline'
+  );
+export const AgentRoleOnSeveralMachines: Story = {
+  args: {
+    search: 'role:',
+    withDetail: true,
+    categories: [
+      category('agent_role', 'role', 'Agent Roles', 'agent_role', [
+        multiMachineRoleItem('m-studio', 'Studio'),
+        multiMachineRoleItem('m-build', 'Build box', 'Reviewer-CI'),
+        multiMachineRoleItem('m-linux', 'Linux runner', undefined, false),
+        ...AGENT_ROLES.slice(1),
+      ]),
+    ],
+  },
+};
+
+const mentionSceneStyles = stylex.create({ input: { width: '100%', resize: 'none', borderWidth: 0, borderRadius: field.radiusMedium, backgroundColor: field.background, color: field.value, boxShadow: field.well, padding: 'calc(var(--spacing) * 2)' } });

@@ -35,16 +35,15 @@ function harness(
     remote?: string;
     status?: number;
     permissions?: { push?: boolean; admin?: boolean };
-    policyFailures?: number;
     executions?: Array<{ code: number; stderr?: string; stdout?: string }>;
     prFailure?: 'rejected' | 'lost-response' | 'invalid-response' | 'metadata';
     bodyFiles?: Record<string, string>;
     publishedTip?: string;
     mergeBase?: string;
+    report?: 'linked' | 'refused' | 'throw';
   } = {}
 ) {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
-  let policyFailures = options.policyFailures ?? 0;
   const actual: Array<string[]> = [];
   const identities: string[] = [];
   const pullRequests: Array<{
@@ -132,16 +131,18 @@ function harness(
     const endpoint = new URL(url).pathname;
     const body = JSON.parse(init.body ?? '{}');
     calls.push({ path: endpoint, body });
-    if (endpoint === '/github-auth-context' && policyFailures-- > 0)
-      return { ok: false, status: 503, json: async () => ({ error: 'policy_unavailable' }) };
-    if (endpoint === '/github-auth-context')
+    if (endpoint === '/pull-request/report') {
+      if (options.report === 'throw')
+        throw Object.assign(new Error('timeout'), { name: 'TimeoutError' });
       return {
-        ok: true,
-        json: async () => ({
-          allowLocalAuth: options.owner ?? true,
-          personalEnabled: options.personal ?? false,
-        }),
+        ok: options.report !== 'refused',
+        status: options.report === 'refused' ? 403 : 200,
+        json: async () =>
+          options.report === 'refused'
+            ? { linked: false, reason: 'invalid_context' }
+            : { linked: true },
       };
+    }
     if (body.source === 'personal' && !options.personal)
       return { ok: true, json: async () => ({ available: false }) };
     return {
@@ -228,6 +229,84 @@ function harness(
       )('/native/bin/gh', args),
   };
 }
+
+describe('gh pr create reports the created PR to its Session', () => {
+  const createArgs = [
+    'pr',
+    'create',
+    '-R',
+    'owner/repo',
+    '--title',
+    'T',
+    '--body',
+    '',
+    '--base',
+    'main',
+    '--head',
+    'feature',
+  ];
+  const reports = (h: ReturnType<typeof harness>) =>
+    h.calls.filter((call) => call.path === '/pull-request/report').map((call) => call.body);
+
+  it('reports a REST-created PR with the host-authored context and keeps stdout and exit code', async () => {
+    const h = harness({ personal: true });
+    expect(await h.execute(createArgs)).toBe(0);
+    expect(reports(h)).toEqual([
+      { contextToken: 'context', url: 'https://github.com/owner/repo/pull/42' },
+    ]);
+    expect(h.stdout.mock.calls).toEqual([['https://github.com/owner/repo/pull/42\n']]);
+    expect(h.stderr).toHaveBeenCalledWith(
+      '[Lody] Linked https://github.com/owner/repo/pull/42 to this Session.'
+    );
+  });
+
+  it('reports the URL native gh printed from any directory or branch', async () => {
+    const h = harness({
+      localToken: 'native-token',
+      executions: [
+        {
+          code: 0,
+          stdout:
+            'Creating pull request for agy-remote-login\nhttps://github.com/owner/repo/pull/3019\n',
+        },
+      ],
+    });
+    expect(await h.execute(['pr', 'create', '--fill'])).toBe(0);
+    expect(reports(h)).toEqual([
+      { contextToken: 'context', url: 'https://github.com/owner/repo/pull/3019' },
+    ]);
+  });
+
+  it.each(['throw', 'refused'] as const)(
+    'never changes the outcome when the report %s',
+    async (report) => {
+      const h = harness({ personal: true, report });
+      expect(await h.execute(createArgs)).toBe(0);
+      expect(h.stdout.mock.calls).toEqual([['https://github.com/owner/repo/pull/42\n']]);
+      expect(h.stderr).toHaveBeenCalledWith(
+        '[Lody] https://github.com/owner/repo/pull/42 was not linked to this Session. It can be linked with lody_session_manage action pr_link.'
+      );
+    }
+  );
+
+  it('still reports a created PR whose metadata update failed, keeping the failure exit code', async () => {
+    const h = harness({ personal: true, prFailure: 'metadata' });
+    expect(await h.execute([...createArgs, '--label', 'bug'])).toBe(1);
+    expect(reports(h)).toHaveLength(1);
+  });
+
+  it('reports nothing for a failed or non-create command', async () => {
+    const failed = harness({ personal: true, prFailure: 'rejected' });
+    await failed.execute(createArgs);
+    expect(reports(failed)).toEqual([]);
+    const view = harness({
+      localToken: 'native-token',
+      executions: [{ code: 0, stdout: 'https://github.com/owner/repo/pull/7\n' }],
+    });
+    expect(await view.execute(['pr', 'view', '7', '-R', 'owner/repo'])).toBe(0);
+    expect(reports(view)).toEqual([]);
+  });
+});
 
 describe('generated gh command boundary', () => {
   const createArgs = [

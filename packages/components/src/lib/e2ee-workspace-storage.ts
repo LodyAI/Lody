@@ -124,8 +124,68 @@ export function clearPendingE2eeWorkspace(storage: Storage, pending: PendingE2ee
     previous.requestId === pending.requestId &&
     previous.name === pending.name &&
     previous.slug === pending.slug
-  )
+  ) {
     storage.removeItem(key);
+    try {
+      storage.removeItem(archivedKey(pending));
+    } catch {
+      // A leftover display marker names a request ID that no longer exists and
+      // is never reused; it cannot hide or change any saved request.
+    }
+  }
+}
+
+/** Display-only archive markers, one per request. The request record itself and the
+ * host's prepared identity are never rewritten or moved by archiving. */
+const archivedPrefix = (accountId: string) =>
+  `lody-e2ee-pending-creation-archived:${encodeURIComponent(accountId)}:`;
+const archivedKey = (pending: Pick<PendingE2eeWorkspace, 'accountId' | 'requestId'>) =>
+  `${archivedPrefix(pending.accountId)}${encodeURIComponent(pending.requestId)}`;
+
+/** True for the storage keys that change an account's creation-request lists. */
+export function isPendingE2eeCreationStorageKey(key: string | null): boolean {
+  return key === null || key.startsWith('lody-e2ee-pending-creation');
+}
+
+/** Saved requests split into the default list and the user's archive. Records saved
+ * before archiving existed have no marker and stay active. */
+export function listPendingE2eeWorkspacesByArchive(
+  storage: Storage,
+  accountId: string
+): { active: PendingE2eeWorkspace[]; archived: PendingE2eeWorkspace[] } {
+  const active: PendingE2eeWorkspace[] = [];
+  const archived: PendingE2eeWorkspace[] = [];
+  for (const pending of listPendingE2eeWorkspaces(storage, accountId))
+    (storage.getItem(archivedKey(pending)) === null ? active : archived).push(pending);
+  return { active, archived };
+}
+
+/** Move one saved request between the default list and the archive. Only the
+ * marker changes; the original request stays exactly as saved, so a restored
+ * request resumes the same request ID, name, slug and device identity. Archiving
+ * requires the exact saved request; a failed write throws and changes nothing. */
+export function setPendingE2eeWorkspaceArchived(
+  storage: Storage,
+  pending: PendingE2eeWorkspace,
+  archived: boolean
+): void {
+  const key = archivedKey(pending);
+  if (archived) {
+    const raw = storage.getItem(pendingKey(pending));
+    if (raw === null) throw conflict('Creation request is no longer saved');
+    const saved = parsePending(raw, pending.accountId);
+    if (
+      saved.requestId !== pending.requestId ||
+      saved.name !== pending.name ||
+      saved.slug !== pending.slug
+    )
+      throw conflict('Creation intent changed');
+    storage.setItem(key, '1');
+  } else {
+    storage.removeItem(key);
+  }
+  if ((storage.getItem(key) !== null) !== archived)
+    throw new Error('Creation request archive state could not be saved');
 }
 
 export function readE2eeGenesisPin(
@@ -401,6 +461,24 @@ export function retainWorkspaceModeProof(
   }
   readWorkspaceModeProof(storage, accountId, descriptor.workspaceId, workspaceSlug);
   return true;
+}
+
+/** The device host retains a verified encrypted identity for this workspace while
+ * this renderer has no record of it. Its genesis becomes the sticky learned-mode
+ * marker, so a later restart waits for encrypted admission instead of opening
+ * provisionally. Readable conflicting evidence is never replaced.
+ */
+export function retainHostEncryptedEvidence(
+  storage: Storage,
+  accountId: string,
+  workspaceId: string,
+  genesisHash: string
+): void {
+  if (!/^[0-9a-f]{64}$/.test(genesisHash)) throw corrupt('Invalid encrypted evidence');
+  const known = storage.getItem(knownEncryptedKey(accountId, workspaceId));
+  if (known === genesisHash) return;
+  if (known !== null) throw conflict('Workspace mode conflicts with encrypted evidence');
+  storage.setItem(knownEncryptedKey(accountId, workspaceId), genesisHash);
 }
 
 /** History-only entry learns that a workspace is encrypted without assigning a slug. */

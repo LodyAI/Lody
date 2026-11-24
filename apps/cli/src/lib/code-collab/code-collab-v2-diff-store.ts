@@ -55,6 +55,8 @@ export type CodeCollabV2DiffStoreTurnSnapshot =
 
 export class CodeCollabV2DiffStore {
   private readonly store: TurnDiffStore;
+  private readonly dbPath: string;
+  private readonly readOnly: boolean;
   private readonly now: () => number;
   private readonly logger = getLogger('code-collab');
 
@@ -62,6 +64,7 @@ export class CodeCollabV2DiffStore {
     readonly workspaceId: WorkspaceId | string,
     options: {
       readonly dbPath?: string;
+      readonly readOnly?: boolean;
       readonly retentionDays?: number;
       readonly maxStorageBytes?: number;
       readonly gcTargetBytes?: number;
@@ -71,9 +74,12 @@ export class CodeCollabV2DiffStore {
     } = {}
   ) {
     const dbPath = options.dbPath ?? getCodeCollabV2DiffStoreDbPath(workspaceId.toString());
-    mkdirSync(path.dirname(dbPath), { recursive: true });
+    this.dbPath = dbPath;
+    this.readOnly = options.readOnly === true;
+    if (!this.readOnly) mkdirSync(path.dirname(dbPath), { recursive: true });
     const storeOptions: TurnDiffStoreOptions = {
       dbPath,
+      readOnly: this.readOnly,
       retentionDays: normalizeRetentionDays(options.retentionDays),
       ...(options.maxStorageBytes === undefined
         ? {}
@@ -185,6 +191,7 @@ export class CodeCollabV2DiffStore {
     readonly ownerSessionId: SessionId;
     readonly nowMs?: number;
   }): Promise<readonly string[]> {
+    if (this.readOnly && !existsSync(this.dbPath)) return [];
     return (
       await this.store.listChangedPaths({
         ownerId: input.ownerSessionId,
@@ -193,12 +200,46 @@ export class CodeCollabV2DiffStore {
     ).map(fromStorePath);
   }
 
+  async getSnapshotDescriptor(input: {
+    readonly ownerSessionId: SessionId;
+    readonly path: string;
+    readonly turnId?: string;
+    readonly side?: 'old' | 'new';
+    readonly maxRawBytes?: number;
+  }) {
+    const { ownerSessionId, path, ...options } = input;
+    if (this.readOnly && !existsSync(this.dbPath)) return { status: 'unavailable' as const };
+    return await this.store.getSnapshotDescriptor({
+      ...options,
+      ownerId: ownerSessionId,
+      path: toStorePath(path),
+    });
+  }
+
+  async getSnapshotBytes(input: {
+    readonly ownerSessionId: SessionId;
+    readonly path: string;
+    readonly turnId?: string;
+    readonly side?: 'old' | 'new';
+    readonly hash: string;
+    readonly maxRawBytes?: number;
+  }) {
+    const { ownerSessionId, path, ...options } = input;
+    if (this.readOnly && !existsSync(this.dbPath)) return { status: 'unavailable' as const };
+    return await this.store.getSnapshotBytes({
+      ...options,
+      ownerId: ownerSessionId,
+      path: toStorePath(path),
+    });
+  }
+
   async getEarliestOldSnapshot(input: {
     readonly ownerSessionId: SessionId;
     readonly path: string;
     readonly nowMs?: number;
     readonly maxRawBytes?: number;
   }): Promise<CodeCollabV2DiffStoreSnapshot> {
+    if (this.readOnly && !existsSync(this.dbPath)) return { status: 'unavailable' as const };
     return await this.store.getEarliestOldSnapshot({
       ownerId: input.ownerSessionId,
       path: toStorePath(input.path),
@@ -240,6 +281,7 @@ export class CodeCollabV2DiffStore {
     readonly turnId: string;
     readonly nowMs?: number;
   }): Promise<FileDiff[]> {
+    if (this.readOnly && !existsSync(this.dbPath)) return [];
     const files = await this.store.listTurnFiles({
       ownerId: input.ownerSessionId,
       turnId: input.turnId,

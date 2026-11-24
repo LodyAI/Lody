@@ -1,5 +1,5 @@
 import type { ReferralCheckoutOffer, ReferralPolicy } from '@lody/cloud-api';
-import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { control, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -97,7 +97,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: 'inherit',
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':hover': 0.8, ':disabled': 0.6 },
+    opacity: { default: 1, ':hover': 0.8, ':disabled': control.disabledOpacity },
   },
   glyphSmall: { width: '12px', height: '12px', flexShrink: 0 },
   danger: { color: colors.destructive },
@@ -239,7 +239,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontSize: uiText.footnoteSize,
     cursor: { default: 'pointer', ':disabled': 'default' },
-    opacity: { default: 1, ':disabled': 0.6 },
+    opacity: { default: 1, ':disabled': control.disabledOpacity },
   },
   quietActionDanger: { color: { default: colors.secondaryLabel, ':hover': colors.destructive } },
 });
@@ -261,7 +261,6 @@ export interface BillingOverviewData {
   effectivePlanTier: 'free' | 'plus' | 'enterprise';
   entitlementSource: 'free' | 'stripe' | 'stripe_gift' | 'enterprise';
   offerKey: string | null;
-  yearlyEarlyBirdEligible: boolean;
   promotionalEntitlementEndsAt: number | null;
   /** Entire granted gift window, including a gift phase that starts later. */
   giftStartsAt: number | null;
@@ -769,7 +768,7 @@ export function BillingSettingsView({
       postGiftBillingScheduled);
 
   return (
-    <div className={settingContainerClass}>
+    <div className={settingContainerClass} data-text-selectable>
       {/* Desktop: checkout opened in the system browser, awaiting payment */}
       {externalCheckoutPending ? (
         <CompactSection>
@@ -1179,7 +1178,7 @@ export function BillingSettingsView({
       overview.effectivePlanTier !== 'enterprise' &&
       (!isPaid || overview.giftStackingSupported) ? (
         <CompactSection>
-          <CompactRow label={t('billing.redeemTitle')} helper={t('billing.redeemSubtitle')}>
+          <CompactRow label={t('billing.redeemTitle')} info={t('billing.redeemSubtitle')}>
             <label htmlFor="billing-redemption-code" {...stylex.props(styles.srOnly)}>
               {t('billing.redeemLabel')}
             </label>
@@ -1222,10 +1221,7 @@ export function BillingSettingsView({
       ['stripe', 'stripe_gift'].includes(overview.entitlementSource) &&
       onPaymentMethod ? (
         <CompactSection>
-          <CompactRow
-            label={t('billing.paymentMethod')}
-            helper={t('billing.paymentMethodDescription')}
-          >
+          <CompactRow label={t('billing.paymentMethod')}>
             <Button
               variant="secondary"
               size="small"

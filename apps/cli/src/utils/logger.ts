@@ -13,14 +13,6 @@ import {
 
 const cleanedLogDirs = new Set<string>();
 
-// Winston's npm levels stop at `debug`, so a dedicated `trace` severity is added
-// below it. The split exists because the file sink is always on: every
-// `logger.debug` call is formatted and written regardless of the user's console
-// level, and high-frequency records (per-flush spans, presence heartbeats,
-// steady-state request plumbing) evicted hours of useful history from the 20 MB
-// rotation window. `trace` is where those records live; `debug` stays the
-// default file level so a routine failure is still diagnosable from the log the
-// daemon writes without anyone opting in.
 const LOG_LEVELS = {
   error: 0,
   warn: 1,
@@ -44,7 +36,6 @@ export const isTraceLoggingEnabled = (env: NodeJS.ProcessEnv = process.env): boo
 export const resolveFileLogLevel = (env: NodeJS.ProcessEnv = process.env): 'debug' | 'trace' =>
   isTraceLoggingEnabled(env) ? 'trace' : 'debug';
 
-// 自定义格式化器 (控制台 - 无时间戳)
 const createConsoleFormatter = () => {
   return winston.format.combine(
     winston.format.errors({ stack: true }),
@@ -58,7 +49,6 @@ const createConsoleFormatter = () => {
   );
 };
 
-// 自定义格式化器 (文件 - 带时间戳和上下文)
 const createFileFormatter = () => {
   return winston.format.combine(
     winston.format.errors({ stack: true }),
@@ -66,7 +56,6 @@ const createFileFormatter = () => {
       const timestamp = new Date().toISOString();
       const message = typeof info.message === 'string' ? info.message : formatLogArgs(info.message);
 
-      // Build context prefix from metadata
       const contextParts: string[] = [];
       if (info.workspaceName) {
         contextParts.push(`[W:${info.workspaceName}]`);
@@ -90,7 +79,6 @@ const createFileFormatter = () => {
   );
 };
 
-// 控制台传输配置
 const createConsoleTransport = (config: LoggerConfig) => {
   return new winston.transports.Console({
     level: config.level === 'silent' ? 'error' : config.level || 'info',
@@ -98,8 +86,6 @@ const createConsoleTransport = (config: LoggerConfig) => {
   });
 };
 
-// winston-daily-rotate-file does not type `logStream`, the emitter its file
-// stream errors reach. Without it a write failure could not be caught.
 const asFileLogSink = (transport: DailyRotateFile): FileLogSink => {
   const logStream: unknown = Reflect.get(transport, 'logStream');
   if (!(logStream instanceof EventEmitter)) {
@@ -108,10 +94,6 @@ const asFileLogSink = (transport: DailyRotateFile): FileLogSink => {
   return Object.assign(transport, { logStream });
 };
 
-// 文件传输配置
-// File transport captures debug regardless of the console level, and trace only
-// when LODY_LOG_TRACE is set; see resolveFileLogLevel. A failing disk degrades it
-// to dropping lines instead of crashing the process; see ResilientFileTransport.
 export const createFileTransport = (
   config: LoggerConfig,
   seams: Partial<Pick<ResilientFileTransportOptions, 'now' | 'probeWritable' | 'writeStderr'>> = {}
@@ -122,9 +104,7 @@ export const createFileTransport = (
   if (!cleanedLogDirs.has(dirname)) {
     try {
       cleanupExpiredLogs(dirname);
-    } catch {
-      // Best effort only: log retention should never block logger initialization.
-    }
+    } catch {}
     cleanedLogDirs.add(dirname);
   }
 
@@ -158,7 +138,6 @@ class WinstonLogger implements Logger {
     for (const transport of logger.winston.transports) {
       if (!(transport instanceof winston.transports.Console)) continue;
       const previous = transport.stderrLevels;
-      // Winston stores this as a level-keyed object despite its array declaration.
       Reflect.set(
         transport,
         'stderrLevels',
@@ -182,24 +161,14 @@ class WinstonLogger implements Logger {
     const transports: winston.transport[] = [];
     const transportType = this.config.transports || 'console';
 
-    // 添加控制台传输
     if (transportType === 'console' || transportType === 'both') {
       transports.push(createConsoleTransport(this.config));
     }
 
-    // 添加文件传输
     if (transportType === 'file' || transportType === 'both') {
       transports.push(createFileTransport(this.config));
     }
 
-    // Error reporting is no longer wired into the logger. Crashes reach PostHog
-    // error tracking via the process-level handlers (utils/telemetry.ts) and
-    // explicit captureException calls; logger.error stays a pure log sink.
-
-    // Set the logger to the lowest severity so every record reaches the
-    // transports. Each transport controls its own filtering level:
-    // - Console: respects config.level (default info)
-    // - File: debug, or trace when LODY_LOG_TRACE is set
     return winston.createLogger({
       levels: LOG_LEVELS,
       level: 'trace',
@@ -217,7 +186,6 @@ class WinstonLogger implements Logger {
   };
 
   error = (...args: unknown[]): void => {
-    // 错误总是输出，即使在silent模式
     this.winston.error(formatLogArgs(...args));
   };
 
@@ -236,11 +204,8 @@ class WinstonLogger implements Logger {
 
   setLevel = (level: LogLevel): void => {
     this.config.level = level;
-    // Keep the logger at the lowest severity so every record reaches the
-    // transports; each transport controls its own filtering level.
     this.winston.level = 'trace';
 
-    // Update transport levels - the file sink keeps its own level, console follows config
     this.winston.transports.forEach((transport: winston.transport) => {
       if (transport instanceof winston.transports.Console) {
         transport.level = level === 'silent' ? 'error' : level;
@@ -268,15 +233,12 @@ class WinstonLogger implements Logger {
   };
 }
 
-// 默认logger实例
 let defaultLoggerInstance: Logger | null = null;
 
-// 创建logger工厂函数
 export const createLogger = (config: LoggerConfig = {}): Logger => {
   return new WinstonLogger(config);
 };
 
-// 创建文件logger
 export const createFileLogger = (filename?: string, dirname?: string): Logger => {
   const logger = createLogger({
     transports: 'file',
@@ -295,7 +257,6 @@ export const createFileLogger = (filename?: string, dirname?: string): Logger =>
   return logger;
 };
 
-// 创建混合logger（console + file）
 export const createHybridLogger = (config: Partial<LoggerConfig> = {}): Logger => {
   const logger = createLogger({
     transports: 'both',
@@ -319,7 +280,6 @@ export const createHybridLogger = (config: Partial<LoggerConfig> = {}): Logger =
   return logger;
 };
 
-// 获取默认logger
 export const getDefaultLogger = (): Logger => {
   if (!defaultLoggerInstance) {
     defaultLoggerInstance = createLogger({
@@ -341,11 +301,42 @@ export let rootLogger = getDefaultLogger();
 export const routeLoggerToStderr = (logger: Logger = rootLogger): (() => void) =>
   WinstonLogger.routeToStderr(logger);
 
+/**
+ * A scoped logger that binds to the CURRENT root on every write. Entry modules
+ * obtain loggers at import time, before a command installs the process sink
+ * (`createHybridLogger`/`createFileLogger`); a child captured then would keep
+ * writing to the startup console logger — for a daemon Worker, a discarded pipe.
+ */
+class ScopedLogger implements Logger {
+  private bound: { readonly root: Logger; readonly logger: Logger } | undefined;
+
+  constructor(private readonly meta: LogMeta) {}
+
+  private current(): Logger {
+    const root = rootLogger;
+    if (this.bound?.root !== root) {
+      this.bound = { root, logger: Object.keys(this.meta).length ? root.child(this.meta) : root };
+    }
+    return this.bound.logger;
+  }
+
+  info = (...args: unknown[]): void => this.current().info(...args);
+  warn = (...args: unknown[]): void => this.current().warn(...args);
+  error = (...args: unknown[]): void => this.current().error(...args);
+  success = (...args: unknown[]): void => this.current().success(...args);
+  debug = (...args: unknown[]): void => this.current().debug(...args);
+  trace = (...args: unknown[]): void => this.current().trace(...args);
+  setLevel = (level: LogLevel): void => this.current().setLevel(level);
+  setDebug = (enabled: boolean): void => this.current().setDebug(enabled);
+  child = (defaultMeta: LogMeta): Logger => new ScopedLogger({ ...this.meta, ...defaultMeta });
+  close = (): Promise<void> => this.current().close();
+}
+
 export const getLogger = (scope?: string, meta?: Record<string, unknown>): Logger => {
   if (!scope && !meta) {
     return rootLogger;
   }
-  return rootLogger.child({
+  return new ScopedLogger({
     ...(scope ? { scope } : {}),
     ...meta,
   });
@@ -380,7 +371,6 @@ export interface LoggerConfig {
   level?: LogLevel;
   transports?: LogTransport;
 
-  // 文件输出配置
   file?: {
     filename?: string;
     dirname?: string;
@@ -390,7 +380,6 @@ export interface LoggerConfig {
     zippedArchive?: boolean;
   };
 
-  // 控制台输出配置
   console?: {
     colorize?: boolean;
     timestamp?: boolean;

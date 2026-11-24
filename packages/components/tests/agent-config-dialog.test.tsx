@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-// @vitest-environment jsdom
+import { developerModeEnabledAtom, lodyAgentBetaEnabledAtom } from '@/atoms/settings';
+
 import { act, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
@@ -33,8 +34,9 @@ import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
   type AgentConfigSubmitPayload,
+  listAddableProviders,
 } from '../src/components/settings/agent-config-dialog';
-
+import i18next from 'i18next';
 import { initI18n } from '../src/i18n';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
@@ -727,16 +729,43 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 6)
+        .slice(0, 10)
         .map((option) => option.textContent)
     ).toEqual([
+      expect.stringContaining('Codex'),
+      expect.stringContaining('Claude'),
+      expect.stringContaining('Antigravity'),
+      expect.stringContaining('DeepSeek Harness'),
+      expect.stringContaining('Grok'),
+      expect.stringContaining('Pi'),
       expect.stringContaining('Kimi Code'),
       expect.stringContaining('Devin'),
-      expect.stringContaining('Grok'),
-      expect.stringContaining('Claude'),
-      expect.stringContaining('Codex'),
-      expect.stringContaining('DeepSeek Harness'),
+      expect.stringContaining('Bub'),
+      expect.stringContaining('Dimcode'),
     ]);
+    expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(
+      false
+    );
+    expect(
+      getOptionButtons().some((option) => option.textContent?.includes('DeepSeek over Claude Code'))
+    ).toBe(false);
+    expect(
+      getOptionButtons()
+        .slice(10, 14)
+        .map((option) => option.textContent)
+    ).toEqual([
+      expect.stringContaining('GLM over Claude Code'),
+      expect.stringContaining('MiMo over Claude Code'),
+      expect.stringContaining('MiniMax over Claude Code'),
+      expect.stringContaining('Custom command'),
+    ]);
+    expect(
+      listAddableProviders(i18next.t).some(
+        (provider) =>
+          provider.key === 'preset:deepseek-over-claude-code' ||
+          provider.key === 'preset:deepseek-reasonix'
+      )
+    ).toBe(false);
 
     await act(async () => {
       getOptionByText('Custom command').dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -748,6 +777,96 @@ describe('AgentConfigDialog', () => {
 
     expect(getSelectedOption()?.textContent).toContain('Custom command');
     expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
+  });
+
+  it('offers managed Antigravity without exposing its deprecated registry launcher', async () => {
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    const providers = listAddableProviders(i18next.t);
+    expect(providers.some((p) => p.cliType === 'builtin' && p.agentType === 'antigravity')).toBe(
+      true
+    );
+    expect(providers.some((p) => p.agentType === 'antigravity-acp')).toBe(false);
+    const option = getOptionButtons().find((b) => b.textContent?.includes('Antigravity'));
+    expect(option).toBeDefined();
+    await act(async () => option?.click());
+    expect(document.body.querySelector('#custom-acp-command')).toBeNull();
+    expect(getSelectedOption()?.textContent).toContain('Antigravity');
+  });
+
+  it('saves the Antigravity skip-permissions launch choice only on capable machines', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const mode: AgentConfigDialogMode = {
+      kind: 'edit',
+      config: createBuiltinConfig({
+        id: 'agy-config' as AgentConfigId,
+        name: 'Antigravity',
+        agentType: 'antigravity',
+      }),
+    };
+    const toggle = () =>
+      document.querySelector<HTMLButtonElement>('#antigravity-skip-permissions')!;
+
+    await renderDialog(mode, createMachine('Old daemon'));
+    expect(toggle().disabled).toBe(true);
+    expect(document.body.textContent).toContain('Update Lody on this machine');
+
+    await renderDialog(
+      mode,
+      createMachine('Workstation', { antigravitySkipPermissions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      })
+    );
+    expect(toggle().disabled).toBe(false);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle().click());
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ antigravitySkipPermissions: true });
+    await act(async () => toggle().click());
+    await act(async () => getPrimaryAction('Save').click());
+    expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
+  });
+
+  it('leaves Lody Agent to its own settings page even while its beta is on', async () => {
+    store.set(developerModeEnabledAtom, true);
+    store.set(lodyAgentBetaEnabledAtom, true);
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    expect(getOptionButtons().some((option) => option.textContent?.includes('Lody Agent'))).toBe(
+      false
+    );
+    expect(
+      listAddableProviders(i18next.t).some((provider) => provider.agentType === 'sorbet')
+    ).toBe(false);
+  });
+
+  it('queues Lody Agent creation and requires provider setup support', async () => {
+    const onSubmit = vi.fn(async () => {});
+    const mode: AgentConfigDialogMode = {
+      kind: 'create',
+      initialForm: { agentType: 'sorbet', cliType: 'builtin', name: 'Lody Agent' },
+    };
+    await renderDialog(mode, createMachine('Legacy workstation'), onSubmit);
+    expect(getPrimaryAction('Create').disabled).toBe(true);
+
+    await renderDialog(
+      mode,
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
+      onSubmit
+    );
+    await act(async () => {
+      getPrimaryAction('Create').click();
+    });
+    await vi.waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ cliType: 'builtin', agentType: 'sorbet', backgroundSetup: true })
+      );
+    });
   });
 
   it('does not create Bub against a daemon without deferred provider setup', async () => {
@@ -766,7 +885,7 @@ describe('AgentConfigDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it.each(['bub', 'dimcode'])('%s setup supports retry and refresh', async (agentType) => {
+  it.each(['bub', 'dimcode', 'sorbet'])('%s setup retry and refresh', async (agentType) => {
     const workspaceId = 'workspace-bub-test' as WorkspaceId;
     const workspaceSlug = 'workspace-bub-test';
     const mirrorRows = new Map<string, MachineFlockScanRow>();
@@ -853,7 +972,7 @@ describe('AgentConfigDialog', () => {
         value: {
           ...setup,
           status: 'failed',
-          failureCode: 'runtime-unavailable',
+          failureCode: agentType === 'sorbet' ? 'verification-failed' : 'runtime-unavailable',
         },
       });
       publishRows();
@@ -864,9 +983,11 @@ describe('AgentConfigDialog', () => {
         'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
       );
       expect(document.body.textContent).toContain('Open install guide');
-    } else {
+    } else if (agentType === 'dimcode') {
       expect(document.body.textContent).toContain('npm install -g dimcode');
       expect(document.body.textContent).not.toContain('Open install guide');
+    } else {
+      expect(document.body.textContent).not.toContain('npm install -g dimcode');
     }
     await act(async () => {
       getPrimaryAction('Retry').click();
@@ -893,7 +1014,9 @@ describe('AgentConfigDialog', () => {
     expect(document.body.textContent).toContain('Ready');
     expect(store.get(getAllProviderSetupsAtom)).toEqual([]);
     expect(store.get(getAllAgentConfigAtom).map((config) => config.id)).toEqual([setup.id]);
-    expect(refresh).toHaveBeenCalledWith({ machineId, configId: setup.id });
+    expect(refresh).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId, configId: setup.id })
+    );
   });
 
   const getTabByName = (name: string): HTMLButtonElement => {
@@ -1008,7 +1131,7 @@ describe('AgentConfigDialog', () => {
     expect(onManagedRuntimeSelected).not.toHaveBeenCalled();
     expect(onCheckBinaryStatus).not.toHaveBeenCalled();
     expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
-    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('false');
+    expect(getTabByName('Custom endpoint').getAttribute('aria-selected')).toBe('false');
     expect(getVisibleDeepSeekEndpointInput()).toBeNull();
     expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
       'DeepSeek API Key'
@@ -1096,8 +1219,8 @@ describe('AgentConfigDialog', () => {
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit);
 
-    await selectTab('Custom Endpoint');
-    expect(getTabByName('Custom Endpoint').getAttribute('aria-selected')).toBe('true');
+    await selectTab('Custom endpoint');
+    expect(getTabByName('Custom endpoint').getAttribute('aria-selected')).toBe('true');
     expect(document.body.querySelector('label[for="deepseek-api-key"]')?.textContent).toBe(
       'API Key'
     );
@@ -1225,7 +1348,7 @@ describe('AgentConfigDialog', () => {
       'sk-updated'
     );
 
-    await selectTab('Custom Endpoint');
+    await selectTab('Custom endpoint');
     expect(getVisibleDeepSeekEndpointInput()?.value).toBe('https://llm.example.com/open/v1');
 
     await selectTab('DeepSeek official');

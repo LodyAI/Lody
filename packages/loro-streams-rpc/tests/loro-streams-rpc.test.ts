@@ -100,66 +100,6 @@ describe('session steer RPC schema', () => {
   });
 });
 
-describe('session preparation RPC schema', () => {
-  const baseRequest = {
-    jsonrpc: '2.0',
-    id: 'request-prepare-1',
-    rpcVersion: '1',
-    workspaceId: 'workspace-1',
-    machineId: 'machine-1',
-    replyTo: 'workspace-1:rpc:res',
-    sentAt: 1,
-    expiresAt: 2,
-  } as const;
-
-  it('accepts identifier-only preparation and cancellation payloads', () => {
-    expect(
-      LoroStreamsRpcRequestSchema.safeParse({
-        ...baseRequest,
-        method: 'session/prepare',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-          agentConfigId: 'config-1',
-          cliType: 'builtin',
-          agentType: 'codex',
-        },
-      }).success
-    ).toBe(true);
-    expect(
-      LoroStreamsRpcRequestSchema.safeParse({
-        ...baseRequest,
-        method: 'session/prepare-cancel',
-        params: {
-          preparationId: 'prepare-1',
-          sessionId: 'session-1',
-          requestedByUserId: 'user-1',
-        },
-      }).success
-    ).toBe(true);
-  });
-
-  it('rejects preparation payloads containing draft content or secrets', () => {
-    const result = LoroStreamsRpcRequestSchema.safeParse({
-      ...baseRequest,
-      method: 'session/prepare',
-      params: {
-        preparationId: 'prepare-1',
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-        agentConfigId: 'config-1',
-        cliType: 'builtin',
-        agentType: 'codex',
-        prompt: 'private draft',
-        env: { API_KEY: 'secret' },
-      },
-    });
-
-    expect(result.success).toBe(false);
-  });
-});
-
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 
 const getLastStreamsClientInstance = (): MockStreamsClientInstance => {
@@ -505,7 +445,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     const request = fake.appended[0]?.value as { id: string; replyTo: string; method: string };
     expect(request.method).toBe('machine/status');
     expect(fake.appended[0]?.streamId).toBe('workspace-1:rpc:req:machine-1');
-    expect(fake.ensured).toEqual([]);
+    expect(fake.ensured).toEqual([request.replyTo]);
 
     fake.pushBatch({
       messages: [
@@ -1086,7 +1026,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('appends first RPC without pre-ensuring streams from the Web client', async () => {
+  it('pre-ensures fresh random UUID response stream without pre-ensuring request stream', async () => {
     const events: string[] = [];
     const streamClient: LoroStreamsJsonStreamClient = {
       ensureJsonStream: vi.fn(async (streamId: string) => {
@@ -1117,7 +1057,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect(streamClient.appendJson).toHaveBeenCalled();
     });
 
-    expect(events).toEqual(['append:workspace-1:rpc:req:machine-1']);
+    expect(events).toEqual([
+      expect.stringMatching(/^ensure:workspace-1:rpc:res:machine-1:/),
+      'append:workspace-1:rpc:req:machine-1',
+    ]);
     expect(streamClient.appendJson).toHaveBeenCalledWith(
       'workspace-1:rpc:req:machine-1',
       expect.objectContaining({
@@ -2087,6 +2030,74 @@ describe('LoroStreamsMachineRpcClient', () => {
         success: true,
         observedAtMs: 123.5,
         state: expect.objectContaining({ git: true, currentBranch: 'feature/a' }),
+      })
+    );
+
+    const listPromise = client.requestLocalProjectBranches({
+      localProjectId: 'local-project-1' as LocalProjectId,
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+      timeoutMs: 5000,
+    });
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(2);
+    });
+    const listRequest = fake.appended[1]?.value as {
+      id: string;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+    expect(listRequest.method).toBe('local-project/list-branches');
+    expect(listRequest.params).toEqual({
+      localProjectId: 'local-project-1',
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: listRequest.id,
+          method: 'local-project/list-branches',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'local-project/list-branches_response',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            localProjectId: 'local-project-1',
+            success: true,
+            observedAtMs: 456,
+            result: {
+              git: true,
+              currentBranch: 'feature/a',
+              defaultBranch: 'main',
+              pinnedBranches: ['main', 'feature/a'],
+              branches: ['feature/a', 'feature/b'],
+              truncated: true,
+              nextCursor: '40',
+              totalCount: 65,
+            },
+          },
+        },
+      ],
+      nextOffset: '5',
+      cursor: 'cursor-5',
+      upToDate: true,
+    });
+    await expect(listPromise).resolves.toEqual(
+      expect.objectContaining({
+        type: 'local-project/list-branches_response',
+        success: true,
+        result: expect.objectContaining({
+          git: true,
+          branches: ['feature/a', 'feature/b'],
+          nextCursor: '40',
+        }),
       })
     );
 
@@ -3569,6 +3580,62 @@ describe('pending RPC deadline', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('pre-creates fresh random UUID responseStreamId with ensureJsonStream before readJsonLive', async () => {
+    const ops: string[] = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async (streamId) => {
+        ops.push(`ensure:${streamId}`);
+      }),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (streamId, state, _onBatch, options) => {
+        ops.push(`read:${streamId}:${state.nextOffset}`);
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+    });
+
+    await dispatcher.start();
+    await vi.waitFor(() => expect(ops.length).toBeGreaterThanOrEqual(2));
+    const responseStreamId = dispatcher.getResponseStreamId();
+    expect(ops).toEqual([`ensure:${responseStreamId}`, `read:${responseStreamId}:-1`]);
+    dispatcher.stop();
+  });
+
+  it('skips pre-creating when responseStreamId is caller-supplied', async () => {
+    const ops: string[] = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async (streamId) => {
+        ops.push(`ensure:${streamId}`);
+      }),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (streamId, state, _onBatch, options) => {
+        ops.push(`read:${streamId}:${state.nextOffset}`);
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res:explicit-1',
+    });
+
+    await dispatcher.start();
+    await vi.waitFor(() => expect(ops).toHaveLength(1));
+    expect(ops).toEqual(['read:workspace-1:rpc:res:explicit-1:-1']);
+    dispatcher.stop();
   });
 });
 

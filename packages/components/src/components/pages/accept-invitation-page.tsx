@@ -14,6 +14,7 @@ export type AcceptInvitationPageState =
   | 'verification_required'
   | 'idle'
   | 'success'
+  | 'billing_blocked'
   | 'error';
 
 export interface AcceptInvitationPageProps {
@@ -98,18 +99,29 @@ export function AcceptInvitationPage({
     );
   }
 
-  if (state === 'error') {
+  if (state === 'error' || state === 'billing_blocked') {
     return (
       <SecondaryPage
         state="blocked"
         from={avatar}
         markLabel={markLabel}
-        title={t('invite.error.title', 'Invitation unavailable')}
+        title={
+          state === 'billing_blocked'
+            ? t('invite.billing.title')
+            : t('invite.error.title', 'Invitation unavailable')
+        }
         description={errorMessage || t('invite.error.notFound', 'Invitation not found or expired.')}
         actions={
-          <Button size="large" variant="secondary" onClick={onBackHome}>
-            {t('invite.error.backButton', 'Back to home')}
-          </Button>
+          <>
+            {state === 'billing_blocked' && (
+              <Button size="large" onClick={onAccept}>
+                {t('invite.billing.retry')}
+              </Button>
+            )}
+            <Button size="large" variant="secondary" onClick={onBackHome}>
+              {t('invite.error.backButton', 'Back to home')}
+            </Button>
+          </>
         }
       />
     );

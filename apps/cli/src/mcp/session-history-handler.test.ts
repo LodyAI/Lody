@@ -138,6 +138,59 @@ describe('MCP session_history production composition', () => {
     expect(texts(resumed.items)).toEqual(['third instruction']);
   });
 
+  it('marks a failed turn and its notice reason without matching text', async () => {
+    const doc = new Loro();
+    const data = createLoroSessionData({ sessionId, doc });
+    await data.commands.appendTurn({
+      id: 'u-failed',
+      role: 'user',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      status: 'failed',
+      items: [{ type: 'text', text: 'do the work' }],
+      fileDiff: [],
+    });
+    await data.commands.appendTurn({
+      id: 'notice-failed',
+      role: 'system',
+      timestamp: '2026-01-01T00:00:01.000Z',
+      items: [
+        {
+          type: 'system_notice',
+          name: 'chat_failed',
+          meta: {
+            reason: 'acp_upstream_api_error',
+            message: "You've hit your 5-hour limit · resets 6am (UTC)",
+          },
+        },
+      ],
+      fileDiff: [],
+    });
+    await data.commands.appendTurn({
+      id: 'u-next',
+      role: 'user',
+      timestamp: '2026-01-01T00:01:00.000Z',
+      items: [{ type: 'text', text: 'next instruction' }],
+      fileDiff: [],
+    });
+
+    const page = await buildSessionHistoryForReader({
+      sessionId,
+      history: data.history,
+      limit: 10,
+      maxBytes: 128 * 1024,
+    });
+    expect(page.items).toContainEqual(
+      expect.objectContaining({
+        id: 'u-failed',
+        text: 'do the work',
+        isError: true,
+        errorReason: 'usage_limit',
+      })
+    );
+    expect(page.items).toContainEqual(expect.objectContaining({ id: 'u-next' }));
+    expect(page.items.find((item) => item.id === 'u-next')).not.toHaveProperty('isError');
+  });
+
   it('rejects a cursor issued for the other direction', async () => {
     const { data } = await conversation();
     const backward = await read(data, { limit: 1 });

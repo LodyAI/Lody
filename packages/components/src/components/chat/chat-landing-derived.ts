@@ -1,5 +1,10 @@
 import type { ChatLandingHintType } from './chat-landing-view';
 import type { SessionContextType } from './context-switch';
+import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
+import {
+  getLocalProjectVisibilityKey,
+  type LocalProjectVisibilityAccess,
+} from '@/lib/visible-local-project-index';
 
 type ChatLandingProjectRefLike =
   | {
@@ -33,6 +38,32 @@ export type ChatLandingProjectRecency = {
 };
 
 export type SharingReviewActionTarget = 'machines' | 'projects' | null;
+
+/** Composer reminders concern only the resources selected for this conversation. */
+export function getChatLandingSharingReviewActionTarget({
+  currentUserId,
+  machineId,
+  localProjectIds,
+  machineAccessByMachineId,
+  localProjectAccessByKey,
+}: {
+  currentUserId: string | null;
+  machineId: string | null;
+  localProjectIds: readonly string[];
+  machineAccessByMachineId: ReadonlyMap<string, MachineVisibilityAccess>;
+  localProjectAccessByKey: ReadonlyMap<string, LocalProjectVisibilityAccess>;
+}): SharingReviewActionTarget {
+  if (!currentUserId || !machineId) return null;
+  const machine = machineAccessByMachineId.get(machineId);
+  if (machine?.ownerUserId !== currentUserId) return null;
+  if (!machine.sharedWithTeam) return 'machines';
+  return localProjectIds.some((id) => {
+    const project = localProjectAccessByKey.get(getLocalProjectVisibilityKey(machineId, id));
+    return project?.ownerUserId === currentUserId && !project.sharedWithTeam;
+  })
+    ? 'projects'
+    : null;
+}
 
 export function getSharingReviewActionTarget({
   privateMachineCount,
@@ -492,6 +523,30 @@ export function isChatLandingMachineReachable({
   return machines.has(machineId) && isMachineOnline(machineId);
 }
 
+export type ChatLandingSelectedMachineState = 'none' | 'available' | 'unknown' | 'offline';
+
+/**
+ * Only 'offline' may stop a send. 'unknown' means presence cannot answer, so the
+ * chat proceeds and fails against the machine's own deadline if it really is down.
+ */
+export function getChatLandingSelectedMachineState({
+  machineId,
+  localMachineId,
+  machines,
+  isMachineOnline,
+  onlineStatus,
+}: Omit<ChatLandingMachineReachableArgs, 'machineId'> & {
+  machineId: string | null;
+  onlineStatus: 'online' | 'offline' | 'unknown';
+}): ChatLandingSelectedMachineState {
+  if (!machineId) return 'none';
+  if (isChatLandingMachineReachable({ machineId, localMachineId, machines, isMachineOnline })) {
+    return 'available';
+  }
+  if (!machines.has(machineId)) return 'none';
+  return onlineStatus === 'offline' ? 'offline' : 'unknown';
+}
+
 export function getChatLandingHasAnyOnlineMachine({
   localMachineId,
   machines,
@@ -625,16 +680,21 @@ export function buildChatLandingPreSelectionKey({
 
 /** Search-parameter contract of the `/$workspaceName/chat` route. */
 export type ChatLandingSearch = {
+  /** Installation advice survives the desktop settings route-to-modal handoff. */
+  github_install_error?: string;
   context?: 'local' | 'github' | 'chat' | 'group';
   machine?: string;
   project?: string;
   repo?: string;
   /** Project group id, with `context: 'group'`. */
   group?: string;
+  pinSection?: string;
 };
 
 export function parseChatLandingSearch(search: Record<string, unknown>): ChatLandingSearch {
   return {
+    github_install_error:
+      typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
     context:
       search.context === 'local' ||
       search.context === 'github' ||
@@ -646,6 +706,8 @@ export function parseChatLandingSearch(search: Record<string, unknown>): ChatLan
     project: typeof search.project === 'string' ? search.project : undefined,
     repo: typeof search.repo === 'string' ? search.repo : undefined,
     group: typeof search.group === 'string' ? search.group : undefined,
+    pinSection:
+      typeof search.pinSection === 'string' && search.pinSection ? search.pinSection : undefined,
   };
 }
 

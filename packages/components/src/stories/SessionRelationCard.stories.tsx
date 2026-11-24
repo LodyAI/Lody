@@ -1,12 +1,59 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import { createStore, Provider as JotaiProvider } from 'jotai';
+import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lody/shared';
 import { CornerLeftUp } from 'lucide-react';
 
 import type { ChatStreamItem, SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
+import { setDocMetaByRoomIdAtom } from '@/atoms/doc-meta';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
+
+const batchFrame = stylex.create({
+  frame: {
+    width: '720px',
+    maxWidth: 'calc(100vw - 2rem)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 6)',
+  },
+});
+
+const migrationStyles = stylex.create({
+  relation: { width: '640px', maxWidth: 'calc(100vw - 2rem)' },
+  column: {
+    paddingBlock: {
+      default: 'calc(var(--spacing) * 2)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
+    },
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+  frame2: {
+    height: '520px',
+    width: '720px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame3: {
+    width: '720px',
+    'max-width': 'calc(100vw - 2rem)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 5)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/SessionRelationCard',
@@ -25,7 +72,7 @@ export const CreatedConversation: Story = {
     sessionTitle: 'Audit the sidebar navigation state',
     actionLabel: 'View session',
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -37,7 +84,7 @@ export const AutomaticallyCreatedBy: Story = {
     actionLabel: 'Back to session',
     actionIcon: CornerLeftUp,
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -47,7 +94,7 @@ export const ReadOnly: Story = {
     label: 'Related session',
     sessionTitle: 'Audit the sidebar navigation state',
     actionLabel: 'View session',
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -59,7 +106,7 @@ export const WithDetail: Story = {
     actionLabel: 'View session',
     detail: 'The target machine is online and ready.',
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -101,7 +148,7 @@ export const InCreateOperation: Story = {
     onAction: () => {},
   },
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <MessageRowView
         message={operationCompletion}
         sessionId={'storybook-opener' as SessionId}
@@ -120,7 +167,7 @@ const operationStoryArgs = {
 } as const;
 
 const renderOperation = (message: SessionHistoryParsed) => (
-  <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+  <div {...stylex.props(storyLayout.frame)}>
     <MessageRowView
       message={message}
       sessionId={'storybook-opener' as SessionId}
@@ -128,6 +175,62 @@ const renderOperation = (message: SessionHistoryParsed) => (
     />
   </div>
 );
+
+const agentChildren = [
+  { id: 'storybook-claude-child', title: '审核 PR 2799 的代码安全与故障', agentType: 'claude' },
+  { id: 'storybook-codex-child', title: 'Fix the flaky portal selection test', agentType: 'codex' },
+  { id: 'storybook-unsynced-child', title: 'Waiting for metadata', agentType: null },
+] as const;
+
+function CreatedSessionsWithAgentsStory() {
+  const [store] = useState(() => {
+    const next = createStore();
+    for (const child of agentChildren) {
+      if (!child.agentType) continue;
+      next.set(setDocMetaByRoomIdAtom, getSessionRoomId(child.id as SessionId), {
+        id: child.id,
+        machineId: 'storybook-machine',
+        userId: 'storybook-user',
+        createdAt: '2026-08-14T12:00:00.000Z',
+        cliType: 'builtin',
+        agentType: child.agentType,
+        title: child.title,
+      });
+    }
+    return next;
+  });
+  return (
+    <JotaiProvider store={store}>
+      {renderOperation({
+        id: 'storybook-agent-progress',
+        role: 'system',
+        read: true,
+        timestamp: '2026-08-14T12:00:00.000Z',
+        items: [
+          {
+            type: 'operation_progress',
+            operationId: 'storybook-agent-children',
+            operationKind: 'session_create_many',
+            items: agentChildren.map((child, index) => ({
+              status: index === 1 ? ('succeeded' as const) : ('running' as const),
+              label: child.title,
+              target: { sessionId: child.id as SessionId, userTurnId: `turn-${child.id}` },
+            })),
+          },
+        ],
+      })}
+    </JotaiProvider>
+  );
+}
+
+/**
+ * Each created Session leads with who runs it: its Agent Role when readable,
+ * otherwise its provider. A target whose metadata has not synced shows its title only.
+ */
+export const CreatedSessionsWithAgents: Story = {
+  args: operationStoryArgs,
+  render: () => <CreatedSessionsWithAgentsStory />,
+};
 
 /** A message Operation names the Session it reached and previews the reply. */
 export const MessageOperationCompleted: Story = {
@@ -232,13 +335,13 @@ export const AtConversationStart: Story = {
     onAction: () => {},
   },
   render: () => (
-    <div className="h-[520px] w-[720px] max-w-[100vw] bg-background">
+    <div {...stylex.props(storyLayout.frame2)}>
       <SessionChatStreamView
         sessionId={openedSessionId}
         items={openedConversationItems}
         renderMessageRow={renderOpenedConversationMessage}
         leadingContent={
-          <ConversationColumn className="py-2 sm:py-3">
+          <ConversationColumn xstyle={migrationStyles.column}>
             <SessionRelationCard
               relation="opened-by"
               label="This session was automatically created by"
@@ -283,7 +386,7 @@ function ProgressPreview({
   status: 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 }) {
   return (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)] bg-background p-5">
+    <div {...stylex.props(storyLayout.frame3)}>
       <MessageRowView
         message={progressMessage(status)}
         sessionId={'storybook-opener' as SessionId}
@@ -316,7 +419,7 @@ export const Cancelled: Story = {
 export const AllCreationStates: Story = {
   args: CreatedConversation.args,
   render: () => (
-    <div className="flex flex-col bg-background">
+    <div {...stylex.props(storyLayout.stack)}>
       {(['created', 'running', 'succeeded', 'failed', 'cancelled'] as const).map((status) => (
         <ProgressPreview key={status} status={status} />
       ))}
@@ -376,7 +479,7 @@ export const ManyCreatedSessions: Story = {
 export const FailedAndMixedBatchResults: Story = {
   args: operationStoryArgs,
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)] flex flex-col gap-6">
+    <div {...stylex.props(batchFrame.frame)}>
       {[false, true].map((mixed) => (
         <MessageRowView
           key={String(mixed)}
@@ -434,7 +537,7 @@ export const FailedAndMixedBatchResults: Story = {
 export const CompletedWorkBatch: Story = {
   args: operationStoryArgs,
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <MessageRowView
         sessionId={'storybook-opener' as SessionId}
         message={{

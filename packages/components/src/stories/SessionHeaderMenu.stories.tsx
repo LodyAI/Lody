@@ -1,14 +1,28 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import { Provider, createStore } from 'jotai';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
-import type { MachineId, SessionMeta } from '@lody/shared';
+import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 
 import {
   SessionHeaderMenu,
   type SessionOwnerMenuState,
 } from '@/components/sessions/session-chat-interface';
+import { SessionInfoDialog } from '@/components/sessions/session-info-dialog';
+const storyLayout = stylex.create({
+  row: {
+    display: 'flex',
+    'min-height': '100dvh',
+    'min-width': '32rem',
+    'align-items': 'flex-start',
+    'justify-content': 'center',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-top': 'calc(var(--spacing) * 24)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const ownerMenuState: SessionOwnerMenuState = {
   ownerUserId: 'user-story',
@@ -46,7 +60,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="flex min-h-dvh min-w-[32rem] items-start justify-center bg-background pt-24 text-foreground">
+      <div {...stylex.props(storyLayout.row)}>
         <Story />
       </div>
     ),
@@ -57,6 +71,7 @@ const meta = {
     machineName: 'Rems-MacBook-Pro.local',
     onCopyConversationHistory: fn(),
     onCopyUrl: fn(),
+    onCopyDeepLink: fn(),
     onShareWithTeam: fn(),
     sharing: {
       visibility: 'private',
@@ -71,6 +86,9 @@ const meta = {
     onFork: fn(),
     forkWorktreeAvailability: 'available',
     onRename: fn(),
+    onSnooze: fn(),
+    onSettle: fn(),
+    onMoveToFocus: fn(),
     onArchive: fn(),
     t: (_key, fallback, options) =>
       Object.entries(options ?? {}).reduce(
@@ -87,20 +105,55 @@ export const GitHubWorktree: Story = {
   globals: { theme: 'dark' },
 };
 
+export const GitHubWorktreeAmbient: Story = {};
+
 /**
- * Multi-member workspace: the "Change owner" submenu lists members with the
- * current owner checked. Single-member workspaces pass no `owner` at all, so
- * the submenu is absent — that is the `GitHubWorktree` story above.
+ * Multi-member workspace: "Session info…" lists the owner with a Change
+ * picker. Single-member workspaces pass no `owner` at all, so the owner row is
+ * absent — that is the `GitHubWorktree` story above.
  */
 export const MultiMemberOwnerTransfer: Story = {
   globals: { theme: 'dark' },
   args: { owner: ownerMenuState },
 };
 
-/** A transfer that is still writing: every row is inert and the target spins. */
+/** A transfer that is still writing: every picker row is inert and the target spins. */
 export const OwnerTransferPending: Story = {
   globals: { theme: 'dark' },
   args: { owner: { ...ownerMenuState, pendingUserId: 'user-teammate' } },
+};
+
+export const SharingUnknown: Story = {
+  args: {
+    sharing: {
+      visibility: 'unknown',
+      canManage: false,
+      machineId: 'machine-header-menu-story' as MachineId,
+      localProjectId: null,
+      machineName: 'Synthetic machine',
+      projectName: null,
+    },
+  },
+};
+
+export const OpenedSessions: Story = {
+  args: {
+    openedByRelations: {
+      opened: [
+        {
+          sessionId: 'synthetic-opened-review' as SessionId,
+          title: 'Review the proposed changes',
+          target: { sessionId: 'synthetic-opened-review' as SessionId },
+        },
+        {
+          sessionId: 'synthetic-opened-followup' as SessionId,
+          title: 'Follow up on the browser checks',
+          target: { sessionId: 'synthetic-opened-followup' as SessionId },
+        },
+      ],
+      onOpenSession: fn(),
+    },
+  },
 };
 
 export const OpenInIde: Story = {
@@ -115,6 +168,7 @@ export const OpenInIde: Story = {
       onOpen: fn(),
       onSelect: fn(),
     },
+    openInFileManager: { label: 'Open in Finder', onOpen: fn() },
   },
 };
 
@@ -138,4 +192,24 @@ export const EncryptedWorkspace: Story = {
       );
     },
   ],
+};
+
+/** The dialog behind "Session info…", open on its own. */
+export const InfoDialog: Story = {
+  globals: { theme: 'dark' },
+  render: (args) => (
+    <SessionInfoDialog
+      open
+      onOpenChange={fn()}
+      repoFullName="zxch3n/test-readme"
+      currentBranch="docs/append-line-to-readmemd"
+      baseBranch="main"
+      pullRequest={{ number: 42, status: 'open', onOpen: fn() }}
+      machineName="Rems-MacBook-Pro.local"
+      workspacePath="/Users/developer/Code/test-readme"
+      sharing={args.sharing}
+      owner={ownerMenuState}
+      t={args.t}
+    />
+  ),
 };

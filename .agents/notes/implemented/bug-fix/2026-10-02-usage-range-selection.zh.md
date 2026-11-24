@@ -37,8 +37,8 @@ observer 回调，此时旧格仍在原容器中。原路径显示 Jul 13 “No 
 
 无需清空缓存：[日期缓存决策](2026-09-21-usage-detail-cache.zh.md) 仍适用。
 移除动画或增加 observer 专属取消机制会改变更多行为，且仍混合选日权限与布局同步。
-[时间线 Spec](../../../../specs/usage-timeline.zh.md) 拥有范围切换语义；
-[UTC 决策](2026-10-01-usage-timeline-time-basis.zh.md) 仍适用。
+[时间线 Spec](../../../../specs/usage-timeline.zh.md) 定义范围切换语义。
+[UTC 日期键](2026-10-01-usage-timeline-time-basis.zh.md)标识选中的日期。
 
 ## 消融与验证
 

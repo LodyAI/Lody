@@ -1,5 +1,6 @@
 import type { AcpCommandSummary } from '@lody/shared';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
+import { hasProjectSkillSource } from '@/components/mentions/mention-skill-source';
 
 export type ChatComposerPromptPlaceholderKey =
   | 'composer.promptPlaceholder.base'
@@ -24,12 +25,20 @@ function hasChatComposerCommandHints(availableCommands?: AcpCommandSummary[]): b
 function hasChatComposerFileMentions(mentionSource?: MentionProjectSource): boolean {
   if (mentionSource?.kind === 'local') return Boolean(mentionSource.localProjectId);
   if (mentionSource?.kind === 'github') return Boolean(mentionSource.repoFullName);
+  if (mentionSource?.kind === 'provider') {
+    return Boolean(mentionSource.provider || mentionSource.providerPending);
+  }
   return false;
 }
 
 function hasChatComposerIssuePrMentions(mentionSource?: MentionProjectSource): boolean {
-  if (mentionSource?.kind === 'github') return Boolean(mentionSource.repoFullName);
+  if (mentionSource?.kind === 'github') {
+    return Boolean(mentionSource.repoFullName) && mentionSource.issuePrEnabled !== false;
+  }
   if (mentionSource?.kind === 'local') return Boolean(mentionSource.githubRepoFullName);
+  if (mentionSource?.kind === 'provider') {
+    return Boolean(mentionSource.githubRepoFullName) && mentionSource.issuePrEnabled !== false;
+  }
   return false;
 }
 
@@ -44,14 +53,7 @@ export function hasChatComposerSkillHints(
   skillAgent?: { machineId?: string }
 ): boolean {
   if (skillAgent?.machineId?.trim()) return true;
-  if (mentionSource?.kind === 'local') {
-    return Boolean(
-      mentionSource.localProjectId && mentionSource.workspaceId && mentionSource.machineId
-    );
-  }
-  if (mentionSource?.kind === 'github') return Boolean(mentionSource.repoFullName);
-  if (mentionSource?.kind === 'provider') return Boolean(mentionSource.githubRepoFullName);
-  return false;
+  return hasProjectSkillSource(mentionSource);
 }
 
 export function getChatComposerPromptPlaceholderKey({

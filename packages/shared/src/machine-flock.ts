@@ -1,3 +1,4 @@
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 import { isMagpieGatewayUrl, normalizeMagpieGateway } from './magpie-import';
 import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
@@ -5,6 +6,7 @@ import { CodexAuthProfileSchema, assertManagedCodexProfileConfig } from './codex
 import {
   getAcpCapabilityCacheKey,
   hasBuiltinRuntimeOverrideValues,
+  hasPersistedBuiltinRuntimeOverrides,
   isBuiltinRuntimeOverrides,
   isBuiltinAgentType,
   isCustomAcpLaunchSpec,
@@ -16,6 +18,16 @@ import {
   type ManagedBuiltinAgentType,
 } from './ai';
 import { isAcpModelCapabilities, type AcpModelCapabilities } from './acp-model-capabilities';
+import {
+  getAcpConfigOptionStructureKey,
+  getAcpConfigOptionsShapeId,
+  isAcpModelConfigOptions,
+  isAcpModelConfigOptionsShape,
+  toAcpModelConfigOptions,
+  type AcpModelConfigOptions,
+  type AcpModelConfigOptionsShape,
+} from './acp-model-config-options';
+import type { AcpConfigOptionSummary } from './ai';
 import type { AgentConfigId, MachineId, SessionId, WorkspaceId } from './ids';
 import type { LocalProjectWorktreeCleanupItem, LocalProjectWorktreeCleanupResult } from './message';
 import type {
@@ -187,6 +199,14 @@ export type MachineFlockAgentConfigIndexKey = ['agentConfigIndex', AgentConfigId
 export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 /** Per-model controls an agent config's adapter declared (`AcpModelCapabilities`). */
 export type MachineFlockAcpModelCapabilityKey = ['acpModelCapability', AgentConfigId];
+/** Which stored option list one model has (`AcpModelConfigOptions`). */
+export type MachineFlockAcpModelConfigOptionsKey = ['acpModelConfigOptions', AgentConfigId, string];
+/** One option list shared by every model of a config that reported it. */
+export type MachineFlockAcpModelConfigOptionsShapeKey = [
+  'acpModelConfigOptionsShape',
+  AgentConfigId,
+  string,
+];
 /** @deprecated Compatibility read for rate limits written before provider-scoped quotas. */
 export type MachineFlockLegacyRateLimitKey = ['rateLimit', CliType, string];
 export type MachineFlockProviderRateLimitKey = ['rateLimit', AgentConfigId, string, string];
@@ -210,6 +230,8 @@ export type MachineFlockKey =
   | MachineFlockAgentConfigIndexKey
   | MachineFlockAcpCapabilityKey
   | MachineFlockAcpModelCapabilityKey
+  | MachineFlockAcpModelConfigOptionsKey
+  | MachineFlockAcpModelConfigOptionsShapeKey
   | MachineFlockRateLimitKey
   | MachineFlockBuiltinAgentOptOutKey
   | MachineFlockSessionLaunchConfigKey;
@@ -258,6 +280,18 @@ export type ParsedMachineFlockKey =
       kind: 'acpModelCapability';
       key: MachineFlockAcpModelCapabilityKey;
       configId: AgentConfigId;
+    }
+  | {
+      kind: 'acpModelConfigOptions';
+      key: MachineFlockAcpModelConfigOptionsKey;
+      configId: AgentConfigId;
+      modelId: string;
+    }
+  | {
+      kind: 'acpModelConfigOptionsShape';
+      key: MachineFlockAcpModelConfigOptionsShapeKey;
+      configId: AgentConfigId;
+      shapeId: string;
     }
   | {
       kind: 'rateLimit';
@@ -324,6 +358,14 @@ export const machineFlockKeys = {
     'acpModelCapability',
     configId,
   ],
+  acpModelConfigOptions: (
+    configId: AgentConfigId,
+    modelId: string
+  ): MachineFlockAcpModelConfigOptionsKey => ['acpModelConfigOptions', configId, modelId],
+  acpModelConfigOptionsShape: (
+    configId: AgentConfigId,
+    shapeId: string
+  ): MachineFlockAcpModelConfigOptionsShapeKey => ['acpModelConfigOptionsShape', configId, shapeId],
   rateLimit: (
     agentConfigId: AgentConfigId,
     cliType: string,
@@ -463,6 +505,36 @@ export const parseMachineFlockKey = (
     };
   }
 
+  if (
+    key.length === 3 &&
+    key[0] === 'acpModelConfigOptions' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    const configId = key[1] as AgentConfigId;
+    return {
+      kind: 'acpModelConfigOptions',
+      key: machineFlockKeys.acpModelConfigOptions(configId, key[2]),
+      configId,
+      modelId: key[2],
+    };
+  }
+
+  if (
+    key.length === 3 &&
+    key[0] === 'acpModelConfigOptionsShape' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    const configId = key[1] as AgentConfigId;
+    return {
+      kind: 'acpModelConfigOptionsShape',
+      key: machineFlockKeys.acpModelConfigOptionsShape(configId, key[2]),
+      configId,
+      shapeId: key[2],
+    };
+  }
+
   if (key.length === 2 && key[0] === 'acpCapability' && isNonEmptyString(key[1])) {
     const configId = key[1] as AgentConfigId;
     return {
@@ -543,6 +615,8 @@ export type MachineFlockRow =
   | { key: MachineFlockAgentConfigIndexKey; value: AgentConfigListSummary }
   | { key: MachineFlockAcpCapabilityKey; value: AcpCapabilityCacheEntry }
   | { key: MachineFlockAcpModelCapabilityKey; value: AcpModelCapabilities }
+  | { key: MachineFlockAcpModelConfigOptionsKey; value: AcpModelConfigOptions }
+  | { key: MachineFlockAcpModelConfigOptionsShapeKey; value: AcpModelConfigOptionsShape }
   | { key: MachineFlockRateLimitKey; value: RateLimit }
   | { key: MachineFlockBuiltinAgentOptOutKey; value: BuiltinAgentOptOut }
   | { key: MachineFlockSessionLaunchConfigKey; value: SessionLaunchConfig };
@@ -587,6 +661,8 @@ export type MachineFlockRowFamily =
   | 'agentConfigIndex'
   | 'acpCapability'
   | 'acpModelCapability'
+  | 'acpModelConfigOptions'
+  | 'acpModelConfigOptionsShape'
   | 'rateLimit'
   | 'builtinAgentOptOut'
   | 'sessionLaunchConfig';
@@ -604,6 +680,8 @@ const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly 
   agentConfigIndex: ['agentConfigIndex'],
   acpCapability: ['acpCapability'],
   acpModelCapability: ['acpModelCapability'],
+  acpModelConfigOptions: ['acpModelConfigOptions'],
+  acpModelConfigOptionsShape: ['acpModelConfigOptionsShape'],
   rateLimit: ['rateLimit'],
   builtinAgentOptOut: ['builtinAgentOptOut'],
   sessionLaunchConfig: ['sessionLaunchConfig'],
@@ -677,6 +755,16 @@ const isMachineFlockAcpModelCapabilityRow = (
   row: MachineFlockRow
 ): row is Extract<MachineFlockRow, { key: MachineFlockAcpModelCapabilityKey }> =>
   row.key[0] === 'acpModelCapability';
+
+const isMachineFlockAcpModelConfigOptionsRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockAcpModelConfigOptionsKey }> =>
+  row.key[0] === 'acpModelConfigOptions';
+
+const isMachineFlockAcpModelConfigOptionsShapeRow = (
+  row: MachineFlockRow
+): row is Extract<MachineFlockRow, { key: MachineFlockAcpModelConfigOptionsShapeKey }> =>
+  row.key[0] === 'acpModelConfigOptionsShape';
 
 const isMachineFlockAgentConfigRow = (
   row: MachineFlockRow
@@ -758,7 +846,12 @@ export function getMachineFlockDeleteLocalProjectIds(
  * Row families a capability reader asks for, so per-model controls are never
  * dropped by a reader that forgot the second family.
  */
-export const ACP_CAPABILITY_ROW_FAMILIES = ['acpCapability', 'acpModelCapability'] as const;
+export const ACP_CAPABILITY_ROW_FAMILIES = [
+  'acpCapability',
+  'acpModelCapability',
+  'acpModelConfigOptions',
+  'acpModelConfigOptionsShape',
+] as const;
 
 /**
  * Merged entries keyed by the stored capability row and then by the stored
@@ -787,11 +880,37 @@ const withDeclaredModelControls = (
   return merged;
 };
 
+// Readers rebuild the merged entry on every read; keep its identity while the
+// observed lists are unchanged so React consumers do not re-render.
+const observedAcpCapabilityEntries = new WeakMap<
+  AcpCapabilityCacheEntry,
+  { signature: string; merged: AcpCapabilityCacheEntry }
+>();
+
+const withObservedModelConfigOptions = (
+  entry: AcpCapabilityCacheEntry,
+  observed: Record<string, AcpConfigOptionSummary[]>
+): AcpCapabilityCacheEntry => {
+  const signature = JSON.stringify(
+    Object.keys(observed)
+      .sort()
+      .map((modelId) => [modelId, observed[modelId]])
+  );
+  const cached = observedAcpCapabilityEntries.get(entry);
+  if (cached?.signature === signature) return cached.merged;
+  const merged = { ...entry, observedModelConfigOptions: observed };
+  observedAcpCapabilityEntries.set(entry, { signature, merged });
+  return merged;
+};
+
 /**
  * Capability entries by cache key. When the rows include the config's
  * `acpModelCapability` row for the same source version, the entry carries its
  * per-model controls as `declaredModelControls`, so every reader resolves effort
- * and Fast for the selected model rather than the probed one.
+ * and Fast for the selected model rather than the probed one. The config's
+ * `acpModelConfigOptions` rows are attached as `observedModelConfigOptions`
+ * whatever their source version: an older answer for a model is still closer
+ * than another model's snapshot, and the next answer replaces it.
  */
 export function getMachineFlockAcpCapabilities(
   rows: MachineFlockRowMap
@@ -809,6 +928,27 @@ export function getMachineFlockAcpCapabilities(
     if (entry && entry.sourceVersion === row.value.sourceVersion) {
       capabilities[key] = withDeclaredModelControls(entry, row.value);
     }
+  }
+  const shapes = new Map<string, AcpConfigOptionSummary[]>();
+  for (const row of Object.values(rows)) {
+    if (isMachineFlockAcpModelConfigOptionsShapeRow(row)) {
+      shapes.set(JSON.stringify([row.key[1], row.key[2]]), row.value.configOptions);
+    }
+  }
+  const observedByKey = new Map<string, Record<string, AcpConfigOptionSummary[]>>();
+  for (const row of Object.values(rows)) {
+    if (!isMachineFlockAcpModelConfigOptionsRow(row)) continue;
+    const key = getAcpCapabilityCacheKey(row.key[1]);
+    // A pointer whose shape has not synced yet is unknown, not an empty list.
+    const configOptions = shapes.get(JSON.stringify([row.key[1], row.value.shape]));
+    if (!capabilities[key] || !configOptions) continue;
+    const observed = observedByKey.get(key) ?? {};
+    observed[row.key[2]] = configOptions;
+    observedByKey.set(key, observed);
+  }
+  for (const [key, observed] of observedByKey) {
+    const entry = capabilities[key];
+    if (entry) capabilities[key] = withObservedModelConfigOptions(entry, observed);
   }
   return capabilities;
 }
@@ -1076,7 +1216,7 @@ export function buildSessionLaunchConfig(
   if (input.customAcp) {
     config.customAcp = input.customAcp;
   }
-  if (hasBuiltinRuntimeOverrideValues(input.runtimeOverrides)) {
+  if (hasPersistedBuiltinRuntimeOverrides(input.runtimeOverrides)) {
     config.runtimeOverrides = input.runtimeOverrides;
   }
   if (input.env && Object.keys(input.env).length > 0) {
@@ -1112,6 +1252,40 @@ export function getSessionLaunchConfigLegacyFields(
   return normalizeSessionLaunchConfig(session);
 }
 
+/** Compare against the persisted reset, so repeated jitter cannot accumulate. */
+function rateLimitsEqualWithinClockJitter(previous: RateLimit, next: RateLimit): boolean {
+  if (
+    !Array.isArray(previous.windows) ||
+    !Array.isArray(next.windows) ||
+    !previous.windows.every(isRecord) ||
+    !next.windows.every(isRecord)
+  )
+    return false;
+  const { windows: previousWindows, ...previousFields } = previous;
+  const { windows: nextWindows, ...nextFields } = next;
+  if (JSON.stringify(previousFields) !== JSON.stringify(nextFields)) return false;
+  if (previousWindows.length !== nextWindows.length) return false;
+  // Windows form a multiset: equal durations may belong to different labels.
+  const sorted = (windows: RateLimit['windows']) =>
+    windows
+      .map(({ resetsAtEpochSeconds, ...fields }) => ({
+        core: JSON.stringify(fields),
+        reset: resetsAtEpochSeconds,
+        duration: fields.windowDurationSeconds,
+      }))
+      .sort((a, b) => a.core.localeCompare(b.core) || (a.reset ?? 0) - (b.reset ?? 0));
+  const oldWindows = sorted(previousWindows);
+  return sorted(nextWindows).every((window, index) => {
+    const old = oldWindows[index];
+    if (!old || old.core !== window.core) return false;
+    if (old.reset === window.reset) return true;
+    if (old.reset === null || window.reset === null) return false;
+    // Do not hide a complete rollover of a very short window.
+    const tolerance = window.duration === null ? 2 : Math.min(2, window.duration / 4);
+    return Math.abs(old.reset - window.reset) <= tolerance;
+  });
+}
+
 export function writeMachineFlockRowToFlock(
   flock: MachineFlockWritableFlock,
   row: MachineFlockRow,
@@ -1124,7 +1298,13 @@ export function writeMachineFlockRowToFlock(
   const previous = readMachineFlockRowsFromFlock(flock, {
     prefixes: [normalized.key],
   })[serializeMachineFlockKey(normalized.key)];
-  if (machineFlockRowsEqual(previous, normalized)) {
+  if (
+    machineFlockRowsEqual(previous, normalized) ||
+    (previous &&
+      isMachineFlockRateLimitRow(previous) &&
+      isMachineFlockRateLimitRow(normalized) &&
+      rateLimitsEqualWithinClockJitter(previous.value, normalized.value))
+  ) {
     return false;
   }
   const persisted =
@@ -1139,6 +1319,91 @@ export function writeMachineFlockRowToFlock(
   flock.set(normalized.key, persisted, nowMs);
   flock.commit();
   return true;
+}
+
+/**
+ * Records each model's own option list for one config in a single commit.
+ * Identical lists share one shape row; a model points at its shape. A model
+ * whose stored list differs only in current values keeps its pointer, so a new
+ * selection never costs a write, and a shape no model points at is removed.
+ * Returns whether anything changed.
+ */
+export function writeAcpModelConfigOptionsToFlock(
+  flock: MachineFlockWritableFlock,
+  configId: AgentConfigId,
+  sourceVersion: string,
+  answers: Record<string, readonly AcpConfigOptionSummary[]>,
+  nowMs?: number
+): boolean {
+  const rows = readMachineFlockRowsFromFlock(flock, {
+    prefixes: [
+      ['acpModelConfigOptions', configId],
+      ['acpModelConfigOptionsShape', configId],
+    ],
+  });
+  const shapes = new Map<string, AcpConfigOptionSummary[]>();
+  const pointers = new Map<string, AcpModelConfigOptions>();
+  for (const row of Object.values(rows)) {
+    if (isMachineFlockAcpModelConfigOptionsShapeRow(row) && row.key[1] === configId) {
+      shapes.set(row.key[2], row.value.configOptions);
+    } else if (isMachineFlockAcpModelConfigOptionsRow(row) && row.key[1] === configId) {
+      pointers.set(row.key[2], row.value);
+    }
+  }
+  const shapeByStructure = new Map<string, string>();
+  for (const pointer of pointers.values()) {
+    const shape = shapes.get(pointer.shape);
+    if (pointer.sourceVersion !== sourceVersion || !shape) continue;
+    const structure = getAcpConfigOptionStructureKey(shape);
+    if (!shapeByStructure.has(structure)) shapeByStructure.set(structure, pointer.shape);
+  }
+  let changed = false;
+  for (const [modelId, answer] of Object.entries(answers)) {
+    const stored = toAcpModelConfigOptions(answer);
+    const structure = getAcpConfigOptionStructureKey(stored);
+    const current = pointers.get(modelId);
+    const currentShape = current ? shapes.get(current.shape) : undefined;
+    const sharedShape = shapeByStructure.get(structure);
+    if (
+      current?.sourceVersion === sourceVersion &&
+      currentShape &&
+      current.shape === sharedShape &&
+      getAcpConfigOptionStructureKey(currentShape) === structure
+    ) {
+      continue;
+    }
+    // Current selections are session state, not a distinct static shape.
+    // Reuse an already observed same-runtime shape even on a model's first answer.
+    const content = JSON.stringify(stored);
+    const baseId = sharedShape ?? getAcpConfigOptionsShapeId(stored);
+    let shapeId = baseId;
+    for (let suffix = 1; ; suffix += 1) {
+      const existing = shapes.get(shapeId);
+      if (!existing || shapeId === sharedShape || JSON.stringify(existing) === content) break;
+      shapeId = `${baseId}-${suffix}`;
+    }
+    if (!shapes.has(shapeId)) {
+      flock.set(
+        machineFlockKeys.acpModelConfigOptionsShape(configId, shapeId),
+        { version: 1, configOptions: stored },
+        nowMs
+      );
+      shapes.set(shapeId, stored);
+    }
+    shapeByStructure.set(structure, shapeId);
+    const pointer: AcpModelConfigOptions = { version: 1, sourceVersion, shape: shapeId };
+    flock.set(machineFlockKeys.acpModelConfigOptions(configId, modelId), pointer, nowMs);
+    pointers.set(modelId, pointer);
+    changed = true;
+  }
+  const referenced = new Set([...pointers.values()].map((pointer) => pointer.shape));
+  for (const shapeId of shapes.keys()) {
+    if (referenced.has(shapeId)) continue;
+    flock.delete(machineFlockKeys.acpModelConfigOptionsShape(configId, shapeId), nowMs);
+    changed = true;
+  }
+  if (changed) flock.commit();
+  return changed;
 }
 
 export function deleteMachineFlockRowFromFlock(
@@ -1260,6 +1525,10 @@ export function parseMachineFlockRow(
       return isAcpCapabilityCacheEntry(value) ? { key: parsedKey.key, value } : undefined;
     case 'acpModelCapability':
       return isAcpModelCapabilities(value) ? { key: parsedKey.key, value } : undefined;
+    case 'acpModelConfigOptions':
+      return isAcpModelConfigOptions(value) ? { key: parsedKey.key, value } : undefined;
+    case 'acpModelConfigOptionsShape':
+      return isAcpModelConfigOptionsShape(value) ? { key: parsedKey.key, value } : undefined;
     case 'rateLimit':
       return isRecord(value) ? { key: parsedKey.key, value: value as RateLimit } : undefined;
     case 'builtinAgentOptOut': {
@@ -1372,7 +1641,7 @@ const normalizeSessionLaunchConfig = (value: unknown): SessionLaunchConfig | und
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       return undefined;
     }
-    if (hasBuiltinRuntimeOverrideValues(value.runtimeOverrides)) {
+    if (hasPersistedBuiltinRuntimeOverrides(value.runtimeOverrides)) {
       config.runtimeOverrides = value.runtimeOverrides;
     }
   }
@@ -1579,7 +1848,66 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   ) {
     project.githubRepoFullName = value.githubRepoFullName;
   }
+  if (typeof value.git === 'boolean') {
+    project.git = value.git;
+  }
+  if (value.defaultBranch === null) {
+    project.defaultBranch = null;
+  } else if (
+    typeof value.defaultBranch === 'string' &&
+    value.defaultBranch.trim().length > 0 &&
+    value.defaultBranch.length <= 1024
+  ) {
+    project.defaultBranch = value.defaultBranch.trim();
+  }
+  if (value.currentBranch === null) {
+    project.currentBranch = null;
+  } else if (
+    typeof value.currentBranch === 'string' &&
+    value.currentBranch.trim().length > 0 &&
+    value.currentBranch.length <= 1024
+  ) {
+    project.currentBranch = value.currentBranch.trim();
+  }
   return project;
+};
+
+const normalizeAgentSessionDefaults = (
+  value: unknown
+): AgentConfigMeta['sessionDefaults'] | undefined => {
+  if (!isRecord(value)) return undefined;
+  const configOptionValues: Record<string, string | boolean> = {};
+  if (isRecord(value.configOptionValues)) {
+    for (const [configId, optionValue] of Object.entries(value.configOptionValues)) {
+      if (!configId || isSensitiveAcpConfigOptionId(configId)) continue;
+      if (typeof optionValue === 'string' || typeof optionValue === 'boolean')
+        configOptionValues[configId] = optionValue;
+    }
+  }
+  const modelConfigOptionValues: Record<string, Record<string, string | boolean>> = {};
+  if (isRecord(value.modelConfigOptionValues)) {
+    for (const [entryModelId, modelRecord] of Object.entries(value.modelConfigOptionValues)) {
+      if (!entryModelId || !isRecord(modelRecord)) continue;
+      const normalizedModelValues: Record<string, string | boolean> = {};
+      for (const [configId, optionValue] of Object.entries(modelRecord)) {
+        if (!configId || isSensitiveAcpConfigOptionId(configId)) continue;
+        if (typeof optionValue === 'string' || typeof optionValue === 'boolean') {
+          normalizedModelValues[configId] = optionValue;
+        }
+      }
+      if (Object.keys(normalizedModelValues).length > 0) {
+        modelConfigOptionValues[entryModelId] = normalizedModelValues;
+      }
+    }
+  }
+  const hasModelValues = Object.keys(modelConfigOptionValues).length > 0;
+  const modelId = isNonEmptyString(value.modelId) ? value.modelId : undefined;
+  if (!modelId && !Object.keys(configOptionValues).length && !hasModelValues) return undefined;
+  return {
+    ...(modelId ? { modelId } : {}),
+    configOptionValues,
+    ...(hasModelValues ? { modelConfigOptionValues } : {}),
+  };
 };
 
 const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined => {
@@ -1625,6 +1953,9 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
       delete runtimeOverrides.piExtensions;
       delete runtimeOverrides.piPath;
     }
+    if (config.agentType !== 'antigravity') {
+      delete runtimeOverrides.antigravitySkipPermissions;
+    }
     config.runtimeOverrides = runtimeOverrides;
   }
   if (!isMissing(value.prompt)) {
@@ -1638,6 +1969,10 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   if (!isMissing(value.brandId)) {
     if (typeof value.brandId !== 'string') return undefined;
     config.brandId = value.brandId as AgentConfigMeta['brandId'];
+  }
+  if (!isMissing(value.sessionDefaults)) {
+    const sessionDefaults = normalizeAgentSessionDefaults(value.sessionDefaults);
+    if (sessionDefaults) config.sessionDefaults = sessionDefaults;
   }
 
   if (!isMissing(value.codexAuth)) {

@@ -111,6 +111,7 @@ export type ProviderSetupRowProps = {
   onDelete: (setup: ProviderSetupTask) => Promise<void>;
   /** Layout only. The row draws no surface: a list's card draws it. */
   className?: string;
+  showAuthentication?: boolean;
 };
 
 export function ProviderSetupRow({
@@ -119,6 +120,7 @@ export function ProviderSetupRow({
   onRetry,
   onDelete,
   className,
+  showAuthentication = true,
 }: ProviderSetupRowProps) {
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
@@ -241,7 +243,12 @@ export function ProviderSetupRow({
         <div {...stylex.props(styles.text)}>
           <div {...stylex.props(styles.name)}>{config.name}</div>
           <div {...stylex.props(styles.agent)}>
-            {labelForAgent(config.cliType, config.agentType)}
+            {config.cliType === 'builtin' && config.agentType === 'sorbet'
+              ? t(
+                  'settings.agent.dialog.option.sorbet.description',
+                  'An agent harness for work that outlives one conversation. Built for Lody.'
+                )
+              : labelForAgent(config.cliType, config.agentType)}
           </div>
         </div>
         {/* Reserve the provider row's status and edit columns so setup actions
@@ -336,7 +343,7 @@ export function ProviderSetupRow({
             </Button>
           </div>
         ) : null}
-        {setup.status === 'awaiting-auth' ? (
+        {showAuthentication && setup.status === 'awaiting-auth' ? (
           <AcpAuthenticationPanel
             codexAuthMode={config.codexAuth?.mode}
             machineId={setup.machineId}

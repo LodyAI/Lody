@@ -20,7 +20,7 @@ PR: https://github.com/LodyAI/Lody/pull/1492
 包括文件内容请求。PR 容器不提供修改回调，操作分发也拒绝写入。
 公开读取不复用认证缓存。公开 CI 刷新降为五分钟，并跳过快速合并状态轮询，节省匿名额度。
 
-本变更扩展了[观测与关联分离](../../proposed/bug-fix/2026-10-01-pr-observation-association.zh.md)：
+本变更扩展了[观测与关联分离](2026-10-01-pr-observation-association.zh.md)：
 缺少托管关联不再意味着公开详情不可读。全局移除身份门控会允许仅凭名称执行凭据写入，
 因此公开路径保持匿名。沿用现有 React Hook 生命周期，不更改 Effect 运行时或后端协议。
 意图见 [PR 观测](../../../../specs/local-github-pr-observation.zh.md)。GitHub 文档说明了

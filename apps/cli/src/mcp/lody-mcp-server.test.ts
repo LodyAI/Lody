@@ -1,17 +1,25 @@
+import { createHistoryWriter } from '@lody/shared/history-writer';
+import { LoroRepo } from 'loro-repo';
+import {
+  runWithSessionCommandEnvironment,
+  type SessionCommandEnvironment,
+} from '@/lib/session-command-environment';
 import { LoroDoc, LoroMap } from 'loro-crdt';
-import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import path from 'path';
 import os from 'node:os';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
+  SESSION_IMAGE_MAX_COUNT,
   getStaticBuiltinAcpCapabilities,
   getSessionRoomId,
   workspaceFlockKeys,
@@ -45,6 +53,7 @@ import {
 import {
   __lodyMcpServerInternals,
   buildLodyMcpServer,
+  buildSessionToolServer,
   runWithMcpSessionContext,
 } from './lody-mcp-server';
 
@@ -54,6 +63,7 @@ const {
   SessionCreateOptionsToolInputSchema,
   SessionCreateToolInputSchema,
   SessionCreateManyToolInputSchema,
+  SessionCreateCombinedToolInputSchema,
   SessionChatToolInputSchema,
   SessionChatManyToolInputSchema,
   SessionCancelToolInputSchema,
@@ -67,7 +77,7 @@ const {
   assertBatchSize,
   resolveSessionRenameItems,
   applySessionRenameItems,
-  persistSessionRenameItems,
+  persistSessionRenameItems: persistWithAdmission,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -86,6 +96,18 @@ const {
   makeMachineLivenessLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
+const persistSessionRenameItems = (
+  manager: LoroDocumentManager,
+  items: Parameters<typeof persistWithAdmission>[1],
+  reason: string
+) =>
+  persistWithAdmission(
+    manager,
+    items,
+    reason,
+    async (id) =>
+      ({ ...(await manager.repo.getDocMeta(getSessionRoomId(id)))!.meta, id }) as SessionMeta
+  );
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -260,20 +282,29 @@ describe('Lody MCP tool catalog', () => {
     }
   });
 
-  it('publishes bounded catalog retry guidance on every create/chat tool', async () => {
+  it('serves bounded catalog retry guidance through help for every create/chat tool', async () => {
     const server = buildLodyMcpServer();
     const client = new Client({ name: 'retry-guidance-test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     try {
-      const { tools } = await client.listTools();
+      // Deferring clients search instructions: coverage comes first, then the help-first rule.
+      expect(client.getInstructions()).toMatch(
+        /^Lody tools coordinate work across Lody conversations/
+      );
+      expect(client.getInstructions()).toContain('you MUST call lody_help({command: TOOL_NAME})');
       for (const name of [
         'lody_session_create',
-        'lody_session_create_many',
+        'lody_session_create',
         'lody_session_chat',
-        'lody_session_chat_many',
+        'lody_session_chat',
       ]) {
-        const description = tools.find((tool) => tool.name === name)?.description;
+        const help = CallToolResultSchema.parse(
+          await client.callTool({ name: 'lody_help', arguments: { command: name } })
+        );
+        const block = help.content.find((item) => item.type === 'text');
+        if (!block || block.type !== 'text') throw new Error('Missing tool help');
+        const { description } = z.object({ description: z.string() }).parse(JSON.parse(block.text));
         expect(description).toContain('wait at least 5 seconds between attempts');
         expect(description).toContain('at most 3 total attempts (the initial call plus 2 retries)');
         expect(description).toContain('reuse the identical request and operationId');
@@ -285,28 +316,132 @@ describe('Lody MCP tool catalog', () => {
     }
   });
 
-  it('publishes session tools and never advertises a Task family', async () => {
+  // Guards the published names: every name costs eager context in each Lody-started Agent,
+  // and paired single/batch or get/list tools are merged into one tool per job.
+  it('publishes exactly the merged Lody tool catalog, with no Task family', async () => {
     const names = await listPublishedToolNames();
-    expect(names).toContain('lody_feedback');
-    expect(names).toEqual(
-      expect.arrayContaining([
-        'lody_session_rename',
-        'lody_session_rename_many',
-        'lody_ios_simulator_preview',
-      ])
-    );
+    expect([...names].sort()).toEqual([
+      'lody_agent_role',
+      'lody_automation',
+      'lody_catalog',
+      'lody_feedback',
+      'lody_help',
+      'lody_mcp_configure',
+      'lody_operation',
+      'lody_operation_cancel',
+      'lody_report_preview_candidate',
+      'lody_schedule',
+      'lody_session_cancel',
+      'lody_session_chat',
+      'lody_session_create',
+      'lody_session_create_options',
+      'lody_session_history',
+      'lody_session_list',
+      'lody_session_manage',
+      'lody_session_queue',
+      'lody_session_status_many',
+      'lody_simulator_preview',
+      'lody_upload',
+    ]);
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
-    expect(names).not.toContain('lody_review_submit');
   });
 
-  it('always advertises only the bounded Schedule family', async () => {
-    const names = await listPublishedToolNames();
-    expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
-      'lody_schedule_get',
-      'lody_schedule_list',
-      'lody_schedule_pause',
-      'lody_schedule_propose',
-    ]);
+  // Clients may auto-approve read-only tools, so reads never share a tool with writes.
+  it('keeps every read-only family in a read-only tool', async () => {
+    const server = buildLodyMcpServer();
+    const client = new Client({ name: 'read-only-test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const { tools } = await client.listTools();
+      expect(
+        tools
+          .filter((tool) => tool.annotations?.readOnlyHint === true)
+          .map((tool) => tool.name)
+          .sort()
+      ).toEqual(['lody_catalog', 'lody_help', 'lody_operation']);
+    } finally {
+      await Promise.all([client.close(), server.close()]);
+    }
+  });
+});
+
+describe('merged single/batch and get/list tool modes', () => {
+  const {
+    SessionCreateCombinedToolInputSchema: create,
+    SessionChatCombinedToolInputSchema: chat,
+    SessionRenameCombinedToolInputSchema: rename,
+    OperationToolInputSchema: operation,
+    UploadToolInputSchema: upload,
+  } = __lodyMcpServerInternals;
+  const ok = (schema: z.ZodType, value: unknown) => schema.safeParse(value).success;
+
+  it('keeps single-create-only fields out of batch mode and batch fields out of single mode', () => {
+    const items = [{ prompt: 'review', useCurrentSessionAsParent: false }];
+    expect(ok(create, { operationId: 'batch-1', items })).toBe(true);
+    expect(ok(create, { operationId: 'batch-1', defaults: { prompt: 'x' }, items: [{}] })).toBe(
+      true
+    );
+    expect(ok(create, { items })).toBe(false);
+    for (const extra of [
+      { attachments: ['a.png'] },
+      { resume: true },
+      { wait: true },
+      { prompt: 'top-level prompt' },
+      { machineId: 'machine-1' },
+    ])
+      expect(ok(create, { operationId: 'batch-1', items, ...extra })).toBe(false);
+    expect(ok(create, { operationId: 'single-1', prompt: 'review' })).toBe(true);
+    expect(ok(create, { operationId: 'single-1', resume: true })).toBe(true);
+    expect(ok(create, { operationId: 'single-1', attachments: ['a.png'] })).toBe(true);
+  });
+
+  it('keeps quotes, attachments and sessionId out of batch chat', () => {
+    const items = [{ sessionId: 's-1', prompt: 'continue' }];
+    expect(ok(chat, { operationId: 'chat-1', items })).toBe(true);
+    for (const extra of [
+      { sessionId: 's-1' },
+      { quotes: [{ messageId: 'm-1' }] },
+      { attachments: ['a.log'] },
+      { wait: true },
+    ])
+      expect(ok(chat, { operationId: 'chat-1', items, ...extra })).toBe(false);
+    expect(ok(chat, { operationId: 'chat-1', sessionId: 's-1', prompt: 'continue' })).toBe(true);
+    expect(ok(chat, { operationId: 'chat-1', prompt: 'continue' })).toBe(false);
+  });
+
+  it('renames one Session or a unique batch, never both', () => {
+    expect(ok(rename, { title: 'New' })).toBe(true);
+    expect(ok(rename, { items: [{ sessionId: 'a', title: 'A' }] })).toBe(true);
+    expect(ok(rename, { title: 'New', items: [{ sessionId: 'a', title: 'A' }] })).toBe(false);
+    expect(
+      ok(rename, {
+        items: [
+          { sessionId: 'a', title: 'A' },
+          { sessionId: 'a', title: 'B' },
+        ],
+      })
+    ).toBe(false);
+  });
+
+  it('reads one Operation, one batch page or a list, each with its own bounds', () => {
+    const batchId = '00000000-0000-4000-8000-000000000001';
+    expect(ok(operation, { operationId: 'op-1' })).toBe(true);
+    expect(ok(operation, { batchId, limit: 50 })).toBe(true);
+    expect(ok(operation, { batchId, limit: 51 })).toBe(false);
+    expect(ok(operation, { state: 'active', limit: 100 })).toBe(true);
+    expect(ok(operation, { operationId: 'op-1', batchId })).toBe(false);
+    expect(ok(operation, { operationId: 'op-1', limit: 5 })).toBe(false);
+    expect(ok(operation, { batchId, state: 'active' })).toBe(false);
+  });
+
+  it('applies the image or file path bound of the selected upload kind', () => {
+    const paths = (count: number) => Array.from({ length: count }, (_, index) => `f${index}`);
+    expect(ok(upload, { kind: 'files', paths: paths(SESSION_FILE_MAX_COUNT) })).toBe(true);
+    expect(ok(upload, { kind: 'images', paths: paths(SESSION_IMAGE_MAX_COUNT) })).toBe(true);
+    expect(ok(upload, { kind: 'images', paths: paths(SESSION_IMAGE_MAX_COUNT + 1) })).toBe(false);
+    expect(ok(upload, { kind: 'files', paths: paths(SESSION_FILE_MAX_COUNT + 1) })).toBe(false);
+    expect(ok(upload, { paths: ['a.png'] })).toBe(false);
   });
 });
 
@@ -324,7 +459,7 @@ describe('lody_feedback input schema', () => {
   });
 });
 
-describe('lody_upload_files input schema', () => {
+describe('lody_upload files input schema', () => {
   it('accepts 1..N file paths', () => {
     expect(FileUploadToolInputSchema.safeParse({ paths: ['a.log'] }).success).toBe(true);
     const max = Array.from({ length: SESSION_FILE_MAX_COUNT }, (_, index) => `f${index}.bin`);
@@ -496,12 +631,7 @@ describe('session MCP input schemas', () => {
     const server = new McpServer({ name: 'schema-test-server', version: '1.0.0' });
     server.registerTool(
       'lody_session_create',
-      { inputSchema: SessionCreateToolInputSchema },
-      async () => ({ content: [] })
-    );
-    server.registerTool(
-      'lody_session_create_many',
-      { inputSchema: SessionCreateManyToolInputSchema },
+      { inputSchema: SessionCreateCombinedToolInputSchema },
       async () => ({ content: [] })
     );
     const client = new Client({ name: 'schema-test-client', version: '1.0.0' });
@@ -510,26 +640,29 @@ describe('session MCP input schemas', () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     try {
       const result = await client.listTools();
+      // Single and batch modes share one tool; batch fields publish beside the single ones.
       const createTool = result.tools.find((tool) => tool.name === 'lody_session_create');
-      const createManyTool = result.tools.find((tool) => tool.name === 'lody_session_create_many');
+      const createManyTool = createTool;
 
       const workContextSchema = {
         oneOf: expect.arrayContaining([
           expect.objectContaining({
             type: 'object',
-            properties: expect.objectContaining({ kind: { const: 'chat', type: 'string' } }),
+            properties: expect.objectContaining({
+              kind: expect.objectContaining({ const: 'chat', type: 'string' }),
+            }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'github', type: 'string' },
+              kind: expect.objectContaining({ const: 'github', type: 'string' }),
               repo: expect.objectContaining({ type: 'string' }),
             }),
           }),
           expect.objectContaining({
             type: 'object',
             properties: expect.objectContaining({
-              kind: { const: 'local', type: 'string' },
+              kind: expect.objectContaining({ const: 'local', type: 'string' }),
               projectId: expect.objectContaining({ type: 'string' }),
             }),
           }),
@@ -1097,6 +1230,42 @@ describe('session MCP input schemas', () => {
       mcpServerIds: [],
       inheritSessionDefaults: false,
     });
+
+    const multiSpeedCapability = createCapability('codex');
+    multiSpeedCapability.configOptions = multiSpeedCapability.configOptions?.map((option) =>
+      option.id === 'fast-mode'
+        ? {
+            id: 'fast-mode',
+            name: 'Speed',
+            type: 'select' as const,
+            currentValue: 'off',
+            options: [
+              { value: 'off', name: 'Standard' },
+              { value: 'fast', name: 'Fast' },
+              { value: 'ultrafast', name: 'Ultrafast' },
+            ],
+          }
+        : option
+    );
+    multiSpeedCapability.declaredModelControls = {
+      'gpt-5.5': {
+        effortValues: ['low', 'medium', 'high'],
+        fastMode: true,
+        speedTiers: ['fast', 'ultrafast'],
+      },
+    };
+    expect(
+      resolveCreateConfig({ modelId: 'gpt-5.5', speedTier: 'ultrafast' }, multiSpeedCapability)
+    ).toMatchObject({
+      modelId: 'gpt-5.5',
+      configOptionValues: { 'fast-mode': 'ultrafast' },
+    });
+    expect(
+      resolveCreateConfig({ modelId: 'gpt-5.5', speedTier: 'normal' }, multiSpeedCapability)
+    ).toMatchObject({
+      modelId: 'gpt-5.5',
+      configOptionValues: { 'fast-mode': 'off' },
+    });
   });
 
   it('validates semantic reasoning against a model selected by a raw option', () => {
@@ -1479,6 +1648,93 @@ describe('session MCP input schemas', () => {
     ]);
   });
 
+  it.each(
+    ['reader', 'editor', 'host-owner'].flatMap((requester) =>
+      ['rename', 'archive'].map((operation) => [requester, operation] as const)
+    )
+  )(
+    'authorizes %s %s batches as the active Turn user, never the host owner',
+    async (requesterUserId, operation) => {
+      const repo = await LoroRepo.create({});
+      const privateId = 'read-shared' as SessionId;
+      const editableId = 'editable' as SessionId;
+      for (const [id, machineId] of [
+        [privateId, 'private-machine'],
+        [editableId, 'shared-machine'],
+      ])
+        await repo.upsertDocMeta(getSessionRoomId(id as SessionId), {
+          id,
+          machineId,
+          userId: 'reader',
+          title: 'Original',
+        });
+      const manager = {
+        repo,
+        syncMetaOrThrow: async () => {},
+        waitUntilMetaSynced: async () => true,
+      } as unknown as LoroDocumentManager;
+      const environment = {
+        auth: { userId: 'host-owner', machineId: 'host-machine', token: 'synthetic-token' },
+        workspace: { id: 'workspace-1', slug: 'synthetic' },
+        manager,
+        host: {
+          readInvocation: () => ({
+            active: true,
+            requesterUserId,
+            sourceTurnId: 'active-turn',
+            inputConfig: {},
+          }),
+        },
+        checkMachineAccess: async (target: { requesterUserId: string; machineId: string }) =>
+          target.requesterUserId === 'host-owner' ||
+          (target.requesterUserId === 'editor' && target.machineId === 'shared-machine')
+            ? { allowed: true }
+            : { allowed: false, reason: 'not_visible' },
+      } as unknown as SessionCommandEnvironment;
+      const handlers: NonNullable<Parameters<typeof buildSessionToolServer>[0]> = new Map();
+      const server = buildSessionToolServer(handlers);
+      try {
+        const response = await runWithSessionCommandEnvironment(environment, () =>
+          runWithMcpSessionContext(
+            { sessionId: 'caller', workspaceId: 'workspace-1', machineId: 'host-machine' },
+            () =>
+              handlers.get('lody_session_manage')!({
+                action: operation,
+                arguments:
+                  operation === 'rename'
+                    ? {
+                        items: [
+                          { sessionId: privateId, title: 'Changed private' },
+                          { sessionId: editableId, title: 'Changed shared' },
+                        ],
+                      }
+                    : { sessionIds: [privateId, editableId] },
+              })
+          )
+        );
+        const results = JSON.parse((response.content![0] as { text: string }).text).items;
+        for (const [index, id] of [privateId, editableId].entries()) {
+          const allowed =
+            requesterUserId === 'host-owner' || (requesterUserId === 'editor' && id === editableId);
+          expect(results[index]).toMatchObject(
+            allowed
+              ? { ok: true }
+              : { ok: false, error: { code: 'SESSION_MANAGEMENT_DENIED', retryable: false } }
+          );
+          const meta = (await repo.getDocMeta(getSessionRoomId(id)))?.meta;
+          if (operation === 'rename')
+            expect(meta?.title).toBe(
+              allowed ? (index === 0 ? 'Changed private' : 'Changed shared') : 'Original'
+            );
+          else expect(meta?.isArchived === true).toBe(allowed);
+        }
+      } finally {
+        await server.close();
+        await repo.destroy();
+      }
+    }
+  );
+
   it('persists only existing sessions as user titles and confirms successful writes', async () => {
     const upsertDocMeta = vi.fn(async () => undefined);
     const waitUntilMetaSynced = vi.fn(async () => true);
@@ -1681,9 +1937,12 @@ describe('session MCP input schemas', () => {
   });
 
   it('shares one remote Machine presence read across a batch', async () => {
-    const getOnlineMachineIds = vi.fn(async () => new Set(['remote-a', 'remote-b']));
+    const getMachinePresenceView = vi.fn(async () => ({
+      online: new Set(['remote-a', 'remote-b']),
+      synced: true,
+    }));
     const machineLiveness = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds } as never,
+      { getMachinePresenceView } as never,
       createMcpContext()
     );
 
@@ -1694,25 +1953,37 @@ describe('session MCP input schemas', () => {
         machineLiveness('remote-b'),
       ])
     ).resolves.toEqual(['online', 'online', 'online']);
-    expect(getOnlineMachineIds).toHaveBeenCalledTimes(1);
+    expect(getMachinePresenceView).toHaveBeenCalledTimes(1);
   });
 
   it('separates a Machine absent from a joined presence room from one it could not check', async () => {
     const joined = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds: vi.fn(async () => new Set(['remote-a'])) } as never,
+      {
+        getMachinePresenceView: vi.fn(async () => ({
+          online: new Set(['remote-a']),
+          synced: true,
+        })),
+      } as never,
       createMcpContext()
     );
     // A joined room that simply lacks the entry is real evidence of an offline Machine.
     await expect(joined('remote-b')).resolves.toBe('offline');
 
     const unavailable = makeMachineLivenessLookupForMcp(
-      { getOnlineMachineIds: vi.fn(async () => null) } as never,
+      {
+        getMachinePresenceView: vi.fn(async () => ({
+          online: new Set(['remote-a']),
+          synced: false,
+        })),
+      } as never,
       createMcpContext()
     );
-    // A null snapshot is "presence room unavailable" and must never read as offline:
-    // every dispatch guard blocks on 'offline' alone, so this is what kept a healthy
-    // remote Machine usable while presence was still joining.
+    // An unjoined room cannot prove absence and must never read as offline: every
+    // dispatch guard blocks on 'offline' alone, so this is what kept a healthy remote
+    // Machine usable while presence was still joining or recycling its live read.
     await expect(unavailable('remote-b')).resolves.toBe('unknown');
+    // A heartbeat received before the room left 'joined' still proves liveness.
+    await expect(unavailable('remote-a')).resolves.toBe('online');
     // The local Machine never depends on the presence room to prove its own liveness.
     await expect(unavailable('machine-id')).resolves.toBe('online');
   });

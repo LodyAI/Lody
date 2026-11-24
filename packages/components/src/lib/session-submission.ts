@@ -1,4 +1,5 @@
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
+import { requireEncryptedRoostOwner } from './encrypted-roost-history';
 import { acceptSessionUserTurn } from './session-send-admission';
 import { dispatchUserTurn, steerUserTurn } from './session-send-delivery';
 import type {
@@ -34,9 +35,17 @@ export type SessionSubmissionPorts = {
   /** Default backend for new sessions when the payload has no explicit choice. */
   defaultHistoryBackend?: SessionHistoryBackendKind;
   assertSessionCreateAllowed: (sessionId: SessionId) => void;
+  /** Current UI permission for existing targets; separate from billing admission. */
+  assertSessionEditable?: (sessionId: SessionId) => Promise<void>;
   recordWorkspaceActivity: (workspaceId: string | undefined) => void;
   publishSessionMeta: (roomId: string, meta: SessionMeta) => void;
   readSessionMeta: (sessionId: SessionId) => SessionMeta | undefined;
+  /**
+   * Focus `orderKey` for a brand-new top-level Session so it lands at the top
+   * of 进行中. Not consulted for Sessions opened by another conversation or
+   * child Tabs: they render nested under their opener and must never reorder it.
+   */
+  planNewSessionOrderKey?: () => string | undefined;
   recordChat: (
     meta: SessionMeta | undefined,
     sessionId: SessionId,
@@ -124,34 +133,47 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     recordWorkspaceActivity,
     publishSessionMeta,
     readSessionMeta,
+    planNewSessionOrderKey,
     recordChat,
     onRpcDelivered,
   } = ports;
 
   const prepareCreate = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
     const encrypted = runtime?.contentMode === 'e2ee';
-    const wanted = encrypted
-      ? LEGACY_SESSION_HISTORY_BACKEND
-      : (payload.historyBackend ?? defaultHistoryBackend);
+    const wanted = payload.historyBackend ?? defaultHistoryBackend;
     const machine =
       wanted === 'roost'
         ? ((await runtime!.repo.getDocMeta(getMachineRoomId(payload.machineId)))?.meta as
             | MachineMeta
             | undefined)
         : undefined;
+    if (encrypted && wanted === 'roost') requireEncryptedRoostOwner(machine);
     const backend = encrypted
-      ? LEGACY_SESSION_HISTORY_BACKEND
+      ? wanted
       : resolveNewSessionHistoryBackend(machine, {
           requested: payload.historyBackend,
           preferred: defaultHistoryBackend,
         });
-    return buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
+    const result = buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
+    // A new top-level conversation lands at the top of Status Focus. Sessions
+    // opened by another conversation and child Tabs render nested under their
+    // opener, so they keep no key and never reorder the root row.
+    if (!payload.parentSessionId && !payload.openedBySessionId && !payload.openedByRootSessionId) {
+      const orderKey = payload.orderKey ?? planNewSessionOrderKey?.();
+      if (orderKey) result.sessionMeta.orderKey = orderKey;
+      if (payload.isPinned === true) {
+        result.sessionMeta.isPinned = true;
+        if (payload.pinSectionId) result.sessionMeta.pinSectionId = payload.pinSectionId;
+      }
+    }
+    return result;
   };
 
   const createSession = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    if (payload.parentSessionId) await ports.assertSessionEditable?.(payload.parentSessionId);
     const { sessionId, sessionMeta } = await prepareCreate(payload);
     const sessionRoomId = getSessionRoomId(sessionId);
     // The local Flock index is the session-count source of truth. Incomplete
@@ -184,6 +206,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+    if (payload.parentSessionId) await ports.assertSessionEditable?.(payload.parentSessionId);
     const { sessionId, sessionMeta } = await prepareCreate(payload);
     // The accept unit includes the first user message, so the meta it
     // publishes already carries that activity. Written here, not by a
@@ -233,6 +256,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
+
+    await ports.assertSessionEditable?.(sessionId);
 
     // Sending any user message (new chat, reply, child-session/filter reply)
     // counts as an explicit active user action.
@@ -302,12 +327,15 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    // A held send is written and dispatched by the pending queue.
+    // A held send is written and dispatched by the pending queue. Check this
+    // before the management guard: a new conversation held for attachment
+    // preparation has no session metadata yet, so the guard would refuse it.
     if (
       runtime.pendingSends?.has(userTurnId) ||
       runtime.pendingSends?.ownsDelivery?.(userTurnId, 'dispatch')
     )
       return;
+    await ports.assertSessionEditable?.(sessionId);
     await dispatchUserTurn(runtime, sessionId, userTurnId, {
       ...options,
       onAccepted: () => onRpcDelivered(sessionId, userTurnId),
@@ -329,6 +357,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       runtime.pendingSends?.ownsDelivery?.(userTurnId, 'guide')
     )
       return false;
+    await ports.assertSessionEditable?.(sessionId);
     return steerUserTurn(runtime, sessionId, expectedTurnId, userTurnId, {
       machineId: options?.machineId,
       onApplied: () => onRpcDelivered(sessionId, userTurnId),

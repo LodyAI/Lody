@@ -16,11 +16,15 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
 
 - Encrypted machine RPC uses one feature DTO/chunk codec and shared complete-response assembler.
   The closed pure-read list uses fresh read authority, never execution journals; other admitted
-  Code Collab/preview actions require write authority and execution claims. Keep same-member
-  machine binding, exact originals and explicit size errors; never fall back to ordinary RPC.
+  Code Collab/preview actions require write authority and execution claims. Only
+  `E2EE_RPC_POLICIES` Session, project and session-read work targets other members' machines;
+  retain exact originals and explicit size errors without ordinary RPC fallback.
 - Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
-  returns a verified `false`; its failure is `e2ee_machine_sharing_unavailable`, because
-  senders withhold input only for a known withdrawal.
+  returns a verified `false`. An unknown policy signs, because senders withhold input
+  only for a known withdrawal and the receiving machine decides.
+- A fully verified ledger view that no longer contains the requester classifies
+  dispatch/read as exact `e2ee_device_revoked` (membership retained) or
+  `e2ee_member_removed`; never as generic `e2ee_rpc_denied`.
 - Encrypted dispatch retains exact frames across retry/fallback. Receipt ACK never
   completes the shared execution claim. [Ownership/close](README.md#encrypted-dispatch).
 - Request stream ids are workspace/machine scoped:
@@ -57,15 +61,14 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   ordinary admission (default 128); overload replies are separately bounded.
   History writes and `CONTROL_METHODS` have reserved pools, independent of reads.
   Serialize mutations in their owner service, not the request loop.
-  `session/history-watch` retains owner encryption and readiness checks. Bound its
-  separate admission at 128; checkpoint waits hold no ordinary read permit. Acquire
-  that permit only for the subsequent body/change read. Stop aborts parked waits.
+  Subscriptions verify owner encryption and current read authorization per frame.
+  Bound their separate admission at 128. Checkpoint waits hold no read permit
+  and stop on cancellation.
 - Control handlers stay fast: `session/dispatch-turn` stashes/wakes, never executes
   an agent inline. Its TTL equals the client deadline, bounding restart replay.
   Stop fences queued handlers; retain started work until its raw completion.
-- History writes require durable precondition-refusal retention before replying.
-  Replayed IDs keep that refusal until expiry; conflicting ID reuse and unavailable
-  request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
+- Ordinary history proofs require both proxy principals; encrypted reads retain exact-session fences through sending. Writes require intent-bound editing proofs and durable claims until proof expiry; uncertain outcomes never replay. Recheck cancellation and deadlines after authorization and persistence.
+- Keep precondition refusals until expiry. Conflicting IDs and unavailable request state fail closed. Details: [history readiness](../../.agents/docs/rpc-loro-streams-rpc.md#history-readiness-and-error-provenance).
 - Session orchestration authorization is checked source-side with the source CLI
   token because workspace RPC cannot authenticate a claimed requester identity.
   Automation controls require target-verified operation-bound proof.

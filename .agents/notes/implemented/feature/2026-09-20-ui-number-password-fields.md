@@ -44,11 +44,11 @@ of them re-derived the number:
 - `sessions/chat-share-image-dialog.tsx` used `Number.parseInt` and a
   `next > 0 ? next : 0` floor.
 
-Four spellings of one idea. They are not *wrong* — each handles an emptied box
+Four spellings of one idea. They are not _wrong_ — each handles an emptied box
 correctly, and the two outcomes they produce are each right for their field: six
 keep the current value (the `Number.isFinite` guard skips the setter; `clampBudget`
 returns its `fallback`) and the chat-share field floors to 0, which is what "never
-collapse" means there. `normalizeConversationFontSize` does return the *default*
+collapse" means there. `normalizeConversationFontSize` does return the _default_
 size for anything not finite, which would reset the setting the moment the box was
 emptied, but the guard in front of it means it is never called that way. That is
 the shape of the problem: four hand-written parsers, one of which is only correct
@@ -58,7 +58,7 @@ None of the seven can be stepped, none clamps what a keyboard's arrow keys do
 (the browser steps a native number input past `max` unless the form validates),
 and none has a control a thumb can hit.
 
-`packages/components/src/ui/password-input.tsx` was a different kind of gap: it
+The deleted `password-input.tsx` (now `packages/ui/src/field/password-input.tsx`) was a different kind of gap: it
 already wrapped `@lody/ui/input`, but the reveal beside it was Tailwind — an
 absolutely positioned button over the input, with its own `hover:`,
 `focus-visible:ring-1` and `disabled:opacity-50` — so a control that is half
@@ -208,13 +208,13 @@ declaration fixes all four.
 Everything else read as intended, measured off the rendered nodes in both
 palettes rather than copied from the tokens:
 
-| | Lody Light | Vesper |
-| --- | --- | --- |
-| group / shell background | `rgb(232, 234, 237)` | `rgb(28, 28, 28)` |
-| its edge | `rgba(25, 27, 31, 0.07) 0 1px 2px inset` | `rgba(0, 0, 0, 0.7) 0 1px 2px inset` |
-| the value | `rgb(26, 27, 30)` | `rgb(255, 255, 255)` |
-| a stepper and the eye | `rgb(150, 156, 166)` | `rgb(115, 115, 115)` |
-| invalid | `…inset, rgb(206, 34, 45) 0 0 0 2px` | `…inset, rgb(255, 128, 128) 0 0 0 2px` |
+|                          | Lody Light                               | Vesper                                 |
+| ------------------------ | ---------------------------------------- | -------------------------------------- |
+| group / shell background | `rgb(232, 234, 237)`                     | `rgb(28, 28, 28)`                      |
+| its edge                 | `rgba(25, 27, 31, 0.07) 0 1px 2px inset` | `rgba(0, 0, 0, 0.7) 0 1px 2px inset`   |
+| the value                | `rgb(26, 27, 30)`                        | `rgb(255, 255, 255)`                   |
+| a stepper and the eye    | `rgb(150, 156, 166)`                     | `rgb(115, 115, 115)`                   |
+| invalid                  | `…inset, rgb(206, 34, 45) 0 0 0 2px`     | `…inset, rgb(255, 128, 128) 0 0 0 2px` |
 
 The input inside either shell reads `box-shadow: none` — one well, not two —
 the ladder measures 28 / 32 / 36 for both controls, and a disabled shell is
@@ -240,7 +240,8 @@ Every in-repository caller moved, and two files are gone.
 - **Three password files**: `login-page.tsx`, `pages/reset-password-page.tsx`,
   `settings/change-password-button.tsx` import from `@lody/ui/password-input`
   and pass `labels` where they passed `showPasswordLabel` / `hidePasswordLabel`.
-- **`packages/components/src/ui/password-input.tsx` is deleted**, its in-repo
+- **The local `password-input.tsx` is deleted** (now
+  `packages/ui/src/field/password-input.tsx`), its in-repo
   callers being zero.
 
 Each migration keeps the control's existing footprint: the same widths, the same
@@ -278,9 +279,9 @@ rungs, the bare input rather than the stepped group.
   including the 15 new ones in `test/number-field.test.tsx` and
   `test/password-input.test.tsx`, and the board's token coverage.
 - `pnpm --filter @lody/ui typecheck` and `pnpm --filter @lody/components
-  typecheck` are clean.
+typecheck` are clean.
 - `pnpm --filter @lody/components test tests/appearance-settings.test.tsx
-  tests/review-policy-setting.test.tsx` — 7 tests passing, run with
+tests/review-policy-setting.test.tsx` — 7 tests passing, run with
   `NODE_ENV=development`, which React 19 needs for `act`.
 - `pnpm lint`, `pnpm lint:i18n` and `pnpm check:public-boundary` pass.
 - The board was driven in Chromium at both palettes: every value in the table

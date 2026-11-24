@@ -30,6 +30,6 @@ On narrow mobile bars, private-access status may use its lock icon while retaini
 the full accessible description and the permitted sharing action.
 
 Implementation and validation evidence are recorded in the
-[proposal](../.agents/notes/proposed/feature/2026-10-11-composer-machine-info-card.md).
+[proposal](../.agents/notes/implemented/feature/2026-10-11-composer-machine-info-card.md).
 The [withdrawal](../.agents/notes/implemented/simplification/2026-10-11-revert-composer-machine-owner.md)
 records the earlier decision. Live team-session verification remains pending.

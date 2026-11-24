@@ -2,14 +2,25 @@ import { EventEmitter, once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import winston from 'winston';
 import { Effect } from 'effect';
 import { lodyLoggerLayer } from '@/platform/logger';
+import { __test__ as cliToolsTest } from './index';
+import { readLatestLogTail } from './log-files';
+import { cleanupExpiredLogs, LODY_LOG_RETENTION_MS } from './log-retention';
+import { redactProxyUrl, sanitizeUrlForLogging } from './log-sanitize';
 import type { Logger } from './logger';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
-import { createFileTransport, createLogger, routeLoggerToStderr } from './logger';
+import {
+  createFileLogger,
+  createFileTransport,
+  createLogger,
+  getLogger,
+  routeLoggerToStderr,
+} from './logger';
 import { FILE_LOG_RETRY_INTERVAL_MS } from './resilient-file-transport';
 
 describe('WinstonLogger', () => {
@@ -126,6 +137,35 @@ describe('file sink level', () => {
       expect(content).not.toMatch(/secret|token|url/);
     }
   );
+});
+
+describe('scoped loggers created before the process sink', () => {
+  const logRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-log-early-'));
+
+  afterAll(() => {
+    fs.rmSync(logRoot, { recursive: true, force: true });
+  });
+
+  // The CLI entry creates module-level scoped loggers (presence diagnostics among
+  // them) before `lody start` installs the daemon file sink. Bound to the startup
+  // console logger, every such line was discarded with the Worker's stdout.
+  it('writes through the file sink installed after the logger was obtained', async () => {
+    const early = getLogger('early-scope');
+    const nested = early.child({ scope: 'nested' });
+    const dirname = fs.mkdtempSync(path.join(logRoot, 'sink-'));
+    const fileLogger = createFileLogger('early-%DATE%.log', dirname);
+    const sink = Reflect.get(fileLogger, 'winston') as winston.Logger;
+    const transport = sink.transports[0];
+    if (!transport) throw new Error('file logger has no transport');
+    await once(transport, 'new');
+    early.debug('presence diagnostic from an early logger');
+    nested.warn('nested diagnostic from an early logger');
+    await closeTransport(transport);
+    const logFile = fs.readdirSync(dirname).find((file) => file.endsWith('.log'));
+    const content = fs.readFileSync(path.join(dirname, logFile ?? ''), 'utf8');
+    expect(content).toContain('presence diagnostic from an early logger');
+    expect(content).toContain('nested diagnostic from an early logger');
+  });
 });
 
 const enospc = (): NodeJS.ErrnoException =>
@@ -286,5 +326,152 @@ describe('file sink on a failing disk', () => {
     expect(content).toMatch(/file logging resumed; .*\(ENOTDIR: .*; 1 line logged meanwhile/);
     expect(content).toContain('written once the directory exists');
     expect(fs.readdirSync(dirname).filter((name) => name.includes('probe'))).toEqual([]);
+  });
+});
+
+describe('cli tool detection helpers', () => {
+  it('selectWindowsWhereCandidate prefers .cmd over .ps1', () => {
+    const picked = cliToolsTest.selectWindowsWhereCandidate([
+      'C:\\Users\\Z\\AppData\\Local\\fnm_multishells\\x\\codex.ps1',
+      'C:\\Users\\Z\\AppData\\Local\\fnm_multishells\\x\\codex.cmd',
+    ]);
+    expect(picked).toMatch(/codex\.cmd$/i);
+  });
+
+  it('honors CODEX_HOME when computing the Codex auth path', () => {
+    const originalCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = '/tmp/custom-codex';
+    try {
+      expect(cliToolsTest.getCodexCredentialsPath('/tmp/home')).toBe('/tmp/custom-codex/auth.json');
+    } finally {
+      if (originalCodexHome === undefined) {
+        delete process.env.CODEX_HOME;
+      } else {
+        process.env.CODEX_HOME = originalCodexHome;
+      }
+    }
+  });
+});
+
+describe('cleanupExpiredLogs', () => {
+  const tempDirs: string[] = [];
+
+  function createTempLogDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-log-retention-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  function touchWithMtime(filePath: string, mtimeMs: number): void {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, 'log', 'utf8');
+    const mtime = new Date(mtimeMs);
+    fs.utimesSync(filePath, mtime, mtime);
+  }
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0, tempDirs.length)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('removes managed log files older than the retention window', () => {
+    const now = Date.UTC(2026, 3, 5, 12, 0, 0);
+    const logDir = createTempLogDir();
+
+    const oldLog = path.join(logDir, '2026-03-20.log');
+    const oldJsonl = path.join(logDir, 'acp', '20260320', 'session.jsonl');
+    const recentLog = path.join(logDir, '2026-04-05.log');
+    const oldText = path.join(logDir, 'notes.txt');
+
+    touchWithMtime(oldLog, now - LODY_LOG_RETENTION_MS - 1);
+    touchWithMtime(oldJsonl, now - LODY_LOG_RETENTION_MS - 1);
+    touchWithMtime(recentLog, now - 60_000);
+    touchWithMtime(oldText, now - LODY_LOG_RETENTION_MS - 1);
+
+    const removed = cleanupExpiredLogs(logDir, { now });
+
+    expect(removed).toBe(2);
+    expect(fs.existsSync(oldLog)).toBe(false);
+    expect(fs.existsSync(oldJsonl)).toBe(false);
+    expect(fs.existsSync(recentLog)).toBe(true);
+    expect(fs.existsSync(oldText)).toBe(true);
+    expect(fs.existsSync(path.join(logDir, 'acp', '20260320'))).toBe(false);
+  });
+});
+
+describe('sanitizeUrlForLogging and redactProxyUrl', () => {
+  it('redacts common sensitive query params', () => {
+    const raw = 'wss://example.com/ws/workspaces/abc?token=secret&machineId=xyz';
+    expect(sanitizeUrlForLogging(raw)).toBe(
+      'wss://example.com/ws/workspaces/abc?token=REDACTED&machineId=xyz'
+    );
+  });
+
+  it('removes basic auth credentials', () => {
+    const raw = 'https://user:pass@example.com/path?token=secret';
+    expect(sanitizeUrlForLogging(raw)).toBe('https://example.com/path?token=REDACTED');
+  });
+
+  it('redacts credentials in proxy URLs', () => {
+    const raw = 'http://user:pass@proxy.example.com:8080';
+    expect(redactProxyUrl(raw)).toBe('http://[redacted]@proxy.example.com:8080');
+  });
+});
+
+describe('readLatestLogTail', () => {
+  const tempDirs: string[] = [];
+
+  function createTempLogDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-log-files-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  function writeLog(dir: string, name: string, content: string, mtimeMs?: number): void {
+    const filePath = path.join(dir, name);
+    fs.writeFileSync(filePath, name.endsWith('.gz') ? zlib.gzipSync(content) : content);
+    if (mtimeMs !== undefined) {
+      const mtime = new Date(mtimeMs);
+      fs.utimesSync(filePath, mtime, mtime);
+    }
+  }
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0, tempDirs.length)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the live rotation once the day has rolled past `<date>.log`', async () => {
+    const dir = createTempLogDir();
+    writeLog(dir, '2026-08-07.log.gz', 'a\nb\n');
+    writeLog(dir, '2026-08-07.log.1', 'c\nd\n');
+
+    const tail = await readLatestLogTail(dir, 2);
+
+    expect(tail).toEqual({ files: ['2026-08-07.log.1'], text: 'c\nd' });
+  });
+
+  it('walks back through rotations when the live file is shorter than requested', async () => {
+    const dir = createTempLogDir();
+    writeLog(dir, '2026-08-06.log', 'old\n');
+    writeLog(dir, '2026-08-07.log.gz', 'a\nb\n');
+    writeLog(dir, '2026-08-07.log.1', 'c\n');
+
+    const tail = await readLatestLogTail(dir, 3);
+
+    expect(tail).toEqual({ files: ['2026-08-07.log.gz', '2026-08-07.log.1'], text: 'a\nb\nc' });
+  });
+
+  it('stops the walk at an unreadable archive instead of failing', async () => {
+    const dir = createTempLogDir();
+    fs.writeFileSync(path.join(dir, '2026-08-07.log.gz'), 'not actually gzip');
+    writeLog(dir, '2026-08-07.log.1', 'live\n');
+
+    await expect(readLatestLogTail(dir, 10)).resolves.toEqual({
+      files: ['2026-08-07.log.1'],
+      text: 'live',
+    });
   });
 });

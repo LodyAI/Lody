@@ -24,7 +24,7 @@ Translation: current
 一致。迭代修复记录已处理的身份，再次遇到同一身份时记录警告并返回无可调度消息。
 后续检查仍由原有会话通知与恢复机制负责。未采用修改所有副本或删除记录的方案，
 因为那会引入新的写入及合并语义，并为了选择任务而修改历史数据。
-后续决策[同步各副本的状态](../../proposed/bug-fix/2026-09-27-duplicate-turn-copy-writes-and-queue-guard.zh.md)，
+后续决策[同步各副本的状态](2026-09-27-duplicate-turn-copy-writes-and-queue-guard.zh.md)，
 但仍不删除记录。
 
 生产者竞争仍然存在：前端原生队列引导先追加历史再删除队列行，CLI 提升独立读取并

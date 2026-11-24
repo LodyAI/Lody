@@ -53,7 +53,7 @@ storage is available from the browser package, but this repository does not
 compose an IndexedDB replica or authorize a new sync scheduler. Public Web/mobile
 application sources are outside this repository's boundary.
 
-The [feature gate](../feature/2026-10-08-roost-history-feature-gate.md) still controls
+The [feature gate](../../implemented/feature/2026-10-08-roost-history-feature-gate.md) still controls
 new-session selection. Loro remains the default; existing backend discriminators,
 history, Loro control metadata, and transport authorization remain unchanged.
 

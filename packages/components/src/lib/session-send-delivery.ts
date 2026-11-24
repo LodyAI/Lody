@@ -2,8 +2,11 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   isSessionHistoryStatusAwaitingStart,
+  isSessionHistoryPendingForDispatch,
   normalizeSessionTurnInputConfig,
+  queuedInputEvidence,
   type MachineId,
+  type MessageQueueItem,
   type SessionHistory,
   type SessionId,
   type SessionMeta,
@@ -12,8 +15,12 @@ import {
 import debug from 'debug';
 import i18next from 'i18next';
 import type { SessionDocDraft, WorkspaceRuntime } from '@/atoms/runtime';
-import { SessionInputNotSentError } from './session-accepted-inputs';
-import { EncryptedPrepareTimeout, isKnownMachineWithdrawal } from './encrypted-dispatch-outcome';
+import { QueueSignalError, SessionInputNotSentError } from './session-accepted-inputs';
+import {
+  EncryptedPrepareTimeout,
+  isKnownMachineWithdrawal,
+  type PreparedEncryptedDispatch,
+} from './encrypted-dispatch-outcome';
 import { throwIfSendAborted } from './session-send-resources';
 
 const log = debug('lody:session-send');
@@ -42,9 +49,12 @@ export type UserTurnSend = {
 
 export type SessionSendRuntime = Pick<
   WorkspaceRuntime,
-  'repo' | 'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
-> &
-  Partial<
+  'writer' | 'sendResources' | 'requestSessionDispatchTurn' | 'requestSessionSteer'
+> & {
+  // Streams hosts await writes directly. A buffered Repo supplies its flush.
+  repo: Pick<WorkspaceRuntime['repo'], 'getDocMeta'> &
+    Partial<Pick<WorkspaceRuntime['repo'], 'flush'>>;
+} & Partial<
     Pick<
       WorkspaceRuntime,
       'isMachineRpcUnreachable' | 'contentMode' | 'prepareEncryptedDispatch' | 'attachmentToken'
@@ -116,78 +126,149 @@ export async function writeUserTurn(
   send: UserTurnSend,
   signal?: AbortSignal
 ): Promise<void> {
-  const late = (await refuseKnownWithdrawnTarget(runtime, send))?.late;
+  // Encrypted machines start only content whose signed intent was written with it in
+  // the same commit (owner decision 2026-11-10), so the intent is signed first.
+  const e2eeIntent =
+    runtime.contentMode === 'e2ee'
+      ? await prepareSignedIntent(runtime, send.sessionId, {
+          ...send.entry,
+          machineId: send.creation?.machineId as MachineId | undefined,
+          signal,
+        })
+      : undefined;
   await prepareUserTurnWrite(runtime, send, signal);
   await persistHumanInputReceipt(runtime, send.sessionId, send.entry, signal);
   throwIfSendAborted(signal);
-  if (send.queue) await runtime.writer.enqueueSessionMessage(send.sessionId, send.queue);
-  else await runtime.writer.appendSessionTurn(send.sessionId, send.entry);
-  if (late && !send.queue) settleOnLateWithdrawal(runtime, send, late);
+  if (send.queue) {
+    try {
+      await runtime.writer.enqueueSessionMessage(
+        send.sessionId,
+        e2eeIntent ? { ...send.queue, e2eeIntent } : send.queue
+      );
+    } catch (error) {
+      // A committed signed row can run, so a failed signal still means the send happened.
+      if (!e2eeIntent || !(error instanceof QueueSignalError)) throw error;
+      log('queue signal failed after %s/%s was written: %o', send.sessionId, send.entry.id, error);
+    }
+  } else
+    await runtime.writer.appendSessionTurn(
+      send.sessionId,
+      e2eeIntent ? { ...send.entry, e2eeIntent } : send.entry
+    );
   if (send.delivery.kind === 'dispatch')
     await activateUserTurn(runtime, send.sessionId, send.entry.id);
 }
 
-/**
- * A withdrawal verified after the deadline cancels the written turn while every copy
- * still awaits a start; a machine that already claimed it keeps its own decision.
- */
-function settleOnLateWithdrawal(
+/** How long an encrypted send waits for its signed intent past the shared preparation deadline. */
+export const QUEUED_ORIGINAL_DEADLINE_MS = 10_000;
+
+async function awaitQueuedOriginal(
+  prepare: Promise<PreparedEncryptedDispatch>,
+  signal?: AbortSignal
+): Promise<PreparedEncryptedDispatch> {
+  const answer = prepare.catch((error: unknown) => {
+    if (error instanceof EncryptedPrepareTimeout) return error.late;
+    throw error;
+  });
+  // A late answer stays observed after this send stops waiting; a retry reuses the original.
+  answer.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('e2ee_rpc_prepare_timeout')),
+      QUEUED_ORIGINAL_DEADLINE_MS
+    );
+    onAbort = () => reject(new Error('e2ee_rpc_prepare_aborted'));
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([answer, stopped]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+/** An input with no signed intent cannot start, so an unsigned input is not sent at all. */
+export async function prepareSignedIntent(
   runtime: SessionSendRuntime,
-  send: UserTurnSend,
-  late: Promise<unknown>
-) {
-  void late.then(
-    () => undefined,
-    async (error: unknown) => {
-      if (!isKnownMachineWithdrawal(error)) return;
-      try {
-        await runtime.sendResources.withSessionStore(send.sessionId, (store) =>
-          store.sessionData.commands.applyHistoryAction({
-            kind: 'user-status',
-            turnId: send.entry.id,
-            status: 'canceled',
-            onlyAwaitingStart: true,
-          })
-        );
-      } catch (cause) {
-        log('late withdrawal could not settle %s/%s: %o', send.sessionId, send.entry.id, cause);
-      }
-    }
+  sessionId: SessionId,
+  input: Pick<SessionHistory, 'id' | 'userId' | 'timestamp' | 'inputConfig'> & {
+    machineId?: MachineId;
+    signal?: AbortSignal;
+  }
+): Promise<string> {
+  const notSent = (key: string) => new SessionInputNotSentError(i18next.t(key));
+  const inputConfig = normalizeSessionTurnInputConfig(input.inputConfig);
+  const userId = input.userId?.trim();
+  const machineId = input.machineId ?? (await readMachineId(runtime, sessionId));
+  if (!runtime.prepareEncryptedDispatch || !machineId || !inputConfig || !userId)
+    throw notSent('sessions.sendError');
+  if (!input.timestamp) throw notSent('sessions.sendError');
+  try {
+    const prepared = await awaitQueuedOriginal(
+      runtime.prepareEncryptedDispatch(machineId, {
+        sessionId,
+        userTurnId: input.id,
+        userId,
+        timestamp: input.timestamp,
+        inputConfig,
+      }),
+      input.signal
+    );
+    if (!prepared.original.e2eeIntent) throw new Error('e2ee_intent_missing');
+    return prepared.original.e2eeIntent;
+  } catch (error) {
+    throw notSent(
+      isKnownMachineWithdrawal(error) ? 'e2ee.machineSharing.issue.notShared' : 'sessions.sendError'
+    );
+  }
+}
+
+/** Writes a queue edit; a changed input is signed again under the same message ID. */
+export async function replaceQueueItem(
+  runtime: SessionSendRuntime,
+  sessionId: SessionId,
+  cid: string,
+  current: MessageQueueItem,
+  next: MessageQueueItem
+): Promise<void> {
+  const sealed = await sealEditedQueueItem(runtime, sessionId, current, next);
+  await runtime.writer.updateSessionMessage(
+    sessionId,
+    cid,
+    sealed as unknown as Record<string, unknown>
   );
 }
 
 /**
- * Encrypted machines also start pending input discovered in synced history, so a
- * withdrawal this host has already verified must refuse the send before anything
- * is written. Every other preparation outcome is unknown here: the input is written
- * and the receiving machine still authorizes it.
+ * An encrypted edit that changes what runs keeps the queue item's message ID and is
+ * signed again by the editor, who then runs it (owner decision 2026-11-10). A machine
+ * that already started the old content refuses the new one. Editing flags keep the
+ * existing signature.
  */
-async function refuseKnownWithdrawnTarget(
+export async function sealEditedQueueItem(
   runtime: SessionSendRuntime,
-  send: UserTurnSend
-): Promise<{ late: Promise<unknown> } | undefined> {
-  if (runtime.contentMode !== 'e2ee' || !runtime.prepareEncryptedDispatch) return undefined;
-  const inputConfig = normalizeSessionTurnInputConfig(send.entry.inputConfig);
-  const userId = send.entry.userId?.trim();
-  const machineId =
-    (send.creation?.machineId as MachineId | undefined) ??
-    (await readMachineId(runtime, send.sessionId));
-  if (!machineId || !inputConfig || !userId || !send.entry.timestamp) return undefined;
-  try {
-    await runtime.prepareEncryptedDispatch(machineId, {
-      sessionId: send.sessionId,
-      userTurnId: send.entry.id,
-      userId,
-      timestamp: send.entry.timestamp,
-      inputConfig,
-    });
-  } catch (error) {
-    if (isKnownMachineWithdrawal(error))
-      throw new SessionInputNotSentError(i18next.t('e2ee.machineSharing.issue.notShared'));
-    // Wrapped: an async function would otherwise wait for the late answer.
-    if (error instanceof EncryptedPrepareTimeout) return { late: error.late };
-  }
-  return undefined;
+  sessionId: SessionId,
+  current: MessageQueueItem,
+  next: MessageQueueItem
+): Promise<MessageQueueItem> {
+  if (
+    runtime.contentMode !== 'e2ee' ||
+    queuedInputEvidence(current.acpSessionConfig) === queuedInputEvidence(next.acpSessionConfig)
+  )
+    return next;
+  const userTurnId = next.userTurnId ?? current.userTurnId;
+  if (!userTurnId) throw new SessionInputNotSentError(i18next.t('sessions.sendError'));
+  const e2eeIntent = await prepareSignedIntent(runtime, sessionId, {
+    id: userTurnId,
+    userId: next.userId,
+    timestamp: next.timestamp,
+    inputConfig: next.acpSessionConfig as SessionHistory['inputConfig'],
+  });
+  return { ...next, userTurnId, e2eeIntent };
 }
 
 /** Only local control metadata; this does not write history or start execution. */
@@ -269,6 +350,18 @@ export async function dispatchUserTurn(
     userId &&
     timestamp
   ) {
+    const send = (prepared: PreparedEncryptedDispatch) =>
+      prepared.send().then(
+        (response) => {
+          if (response?.accepted) options?.onAccepted?.();
+          return response?.accepted ?? false;
+        },
+        () => false
+      );
+    const unavailable = () => {
+      log('Encrypted dispatch acceleration unavailable for %s/%s', sessionId, userTurnId);
+      return false;
+    };
     try {
       const prepared = await runtime.prepareEncryptedDispatch(machineId, {
         sessionId,
@@ -277,25 +370,22 @@ export async function dispatchUserTurn(
         timestamp,
         inputConfig,
       });
-      await runtime.sendResources.withSessionStore(sessionId, (store) => {
-        store.setState((draft: SessionDocDraft) => {
-          const existing = draft.rpcDispatchOriginals?.[userTurnId];
-          if (existing !== undefined && existing !== prepared.original.frameHex)
-            throw new Error('e2ee_rpc_original_conflict');
-          draft.rpcDispatchOriginals ??= {};
-          draft.rpcDispatchOriginals[userTurnId] = prepared.original.frameHex;
-        });
-      });
-      rpc = prepared.send().then(
-        (response) => {
-          if (response?.accepted) options?.onAccepted?.();
-          return response?.accepted ?? false;
-        },
-        () => false
-      );
-    } catch {
-      // Preparation/storage failure cannot remove or delay durable activation.
-      log('Encrypted dispatch acceleration unavailable for %s/%s', sessionId, userTurnId);
+      rpc = send(prepared);
+    } catch (error) {
+      // Preparation failure cannot remove or delay durable activation. A host
+      // that answers after the deadline still accelerates the activated turn.
+      rpc =
+        error instanceof EncryptedPrepareTimeout
+          ? error.late
+              .then(async (prepared) => {
+                const current = await readUserTurn(runtime, sessionId, userTurnId);
+                // Durable activation may already be processing; it is still dispatchable.
+                // The receiver deduplicates this turn id; cancellation stops the late send.
+                if (!isSessionHistoryPendingForDispatch(current)) return false;
+                return send(prepared);
+              })
+              .catch(unavailable)
+          : Promise.resolve(unavailable());
     }
   }
   if (runtime.contentMode !== 'e2ee' && machineId && inputConfig && userId && timestamp) {
@@ -375,7 +465,7 @@ async function promoteGuideToFollowUp(
   // A started, terminal or removed turn is not repairable.
   if (!promoted) return;
   await dispatchUserTurn(runtime, sessionId, userTurnId, options);
-  await runtime.repo.flush();
+  await runtime.repo.flush?.();
 }
 
 /**
@@ -424,7 +514,9 @@ export async function steerUserTurn(
   }
   if (
     !response?.recoveryOwned &&
-    (response?.disposition === 'no-active-turn' || response?.disposition === 'promotion-failed')
+    (response?.disposition === 'no-active-turn' ||
+      response?.disposition === 'promotion-failed' ||
+      response?.disposition === 'unsupported')
   ) {
     await promoteGuideToFollowUp(runtime, sessionId, userTurnId, { inputConfig, machineId });
     log('steer became an ordinary follow-up for %s/%s', sessionId, userTurnId);
@@ -445,15 +537,24 @@ export async function steerUserTurn(
 /** Delivery for a send that was held in memory until its attachments were ready. */
 export async function deliverUserTurn(
   runtime: SessionSendRuntime,
-  send: UserTurnSend & { targetMachineId?: MachineId | null }
+  send: UserTurnSend & { targetMachineId?: MachineId | null },
+  onGuideOutcome?: (
+    sessionId: SessionId,
+    userTurnId: string,
+    expectedTurnId: string,
+    applied: boolean | undefined
+  ) => void
 ): Promise<void> {
   if (send.delivery.kind === 'dispatch') {
     await dispatchUserTurn(runtime, send.sessionId, send.entry.id, {
       machineId: send.targetMachineId ?? null,
     });
   } else if (send.delivery.kind === 'guide') {
-    await steerUserTurn(runtime, send.sessionId, send.delivery.expectedTurnId, send.entry.id, {
+    const { expectedTurnId } = send.delivery;
+    onGuideOutcome?.(send.sessionId, send.entry.id, expectedTurnId, undefined);
+    const applied = await steerUserTurn(runtime, send.sessionId, expectedTurnId, send.entry.id, {
       machineId: send.targetMachineId ?? null,
     });
+    onGuideOutcome?.(send.sessionId, send.entry.id, expectedTurnId, applied);
   }
 }

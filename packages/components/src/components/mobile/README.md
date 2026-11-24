@@ -16,7 +16,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 - `mobile-home-screen.tsx` — workspace home. `workspaceTabSpecs` builds the
   Inbox / Chat / Projects dock tabs. The header's connection/pull pill is
   absolutely centred on the h-9 chrome row, and the pill bar expands above the
-  scroll region.
+  scroll region. Its Add project and private-resource Help sheets opt into
+  [DrawerContent](../../ui/drawer.tsx)'s `bottomPadding="safeArea"`; the sheet owns
+  that local bottom clearance.
 - `mobile-project-screen.tsx`, `mobile-chat-landing-screen.tsx`,
   `mobile-archive-screen.tsx` — the other top-level screens.
 - `mobile-workspace-layout.tsx`, [`mobile-workspace-tabbar.tsx`](../../../../../specs/mobile-workspace-dock.md),
@@ -31,9 +33,59 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 
 - `mobile-chat-list.tsx` (`MobileChatList`, `MobileChatListCard`),
   `mobile-swipeable-row.tsx` (iOS-Mail-style row actions; `touch-action: pan-y`),
+  `mobile-later-sheet.tsx` (Later picker and section-name sheet),
   `mobile-filter-pill-bar.tsx`, `mobile-filter-drawer.tsx`.
 - `MOBILE_CHAT_PREVIEW_MAX_ROOTS` is 5 — the desktop `MAX_VISIBLE_SESSIONS`,
   copied rather than imported so the mobile bundle skips `session-list.tsx`.
+
+### Status grouping
+
+The home list's Status grouping (`specs/sidebar-status-view.md#phones`) and the
+Pinned area of every grouping render the shared `buildStatusViewLayout` from
+`@lody/shared`; nothing here sorts or classifies those rows.
+
+- `mobile-status-view.ts` maps list rows onto the shared layout input. A row's
+  `readOnly` (the session-management guard's predicate) and a read-only member
+  (`useStatusViewWritable`) both mean `canManage: false`, so status actions,
+  swipes and drags are not offered where they would be refused. Pinning stays
+  available through the preference path, except in an encrypted workspace
+  without the write role, where no pin can be sealed either (`canPrefer: false`).
+- A row nested under its opener carries its own id (`data-status-row-id`) and
+  its opener's (`data-status-root-id`). Its menu and swipes act on it alone
+  (the Spec's opened-by rule); it has no order of its own, so it does not drag
+  and drops land relative to its opener.
+- `use-mobile-status-list.tsx` owns the surface state the shared contract leaves
+  to each surface: the clock (re-render at `nextChangeAt`, each minute while
+  Later countdowns show, and on foreground), the order frozen while a row is
+  lifted, the dropped order held until the moved row's placement reads back or
+  its write fails, and the row, section-picker, section-header, Later and
+  section-name sheets, and the confirmation before a section is deleted. The
+  clock timer is capped at 2^31-1 ms: a longer delay fires at once in browsers.
+  Section menus show only in the Status grouping, where pins can be placed.
+  Writes go through the injected `MobileStatusCommands`
+  (`runStatusViewCommand` plus `use-mobile-status-actions.ts`, which asks the
+  shared sub-conversation question and offers Undo after Later and Settle).
+- `use-status-list-drag.ts`: holding a row still for 450 ms lifts it; releasing
+  opens the action menu, moving drags it. Movement before the lift is a scroll
+  or a swipe; a second finger cancels the gesture, and a context-menu request
+  (right click, TalkBack, a menu key) opens the action menu. The drop slot follows
+  the finger; over a list that takes no drops it is cleared, and only in the
+  auto-scroll zones (which clear the floating tab bar) does it survive the
+  finger passing over padding. Pull-to-refresh stands down for a touch a lifted
+  row claimed. While a row is lifted, a non-passive `touchmove` listener on the
+  list surface stops the WebView scrolling; the list scrolls itself at its
+  edges. That listener must be registered at mount: one added at the lift is
+  too late, because the browser commits to a pan at `touchstart` and cancels
+  the pointer. Haptics use `navigator.vibrate` where the WebView has it
+  (Android); the Capacitor shell has no haptics bridge, so iOS is silent.
+  Chrome also refuses `vibrate` until the page has had a tap (user activation),
+  so the lift and slot feedback stay silent on a freshly loaded page whose
+  first gesture is a long press.
+- `MobileStatusSwipeRow`: a leading swipe pins or unpins; a trailing swipe gives
+  Settle and Later on Focus and Later rows, Archive on Settled and pinned rows.
+- On a fold, one list instance portals its first bucket into the upper panel
+  (`splitTargets`), so both panels share one layout, one drag and one planner
+  input.
 
 ## Sheets and session surfaces
 
@@ -91,9 +143,13 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
   `mobile-session-menu-sheet.tsx` (the `…` button: machine/branch info, optional
   Owner row, Find/Fork/Rename/Copy/Archive).
 - `mobile-file-viewer-drawer.tsx` — full-screen right drawer over the still-mounted
-  conversation. Session HTML opens in preview with an eye toggle for source;
+  conversation. Session files open read-only with an explicit edit toggle for
+  writable files; reopening the drawer restores read-only mode. Session HTML opens in preview with an eye toggle for source;
   WebKit uses the shared script-free HTML/CSS preview. The project file browser
   also previews complete HTML by default with the same source toggle.
+  Its [DrawerContent](../../ui/drawer.tsx) uses `width="full"` for 100% width without
+  directional width caps. Caller classes and inline styles retain normal cascade
+  precedence. Insets, borders, radii and keyboard handling keep their current owners.
   `glass-icon-button.tsx` — the frosted header's `GlassIconButton`
   (canvas-drawn glass disc; story `MobileFrostedHeader.stories.tsx`).
 
@@ -118,9 +174,7 @@ relative-time`, a collapsed `Archived (N)` disclosure whose rows restore and
 - Provider-defined pickers have a separate coordinator ID namespace, so an ACP
   option named `permission` or `model` cannot open or dismiss a built-in row.
   [Collision fix and builtin audit](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-dimcode-mobile-permission-picker.md).
-- `mobile-session-composer-footer.tsx` still exports the legacy
-  `MobileModelPickerLabel` helpers for any remaining chip faces;
-  `mobile-fast-plan-toggles.tsx` survives for the in-session composer only.
+- `mobile-fast-plan-toggles.tsx` survives for the in-session composer only.
 
 ## Settings
 
