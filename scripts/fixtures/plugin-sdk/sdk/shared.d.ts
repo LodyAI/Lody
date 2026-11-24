@@ -94,7 +94,7 @@ export type ReadonlyJsonValue = ReadonlyJsonPrimitive | ReadonlyJsonArray | Read
  * Gives custom Workspace / multi-Agent panels unrestricted read freedom beyond fixed summary shapes,
  * while keeping `HistoryWriter` and Kernel commands as the sole mutation path.
  */
-export interface RawDocumentSnapshot<TDoc extends ReadonlyJsonValue = ReadonlyJsonObject> {
+export interface UnstableDocumentSnapshot<TDoc extends ReadonlyJsonValue = ReadonlyJsonObject> {
   readonly schemaVersion: number;
   readonly revision: string;
   readonly doc: TDoc;
@@ -105,30 +105,25 @@ export interface RawDocumentSnapshot<TDoc extends ReadonlyJsonValue = ReadonlyJs
  * Loro/Flock and `sessionData`/Roost readers (zero parallel Domain Store, zero whole-tree rebuilds
  * on unrelated commits or streaming tokens).
  */
-export type RawSnapshotTarget =
+export type UnstableSnapshotTarget =
   | {
       readonly kind: 'workspace-state';
       readonly workspace: WorkspaceRef;
-      /** Optional top-level collection/key path slice to avoid materializing unrelated workspace state. */
-      readonly path?: readonly string[];
+      readonly path: readonly [
+        'sessions' | 'projects' | 'machines' | 'roles' | 'schedules' | 'rateLimits',
+        string,
+        ...string[],
+      ];
     }
   | { readonly kind: 'session-meta'; readonly session: SessionRef }
-  | {
-      readonly kind: 'session-transcript';
-      readonly session: SessionRef;
-      /** Specific turn IDs or bounded recent window (defaults to latest bounded page; never sweeps full history). */
-      readonly turnIds?: readonly string[];
-      readonly limit?: number;
-    }
+  | ({ readonly kind: 'session-transcript'; readonly session: SessionRef } & (
+      | { readonly turnIds: readonly string[]; readonly limit?: never }
+      | { readonly limit: number; readonly turnIds?: never }
+    ))
   | {
       readonly kind: 'project-state';
       readonly project: ProjectRef;
-      readonly path?: readonly string[];
-    }
-  | {
-      readonly kind: 'schedule-doc';
-      readonly workspace: WorkspaceRef;
-      readonly scheduleId: string;
+      readonly path: readonly [string, ...string[]];
     };
 
 export type AcpToolKind =
@@ -775,24 +770,31 @@ export declare const lodyCommands: {
     SessionRef
   >;
   readonly sessionUpdateTitle: LodyCommandDescriptor<'session', { readonly title: string }, void>;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionMarkRead: LodyCommandDescriptor<'session', void, void>;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionMarkUnread: LodyCommandDescriptor<'session', void, void>;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionSetPinned: LodyCommandDescriptor<'session', { readonly pinned: boolean }, void>;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionSnooze: LodyCommandDescriptor<
     'session',
     { readonly until: number; readonly includeOpenedSessions?: boolean },
     void
   >;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionSettle: LodyCommandDescriptor<
     'session',
     { readonly includeOpenedSessions?: boolean } | void,
     void
   >;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionMoveToFocus: LodyCommandDescriptor<
     'session',
     { readonly includeOpenedSessions?: boolean } | void,
     void
   >;
+  /** @experimental Coupled to the host sidebar. */
   readonly sessionMoveOrder: LodyCommandDescriptor<
     'session',
     {
@@ -803,21 +805,25 @@ export declare const lodyCommands: {
     },
     void
   >;
+  /** @experimental Reserved for hosts with workspace pin-section support; unavailable in the current host. */
   readonly pinSectionCreate: LodyCommandDescriptor<
     'workspace',
     { readonly sectionId?: string; readonly name: string },
     { readonly sectionId: string }
   >;
+  /** @experimental Reserved for hosts with workspace pin-section support; unavailable in the current host. */
   readonly pinSectionRename: LodyCommandDescriptor<
     'workspace',
     { readonly sectionId: string; readonly name: string },
     void
   >;
+  /** @experimental Reserved for hosts with workspace pin-section support; unavailable in the current host. */
   readonly pinSectionMove: LodyCommandDescriptor<
     'workspace',
     { readonly sectionId: string; readonly beforeSectionId: string | null },
     void
   >;
+  /** @experimental Reserved for hosts with workspace pin-section support; unavailable in the current host. */
   readonly pinSectionDelete: LodyCommandDescriptor<
     'workspace',
     { readonly sectionId: string },

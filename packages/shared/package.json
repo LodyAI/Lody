@@ -249,6 +249,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "semver": "^7.7.4",
     "mdast-util-from-markdown": "^2.0.2",
     "immer": "^10.2.0",
     "fzstd": "0.1.1",

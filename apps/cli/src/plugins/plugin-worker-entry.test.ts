@@ -44,11 +44,18 @@ it('validates separately bundled attachment handlers and keeps serving after an 
           instanceId: 1,
           dataDir: dir,
           config: {},
+          permissions: [],
         })
       ).toMatchObject({ type: 'ready' });
-      expect(await exchange({ type: 'start' })).toMatchObject({ ok: true });
+      expect(await exchange({ type: 'start', contextId: 'startup' })).toMatchObject({ ok: true });
       expect(
-        await exchange({ type: 'event', eventType: 'failure', eventId: 'one', payload: null })
+        await exchange({
+          type: 'event',
+          contextId: 'delivery',
+          eventType: 'failure',
+          eventId: 'one',
+          payload: null,
+        })
       ).toMatchObject({ ok: false, error: { code: 'handler_error' } });
       const base = {
         type: 'invoke',

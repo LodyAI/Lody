@@ -482,7 +482,8 @@ export class LoroDocumentManager {
   workflowSessionAuthority?: (
     pluginId: string,
     installation: string,
-    projectId: string
+    projectId: string,
+    roleId: string
   ) => Promise<() => void>;
   async authorizeWorkflowChild(
     sessionId: SessionId,
@@ -525,7 +526,8 @@ export class LoroDocumentManager {
     const check = await this.workflowSessionAuthority(
       pluginId,
       principal.slice(prefix.length),
-      projectId
+      projectId,
+      roleId
     );
     const role = (await this.pluginWorkflows())
       .find((g) => g.pluginId === pluginId)

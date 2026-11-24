@@ -1,4 +1,4 @@
-import type { RawSnapshotTarget } from '@lody/plugin-sdk';
+import type { UnstableSnapshotTarget } from '@lody/plugin-sdk';
 import type { SessionMeta, AgentRole, ScheduleRegistryRow } from '@lody/shared';
 import type { WorkspaceRuntime } from '../atoms/runtime';
 import type { VisibleLocalProjectIndex } from '../lib/visible-local-project-index';
@@ -16,43 +16,36 @@ export function workspaceSnapshotSource(
   schedules: readonly ScheduleRegistryRow[],
   extra: Readonly<Record<string, unknown>> = {}
 ): SnapshotSource {
-  const find = (t: Extract<RawSnapshotTarget, { session: unknown }>) => {
+  const find = (t: Extract<UnstableSnapshotTarget, { session: unknown }>) => {
     const s =
       active.find((x) => x.id === t.session.sessionId) ??
       archived.find((x) => x.id === t.session.sessionId);
     if (!s || s.machineId !== t.session.machineId) return forbidden();
     return s;
   };
-  const project = (t: Extract<RawSnapshotTarget, { kind: 'project-state' }>) =>
+  const project = (t: Extract<UnstableSnapshotTarget, { kind: 'project-state' }>) =>
     projects.get(`${t.project.machineId}:${t.project.projectId}`)?.project ?? forbidden();
-  const schedule = (t: Extract<RawSnapshotTarget, { kind: 'schedule-doc' }>) =>
-    schedules.find((x) => x.scheduleId === t.scheduleId) ?? forbidden();
-  function identity(t: RawSnapshotTarget) {
+  function identity(t: UnstableSnapshotTarget) {
+    if (t.kind === 'project-state' && !t.path?.length) return forbidden();
     if (!account) return forbidden();
     let refs: readonly unknown[];
     switch (t.kind) {
       case 'workspace-state': {
-        const k = t.path?.[0];
-        const key = t.path?.[1];
-        const sources: Record<string, unknown> = {
-          ...extra,
-          agentRoles: roles,
-          projects,
-          schedules,
-          sessions: active,
-        };
-        if (k && !Object.hasOwn(sources, k)) return forbidden();
-        if (key && k === 'sessions')
-          refs = [active.find((s) => s.id === key) ?? archived.find((s) => s.id === key)];
-        else if (key && k === 'projects') refs = [projects.get(key)?.project];
-        else if (key && k === 'agentRoles') refs = [roles.find((r) => r.id === key)];
-        else if (key && k === 'schedules') refs = [schedules.find((r) => r.scheduleId === key)];
-        else
-          refs = k
-            ? k === 'sessions'
-              ? [active, archived]
-              : [sources[k]]
-            : [...Object.values(sources), archived];
+        const [collection, key] = t.path ?? [];
+        if (!key) return forbidden();
+        const data =
+          collection === 'sessions'
+            ? (active.find((s) => s.id === key) ?? archived.find((s) => s.id === key))
+            : collection === 'projects'
+              ? projects.get(key)?.project
+              : collection === 'roles'
+                ? roles.find((r) => r.id === key)
+                : collection === 'schedules'
+                  ? schedules.find((r) => r.scheduleId === key)
+                  : collection === 'machines' || collection === 'rateLimits'
+                    ? Object.getOwnPropertyDescriptor(extra[collection] ?? {}, key)?.value
+                    : undefined;
+        refs = [data];
         break;
       }
       case 'session-meta':
@@ -64,9 +57,6 @@ export function workspaceSnapshotSource(
       case 'project-state':
         refs = [project(t)];
         break;
-      case 'schedule-doc':
-        refs = [schedule(t).scheduleId];
-        break;
       default:
         return forbidden();
     }
@@ -74,7 +64,7 @@ export function workspaceSnapshotSource(
     return [runtime, account, ...refs];
   }
   async function open(
-    t: RawSnapshotTarget,
+    t: UnstableSnapshotTarget,
     notify: () => void,
     signal: AbortSignal
   ): Promise<SnapshotSlice> {
@@ -86,54 +76,26 @@ export function workspaceSnapshotSource(
         return {
           identity: id,
           read: () => {
-            const k = t.path?.[0];
-            const key = t.path?.[1];
-            if (k && key && ['sessions', 'projects', 'agentRoles', 'schedules'].includes(k))
-              return { [k]: { [key]: id[2] } };
-            return {
-              ...(k ? (Object.hasOwn(extra, k) ? { [k]: extra[k] } : {}) : extra),
-              ...(!k || k === 'sessions'
-                ? { sessions: Object.fromEntries([...active, ...archived].map((s) => [s.id, s])) }
-                : {}),
-              ...(!k || k === 'projects'
-                ? {
-                    projects: Object.fromEntries([...projects].map(([key, p]) => [key, p.project])),
-                  }
-                : {}),
-              ...(!k || k === 'agentRoles'
-                ? { agentRoles: Object.fromEntries(roles.map((r) => [r.id, r])) }
-                : {}),
-              ...(!k || k === 'schedules'
-                ? { schedules: Object.fromEntries(schedules.map((r) => [r.scheduleId, r])) }
-                : {}),
-            };
+            const [k, key] = t.path;
+            return { [k]: { [key]: id[2] } };
           },
         };
       case 'project-state':
         return { identity: id, read: () => project(t) };
       case 'session-meta':
         return { identity: id, read: () => find(t) };
-      case 'schedule-doc': {
-        const store = await runtime.acquireScheduleStore(t.scheduleId);
-        const off = store.subscribe(notify);
-        return {
-          identity: id,
-          read: () => store.getState() ?? forbidden(),
-          release: () => {
-            off();
-            runtime.releaseScheduleStoreRef(t.scheduleId);
-          },
-        };
-      }
       case 'session-transcript': {
         const s = find(t);
         const limit = t.limit ?? 20;
         if (
+          (t.limit === undefined) === (t.turnIds === undefined) ||
           !Number.isSafeInteger(limit) ||
           limit < 1 ||
           limit > 100 ||
           (t.turnIds &&
-            (t.turnIds.length > 100 || t.turnIds.some((id) => typeof id !== 'string' || !id)))
+            (!t.turnIds.length ||
+              t.turnIds.length > 100 ||
+              t.turnIds.some((id) => typeof id !== 'string' || !id)))
         )
           throw Error('Invalid transcript window');
         const store = await runtime.acquireSessionStore(s.id);

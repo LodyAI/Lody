@@ -48,6 +48,11 @@ it('revokes a dev lease on escalation and never resurrects it on downgrade or no
   expect(store.allows({ ...entry, manifest: { ...manifest, machine: 'machine.js' } })).toBe(false);
   expect(store.allows(entry)).toBe(false);
   store.grant(entry);
+  expect(
+    store.allows({ ...entry, manifest: { ...manifest, permissions: ['unstable.rawState'] } })
+  ).toBe(false);
+  expect(store.allows(entry)).toBe(false);
+  store.grant(entry);
   expect(store.allows({ ...entry, devSessionNonce: 'b'.repeat(32) })).toBe(false);
   expect(store.allows(entry)).toBe(false);
 });
@@ -495,18 +500,21 @@ it('resolves a bounded raw Loro transcript from the authorized workspace and rel
     sessionId: FIXTURE_SESSION_ID,
   } as import('@lody/plugin-sdk').SessionRef;
   try {
-    const snapshot = await port.readSnapshot({
+    const snapshot = await port.unstable.readSnapshot({
       kind: 'session-transcript',
       session: ref,
       turnIds: ['a-2'],
     });
     expect(snapshot.doc.turns).toMatchObject([{ id: 'a-2', userTurnId: 'u-2' }]);
     expect(Object.isFrozen(snapshot.doc.turns)).toBe(true);
-    expect((await port.readSnapshot({ kind: 'session-meta', session: ref })).doc.businessKey).toBe(
-      'owned'
-    );
+    expect(
+      (await port.unstable.readSnapshot({ kind: 'session-meta', session: ref })).doc.businessKey
+    ).toBe('owned');
     await expect(
-      port.readSnapshot({ kind: 'session-transcript', session: { ...ref, machineId: 'foreign' } })
+      port.unstable.readSnapshot({
+        kind: 'session-transcript',
+        session: { ...ref, machineId: 'foreign' },
+      })
     ).rejects.toMatchObject({ code: 'forbidden' });
     expect(leased).toBe(0);
   } finally {

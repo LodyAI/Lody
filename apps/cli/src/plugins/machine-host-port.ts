@@ -2,8 +2,14 @@ import type { ChildToHostFrame, HostToChildFrame } from '@lody/shared/plugins/ip
 type Request = Extract<ChildToHostFrame, { type: 'host_call' }>;
 export type MachineHostOrigin =
   | { type: 'start' }
-  | { type: 'event'; frame: Extract<HostToChildFrame, { type: 'event' }> }
-  | { type: 'invoke'; frame: Extract<HostToChildFrame, { type: 'invoke' }> };
+  | { type: 'service' }
+  | { type: 'uninstall' }
+  | { type: 'event'; frame: Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'> }
+  | {
+      type: 'invoke';
+      execute?: DispatchMachineHostCall;
+      frame: Extract<HostToChildFrame, { type: 'invoke' }>;
+    };
 export interface MachineHostCall {
   pluginId: string;
   workspaceId: string;
@@ -27,13 +33,15 @@ export function encryptedPluginDispatch(
     if (
       call.origin.type === 'invoke' &&
       call.origin.frame.kind !== 'tool' &&
-      (call.op === 'sessions.create' ||
-        call.op === 'sessions.send' ||
-        call.op === 'sessions.respondInteraction' ||
-        (call.op === 'lody.execute' &&
-          ['sessionCreate', 'sessionSend', 'sessionRespondInteraction'].includes(
-            call.payload.descriptorId ?? ''
-          )))
+      call.op === 'lody.execute' &&
+      [
+        'sessionCreate',
+        'sessionSend',
+        'sessionRespondInteraction',
+        'sessionStop',
+        'sessionArchive',
+        'sessionFork',
+      ].includes(call.payload.descriptorId ?? '')
     )
       throw Object.assign(
         new Error('Unrooted plugin invocation cannot originate encrypted inputs'),

@@ -3,6 +3,7 @@ import { personalHostFailureCode } from './e2ee-control-failure';
 import { removeEagerSyncHighWaterNamespace } from './eager-sync-high-water-cache';
 import {
   encryptedLocalNamespace,
+  encryptedLocalInstance,
   parseEncryptedLocalScope,
   type E2eeLocalDataScope,
 } from './e2ee-local-data';
@@ -62,6 +63,7 @@ export async function removeEncryptedWorkspaceLocalData(input: E2eeLocalDataScop
   };
   const results = await Promise.allSettled([
     removeInputs(),
+    remove('lody-plugin-storage:' + encryptedLocalInstance(input)),
     remove(`lody-loro-repo-db-${namespace}`),
     remove(`lody-loro-stream-cursors-${namespace}`),
     removeEagerSyncHighWaterNamespace(namespace),

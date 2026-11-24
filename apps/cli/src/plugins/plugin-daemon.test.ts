@@ -176,6 +176,7 @@ it('resumes a pending installation from its saved generation once all required s
               config: {
                 channel: { type: 'string', label: 'Channel', required: true },
                 topic: { type: 'string', label: 'Topic', required: true },
+                format: { type: 'string', label: 'Format', scope: 'project' },
               },
             },
           },
@@ -201,6 +202,19 @@ it('resumes a pending installation from its saved generation once all required s
     expect(await list()).toMatchObject({
       plugins: [{ enabled: true, pendingConfiguration: false }],
     });
+    for (const projectId of ['a', 'b'])
+      await daemon.dispatch({
+        action: 'configure-many',
+        pluginId: id,
+        projectId,
+        changes: { format: projectId },
+      });
+    await expect(
+      daemon.dispatch({ action: 'configure', pluginId: id, key: 'format', value: 'shared' })
+    ).rejects.toThrow('target mismatch');
+    expect(
+      JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'))[0].projectPreferences
+    ).toEqual({ a: { format: 'a' }, b: { format: 'b' } });
     expect(JSON.parse(await readFile(join(root, 'catalog.json'), 'utf8'))[0].preferences).toEqual({
       channel: 'test',
       topic: 'test',
@@ -376,8 +390,8 @@ it.each(['buffered event', 'missed event'] as const)(
             },
           ],
         };
-      if (call.op === 'lody.readSnapshot') return { doc: { agentRoleId: architect } };
-      if (call.op === 'sessions.create') {
+      if (call.op === 'lody.unstable.readSnapshot') return { doc: { agentRoleId: architect } };
+      if (call.op === 'lody.execute' && call.payload.descriptorId === 'sessionCreate') {
         attempts.push(call);
         return dispatchMachineHostCall(call, signal);
       }
@@ -539,35 +553,32 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     const approval = {
       action: 'grant' as const,
       installationId,
-      pluginId,
+      plugin_id: pluginId,
       machineDigest: compiled.machineDigest,
       targetDevice: owner.identity.signingPublicKey,
-      operation: 'sessions.create' as const,
-      readOperations: [
-        'sessions',
-        'sessionTurns',
-        'session-meta',
-      ] as import('@lody/shared/plugins/machine-rpc').WorkflowReadOperation[],
-      projectId,
-      expiresAt: Date.now() + 3600000,
+      grant_id: randomUUID(),
+      machine_id: f.machineId,
+      workspace_id: f.workspaceId,
+      issued_by_user_id: Buffer.from(f.ledger.owner.raw).toString('hex'),
+      issued_at_ms: Date.now(),
+      allowed_project_ids: [projectId],
+      allowed_role_ids: '*' as const,
+      allowed_ops: ['sessions.create'] as 'sessions.create'[],
     };
     expect(await owner.issue(daemon, approval, projectExists)).toEqual({
-      type: 'plugin/workflow-create-approval',
+      type: 'plugin/declared-workflow-grant',
       active: true,
     });
     await daemon.dispose();
     daemon = open();
     await daemon.start();
     const restored = JSON.parse(await readFile(join(f.directory, 'catalog.json'), 'utf8'))[0]
-      .workflowReceipt;
-    expect((await owner.identity.verifyWorkflowApproval(restored, f.machineId)).approval).toEqual(
-      approval
-    );
+      .declaredGrant.signature;
+    expect(
+      (await owner.identity.verifyDeclaredWorkflowGrant(restored, f.machineId)).approval
+    ).toEqual(approval);
     await expect(
-      owner.identity.verifyWorkflowApproval(
-        { ...restored, signer: owner.identity.signingPublicKey },
-        f.machineId
-      )
+      owner.identity.verifyDeclaredWorkflowGrant(restored.slice(0, -2), f.machineId)
     ).rejects.toThrow();
     const inspection = await daemon.dispatch({ action: 'inspect', pluginId });
     const instance = inspection.instanceId;
@@ -578,7 +589,11 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     const revoke = (id: string) =>
       owner.issue(
         daemon,
-        { ...approval, action: 'revoke', projectId: id, readOperations: undefined },
+        {
+          ...approval,
+          action: 'revoke',
+          grant_id: id === projectId ? approval.grant_id : randomUUID(),
+        },
         projectExists
       );
     await revoke('other-project');
@@ -586,7 +601,8 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     await revoke(projectId);
     expect(lease?.isCurrent()).toBe(false);
     expect(await daemon.workflowLease(pluginId, instance)).toBeUndefined();
-    await owner.issue(daemon, approval, projectExists);
+    await expect(owner.issue(daemon, approval, projectExists)).rejects.toThrow();
+    await owner.issue(daemon, { ...approval, grant_id: randomUUID() }, projectExists);
     const renewed = await daemon.workflowLease(pluginId, instance);
     expect(renewed?.isCurrent()).toBe(true);
     await daemon.dispatch({ action: 'disable', pluginId });
@@ -691,7 +707,7 @@ it('workflow contribution processes belong to the enabled generation and receive
 
 it('admits verifier lineage only for the approved project, signed parent turn and installed role skills', async () => {
   const { ownerApprovalFixture } = await import('../../tests/fixtures/plugin-workflow-approval');
-  const { authorizedProjectCreate } = await import('./workflow/authorized-project-create');
+  const { resolveDeclaredWorkflow } = await import('./workflow/declared-workflow');
   const { makeVerifiedExecutionIntent } = await import('../lib/e2ee/execution-intent-verification');
   const { LoroDoc, LoroMap } = await import('loro-crdt');
   const fixture = await ownerApprovalFixture(),
@@ -716,17 +732,21 @@ it('admits verifier lineage only for the approved project, signed parent turn an
         request: {
           workspaceId,
           machineId,
-          method: 'plugin/workflow-create-approval',
+          method: 'plugin/declared-workflow-grant',
           params: {
-            pluginId,
+            plugin_id: pluginId,
             installationId,
             machineDigest,
-            projectId,
+            grant_id: randomUUID(),
+            workspace_id: workspaceId,
+            machine_id: machineId,
+            issued_by_user_id: receipt.signer,
+            issued_at_ms: Date.now(),
+            allowed_project_ids: [projectId],
+            allowed_role_ids: [roleId],
             targetDevice: fixture.identity.signingPublicKey,
             action: 'grant',
-            operation: 'sessions.create',
-            expiresAt: Date.now() + 60000,
-            readOperations: ['session-meta', 'sessionTurns'],
+            allowed_ops: ['sessions.create'],
           },
         },
       })
@@ -772,7 +792,7 @@ it('admits verifier lineage only for the approved project, signed parent turn an
         return { archived: true, sessionId: 'verifier', userId };
       },
     };
-    const resolve = authorizedProjectCreate({
+    const resolve = resolveDeclaredWorkflow({
       workspaceId,
       machineId: machineId as import('@lody/shared').MachineId,
       manager: manager as unknown as import('../lib/loro/doc').LoroDocumentManager,
@@ -789,7 +809,12 @@ it('admits verifier lineage only for the approved project, signed parent turn an
           openDispatch: (id, frame) => f.receiver.openDispatch(id, frame),
         }),
       },
-      lease: async () => ({ receipt, installationId, machineDigest, isCurrent: () => true }),
+      lease: async () => ({
+        signature: Buffer.from(frame.frame).toString('hex'),
+        installationId,
+        machineDigest,
+        isCurrent: () => true,
+      }),
       projectExists: async () => true,
       sessionScope: async () => footprint,
     });
@@ -801,8 +826,10 @@ it('admits verifier lineage only for the approved project, signed parent turn an
           machineId,
           pluginId,
           instanceId: 1,
-          op: 'sessions.create',
+          origin: { type: 'start' },
+          op: 'lody.execute',
           payload: {
+            descriptorId: 'sessionCreate',
             target,
             input: {
               prompt: 'Verify',
@@ -827,7 +854,7 @@ it('admits verifier lineage only for the approved project, signed parent turn an
       input: { parentSession, originTurn, skillIds: [skill] },
     });
     await expect(create({ skillIds: ['foreign'] })).rejects.toThrow('skill');
-    await expect(create({ roleId: 'external' })).rejects.toThrow('binding');
+    await expect(create({ roleId: 'external' })).rejects.toThrow('Denied');
     footprint = ['other'];
     await expect(create()).rejects.toThrow('parent');
     footprint = [projectId];
@@ -836,5 +863,88 @@ it('admits verifier lineage only for the approved project, signed parent turn an
     expect(reserved).toHaveLength(1);
   } finally {
     await fixture.close();
+  }
+});
+
+it('restores Issue Context pins from host storage without sharing pins across projects', async () => {
+  const { compilePlugin } = await import('./plugin-build');
+  const { fileURLToPath } = await import('node:url');
+  const { build } = await import('esbuild');
+  const root = await mkdtemp(join(tmpdir(), 'issue-pins-'));
+  const stage = join(root, 'generations', randomUUID());
+  const worker = join(root, 'worker.mjs');
+  const open = () =>
+    new PluginDaemon(
+      root,
+      'w',
+      'm',
+      () => {},
+      { read: async () => JSON.stringify('test-tracker'), write: async () => {} },
+      undefined,
+      worker
+    );
+  let daemon = open();
+  const call = (
+    projectId: string,
+    method: 'plugin/query' | 'plugin/mutate',
+    descriptorId: string,
+    input: Record<string, string | boolean>
+  ) => {
+    const machine = { workspaceId: 'w', machineId: 'm' };
+    return daemon.dispatchMachineRpc(
+      {
+        ...machine,
+        method,
+        params: {
+          pluginId: 'issue-context',
+          descriptorId,
+          scope: 'project',
+          target: { ...machine, projectId },
+          input,
+        },
+      },
+      { userId: 'viewer', machineOwner: false, projectId }
+    );
+  };
+  try {
+    await mkdir(stage, { recursive: true });
+    const [compiled] = await Promise.all([
+      compilePlugin({
+        stage,
+        sourceDir: fileURLToPath(
+          new URL('../../../../scripts/fixtures/plugin-sdk/examples/issue-context', import.meta.url)
+        ),
+      }),
+      build({
+        entryPoints: [fileURLToPath(new URL('./plugin-worker-entry.ts', import.meta.url))],
+        outfile: worker,
+        bundle: true,
+        platform: 'node',
+        format: 'esm',
+      }),
+    ]);
+    await writeFile(
+      join(root, 'catalog.json'),
+      JSON.stringify([
+        {
+          enabled: true,
+          dev: false,
+          source: 'unavailable',
+          current: { ...compiled, directory: stage, machineEntry: join(stage, 'machine.js') },
+        },
+      ])
+    );
+    await daemon.start();
+    await call('p', 'plugin/mutate', 'issues.togglePin', { issueId: 'iss_101', pinned: true });
+    await daemon.dispose();
+    daemon = open();
+    await daemon.start();
+    for (const project of ['p', 'q'])
+      expect(await call(project, 'plugin/query', 'issues.list', {})).toMatchObject({
+        data: [{ id: 'iss_101', pinned: project === 'p' }],
+      });
+  } finally {
+    await daemon.dispose();
+    await rm(root, { recursive: true, force: true });
   }
 });

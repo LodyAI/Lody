@@ -1,3 +1,4 @@
+import { clientStorage } from './client-storage';
 import { clientDiagnostics } from './client-diagnostics';
 import { createPluginAppearance } from './appearance';
 import { createProductionSurfaces } from './surface-factory';
@@ -7,6 +8,7 @@ import { usePluginCommandBindings } from '../commands/plugin-command-bindings';
 import type { WorkspacePluginReads } from './workspace-client';
 import { createPluginAssets } from './assets';
 import type {
+  ProjectRef,
   ClientPluginRegistry,
   ClientHostBindings,
   ReadonlyJsonPrimitive,
@@ -24,6 +26,7 @@ export type SurfaceFactory = (
   signal: AbortSignal,
   queries: Pick<ClientHostBindings, 'useQuery' | 'useMutation'> &
     ReturnType<WorkspacePluginReads['bindings']> & {
+      storage: import('@lody/plugin-sdk').PluginStorage;
       port: PluginCallPort;
       useNavigation: () => ReturnType<typeof useWorkspaceNavigation>;
       useExecute: () => ReturnType<typeof usePluginCommandBindings>['execute'];
@@ -34,21 +37,31 @@ export type SurfaceFactory = (
 export function createWorkspacePluginRegistry(
   entry: ClientCatalogInstallation,
   port: PluginCallPort,
-  reads: WorkspacePluginReads
+  reads: WorkspacePluginReads,
+  storageNamespace: string
 ): ClientCatalogInstallation['registry'] {
   return (files, signal, queries) => {
     const assets = createPluginAssets(entry.dev.manifest.assets ?? [], files, signal);
-    const readConfig = () =>
-      Object.freeze(
+    const readConfig = (project?: ProjectRef) => {
+      if (
+        project &&
+        (project.workspaceId !== entry.workspaceId || project.machineId !== entry.dev.machineId)
+      )
+        throw Error('Invalid project configuration target');
+      return Object.freeze(
         Object.fromEntries(
           Object.entries(entry.dev.manifest.config ?? {}).flatMap(([key, f]) => {
-            if (f.type === 'secret' || f.scope === 'machine') return [];
+            if (f.type === 'secret' || f.scope === 'machine' || (f.scope === 'project' && !project))
+              return [];
             const value =
-              entry.inspection?.preferences[key] ?? ('default' in f ? f.default : undefined);
+              (f.scope === 'project'
+                ? entry.inspection?.projectPreferences?.[project!.projectId]?.[key]
+                : entry.inspection?.preferences[key]) ?? ('default' in f ? f.default : undefined);
             return value === undefined ? [] : [[key, value]];
           })
         )
       );
+    };
     const hooks = createPluginQueryBindings(queries, port, {
       workspaceId: entry.workspaceId,
       machineId: entry.dev.machineId,
@@ -59,9 +72,18 @@ export function createWorkspacePluginRegistry(
         entry,
         signal,
         {
+          storage: clientStorage(
+            storageNamespace,
+            JSON.stringify([entry.sourceKey, entry.pluginId]),
+            signal
+          ),
           port,
           ...hooks,
-          ...reads.bindings(signal, entry.pluginId),
+          ...reads.bindings(
+            signal,
+            entry.pluginId,
+            entry.dev.manifest.permissions?.includes('unstable.rawState')
+          ),
           useNavigation: () =>
             useWorkspaceNavigation(entry.workspaceId, entry.dev.machineId, signal),
           useExecute: () =>
@@ -69,6 +91,7 @@ export function createWorkspacePluginRegistry(
               entry.workspaceId,
               entry.dev.machineId,
               signal,
+              entry.dev.manifest.permissions ?? [],
               entry.reserveSession
             ).execute,
           useLodyCommand(target, command) {
@@ -76,6 +99,7 @@ export function createWorkspacePluginRegistry(
               entry.workspaceId,
               entry.dev.machineId,
               signal,
+              entry.dev.manifest.permissions ?? [],
               entry.reserveSession
             ).useLodyCommand(target, command);
           },
@@ -89,7 +113,8 @@ export function createWorkspacePluginRegistry(
         clientDiagnostics.report(entry, 'event_handler_failed', String(e))
       ),
       config: {
-        get: <T extends Readonly<Record<string, ReadonlyJsonPrimitive>>>() => readConfig() as T,
+        get: <T extends Readonly<Record<string, ReadonlyJsonPrimitive>>>(project?: ProjectRef) =>
+          readConfig(project) as T,
       },
     };
   };

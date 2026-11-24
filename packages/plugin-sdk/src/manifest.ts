@@ -19,7 +19,7 @@ export type PluginConfigField = {
 } & (
   | {
       readonly type: 'string';
-      readonly scope?: 'client' | 'machine' | 'both';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly default?: string;
       readonly placeholder?: string;
     }
@@ -30,7 +30,7 @@ export type PluginConfigField = {
     }
   | {
       readonly type: 'number';
-      readonly scope?: 'client' | 'machine' | 'both';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly default?: number;
       readonly min?: number;
       readonly max?: number;
@@ -38,12 +38,12 @@ export type PluginConfigField = {
     }
   | {
       readonly type: 'boolean';
-      readonly scope?: 'client' | 'machine' | 'both';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly default?: boolean;
     }
   | {
       readonly type: 'select';
-      readonly scope?: 'client' | 'machine' | 'both';
+      readonly scope?: 'client' | 'machine' | 'project' | 'both';
       readonly options: readonly PluginSelectOption[];
       readonly default?: string;
     }
@@ -150,10 +150,17 @@ export type PluginThemeContribution = {
   | { readonly seed: PluginThemeSeedColors; readonly path?: undefined }
 );
 
+export type PluginPermission =
+  | 'sessions.write'
+  | 'sessions.approve'
+  | 'workflow.autonomous'
+  | 'unstable.rawState';
+
 export interface PluginManifest {
   readonly id: string;
   readonly version: string;
-  readonly sdk: '^1.0.0';
+  readonly sdk: string;
+  readonly permissions?: readonly PluginPermission[];
   readonly title: string;
   readonly description?: string;
   readonly client?: string;

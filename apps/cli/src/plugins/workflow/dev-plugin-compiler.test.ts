@@ -8,7 +8,7 @@ import { processLayer, nodeProcessLive } from '@lody/shared/node/process';
 import { DevPluginCompiler } from './dev-plugin-compiler';
 
 it.effect(
-  'failed compilation retains last generation; idle worker lease ends one second after last use',
+  'failed compilation retains last generation; the compiler stays warm between edits and reaps after inactivity',
   () =>
     Effect.gen(function* () {
       const root = yield* Effect.acquireRelease(
@@ -56,14 +56,14 @@ it.effect(
       yield* Effect.gen(function* () {
         const compiler = yield* DevPluginCompiler;
         yield* compiler.build(root, root);
-        yield* TestClock.adjust(999);
+        yield* TestClock.adjust('20 seconds');
         expect(running).toBe(1);
         ok = false;
         expect((yield* Effect.flip(compiler.build(root, root))).message).toBe('syntax error');
         expect((yield* Effect.promise(() => readdir(root))).length).toBe(1);
-        yield* TestClock.adjust(999);
+        yield* TestClock.adjust('20 seconds');
         expect(running).toBe(1);
-        yield* TestClock.adjust(1);
+        yield* TestClock.adjust('10 seconds');
         expect(running).toBe(0);
       }).pipe(Effect.provide(layer));
     })

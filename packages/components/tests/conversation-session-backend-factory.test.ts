@@ -153,14 +153,14 @@ describe('createConversationSession backend seam', () => {
             [],
             []
           );
-          const { readSnapshot } = snapshotBindings(
+          const { unstable } = snapshotBindings(
             workspaceId,
             'test',
             new AbortController().signal,
             () => src,
             () => () => {}
           );
-          const snapshot = await readSnapshot({
+          const snapshot = await unstable.readSnapshot({
             kind: 'session-transcript',
             session: {
               workspaceId: String(workspaceId),

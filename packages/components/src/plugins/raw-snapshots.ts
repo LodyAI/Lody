@@ -1,9 +1,9 @@
-import { copyPluginSnapshot } from '@lody/shared/plugins/snapshot';
+import { checkSnapshotEnvelope, copyPluginSnapshot } from '@lody/shared/plugins/snapshot';
 import { useMemo, useRef, useSyncExternalStore } from 'react';
-import type { RawDocumentSnapshot, RawSnapshotTarget } from '@lody/plugin-sdk';
+import type { UnstableDocumentSnapshot, UnstableSnapshotTarget } from '@lody/plugin-sdk';
 import type { ClientHostBindings, LodyClient, QueryResult } from '@lody/plugin-sdk/client';
 
-type Target = RawSnapshotTarget;
+type Target = UnstableSnapshotTarget;
 export type SnapshotSlice = {
   identity: readonly unknown[];
   read: () => unknown | Promise<unknown>;
@@ -20,12 +20,12 @@ export function snapshotDocument(
   pluginId: string,
   revision: string,
   kind: Target['kind']
-): RawDocumentSnapshot {
-  return Object.freeze({
+): UnstableDocumentSnapshot {
+  return checkSnapshotEnvelope({
     schemaVersion: 1,
     revision,
     doc: copyPluginSnapshot(raw, path, pluginId, kind),
-  }) as RawDocumentSnapshot;
+  }) as UnstableDocumentSnapshot;
 }
 const same = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
@@ -48,7 +48,7 @@ export function snapshotBindings(
   function guard(t: Target, id: readonly unknown[]) {
     if (!same(current(t).identity(t), id)) throw denied();
   }
-  const readSnapshot: LodyClient['readSnapshot'] = async (target) => {
+  const readSnapshot: LodyClient['unstable']['readSnapshot'] = async (target) => {
     const t = structuredClone(target);
     const s = await current(t).open(t, () => {}, signal);
     try {
@@ -61,7 +61,7 @@ export function snapshotBindings(
   };
   const slots = new Map<string, ReturnType<typeof createSlot>>();
   function createSlot(key: string, t: Target) {
-    let result: QueryResult<RawDocumentSnapshot> = { status: 'loading' },
+    let result: QueryResult<UnstableDocumentSnapshot> = { status: 'loading' },
       slice: SnapshotSlice | undefined,
       controller: AbortController | undefined,
       stop: (() => void) | undefined,
@@ -88,7 +88,7 @@ export function snapshotBindings(
       dirty = true;
       inFlight = false;
     };
-    function failure(e: unknown): QueryResult<RawDocumentSnapshot> {
+    function failure(e: unknown): QueryResult<UnstableDocumentSnapshot> {
       return signal.aborted || (e as { code?: string })?.code === 'forbidden'
         ? { status: 'unavailable', reason: 'forbidden', refresh: invalidate }
         : { status: 'error', message: String(e), refresh: invalidate };
@@ -189,16 +189,18 @@ export function snapshotBindings(
     const api = { get, sub };
     return api;
   }
-  const useLodySnapshot: ClientHostBindings['useLodySnapshot'] = <T = RawDocumentSnapshot>(
+  const useUnstableLodySnapshot: ClientHostBindings['useUnstableLodySnapshot'] = <
+    T = UnstableDocumentSnapshot,
+  >(
     target: Target,
-    selector?: (s: RawDocumentSnapshot) => T,
+    selector?: (s: UnstableDocumentSnapshot) => T,
     isEqual?: (a: T, b: T) => boolean
   ) => {
     const key = JSON.stringify(target);
     // Resolve the shared lease at subscription time: multiple consumers can render before either mounts.
     const slot = useMemo(() => {
       let live: ReturnType<typeof createSlot> | undefined;
-      const loading: QueryResult<RawDocumentSnapshot> = { status: 'loading' };
+      const loading: QueryResult<UnstableDocumentSnapshot> = { status: 'loading' };
       return {
         get: () => live?.get() ?? loading,
         sub: (fn: () => void) => {
@@ -213,7 +215,7 @@ export function snapshotBindings(
     }, [key]);
     const memo = useRef<{
       slot: typeof slot;
-      input: QueryResult<RawDocumentSnapshot>;
+      input: QueryResult<UnstableDocumentSnapshot>;
       selector: typeof selector;
       result: QueryResult<T>;
     } | null>(null);
@@ -237,5 +239,5 @@ export function snapshotBindings(
     }
     return useSyncExternalStore(slot.sub, selected, selected);
   };
-  return { readSnapshot, useLodySnapshot };
+  return { unstable: { readSnapshot }, useUnstableLodySnapshot };
 }

@@ -548,7 +548,7 @@ effectIt.effect(
         });
         await writeFile(
           machineEntry,
-          `export default {kind:'machine-plugin', register(m){const schema={safeParse:data=>({success:true,data})};m.mutation({id:'probe',scope:'machine',input:schema,output:schema},async ctx=>{try{await ctx.lody.sessions.create(ctx.machine,{requestId:'must-not-exist',prompt:'forbidden'});return 'unexpected'}catch(e){return e.code}});m.query({id:'read',scope:'session',input:schema,output:schema},async ctx=>{let denied=false;try{await ctx.lody.readSnapshot({kind:"session-meta",session:{...ctx.target,sessionId:"another"}})}catch{denied=true}if(!denied)throw Error("cross-session access");return (await ctx.lody.readSnapshot({kind:"session-meta",session:ctx.target})).doc.id})}}`
+          `export default {kind:'machine-plugin', register(m){const schema={safeParse:data=>({success:true,data})};m.mutation({id:'probe',scope:'machine',input:schema,output:schema},async ctx=>{try{await ctx.lody.sessions.create(ctx.machine,{requestId:'must-not-exist',prompt:'forbidden'});return 'unexpected'}catch(e){return e.code}});m.query({id:'read',scope:'session',input:schema,output:schema},async ctx=>{let denied=false;try{await ctx.lody.unstable.readSnapshot({kind:"session-meta",session:{...ctx.target,sessionId:"another"}})}catch{denied=true}if(!denied)throw Error("cross-session access");return (await ctx.lody.unstable.readSnapshot({kind:"session-meta",session:ctx.target})).doc.id})}}`
         );
         await writeFile(
           join(f.directory, 'catalog.json'),
@@ -563,6 +563,7 @@ effectIt.effect(
                   version: '1.0.0',
                   title: 'Sample',
                   machine: 'plugin.mjs',
+                  permissions: ['unstable.rawState'],
                 },
               },
               source: '/unused',

@@ -64,9 +64,10 @@ export class MachineRuntime {
     )
       throw new Error('e2ee_feature_scope');
     if (request.method === 'plugin/control') throw Error('Local plugin control required');
-    if (request.method === 'plugin/workflow-create-approval') {
+    if (request.method === 'plugin/declared-workflow-grant') {
       if (
         !context?.pluginMachineOwner ||
+        !context.grantSignature ||
         !context.authority?.isCurrent() ||
         !context.requester ||
         !config.pluginRpc
@@ -79,7 +80,7 @@ export class MachineRuntime {
           {
             userId: context.requester.accountId,
             machineOwner: true,
-            workflowReceipt: { requestId: context.requestId, signer: context.requesterDevice },
+            declaredGrantSignature: context.grantSignature,
           },
           context.signal
         ),

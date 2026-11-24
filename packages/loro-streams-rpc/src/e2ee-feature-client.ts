@@ -37,7 +37,7 @@ const supportsSharedExecution = (request: E2eeFeatureInput['request']) =>
   request.method === 'session/fork' ||
   (isPluginMachineRequest(request) &&
     request.method !== 'plugin/control' &&
-    request.method !== 'plugin/workflow-create-approval' &&
+    request.method !== 'plugin/declared-workflow-grant' &&
     (!('scope' in request.params) || request.params.scope !== 'machine'));
 const CLOCK_SKEW_TOLERANCE_MS = 10 * 60_000;
 const featureTtl = (method: string) =>
@@ -575,22 +575,18 @@ export function makeE2eeFeatureRpcClient(options: {
     return complete?.outcome ?? null;
   });
   return {
-    readWorkflowApproval: (machineId: string, signer: string, id: string) =>
+    openDeclaredWorkflowGrant: (machineId: string, signature: string) =>
       Effect.scoped(
         Effect.gen(function* () {
-          const saved = yield* options.originals.read(
-            'received',
-            JSON.stringify(['feature', signer, id])
-          );
-          if (!saved || saved.target !== machineId || saved.signer !== signer) return undefined;
-          const verified = yield* openFrames(machineId, unpackFrames(saved.frame));
-          if (
-            verified.requestId !== id ||
-            verified.requesterDevice !== signer ||
-            verified.input.request.method !== 'plugin/workflow-create-approval'
-          )
-            return undefined;
-          return verified.input.request;
+          const bytes = yield* attempt(() => {
+            if (!/^(?:[0-9a-f]{2})+$/.test(signature) || signature.length > 524288)
+              throw Error('Invalid signed grant');
+            return unhex(signature);
+          });
+          const verified = yield* openFrames(machineId, unpackFrames(bytes));
+          if (verified.input.request.method !== 'plugin/declared-workflow-grant')
+            throw Error('Not a declared workflow grant');
+          return { request: verified.input.request, signer: verified.requesterDevice };
         })
       ),
     verifyFeatureRequest: (request: Opened) =>

@@ -50,7 +50,7 @@ export class WorkspacePluginReads {
     this.catalog = catalog;
     for (const fn of this.listeners) fn();
   }
-  bindings(signal: AbortSignal, pluginId = '') {
+  bindings(signal: AbortSignal, pluginId = '', allowSnapshot = false) {
     const subscribe = (fn: () => void) => {
       this.listeners.add(fn);
       signal.addEventListener('abort', fn);
@@ -252,7 +252,7 @@ export class WorkspacePluginReads {
         this.workspaceId,
         pluginId,
         signal,
-        () => this.catalog?.snapshots,
+        () => (allowSnapshot ? this.catalog?.snapshots : undefined),
         subscribe
       ),
     };

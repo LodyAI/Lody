@@ -488,17 +488,21 @@ describe('trusted-host encrypted dispatch originals', () => {
       request: {
         workspaceId: f.workspaceId,
         machineId: f.machineId,
-        method: 'plugin/workflow-create-approval',
+        method: 'plugin/declared-workflow-grant',
         params: {
-          pluginId: 'architect',
-          operation: 'sessions.create',
-          projectId: 'selected',
+          plugin_id: 'architect',
+          grant_id: '00000000-0000-4000-8000-000000000002',
+          workspace_id: f.workspaceId,
+          machine_id: f.machineId,
+          issued_by_user_id: signer,
+          issued_at_ms: Date.now(),
+          allowed_project_ids: ['selected'],
+          allowed_role_ids: '*',
+          allowed_ops: ['sessions.create'],
           installationId: '00000000-0000-4000-8000-000000000001',
           machineDigest: 'aa'.repeat(32),
           targetDevice,
-          expiresAt: Date.now() + 3600000,
           action: 'grant',
-          readOperations: ['sessions', 'session-meta'],
         },
       },
     });
@@ -512,19 +516,16 @@ describe('trusted-host encrypted dispatch originals', () => {
     if (!verified) throw Error('Expected signed approval');
     await Effect.runPromise(f.receiver.retainFeatureRequest(f.machineId, verified));
     const restart = f.native('phone');
+    const signature = Buffer.from(verified.frame).toString('hex');
     expect(
-      await Effect.runPromise(restart.readWorkflowApproval(f.machineId, signer, input.requestId))
-    ).toEqual(input.request);
-    expect(
-      await Effect.runPromise(
-        restart.readWorkflowApproval('different-machine', signer, input.requestId)
-      )
-    ).toBeUndefined();
-    expect(
-      await Effect.runPromise(
-        restart.readWorkflowApproval(f.machineId, targetDevice, input.requestId)
-      )
-    ).toBeUndefined();
+      await Effect.runPromise(restart.openDeclaredWorkflowGrant(f.machineId, signature))
+    ).toEqual({ request: input.request, signer });
+    await expect(
+      Effect.runPromise(restart.openDeclaredWorkflowGrant('different-machine', signature))
+    ).rejects.toThrow();
+    await expect(
+      Effect.runPromise(restart.openDeclaredWorkflowGrant(f.machineId, signature.slice(0, -2)))
+    ).rejects.toThrow();
   });
   it('returns encrypted plugin catalog pages to a shared member but refuses machine-scoped handlers and remote control', async () => {
     const f = encryptedRpcFixture({ teammate: true });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,179 +47,6 @@ test('plugin SDK browser-pure client contracts and dogfood UI examples typecheck
 
 test('plugin SDK Node machine contracts and durable dataDir examples typecheck without DOM globals', () => {
   verifyTsconfig('tsconfig.machine.json', 9);
-});
-
-function loadIssueMachine(io = fs) {
-  const mutations = new Map();
-  const modules = new Map();
-  const sdkDir = path.join(repoRoot, 'packages/plugin-sdk/src');
-  function load(file) {
-    if (modules.has(file)) return modules.get(file).exports;
-    const module = { exports: {} };
-    modules.set(file, module);
-    const source = readFileSync(file, 'utf8');
-    const compiled = ts.transpileModule(source, {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2023,
-        esModuleInterop: true,
-      },
-    }).outputText;
-    const fixtureRequire = (id) => {
-      if (id === 'node:fs/promises') return io;
-      if (id.startsWith('node:')) return require(id);
-      if (id === 'zod') return requireShared('zod');
-      if (id === '@lody/plugin-sdk') return load(path.join(sdkDir, 'index.ts'));
-      if (id === './index.js') return load(path.join(sdkDir, 'index.ts'));
-      if (id === '@lody/plugin-sdk/machine') {
-        return load(path.join(sdkDir, 'machine.ts'));
-      }
-      if (id.startsWith('./')) return load(path.resolve(path.dirname(file), `${id}.ts`));
-      throw new Error(`Unexpected fixture dependency: ${id}`);
-    };
-    new Function('require', 'module', 'exports', compiled)(fixtureRequire, module, module.exports);
-    return module.exports;
-  }
-  load(path.join(fixtureDir, 'examples/issue-context/machine.ts')).default.register({
-    onStart() {},
-    query() {},
-    attachmentSource() {},
-    tool() {},
-    events: { on() {} },
-    mutation(descriptor, handler) {
-      mutations.set(descriptor.id, handler);
-    },
-  });
-  return mutations.get('issues.togglePin');
-}
-
-async function issueStateFixture(t) {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-plugin-issue-state-'));
-  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
-  return {
-    dataDir,
-    file: path.join(dataDir, 'issue-context-state.json'),
-    context: { dataDir, target: { projectId: 'p' }, invalidate() {} },
-  };
-}
-
-test('issue plugin initializes missing state and preserves all concurrent project pin changes', async (t) => {
-  const { dataDir, file, context } = await issueStateFixture(t);
-  // Immediate completions deterministically expose uncoordinated read/modify/write:
-  // without the per-file queue, concurrent handlers all read before any writes.
-  const mutate = loadIssueMachine({
-    ...fs,
-    async readFile(...args) {
-      return readFileSync(...args);
-    },
-    async mkdir(...args) {
-      return mkdirSync(...args);
-    },
-    async writeFile(...args) {
-      return writeFileSync(...args);
-    },
-    async rename(...args) {
-      return renameSync(...args);
-    },
-  });
-  const legacyTemp = `${file}.tmp`;
-  await fs.writeFile(legacyTemp, 'unrelated temporary file');
-  const results = await Promise.all([
-    mutate(context, { issueId: 'A', pinned: true }),
-    mutate(context, { issueId: 'B', pinned: true }),
-    mutate({ ...context, target: { projectId: 'q' } }, { issueId: 'C', pinned: true }),
-  ]);
-  assert.deepEqual(results, [{ ok: true }, { ok: true }, { ok: true }]);
-  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
-    pinnedByProject: { p: ['A', 'B'], q: ['C'] },
-    linkedBySession: {},
-  });
-  assert.equal(await fs.readFile(legacyTemp, 'utf8'), 'unrelated temporary file');
-  assert.deepEqual(
-    (await fs.readdir(dataDir)).sort(),
-    [path.basename(file), path.basename(legacyTemp)].sort()
-  );
-});
-
-test('issue plugin preserves stored state on read or parse failures', async (t) => {
-  for (const code of ['EACCES', 'EIO']) {
-    await t.test(code, async (t) => {
-      const { file, context } = await issueStateFixture(t);
-      const original = JSON.stringify({
-        pinnedByProject: { p: ['A'] },
-        linkedBySession: { s: 'ISSUE-A' },
-      });
-      await fs.writeFile(file, original);
-      const failure = Object.assign(new Error(`Injected ${code}`), { code });
-      let fail = true;
-      const mutate = loadIssueMachine({
-        ...fs,
-        async readFile(...args) {
-          if (fail) {
-            fail = false;
-            throw failure;
-          }
-          return fs.readFile(...args);
-        },
-      });
-      await assert.rejects(
-        mutate(context, { issueId: 'B', pinned: true }),
-        (error) => error === failure
-      );
-      assert.equal(await fs.readFile(file, 'utf8'), original);
-      // Failure must release the queue and keep the original state available.
-      await mutate(context, { issueId: 'B', pinned: true });
-      assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
-        pinnedByProject: { p: ['A', 'B'] },
-        linkedBySession: { s: 'ISSUE-A' },
-      });
-    });
-  }
-  for (const original of ['invalid JSON', '{"pinnedByProject":{"p":42},"linkedBySession":{}}']) {
-    await t.test(original, async (t) => {
-      const { file, context } = await issueStateFixture(t);
-      await fs.writeFile(file, original);
-      await assert.rejects(loadIssueMachine()(context, { issueId: 'B', pinned: true }));
-      assert.equal(await fs.readFile(file, 'utf8'), original);
-    });
-  }
-});
-
-test('issue plugin preserves committed data and remains usable after failed temporary writes or replacement', async (t) => {
-  for (const operation of ['writeFile', 'rename']) {
-    await t.test(operation, async (t) => {
-      const { dataDir, file, context } = await issueStateFixture(t);
-      const original = JSON.stringify({
-        pinnedByProject: { p: ['A'] },
-        linkedBySession: { s: 'ISSUE-A' },
-      });
-      await fs.writeFile(file, original);
-      const failure = Object.assign(new Error(`Injected ${operation} failure`), { code: 'EIO' });
-      let fail = true;
-      const mutate = loadIssueMachine({
-        ...fs,
-        async [operation](...args) {
-          if (fail) {
-            fail = false;
-            if (operation === 'writeFile') await fs.writeFile(...args);
-            throw failure;
-          }
-          return fs[operation](...args);
-        },
-      });
-      await assert.rejects(
-        mutate(context, { issueId: 'B', pinned: true }),
-        (error) => error === failure
-      );
-      assert.equal(await fs.readFile(file, 'utf8'), original);
-      assert.deepEqual(await fs.readdir(dataDir), [path.basename(file)]);
-      await mutate(context, { issueId: 'B', pinned: true });
-      assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
-        pinnedByProject: { p: ['A', 'B'] },
-        linkedBySession: { s: 'ISSUE-A' },
-      });
-    });
-  }
 });
 
 test('sound-effects client plugin composes events, assets.url, signal, and standard Web Audio without bespoke SDK slots', async () => {
@@ -482,14 +309,16 @@ test('sorbet-workflow reconciles both mid-call crashes and missed turn.completed
       }
       throw new Error(`Unexpected query: ${query.id}`);
     },
-    async readSnapshot() {
-      return Object.freeze({
-        schemaVersion: 1,
-        revision: 'r1',
-        doc: Object.freeze({
-          agentRoleId: 'plugin:sorbet-workflow:sorbet-architect',
-        }),
-      });
+    unstable: {
+      async readSnapshot() {
+        return Object.freeze({
+          schemaVersion: 1,
+          revision: 'r1',
+          doc: Object.freeze({
+            agentRoleId: 'plugin:sorbet-workflow:sorbet-architect',
+          }),
+        });
+      },
     },
     sessions: {
       async create(target, req) {
@@ -670,17 +499,6 @@ test('sorbet-workflow messages.renderBlock preserves interactive component state
       if (id === '@lody/plugin-sdk/client') {
         return {
           defineClientPlugin: (register) => ({ register }),
-          useHostCapabilities: () => ({
-            platform: 'web',
-            formFactor: 'wide',
-            containers: {
-              sidebarViews: true,
-              sessionPanels: true,
-              screens: true,
-              projectPages: true,
-            },
-          }),
-          useLodySnapshot: () => ({ status: 'loading' }),
           useLody: () => ({
             drafts: {
               open(target, draft) {

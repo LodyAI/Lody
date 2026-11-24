@@ -11,7 +11,7 @@ import {
 } from '@lody/shared';
 import {
   pluginSessionCreateParams,
-  type WorkflowApprovalReceipt,
+  type DeclaredGrantSignature,
   type PluginMachineRequest,
 } from '@lody/shared/plugins/machine-rpc';
 import type { CliE2eeWorkspaceLegacy } from '../../lib/e2ee/workspace-legacy';
@@ -23,45 +23,60 @@ import {
 } from './daemon-command-executor';
 
 interface Lease {
-  receipt: WorkflowApprovalReceipt;
+  signature: DeclaredGrantSignature;
   installationId: string;
   machineDigest: string;
   isCurrent: () => boolean;
 }
-/** A workflow owns only its verifier sessions. No historical turn or plugin-supplied identity participates. */
-export function authorizedProjectCreate(options: {
+/** Out-of-turn commands run as the signed workflow, not the issuer or a past turn. */
+export function resolveDeclaredWorkflow(options: {
   workspaceId: string;
   machineId: MachineId;
   manager: LoroDocumentManager;
   identity: Pick<
     CliE2eeWorkspaceLegacy,
-    'verifyWorkflowApproval' | 'signingPublicKey' | 'pluginAuthoritySignal'
-  > &
-    Partial<Pick<CliE2eeWorkspaceLegacy, 'resolveVerifiedExecutionOriginal'>>;
+    | 'verifyDeclaredWorkflowGrant'
+    | 'signingPublicKey'
+    | 'pluginAuthoritySignal'
+    | 'resolveVerifiedExecutionOriginal'
+  >;
   lease: (id: string, instance: number) => Promise<Lease | undefined>;
   projectExists: (id: string) => Promise<boolean>;
-  sessionScope?: (id: SessionId) => Promise<readonly string[]>;
+  sessionScope: (id: SessionId) => Promise<readonly string[]>;
 }): ResolveStandalonePluginOperation {
   return async (call, signal) => {
-    const read = call.op === 'lody.read' || call.op === 'lody.readSnapshot';
-    if (
-      !read &&
-      call.op !== 'sessions.create' &&
-      !(call.op === 'lody.execute' && call.payload.descriptorId === 'sessionCreate')
-    )
-      return undefined;
+    if (!['start', 'service', 'event'].includes(call.origin.type)) return undefined;
+    const read = call.op === 'lody.read' || call.op === 'lody.unstable.readSnapshot';
+    const op =
+      call.op === 'lody.execute'
+        ? (
+            {
+              sessionCreate: 'sessions.create',
+              sessionSend: 'sessions.send',
+              sessionRespondInteraction: 'sessions.respondInteraction',
+            } as const
+          )[
+            call.payload.descriptorId as
+              | 'sessionCreate'
+              | 'sessionSend'
+              | 'sessionRespondInteraction'
+          ]
+        : undefined;
+    if (!read && !op) return undefined;
     if (call.workspaceId !== options.workspaceId || call.machineId !== options.machineId)
       return undefined;
     const lease = await options.lease(call.pluginId, call.instanceId);
     if (!lease) return undefined;
-    const { approval, isCurrent } = await options.identity.verifyWorkflowApproval(
-      lease.receipt,
+    const { approval, isCurrent } = await options.identity.verifyDeclaredWorkflowGrant(
+      lease.signature,
       call.machineId
     );
     if (
       approval.action !== 'grant' ||
-      approval.operation !== 'sessions.create' ||
-      approval.pluginId !== call.pluginId ||
+      (op && !approval.allowed_ops.includes(op)) ||
+      approval.workspace_id !== call.workspaceId ||
+      approval.machine_id !== call.machineId ||
+      approval.plugin_id !== call.pluginId ||
       approval.installationId !== lease.installationId ||
       approval.machineDigest !== lease.machineDigest ||
       approval.targetDevice !== options.identity.signingPublicKey
@@ -70,18 +85,45 @@ export function authorizedProjectCreate(options: {
     const check = () => {
       signal.throwIfAborted();
       options.identity.pluginAuthoritySignal.throwIfAborted();
-      if (!lease.isCurrent() || !isCurrent() || Date.now() >= approval.expiresAt)
-        throw Error('Workflow create approval withdrawn');
+      if (!lease.isCurrent() || !isCurrent()) throw Error('Declared workflow grant withdrawn');
     };
     check();
-    const projectId = approval.projectId;
+    const raw = call.payload.target;
+    const targetRef =
+      call.op === 'lody.unstable.readSnapshot' &&
+      raw &&
+      typeof raw === 'object' &&
+      !Array.isArray(raw)
+        ? (raw.session ?? raw.project)
+        : raw;
+    const ref = pluginSessionCreateParams.shape.target.safeParse(targetRef);
+    if (
+      !ref.success ||
+      ref.data.machineId !== call.machineId ||
+      ref.data.workspaceId !== call.workspaceId
+    )
+      return undefined;
+    const row = ref.data.sessionId
+      ? await options.manager.repo.getDocMeta(getSessionRoomId(ref.data.sessionId as SessionId))
+      : undefined;
+    const actual = (row?.meta as import('@lody/shared').SessionMeta | undefined)?.project;
+    const projectId = ref.data.sessionId
+      ? row && !row.deleted && row.meta.machineId === call.machineId && actual?.kind === 'local'
+        ? actual.localProjectId
+        : undefined
+      : ref.data.projectId;
+    if (ref.data.projectId && ref.data.projectId !== projectId) return undefined;
+    if (
+      !projectId ||
+      (approval.allowed_project_ids !== '*' && !approval.allowed_project_ids.includes(projectId))
+    )
+      return undefined;
+    const roleAllowed = (roleId: string | null | undefined) =>
+      approval.allowed_role_ids === '*' || (!!roleId && approval.allowed_role_ids.includes(roleId));
     if (read) {
-      // Legacy create-only receipts never authorize reading source sessions.
-      const reads = approval.readOperations;
       const scope = options.sessionScope;
-      if (!Array.isArray(reads) || !scope) return undefined;
       const raw = call.payload.target,
-        snapshot = call.op === 'lody.readSnapshot';
+        snapshot = call.op === 'lody.unstable.readSnapshot';
       const nested =
         snapshot &&
         typeof raw === 'object' &&
@@ -91,7 +133,8 @@ export function authorizedProjectCreate(options: {
           ? raw.session
           : undefined;
       const method = snapshot ? (nested ? 'session-meta' : undefined) : call.payload.descriptorId;
-      if (!method || !reads.some((operation) => operation === method)) return undefined;
+      if (!method || !['sessions', 'sessionTurns', 'session-meta'].includes(method))
+        return undefined;
       const parsed = pluginSessionCreateParams.shape.target.safeParse(snapshot ? nested : raw);
       if (!parsed.success) return undefined;
       const ref = parsed.data;
@@ -120,6 +163,10 @@ export function authorizedProjectCreate(options: {
         if (ref.sessionId) {
           const sid = ref.sessionId as SessionId;
           const row = await options.manager.repo.getDocMeta(getSessionRoomId(sid));
+          if (
+            !roleAllowed((row?.meta as import('@lody/shared').SessionMeta | undefined)?.agentRoleId)
+          )
+            throw Error('Workflow role forbidden');
           const project = (row?.meta as import('@lody/shared').SessionMeta | undefined)?.project;
           if (
             !row ||
@@ -134,12 +181,19 @@ export function authorizedProjectCreate(options: {
             throw Error('Workflow session forbidden');
         }
         check();
+        const sources = bindDaemonReadSources({
+          ...ctx,
+          manager: options.manager,
+          sessionScope: scope,
+        });
         const result = await executeScopedPluginRead(
           {
             ...ctx,
-            ...bindDaemonReadSources({ ...ctx, manager: options.manager, sessionScope: scope }),
+            ...sources,
+            sessions: async (guard) =>
+              (await sources.sessions(guard)).filter((meta) => roleAllowed(meta.agentRoleId)),
           },
-          snapshot ? 'lody.readSnapshot' : 'lody.read',
+          snapshot ? 'lody.unstable.readSnapshot' : 'lody.read',
           {
             ...call.payload,
             target: snapshot ? { kind: 'session-meta', session: rawRef } : rawRef,
@@ -150,6 +204,101 @@ export function authorizedProjectCreate(options: {
         return JSON.parse(JSON.stringify(result));
       };
     }
+    if (op === 'sessions.send' || op === 'sessions.respondInteraction') {
+      if (
+        !ref.success ||
+        !ref.data.sessionId ||
+        ref.data.workspaceId !== call.workspaceId ||
+        ref.data.machineId !== call.machineId
+      )
+        return undefined;
+      const sid = ref.data.sessionId as SessionId;
+      const scope = async () => {
+        const row = await options.manager.repo.getDocMeta(getSessionRoomId(sid));
+        const meta = row?.meta as import('@lody/shared').SessionMeta | undefined;
+        const footprint = await options.sessionScope(sid);
+        if (
+          !row ||
+          row.deleted ||
+          meta?.id !== sid ||
+          meta.machineId !== call.machineId ||
+          meta.isArchived ||
+          meta.collaborationStopped ||
+          meta.project?.kind !== 'local' ||
+          meta.project.localProjectId !== projectId ||
+          !footprint?.length ||
+          footprint.some((id) => id !== projectId) ||
+          (approval.allowed_role_ids !== '*' &&
+            (!meta.agentRoleId || !approval.allowed_role_ids.includes(meta.agentRoleId)))
+        )
+          throw Error('Session outside declared workflow grant');
+        check();
+        return meta;
+      };
+      return async () => {
+        const { lifecycleCommandInputs: inputs } =
+          await import('@lody/shared/commands/host-commands');
+        const doc = await options.manager.getOrCreateSessionDoc(sid);
+        if (op === 'sessions.respondInteraction') {
+          const p = inputs.sessionRespondInteraction.parse(call.payload.input);
+          const backend = await (
+            await import('../../session/session-backend')
+          ).createSessionBackend(doc);
+          await scope();
+          check();
+          if (!(await backend.respondPermission(p.requestId, p.outcome, { turnId: p.turnId })))
+            throw Error('Interaction no longer pending');
+          return null;
+        }
+        const p = inputs.sessionSend.parse(call.payload.input),
+          meta = await scope();
+        if (p.delivery === 'steer' || !meta.cliType || !meta.agentType)
+          throw Error('Workflow delivery unavailable');
+        const userTurnId = crypto.randomUUID(),
+          inputConfig = {
+            prompt: p.prompt,
+            inputBlocks: [{ type: 'text' as const, text: p.prompt }],
+            cliType: meta.cliType,
+            agentType: meta.agentType,
+          };
+        const e2eeIntent = await options.manager.signMachineInput({
+          sessionId: sid,
+          userTurnId,
+          inputConfig,
+          targetMachineId: options.machineId,
+        });
+        if (!e2eeIntent) throw Error('Unsigned workflow input');
+        await scope();
+        check();
+        await doc.pushMessageQueue({
+          userTurnId,
+          operationId: `queue:${userTurnId}`,
+          userId: `plugin-workflow:${call.pluginId}:${lease.installationId}`,
+          task: p.prompt,
+          timestamp: new Date().toISOString(),
+          isEditing: false,
+          editingStartedAt: undefined,
+          project: meta.project,
+          acpSessionConfig: inputConfig,
+          e2eeIntent,
+        });
+        if (!doc.handle) throw Error('Session unavailable');
+        const frontiers = doc.handle.doc.frontiers(),
+          state = await doc.getMetaState(),
+          updatedAt = Math.max(
+            Date.now(),
+            (state?.messageQueueUpdatedAt ?? 0) + 1,
+            (state?.messageQueueCheckedAt ?? 0) + 1
+          );
+        check();
+        await options.manager.repo.upsertDocMeta(doc.roomId, {
+          messageQueueUpdatedAt: updatedAt,
+          messageQueueUpdateVersion: { updatedAt, frontiers },
+        });
+        await options.manager.repo.flush();
+        return { turnId: userTurnId, disposition: 'queued' };
+      };
+    }
     const target = pluginSessionCreateParams.shape.target.parse(call.payload.target),
       input = pluginSessionCreateParams.shape.input.parse(call.payload.input);
     if (
@@ -157,7 +306,8 @@ export function authorizedProjectCreate(options: {
       target.machineId !== call.machineId ||
       target.projectId !== projectId ||
       target.sessionId ||
-      !input.roleId ||
+      (approval.allowed_role_ids !== '*' &&
+        (!input.roleId || !approval.allowed_role_ids.includes(input.roleId))) ||
       input.pullRequestUrl
     )
       return undefined;
@@ -167,14 +317,10 @@ export function authorizedProjectCreate(options: {
       ref.workspaceId === target.workspaceId &&
       ref.machineId === target.machineId &&
       (ref.projectId === undefined || ref.projectId === projectId);
-    if (parent && (!validRef(parent) || !approval.readOperations?.includes('session-meta')))
-      return undefined;
+    if (parent && !validRef(parent)) return undefined;
     if (
       origin &&
-      (!parent ||
-        !validRef(origin.session) ||
-        origin.session.sessionId !== parent.sessionId ||
-        !approval.readOperations?.includes('sessionTurns'))
+      (!parent || !validRef(origin.session) || origin.session.sessionId !== parent.sessionId)
     )
       return undefined;
     const validateLineage = async () => {
@@ -182,7 +328,7 @@ export function authorizedProjectCreate(options: {
       const sid = parent.sessionId as SessionId;
       const row = await options.manager.repo.getDocMeta(getSessionRoomId(sid));
       const meta = row?.meta as import('@lody/shared').SessionMeta | undefined;
-      const footprint = await options.sessionScope?.(sid);
+      const footprint = await options.sessionScope(sid);
       if (
         !row ||
         row.deleted ||
@@ -227,18 +373,18 @@ export function authorizedProjectCreate(options: {
       );
       const role = generation?.roles.get(input.roleId!);
       if (
-        !role ||
-        !role.defaultProvider ||
-        role.defaultProvider !== input.providerId ||
-        !generation?.acpProviders.has(role.defaultProvider)
+        (input.roleId?.startsWith('plugin:') && !role) ||
+        (input.providerId?.startsWith('plugin:') &&
+          !generation?.acpProviders.has(input.providerId)) ||
+        (role && input.providerId && role.defaultProvider !== input.providerId)
       )
-        throw Error('Workflow verifier binding forbidden');
+        throw Error('Workflow role binding forbidden');
       const skills = (input.skillIds ?? []).map((id) =>
         id.startsWith('plugin:') ? id : `plugin:${call.pluginId}:${id}`
       );
       if (
         new Set(skills).size !== skills.length ||
-        skills.some((id) => !role.skills.includes(id) || !generation.skills.has(id))
+        skills.some((id) => !role?.skills.includes(id) || !generation?.skills.has(id))
       )
         throw Error('Workflow skill forbidden');
       if (!(await options.projectExists(projectId))) throw Error('Workflow project unavailable');
@@ -266,7 +412,7 @@ export function authorizedProjectCreate(options: {
             ...input,
             targetMachineId: options.machineId,
           });
-          if (!e2eeIntent) throw Error('Unsigned verifier input');
+          if (!e2eeIntent) throw Error('Unsigned workflow input');
           return { e2eeIntent };
         }
       );
@@ -277,29 +423,28 @@ export function authorizedProjectCreate(options: {
 }
 
 /** Only retained encrypted ingress can mint the actor proof consumed by Registry. */
-export async function bindWorkflowApprovalActor({
+export async function bindDeclaredGrantActor({
   request,
   actor,
   identity,
   machineId,
   projectExists,
 }: {
-  request: Extract<PluginMachineRequest, { method: 'plugin/workflow-create-approval' }>;
+  request: Extract<PluginMachineRequest, { method: 'plugin/declared-workflow-grant' }>;
   actor: import('./plugin-registry').VerifiedPluginGrant;
-  identity?: Pick<CliE2eeWorkspaceLegacy, 'verifyWorkflowApproval' | 'signingPublicKey'>;
+  identity?: Pick<CliE2eeWorkspaceLegacy, 'verifyDeclaredWorkflowGrant' | 'signingPublicKey'>;
   machineId: MachineId;
   projectExists: (id: string) => Promise<boolean>;
 }) {
-  if (!identity || !actor.workflowReceipt || !actor.machineOwner)
+  if (!identity || !actor.declaredGrantSignature || !actor.machineOwner)
     throw Error('Owner approval required');
-  const proof = await identity.verifyWorkflowApproval(actor.workflowReceipt, machineId);
+  const proof = await identity.verifyDeclaredWorkflowGrant(actor.declaredGrantSignature, machineId);
   if (
     JSON.stringify(proof.approval) !== JSON.stringify(request.params) ||
     !proof.isCurrent() ||
     (request.params.action === 'grant' &&
-      (request.params.expiresAt <= Date.now() ||
-        request.params.expiresAt > Date.now() + 86400000 ||
-        !(await projectExists(request.params.projectId))))
+      request.params.allowed_project_ids !== '*' &&
+      !(await Promise.all(request.params.allowed_project_ids.map(projectExists))).every(Boolean))
   )
     throw Error('Workflow approval forbidden');
   return { ...actor, workflowCurrent: proof.isCurrent, targetDevice: identity.signingPublicKey };

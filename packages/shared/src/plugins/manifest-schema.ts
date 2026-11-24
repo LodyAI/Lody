@@ -1,3 +1,6 @@
+/// <reference path="./semver.d.ts" />
+import satisfies from 'semver/functions/satisfies.js';
+import sdkPackage from '../../../plugin-sdk/package.json' with { type: 'json' };
 import { z } from 'zod';
 
 const text = z.string().min(1);
@@ -14,7 +17,7 @@ const paths = relativePath.array().optional();
 const keys = text.array().optional();
 const obj = z.strictObject;
 const meta = { label: text, description: opt, required: z.boolean().optional() };
-const field = { ...meta, scope: z.enum(['client', 'machine', 'both']).optional() };
+const field = { ...meta, scope: z.enum(['client', 'machine', 'project', 'both']).optional() };
 const num = z.number().optional();
 const configField = z.discriminatedUnion('type', [
   obj({ ...field, type: z.literal('string'), default: opt, placeholder: opt }),
@@ -58,7 +61,17 @@ export const pluginManifestSchema = obj({
     .regex(
       /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[\da-zA-Z-]*[a-zA-Z-][\da-zA-Z-]*)(?:\.(?:0|[1-9]\d*|[\da-zA-Z-]*[a-zA-Z-][\da-zA-Z-]*))*))?(?:\+[\da-zA-Z-]+(?:\.[\da-zA-Z-]+)*)?$/
     ),
-  sdk: z.literal('^1.0.0'),
+  permissions: z
+    .array(
+      z.enum(['workflow.autonomous', 'sessions.write', 'sessions.approve', 'unstable.rawState'])
+    )
+    .optional(),
+  sdk: text
+    .max(512)
+    .refine(
+      (range) => Boolean(range.trim()) && satisfies(sdkPackage.version, range),
+      `SDK range must include host version ${sdkPackage.version}`
+    ),
   title: text,
   description: opt,
   client: relativePath.optional(),
@@ -134,7 +147,10 @@ export const pluginManifestSchema = obj({
       [...(m.mcpServers ?? []), ...(m.acpProviders ?? [])].every((c) =>
         (c.envKeys ?? []).every((k) => {
           const f = m.config?.[k];
-          return f?.type === 'string' || f?.type === 'secret';
+          return (
+            f?.type === 'secret' ||
+            (f?.type === 'string' && f.scope !== 'project' && f.scope !== 'client')
+          );
         })
       ),
     'Environment keys must reference string or secret configuration fields'

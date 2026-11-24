@@ -54,7 +54,7 @@ export class PluginTurnEvents {
         const machine = { ...workspace, machineId: this.machineId };
         const project = projectId ? { ...machine, projectId } : undefined;
         const session = { ...(project ?? machine), sessionId };
-        const frame: Extract<HostToChildFrame, { type: 'event' }> = {
+        const frame: Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'> = {
           type: 'event',
           eventType: event.type,
           eventId: JSON.stringify([

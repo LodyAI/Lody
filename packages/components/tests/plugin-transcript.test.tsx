@@ -161,11 +161,11 @@ it('keeps raw identity isolated, secrets absent and selection stable across unre
   const target = {
     kind: 'session-meta',
     session: { workspaceId: 'w', machineId: 'm', sessionId: 's' },
-  } as import('@lody/plugin-sdk').RawSnapshotTarget;
+  } as import('@lody/plugin-sdk').UnstableSnapshotTarget;
   expect(reads).toBe(0);
-  const snap = await bindings.readSnapshot(target);
+  const snap = await bindings.unstable.readSnapshot(target);
   expect(snap.doc).not.toHaveProperty('businessKey');
-  expect(snap.doc.nested).toEqual({ createdByPluginId: 'foreign' });
+  expect(snap.doc.nested).toBeUndefined();
   expect(Object.isFrozen(snap.doc.nested)).toBe(true);
   raw.title = 'b';
   expect(snap.doc.title).toBe('a');
@@ -173,7 +173,7 @@ it('keeps raw identity isolated, secrets absent and selection stable across unre
     root = createRoot(el);
   let renders = 0;
   function Consumer() {
-    const q = bindings.useLodySnapshot(target, (s) => s.doc.title);
+    const q = bindings.useUnstableLodySnapshot(target, (s) => s.doc.title);
     renders++;
     return <>{q.status === 'ready' ? String(q.data) : q.status}</>;
   }
@@ -195,5 +195,5 @@ it('keeps raw identity isolated, secrets absent and selection stable across unre
   update();
   expect(reads).toBe(count);
   scope.abort();
-  await expect(bindings.readSnapshot(target)).rejects.toThrow();
+  await expect(bindings.unstable.readSnapshot(target)).rejects.toThrow();
 });

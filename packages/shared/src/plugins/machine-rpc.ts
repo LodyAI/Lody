@@ -9,6 +9,7 @@ export const pluginControlParams = z.strictObject({
   pluginId: pluginIdSchema,
   action: z.enum(['inspect', 'configure-many', 'enable', 'disable', 'reload']),
   changes: configValues.optional(),
+  projectId: z.string().min(1).max(256).optional(),
   clientDigest: digest.optional(),
 });
 export const pluginInspectionSchema = z.object({
@@ -18,27 +19,47 @@ export const pluginInspectionSchema = z.object({
   diagnostics: z.array(z.string()),
   logs: z.array(z.string()).max(500),
   preferences: configValues,
+  projectPreferences: z.record(z.string(), configValues).optional(),
   configured: z.array(z.string()),
 });
-export const workflowReadOperation = z.enum(['sessions', 'sessionTurns', 'session-meta']);
-export type WorkflowReadOperation = z.infer<typeof workflowReadOperation>;
-export const workflowCreateApproval = z.strictObject({
-  pluginId: pluginIdSchema,
+const grantScope = z.union([z.literal('*'), z.array(z.string().min(1)).min(1).max(256)]);
+export const workflowGrantRequest = z.strictObject({
+  plugin_id: pluginIdSchema,
   installationId: z.string().uuid(),
   machineDigest: digest,
   targetDevice: digest,
-  operation: z.literal('sessions.create'),
-  readOperations: z.array(workflowReadOperation).max(3).optional(),
-  projectId: z.string().trim().min(1),
-  expiresAt: z.number().int().positive(),
+  grant_id: z.string().uuid(),
+  workspace_id: z.string().min(1),
+  machine_id: z.string().min(1),
+  issued_by_user_id: z.string().min(1),
+  issued_at_ms: z.number().int().positive(),
+  allowed_ops: z
+    .array(
+      z.enum([
+        'sessions.create',
+        'sessions.send',
+        'sessions.respondInteraction',
+        'sessions.requestStop',
+        'sessions.requestArchive',
+        'sessionFork',
+      ])
+    )
+    .min(1)
+    .max(6),
+  allowed_project_ids: grantScope,
+  allowed_role_ids: grantScope,
   action: z.enum(['grant', 'revoke']),
 });
-export type WorkflowCreateApproval = z.infer<typeof workflowCreateApproval>;
-export const workflowApprovalReceipt = z.strictObject({
-  requestId: z.string().regex(/^[0-9a-f]{32}$/),
-  signer: digest,
-});
-export type WorkflowApprovalReceipt = z.infer<typeof workflowApprovalReceipt>;
+export type WorkflowGrantRequest = z.infer<typeof workflowGrantRequest>;
+export const declaredGrantSignature = z
+  .string()
+  .max(524288)
+  .regex(/^(?:[0-9a-f]{2})+$/);
+export type DeclaredGrantSignature = z.infer<typeof declaredGrantSignature>;
+export const declaredWorkflowGrant = workflowGrantRequest
+  .omit({ action: true })
+  .extend({ signature: declaredGrantSignature });
+export type DeclaredWorkflowGrant = z.infer<typeof declaredWorkflowGrant>;
 export const pluginCatalogParams = z.strictObject({});
 export const pluginBundleParams = z.strictObject({
   pluginId: pluginIdSchema,
@@ -100,7 +121,7 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
     cliType: z.enum(['builtin', 'custom', 'registry']),
     agentType: z.string(),
   }),
-  z.strictObject({ type: z.literal('plugin/workflow-create-approval'), active: z.boolean() }),
+  z.strictObject({ type: z.literal('plugin/declared-workflow-grant'), active: z.boolean() }),
   z.strictObject({ type: z.literal('plugin/control'), inspection: pluginInspectionSchema }),
   z.strictObject({
     type: z.literal('plugin/catalog'),
@@ -115,6 +136,8 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
             installationId: z.string().uuid(),
             machineDigest: digest,
             targetDevice: digest,
+            issuer: z.string().min(1),
+            activeGrant: workflowGrantRequest.omit({ action: true }).optional(),
           })
           .optional(),
         clientDigest: digest.optional(),
@@ -149,7 +172,7 @@ export function isPluginMachineRequest(
 }
 export const pluginMethods: ReadonlySet<string> = new Set([
   'plugin/control',
-  'plugin/workflow-create-approval',
+  'plugin/declared-workflow-grant',
   'plugin/catalog',
   'plugin/session-create',
   'plugin/bundle-chunk',
