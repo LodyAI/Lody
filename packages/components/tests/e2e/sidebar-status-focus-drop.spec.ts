@@ -254,3 +254,52 @@ test('hovering Status and Workspace session rows reveals end-slot actions with t
     expect(snoozeBg).toMatch(/^rgba\(.+,\s*0\.1\)$/);
   }
 });
+
+const paintedOpacity = (locator: Locator) =>
+  locator.evaluate((el) => {
+    let opacity = 1;
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      opacity *= Number(getComputedStyle(node).opacity);
+    }
+    return opacity;
+  });
+
+test('a status row hides its status mark only while Archive is revealed', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  const surfaces = [
+    'components-lodysidebar--all-sessions-working',
+    'components-lodysidebar--updated-mode',
+  ];
+  for (const story of surfaces) {
+    await page.goto(`/iframe.html?id=${story}&viewMode=story`);
+    const endSlot = page
+      .locator('[data-session-row-end-slot]:has([data-session-row-indicator])')
+      .filter({ has: page.getByRole('button', { name: 'Archive session' }) })
+      .first();
+    await expect(endSlot).toBeVisible();
+    const indicator = endSlot.locator('[data-session-row-indicator]');
+    const archive = endSlot.getByRole('button', { name: 'Archive session' });
+
+    await expect.poll(() => paintedOpacity(indicator)).toBe(1);
+    await expect.poll(() => paintedOpacity(archive)).toBe(0);
+
+    const box = (await endSlot.boundingBox())!;
+    await page.mouse.move(box.x - 60, box.y + box.height / 2);
+    await expect.poll(() => paintedOpacity(archive)).toBe(1);
+    await expect.poll(() => paintedOpacity(indicator)).toBe(0);
+
+    await page.mouse.move(box.x + 600, 5);
+    await expect.poll(() => paintedOpacity(indicator)).toBe(1);
+    await expect.poll(() => paintedOpacity(archive)).toBe(0);
+  }
+
+  await page.goto('/iframe.html?id=components-sidebar-send-status--states&viewMode=story');
+  const bareSlot = page
+    .locator('[data-session-row-end-slot]:has([data-session-row-indicator])')
+    .filter({ hasNot: page.locator('button') })
+    .first();
+  await expect(bareSlot).toBeVisible();
+  const bareBox = (await bareSlot.boundingBox())!;
+  await page.mouse.move(bareBox.x - 60, bareBox.y + bareBox.height / 2);
+  await expect.poll(() => paintedOpacity(bareSlot.locator('[data-session-row-indicator]'))).toBe(1);
+});
