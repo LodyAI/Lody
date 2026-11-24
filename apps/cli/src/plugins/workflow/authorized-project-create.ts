@@ -1,4 +1,14 @@
-import { getSessionRoomId, type SessionId, type WorkspaceId, type MachineId } from '@lody/shared';
+import { basename } from 'node:path';
+import { Effect } from 'effect';
+import { findUserTurn } from '../../lib/e2ee/execution-intent-verification';
+import {
+  decodeE2eeIntentRecord,
+  E2EE_INTENT_KIND,
+  getSessionRoomId,
+  type SessionId,
+  type WorkspaceId,
+  type MachineId,
+} from '@lody/shared';
 import {
   pluginSessionCreateParams,
   type WorkflowApprovalReceipt,
@@ -26,7 +36,8 @@ export function authorizedProjectCreate(options: {
   identity: Pick<
     CliE2eeWorkspaceLegacy,
     'verifyWorkflowApproval' | 'signingPublicKey' | 'pluginAuthoritySignal'
-  >;
+  > &
+    Partial<Pick<CliE2eeWorkspaceLegacy, 'resolveVerifiedExecutionOriginal'>>;
   lease: (id: string, instance: number) => Promise<Lease | undefined>;
   projectExists: (id: string) => Promise<boolean>;
   sessionScope?: (id: SessionId) => Promise<readonly string[]>;
@@ -146,17 +157,101 @@ export function authorizedProjectCreate(options: {
       target.machineId !== call.machineId ||
       target.projectId !== projectId ||
       target.sessionId ||
-      input.parentSession ||
-      input.originTurn ||
-      input.skillIds?.length ||
+      !input.roleId ||
       input.pullRequestUrl
     )
       return undefined;
+    const parent = input.parentSession,
+      origin = input.originTurn;
+    const validRef = (ref: NonNullable<typeof parent>) =>
+      ref.workspaceId === target.workspaceId &&
+      ref.machineId === target.machineId &&
+      (ref.projectId === undefined || ref.projectId === projectId);
+    if (parent && (!validRef(parent) || !approval.readOperations?.includes('session-meta')))
+      return undefined;
+    if (
+      origin &&
+      (!parent ||
+        !validRef(origin.session) ||
+        origin.session.sessionId !== parent.sessionId ||
+        !approval.readOperations?.includes('sessionTurns'))
+    )
+      return undefined;
+    const validateLineage = async () => {
+      if (!parent) return;
+      const sid = parent.sessionId as SessionId;
+      const row = await options.manager.repo.getDocMeta(getSessionRoomId(sid));
+      const meta = row?.meta as import('@lody/shared').SessionMeta | undefined;
+      const footprint = await options.sessionScope?.(sid);
+      if (
+        !row ||
+        row.deleted ||
+        meta?.machineId !== target.machineId ||
+        meta.id !== sid ||
+        meta.project?.kind !== 'local' ||
+        meta.project.localProjectId !== projectId ||
+        !footprint?.length ||
+        footprint.some((id) => id !== projectId)
+      )
+        throw Error('Workflow parent forbidden');
+      if (origin) {
+        const verify = options.identity.resolveVerifiedExecutionOriginal;
+        const doc = (await options.manager.getOrCreateSessionDoc(sid)).handle?.doc;
+        if (!verify || !doc) throw Error('Workflow origin unavailable');
+        const signedRow = () => findUserTurn(doc, origin.userTurnId);
+        const original = signedRow();
+        if (decodeE2eeIntentRecord(original?.e2eeIntent)?.kind !== E2EE_INTENT_KIND.memberInput)
+          throw Error('Workflow origin is not a signed member input');
+        const proof = await Effect.runPromise(
+          verify(
+            { workspaceId: target.workspaceId, sessionId: sid, userTurnId: origin.userTurnId },
+            doc,
+            { origin: true }
+          )
+        );
+        if (
+          !proof ||
+          'state' in proof ||
+          proof.machineAuthored ||
+          proof.derivedFrom ||
+          proof.schedule ||
+          JSON.stringify(original) !== JSON.stringify(signedRow())
+        )
+          throw Error('Workflow origin forbidden');
+      }
+      check();
+    };
     return async () => {
+      const generation = (await options.manager.pluginWorkflows()).find(
+        (g) => g.pluginId === call.pluginId && basename(g.root) === lease.installationId
+      );
+      const role = generation?.roles.get(input.roleId!);
+      if (
+        !role ||
+        !role.defaultProvider ||
+        role.defaultProvider !== input.providerId ||
+        !generation?.acpProviders.has(role.defaultProvider)
+      )
+        throw Error('Workflow verifier binding forbidden');
+      const skills = (input.skillIds ?? []).map((id) =>
+        id.startsWith('plugin:') ? id : `plugin:${call.pluginId}:${id}`
+      );
+      if (
+        new Set(skills).size !== skills.length ||
+        skills.some((id) => !role.skills.includes(id) || !generation.skills.has(id))
+      )
+        throw Error('Workflow skill forbidden');
       if (!(await options.projectExists(projectId))) throw Error('Workflow project unavailable');
       check();
       const principal = `plugin-workflow:${call.pluginId}:${lease.installationId}`;
-      const params = { pluginId: call.pluginId, scope: 'project' as const, target, input };
+      await validateLineage();
+      check();
+      const params = {
+        pluginId: call.pluginId,
+        scope: 'project' as const,
+        target,
+        input: { ...input, skillIds: skills },
+      };
       const receipt = await acceptVerifiedPluginCreation(
         options.manager,
         principal,
@@ -165,6 +260,7 @@ export function authorizedProjectCreate(options: {
           options.manager.createClientPluginSession(params, principal, options.machineId, check),
         check,
         async (input) => {
+          await validateLineage();
           check();
           const e2eeIntent = await options.manager.signMachineInput({
             ...input,
