@@ -19,7 +19,7 @@ Translation: current
 
 验证与实现合规性划分为四档画像（详见第 16 章）：
 
-- **Core Conformance（`REQUIRED` 必选核心合规）：** 同时强制覆盖 **桌面端（`Electron`）**、**Web 浏览器端（`web`）**、**无头守护进程端（`headless`）** 以及 **移动端 Capacitor（`apps/mobile-capacitor` 的内联卡片、事件与声明式配置）**。涵盖包校验、单插件子进程隔离、`Drain-Before-Respawn`、单层 IPC（携带 `contextId` 的 `host_call`）、远程 `client.js` 产物分页流式传输（`<= 4 MiB` 分片 + `clientDigest` 信任门禁）、工作区与机器级客户端归属分离及多机去重、宿主事件总线（`client` + `machine` + 本地游标续传）、Command Palette / Slash Commands / 客户端签名前 `beforeSend` / `lody.ui` 基础反馈原语、通用工具（`replace` + 可叠加 `enhance`）与结构化消息块渲染器、三层侧边栏 + 轻量化 Session/Message/StatusBar 槽位、双层主题与 `@layer lody-plugin` 托管 CSS、Workflow `agentRoles` + `skills` + `mcpServers`、双层工作区数据读取（Tier-1 归一化 `lodyQueries` + 跨端同步 `annotations` + 宿主托管作用域 `storage`；Tier-2 显式 Opt-in 的 `unstable` 白名单快照）、声明式 `manifest.config`（含 `project` 作用域）+ 首次启用 `onboarding` + 显式 `manifest.permissions`、Agent 辅助创建与 `lody_plugin` `propose_*` 人类确认卡片，以及双模型 E2EE 安全门禁（活跃回合内 `SignedTurnOrigin` 派生 + 机主签发 `DeclaredWorkflowGrant`）。
+- **Core Conformance（`REQUIRED` 必选核心合规）：** 同时强制覆盖 **桌面端（`Electron`）**、**Web 浏览器端（`web`）**、**无头守护进程端（`headless`）** 以及 **移动端 Capacitor（`apps/mobile-capacitor` 的内联卡片、事件与声明式配置）**。涵盖包校验、单插件子进程隔离、`Drain-Before-Respawn`、单层 IPC（携带 `contextId` 的 `host_call`）、双路径客户端产物分发（钉死版本的 `npm` `.tgz` Web 零机冷启动 + `MachineRpc` `plugin/bundle-chunk` `<= 4 MiB` + `clientDigest` 信任门禁与托管 IndexedDB 持久化）、`npm` 机主自有机器同步 vs `local` 纯本机归属及多机动态 RPC 路由、宿主事件总线（`client` + `machine` + 本地游标续传）、Command Palette / Slash Commands / 客户端签名前 `beforeSend` / `lody.ui` 基础反馈原语、通用工具（`replace` + 可叠加 `enhance`）与结构化消息块渲染器、路由化自定义页面（`screens`、`project.pages`、`session.panels` 分栏面板）、三层侧边栏 + 轻量化 Session/Message/StatusBar 槽位、双层主题与 `@layer lody-plugin` 托管 CSS、Workflow `agentRoles` + `skills` + `mcpServers`、双层工作区数据读取（Tier-1 归一化 `lodyQueries` + 跨端同步 `annotations` + 宿主托管作用域 `storage`；Tier-2 显式 Opt-in 的 `unstable` 白名单快照）、声明式 `manifest.config`（含 `project` 作用域）+ 三层自定义设置页面（`workspace` / `machine` / `project` + 宿主托管 `<PluginSecretField />` + `lody.settings.open`）+ 首次启用 `onboarding` + 显式 `manifest.permissions`、机器所有者远程 `plugin/control`、Agent 辅助创建与 `lody_plugin` `propose_*` 人类确认卡片，以及双模型 E2EE 安全门禁（活跃回合内 `SignedTurnOrigin` 派生 + 机主签发 `DeclaredWorkflowGrant`）。
 - **Workflow Provider Conformance（`Conditional` 条件合规）：** 当启用 `manifest.acpProviders`（声明式桥接至 Lody 既有的托管 ACP 扩展契约 `LodyAI/acp-extension-core` 与 `acp-session-start-gate.ts`）时 **REQUIRED**。与 Core 解耦，使自定义 ACP 运行时完整复用原生认证、非 Node 二进制与能力缓存，而非另造简陋启动器。
 - **Mobile Extended UI Conformance（`Conditional` 条件合规）：** 当移动端宿主声明 `HostCapabilities.containers.sidebarViews`、`sessionPanels`、`screens` 或 `projectPages` 为 `true`（在移动端抽屉/半屏容器中挂载外壳视图）时 **REQUIRED**。
 - **Real Integration Profile（投产发布 `REQUIRED` 必选真实集成验证）：** 零 Mock 的真实 OS 子进程（`SIGTERM`/`SIGKILL`、崩溃与 `--dev` 编译器回收）以及跨端（Electron + 无头 Web + 移动视口）真实 E2E 验收套件（第 16.8 节）。
@@ -118,12 +118,12 @@ flowchart TB
 
 ### 3.3 跨设备运行拓扑规范
 
-| 运行拓扑                                                     | 前端产物分发方式                                                                               | 激活的 UI 扩展面                                                                                                                                                                                                                                           | 机器侧执行路径                                                                     |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **`desktop`（`Electron`）**                                  | 本地已校验产物或远程 `MachineRpc` 分页流（`Core`）                                             | 全部 Core 内联扩展 + 全部外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`）                                                                                                                                               | 本地或远程 `WorkspaceMachineRpcFacade`                                             |
-| **`web`（浏览器）**                                          | 远程 `MachineRpc` `plugin/bundle-chunk`（`<= 4 MiB`，经 `clientDigest` 校验，**纳入 `Core`**） | **与 `desktop` 100% 对等**（全部 Core 内联扩展 + 全部外壳容器 `containers`：`sidebarViews`、`sessionPanels`、`screens`、`projectPages`）                                                                                                                   | 远程 `WorkspaceMachineRpcFacade`                                                   |
-| **`mobile`（`apps/mobile-capacitor`，iOS 16.4+ / Android）** | 远程 `MachineRpc` `plugin/bundle-chunk`（`Core`）                                              | `Core`：会话/输入栏内联扩展（`tools`、`messages`、`composer`、`sidebar.sessionRow`）、`events`、`manifest.config`。`Conditional`：通过 `useHostCapabilities()` 协商开放外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`） | 远程 `WorkspaceMachineRpcFacade`                                                   |
-| **`headless`（`CLI`）**                                      | 跳过前端产物加载                                                                               | 不适用                                                                                                                                                                                                                                                     | 完整支持 `machine`、`events`、`agentRoles`、`skills`、`mcpServers`、`acpProviders` |
+| 运行拓扑                                                     | 前端产物分发方式                                                                                                                               | 激活的 UI 扩展面                                                                                                                                                                                                                                                 | 机器侧执行路径                                                                     |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **`desktop`（`Electron`）**                                  | 托管缓存 → 本地已校验产物、钉死版本 `npm` `.tgz` 或远程 `MachineRpc` `plugin/bundle-chunk`（`Core`）                                           | 全部 Core 内联扩展 + 路由化外壳容器 `containers`（`sidebarViews`、`sessionPanels` 分栏面板、`screens`、`projectPages`）+ 三层自定义设置（`workspace`、`machine`、`project`）                                                                                     | 本地或远程 `WorkspaceMachineRpcFacade`                                             |
+| **`web`（浏览器）**                                          | 托管 IndexedDB 缓存 → 直连 CORS 钉死版本 `npm` `.tgz`（`0` 机器在线亦可用）或回退远程 `MachineRpc` `plugin/bundle-chunk`（`<= 4 MiB`，经 `clientDigest` 校验，**纳入 `Core`**） | **与 `desktop` 100% 对等**（全部 Core 内联扩展 + 路由化外壳容器 + 三层自定义设置 + 机主远程 `plugin/control`）                                                                                                                                                   | 远程 `WorkspaceMachineRpcFacade`                                                   |
+| **`mobile`（`apps/mobile-capacitor`，iOS 16.4+ / Android）** | 托管缓存 → 直连钉死版本 `npm` `.tgz` 或远程 `MachineRpc` `plugin/bundle-chunk`（`Core`）                                                       | `Core`：会话/输入栏内联扩展（`tools`、`messages`、`composer`、`sidebar.sessionRow`）、`events`、声明式 `manifest.config` 与工作区设置。`Conditional`：通过 `useHostCapabilities()` 协商开放外壳容器 `containers`（`sidebarViews`、`sessionPanels` 抽屉、`screens`、`projectPages`） | 远程 `WorkspaceMachineRpcFacade`                                                   |
+| **`headless`（`CLI`）**                                      | 跳过前端产物加载                                                                                                                               | 不适用                                                                                                                                                                                                                                                           | 完整支持 `machine`、`events`、`agentRoles`、`skills`、`mcpServers`、`acpProviders` |
 
 ---
 
@@ -131,7 +131,8 @@ flowchart TB
 
 ### 4.1 核心实体
 
-- **`PluginInstallation`：** `{ plugin_id, version, scope: 'workspace' | 'machine', root_dir, manifest, enabled, lifecycle_state, client_digest, config_values, secret_keys_present, granted_permissions[], workflow_grant?, active_instance?, workflow_registrations, diagnostics[], logs_ring }`。
+- **`WorkspacePluginEntry`：** 同步在工作区内的已发布 `npm` 插件注册记录（E2EE 工作区下存于加密 Workspace Loro 文档内）：`{ plugin_id, source: { kind: 'npm', package_name, exact_version, integrity }, client_digest?, manifest_summary, permissions[], config_schema, enabled, machine_sync: 'manual' | 'owner_machines', sync_owner_user_id?, sync_signature? }`。使 Web/Mobile 端无需在信任前发出任何外部网络请求即可展示权限披露，并在 `0` 机器在线时完成冷启动加载。
+- **`PluginInstallation`：** `{ plugin_id, version, scope: 'workspace' | 'machine', source: { kind: 'npm', package_name, exact_version, integrity } | { kind: 'local', origin: 'dir' | 'dev' | 'archive' | 'github' }, root_dir, manifest, enabled, lifecycle_state, client_digest, config_values, secret_keys_present, granted_permissions[], workflow_grant?, active_instance?, workflow_registrations, diagnostics[], logs_ring }`。
 - **`MachinePluginInstance`：** `{ instance_id, pid, started_at_ms, registered_handlers, event_subscriptions, has_background_service, inflight_calls }`。
 - **`ClientPluginInstance`：** `{ plugin_id, source_key: 'workspace' | 'local' | 'machine:<id>', client_digest, state, abort_controller, cleanup_fn?, contributions, style_elements[], query_cache }`。
 - **`DeclaredWorkflowGrant`：** 由机器所有者签发且可随时撤销的工作流授权记录 `{ grant_id, workspace_id, machine_id, plugin_id, allowed_ops[], allowed_project_ids: string[] | '*', allowed_role_ids: string[] | '*', issued_by_user_id, issued_at_ms, signature }`，用于授权回合外的守护进程自动执行（`session.turn.completed`、`onStart`、`machine.service`、`sessions.respondInteraction`）。
@@ -232,19 +233,25 @@ flowchart TB
    - 凡是挂载 `"replace"` 模式的 `tools.matchRender` 或 `messages.renderBlock`，宿主外壳 **MUST** 在插件子树外部渲染不可被插件伪造或隐藏的头部切换按钮（**“查看原始输出 / 查看原始 Markdown”**），并以 `SurfaceErrorBoundary` 包裹插件组件。
    - 遵循 [`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md)：插件工具/消息块渲染器 **MUST NOT** 向正文专用搜索索引注入 `searchBlockId`、**MUST NOT** 在折叠活动组内制造嵌套全高滚动陷阱，且必须保持回合折叠与对齐轨道不变量。
 
-### 6.3 命令面板、签名前输入钩子、三层正交侧边栏与跨设备能力协商
+### 6.3 命令面板、签名前输入钩子、路由化自定义页面、三层正交侧边栏与跨设备能力协商
 
 1. **命令面板、Slash Commands 与客户端签名前输入钩子：**
    - `commands.register({ id, title, shortcut?, when?, run })`：向 Lody 命令面板（`Cmd+K`）及非冲突快捷键注册插件动作。
    - `composer.slashCommands.add({ name, description, run })`：在输入栏注册可执行动作的 `/command` 触发器（展开草稿、触发插件流或打开界面）。
    - `composer.beforeSend(handler)`：在用户个人设备完成 E2EE `memberInput` **签名之前**执行的客户端钩子（支持用户可见的 Working Memory / 上下文注入、模板展开或 PII 敏感信息检查，100% 保持 E2EE 完整性，精准补齐禁止守护进程侧 `machine.beforeSessionTurn` 后的缺口）。任何改写结果 **MUST** 反映在最终签发提交的用户输入中，并受交互短时限（`<= 3000 ms`，用户可取消）约束。
-2. **三层正交侧边栏与轻量上下文槽位（基于 [`sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)）：**
+2. **路由化自定义页面（`screens`、`project.pages`、`session.panels`）：**
+   - 宿主 **MUST NOT** 将 `screens`、`project.pages` 与 `session.panels` 混为一谈地塞进单一全局 `<Dialog>` 弹窗；三者须对应各自独立的空间形态与一等公民 URL 路由（支持浏览器前进/后退、刷新保留、收藏书签与协作者深链分享）：
+     - **`screens.add({ id, title, icon?, nav?: "sidebar" | "command-only", order?, Component })`：** 挂载于主工作区 `<Outlet />`（宽屏下保留左侧 Sidebar，与 `/today`、`/schedules` 同级），路由为 `/$workspaceName/p/$pluginId/$screenId`，URL search params 与 `ScreenProps.params` 1:1 双向同步（经 `lody.screens.setParams(next, { replace? })` 更新）。声明 `nav: "sidebar"` 的页面由宿主统一收纳至侧边栏 **Apps / Plugins** 分区，自动联动当前路由高亮、移动端导航与 `Cmd+K`。
+     - **`project.pages.add({ id, title, icon?, Component })`：** 挂载于项目上下文主视图并附带宿主面包屑头（`<Project> / <Page Title>`），路由为 `/$workspaceName/projects/$machineId/$projectId/p/$pluginId/$pageId`（同时可通过项目菜单与项目页签切换访问）。
+     - **`session.panels.add({ id, title, icon?, Component })`：** 在宽屏 Desktop/Web 端作为会话右侧可拖拽 **Split Pane（分栏面板）** 与对话转录并排展示（移动端退化为 Bottom Sheet / Drawer），让用户边看 Agent 输出边操作面板而不遮挡对话，并同步至 `?panel=<pluginId>:<panelId>`。
+   - **冷启动深链解析状态机：** Web 直接访问或刷新插件页面 URL 时 **MUST** 保留原 URL 与查询参数（严禁闪现 404 或踢回 `/chat`），并按需展示明确宿主态：`resolving`（加载 catalog/bundle 骨架屏）、`untrusted`（原地能力披露与 Trust 按钮，批准后原地挂载页面）、`source_offline`（仅 `local` 插件宿主机器离线时展示；`npm` 工作区页面在 `0` 机器在线时直接加载）、`disabled` / `not_installed`（引导启用或前往设置）以及 `safe_mode`（`?safeMode=1` 跳过提示）。
+3. **三层正交侧边栏与轻量上下文槽位（基于 [`sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)）：**
    - `sidebar.sessionRow.decorate`：按 `(plugin_id, decorator_id)` 确定性叠加行尾徽章与悬停气泡；自定义 `sidebar.views.add` 树内渲染 `<SessionRow />` 时 **MUST** 自动继承全部活跃装饰器。
    - `sidebar.headerItems` / `footerItems`：使用 `<SidebarRow />` 的顶/底导航项，联动 `screens.add`。
    - `sidebar.views.add`：与宿主内置 `"Default"` 视图并列可选的自定义侧边栏主体；禁用当前视图时立即回退至 `"Default"`。
    - 轻量上下文槽位：`session.headerActions.add`（会话顶栏操作）、`messages.actions.add`（消息/回合底部操作）与 `statusBar.items.add`（状态栏紧凑指标）。
-   - **贡献 ID 命名空间：** 传给 `lody.screens.open`、`lody.panels.openSession` 与 `lody.pages.openProject` 的未限定 ID 严格解析至调用插件自身命名空间（`<calling_plugin_id>:<id>`）；跨插件打开须显式使用 `<plugin_id>:<id>`。
-3. **跨设备统一 API 与能力协商（`useHostCapabilities()`）：**
+   - **贡献 ID 命名空间：** 传给 `lody.screens.open`、`lody.panels.openSession`、`lody.pages.openProject` 与 `lody.settings.open` 的未限定 ID 严格解析至调用插件自身命名空间（`<calling_plugin_id>:<id>`）；跨插件打开须显式使用 `<plugin_id>:<id>`。
+4. **跨设备统一 API 与能力协商（`useHostCapabilities()`）：**
    - 开发者面向单一 `@lody/plugin-sdk/client` 编写跨端代码，通过 `useHostCapabilities()` 读取 `{ platform: "desktop" | "web" | "mobile", formFactor: "wide" | "compact", containers: { sidebarViews, sessionPanels, screens, projectPages } }`；其中 `containers` 与 `ClientPluginRegistry` 的外壳挂载命名空间严格 **1:1 对齐**，绝不混入具体业务特性开关或机器在线状态。
    - 会话与输入栏内联扩展（`tools`、`messages`、`composer`、`commands`、`sidebar.sessionRow`）、`events` 与 `manifest.config` 在 `desktop`、`web` 与 `mobile` 三端均属 `Core Conformance` 必有基线；`desktop` 与 `web` 在 Core 中同时开启全部外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`），`mobile`（`apps/mobile-capacitor`）在启用 `Mobile Extended UI Conformance` 时开放上述外壳容器。在紧凑端注册未挂载的外壳容器 **MUST NOT** 抛错崩溃——宿主记录 `capability_unavailable_on_platform` 诊断并继续正常运行内联扩展、事件与配置能力。
 
@@ -335,17 +342,26 @@ flowchart TB
 
 `--dev` 源码链接插件在守护进程外的 `DevPluginCompiler` 子进程中按需编译，在有界空闲窗口后自动退出（实现自定义间隔，如开发态默认 `30 s` 以免每次保存重复冷启动），并在 `PluginHost` 关闭时无条件回收（`0` 僵尸进程）。
 
-### 8.5 工作区 vs 机器级客户端归属、多机去重与 `clientDigest` 幂等规则
+### 8.5 来源归属（`npm` vs `local`）、多机同步、去重与动态客户端路由
 
-`ClientPluginHost` 严格区分**工作区/用户级纯前端插件**与**机器绑定插件**，使多机工作区既不会因单机休眠丢失 UI 体验，也不会重复挂载多份同名 UI/事件插件：
+Lody 将插件的**包来源归属**（`npm` vs `local`）与 **UI 挂载模型**分离，确保 Web 在零机器在线时可冷启动、多机同步在共享 E2EE 工作区中保持安全，且去重后的客户端 UI 可跨所有已启用机器协同工作：
 
-- **工作区/用户级前端安装（`source_key = "workspace"`）：** 纯前端插件（主题、样式、音效、侧边栏视图、通用工具/消息块渲染器、Slash Commands）归属工作区/用户级，非敏感 `scope: "client"` 配置落盘于用户/工作区偏好，**按工作区单实例挂载**，且不受单台机器离线影响。
-- **机器绑定配套安装（`source_key = "machine:<machine_id>"` 或 `"local"`）：** 含 `manifest.machine` 或机器级工作流贡献的插件以 `(workspace_id, source_key, plugin_id)` 绑定来源机器 RPC 路由与机器专属面板。当同一 `plugin_id` 在同一工作区的多台在线机器上启用时，`ClientPluginHost` **MUST** 将工作区全局客户端贡献（`events.on`、`commands`、`composer.slashCommands`、`composer.beforeSend`、`tools.matchRender`、`messages.renderBlock`、`sidebar.*`、`screens`、`themes`、`styles`）去重收敛至单一确定性主客户端实例（选取最高 SemVer 版本，平局按 `source_key ASC` 决出），彻底杜绝双倍音效、重复侧边栏入口或同类匹配器自遮蔽。
-- **不可变产物键（Bundle Key：`(plugin_id, clientDigest)`）：** 用于去重共享 `plugin/bundle-chunk` 网络下载、SHA-256 完整性校验、托管缓存落盘与不可变静态资源 `assets/*`。
-- **按活跃实例隔离的模块求值：** 每个活跃客户端实例在独立的 ES 模块实例中求值 `client.js`（卸载/HMR 时吊销），同时共享宿主外置的 `react` / `zod` / `@lody/ui` / `@lody/plugin-sdk/*` 单例。
-
-- 若 `clientDigest` 未变且处于 `Active`，调和过程 **MUST** 原地保留现有实例、事件监听与 `query_cache`。
-- 当 `clientDigest` 变化或执行 `disable` 时，**MUST** 先触发 `abort_controller.abort()`（摘除全部 `events.on` 与进行中查询）、执行 `cleanup_fn`、注销全部 UI/匹配器/命令/主题贡献、移除 `<style>` 节点并清空 `query_cache`，随后才允许挂载新实例。
+1. **公开发布源（`source.kind = "npm"` —— Web 零机冷启动与可选机主自有机器同步）：**
+   - 永远钉死**精确不可变版本**（如 `packageName@1.2.3`，禁止浮动 `^` 范围），连同 SRI `integrity`（SHA-512）与 `clientDigest`（SHA-256）写入加密 Workspace Loro 文档中的 `WorkspacePluginEntry`。
+   - **Web / Mobile 冷启动管线（`0` 机器在线可用）：** 因为 `manifest_summary`、`permissions` 与 `config_schema` 随 `WorkspacePluginEntry` 同步，Web 在用户批准前**不发任何外部注册表请求**即可展示完整权限披露。批准后客户端按序解析 `(plugin_id, clientDigest)`：（1）托管 IndexedDB 缓存；未命中则（2）直连 CORS 兼容的 `npm` `.tgz`（默认 npmjs 或可配置镜像，浏览器内经 `DecompressionStream('gzip')` 解包）；若受防火墙/私有源阻断则（3）回退至任意在线机器的 `MachineRpc` `plugin/bundle-chunk`。所有路径落盘或 `import()` 前 **MUST** 严格校验 `integrity` / `clientDigest`，镜像站仅作不可信传输通道。
+   - **机主自有机器同步（`machineSync: "manual" | "owner_machines"`）：** 用户安装 `npm` 插件并显式勾选 `machineSync: "owner_machines"` 时，**仅该用户本人拥有的机器（`machine.ownerUserId === sync_owner_user_id`，E2EE 下核验机主签名）** 自动调和并安装该精确版本。共享工作区中的协作者添加 `npm` 插件 **MUST NEVER** 触发在其他成员机器上的自动安装。新同步的机器 **MUST NEVER** 自动复制 `secret` 密钥，也 **MUST NEVER** 自动签发 `DeclaredWorkflowGrant`；若缺失必填密钥或工作流授权，该机器落于 `Disabled` / `Needs Setup` 待主人配置。升级必须显式确认，新增 `manifest.permissions` 时重新弹窗。
+2. **本地来源（`source.kind = "local"` —— 本地目录、`--dev`、本地 `.tgz` 或 CLI 安装的 GitHub Release）：**
+   - 严格绑定单一安装机器（`source_key = "local"` 或 `"machine:<machine_id>"`），**MUST NEVER** 自动同步到其他机器，也 **MUST NEVER** 向 npmjs 发请求。
+   - Web 与远程桌面端仅在该机器在线时通过 `MachineRpc` `plugin/bundle-chunk` 流式加载其前端产物（`--dev` 支持 `Trusted Dev Session` 热更新），机器离线时清晰提示离线态。
+3. **多机去重与动态客户端路由：**
+   - 工作区级 `npm` 客户端插件（`source_key = "workspace"`）**按工作区单实例挂载**，不受单机离线影响。
+   - 同一 `plugin_id` 在同一工作区的多台在线机器上启用时，`ClientPluginHost` **MUST** 将工作区全局前端贡献（`events.on`、`commands`、`composer.slashCommands`、`composer.beforeSend`、`tools.matchRender`、`messages.renderBlock`、`sidebar.*`、`screens`、`themes`、`styles`）去重收敛至单一确定性主实例（最高 SemVer，平局按 `source_key ASC`），彻底杜绝双倍音效、重复侧边栏入口或匹配器自遮蔽。
+   - **多机动态 RPC 与导航路由器：** 去重后的主 `ClientPluginInstance` **MUST NOT** 将 `useQuery`、`useMutation`、`lody.execute`、`lody.pages.openProject` 或 `lody.panels.openSession` 死绑到单一 `machineId`；相反，**MUST** 按每次调用的 `target.machineId` 动态转发至工作区中启用了该 `plugin_id` 的对应机器（目标机器离线或未启用该插件时返回 `{ status: "unavailable", reason: "machine_offline" | "not_found" }`）。
+4. **不可变产物键、模块隔离与 `clientDigest` 幂等规则：**
+   - **不可变产物键（Bundle Key：`(plugin_id, clientDigest)`）：** 用于去重共享网络下载、SHA-256 校验、托管 IndexedDB 缓存落盘与静态资源 `assets/*`。
+   - **按活跃实例隔离的模块求值：** 每个活跃客户端实例在独立的 ES 模块实例中求值 `client.js`（卸载/HMR 时吊销），同时共享宿主外置的 `react` / `zod` / `@lody/ui` / `@lody/plugin-sdk/*` 单例。
+   - 若 `clientDigest` 未变且处于 `Active`，调和过程 **MUST** 原地保留现有实例、事件监听与 `query_cache`。
+   - 当 `clientDigest` 变化或执行 `disable` 时，**MUST** 先触发 `abort_controller.abort()`（摘除全部 `events.on` 与进行中查询）、执行 `cleanup_fn`、注销全部 UI/匹配器/命令/主题贡献、移除 `<style>` 节点并清空 `query_cache`，随后才允许挂载新实例。
 
 ---
 
@@ -363,8 +379,9 @@ flowchart TB
 
 为在 `Core Conformance` 中确保 Desktop 与 Web 完全一致的插件体验，`WorkspaceMachineRpcFacade` 暴露固定白名单方法：
 
-- `plugin/catalog`：返回已安装/启用插件列表、`clientDigest`、声明的 `permissions`、活跃 `workflowGrant` 摘要、声明式 `config` Schema 与能力摘要。
-- `plugin/bundle-chunk`：以 `256 KiB` `purpose 9` 分片流式读取 `client.js` 与 `themes`/`styles`/`assets`（`<= 4 MiB`），客户端在落盘缓存与执行前强制校验 `clientDigest`。
+- `plugin/catalog`：返回已安装/启用插件列表、来源归属（`npm` vs `local`）、`clientDigest`、声明的 `permissions`、活跃 `workflowGrant` 摘要、声明式 `config` Schema 与能力摘要。
+- `plugin/bundle-chunk`：以 `256 KiB` `purpose 9` 分片流式读取 `client.js` 与 `themes`/`styles`/`assets`（`<= 4 MiB`），客户端在落盘缓存与执行前强制校验 `clientDigest`（为 `local` / `--dev` / 私有包的主路径，以及公网 `npm` 不可达时的回退路径）。
+- `plugin/control`**（仅限机器所有者 —— 覆盖 Desktop、Web 与 Mobile）：** 远程管理 RPC，覆盖 `inspect`、`enable`、`disable`、`reload`、`configure-many`、`set-secret`（向目标机器钥匙串只写不读）、`resolve-proposal`（审批或拒绝 `plugin_proposal` 卡片）与 `manage-workflow-grant`。**MUST NOT** 人为限制为 `transport === "local"`；守护进程 **MUST** 核验 `callerUserId === machine.ownerUserId`、非 Guest `authorizeExecution` 以及写操作对应的个人设备 E2EE 签名，非机主一律拒绝 `forbidden`。
 - `plugin/query`、`plugin/mutate`、`plugin/attachment-search`、`plugin/attachment-resolve`：单帧 `<= 256 KiB` 调用。
 
 ### 9.3 超时、取消信号与会话 `Stop` 传播
@@ -399,11 +416,12 @@ flowchart TB
   - 直接替换状态文件时 **SHOULD** 采用临时文件 + `fs.rename` 原子替换。
   - `disable` 与 `remove` 默认保留 `ctx.dataDir` 与 `storage`；`remove --purge-data` 仅在 `Drain-Before-Respawn` 确认子进程退出后一并清理。
 
-### 10.3 声明式配置与钥匙串密钥隔离存储
+### 10.3 声明式配置、钥匙串密钥隔离与 Web 托管缓存
 
-- `scope: "client"` / `"both"` 的非敏感 `manifest.config` 值持久化于用户/工作区偏好配置（绝不锁死在单台机器的 `catalog.json` 中），同步注入 `lody.config.get()` 与 `usePluginConfig()`。
-- `scope: "project"` 的非敏感 `manifest.config` 值按项目持久化（与 `settings.pages.add({ binding: "project" })` 对齐）。
-- `type: "secret"` 与 `scope: "machine"` 值**仅**存入目标机器系统钥匙串（OS Keychain / 守护进程加密存储），绝不进入 Loro/Flock 同步文档或下发给客户端。
+- `scope: "client"` / `"both"` 的非敏感 `manifest.config` 值持久化于用户/工作区偏好配置（绝不锁死在单台机器的 `catalog.json` 中），在 `0` 机器在线时依然可编辑，并同步注入 `lody.config.get()` 与 `usePluginConfig()`。
+- `scope: "project"` 的非敏感 `manifest.config` 值随项目元数据持久化于工作区同步存储（E2EE 工作区下加密存于 Workspace Loro 文档，单插件单项目上限 `<= 16 KiB`，与 `settings.pages.add({ binding: "project" })` 对齐），对有权限查看该项目的成员可读，由机器所有者及具备有效 `MachineSharing` 写权限的协作者可改。
+- `type: "secret"` 与 `scope: "machine"` 值**仅**存入目标机器系统钥匙串（OS Keychain / 守护进程加密存储），绝不进入 Loro/Flock 同步文档或下发给客户端（远程仅允许机器所有者经 `plugin/control` `set-secret` / `configure-many` 写入）。
+- Web 客户端 **MUST** 将已校验产物（`VerifiedBundleCache`）、已批准的 `(workspace_id, plugin_id, clientDigest)` 信任记录与 `lody.storage` 持久化在托管作用域 IndexedDB（`<account>/<workspace>/<genesis>/<signing-key>`）中，使页面刷新免重复下载与审批，并通过同托管作用域的 `BroadcastChannel` 在多个打开的浏览器标签页间同步信任/配置/`lody.storage` 变更。
 
 ### 10.4 作用域查询缓存与精准失效
 
@@ -438,8 +456,9 @@ flowchart TB
 ### 11.4 打包、分享与 SemVer 更新回滚
 
 - `lody plugin pack` 校验环境纯度、打包产物、验证 `MAX_PACKED_CLIENT_BUNDLE_BYTES`（`<= 4 MiB`），输出兼容标准 npm 的 `.tgz` 归档包（可选 `.lodypkg` 后缀），内嵌 `SHA-256` 完整性清单与 `lody.plugin.json`。
-- 支持从本地目录/`.tgz`/`.lodypkg`、兼容 npm 的源包、Git Release / HTTPS 归档链接或工作区目录安装。
-- 升级插件时经 `Drain-Before-Respawn` 平滑切换、触发可选 `onUpgrade(ctx, { fromVersion, toVersion })`、完整保留 `ctx.storage`、`ctx.dataDir` 与已有 `config` 值、仅在新增 `permissions` 或必填项时重新弹窗确认，并保留上一代产物支持一键 `lody plugin rollback <id>`。
+- **跨设备规范分发源（`npm`）：** 已发布的 `npm` 包（`packageName@exactVersion` + SRI `integrity`）是 Web 零机冷启动与可选 `owner_machines` 多机同步的规范源，无需 Lody 自建托管后端即可通过 CORS 兼容注册表/镜像在浏览器端直接 `fetch()`。
+- **单机本地来源（`local`）：** 本地目录、`--dev` 链接、本地 `.tgz`/`.lodypkg` 归档及固定 GitHub Release / HTTPS 归档链接（因 GitHub 原始 Release 重定向缺乏浏览器 CORS 头）仅安装到目标单机，永不跨机自动同步，在机器在线时经 `plugin/bundle-chunk` 向 Web 流式分发前端产物。
+- 升级插件永远钉死精确版本（禁止静默浮动升级），经 `Drain-Before-Respawn` 平滑切换、触发可选 `onUpgrade(ctx, { fromVersion, toVersion })`、完整保留 `ctx.storage`、`ctx.dataDir` 与已有 `config` 值、仅在新增 `permissions` 或必填项时重新弹窗确认，并保留上一代产物支持一键 `lody plugin rollback <id>`。
 
 ---
 
@@ -468,15 +487,30 @@ flowchart TB
 2. **幂等 `plugin_proposal` 聊天审批卡片：** 调用 `propose_*` 时先执行 `lody plugin doctor` 静态校验、冻结包 `SHA-256` 摘要与请求的 `permissions`，并按 `requestId` 在当前会话写入唯一幂等的 `plugin_proposal` 系统卡片；重复调用返回最新人类审批结果（`pending` | `approved` | `rejected`）。
 3. **人类确认门禁：** `lody_plugin` 暴露 **`0` 个**直接安装/启用/重载/签发工作流授权/写密钥接口；唯有当人类用户在宿主可信卡片上点击**“批准并启用（Approve & Enable）”**（同步签发获批的 `DeclaredWorkflowGrant`）或执行人类交互终端命令时，宿主才激活插件代码。
 
-### 12.3 声明式配置表单与首次使用引导抽屉
+### 12.3 宿主管理与插件设置分离、三层自定义设置页及宿主密钥原语
 
-- 凡声明 `manifest.config` 的插件，Lody 在 Desktop、Web 与 Mobile 端跨工作区、项目与机器作用域自动渲染原生设置表单（文本框、掩码钥匙串输入框、数值步进/滑块、开关与下拉单选），无需手写常规设置 UI。
-- 启用插件时若声明了 `manifest.onboarding` 或存在未填写的 `required: true` `manifest.config` 字段，宿主自动弹出**首次使用引导抽屉（First-Run Setup Sheet）**，用户提交后立即拉起进入 `Running`。插件仍可按需通过 `lody.settings.pages.add` 挂载高级自定义设置页。
+Lody 清晰拆分**宿主托管插件管理**与**插件业务设置**，确保无论 `client.js` 是否受信任或加载，用户始终能检视、审批、配置或禁用插件：
+
+1. **宿主管理与诊断层（无需执行 `client.js`）：**
+   - 启停、重载、版本升级/回滚、`npm` 插件的 `machineSync: "owner_machines"` 开关、能力与 `manifest.permissions` 披露、`DeclaredWorkflowGrant` 范围审批、`clientDigest` 信任与吊销、PID、诊断与日志一律由宿主可信界面渲染（在 `Disabled`、`Untrusted`、`Faulted` 或 `--safe-mode` 下均保持可用）。
+2. **第一层 —— 声明式 `manifest.config` 与首次使用引导抽屉：**
+   - 凡声明 `manifest.config` 的插件，Lody 在 Desktop、Web 与 Mobile 端跨工作区、项目与机器作用域自动渲染原生设置表单（文本框、掩码钥匙串输入框、数值步进/滑块、开关与下拉单选），无需手写常规设置 UI。
+   - 启用插件时（含通过 `owner_machines` 新同步落盘的机器）若声明了 `manifest.onboarding` 或存在未填写的 `required: true` `manifest.config` 字段，宿主自动弹出**首次使用引导抽屉（First-Run Setup Sheet）**，用户提交后立即进入 `Running`。
+3. **第二层 —— 三层自定义设置页面（`settings.pages.add`）与宿主原语：**
+   - 在 `client.js` 获信任并激活后，插件 **MAY** 在三种显式作用域上注册高级自定义设置页（OAuth 连接、测试连接、动态拉取远端频道/项目映射、规则表），取代堆砌在 Inspector 底部或藏于右键菜单的零散挂载：
+     - **`binding: "workspace"`**（`{ workspace, pluginId, version }`）：挂载于 `设置 -> 插件 -> <插件>` 详情页（并可选在设置左侧栏底部折叠的 `Plugins` 分组中提供快捷入口）；**无需任何机器在线**。
+     - **`binding: "machine"`**（兼容 `"installation"`，`{ workspace, machine, pluginId, version }`）：挂载于 `设置 -> 插件 -> <插件>`（多机安装时顶部提供机器切换器）及机器详情页；机主在 Web 端的配置修改经 E2EE 鉴权的远程 `plugin/control` 直达目标守护进程。
+     - **`binding: "project"`**（`{ workspace, project, params }`）：直接内嵌于 **项目设置（Project Settings，`/$workspaceName/settings/projects`）** 的专属分组/页签中，不再仅藏于侧边栏右键菜单。
+   - **宿主托管设置原语与导航：**
+     - **`<PluginSecretField fieldKey target onSaved />`**（`@lody/plugin-sdk/client`）：由宿主渲染掩码密钥输入框并直接经 `plugin/control` `set-secret` 写入目标机器钥匙串；插件 JS 仅能观察到 `{ configured: boolean }` 状态与 `onSaved` 回调，**永远接触不到明文密钥**，消除绕过钥匙串自建明文 mutation 的诱因。
+     - **`<PluginConfigForm scope target fields? />`：** 允许自定义设置页直接内嵌复用宿主原生声明式表单，在其上下拼接自定义交互控件。
+     - **`lody.settings.open(target?)`：** 一键跳转至插件对应作用域设置页（在 Desktop/Web 打开设置弹窗或在 Mobile 跳转 `/$workspaceName/settings/plugins/$pluginId`）。
+   - 在未信任、禁用、离线（`local` 机器插件）或 `--safe-mode` 状态下，自定义设置区优雅降级为声明式表单或内联信任/状态提示。
 
 ### 12.4 跨设备无缝体验与故障自愈 UX
 
-- 在 **Web 浏览器**打开工作区时自动加载工作区级前端插件并从在线机器流式拉取受信任配套 `clientDigest` 产物（`plugin/bundle-chunk`），获得与 **Electron 桌面端**完全一致的自定义工具卡片、命令面板、侧边栏、全屏页、主题与音效/事件体验。
-- 在 **Mobile Capacitor** 打开工作区时原生渲染自定义工具/消息卡片与声明式设置，宽屏专属面板按 `useHostCapabilities()` 优雅折叠协商。
+- 在 **Web 浏览器**打开工作区时，优先从托管 IndexedDB 或直连 CORS 钉死版本 `npm` `.tgz` 加载工作区插件（`0` 机器在线亦可用），并通过 `plugin/bundle-chunk` 流式拉取 `local` 或回退机器的配套 `clientDigest` 产物，完整对等 **Electron 桌面端**的路由化自定义页面、分栏会话面板、三层设置页、机主远程控制、自定义工具卡片、命令面板、侧边栏、主题与音效/事件体验。
+- 在 **Mobile Capacitor** 打开工作区时原生渲染自定义工具/消息卡片、声明式设置与工作区设置，宽屏专属面板/分栏按 `useHostCapabilities()` 优雅折叠协商。
 - 插件进入 `Faulted` 或渲染抛错时展示非模态内联恢复横幅（`[重载插件]` / `[查看日志]` / `[禁用]`），并始终提供 `lody --safe-mode` 一键逃生舱。
 
 ---
@@ -488,9 +522,10 @@ flowchart TB
 - 仅限宿主可信 UI 确认（设置 / `plugin_proposal` 批准按钮）或交互式人类 CLI 命令可激活、授予工作流权限或重载插件代码。CLI 检查 `LODY_AGENT_SESSION_ID` 仅属于**防止协作 Agent 误触自启用的护栏**，绝不是针对具备 Shell 能力 Agent（可自行取消环境变量）的安全边界；来自非受信或沙箱环境的守护进程特权变更必须经由可信 UI 批准或守护进程交互确认令牌。
 - 派生的 `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量仅保留最小系统变量（`PATH`、`HOME`、`TMPDIR`、`LANG`、`TZ`、`NODE_ENV`）及 `envKeys` 显式引用的本插件 `manifest.config` 键；守护进程 E2EE 签名密钥、KEK、云端令牌与兄弟插件密钥 **MUST NEVER** 注入子进程。
 
-### 13.2 前端产物信任门控、受限 `Trusted Dev Session` 与 `lody --safe-mode`
+### 13.2 前端产物信任门控、Web 同源披露与 CSP、受限 `Trusted Dev Session` 与 `lody --safe-mode`
 
-- **普通已安装 / 发布态插件（`devMode !== true`）：** Web、Mobile 与协作者桌面端对远程 `clientDigest` 产物严格执行逐 `(workspace_id, plugin_id, clientDigest)` 显式版本信任确认。
+- **普通已安装 / 发布态插件（`devMode !== true`）：** Web、Mobile 与协作者桌面端对远程 `clientDigest` 产物严格执行逐 `(workspace_id, plugin_id, clientDigest)` 显式版本信任确认，**获批前绝不拉取（`npm` `.tgz` 或 `plugin/bundle-chunk`）或执行 `client.js`**（权限披露直接来自加密 `WorkspacePluginEntry`，零前置外网请求）。获批的发布信任记录与已校验产物持久化于托管作用域 IndexedDB（跨浏览器标签页经同托管 `BroadcastChannel` 同步，吊销或移出时原子擦除）。
+- **Web 同源风险披露与 CSP 约束：** 由于 Web 端通过 `blob:` ESM URL 在同源会话中加载受信任 `client.js`（不做恶意代码沙箱，见第 2.3 节），Web 部署 CSP **MUST** 放行 `script-src blob:` 及可配置的 `npm` 注册表/镜像 `connect-src`；同时 Web 端信任披露卡片 **MUST** 清晰区分“共享工作区中由其他成员引入的插件”（绝不自动执行，明确提示将在当前浏览器会话运行 UI 代码，并提供一键吊销与 `?safeMode=1` 逃生）。
 - **面向 `--dev` 热更新的受限开发态信任会话（`Trusted Dev Session`）：** 当机器所有者运行 `lody plugin link --dev` 时，`PluginHost` 为本次开发链接生成临时 128 位随机 `devSessionNonce`（在 `plugin/catalog` 中仅向机器所有者暴露 `devMode: true`）。以同一机器所有者身份登录的远程 Web/Desktop/Mobile 客户端可显式开启一项**范围受限、可随时撤销的 `Trusted Dev Session` 租约**，严格绑定至 `(workspace_id, machine_id, plugin_id, devSessionNonce)` 且仅存于当前浏览器会话内存/`sessionStorage`（绝不写入永久跨摘要信任库）：
   1. 同一 `devSessionNonce` 下后续由 `DevPluginCompiler` 产出的新 `clientDigest` 自动热替换，免除每次保存文件重复确认；
   2. 宿主顶栏常驻展示不可伪造的 **`Dev HMR Trusted · 撤销（Revoke）`** 状态徽章，支持一键即时撤销；
@@ -804,9 +839,10 @@ function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, calle
 - `stdio` 环形日志（`<= 500` 行 / `256 KiB`）绝不污染 IPC 帧；超出 `16 KiB`（`<= 2 MiB`）的 `defineTool` 输出自动溢出至宿主回合产物存储并保留内联摘要。
 - 超时与崩溃将未完成 `mutation` / `tool` 结算为 `outcome_unknown`（`0` 次自动重试），崩溃后进入 `Faulted` 且禁止后台死循环自动拉起。
 
-### 16.3 Core Conformance — 扩展性验收：事件、命令、通用渲染器、侧边栏与双层外观
+### 16.3 Core Conformance — 扩展性验收：事件、命令、自定义页面、通用渲染器、侧边栏与双层外观
 
-- **产品验收场景 —— 音效插件与多机去重：** 工作区级纯前端插件组合 `lody.events.on`、声明式 `config`、`lody.assets.url`、`lody.signal` 与标准 Web Audio，`0` 后端子进程，单机离线时仍保持可用，多机安装同一插件绝不触发双倍音效，`signal` 中止时立即暂停活跃音频，禁用后 `100%` 摘除事件监听。
+- **产品验收场景 —— 音效插件与多机去重：** 工作区级 `npm` 纯前端插件组合 `lody.events.on`、声明式 `config`、`lody.assets.url`、`lody.signal` 与标准 Web Audio，`0` 后端子进程，Web 端在 `0` 机器在线时可冷启动，多机安装同一插件绝不触发双倍音效，`signal` 中止时立即暂停活跃音频，禁用后 `100%` 摘除事件监听。
+- **产品验收场景 —— 路由化自定义页面与多机动态路由：** `screens.add({ nav: "sidebar" })` 挂载于 `/$workspaceName/p/$pluginId/$screenId`（刷新与冷启动 `resolving -> untrusted -> active` 全程保留查询参数），`project.pages.add` 挂载于带面包屑头的项目页路由，`session.panels.add` 作为右侧 Split Pane 同步至 `?panel=` 且不遮挡会话；多机去重后的主客户端实例按 `target.machineId` 动态路由 `useQuery` / `useMutation` / `lody.pages.openProject`。
 - **产品验收场景 —— 命令面板、Slash Command 与签名前 `beforeSend`：** 插件注册命令面板动作、输入栏 `/slash` 触发器与客户端 `composer.beforeSend` 钩子（在个人设备 E2EE 签名前注入用户可见上下文），并调用 `lody.ui.toast` / `confirm` 反馈。
 - **产品验收场景 —— 跨工具（`replace` + `enhance`）与消息块通用渲染：** `tools.matchRender` 对 `"replace"` 选出唯一胜出者（附带“查看原始输出”开关与 `matcher_shadowed` 诊断），同时对 `"enhance"` 可叠加挂载；`messages.renderBlock` 在 `streaming: true -> false` 增量更新期间保持组件实例与内部状态，且不破坏 `ai-gui` 正文搜索与回合折叠不变量。
 - **侧边栏、轻量槽位与双层外观：** 三层侧边栏与 Session/Message/StatusBar 槽位确定性叠加；`--*` 主题令牌与 `@layer lody-plugin` `<style>` 干净挂载与还原；`lody --safe-mode` 旁路全部前端插件。
@@ -816,17 +852,19 @@ function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, calle
 - **产品验收场景 —— 同步 `annotations` 与 Tier-2 Unstable 逃生舱：** 插件经 `sessionSetAnnotation` 持久化 `<= 4 KiB` 跨端同步元数据（离线可读，无逐行 RPC 风暴）并经宿主托管 `storage` 存取结构化状态；声明 `permissions: ["unstable.rawState"]` 的重度面板经 `useUnstableLodySnapshot` 按白名单、必填切片与 `<= 512 KiB` 上限读取深度冻结投影，且不暴露新增内部敏感字段。
 - **产品验收场景 —— 工作流 Role + MCP + 事件游标 + 后台服务恢复：** 启用工作流插件注册 `plugin:<id>:<role>` 并进程外拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed", ..., { resumeFromCursor: true })` 在原子 `ctx.storage` 记录状态，并在机主签发的 `DeclaredWorkflowGrant` 授权下以 `(requestId, businessKey)` 幂等拉起验证子会话；守护进程重启后经事件游标补收遗漏事件，无 `onStart` 全扫超时且 `0` 重复建会。运行在 `machine.service` 中的桥接插件接收 `session.waiting_input` / `session.interaction.resolved`，并在具备 `sessions.approve` + `workflow.autonomous` 时调用 `sessions.respondInteraction` 结算审批。
 
-### 16.5 Core Conformance — DX、UX、提议-确认审批与 Desktop/Web/Mobile 跨端体验
+### 16.5 Core Conformance — DX、UX、自定义设置、`npm` 同步、提议-确认审批与跨端体验
 
-- **产品验收场景 —— 从零到热预览 DX：** `lody plugin create` 生成可运行工程；`lody plugin link --dev` 在显式开启、范围受限且可随时撤销的 `Trusted Dev Session`（`(workspace_id, machine_id, plugin_id, devSessionNonce)`，普通已安装插件仍按发布 `clientDigest` 逐版确权）下**同步免弹窗热更新 Electron 桌面端与 Web 浏览器会话**，且 `DevPluginCompiler` 在空闲与退出时干净回收子进程；插件检视器与 `lody plugin doctor` 输出结构化诊断。
-- **产品验收场景 —— Agent 辅助造插件（`lody_plugin`）：** Agent 脚手架生成插件并调用 `propose_install`；聊天流展示列明 `manifest.permissions` 的唯一幂等 `plugin_proposal` 卡片；人类点击 `Approve & Enable` 前 `0` 代码执行；点击批准后弹出首次配置引导抽屉收集必填项并立即进入 `Running`。
-- **产品验收场景 —— 跨设备对等与适配：** 在 **Web** 打开工作区运行工作区级前端插件并通过 `plugin/bundle-chunk` 流式加载 `<= 4 MiB` `clientDigest` 校验配套产物，与桌面端对等；**Mobile Capacitor** 原生渲染内联卡片与声明式设置，宽屏专属面板通过 `useHostCapabilities()` 平滑协商。
+- **产品验收场景 —— 从零到热预览 DX：** `lody plugin create` 生成可运行工程；`lody plugin link --dev` 在显式开启、范围受限且可随时撤销的 `Trusted Dev Session`（`(workspace_id, machine_id, plugin_id, devSessionNonce)`，普通已安装插件按发布 `clientDigest` 逐版确权并持久化于托管 IndexedDB）下**同步免弹窗热更新 Electron 桌面端与 Web 浏览器会话**，且 `DevPluginCompiler` 在空闲与退出时干净回收子进程；插件检视器与 `lody plugin doctor` 输出结构化诊断。
+- **产品验收场景 —— `npm` 零机冷启动、`owner_machines` 同步与本地边界：** 安装钉死版本 `npm` 插件后，全新 Web 浏览器在 `0` 机器在线时即可拉起其 UI（批准前零外网请求，拉取时校验 SRI `integrity` + `clientDigest`，支持回退 `plugin/bundle-chunk`）；开启 `machineSync: "owner_machines"` 仅同步至安装者自有机器（绝不安装到协作者机器、绝不跨机复制 `secret` 或静默签发 `DeclaredWorkflowGrant`）；`local` 插件永不跨机同步。
+- **产品验收场景 —— 三层自定义设置与远程机器控制：** `settings.pages.add` 分别在 `workspace`（`0` 机器在线可用）、`machine`（带机器切换器与 Web 远程 `plugin/control`）与 `project`（内嵌 Project Settings）干净挂载；`<PluginSecretField />` 向远程机器钥匙串只写不读，插件 JS 绝不拿到明文；`lody.settings.open(...)` 深链直达 `/$workspaceName/settings/plugins/$pluginId`。
+- **产品验收场景 —— Agent 辅助造插件（`lody_plugin`）：** Agent 脚手架生成插件并调用 `propose_install`；聊天流展示列明 `manifest.permissions` 的唯一幂等 `plugin_proposal` 卡片；人类点击 `Approve & Enable`（桌面本地或 Web/Mobile 经机主远程 `plugin/control` 批准）前 `0` 代码执行；点击批准后弹出首次配置引导抽屉收集必填项并立即进入 `Running`。
+- **产品验收场景 —— 跨设备对等与适配：** 在 **Web** 打开工作区运行 `npm` 工作区插件（托管 IndexedDB + 直连 `.tgz` / 回退 `plugin/bundle-chunk`）与 `local` 机器配套产物，与桌面端对等；**Mobile Capacitor** 原生渲染内联卡片与声明式/工作区设置，宽屏专属面板通过 `useHostCapabilities()` 平滑协商。
 
 ### 16.6 Core Conformance — 安全边界与双模型 E2EE 门禁
 
 - `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量彻底剥离守护进程 E2EE 密钥、云端令牌及兄弟插件密钥。
 - 未声明并获批对应 `manifest.permissions` 而调用 `sessions.write`、`sessions.approve`、`workflow.autonomous` 或 `unstable.rawState` 时一律返回 `forbidden`。
-- 在 E2EE 工作区中：Guest 无法调用 `plugin/query` 或 `plugin/mutate`；非所有者禁止调用 `'machine'` 作用域或签发 `DeclaredWorkflowGrant`；协作者须具备覆盖全部绑定项目的 `MachineSharing`；**模型 A**（`ToolExecutionContext`）核验活跃驱动回合与 20 跳 `machineInput` 上限（拒绝从已结束/历史回合新派生成员输入）；**模型 B**（`machine_event` / `machine_startup` / `machine_service`）要求有效且未撤销的机主签名 `DeclaredWorkflowGrant` 覆盖目标插件、机器、操作、项目与 Role（且拒绝个人 `prefer` 写操作）；无根查询/写操作拒绝会话写入（`forbidden`）；成员移除或设备吊销时原子擦除 `<account>/<workspace>/<genesis>/<signing-key>` 全部托管存储（`dataDir`、`storage`、回执、授权、游标表与产物缓存）。
+- 在 E2EE 工作区中：Guest 无法调用 `plugin/query`、`plugin/mutate` 或 `plugin/control`；非所有者禁止调用 `'machine'` 作用域、远程 `plugin/control`（`enable`/`disable`/`reload`/`set-secret`/`resolve-proposal`/`manage-workflow-grant`）或签发 `DeclaredWorkflowGrant`；`machineSync: "owner_machines"` 绝不安装到他人机器；协作者须具备覆盖全部绑定项目的 `MachineSharing`；**模型 A**（`ToolExecutionContext`）核验活跃驱动回合与 20 跳 `machineInput` 上限（拒绝从已结束/历史回合新派生成员输入）；**模型 B**（`machine_event` / `machine_startup` / `machine_service`）要求有效且未撤销的机主签名 `DeclaredWorkflowGrant` 覆盖目标插件、机器、操作、项目与 Role（且拒绝个人 `prefer` 写操作）；无根查询/写操作拒绝会话写入（`forbidden`）；成员移除或设备吊销时原子擦除 `<account>/<workspace>/<genesis>/<signing-key>` 全部托管存储（`dataDir`、`storage`、回执、授权、游标表以及 IndexedDB 产物与信任缓存）。
 
 ### 16.7 条件扩展合规 — Workflow ACP Provider 与移动端全屏扩展 UI
 
@@ -837,8 +875,8 @@ function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, calle
 
 1. **顽固子进程 Drain-Before-Respawn E2E：** 真实 Node 子进程忽略 `SIGTERM`，触发 `reload` 后在 `<= 4500 ms` 内经 `SIGKILL` 终结，新 PID 严格在旧 PID `close` 后启动，`ctx.storage` 与 `ctx.dataDir` 零损坏。
 2. **死循环停止、崩溃 `outcome_unknown` 与零僵尸编译器 E2E：** 真实 `while(true){}` 死循环在 `disable` 后终止且主守护进程保持响应；写操作中途 `SIGKILL` 返回 `outcome_unknown`（`0` 重试）并置为 `Faulted`；`--dev` 编译器在配置的空闲窗口后及守护进程关闭时存活子进程数为 `0`。
-3. **Desktop + Web 同步热预览与多机去重 E2E：** 编辑 `--dev` 插件源码，验证 Electron 与无头 Chromium Web 会话经 `plugin/bundle-chunk` 同步热更新且订阅与 `<style>` 泄漏数为 `0`，同时验证多机工作区不会触发重复音效或重复侧边栏条目。
-4. **全场景产品验收 E2E（`sound-effects`、`test-report`、`focus-sidebar`、`sorbet-workflow`、`lody_plugin` 审批卡片与 `--safe-mode`）：** 在真实环境中验证事件音效触发、通用工具 `"replace"` + `"enhance"` 渲染与“查看原始输出”切换、命令面板与签名前 `beforeSend`、首次配置引导抽屉、人类确认 Agent `plugin_proposal` 卡片及 `DeclaredWorkflowGrant`、移动视口卡片/配置展示以及 `lody --safe-mode` 恢复。
+3. **Desktop + Web 同步热预览、`npm` 零机冷启动、路由页面与多机去重 E2E：** 编辑 `--dev` 插件源码，验证 Electron 与无头 Chromium Web 会话经 `plugin/bundle-chunk` 同步热更新且订阅与 `<style>` 泄漏数为 `0`；验证钉死版本 `npm` 插件在 Web 端 `0` 机器在线下冷启动、刷新 `/$workspaceName/p/$pluginId/$screenId` 保留参数、打开 `session.panels` 分栏面板与三层自定义设置（含远程 `<PluginSecretField />` 写入），并验证多机工作区动态转发 RPC 且不触发重复音效或侧边栏条目。
+4. **全场景产品验收 E2E（`sound-effects`、`test-report`、`focus-sidebar`、`sorbet-workflow`、`lody_plugin` 审批卡片与 `--safe-mode`）：** 在真实环境中验证事件音效触发、通用工具 `"replace"` + `"enhance"` 渲染与“查看原始输出”切换、命令面板与签名前 `beforeSend`、首次配置引导抽屉、人类确认 Agent `plugin_proposal` 卡片及 `DeclaredWorkflowGrant`（含 Web 远程批准）、移动视口卡片/配置展示以及 `lody --safe-mode` 恢复。
 
 ---
 
@@ -846,7 +884,7 @@ function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, calle
 
 ### 17.1 Core Conformance 必达条件
 
-仅当公开 `@lody/plugin-sdk`、`PluginHost`（含带 `contextId` 的 IPC、`storage`、事件游标与 `machine.service`）、`Workflow Harness`（`agentRoles` + `skills` + `mcpServers`）、`DevPluginCompiler`、`ClientPluginHost`（含工作区/机器归属分离与多机去重，覆盖 Electron、Web `plugin/bundle-chunk` 与 Mobile Capacitor 内联卡片/配置）、声明式 `manifest.config` + `manifest.permissions` + 首次引导 UI、`lody_plugin` 提议-确认 MCP 与聊天卡片、插件诊断检视器与 CLI（`create|link|preview|doctor|pack`）、双模型 E2EE 运行时门禁（`SignedTurnOrigin` + `DeclaredWorkflowGrant`）及内置参考插件全部落地并通过第 16.1–16.6 节与第 16.8 节自动化验证时，才满足 v1 `Core Conformance`。
+仅当公开 `@lody/plugin-sdk`、`PluginHost`（含带 `contextId` 的 IPC、`storage`、事件游标、`machine.service`、`npm` `owner_machines` 同步与机主远程 `plugin/control`）、`Workflow Harness`（`agentRoles` + `skills` + `mcpServers`）、`DevPluginCompiler`、`ClientPluginHost`（钉死版本 `npm` Web 冷启动 + 托管 IndexedDB + `local` `plugin/bundle-chunk` + 多机去重与动态 RPC 路由，覆盖 Electron、Web 与 Mobile Capacitor）、路由化自定义页面（`screens`、`project.pages`、`session.panels` 分栏面板）、声明式 `manifest.config` + 三层自定义设置（`workspace` / `machine` / `project`、`<PluginSecretField />`、`lody.settings.open`）+ `manifest.permissions` + 首次引导 UI、`lody_plugin` 提议-确认 MCP 与聊天卡片、插件诊断检视器与 CLI（`create|link|preview|doctor|pack`）、双模型 E2EE 运行时门禁（`SignedTurnOrigin` + `DeclaredWorkflowGrant`）及内置参考插件全部落地并通过第 16.1–16.6 节与第 16.8 节自动化验证时，才满足 v1 `Core Conformance`。
 
 ### 17.2 条件扩展合规要求
 
@@ -860,7 +898,7 @@ function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, calle
 ### 17.4 仓库证据与当前实现状态（Repository Evidence & Current Implementation Status）
 
 - **规范性文档与 SDK 契约：** 本文档、[插件架构收敛与 E2EE 工作区边界](../.agents/notes/proposed/architecture/2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md)、[插件系统实施设计与分层 PR 落地计划](../.agents/notes/proposed/architecture/2026-11-23-plugin-system-implementation-design.zh.md)、[`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts) 以及原型契约 [`scripts/fixtures/plugin-sdk/sdk/`](../scripts/fixtures/plugin-sdk/sdk/shared.d.ts)。
-- **已核查宿主模块所有者与边界：** [`packages/ui/src/index.ts`](../packages/ui/src/index.ts)、[`packages/components/src/components/loro-app-sidebar.tsx`](../packages/components/src/components/loro-app-sidebar.tsx)、[`packages/components/src/components/sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)、[`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md)、[`packages/components/src/hooks/use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-dom.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-dom.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-css.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-css.ts)、[`packages/components/src/providers/workspace-machine-rpc-facade.ts`](../packages/components/src/providers/workspace-machine-rpc-facade.ts)、[`packages/shared/src/schema.ts`](../packages/shared/src/schema.ts)、[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)、[`packages/shared/src/acp/ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts)、[`packages/shared/src/acp/history-apply.ts`](../packages/shared/src/acp/history-apply.ts)、[`packages/shared/src/acp/tool-call-history.ts`](../packages/shared/src/acp/tool-call-history.ts)、[`packages/shared/src/e2ee-rpc.ts`](../packages/shared/src/e2ee-rpc.ts)、[`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)、[`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md)、[`apps/cli/src/lib/acp/AGENTS.md`](../apps/cli/src/lib/acp/AGENTS.md)、[`apps/cli/src/lib/schedules/AGENTS.md`](../apps/cli/src/lib/schedules/AGENTS.md)、[`apps/cli/src/lib/e2ee/AGENTS.md`](../apps/cli/src/lib/e2ee/AGENTS.md)、[`apps/cli/src/mcp/AGENTS.md`](../apps/cli/src/mcp/AGENTS.md)、[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)、[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md)、[`packages/e2ee-machine-sharing/AGENTS.md`](../packages/e2ee-machine-sharing/AGENTS.md) 与 [`.agents/docs/failure-containment.md`](../.agents/docs/failure-containment.md)。
+- **已核查宿主模块所有者与边界：** [`packages/ui/src/index.ts`](../packages/ui/src/index.ts)、[`packages/components/src/components/loro-app-sidebar.tsx`](../packages/components/src/components/loro-app-sidebar.tsx)、[`packages/components/src/components/sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)、[`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md)、[`packages/components/src/components/settings/desktop-settings-modal.tsx`](../packages/components/src/components/settings/desktop-settings-modal.tsx)、[`packages/components/src/routes/$workspaceName/_auth/settings.tsx`](../packages/components/src/routes/$workspaceName/_auth/settings.tsx)、[`packages/components/src/hooks/use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-dom.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-dom.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-css.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-css.ts)、[`packages/components/src/providers/workspace-machine-rpc-facade.ts`](../packages/components/src/providers/workspace-machine-rpc-facade.ts)、[`packages/shared/src/schema.ts`](../packages/shared/src/schema.ts)、[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)、[`packages/shared/src/acp/ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts)、[`packages/shared/src/acp/history-apply.ts`](../packages/shared/src/acp/history-apply.ts)、[`packages/shared/src/acp/tool-call-history.ts`](../packages/shared/src/acp/tool-call-history.ts)、[`packages/shared/src/e2ee-rpc.ts`](../packages/shared/src/e2ee-rpc.ts)、[`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)、[`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md)、[`apps/cli/src/lib/acp/AGENTS.md`](../apps/cli/src/lib/acp/AGENTS.md)、[`apps/cli/src/lib/schedules/AGENTS.md`](../apps/cli/src/lib/schedules/AGENTS.md)、[`apps/cli/src/lib/e2ee/AGENTS.md`](../apps/cli/src/lib/e2ee/AGENTS.md)、[`apps/cli/src/mcp/AGENTS.md`](../apps/cli/src/mcp/AGENTS.md)、[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)、[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md)、[`packages/e2ee-machine-sharing/AGENTS.md`](../packages/e2ee-machine-sharing/AGENTS.md) 与 [`.agents/docs/failure-containment.md`](../.agents/docs/failure-containment.md)。
 - **已执行验证与当前规范-实现差异：**
   - `PR-1` 与 `PR-2` 基础层已落于 [`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts)、[`packages/shared/src/plugins/`](../packages/shared/src/plugins/manifest-schema.ts)、[`apps/cli/src/plugins/`](../apps/cli/src/plugins/workflow/plugin-host.ts) 与 [`packages/components/src/plugins/`](../packages/components/src/plugins/client-host.ts)。[`scripts/plugin-sdk-contracts.test.mjs`](../scripts/plugin-sdk-contracts.test.mjs) 与 [`scripts/plugin-dev-acceptance.py`](../scripts/plugin-dev-acceptance.py) 验证了基础 SDK 契约、子进程生命周期与本地 CLI 开发闭环。
-  - **待 PR-3 / PR-4 对齐的已知差异：** 当前 `manifest-schema.ts` 仍硬编码 `sdk: "^1.0.0"` 且未包含 `manifest.permissions` 与 `scope: "project"`；`ipc-protocol.ts` 的 `host_call` 尚未携带 `contextId` 且重复列举了 `sessions.*` 线协议操作码；`plugin-worker-entry.ts` 每事件类型仅存单个监听器，尚未接入 `machine.service`、`ctx.storage` 与游标续传；`ClientPluginHost` 尚未拆分工作区级纯前端插件与多机去重；Tier-2 `lody.unstable.readSnapshot`、`annotations`、`commands`/`slashCommands`/`beforeSend`、`lody.ui`、宿主工具输出自动溢出、`DeclaredWorkflowGrant` 及 `lody_plugin` 审批卡尚待实现。
+  - **待 PR-3 / PR-4 对齐的已知差异：** 当前 `manifest-schema.ts` 仍硬编码 `sdk: "^1.0.0"` 且未包含 `manifest.permissions` 与 `scope: "project"`；`ipc-protocol.ts` 的 `host_call` 尚未携带 `contextId` 且重复列举了 `sessions.*` 线协议操作码；`plugin-worker-entry.ts` 每事件类型仅存单个监听器，尚未接入 `machine.service`、`ctx.storage` 与游标续传；`workspace-catalog.ts` 仍将 `plugin/control` 限制在 `transport === 'local'` 并将 RPC/导航硬绑定到单一 `machineId`；`shell-surfaces.tsx` 的 `PluginScreenOutlet` 仍将 `screens`、`project.pages` 与 `session.panels` 渲染于单一 `<Dialog>` 弹窗且缺乏 URL 路由；`settings.pages.add` 尚缺 `binding: 'workspace'`、Project Settings 内嵌挂载、`<PluginSecretField />`、`<PluginConfigForm />` 与 `lody.settings.open`；`VerifiedBundleCache` 与发布信任集仍仅存于内存；钉死版本 `npm` Web 冷启动与 `owner_machines` 同步、多机去重、Tier-2 `lody.unstable.readSnapshot`、`annotations`、`commands`/`slashCommands`/`beforeSend`、`lody.ui`、宿主工具输出自动溢出、`DeclaredWorkflowGrant` 及 `lody_plugin` 审批卡尚待实现。
