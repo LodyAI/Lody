@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.116.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.1...lody-mobile-v0.116.0) (2026-11-24)
+
+
+### Features
+
+* **memory:** uninstall EverMe from the memory settings ([#3261](https://github.com/LodyAI/Lody/issues/3261)) ([7eeeba2](https://github.com/LodyAI/Lody/commit/7eeeba2af2212d71971d310860b1f7e41aff65c6))
+* synchronize agent session archives ([#2281](https://github.com/LodyAI/Lody/issues/2281)) ([a8c4420](https://github.com/LodyAI/Lody/commit/a8c4420732531e73ff87332ef8bf99f51e7c5b12))
+
+
+### Bug Fixes
+
+* **components:** inset side drawers with paddingBottom to prevent Android keyboard flash ([#3258](https://github.com/LodyAI/Lody/issues/3258)) ([51a2008](https://github.com/LodyAI/Lody/commit/51a2008172b188207db1a64488ec547431bbf133))
+* **mobile:** route Android back gesture through layered mobile back transitions ([#3243](https://github.com/LodyAI/Lody/issues/3243)) ([130f2a9](https://github.com/LodyAI/Lody/commit/130f2a9afefb693f5947393709f91a06bed4862c))
+
 ## [0.115.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.0...lody-mobile-v0.115.1) (2026-11-23)
 
 
