@@ -185,6 +185,7 @@ const styles = stylex.create({
   link: {
     height: 'auto',
     paddingInline: 0,
+    lineHeight: 'inherit',
     color: colors.accent,
     boxShadow: { default: 'none', ':focus-visible': RING },
     textDecoration: { default: 'none', ':hover': 'underline' },
