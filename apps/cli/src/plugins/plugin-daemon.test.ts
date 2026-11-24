@@ -340,157 +340,37 @@ it('coalesces trailing dev builds, preserves the rollback directory and orders d
   }
 });
 
-it.each(['buffered event', 'missed event'] as const)(
-  'restores the staged Sorbet worker and replays the journal after a %s without an activation',
-  async (window) => {
-    const { fileURLToPath } = await import('node:url');
-    const { compilePlugin } = await import('./plugin-build');
-    const { dispatchMachineHostCall } = await import('./workflow/daemon-command-executor');
-    const { build } = await import('esbuild');
-    const root = await mkdtemp(join(tmpdir(), 'sorbet-daemon-'));
-    const generation = join(root, 'generations', randomUUID());
-    const worker = join(root, 'worker.mjs');
-    const pluginId = 'sorbet-workflow';
-    const target = { workspaceId: 'w', machineId: 'm' };
-    const project = { ...target, projectId: 'p' };
-    const session = { ...project, sessionId: 'architect' };
-    const architect = `plugin:${pluginId}:sorbet-architect`;
-    const journal = join(root, 'data', pluginId, 'workflow-journal.json');
-    const signal = () => {
-      let resolve!: () => void;
-      const promise = new Promise<void>((r) => (resolve = r));
-      return { resolve, promise };
+it('resumes only unacknowledged events and compares JSON atomically across independent SQLite connections', async () => {
+  const { PluginStateStore } = await import('./plugin-state-store');
+  const root = await mkdtemp(join(tmpdir(), 'plugin-state-'));
+  const a = new PluginStateStore(root),
+    b = new PluginStateStore(root);
+  try {
+    a.subscribe('p', 'session.turn.completed');
+    const frame = {
+      type: 'event' as const,
+      eventType: 'session.turn.completed',
+      eventId: 'one',
+      payload: {},
     };
-    const scanning = signal(),
-      release = signal();
-    const attempts: import('./machine-host-port').MachineHostCall[] = [];
-    let restarted = false;
-    const dispatch: import('./machine-host-port').DispatchMachineHostCall = async (
-      call,
-      signal
-    ) => {
-      if (call.op === 'lody.read' && call.payload.descriptorId === 'sessions') {
-        if (!restarted) {
-          scanning.resolve();
-          await release.promise;
-          if (window === 'buffered event') return { items: [] };
-        }
-        return { items: [{ session, project, agentRoleId: architect, updatedAt: 1 }] };
-      }
-      if (call.op === 'lody.read' && call.payload.descriptorId === 'sessionTurns')
-        return {
-          items: [
-            {
-              role: 'assistant',
-              turnId: 'assistant',
-              userTurnId: 'human',
-              stopReason: 'end_turn',
-              finished: true,
-              createdAt: 1,
-            },
-          ],
-        };
-      if (call.op === 'lody.unstable.readSnapshot') return { doc: { agentRoleId: architect } };
-      if (call.op === 'lody.execute' && call.payload.descriptorId === 'sessionCreate') {
-        attempts.push(call);
-        return dispatchMachineHostCall(call, signal);
-      }
-      throw Error(`Unexpected host call: ${call.op}`);
-    };
-    const open = () => new PluginDaemon(root, 'w', 'm', () => {}, undefined, dispatch, worker);
-    let daemon = open();
-    try {
-      await mkdir(generation, { recursive: true });
-      const [compiled] = await Promise.all([
-        compilePlugin({
-          sourceDir: fileURLToPath(
-            new URL(
-              '../../../../scripts/fixtures/plugin-sdk/examples/sorbet-workflow',
-              import.meta.url
-            )
-          ),
-          stage: generation,
-        }),
-        build({
-          entryPoints: [fileURLToPath(new URL('./plugin-worker-entry.ts', import.meta.url))],
-          outfile: worker,
-          bundle: true,
-          platform: 'node',
-          format: 'esm',
-        }),
-      ]);
-      await writeFile(
-        join(root, 'catalog.json'),
-        JSON.stringify([
-          {
-            enabled: true,
-            dev: false,
-            source: 'unavailable',
-            current: {
-              ...compiled,
-              directory: generation,
-              machineEntry: join(generation, 'machine.js'),
-            },
-          },
-        ])
-      );
-      const start = daemon.start();
-      await Promise.race([
-        scanning.promise,
-        start.then(async () => {
-          throw Error(
-            `Worker stopped before scan: ${JSON.stringify(await daemon.dispatch({ action: 'logs', pluginId }))}`
-          );
-        }),
-      ]);
-      if (window === 'buffered event')
-        await daemon.event({
-          type: 'event',
-          eventId: 'complete',
-          eventType: 'session.turn.completed',
-          payload: {
-            workspace: { workspaceId: 'w' },
-            machine: target,
-            project,
-            session,
-            turnId: 'assistant',
-            userTurnId: 'human',
-            stopReason: 'end_turn',
-          },
-        });
-      await expect(readFile(journal)).rejects.toMatchObject({ code: 'ENOENT' });
-      release.resolve();
-      await start;
-      const first = JSON.parse(await readFile(journal, 'utf8'));
-      expect(first.entries['architect:assistant']).toMatchObject({
-        userTurnId: 'human',
-        verifierSessionId: null,
-      });
-      await daemon.dispose();
-      restarted = true;
-      daemon = open();
-      await daemon.start();
-      expect(attempts.map((c) => c.origin.type)).toEqual([
-        window === 'buffered event' ? 'event' : 'start',
-        'start',
-      ]);
-      expect(attempts[1]?.payload).toEqual(attempts[0]?.payload);
-      expect(attempts[1]?.payload).toMatchObject({
-        target: project,
-        input: {
-          parentSession: session,
-          originTurn: { session, userTurnId: 'human' },
-          roleId: `plugin:${pluginId}:sorbet-verifier`,
-        },
-      });
-      expect(JSON.parse(await readFile(journal, 'utf8'))).toEqual(first);
-    } finally {
-      release.resolve();
-      await daemon.dispose();
-      await rm(root, { recursive: true, force: true });
-    }
+    const first = a.record(frame);
+    a.record({ ...frame, eventId: 'two' });
+    a.ack('p', frame.eventType, first);
+    a.close();
+    expect(b.next('p', [frame.eventType])?.frame.eventId).toBe('two');
+    expect(b.storage('p', 'storage.update', 'k', { value: { b: 2, a: 1 } })).toBe(true);
+    expect(a.storage('p', 'storage.update', 'k', { value: null })).toBe(false);
+    expect(a.storage('p', 'storage.update', 'k', { expected: { a: 1, b: 2 }, value: null })).toBe(
+      true
+    );
+    expect(b.storage('p', 'storage.get', 'k', undefined)).toEqual({ value: null });
+    expect(b.storage('other', 'storage.get', 'k', undefined)).toEqual({});
+  } finally {
+    a.close();
+    b.close();
+    await rm(root, { recursive: true, force: true });
   }
-);
+});
 
 it('reopens the signed owner workflow receipt for the exact staged Sorbet project and operation', async () => {
   const { ownerApprovalFixture } = await import('../../tests/fixtures/plugin-workflow-approval');
@@ -614,7 +494,7 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
   }
 });
 
-it('workflow contribution processes belong to the enabled generation and receive only declared config', async () => {
+it('workflow contribution processes belong to the enabled generation and receive only declared config', async (t) => {
   const { once } = await import('node:events');
   const root = await mkdtemp(join(tmpdir(), 'workflow-generation-'));
   const directory = join(root, 'generations', randomUUID());
@@ -647,7 +527,7 @@ it('workflow contribution processes belong to the enabled generation and receive
           defaultProvider: 'plugin:demo:acp',
         },
       ],
-      acpProviders: [{ id: 'acp', title: 'ACP', entry: 'entry.mjs' }],
+      acpProviders: [{ id: 'acp', title: 'ACP', managedAgent: 'pi' }],
       mcpServers: [
         { id: 'web', title: 'Web', entry: 'http.mjs', transport: 'http' },
         {
@@ -672,15 +552,16 @@ it('workflow contribution processes belong to the enabled generation and receive
     await daemon.start();
     const rows = (await daemon.workflowCatalog())[0]!;
     expect(rows.roles.get('plugin:demo:planner')).toMatchObject({
+      defaultProvider: 'plugin:demo:acp',
       prompt: 'Role instructions',
       skills: ['plugin:demo:plan'],
       mcpServers: ['plugin:demo:lookup'],
     });
-    const handle = await daemon.spawnWorkflow('mcpServers', 'plugin:demo:lookup');
+    const handle = await daemon.spawnWorkflowMcp('plugin:demo:lookup');
     const reply = once(handle.child.stdout!, 'data');
     handle.child.stdin!.write('read');
     expect(JSON.parse(String((await reply)[0]))).toEqual({ allowed: 'public-input' });
-    const http = await daemon.spawnWorkflow('mcpServers', 'plugin:demo:web');
+    const http = await daemon.spawnWorkflowMcp('plugin:demo:web');
     const { bindWorkflowHttp } = await import('./workflow/plugin-mcp-session');
     const binding = await bindWorkflowHttp('web', http, http.socketPath!);
     expect((await fetch(binding.entry.url)).status).toBe(403);
@@ -691,14 +572,19 @@ it('workflow contribution processes belong to the enabled generation and receive
         })
       ).json()
     ).toEqual({ path: '/mcp' });
-    const acp = await daemon.spawnWorkflow('acpProviders', 'plugin:demo:acp');
-    const ended = Promise.all([once(handle.child, 'close'), once(acp.child, 'close')]);
+    const bind = await daemon.managedProvider('plugin:demo:acp', 'pi');
+    await expect(daemon.managedProvider('plugin:demo:acp', 'codex')).rejects.toThrow();
+    const { createNoopSessionSandbox } = await import('../session/session-sandbox');
+    const sandbox = createNoopSessionSandbox();
+    t.onTestFinished(() => sandbox.cleanup());
+    const provider = await bind(() =>
+      sandbox.spawn(process.execPath, ['-e', 'process.stdin.resume()'], { stdio: 'pipe' })
+    );
+    const ended = Promise.all([once(handle.child, 'close'), once(provider.child, 'close')]);
     await daemon.dispatch({ action: 'disable', pluginId: 'demo' });
     await ended;
     expect(await daemon.workflowCatalog()).toEqual([]);
-    await expect(daemon.spawnWorkflow('acpProviders', 'plugin:demo:acp')).rejects.toThrow(
-      'unavailable'
-    );
+    expect(() => bind(() => Promise.resolve(provider))).toThrow('withdrawn');
   } finally {
     await daemon.dispose();
     await rm(root, { recursive: true, force: true });
@@ -722,9 +608,9 @@ it('admits verifier lineage only for the approved project, signed parent turn an
         signer: Buffer.from(f.ledger.owner.raw).toString('hex'),
         requestId: 'de'.repeat(16),
       },
-      roleId = `plugin:${pluginId}:verifier`,
-      providerId = `plugin:${pluginId}:provider`,
-      skill = `plugin:${pluginId}:verify`,
+      roleId = `plugin:${pluginId}:sorbet-verifier`,
+      providerId = `plugin:${pluginId}:sorbet-acp`,
+      skill = `plugin:${pluginId}:sorbet-verifier`,
       target = { workspaceId, machineId, projectId };
     const original = await Effect.runPromise(
       f.sender.prepareFeature({
@@ -746,7 +632,14 @@ it('admits verifier lineage only for the approved project, signed parent turn an
             allowed_role_ids: [roleId],
             targetDevice: fixture.identity.signingPublicKey,
             action: 'grant',
-            allowed_ops: ['sessions.create'],
+            allowed_ops: [
+              'sessions.create',
+              'sessions.respondInteraction',
+              'sessions.send',
+              'sessions.requestStop',
+              'sessions.requestArchive',
+              'sessionFork',
+            ],
           },
         },
       })
@@ -766,6 +659,28 @@ it('admits verifier lineage only for the approved project, signed parent turn an
       originTurn = { session: parentSession, userTurnId: f.input.userTurnId };
     let footprint = [projectId];
     const reserved: unknown[] = [];
+    let activeRole = roleId;
+    const pending = new Set(['permission']);
+    const sdk = await import('@lody/shared'),
+      cryptoCore = await import('@lody/e2ee-core/protocol'),
+      { Result } = await import('effect');
+    const queue: {
+        userId: string;
+        userTurnId: string;
+        e2eeIntent: string;
+        acpSessionConfig: unknown;
+      }[] = [],
+      writes: unknown[] = [],
+      stopped: string[] = [];
+    const intent = (id: string, config: unknown) => ({
+      kind: sdk.E2EE_INTENT_KIND.machineInput,
+      genesis: f.ledger.context.genesis,
+      workspaceId,
+      targetMachineId: machineId,
+      scope: f.input.sessionId,
+      messageId: id,
+      contentDigest: Buffer.from(sdk.turnExecutionDigest({ inputConfig: config })!, 'hex'),
+    });
     const manager = {
       isEncryptedWorkspace: () => true,
       pluginWorkflows: async () => [
@@ -777,16 +692,67 @@ it('admits verifier lineage only for the approved project, signed parent turn an
           skills: new Map([[skill, {}]]),
         },
       ],
+      signMachineInput: async ({
+        userTurnId,
+        inputConfig,
+      }: {
+        userTurnId: string;
+        inputConfig: unknown;
+      }) =>
+        sdk.encodeE2eeIntentRecord({
+          kind: sdk.E2EE_INTENT_KIND.machineInput,
+          signer: f.ledger.phone.raw,
+          signature: (
+            await Effect.runPromise(
+              cryptoCore.signExecutionIntent({
+                ...intent(userTurnId, inputConfig),
+                signer: f.ledger.phone.signer,
+              })
+            )
+          ).toBytes(),
+        }),
       repo: {
+        upsertDocMeta: async (_id: string, patch: unknown) => {
+          writes.push(patch);
+        },
+        flush: async () => {},
+        listDoc: async () => [
+          {
+            docId: sdk.getSessionRoomId(f.input.sessionId as import('@lody/shared').SessionId),
+            meta: { machineId },
+          },
+        ],
         getDocMeta: async () => ({
           meta: {
             id: f.input.sessionId,
+            agentRoleId: activeRole,
+            cliType: 'builtin',
+            agentType: 'codex',
             machineId,
             project: { kind: 'local', localProjectId: projectId },
           },
         }),
       },
-      getOrCreateSessionDoc: async () => ({ handle: { doc } }),
+      getOrCreateSessionDoc: async () => ({
+        handle: { doc },
+        pushMessageQueue: async (item: (typeof queue)[number]) => {
+          queue.push(item);
+        },
+        getMetaState: async () => ({ historyBackend: 'loro' }),
+        sessionData: {
+          history: {
+            count: async () => 1,
+            readDirectory: async () => [
+              {
+                turnId: 'assistant',
+                state: 'ready',
+                scalars: { id: 'assistant', role: 'assistant' },
+              },
+            ],
+          },
+          commands: { respondPermission: async (id: string) => pending.delete(id) },
+        },
+      }),
       createClientPluginSession: async (p: unknown, userId: string) => {
         reserved.push(p);
         return { archived: true, sessionId: 'verifier', userId };
@@ -816,8 +782,84 @@ it('admits verifier lineage only for the approved project, signed parent turn an
         isCurrent: () => true,
       }),
       projectExists: async () => true,
+      stopSession: async (sid, id) => {
+        stopped.push(`${sid}/${id}`);
+      },
+      forkSession: async (sid, id, principal, admit) => {
+        await admit();
+        expect([sid, id, principal]).toEqual([
+          f.input.sessionId,
+          'fork-turn',
+          `plugin-workflow:${pluginId}:${installationId}`,
+        ]);
+        return 'fork-target' as import('@lody/shared').SessionId;
+      },
       sessionScope: async () => footprint,
     });
+    const decision = async (descriptorId: string, session = parentSession) => {
+      const signal = new AbortController().signal;
+      const fn = await resolve(
+        {
+          workspaceId,
+          machineId,
+          pluginId,
+          instanceId: 1,
+          origin: { type: 'service' },
+          op: 'lody.execute',
+          payload: {
+            descriptorId,
+            target: session,
+            input:
+              descriptorId === 'sessionSend'
+                ? { prompt: 'Scoped input' }
+                : descriptorId === 'sessionFork'
+                  ? { fromTurnId: 'fork-turn' }
+                  : descriptorId === 'sessionRespondInteraction'
+                    ? { requestId: 'permission', outcome: { outcome: 'cancelled' } }
+                    : undefined,
+          },
+        },
+        signal
+      );
+      if (!fn) throw Error('Denied');
+      return fn(signal);
+    };
+    await expect(decision('sessionRestore')).rejects.toThrow('Denied');
+    await decision('sessionSend');
+    const sent = queue[0]!,
+      record = sdk.decodeE2eeIntentRecord(sent.e2eeIntent)!;
+    expect(record.kind).toBe(sdk.E2EE_INTENT_KIND.machineInput);
+    expect(sent.userId).toBe(`plugin-workflow:${pluginId}:${installationId}`);
+    expect(
+      Result.isSuccess(
+        cryptoCore.verifyExecutionIntent(
+          intent(sent.userTurnId, sent.acpSessionConfig),
+          record.signer,
+          record.signature
+        )
+      )
+    ).toBe(true);
+    expect(writes).toContainEqual(
+      expect.objectContaining({ messageQueueUpdateVersion: expect.any(Object) })
+    );
+    await decision('sessionStop');
+    expect(stopped).toEqual([`${f.input.sessionId}/assistant`]);
+    await decision('sessionArchive');
+    expect(writes).toContainEqual(expect.objectContaining({ isArchived: true }));
+    expect(await decision('sessionFork')).toEqual({
+      workspaceId,
+      machineId,
+      sessionId: 'fork-target',
+    });
+    await expect(
+      decision('sessionRespondInteraction', { ...parentSession, projectId: 'other' })
+    ).rejects.toThrow('Denied');
+    activeRole = 'other-role';
+    await expect(decision('sessionRespondInteraction')).rejects.toThrow('outside declared');
+    expect(pending.has('permission')).toBe(true);
+    activeRole = roleId;
+    await decision('sessionRespondInteraction');
+    expect(pending.has('permission')).toBe(false);
     const create = async (extra: Record<string, string | string[]> = {}) => {
       const signal = new AbortController().signal;
       const fn = await resolve(
@@ -838,7 +880,7 @@ it('admits verifier lineage only for the approved project, signed parent turn an
               originTurn,
               roleId,
               providerId,
-              skillIds: ['verify'],
+              skillIds: ['sorbet-verifier'],
               ...extra,
             },
           },

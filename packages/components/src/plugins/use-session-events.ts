@@ -59,7 +59,7 @@ export function usePluginSessionMetaEvents(
   ready: boolean,
   sessions: readonly SessionMeta[]
 ) {
-  const previous = useRef<{ id: string; seen: Map<string, string>; since: number } | undefined>(
+  const previous = useRef<{ id: string; seen: Map<string, string>; archived:Set<string>; since: number } | undefined>(
     undefined
   );
   useEffect(() => {
@@ -70,6 +70,7 @@ export function usePluginSessionMetaEvents(
     const old = previous.current;
     const seen = new Map<string, string>();
     const since = old?.id === workspaceId ? old.since : Date.now();
+    const archived=new Set<string>();
     for (const session of sessions) {
       const t = session.status?.type;
       const status = session.collaborationStopped
@@ -79,6 +80,7 @@ export function usePluginSessionMetaEvents(
           : t === 'running' || t === 'initializing'
             ? 'busy'
             : 'idle';
+      if(session.isArchived){archived.add(session.id);if(old?.id===workspaceId&&old.seen.has(session.id)&&!old.archived.has(session.id))clientPluginEvents.publish('session.archived',eventRefs(workspaceId,session));}
       seen.set(session.id, status);
       if (old?.id !== workspaceId) continue;
       const prior = old.seen.get(session.id);
@@ -96,6 +98,6 @@ export function usePluginSessionMetaEvents(
           previousStatus: prior as typeof status,
         });
     }
-    previous.current = { id: workspaceId, seen, since };
+    previous.current = { id: workspaceId, seen, archived,since };
   }, [workspaceId, ready, sessions]);
 }

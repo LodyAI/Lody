@@ -245,6 +245,51 @@ defineSessionBackendContract('Loro', async (options) => {
 
 defineSessionBackendContract('Loro with real CRDT history', createRealLoroBackendFixture);
 
+it('round-trips UTF-8 plugin result boundaries and collects only replaced references', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { DatabaseSync } = await import('node:sqlite');
+  const { getSessionRoomId } = await import('@lody/shared');
+  const { persistPluginToolResult, readPluginToolResult, collectReplacedPluginResults } = await import('../plugins/tool-result-history');
+  const root = await mkdtemp(join(tmpdir(),'plugin-results-'));
+  const repo = await LoroRepo.create({});
+  const sessionId = 'result-session' as SessionId;
+  const doc = new SessionDocument(repo,sessionId,async()=>undefined);
+  try {
+    await doc.initOffline(undefined,{historyBackend:'loro'});
+    await repo.upsertDocMeta(getSessionRoomId(sessionId),{id:sessionId});
+    const history=await createSessionBackend(doc,{historyBackend:'loro'});
+    let allowed=true;
+    const custody={documents:{pluginResultRepository:root},sessionId,history,turnId:'one',toolCallId:'inline',signal:new AbortController().signal,authorize:async()=>{if(!allowed)throw Error('revoked');}};
+    const timestamp='2026-01-01T00:00:00Z';
+    for(const turnId of ['one','two'])await history.openAssistantTurn({turnId,timestamp});
+    const inline='é'.repeat(8191),spill=inline+'x';
+    expect(await persistPluginToolResult(custody,inline)).toBe(JSON.stringify(inline));
+    expect(await history.readTurn('one')).toMatchObject({state:'ready',turn:{items:[{type:'text',text:JSON.stringify(inline)}]}});
+    const first={...custody,toolCallId:'a'},second={...custody,turnId:'two',toolCallId:'b'};
+    const {sha256,bytes}=JSON.parse(await persistPluginToolResult(first,spill));
+    expect(bytes).toBe(16385);
+    expect(JSON.parse(await persistPluginToolResult(second,spill)).sha256).toBe(sha256);
+    await history.applyAgentBatch({targetAssistantEntryId:'one',entryBound:true,contents:[{type:'text',text:'continued'}]});
+    expect(await readPluginToolResult(first,sha256)).toBe(JSON.stringify(spill));
+    const before=await history.readTurn('one');
+    await expect(persistPluginToolResult({...first,toolCallId:'too-large'},'é'.repeat(1048576))).rejects.toMatchObject({code:'validation_failed'});
+    allowed=false;
+    await expect(readPluginToolResult(first,sha256)).rejects.toThrow('revoked');
+    await expect(persistPluginToolResult(first,'late')).rejects.toThrow('revoked');
+    expect(await history.readTurn('one')).toEqual(before);
+    allowed=true;
+    await history.applyHistoryAction({kind:'upsert-turn',turn:{id:'one',role:'assistant',timestamp,items:[]}});
+    await history.flushLocalWrites();
+    await collectReplacedPluginResults(root,sessionId,history);
+    await expect(readPluginToolResult(first,sha256)).rejects.toMatchObject({code:'forbidden'});
+    expect(await readPluginToolResult(second,sha256)).toBe(JSON.stringify(spill));
+    const db=new DatabaseSync(join(root,'plugin-turn-results.sqlite'),{readOnly:true});
+    try {expect(db.prepare('SELECT turn,call FROM results').all()).toEqual([{turn:'two',call:'b'}]);} finally {db.close();}
+  } finally {await doc.destroy({preserveStatus:true});await repo.destroy();await rm(root,{recursive:true,force:true});}
+});
+
 describe('session backend selection', () => {
   it('defaults legacy metadata to Loro and keeps one backend per opened document', async () => {
     const { sessionDoc } = createBackendHarness();

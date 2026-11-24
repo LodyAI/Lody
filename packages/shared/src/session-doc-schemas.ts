@@ -406,6 +406,7 @@ export const messageQueueItemSchema = schema.LoroMap({
   // killed tab). See `popMessageQueue` in `apps/cli/src/lib/loro/doc.ts`.
   editingStartedAt: schema.Number({ required: false }),
   acpSessionConfig: acpSessionConfigSchema,
+  derivedFrom: schema.LoroMap({sessionId:schema.String(),userTurnId:schema.String()},{required:false}),
   /** Encrypted only: the author's signed execution intent; promotion copies it. */
   e2eeIntent: schema.String({ required: false }),
 });

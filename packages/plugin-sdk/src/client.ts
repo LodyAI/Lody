@@ -3,6 +3,8 @@ import type { ComponentType, ReactNode } from 'react';
 import type { z } from 'zod';
 import type { PluginThemeSeedColors, PluginThemeTokens } from './manifest.js';
 import {
+  MAX_PLUGIN_ANNOTATION_BYTES,
+  MAX_UNSTABLE_SNAPSHOT_BYTES,
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,
@@ -69,6 +71,8 @@ import {
 } from './index.js';
 
 export {
+  MAX_PLUGIN_ANNOTATION_BYTES,
+  MAX_UNSTABLE_SNAPSHOT_BYTES,
   MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES,
   MAX_PACKED_CLIENT_BUNDLE_BYTES,
   MAX_PLUGIN_RPC_REQUEST_BYTES,

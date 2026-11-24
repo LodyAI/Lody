@@ -92,7 +92,8 @@ export function createWorkspacePluginRegistry(
               entry.dev.machineId,
               signal,
               entry.dev.manifest.permissions ?? [],
-              entry.reserveSession
+              entry.reserveSession,
+              entry.pluginId
             ).execute,
           useLodyCommand(target, command) {
             return usePluginCommandBindings(
@@ -100,7 +101,8 @@ export function createWorkspacePluginRegistry(
               entry.dev.machineId,
               signal,
               entry.dev.manifest.permissions ?? [],
-              entry.reserveSession
+              entry.reserveSession,
+              entry.pluginId
             ).useLodyCommand(target, command);
           },
         },

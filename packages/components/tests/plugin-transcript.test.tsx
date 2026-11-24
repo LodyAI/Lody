@@ -166,7 +166,7 @@ it('keeps raw identity isolated, secrets absent and selection stable across unre
   const snap = await bindings.unstable.readSnapshot(target);
   expect(snap.doc).not.toHaveProperty('businessKey');
   expect(snap.doc.nested).toBeUndefined();
-  expect(Object.isFrozen(snap.doc.nested)).toBe(true);
+  expect(Object.isFrozen(snap.doc)).toBe(true);
   raw.title = 'b';
   expect(snap.doc.title).toBe('a');
   const el = document.createElement('div'),
@@ -196,4 +196,16 @@ it('keeps raw identity isolated, secrets absent and selection stable across unre
   expect(reads).toBe(count);
   scope.abort();
   await expect(bindings.unstable.readSnapshot(target)).rejects.toThrow();
+});
+
+it('rejects over-budget UTF-8 projections and leaves unexpected future host fields invisible', async () => {
+  const { snapshotDocument } = await import('../src/plugins/raw-snapshots');
+  const source = { title: 'ok', unknownGrantEnvelope: 'not plugin data' };
+  expect(snapshotDocument(source, [], 'example', '1', 'session-meta').doc).toEqual({ title: 'ok' });
+  expect(() =>
+    snapshotDocument({ ...source, title: '界'.repeat(175000) }, [], 'example', '1', 'session-meta')
+  ).toThrow('byte limit');
+  expect(() =>
+    snapshotDocument({ sessions: { a: source } }, [], 'example', '1', 'workspace-state')
+  ).toThrow();
 });

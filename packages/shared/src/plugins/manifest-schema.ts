@@ -95,12 +95,10 @@ export const pluginManifestSchema = obj({
     .array()
     .optional(),
   acpProviders: obj({
-    ...contribution,
-    capabilities: obj({
-      loadSession: z.boolean().optional(),
-      subagentEvents: z.boolean().optional(),
-      configOptions: z.boolean().optional(),
-    }).optional(),
+    id: descriptorIdSchema,
+    title: text,
+    description: opt,
+    managedAgent: z.enum(['pi', 'kimi', 'devin', 'grok', 'codex', 'claude', 'antigravity']),
   })
     .array()
     .optional(),
@@ -144,7 +142,7 @@ export const pluginManifestSchema = obj({
   )
   .refine(
     (m) =>
-      [...(m.mcpServers ?? []), ...(m.acpProviders ?? [])].every((c) =>
+      (m.mcpServers ?? []).every((c) =>
         (c.envKeys ?? []).every((k) => {
           const f = m.config?.[k];
           return (

@@ -138,6 +138,7 @@ export type ProjectRef =
     };
 
 export type LocalProjectMeta = {
+  annotations?: import('./plugins/annotations').PluginAnnotations;
   id: LocalProjectId;
   name: string;
   rootPath: string;

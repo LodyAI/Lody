@@ -14,7 +14,7 @@ export function workspaceSnapshotSource(
   projects: VisibleLocalProjectIndex['projects'],
   roles: readonly AgentRole[],
   schedules: readonly ScheduleRegistryRow[],
-  extra: Readonly<Record<string, unknown>> = {}
+  extra: { machines?: ReadonlyMap<string, unknown>; rateLimits?: (key: string) => unknown } = {}
 ): SnapshotSource {
   const find = (t: Extract<UnstableSnapshotTarget, { session: unknown }>) => {
     const s =
@@ -42,9 +42,11 @@ export function workspaceSnapshotSource(
                 ? roles.find((r) => r.id === key)
                 : collection === 'schedules'
                   ? schedules.find((r) => r.scheduleId === key)
-                  : collection === 'machines' || collection === 'rateLimits'
-                    ? Object.getOwnPropertyDescriptor(extra[collection] ?? {}, key)?.value
-                    : undefined;
+                  : collection === 'machines'
+                    ? extra.machines?.get(key)
+                    : collection === 'rateLimits'
+                      ? extra.rateLimits?.(key)
+                      : undefined;
         refs = [data];
         break;
       }

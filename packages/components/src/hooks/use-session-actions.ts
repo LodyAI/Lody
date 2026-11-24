@@ -1,3 +1,4 @@
+import { writePluginAnnotation } from '@lody/shared/plugins/annotations';
 import { lifecycleCommandInputs } from '@lody/shared/commands/host-commands';
 import { executeSessionLifecycle } from '../commands/session-lifecycle';
 import { userAtom } from '../atoms';
@@ -241,7 +242,8 @@ export type SessionActions = {
     id: SessionId,
     command: string,
     input: unknown,
-    signal: AbortSignal
+    signal: AbortSignal,
+    pluginId?: string
   ) => Promise<
     | void
     | import('@lody/plugin-sdk').SendSessionMessageReceipt
@@ -1279,7 +1281,15 @@ export function useSessionActions(): SessionActions {
   );
   return {
     ...triage,
-    executePluginSessionCommand: async (workspaceId, machineId, id, command, input, signal) => {
+    executePluginSessionCommand: async (
+      workspaceId,
+      machineId,
+      id,
+      command,
+      input,
+      signal,
+      pluginId
+    ) => {
       signal.throwIfAborted();
       if (
         !runtime ||
@@ -1291,6 +1301,23 @@ export function useSessionActions(): SessionActions {
       signal.throwIfAborted();
       if (meta?.machineId !== machineId || store.get(activeWorkspaceRuntimeAtom) !== runtime)
         throw Object.assign(Error('Session outside installation'), { code: 'forbidden' });
+      if (command === 'sessionSetAnnotation') {
+        await assertCanManageSessions([id]);
+        const [current] = await readSessionMetas(id, false);
+        signal.throwIfAborted();
+        if (
+          !pluginId ||
+          !current ||
+          current.machineId !== machineId ||
+          store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+          store.get(userAtom)?.id !== current.userId
+        )
+          throw Error('Session annotation forbidden');
+        await runtime.writer.upsertDocMeta(getSessionRoomId(id), {
+          annotations: writePluginAnnotation(current.annotations, pluginId, input),
+        });
+        return;
+      }
       if (Object.hasOwn(lifecycleCommandInputs, command)) {
         await assertCanManageSessions([id]);
         signal.throwIfAborted();

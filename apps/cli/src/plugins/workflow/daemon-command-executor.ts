@@ -77,6 +77,11 @@ export interface DaemonCommandContext {
     input: unknown,
     check: () => void
   ): Promise<unknown>;
+  annotation?(
+    entity: { projectId: string } | { session: SessionMeta },
+    input: unknown,
+    check: () => void
+  ): Promise<void>;
   preference(
     id: keyof typeof sessionCommandInputs,
     meta: SessionMeta,
@@ -118,6 +123,18 @@ export function daemonCommandExecutor(ctx: DaemonCommandContext): DispatchMachin
       target.sessionId !== actor.sessionId
     )
       return forbidden();
+    if (call.op === 'lody.execute' && payload.descriptorId === 'projectSetAnnotation') {
+      if (
+        !actor.annotation ||
+        !actor.machineOwner ||
+        call.origin.frame.kind !== 'mutation' ||
+        !target.projectId ||
+        target.sessionId
+      )
+        return forbidden();
+      await actor.annotation({ projectId: target.projectId }, payload.input, check);
+      return null;
+    }
     if (call.op === 'lody.execute' && payload.descriptorId === 'sessionCreate') {
       if (
         call.origin.frame.kind !== 'mutation' ||
@@ -142,6 +159,18 @@ export function daemonCommandExecutor(ctx: DaemonCommandContext): DispatchMachin
     const meta = await actor.meta(id);
     check();
     if (meta.machineId !== actor.machineId) return forbidden();
+    if (call.op === 'lody.execute' && payload.descriptorId === 'sessionSetAnnotation') {
+      if (
+        !actor.annotation ||
+        call.origin.frame.kind !== 'mutation' ||
+        meta.userId !== actor.userId ||
+        meta.id !== id
+      )
+        return forbidden();
+      await actor.annotation({ session: meta }, payload.input, check);
+      return null;
+    }
+
     if (
       call.op === 'lody.execute' &&
       payload.descriptorId &&

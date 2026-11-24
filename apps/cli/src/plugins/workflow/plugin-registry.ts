@@ -83,9 +83,19 @@ export interface VerifiedPluginGrant {
   projectId?: string;
   sessionId?: string;
 }
+export interface PluginToolTurn {
+  sessionId: string;
+  projectId?: string;
+  userId: string;
+  isCurrent(): boolean;
+  onDispatch?: (id: string) => void;
+  executeHostCall: DispatchMachineHostCall;
+}
 export class Registry extends Context.Service<
   Registry,
   {
+    sessionTools: () => readonly { name: string; description: string; inputSchema: Record<string, unknown> }[];
+    invokeSessionTool: (name: string, input: z.infer<ReturnType<typeof z.json>>, turn: PluginToolTurn) => Effect.Effect<unknown, unknown>;
     workflowLease: (
       id: string,
       instance: number
@@ -528,7 +538,28 @@ export function registryLayer(
           { concurrency: 'unbounded', discard: true }
         );
       });
+      const availableTools = () => [...items].flatMap(([pluginId, item]) =>
+        item.enabled && !item.pendingConfiguration && host.inspect(pluginId).lifecycle === 'Running'
+          ? host.tools(pluginId).map(tool => ({pluginId, item, tool})) : []);
       return Registry.of({
+        sessionTools: () => availableTools().map(entry => entry.tool),
+        invokeSessionTool: Effect.fnUntraced(function* (name, input, turn) {
+          const matches = availableTools().filter(entry => entry.tool.name === name);
+          const entry = matches[0];
+          if (!entry || matches.length !== 1 || !turn.isCurrent())
+            return yield* Effect.fail(new Error('Session plugin tool unavailable'));
+          const {pluginId, item} = entry;
+          const projectId = turn.projectId;
+          const target = {workspaceId, machineId, sessionId: turn.sessionId, ...(projectId ? {projectId} : {})};
+          return yield* host.invoke(pluginId, {
+            kind: 'tool', scope: 'session', descriptorId: name.slice(`plugin__${pluginId}__`.length),
+            input, target, actorUserId: turn.userId,
+            ...(projectId ? {projectConfig: resolveProjectConfig(item.current.manifest,item.projectPreferences?.[projectId])} : {}),
+          }, (...args) => {
+            if (items.get(pluginId) !== item || !turn.isCurrent()) return Promise.reject(new Error('Plugin tool invocation ended'));
+            return turn.executeHostCall(...args);
+          }, turn.onDispatch);
+        }),
         workflowLease: (id, instance) => {
           const item = items.get(id);
           if (!item?.enabled || !item.declaredGrant || !item.current.machineDigest)

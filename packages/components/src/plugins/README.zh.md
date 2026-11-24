@@ -1,14 +1,11 @@
-# 客户端读取快照
+# 客户端插件读取
 
 [English](README.md)
 
-`useLodySnapshot` 订阅的数据与 `lody.readSnapshot` 可以读取的数据相同，两者都受当前工作区授权约束。同一插件安装中，订阅同一目标的组件共用数据源；最后一个订阅退出时释放它。数据变更只会使对应快照失效。没有订阅、也没有显式读取时，不会生成原始快照。返回的 JSON 与原数据分离，且递归冻结。如果 selector 每次都返回新对象，可传入 `isEqual`，避免内容相同时重新渲染面板。
+离线界面优先使用 `lodyQueries`。`sessionSetAnnotation` 和 `projectSetAnnotation` 接受 `{ value }`（JSON，UTF-8 序列化后不超过 4 KiB）。命名空间由宿主根据插件身份确定；同步后的摘要通过 `annotations[pluginId]` 暴露该值。
 
-| 目标 | 可读取的数据 |
-| --- | --- |
-| `workspace-state` | 以 ID 为键的 `sessions`、`projects`、`agentRoles` 和 `schedules`。可见本地项目副本的键为 `machineId:localProjectId`。`workspaceProjects`、`pinSections`、`mcpServers`、`projectMcpDefaults` 来自工作区目录。传入 `path` 可只读一个子树。 |
-| `project-state` / `session-meta` | 可见本地项目或 Session 的元数据。只有创建该 Session 的插件可以读取其 `businessKey`。 |
-| `session-transcript` | 通过该 Session 的 Loro 或 Roost 历史读取器返回 `{ turns }`。用 `turnIds` 指定最多 100 个 Turn，或用 `limit` 读取最近 1 至 100 条，默认 20 条。 |
-| `schedule-doc` | 工作区 Schedule 存储中的相应文档。 |
+显式声明 `unstable.rawState` 后，可通过 `lody.unstable.readSnapshot` 或 `useUnstableLodySnapshot` 读取白名单投影。结果是脱离原文档的深冻结 JSON，包括外壳在内最多 512 KiB；字段不受 SemVer 稳定性保证。未订阅时不会打开数据源，最后一个订阅者离开时释放它。
 
-客户端不返回可写句柄、环境变量映射、认证请求头或托管密钥字段。脱敏针对宿主的结构化字段，不会识别用户或 Agent 写在 Turn 正文中的任意文本。
+- `workspace-state`：用 `path: [collection, key, ...fields]` 选取一个可见实体。集合包括 `sessions`、`projects`、`machines`、`roles`、`schedules` 和 `rateLimits`。本地项目和额度键分别是 `machineId:localProjectId` 和 `machineId:rateLimitEntryKey`。
+- `project-state`：指定可见项目和非空字段路径。`session-meta` 选取单个可见 Session；只有创建它的插件能读到 `businessKey`。
+- `session-transcript`：指定 1–100 个 `turnIds`，或用 1–100 的 `limit` 读取最近窗口，不能同时指定。宿主只读取对应历史记录。

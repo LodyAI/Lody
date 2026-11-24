@@ -37,6 +37,11 @@ interface Status {
   clientDigest?: string;
 }
 type HostEvent = Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'>;
+interface PluginMcpDescriptor {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
 interface Api {
   broadcast: (frame: HostEvent, admit?: () => Promise<boolean>) => Effect.Effect<void, unknown>;
   event: (id: string, frame: HostEvent) => Effect.Effect<void, unknown>;
@@ -51,11 +56,13 @@ interface Api {
     pid?: number;
     registrations: string[];
   };
+  tools: (id: string) => readonly PluginMcpDescriptor[];
   logs: (id: string) => Effect.Effect<readonly string[]>;
   invoke: (
     id: string,
     frame: Invoke,
-    execute?: DispatchMachineHostCall
+    execute?: DispatchMachineHostCall,
+    onDispatch?: (callId: string) => void
   ) => Effect.Effect<unknown, InvocationFailure>;
 }
 export class PluginHost extends Context.Service<PluginHost, Api>()('lody/plugins/PluginHost') {}
@@ -87,6 +94,7 @@ export const makePluginHostLayer = (
         draining?: boolean;
         origins: Map<string, { origin: MachineHostOrigin; controller: AbortController }>;
         registrations?: string[];
+        tools?: PluginMcpDescriptor[];
         buffered: { frame: HostEvent; admit?: () => Promise<boolean> }[];
         eventTail?: Deferred.Deferred<void>;
         eventReply?: { contextId: string; reply: Deferred.Deferred<void, Error> };
@@ -288,6 +296,7 @@ export const makePluginHostLayer = (
             const f = parsed.data;
             if (f.type === 'ready' && phase === 'init') {
               phase = 'ready';
+              g.tools = f.handlers.flatMap(h => h.kind === 'tool' && h.tool ? [{ name: `plugin__${id}__${h.descriptorId}`, ...h.tool }] : []);
               g.registrations = [
                 ...f.handlers.map((h) => `${h.kind}: ${h.descriptorId}`),
                 ...f.subscribedEvents.map((e) => `event: ${e}`),
@@ -571,8 +580,12 @@ export const makePluginHostLayer = (
             registrations: g?.registrations ?? [],
           };
         },
+        tools: (id) => {
+          const g = active.get(id);
+          return !g?.running || g.faulted || g.lease ? [] : (g.tools ?? []);
+        },
         logs: (id) => active.get(id)?.child?.ringBuffer ?? Effect.succeed(history.get(id) ?? []),
-        invoke: (id, frame, execute) =>
+        invoke: (id, frame, execute, onDispatch) =>
           Effect.suspend(() => {
             const g = active.get(id),
               child = g?.child;
@@ -589,6 +602,7 @@ export const makePluginHostLayer = (
                 frame.kind,
                 (callId) => {
                   dispatched = callId;
+                  onDispatch?.(callId);
                   const invocation = { type: 'invoke' as const, callId, ...frame };
                   g.origins.set(callId, {
                     origin: { type: 'invoke', frame: invocation, execute },

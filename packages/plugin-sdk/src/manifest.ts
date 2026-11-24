@@ -89,24 +89,12 @@ export interface PluginMcpServerContribution {
   readonly envKeys?: readonly string[];
 }
 
-/**
- * Bundled ACP Agent Provider runtime (`Workflow Provider Conformance Profile`), allowing full
- * workflow plugins (e.g. Sorbet Super Assistant) to package a custom Agent harness launched via
- * `acp-session-start-gate.ts` as `plugin:<plugin_id>:<provider_id>`.
- */
+/** Names a host-managed adapter. Authentication and capability discovery belong to ACP. */
 export interface PluginAcpProviderContribution {
   readonly id: string;
   readonly title: string;
   readonly description?: string;
-  /** Relative path to the bundled ACP server entrypoint inside the plugin package. */
-  readonly entry: string;
-  /** Declared `config` keys (`string` or `secret`) forwarded as environment variables to this ACP provider subprocess. */
-  readonly envKeys?: readonly string[];
-  readonly capabilities?: {
-    readonly loadSession?: boolean;
-    readonly subagentEvents?: boolean;
-    readonly configOptions?: boolean;
-  };
+  readonly managedAgent: 'pi' | 'kimi' | 'devin' | 'grok' | 'codex' | 'claude' | 'antigravity';
 }
 
 /**

@@ -122,7 +122,6 @@ export async function compilePlugin(message: unknown) {
   for (const p of new Set([
     ...(manifest.skills ?? []).map((name) => `skills/${name}/SKILL.md`),
     ...(manifest.agentRoles ?? []).map((r) => r.promptPath),
-    ...(manifest.acpProviders ?? []).map((r) => r.entry),
     ...(manifest.mcpServers ?? []).map((r) => r.entry),
     ...(manifest.styles ?? []),
     ...(manifest.assets ?? []),

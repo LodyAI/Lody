@@ -18,6 +18,7 @@ const send = (frame: unknown) => process.send?.(childToHostSchema.parse(frame));
 type Kind = Extract<HostToChildFrame, { type: 'invoke' }>['kind'];
 type Descriptor = {
   id: string;
+  description?: string;
   scope?: 'project' | 'session' | 'machine';
   metadataSchema?: z.ZodType;
   input?: z.ZodType;
@@ -249,6 +250,7 @@ async function receive(frame: HostToChildFrame) {
           kind,
           descriptorId: d.id,
           scope: d.scope ?? 'session',
+          ...(kind === 'tool' ? {tool: {description: d.description ?? d.id, inputSchema: z.toJSONSchema(d.input!, {io:'input', unrepresentable:'any'})}} : {}),
         })),
         subscribedEvents: [...events.keys()],
         resumeEvents: [...resumeEvents],
@@ -358,11 +360,14 @@ async function receive(frame: HostToChildFrame) {
           },
           input
         );
+        const data = parse(z.json(), parse(h.descriptor.output!, result) ?? null);
+        if (frame.kind === 'tool' && Buffer.byteLength(JSON.stringify(data)) > 2 * 1024 * 1024)
+          throw new ValidationFailure();
         send({
           type: 'result',
           callId: frame.callId,
           ok: true,
-          data: parse(z.json(), parse(h.descriptor.output!, result) ?? null),
+          data,
         });
       } catch (error) {
         send({

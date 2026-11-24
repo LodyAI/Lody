@@ -281,7 +281,9 @@ export type SessionMonitorRuntimeInfo = {
 };
 
 export interface CreateAgentConfig {
-  spawnWorkflowProvider?: () => Promise<import('./session-sandbox').SessionProcessHandle>;
+  withManagedProvider?: (
+    spawn: () => Promise<import('./session-sandbox').SessionProcessHandle>
+  ) => Promise<import('./session-sandbox').SessionProcessHandle>;
   resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   resolveAdditionalDirectories?: AgentClientOptions['resolveAdditionalDirectories'];
   cliType: AgentConfigCliType;
@@ -393,6 +395,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   protected token: string;
   private githubTokenManager: CloudGithubTokenManager | null = null;
   private gitCredentialBroker: GitCredentialBroker | null = null;
+  private readonly pluginToolMounts = new WeakMap<ISession,()=>boolean>();
+  hasTurnScopedPluginTools(session:ISession){return this.pluginToolMounts.has(session)}
+  pluginToolMountExpired(session:ISession){return this.pluginToolMounts.get(session)?.()===false}
   private readonly sessions = new Map<SessionId, Session>();
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
   private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
@@ -402,6 +407,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private readonly sessionSandboxFactory: SessionSandboxFactory;
   private readonly cloudPort: CloudPort;
   readonly mcpAuthentication: McpAuthenticationLegacy;
+  capturePluginToolTurn?: (id: SessionId) => { turnId: string; sourceTurnId:string; userId: string; isCurrent(): boolean; executeHostCall:import('../plugins/machine-host-port').DispatchMachineHostCall } | undefined;
   // Rebalance requests are serialized because the per-session limit is derived from a
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
@@ -651,20 +657,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return {
       cliType: config.agentCliType,
       agentType: config.agentType,
-      ...(config.agentConfigId?.startsWith('plugin:')
-        ? {
-            spawnWorkflowProvider: async () => {
-              const daemon = await this.workspaceDocument.pluginDaemon?.();
-              if (!daemon) throw Error('Workflow provider forbidden');
-              return daemon.spawnWorkflow(
-                'acpProviders',
-                config.agentConfigId!,
-                options?.abortSignal,
-                await admitWorkflow('acpProviders', config.agentConfigId!)
-              );
-            },
-          }
-        : {}),
       command: launch.command,
       args: launch.args,
       env: launch.env,
@@ -795,14 +787,38 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         const selected = new Set<string>(
           config.mcpServerIds.filter((id) => id.startsWith('plugin:'))
         );
-        if (!selected.size && !config.agentRoleId?.startsWith('plugin:')) return base;
+        const workflowSelected = selected.size > 0 || config.agentRoleId?.startsWith('plugin:');
+        const turn = this.capturePluginToolTurn?.(sessionId);
+        if (!workflowSelected && !turn) return base;
         const daemon = await this.workspaceDocument.pluginDaemon?.();
-        if (!daemon) throw Error('Workflow server forbidden');
-        const rows = await daemon.workflowCatalog();
+        if (!daemon) {
+          if (workflowSelected) throw Error('Workflow server forbidden');
+          return base;
+        }
+        const rows = workflowSelected ? await daemon.workflowCatalog() : [];
         for (const row of rows)
           for (const id of row.roles.get(config.agentRoleId ?? '')?.mcpServers ?? [])
             selected.add(id);
         const servers: import('@lody/shared').ResolvedMcpServer[] = [];
+        if (turn && turn.userId === mcpRequesterUserId && (await daemon.sessionTools()).length && turn.isCurrent()) {
+          const key = `lody-plugin-tools:${turn.turnId}:${turn.sourceTurnId}`;
+          for(const [old,binding] of bindings)if(old.startsWith('lody-plugin-tools:')&&old!==key){bindings.delete(old);await (await binding).release();}
+          let binding = bindings.get(key);
+          if (!binding) {
+            binding = import('../plugins/workflow/plugin-tool-mcp').then(({bindPluginToolMcp}) => bindPluginToolMcp(daemon, {
+              ...turn, sessionId, projectId: localProjectId,
+              executeHostCall: turn.executeHostCall,
+            }, async (toolCallId, signal) => {
+              const {createSessionBackend} = await import('./session-backend');
+              const history = await createSessionBackend(await this.workspaceDocument.getOrCreateSessionDoc(sessionId));
+              return {documents:this.workspaceDocument,history,sessionId,turnId:turn.turnId,toolCallId,signal,
+                authorize:async () => {if (!turn.isCurrent()) throw Error('Plugin turn ended');}};
+            }));
+            bindings.set(key, binding);
+          }
+          servers.push((await binding).entry);
+          this.pluginToolMounts.set(session,turn.isCurrent);
+        }
         for (const id of selected) {
           const row = rows.find((g) => g.mcpServers.has(id))?.mcpServers.get(id);
           if (!row) throw Error('Workflow MCP unavailable');
@@ -811,12 +827,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             const { bindWorkflowStdio, bindWorkflowHttp } =
               await import('../plugins/workflow/plugin-mcp-session');
             binding = daemon
-              .spawnWorkflow(
-                'mcpServers',
-                id,
-                options?.abortSignal,
-                await admitWorkflow('mcpServers', id)
-              )
+              .spawnWorkflowMcp(id, options?.abortSignal, await admitWorkflow('mcpServers', id))
               .then(async (child) =>
                 child.socketPath
                   ? await bindWorkflowHttp(id, child, child.socketPath)
@@ -917,62 +928,86 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.reportStartStage(config, 'agent-runtime');
       const launchResolutionStartedAt = performance.now();
       let managedRuntimeReadyLogged = false;
-      const launch: ResolvedAcpProcessLaunch = config.agentConfigId?.startsWith('plugin:')
-        ? { command: 'plugin-provider', args: [] }
-        : await resolveACPProcessLaunchAsync({
-            signal,
-            agentConfigId: config.agentConfigId,
-            magpieGatewayUrl: config.magpieGatewayUrl,
-            cliType: config.agentCliType,
-            agentType: config.agentType,
-            customAcp: config.customAcp,
-            runtimeOverrides: config.runtimeOverrides,
-            env: config.env,
-            onManagedRuntimeProgress: (event) => {
-              config.onPresencePhase?.(
-                'managed-runtime',
-                formatManagedRuntimeProgressDetail(event)
+      let withManagedProvider: CreateAgentConfig['withManagedProvider'];
+      if (config.agentConfigId?.startsWith('plugin:')) {
+        const id = config.agentConfigId,
+          daemon = await this.workspaceDocument.pluginDaemon?.();
+        if (
+          !daemon ||
+          config.agentCliType !== 'builtin' ||
+          config.customAcp ||
+          config.runtimeOverrides ||
+          config.magpieGatewayUrl
+        )
+          throw Error('Workflow provider unavailable');
+        const bind = await daemon.managedProvider(id, config.agentType);
+        const admit =
+          config.requesterUserId === this.cloudPort.identity.userId
+            ? undefined
+            : await this.workspaceDocument.authorizeWorkflowChild(
+                sessionId,
+                config.requesterUserId,
+                config.project?.kind === 'local' ? config.project.localProjectId : undefined,
+                config.agentRoleId,
+                'acpProviders',
+                id
               );
-              if (event.phase === 'complete' && !managedRuntimeReadyLogged) {
-                managedRuntimeReadyLogged = true;
-                this.logger.debug(
-                  `[${sessionId}] Managed runtime ready in ${Math.round(performance.now() - launchResolutionStartedAt)}ms (runtime=${event.runtimeName})`
-                );
-              }
+        withManagedProvider = (spawn) => {
+          admit?.();
+          return bind(spawn);
+        };
+      }
+      const launch: ResolvedAcpProcessLaunch = await resolveACPProcessLaunchAsync({
+        signal,
+        agentConfigId: config.agentConfigId,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        env: config.env,
+        onManagedRuntimeProgress: (event) => {
+          config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
+          if (event.phase === 'complete' && !managedRuntimeReadyLogged) {
+            managedRuntimeReadyLogged = true;
+            this.logger.debug(
+              `[${sessionId}] Managed runtime ready in ${Math.round(performance.now() - launchResolutionStartedAt)}ms (runtime=${event.runtimeName})`
+            );
+          }
+        },
+      }).catch((error: unknown) => {
+        if (error instanceof ManagedRuntimeError) {
+          const runtimeName = resolveManagedRuntimeNameForBuiltin(config.agentType);
+          const runtimeDiagnostics = runtimeName
+            ? getManagedAgentRuntimeManager().getDiagnostics(runtimeName)
+            : undefined;
+          captureCli(
+            'managed_runtime/install_failed',
+            {
+              workspace_id: config.workspaceId,
+              session_id: sessionId,
+              machine_id: config.machineId,
+              agent_type: config.agentType,
+              ...(runtimeName ? { runtime_name: runtimeName } : {}),
+              ...(runtimeDiagnostics
+                ? {
+                    runtime_version: runtimeDiagnostics.version,
+                    platform_arch: runtimeDiagnostics.platformArch,
+                    runtime_base_host: runtimeDiagnostics.runtimeBaseHost,
+                    proxy_env_present: runtimeDiagnostics.proxyEnvPresent,
+                    proxy_configured_for_runtime_url:
+                      runtimeDiagnostics.proxyConfiguredForRuntimeUrl,
+                  }
+                : {}),
+              source: 'session_start',
+              reason: classifyManagedRuntimeFailureReason(error),
+              error_message: truncateAnalyticsString(formatManagedRuntimeFailureMessage(error)),
             },
-          }).catch((error: unknown) => {
-            if (error instanceof ManagedRuntimeError) {
-              const runtimeName = resolveManagedRuntimeNameForBuiltin(config.agentType);
-              const runtimeDiagnostics = runtimeName
-                ? getManagedAgentRuntimeManager().getDiagnostics(runtimeName)
-                : undefined;
-              captureCli(
-                'managed_runtime/install_failed',
-                {
-                  workspace_id: config.workspaceId,
-                  session_id: sessionId,
-                  machine_id: config.machineId,
-                  agent_type: config.agentType,
-                  ...(runtimeName ? { runtime_name: runtimeName } : {}),
-                  ...(runtimeDiagnostics
-                    ? {
-                        runtime_version: runtimeDiagnostics.version,
-                        platform_arch: runtimeDiagnostics.platformArch,
-                        runtime_base_host: runtimeDiagnostics.runtimeBaseHost,
-                        proxy_env_present: runtimeDiagnostics.proxyEnvPresent,
-                        proxy_configured_for_runtime_url:
-                          runtimeDiagnostics.proxyConfiguredForRuntimeUrl,
-                      }
-                    : {}),
-                  source: 'session_start',
-                  reason: classifyManagedRuntimeFailureReason(error),
-                  error_message: truncateAnalyticsString(formatManagedRuntimeFailureMessage(error)),
-                },
-                { tier: 'A' }
-              );
-            }
-            throw error;
-          });
+            { tier: 'A' }
+          );
+        }
+        throw error;
+      });
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const publishAcpStep = (step: 'spawn' | 'initialize' | 'new-session') => {
         const detail =
@@ -1002,6 +1037,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             }
           },
         });
+        agentConfig.withManagedProvider = withManagedProvider;
         const deliverUsage = agentConfig.onUsageUpdate;
         agentConfig.onUsageUpdate = (usage, accountingId) => {
           if (usageState === 'starting') pendingUsage.push([usage, accountingId]);

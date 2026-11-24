@@ -91,8 +91,7 @@ export type ReadonlyJsonValue = ReadonlyJsonPrimitive | ReadonlyJsonArray | Read
 
 /**
  * Detached, deeply frozen read-only snapshot of an authorized Lody workspace or session state tree.
- * Gives custom Workspace / multi-Agent panels unrestricted read freedom beyond fixed summary shapes,
- * while keeping `HistoryWriter` and Kernel commands as the sole mutation path.
+ * A bounded domain projection outside the SDK SemVer guarantee. Requires unstable.rawState.
  */
 export interface UnstableDocumentSnapshot<TDoc extends ReadonlyJsonValue = ReadonlyJsonObject> {
   readonly schemaVersion: number;
@@ -339,6 +338,7 @@ export interface MachineSummary {
 }
 
 export interface ProjectSummary {
+  readonly annotations?: Readonly<Record<string, ReadonlyJsonValue>>;
   readonly project: ProjectRef;
   readonly name: string;
   readonly repository?: string;
@@ -401,6 +401,7 @@ export interface InstalledPluginSummary {
 }
 
 export interface SessionSummary {
+  readonly annotations?: Readonly<Record<string, ReadonlyJsonValue>>;
   readonly session: SessionRef;
   readonly title: string;
   readonly status: 'idle' | 'busy' | 'waiting' | 'stopped';
@@ -589,6 +590,7 @@ export interface MachineHostEventMap {
     readonly userTurnId?: string;
   };
   readonly 'session.turn.completed': {
+    readonly agentRoleId?: string;
     readonly workspace: WorkspaceRef;
     readonly machine: MachineRef;
     readonly session: SessionRef;
@@ -809,6 +811,16 @@ export const lodyCommands: {
     } | void,
     SessionRef
   >;
+  readonly sessionSetAnnotation: LodyCommandDescriptor<
+    'session',
+    { readonly value: ReadonlyJsonValue },
+    void
+  >;
+  readonly projectSetAnnotation: LodyCommandDescriptor<
+    'project',
+    { readonly value: ReadonlyJsonValue },
+    void
+  >;
   readonly sessionUpdateTitle: LodyCommandDescriptor<'session', { readonly title: string }, void>;
   /** @experimental Coupled to the host sidebar. */
   readonly sessionMarkRead: LodyCommandDescriptor<'session', void, void>;
@@ -891,6 +903,8 @@ export const lodyCommands: {
   sessionArchive: { kind: 'lody-command', id: 'sessionArchive', scope: 'session' },
   sessionRestore: { kind: 'lody-command', id: 'sessionRestore', scope: 'session' },
   sessionFork: { kind: 'lody-command', id: 'sessionFork', scope: 'session' },
+  sessionSetAnnotation: { kind: 'lody-command', id: 'sessionSetAnnotation', scope: 'session' },
+  projectSetAnnotation: { kind: 'lody-command', id: 'projectSetAnnotation', scope: 'project' },
   sessionUpdateTitle: { kind: 'lody-command', id: 'sessionUpdateTitle', scope: 'session' },
   sessionMarkRead: { kind: 'lody-command', id: 'sessionMarkRead', scope: 'session' },
   sessionMarkUnread: { kind: 'lody-command', id: 'sessionMarkUnread', scope: 'session' },
@@ -953,3 +967,6 @@ export function defineAttachmentSource<TMeta extends z.ZodType = z.ZodUnknown>(
 ): AttachmentSourceDescriptor<TMeta> {
   return { kind: 'attachment-source', id, ...spec };
 }
+
+export const MAX_UNSTABLE_SNAPSHOT_BYTES = 524288;
+export const MAX_PLUGIN_ANNOTATION_BYTES = 4096;

@@ -606,6 +606,37 @@ describe('SessionForkService durability boundary', () => {
     expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
   });
 
+  it('retains workflow attribution and rolls back a shared fork when its grant is revoked after preparation', async () => {
+    const principal = 'plugin-workflow:example:installation';
+    for (const revokeAfterPrepare of [false, true]) {
+      const h = createForkHarness(undefined, {
+        sourceMeta: { agentRoleId: 'role' as SessionMeta['agentRoleId'] },
+      });
+      const room = getSessionRoomId(targetSessionId);
+      const result = await h.service.fork({
+        ...forkSpec,
+        requestedByUserId: principal,
+        executionRequesterUserId: principal,
+        authorizeWorkflow: async () => {
+          if (
+            revokeAfterPrepare &&
+            ((await h.repo.getDocMeta(room)) as Partial<SessionMeta> | undefined)?.userId ===
+              principal
+          )
+            throw Error('Grant revoked');
+        },
+      });
+      expect(result.success).toBe(!revokeAfterPrepare);
+      const target = await h.repo.getDocMeta(room);
+      if (revokeAfterPrepare) expect(target).toBeUndefined();
+      else
+        expect(target).toMatchObject({
+          userId: principal,
+          agentRoleId: 'role',
+          acpSessionId: expect.any(String),
+        });
+    }
+  });
   it('runs an encrypted member fork as the verified signer while the member account owns it', async () => {
     const harness = createForkHarness();
 

@@ -205,7 +205,9 @@ import {
   isGitExecutableNotFoundError,
 } from './worktree/git-process-error';
 
+type PluginStopReason = import('@lody/plugin-sdk').TurnStopReason;
 type FinalizeTurnContext = {
+ stopReason?:PluginStopReason;
   sessionId: SessionId;
   session: ISession;
   sessionDoc: SessionDocument;
@@ -306,7 +308,7 @@ type TurnFinalizationEffects = {
   finalizeACPState: (
     sessionId: SessionId,
     turnId?: string,
-    stopReason?: 'cancelled' | 'error'
+    stopReason?: PluginStopReason
   ) => Promise<void>;
   persistCodeCollabTurnDiffs?: (
     sessionId: SessionId,
@@ -338,7 +340,7 @@ type ApplyModeAndModelConfig = SessionTurnInputConfig & {
 
 type PromptHandoffRun = {
   turnId: string;
-  promptOutcome: Promise<{ status: 'fulfilled' } | { status: 'rejected'; error: unknown }>;
+  promptOutcome: Promise<{ status: 'fulfilled'; stopReason:PluginStopReason } | { status: 'rejected'; error: unknown }>;
   successor?: PromptHandoffRun;
   successorReady: Promise<void>;
   signalSuccessor: () => void;
@@ -380,6 +382,7 @@ type TurnInvocation = {
 type SessionStopFailurePhase = 'cancel' | 'timeout' | 'terminate';
 
 type TurnRuntimeState = {
+ pluginStopReason?:PluginStopReason;
   sessionId: SessionId;
   /** Logical chain tail exposed to Web, cancel, and optimistic steer validation. */
   turnId: string;
@@ -1580,7 +1583,7 @@ export class SessionExecutionService {
     return {
       turnId: options.turnId,
       promptOutcome: options.promptPromise.then(
-        () => ({ status: 'fulfilled' as const }),
+        (result) => {const r=result&&typeof result==='object'?Reflect.get(result,'stopReason'):undefined;const stopReason:PluginStopReason=r==='end_turn'||r==='cancelled'||r==='max_tokens'?r:'unknown';return {status:'fulfilled' as const,stopReason};},
         (error: unknown) => ({ status: 'rejected' as const, error })
       ),
       successorReady,
@@ -1643,6 +1646,7 @@ export class SessionExecutionService {
       if (decision.outcome.status === 'rejected') {
         throw decision.outcome.error;
       }
+      runtime.pluginStopReason=decision.outcome.stopReason;
       return;
     }
   }
@@ -2447,7 +2451,7 @@ export class SessionExecutionService {
     if (!agentClient || !acpSessionId || !steerCapability) {
       return await rejectAndPromote('unsupported');
     }
-    if (mcpSelectionChanged(runtime.session, options.inputConfig)) {
+    if (this.deps.sessionManager.hasTurnScopedPluginTools?.(runtime.session) || mcpSelectionChanged(runtime.session, options.inputConfig)) {
       return await rejectAndPromote('unsupported', 'MCP selection requires a new turn.');
     }
     if (steerCapability.configPolicy === 'active') {
@@ -4800,7 +4804,7 @@ export class SessionExecutionService {
   private async finalizeTurn(ctx: FinalizeTurnContext): Promise<void> {
     const { sessionId, sessionDoc, turnId } = ctx;
     await this.runTurnFinalizationStage(sessionId, turnId, 'finalizeACPState', () =>
-      this.deps.turnFinalization.finalizeACPState(sessionId, turnId)
+      this.deps.turnFinalization.finalizeACPState(sessionId, turnId,ctx.stopReason)
     );
     const notificationRuntime = this.getTurnRuntime(sessionId, turnId);
     if (notificationRuntime)
@@ -6438,6 +6442,19 @@ export class SessionExecutionService {
     return undefined;
   }
 
+  capturePluginToolTurn(sessionId: SessionId) {
+    // Released ACP processes may still serve ordinary Session tools, never this turn's lease.
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    const principal = this.getActiveInvocationContext(sessionId);
+    if (!runtime || !principal || principal.sender?.kind !== 'user' ||
+        ((this.deps.encryptedExecution || this.deps.encryptedWorkspace) && runtime.encryptedPrincipal !== 'owner' && runtime.encryptedPrincipal !== 'member')) return;
+    const invocation = runtime.invocation;
+    const turnId = runtime.turnId;
+    return { turnId, sourceTurnId: principal.sourceTurnId, userId: principal.requesterUserId, isCurrent: () => runtime.turnId === turnId &&
+      this.turnRuntimeBySession.get(sessionId) === runtime && runtime.invocation === invocation &&
+      this.getActiveInvocationContext(sessionId)?.sourceTurnId === principal.sourceTurnId };
+  }
+
   getActiveInvocationContext(sessionId: SessionId):
     | {
         requesterUserId: string;
@@ -7846,6 +7863,7 @@ export class SessionExecutionService {
           { sessionId, turnId: completedTurnId },
           async () =>
             await self.finalizeTurn({
+ stopReason:runtime.pluginStopReason,
               sessionId,
               session: activeSession,
               sessionDoc,
@@ -7995,7 +8013,7 @@ export class SessionExecutionService {
           // driving turn's selection takes effect without hot-loading a busy agent.
           if (
             readySession &&
-            (mcpSelectionChanged(readySession, acpSessionConfig) ||
+            (self.deps.sessionManager.pluginToolMountExpired?.(readySession) || mcpSelectionChanged(readySession, acpSessionConfig) ||
               JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
                 JSON.stringify(acpSessionConfig.memory ?? null))
           ) {
@@ -8683,6 +8701,7 @@ export class SessionExecutionService {
               { sessionId, turnId: completedTurnId },
               async () =>
                 await self.finalizeTurn({
+ stopReason:runtime.pluginStopReason,
                   sessionId,
                   session,
                   sessionDoc,

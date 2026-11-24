@@ -78,7 +78,7 @@ export function makeVerifiedExecutionIntent(options: {
   return (
     intent: EncryptedExecutionIntent,
     doc?: LoroDoc,
-    lookup: { readonly origin?: boolean } = {}
+    lookup: { readonly origin?: boolean; readonly pluginTool?:boolean } = {}
   ): Effect.Effect<
     VerifiedExecutionOriginal | PendingExecutionOriginal | RefusedExecutionOriginal | undefined,
     unknown
@@ -167,6 +167,7 @@ export function makeVerifiedExecutionIntent(options: {
             }).safeParse(row.scheduleRun);
       if (schedule && !schedule.success) return refused('e2ee_signature_invalid');
       return {
+        ...(lookup.pluginTool ? {humanMemberInput:decoded.kind===E2EE_INTENT_KIND.memberInput && state.devices.get(signer)?.kind==='personal'} : {}),
         requesterDevice: signer,
         requesterCryptoUserId: hex(found.userId.toBytes()),
         ...(state.devices.get(signer)?.kind === 'machine'

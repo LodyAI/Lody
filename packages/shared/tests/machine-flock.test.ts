@@ -746,3 +746,21 @@ describe('rate limit entry keys and legacy persistence migrations', () => {
     }
   });
 });
+
+it('preserves bounded namespaced plugin annotations in the synced project row', async () => {
+  const { writePluginAnnotation } = await import('../src/plugins/annotations');
+  const flock = new FakeMachineFlock();
+  const id = 'example' as LocalProjectId;
+  const project = { id, name: 'Example', rootPath: '/repo', createdAtMs: 0 };
+  const first = writePluginAnnotation(undefined, 'one', { value: { color: 'red' } });
+  const exact = 'é'.repeat(2047);
+  const annotations = writePluginAnnotation(first, 'two', { value: exact });
+  expect(() => writePluginAnnotation(annotations, 'two', { value: exact + 'x' })).toThrow('4 KiB');
+  writeMachineFlockRowToFlock(flock, {
+    key: machineFlockKeys.localProject(id),
+    value: { ...project, annotations },
+  });
+  expect(
+    getMachineFlockLocalProjects(readMachineFlockRowsFromFlock(flock))[id]?.annotations
+  ).toEqual({ one: { color: 'red' }, two: exact });
+});
