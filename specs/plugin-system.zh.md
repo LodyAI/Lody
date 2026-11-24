@@ -19,8 +19,8 @@ Translation: current
 
 验证与实现合规性划分为四档画像（详见第 16 章）：
 
-- **Core Conformance（`REQUIRED` 必选核心合规）：** 同时强制覆盖 **桌面端（`Electron`）**、**Web 浏览器端（`web`）**、**无头守护进程端（`headless`）** 以及 **移动端 Capacitor（`apps/mobile-capacitor` 的内联卡片、事件与声明式配置）**。涵盖包校验、单插件子进程隔离、`Drain-Before-Respawn`、单层 IPC、远程 `client.js` 产物分页流式传输（`<= 4 MiB` 分片 + `clientDigest` 信任门禁）、宿主事件总线（`client` + `machine`）、通用工具与结构化消息块渲染器、三层侧边栏、双层主题与托管 CSS、Workflow `agentRoles` + `skills` + `mcpServers`、类型化 `lodyQueries` + 只读原始状态树快照（`useLodySnapshot` / `readSnapshot`）、声明式 `manifest.config` + 首次启用 `onboarding`、Agent 辅助创建与 `lody_plugin` `propose_*` 人类确认卡片，以及 E2EE 安全门禁。
-- **Workflow Provider Conformance（`Conditional` 条件合规）：** 当启用 `manifest.acpProviders`（如 Sorbet Super Assistant 这类打包自定义 ACP Agent 运行时、经 `acp-session-start-gate.ts` 拉起的能力）时 **REQUIRED**。在 v1 规范与 SDK 中完整定义，保证工作流契约从第一天起高度统一。
+- **Core Conformance（`REQUIRED` 必选核心合规）：** 同时强制覆盖 **桌面端（`Electron`）**、**Web 浏览器端（`web`）**、**无头守护进程端（`headless`）** 以及 **移动端 Capacitor（`apps/mobile-capacitor` 的内联卡片、事件与声明式配置）**。涵盖包校验、单插件子进程隔离、`Drain-Before-Respawn`、单层 IPC（携带 `contextId` 的 `host_call`）、远程 `client.js` 产物分页流式传输（`<= 4 MiB` 分片 + `clientDigest` 信任门禁）、工作区与机器级客户端归属分离及多机去重、宿主事件总线（`client` + `machine` + 本地游标续传）、Command Palette / Slash Commands / 客户端签名前 `beforeSend` / `lody.ui` 基础反馈原语、通用工具（`replace` + 可叠加 `enhance`）与结构化消息块渲染器、三层侧边栏 + 轻量化 Session/Message/StatusBar 槽位、双层主题与 `@layer lody-plugin` 托管 CSS、Workflow `agentRoles` + `skills` + `mcpServers`、双层工作区数据读取（Tier-1 归一化 `lodyQueries` + 跨端同步 `annotations` + 宿主托管作用域 `storage`；Tier-2 显式 Opt-in 的 `unstable` 白名单快照）、声明式 `manifest.config`（含 `project` 作用域）+ 首次启用 `onboarding` + 显式 `manifest.permissions`、Agent 辅助创建与 `lody_plugin` `propose_*` 人类确认卡片，以及双模型 E2EE 安全门禁（活跃回合内 `SignedTurnOrigin` 派生 + 机主签发 `DeclaredWorkflowGrant`）。
+- **Workflow Provider Conformance（`Conditional` 条件合规）：** 当启用 `manifest.acpProviders`（声明式桥接至 Lody 既有的托管 ACP 扩展契约 `LodyAI/acp-extension-core` 与 `acp-session-start-gate.ts`）时 **REQUIRED**。与 Core 解耦，使自定义 ACP 运行时完整复用原生认证、非 Node 二进制与能力缓存，而非另造简陋启动器。
 - **Mobile Extended UI Conformance（`Conditional` 条件合规）：** 当移动端宿主声明 `HostCapabilities.containers.sidebarViews`、`sessionPanels`、`screens` 或 `projectPages` 为 `true`（在移动端抽屉/半屏容器中挂载外壳视图）时 **REQUIRED**。
 - **Real Integration Profile（投产发布 `REQUIRED` 必选真实集成验证）：** 零 Mock 的真实 OS 子进程（`SIGTERM`/`SIGKILL`、崩溃与 `--dev` 编译器回收）以及跨端（Electron + 无头 Web + 移动视口）真实 E2E 验收套件（第 16.8 节）。
 
@@ -28,10 +28,10 @@ Translation: current
 
 以下内容属于明确的 **Implementation-defined** 范畴，插件代码 **MUST NOT** 对其产生隐式耦合：
 
-- 宿主内部存储插件启用标记、`SessionCreationReceipt` 回执、`plugin_proposal` 审批状态及信任记录的 SQLite/KV 表结构与路径。
+- 宿主内部存储插件启用标记、作用域 KV 存储、`SessionCreationReceipt` 回执、`DeclaredWorkflowGrant` 授权、`plugin_proposal` 审批状态及信任记录的 SQLite/KV 表结构与路径。
 - 在公开的 `@lody/ui` 组件与文档化 `--*` CSS 变量之外的宿主内部 React Fiber 树、类名与 DOM 层级。
 - Node `stdio[3]` IPC 通道底层的序列化帧细节（只要无损保留第 9.1 节定义的全部逻辑信封即可）。
-- `--dev` 编译子进程内部使用的具体打包器（`esbuild`、`rolldown` 或 `swc`，只要满足第 8.4 节的环境纯净度与空闲回收约束即可）。
+- `--dev` 编译子进程内部使用的具体打包器（`esbuild`、`rolldown` 或 `swc`）及空闲回收间隔（只要满足第 8.4 节的环境纯净度与有界空闲/退出清理约束即可）。
 
 ---
 
@@ -45,18 +45,18 @@ Lody 是横跨本地与远程多机器、同时服务 Desktop、Web 与 Mobile �
 
 ### 2.2 核心目标（Goals）
 
-1. **零 Fork 全域可塑性：** 一等公民地支持客户端与机器侧宿主事件订阅、跨工具/结构化消息块通用渲染器（强制附带“查看原始输出”逃生开关）、三层正交侧边栏、全屏工作台、双层主题 + 托管 CSS，以及完整 Workflow 组合（`agentRoles`、`skills`、`mcpServers`、`acpProviders`）。
-2. **无设限响应式读取 + 受控单点写入：** 在 18 个类型化 `lodyQueries` 之上，开放深度只读冻结的**原始文档/状态树快照**（`useLodySnapshot` / `readSnapshot`），彻底消除自定义面板的数据围墙，同时严格保持 `HistoryWriter` 与内核命令作为唯一写路径。
-3. **完整的开发者与用户体验闭环：** 5 秒级脚手架创建、Desktop 与 Web 同步热重载预览、结构化插件诊断面板、声明式 `manifest.config` + 首次使用引导抽屉，以及由人类点击确认 `plugin_proposal` 卡片门禁的 Agent 辅助造插件流程。
-4. **跨设备一等体验：** 同一套 `@lody/plugin-sdk/client` 产物在 `Core Conformance` 下同时运行于 Electron 桌面端与 Web 浏览器端，并通过 `useHostCapabilities()` 平滑适配 Mobile Capacitor。
-5. **严格的 OS 进程隔离与 E2EE 完整性：** 每个 `machine` 插件独占子进程（纯前端插件 `0` 子进程）、`Drain-Before-Respawn`、读写 `0` 次自动重试（中断副作用返回 `outcome_unknown`），以及 E2EE 执行签名与托管擦除门禁。
+1. **零 Fork 全域可塑性：** 一等公民地支持客户端与机器侧宿主事件订阅（含本地游标续传与长驻后台服务）、Command Palette、Slash Commands、客户端签名前 `beforeSend`、跨工具（`replace` + 可叠加 `enhance`）/结构化消息块通用渲染器（强制附带“查看原始输出”逃生开关）、三层正交侧边栏 + Session/Message/StatusBar 轻量槽位、全屏工作台、双层主题 + `@layer lody-plugin` 托管 CSS，以及完整 Workflow 组合（`agentRoles`、`skills`、`mcpServers`、条件托管 `acpProviders`）。
+2. **双层读取、宿主托管存储与受控单点写入：** 以 Tier-1 归一化 `lodyQueries`、跨端同步的实体 `annotations` 及宿主托管原子 `storage` 覆盖主流需求，同时保留显式 Opt-in 的 Tier-2 **`unstable` 白名单快照逃生舱**（`lody.unstable.readSnapshot` / `useUnstableLodySnapshot`），让重度客制化插件不撞墙，也不把内部 CRDT 存储结构焊死进 SemVer `^1.0.0`，并始终保持 `HistoryWriter` 与内核命令作为唯一写路径。
+3. **完整的开发者与用户体验闭环：** 快捷脚手架创建、Desktop 与 Web 同步热重载预览、结构化插件诊断面板、声明式 `manifest.config` + 显式 `manifest.permissions` + 首次使用引导抽屉，以及由人类点击确认 `plugin_proposal` 卡片门禁的 Agent 辅助造插件流程。
+4. **跨设备一等体验与清晰的多机归属：** 工作区/用户级纯前端插件按工作区单实例挂载且不因单机离线消失；机器级插件按机路由 RPC 并对工作区级 UI 贡献去重；同一套 `@lody/plugin-sdk/client` 产物经 `useHostCapabilities()` 统一运行于 Electron、Web 与 Mobile Capacitor。
+5. **严格的 OS 进程隔离与清晰的双模型 E2EE 完整性：** 每个 `machine` 插件独占子进程（纯前端插件 `0` 子进程）、`Drain-Before-Respawn`、读写 `0` 次自动重试（中断副作用返回 `outcome_unknown`），以及在 E2EE 下严格分离活跃回合内 `SignedTurnOrigin` 派生与机主签发 `DeclaredWorkflowGrant` 后台自动化授权。
 
 ### 2.3 非目标与禁止的反模式（Non-Goals & Anti-Patterns）
 
-- **不可信恶意代码沙箱：** 插件属于用户主动信任的代码；Lody 不构建 V8 Isolate 或 WASM 安全监狱来运行恶意软件。
-- **Agent 未经人类确认静默安装/启用代码：** Agent **MAY** 生成插件源码并通过 `lody_plugin` 发起安装/启用提议，但 **MUST NOT** 在未经人类显式确认的情况下激活可执行代码或写入密钥。
-- **签名后静默篡改提示词（`machine.beforeSessionTurn`）：** 在个人设备完成 `memberInput` 签名后由守护进程静默拼接提示词会破坏 E2EE 提示词完整性，**MUST NOT** 存在。
-- **直接暴露可变 CRDT / Loro 内部句柄：** 插件读取脱离底层句柄的只读快照并通过内核命令写入；禁止直接暴露可变 CRDT 容器绕过 `HistoryWriter` 校验与 E2EE 签名。
+- **不可信恶意代码沙箱：** 插件属于用户主动信任的代码；Lody 不构建 V8 Isolate 或 WASM 安全监狱来运行恶意软件。单个机器插件子进程内，宿主侧 `ActorContext` 用于防止跨调用误用权限，而非防进程内恶意对抗。
+- **Agent 未经人类确认静默安装/启用代码：** Agent **MAY** 生成插件源码并通过 `lody_plugin` 发起安装/启用提议，但 **MUST NOT** 在未经人类显式确认的情况下激活可执行代码或写入密钥。`LODY_AGENT_SESSION_ID` 等环境变量仅作为防误触协作护栏，绝不构成针对具备 Shell 能力 Agent 的安全边界。
+- **签名后静默篡改提示词（`machine.beforeSessionTurn`）：** 在个人设备完成 `memberInput` 签名后由守护进程静默拼接提示词会破坏 E2EE 提示词完整性，**MUST NOT** 存在；提示词/上下文增强应发生在客户端签名之前（`lody.composer.beforeSend`）。
+- **直接暴露可变 CRDT / Loro 内部句柄或黑名单脱敏裸树导出：** 插件读取 Tier-1 归一化查询或 Tier-2 白名单投影冻结快照并通过内核命令写入；禁止直接暴露可变 CRDT 容器或用黑名单过滤后整树吐出内部存储文档。
 - **单机多插件共享 Worker、Canary 归因与静默自动重试：** 严禁多插件共驻同一 Worker 或对失败的插件调用做后台自动重试。
 
 ### 2.4 信任模型与权限主体（Trust & Principal Model）
@@ -83,10 +83,10 @@ flowchart TB
   end
 
   subgraph Daemon["机器守护进程（apps/cli）"]
-    Kernel["Host Kernel 宿主内核\n（SessionManager、HistoryWriter、E2EE 门禁、\n提议账本、钥匙串配置存储）"]
-    MPH["Machine PluginHost\n（FIFO 生命周期队列、Drain-Before-Respawn、\n事件扇出、环形日志缓冲）"]
-    DPC["DevPluginCompiler（仅 --dev）\n（按需编译子进程，空闲 1s 退出）"]
-    WF["Workflow Harness 工作流底座\n（进程外 MCP 服务与受门禁管控的 ACP Provider）"]
+    Kernel["Host Kernel 宿主内核\n（SessionManager、HistoryWriter、E2EE 门禁、\n工作流授权、作用域存储、钥匙串）"]
+    MPH["Machine PluginHost\n（FIFO 生命周期队列、Drain-Before-Respawn、\n事件总线 + 游标、环形日志缓冲）"]
+    DPC["DevPluginCompiler（仅 --dev）\n（按需编译子进程，有界空闲回收）"]
+    WF["Workflow Harness 工作流底座\n（进程外 MCP 服务与托管 ACP 扩展桥接）"]
   end
 
   subgraph Subprocesses["每插件独立 OS 子进程"]
@@ -100,15 +100,15 @@ flowchart TB
   Kernel <--> MPH
   Kernel <--> WF
   MPH -.->|"--dev 编译"| DPC
-  MPH <-->|"单层扁平 IPC + 最小化环境变量"| P1
+  MPH <-->|"单层扁平 IPC + contextId + 最小化环境变量"| P1
   WF <-->|"stdio / 本地回环 HTTP / ACP"| PMCP
 ```
 
-1. **`Host Kernel`：** 负责 Session 生命周期、`HistoryWriter`、`SessionCreationReceipt` 持久化、`plugin_proposal` 审批账本、声明式 `manifest.config` 与钥匙串密钥托管、E2EE 授权/执行意图校验，以及规范化 Session/Turn/Tool 事件发射。
-2. **`Machine PluginHost`：** 负责插件发现、清单校验、单插件独立 `child_process.fork` 生命周期、`Drain-Before-Respawn`、单层 IPC 路由、机器侧事件扇出及有界环形日志缓冲。
-3. **`Workflow Harness`：** 将插件声明的 `agentRoles`、`skills`、进程外 `mcpServers` 及（`Workflow Provider Conformance`）`acpProviders` 注册进 Lody 原生 Role/Skill/MCP/ACP 子系统，且绝不在守护进程主进程内执行任何 MCP 或 ACP 代码。
-4. **`DevPluginCompiler`：** 仅对 `--dev` 插件按需拉起的编译子进程；负责编译 TS/TSX、重算 `clientDigest`、向已连接的 Desktop 与 Web 客户端同步推送热更新，并在空闲 `1000 ms` 后自动退出。
-5. **`ClientPluginHost`：** 在 Electron、Web 浏览器与 Mobile Capacitor WebView 中统一运行；负责校验 `clientDigest` 信任、执行 `client.js`、挂载 `events`、通用 `tools.matchRender` / `messages.renderBlock`、侧边栏、全屏页、`themes`、`styles` 与 `useHostCapabilities()`，并执行零泄漏销毁。
+1. **`Host Kernel`：** 负责 Session 生命周期、`HistoryWriter`、超大工具输出的宿主托管产物溢出存储、托管作用域插件 KV `storage`、`SessionCreationReceipt` 持久化、机主签发的 `DeclaredWorkflowGrant` 授权账本、`plugin_proposal` 审批账本、声明式 `manifest.config` 与钥匙串密钥托管、E2EE 授权/执行意图校验，以及带本地单调自增序号日志的规范化 Session/Turn/Tool 事件发射。
+2. **`Machine PluginHost`：** 负责插件发现、清单校验、单插件独立 `child_process.fork` 生命周期（`onStart`、长驻 `service`、`onUpgrade`、`onUninstall`）、`Drain-Before-Respawn`、单层 IPC 路由、有界机器侧事件扇出与游标续传及环形日志缓冲。
+3. **`Workflow Harness`：** 将插件声明的 `agentRoles`、`skills`、进程外 `mcpServers` 及（`Workflow Provider Conformance`）托管 `acpProviders` 注册进 Lody 原生 Role/Skill/MCP/ACP 子系统，且绝不在守护进程主进程内执行任何 MCP 或 ACP 代码。
+4. **`DevPluginCompiler`：** 仅对 `--dev` 插件按需拉起的编译子进程；负责编译 TS/TSX、重算 `clientDigest`、向已连接的 Desktop 与 Web 客户端同步推送热更新，并在有界空闲期后自动退出（实现自定义空闲窗口，如开发态默认 `30 s`，且随 `PluginHost` 关闭立即回收）。
+5. **`ClientPluginHost`：** 在 Electron、Web 浏览器与 Mobile Capacitor WebView 中统一运行；区分工作区级纯前端插件与机器级配套产物、对多机同名插件的工作区级 UI 贡献去重、校验 `clientDigest` 信任、执行 `client.js`、挂载 `events`、`commands`、`composer.slashCommands` / `beforeSend`、通用 `tools.matchRender`（`replace` + `enhance`）/ `messages.renderBlock`、侧边栏、轻量槽位、全屏页、`themes`、`@layer lody-plugin` `styles` 与 `useHostCapabilities()`，并执行零泄漏销毁。
 
 ### 3.2 模块边界不变量
 
@@ -131,10 +131,11 @@ flowchart TB
 
 ### 4.1 核心实体
 
-- **`PluginInstallation`：** `{ plugin_id, version, root_dir, manifest, enabled, lifecycle_state, client_digest, config_values, secret_keys_present, active_instance?, workflow_registrations, diagnostics[], logs_ring }`。
-- **`MachinePluginInstance`：** `{ instance_id, pid, started_at_ms, registered_handlers, event_subscriptions, inflight_calls }`。
-- **`ClientPluginInstance`：** `{ plugin_id, machine_id, client_digest, state, abort_controller, cleanup_fn?, contributions, style_elements[], query_cache }`。
-- **`PluginProposalRecord`：** `{ workspace_id, machine_id, request_id, proposing_session_id, plugin_id, source_dir_or_pkg, manifest_summary, requested_capabilities[], status: 'pending' | 'approved' | 'rejected' | 'superseded', resolved_by_user_id?, resolved_at_ms? }`。
+- **`PluginInstallation`：** `{ plugin_id, version, scope: 'workspace' | 'machine', root_dir, manifest, enabled, lifecycle_state, client_digest, config_values, secret_keys_present, granted_permissions[], workflow_grant?, active_instance?, workflow_registrations, diagnostics[], logs_ring }`。
+- **`MachinePluginInstance`：** `{ instance_id, pid, started_at_ms, registered_handlers, event_subscriptions, has_background_service, inflight_calls }`。
+- **`ClientPluginInstance`：** `{ plugin_id, source_key: 'workspace' | 'local' | 'machine:<id>', client_digest, state, abort_controller, cleanup_fn?, contributions, style_elements[], query_cache }`。
+- **`DeclaredWorkflowGrant`：** 由机器所有者签发且可随时撤销的工作流授权记录 `{ grant_id, workspace_id, machine_id, plugin_id, allowed_ops[], allowed_project_ids: string[] | '*', allowed_role_ids: string[] | '*', issued_by_user_id, issued_at_ms, signature }`，用于授权回合外的守护进程自动执行（`session.turn.completed`、`onStart`、`machine.service`、`sessions.respondInteraction`）。
+- **`PluginProposalRecord`：** `{ workspace_id, machine_id, request_id, proposing_session_id, plugin_id, source_dir_or_pkg, manifest_summary, requested_permissions[], status: 'pending' | 'approved' | 'rejected' | 'superseded', resolved_by_user_id?, resolved_at_ms? }`。
 - **`SessionCreationReceipt`：** 按 `(workspace_id, caller_user_id, target_key, plugin_id, request_id)` 持久化的幂等建会回执及活跃 `business_key` 预留记录（第 7.3 节）。
 
 ### 4.2 稳定标识符、规范化与摘要规则
@@ -158,25 +159,34 @@ flowchart TB
 - **前端产物（`manifest.client`）：** 面向 ES2023 + Safari/WKWebView 16.4（`apps/mobile-capacitor/AGENTS.md`）的单文件纯浏览器 ESM 产物。**MUST NOT** 导入 `@lody/plugin-sdk/machine` 或 Node 内置模块（`node:*`）；`react`、`react/jsx-runtime`、`zod`、`@lody/ui` 与 `@lody/plugin-sdk/*` 由 `ClientPluginHost` 外部化注入。
 - **机器侧入口（`manifest.machine`）：** 面向 Node >= 22 的 ESM 产物。**MUST NOT** 导入 `@lody/plugin-sdk/client` 或引用 DOM 全局对象（`window`、`document`）。
 
-### 5.2 清单 Schema、声明式配置与工作流贡献（`lody.plugin.json`）
+### 5.2 清单 Schema、声明式配置、显式权限与工作流贡献（`lody.plugin.json`）
 
 `lody.plugin.json` **MUST** 是符合 [`PluginManifest`](../scripts/fixtures/plugin-sdk/sdk/manifest.d.ts) 的严格 UTF-8 JSON：
 
-- **必填项：** `id`、`version`（合法 SemVer）、`sdk`（`"^1.0.0"`）、`title`，且至少声明一项贡献（`client`、`machine`、`skills`、`agentRoles`、`mcpServers`、`acpProviders`、`themes` 或 `styles`）。未知顶层字段 **MUST** 校验失败。
+- **必填项：** `id`、`version`（合法 SemVer）、`sdk`（按标准 SemVer 范围与宿主 SDK 版本匹配——如预览期 `"^0.1.0"`、稳定后 `"^1.0.0"`，严禁硬编码单一字面量）、`title`，且至少声明一项贡献（`client`、`machine`、`skills`、`agentRoles`、`mcpServers`、`acpProviders`、`themes` 或 `styles`）。未知顶层字段 **MUST** 校验失败。
+- **显式能力权限声明（`manifest.permissions`）：**
+  - 高权限宿主能力 **MUST** 在 `manifest.permissions` 中显式声明，绝不因存在 `manifest.machine` 而隐式默认授予：
+    - `sessions.write`（`sessions.create`、`sessions.send`、`sessions.requestStop`、`sessions.requestArchive`、`sessionFork`）
+    - `sessions.approve`（`sessions.respondInteraction` —— 结算 ACP 权限或问答提示）
+    - `workflow.autonomous`（在活跃人类回合之外调用 `sessions.*` —— 包括 `session.turn.completed`、`onStart` 与 `machine.service` —— 由机主签发的 `DeclaredWorkflowGrant` 支撑）
+    - `unstable.rawState`（Tier-2 显式 Opt-in 访问 `lody.unstable.readSnapshot` / `useUnstableLodySnapshot`）
+  - 未声明且未获批准却调用受控操作时 **MUST** 返回 `forbidden`。
 - **声明式 `config` 与首次引导 `onboarding`：**
-  - 支持 `string`、`secret`、`number`、`boolean` 与 `select` 五种字段类型，以及 `scope: "client" | "machine" | "both"`。
-  - 凡是 `type: "secret"` 的字段，`scope` **MUST** 为 `"machine"`（省略时默认为 `"machine"`）；任何将 `secret` 声明为 `"client"` 或 `"both"` 的清单 **MUST** 在校验阶段直接拒绝（`manifest_invalid`）。
+  - 支持 `string`、`secret`、`number`、`boolean` 与 `select` 五种字段类型，以及 `scope: "client" | "machine" | "project" | "both"`。
+  - 凡是 `type: "secret"` 的字段，`scope` **MUST** 为 `"machine"`（省略时默认为 `"machine"`）；任何将 `secret` 声明为 `"client"`、`"project"` 或 `"both"` 的清单 **MUST** 在校验阶段直接拒绝（`manifest_invalid`）。
   - `onboarding` 列出首次启用时由宿主原生首次配置引导抽屉收集的 `config` 键名（统一收敛至 `manifest.config`，不再并存重复的 `manifest.env`）。
-- **工作流字段：** `skills`（`skills/<name>/SKILL.md`）、`agentRoles`（绑定 `promptPath`、`skills`、`mcpServers` 与 `defaultProvider`）、`mcpServers`（`stdio` | `http` 进程外入口）与 `acpProviders`（打包 ACP 服务入口）。
+- **工作流字段：** `skills`（`skills/<name>/SKILL.md`）、`agentRoles`（绑定 `promptPath`、`skills`、`mcpServers` 与 `defaultProvider`）、`mcpServers`（v1 Core 面向 `stdio` 进程外入口；`http` 传输须满足宿主显式本地回环端口与就绪握手契约）与 `acpProviders`（条件声明式桥接至 Lody 托管 ACP 扩展契约）。
 
 ### 5.3 规范性字节与资源预算上限
 
-| 常量 / 资源                           | 上限                      | 强制执行边界                                                                           |
-| ------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------- |
-| `MAX_PLUGIN_RPC_REQUEST_BYTES`        | `262,144`（`256 KiB`）    | 单次请求 UTF-8 上限；适配单个 `1 MiB` E2EE Iroh `purpose 8` 帧。                       |
-| `MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES` | `16,384`（`16 KiB`）      | `HistoryWriter` 内联写入上限；超限大文件须存入 `ctx.dataDir` 并返回摘要指针。          |
-| `MAX_PACKED_CLIENT_BUNDLE_BYTES`      | `4,194,304`（`4 MiB`）    | `client.js` + `themes`/`styles`/`assets` 总包上限；按 `256 KiB` `purpose 9` 分片传输。 |
-| `MAX_SUBPROCESS_LOG_RING`             | `500` 行 / `262,144` 字节 | 每插件守护进程环形日志缓冲（单行 `<= 16 KiB`）。                                       |
+| 常量 / 资源                           | 上限                      | 强制执行边界                                                                                          |
+| ------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `MAX_PLUGIN_RPC_REQUEST_BYTES`        | `262,144`（`256 KiB`）    | 单次请求 UTF-8 上限；适配单个 `1 MiB` E2EE Iroh `purpose 8` 帧。                                      |
+| `MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES` | `16,384`（`16 KiB`）      | `HistoryWriter` 内联写入上限；`16 KiB .. 2 MiB` 产物由宿主自动溢出至托管回合产物存储并写入内联摘要。 |
+| `MAX_UNSTABLE_SNAPSHOT_BYTES`         | `524,288`（`512 KiB`）    | 单次 `lody.unstable.readSnapshot` 切片序列化硬上限；防止 `256 MiB` 子进程 IPC OOM 或主线程卡顿。     |
+| `MAX_PLUGIN_ANNOTATION_BYTES`         | `4,096`（`4 KiB`）        | 每个插件在单个 Session 或 Project 上跨端同步的 `annotations[plugin_id]` 元数据上限。                  |
+| `MAX_PACKED_CLIENT_BUNDLE_BYTES`      | `4,194,304`（`4 MiB`）    | `client.js` + `themes`/`styles`/`assets` 总包上限；按 `256 KiB` `purpose 9` 分片传输。                |
+| `MAX_SUBPROCESS_LOG_RING`             | `500` 行 / `262,144` 字节 | 每插件守护进程环形日志缓冲（单行 `<= 16 KiB`）。                                                      |
 
 ### 5.4 SDK 模块导出与双向 Schema 校验
 
@@ -184,23 +194,25 @@ flowchart TB
 
 ---
 
-## 6. 扩展性契约：事件总线、通用渲染器与完整工作流组合（Extensibility Contract）
+## 6. 扩展性契约：事件总线、命令与输入钩子、通用渲染器与工作流组合（Extensibility Contract）
 
 ### 6.1 宿主生命周期与 UI 交互事件总线
 
 合规宿主 **MUST** 在 `ClientPluginRegistry.events.on` 与 `MachinePluginRegistry.events.on` 两端同时提供一等公民的推送式事件总线，使插件无需借助 DOM 监听或轮询 Session 状态即可构建实时响应逻辑：
 
 1. **规范化会话与 Agent 生命周期事件（`MachineHostEventMap` —— 机器侧与客户端共享）：**
-   - `session.created`、`session.status.changed`、`session.turn.started`、`session.turn.completed`（含 `stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` 与 `durationMs`）、`session.tool.started`、`session.tool.completed`（携带归一化 `ObservedToolCall`）以及 `session.waiting_input`（携带 `PendingInteractionSummary`：`{ requestId, turnId?, kind: "permission" | "elicitation", title?, options }`）。
+   - `session.created`、`session.archived`、`session.status.changed`、`session.turn.started`、`session.turn.completed`（含 `agentRoleId?`、`stopReason`: `"end_turn" | "cancelled" | "error" | "max_tokens" | "unknown"` 与 `durationMs`）、`session.tool.started`、`session.tool.completed`（携带归一化 `ObservedToolCall`）、`session.waiting_input`（携带 `PendingInteractionSummary`：`{ requestId, turnId?, kind: "permission" | "elicitation", title?, options }`）以及 `session.interaction.resolved`（`{ requestId, turnId?, kind, outcome }`，使 Slack/Telegram/飞书等远程审批桥接在桌面/移动端完成审批后可同步更新或清理外部按钮消息）。
 2. **客户端本地交互事件（`ClientHostEventMap` —— 仅客户端）：**
    - `ui.message.submitted`、`ui.session.switched`、`ui.interaction.resolved` 与 `ui.command.invoked`。
-3. **投递、隔离与回收规则：**
+3. **投递、背压、游标续传与回收规则：**
    - 事件投递采用**非阻塞观察者扇出（Observer Fan-out）**：插件 A 的慢回调或抛错 **MUST NOT** 延迟宿主 Session 执行、阻塞 UI 交互或影响插件 B 接收同一事件。
-   - 机器侧事件处理器受 `30_000 ms` 超时约束（超时或关闭时触发 `ctx.signal` 中止）；未捕获异常写入 `logs_ring` 与 `diagnostics`，绝不波及兄弟插件。
+   - 机器侧事件投递 **MUST** 具备有界队列深度，且 **MUST NOT** 让缓慢的 `session.tool.completed` 回调队头阻塞高优先级控制事件（`session.waiting_input`、`session.interaction.resolved`、`session.turn.completed`）；单个事件处理器受 `30_000 ms` 超时约束（超时或关闭时触发 `ctx.signal` 中止），同一事件类型注册多个监听器时叠加触发而非相互覆盖。
+   - **本地单调事件游标（`resumeFromCursor`）：** 守护进程在受托管作用域约束的本地 SQLite 有界环形表中记录近期 `MachineHostEventMap` 信封及单调 `seq` 序号，使 `machine.events.on(type, handler, { resumeFromCursor: true })` 在守护进程重启/重载后可按序重放遗漏事件（经 `SessionCreationReceipt` 与 `ctx.storage` 幂等去重），无需每个工作流插件手写 200 行全历史分页扫描。
    - 客户端插件禁用或 `clientDigest` 热替换时，`abort_controller.abort()` **MUST** 自动摘除该实例注册的全部事件监听器。
-4. **正交静态资源寻址与生命周期信号原语（`lody.assets.url`、`lody.signal`）：**
+4. **正交静态资源、生命周期与基础 UI 反馈原语（`lody.assets.url`、`lody.signal`、`lody.ui`）：**
    - `lody.assets.url(relativePath)` 在 Electron 本地协议、Web `plugin/bundle-chunk` 缓存与 Mobile Capacitor WebView 下统一解析打包在 `assets/*` 内的静态资源。
    - `lody.signal: AbortSignal` 在插件禁用或 `clientDigest` 热替换时自动中止，使插件可直接组合标准 Web 平台原语（`AudioContext` / `HTMLAudioElement`、`Canvas`、`fetch`、定时器等）并在卸载时确定性回收资源，无需在 SDK 中为具体业务场景堆砌非原语命名空间（如 `lody.audio`）。
+   - `LodyClient.ui` 提供基础宿主反馈原语：`toast`、`confirm`、`openExternalUrl` 与 `copyToClipboard`。
 
 ### 6.2 通用工具调用匹配渲染与结构化消息块渲染
 
@@ -210,11 +222,9 @@ flowchart TB
    - 精确匹配 `plugin__<plugin_id>__<tool.id>`，经 Zod `safeParse` 后在 `{ status: "running", output?: undefined }` 与 `{ status: "completed", output: TOutput }` 间收窄类型。
 2. **跨 Provider 通用工具调用匹配渲染（`tools.matchRender(spec)`）：**
    - 通过 `ToolCallMatcher`（`toolNames`、`mcpServer`、`acpKinds`、受防回溯保护的 `commandPattern` 以及纯函数谓词 `when(call)`）匹配内置工具、ACP 工具（Claude Code、Codex、Antigravity、自定义 ACP）及任意 MCP 工具。
-   - **确定性优先级裁决：** 当多个已启用渲染器同时匹配某次 `ObservedToolCall` 时，宿主按以下顺序选出唯一胜出者：
-     1. 用户在设置中指定的逐工具渲染器覆盖项（若有）；否则
-     2. 插件自有工具的 `tools.render` 精确绑定；否则
-     3. 最高 `priority`（默认 `0`），平局时按 `(plugin_id ASC, spec.id ASC)` 字典序确定性决出。
-   - 被高优先级遮蔽的匹配器在插件诊断面板（第 11.3 节）中记录 `matcher_shadowed`。
+   - **模式分离（`replace` 唯一胜出 vs `enhance` 可叠加增强）：**
+     - **`mode: "replace"`（默认）：** 按以下顺序选出唯一主渲染器：（1）用户在设置中指定的逐工具渲染器覆盖项；否则（2）插件自有工具 `tools.render`；否则（3）最高 `priority`（默认 `0`），平局按 `(plugin_id ASC, source_key ASC, spec.id ASC)` 字典序确定性决出。被遮蔽的 `"replace"` 匹配器在插件诊断面板（第 11.3 节）中记录 `matcher_shadowed`。
+     - **`mode: "enhance"`：** 不参与唯一胜出竞争；所有命中的 `"enhance"` 渲染器按 `(priority DESC, plugin_id ASC, source_key ASC, spec.id ASC)` 顺序作为附加信息/操作块叠加挂载，并分别由 `SurfaceErrorBoundary` 独立隔离。
 3. **结构化消息块渲染与稳定块身份（`messages.renderBlock(spec)`）：**
    - 匹配语言标签命中 `spec.languages` 的助手 fenced 代码块（如 `sorbet-plan`、`test-report`、`openapi-preview`），向组件传入 `turnId`、确定性块身份 `blockId = "<turnId>:block:<ordinal>"`（该助手回合内 fenced 代码块的 `0` 起始出现序号）、`code`、`meta` 以及 `streaming`（流式生成时为 `true`，围栏闭合后为 `false`）。
    - **有状态增量更新（Stable Block Identity + Stateful Incremental Updates）：** `ClientPluginHost` **MUST** 按 `(session.sessionId, blockId, winner.plugin_id, winner.id)` 维护消息块组件挂载键——**MUST NOT** 将 `code`、`meta`、`streaming` 或临时 AST 节点引用混入挂载 Key。在同一个代码块持续流式输出以及 `streaming: true -> false` 闭合过程中，宿主 **MUST** 保持已挂载的 React 组件实例并原地增量更新 Props，确保插件内部维护的表单输入、图表缩放、选中项或 `useRef` / Canvas 状态绝不因流式刷新而被重置；仅当用户切换“查看原始 Markdown”、`SurfaceErrorBoundary` 捕获渲染崩溃、胜出渲染器/`clientDigest` 热替换或所属回合/会话卸载时才卸载组件。
@@ -222,20 +232,26 @@ flowchart TB
    - 凡是挂载 `"replace"` 模式的 `tools.matchRender` 或 `messages.renderBlock`，宿主外壳 **MUST** 在插件子树外部渲染不可被插件伪造或隐藏的头部切换按钮（**“查看原始输出 / 查看原始 Markdown”**），并以 `SurfaceErrorBoundary` 包裹插件组件。
    - 遵循 [`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md)：插件工具/消息块渲染器 **MUST NOT** 向正文专用搜索索引注入 `searchBlockId`、**MUST NOT** 在折叠活动组内制造嵌套全高滚动陷阱，且必须保持回合折叠与对齐轨道不变量。
 
-### 6.3 三层正交侧边栏与跨设备能力协商
+### 6.3 命令面板、签名前输入钩子、三层正交侧边栏与跨设备能力协商
 
-1. **三层正交侧边栏组合（基于 [`sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)）：**
+1. **命令面板、Slash Commands 与客户端签名前输入钩子：**
+   - `commands.register({ id, title, shortcut?, when?, run })`：向 Lody 命令面板（`Cmd+K`）及非冲突快捷键注册插件动作。
+   - `composer.slashCommands.add({ name, description, run })`：在输入栏注册可执行动作的 `/command` 触发器（展开草稿、触发插件流或打开界面）。
+   - `composer.beforeSend(handler)`：在用户个人设备完成 E2EE `memberInput` **签名之前**执行的客户端钩子（支持用户可见的 Working Memory / 上下文注入、模板展开或 PII 敏感信息检查，100% 保持 E2EE 完整性，精准补齐禁止守护进程侧 `machine.beforeSessionTurn` 后的缺口）。任何改写结果 **MUST** 反映在最终签发提交的用户输入中，并受交互短时限（`<= 3000 ms`，用户可取消）约束。
+2. **三层正交侧边栏与轻量上下文槽位（基于 [`sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)）：**
    - `sidebar.sessionRow.decorate`：按 `(plugin_id, decorator_id)` 确定性叠加行尾徽章与悬停气泡；自定义 `sidebar.views.add` 树内渲染 `<SessionRow />` 时 **MUST** 自动继承全部活跃装饰器。
    - `sidebar.headerItems` / `footerItems`：使用 `<SidebarRow />` 的顶/底导航项，联动 `screens.add`。
    - `sidebar.views.add`：与宿主内置 `"Default"` 视图并列可选的自定义侧边栏主体；禁用当前视图时立即回退至 `"Default"`。
-2. **跨设备统一 API 与能力协商（`useHostCapabilities()`）：**
+   - 轻量上下文槽位：`session.headerActions.add`（会话顶栏操作）、`messages.actions.add`（消息/回合底部操作）与 `statusBar.items.add`（状态栏紧凑指标）。
+   - **贡献 ID 命名空间：** 传给 `lody.screens.open`、`lody.panels.openSession` 与 `lody.pages.openProject` 的未限定 ID 严格解析至调用插件自身命名空间（`<calling_plugin_id>:<id>`）；跨插件打开须显式使用 `<plugin_id>:<id>`。
+3. **跨设备统一 API 与能力协商（`useHostCapabilities()`）：**
    - 开发者面向单一 `@lody/plugin-sdk/client` 编写跨端代码，通过 `useHostCapabilities()` 读取 `{ platform: "desktop" | "web" | "mobile", formFactor: "wide" | "compact", containers: { sidebarViews, sessionPanels, screens, projectPages } }`；其中 `containers` 与 `ClientPluginRegistry` 的外壳挂载命名空间严格 **1:1 对齐**，绝不混入具体业务特性开关或机器在线状态。
-   - 会话与输入栏内联扩展（`tools`、`messages`、`composer`、`sidebar.sessionRow`）、`events` 与 `manifest.config` 在 `desktop`、`web` 与 `mobile` 三端均属 `Core Conformance` 必有基线；`desktop` 与 `web` 在 Core 中同时开启全部外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`），`mobile`（`apps/mobile-capacitor`）在启用 `Mobile Extended UI Conformance` 时开放上述外壳容器。在紧凑端注册未挂载的外壳容器 **MUST NOT** 抛错崩溃——宿主记录 `capability_unavailable_on_platform` 诊断并继续正常运行内联扩展、事件与配置能力。
+   - 会话与输入栏内联扩展（`tools`、`messages`、`composer`、`commands`、`sidebar.sessionRow`）、`events` 与 `manifest.config` 在 `desktop`、`web` 与 `mobile` 三端均属 `Core Conformance` 必有基线；`desktop` 与 `web` 在 Core 中同时开启全部外壳容器 `containers`（`sidebarViews`、`sessionPanels`、`screens`、`projectPages`），`mobile`（`apps/mobile-capacitor`）在启用 `Mobile Extended UI Conformance` 时开放上述外壳容器。在紧凑端注册未挂载的外壳容器 **MUST NOT** 抛错崩溃——宿主记录 `capability_unavailable_on_platform` 诊断并继续正常运行内联扩展、事件与配置能力。
 
 ### 6.4 双层外观体系（SemVer 主题令牌 + 宿主托管 CSS）
 
-- **第一层 —— SemVer 稳定主题令牌（`manifest.themes`、`lody.themes.add`、`lody.themes.activate`）：** `PluginThemeSeedColors` + `PluginThemeTokens`（`fontSans`、`fontMono`、`radius`、`density`）经 [`vscode-theme-dom.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-dom.ts) 与 [`vscode-theme-css.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-css.ts) 派生根级 `--*` CSS 变量，在 `^1.0.0` 周期内享受 **SemVer 兼容承诺**。
-- **第二层 —— 宿主托管自定义样式表（`manifest.styles`、`lody.styles.add`）：** 按实例挂载 `<style data-lody-plugin="<plugin_id>">`，禁用/热更新时自动移除、`lody --safe-mode` 一键旁路、绝不跨协作者自动传染，且不冻结宿主内部 React DOM 层级。
+- **第一层 —— SemVer 稳定主题令牌（`manifest.themes`、`lody.themes.add`、`lody.themes.activate`）：** `PluginThemeSeedColors` + `PluginThemeTokens`（`fontSans`、`fontMono`、`radius`、`density`）经 [`vscode-theme-dom.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-dom.ts) 与 [`vscode-theme-css.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-css.ts) 派生根级 `--*` CSS 变量，在稳定主版本 SDK 周期内享受 **SemVer 兼容承诺**。
+- **第二层 —— 宿主托管自定义样式表（`manifest.styles`、`lody.styles.add`）：** 按实例挂载包裹在 `@layer lody-plugin` 内的 `<style data-lody-plugin="<plugin_id>">`（级联优先级低于宿主关键外壳、`SurfaceErrorBoundary` 与“查看原始输出”逃生开关），禁用/热更新时自动移除、`lody --safe-mode` 一键旁路、绝不跨协作者自动传染，且不冻结宿主内部 React DOM 层级。
 
 ### 6.5 完整工作流组合（`agentRoles`、`skills`、`mcpServers`、`acpProviders`）
 
@@ -243,60 +259,67 @@ flowchart TB
 
 1. **Skills（`manifest.skills`）：** 启用期间注入 Agent Role 选择器与 `CreateSessionRequest.skillIds`。
 2. **Agent Roles（`manifest.agentRoles` —— `Core Conformance`）：** 注册为 `plugin:<plugin_id>:<role_id>`，整合系统提示词（`promptPath`）、内置 `skills`、内置 `mcpServers` 与默认 `defaultProvider`。在 Role 选择器中展示插件来源徽章；用户修改时生成用户侧覆盖副本，不污染原插件目录。
-3. **进程外 MCP 服务（`manifest.mcpServers` —— `Core Conformance`）：** 按会话通过 Lody 标准 MCP 底座拉起独立子进程（遵循 [`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md) 核心铁律：**MCP 工具绝不在守护进程主进程内运行**），仅注入最小系统环境变量及 `envKeys` 显式引用的本插件 `manifest.config` 键值。
-4. **自定义 ACP Agent 运行时（`manifest.acpProviders` —— `Workflow Provider Conformance`）：** 经 `acp-session-start-gate.ts` 受控并发门禁拉起，注册为 `plugin:<plugin_id>:<provider_id>`，完整对接 `newSession`、`loadSession`、`subagentEvents`、`configOptions` 与问答/权限桥接——使 Sorbet Super Assistant 等深度定制 Agent 无需修改 Lody 源码即可成为原生会话驱动引擎。
+3. **进程外 MCP 服务（`manifest.mcpServers` —— `Core Conformance`）：** 按会话通过 Lody 标准 MCP 底座拉起独立子进程（遵循 [`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md) 核心铁律：**MCP 工具绝不在守护进程主进程内运行**），仅注入最小系统环境变量及 `envKeys` 显式引用的本插件 `manifest.config` 键值。重型、长耗时或需强隔离的工具优先走 `manifest.mcpServers`（`stdio`），避免阻塞或撑爆插件的共享 `machine` 查询/事件子进程；`transport: "http"` 仅在实现宿主显式回环就绪与端口发现契约后允许启用。
+4. **托管 ACP Agent 运行时桥接（`manifest.acpProviders` —— `Workflow Provider Conformance`）：** 声明式桥接至 Lody 既有的托管 ACP 扩展契约（`LodyAI/acp-extension-core`、`acp-session-start-gate.ts`、能力缓存与原生登录认证流），注册为 `plugin:<plugin_id>:<provider_id>`，避免另造一套残缺的纯 Node 启动器；支持原生二进制、外部 harness 与 OAuth 登录，无需 Fork `apps/cli/src/agent`。
 
 ---
 
-## 7. 工作区数据与宿主能力契约（Workspace Data & Host Capabilities Contract）
+## 7. 工作区数据、双层读取、托管存储与宿主能力契约（Workspace Data, Two-Tier Reads, Storage & Host Capabilities Contract）
 
-### 7.1 扩展类型化查询（18 项 `lodyQueries`）
+### 7.1 第一层（Tier 1）—— 归一化类型化查询（`lodyQueries`）与跨端同步实体元数据（`annotations`）
 
-`lodyQueries` 基于引用计数共享 Loro/Flock 房间与 `WorkspaceMachineRpcFacade` 提供 18 项响应式查询描述符：
+`lodyQueries` 基于引用计数共享 Loro/Flock 房间、经归一化处理的 `sessionData`/Roost 读取器（透明屏蔽 legacy 行与 `updateCopies` 重复副本）与 `WorkspaceMachineRpcFacade` 提供 SemVer 稳定的响应式查询描述符：
 
 - **工作区级（`WorkspaceRef` —— 不含单一 `machineId`，单机离线仍保持 `ready`）：** `machines`、`projects`、`agentRoles`、`agentConfigs`、`plugins`、`members`、`schedules`、`sessions`。
 - **项目 / 机器级：** `gitState`、`worktrees`、`filePreview`、`pullRequests`、`skills` 及作用域过滤的 `sessions`、`schedules`。
-- **会话级（`SessionRef`）：** `sessionDetail`、`sessionTurns`（分页完整 `SessionTurnRecord`，含正文、思考、计划、归一化 `ObservedToolCall[]` 与 `SubagentRunSummary[]`）、`subagentRun`（按需通过 `readSubagentRun` 读取子 Agent 转录）、`automations`、`sessionDiff`、`gitState`、`filePreview`。
+- **会话级（`SessionRef`）：** `sessionDetail`、`sessionTurns`（分页完整归一化 `SessionTurnRecord`，含正文、思考、计划、用量、归一化 `ObservedToolCall[]` 与 `SubagentRunSummary[]`）、`subagentRun`（按需通过 `readSubagentRun` 读取子 Agent 转录）、`automations`、`sessionDiff`、`gitState`、`filePreview`。
 - **跨插件 `businessKey` 隐私隔离：** 仅当 `createdByPluginId === calling_plugin_id` 时才填充 `SessionSummary.businessKey`。
+- **插件命名空间元数据（`annotations[plugin_id]`）：** 插件可通过 `lodyCommands.sessionSetAnnotation` / `projectSetAnnotation` 在单个 Session 或 Project 上附加不超过 `4 KiB` 的 JSON 元数据。元数据随实体跨端同步并在 `SessionSummary` / `ProjectSummary` 中离线可读，彻底消除侧边栏徽章与工作流标签的逐行远程 `defineQuery` RPC 风暴。
 
-### 7.2 只读原始文档与状态树快照（`useLodySnapshot` / `readSnapshot`）
+### 7.2 第二层（Tier 2）—— 显式 Opt-in 的 Unstable 白名单只读快照（`lody.unstable.readSnapshot` / `useUnstableLodySnapshot`）
 
-在彻底消除固定 Summary 类型数据围墙的同时，保持宿主零额外内存与计算负担：
+对照双层外观体系（第 6.4 节），Lody 为重度客制化插件（自定义指挥台、统计报表、前沿实验性视图）保留只读逃生舱，确保重度定制无需等待上游新增 Tier-1 字段或 Fork Lody——同时不将内部 CRDT 存储格式锁死进 `^1.0.0`，也杜绝黑名单漏脱敏隐患：
 
-1. **直接复用现有 Loro/Flock 与 `sessionData`/Roost 读取与订阅底座（严禁引入第二套 Domain Store）：** 宿主 **MUST NOT** 为插件单独维护第二套 Domain Store 或影子状态镜像，且 **MUST NOT** 在每次文档提交或流式 Token 输出时重新构建整棵状态树。`lodyQueries` 与 `useLodySnapshot` / `readSnapshot` 直接挂接在 Lody 现有的共享 Loro/Flock 房间读取器及 `sessionData` / Roost 窄目录与窗口化回合读取器（`readSessionHistory`、`readTurn`、`readTurnOutput`、`readSubagentRun`）之上。
-2. **按需惰性局部物化（`RawSnapshotTarget`）：** 无插件订阅时不产生任何快照序列化开销；存在活跃订阅时，仅当底层窄变更通知（变更 `turnIds`、结构区间或 Flock 键更新）命中目标范围时，才按需物化授权范围内的局部切片（`workspace-state` / `project-state` 的可选 `path` 子树、`session-meta`、`schedule-doc`，或 `session-transcript` 的指定 `turnIds` / 有界 `limit` 窗口，严禁自动全历史扫描）。
-3. **脱离底层句柄、深度只读冻结与 Selector 记忆化：** 物化后的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 与底层可变 CRDT 句柄分离并执行深度只读冻结（`Object.freeze`），一切写操作仍严格经由内核命令与 `HistoryWriter` 完成（[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)）；`useLodySnapshot(target, selector, isEqual)` 仅在 `selector(snapshot)` 变化时触发组件重渲染。
-4. **安全脱敏与一致授权：** 快照严格复用与 `lodyQueries` 相同的工作区及 E2EE 可见性门禁，并在冻结前剥离钥匙串密钥、认证令牌、E2EE KEK/签名私钥以及外部插件私有 `businessKey`。
+1. **显式 Tier-2 / Unstable 定位与权限门控：**
+   - 挂载于 `lody.unstable.readSnapshot` / `useUnstableLodySnapshot`（机器侧为 `ctx.lody.unstable.readSnapshot`），须在 `manifest.permissions` 中显式声明 `"unstable.rawState"` 并在安装确认卡中向用户披露。
+   - 明确位于 **SemVer 稳定契约之外**（与 `manifest.styles` 同级）：Lody 重构底层 Loro/Flock/Roost 存储 schema 时不承担永久兼容垫片义务。常规工作流与 UI 插件 **MUST** 优先使用 Tier-1 `lodyQueries`、事件载荷与 `annotations`。
+2. **白名单顶层域投影（禁止整树黑名单脱敏）：**
+   - 宿主 **MUST NOT** 将未过滤的内部 CRDT 原始文档整树导出再按黑名单删敏感字段（新增内部字段时极易静默泄露）。相反，每个 `UnstableSnapshotTarget` 直接复用现有 Loro/Flock 与 `sessionData`/Roost 读取器（零平行 Domain Store），仅按**显式字段白名单**投影公开领域集合（`sessions`、`projects`、`machines`、`roles`、`schedules`、`rateLimits`、`session-turns`）；未来新增的内部控制或凭据字段默认不可见。
+3. **强制切片、按需懒物化与硬字节上限：**
+   - 禁止无范围全工作区导出：`workspace-state` 与 `project-state` **MUST** 显式提供 `collection` / `path` 切片（必要时分页），`session-transcript` **MUST** 提供 `turnIds` 或有界 `limit` 窗口。
+   - 无订阅时零分配；物化后的 `RawDocumentSnapshot`（`{ schemaVersion, revision, doc }`）**MUST** 脱离底层句柄、深度只读冻结（`Object.freeze`），并受 `MAX_UNSTABLE_SNAPSHOT_BYTES`（`512 KiB`）硬上限约束，避免阻塞 React 主线程或撑爆 `256 MiB` 机器子进程 IPC。
 
-### 7.3 共享宿主命令注册表（`lodyCommands`）、会话幂等回执与对称交互结算（`respondInteraction`）
+### 7.3 共享宿主命令注册表（`lodyCommands`）、会话幂等回执、`respondInteraction` 与游标恢复
 
 0. **第一方与插件共用的类型化宿主命令注册表（`lodyCommands` + `lody.execute` / `useLodyCommand` / `ctx.lody.execute`）：**
-   - Lody 不另建第二套仅供插件使用的命令系统，也不将原生业务变更锁死在内部 React Hook 中，而是将宿主全部业务写操作收敛为类型化 `LodyCommandDescriptor<S, TInput, TOutput>` 注册表 `lodyCommands`（完整覆盖会话执行 `sessionCreate` / `sessionSend` / `sessionRespondInteraction` / `sessionStop` / `sessionArchive` / `sessionRestore` / `sessionFork`、基于 [`status-view/command.ts`](../packages/shared/src/status-view/command.ts) `planStatusViewCommand` 与 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts) 的状态分流命令 `sessionSetPinned` / `sessionSnooze` / `sessionSettle` / `sessionMoveToFocus` / `sessionMoveOrder` / `sessionUpdateTitle` / `sessionMarkRead` / `sessionMarkUnread`、置顶分组 `pinSection*` 以及定时任务控制 `scheduleSetEnabled` / `scheduleRunNow`）。
-   - 第一方 UI 与第三方插件通过客户端 `lody.execute(target, command, input)` / `useLodyCommand` 及机器侧 `ctx.lody.execute(target, command, input)` **共用同一套授权与执行管线**（同时保留 `sessions.{create, send, respondInteraction, requestStop, requestArchive}` 作为指向 `lodyCommands.session*` 的轻量语义别名）。
-   - **显式调用主体（`ActorContext`）与第一方 `prefer` / `manage` / `execute` 授权复用：** 每次 `lodyCommands` 调用均绑定宿主不可伪造的 `ActorContext`，绝不仅凭 `target` 放行，也绝不因插件运行在机器所有者的 Daemon 上就赋予替全体成员改偏好或点审批的越权能力：客户端绑定当前登录用户；机器侧 `plugin/query` 与 `plugin/mutate` 绑定发起 RPC 的已认证成员；`ToolExecutionContext` 与 `MachineEventContext` 绑定该会话/回合所属授权用户（`SessionMeta.userId` / 经核验的 `originTurn` 签名人）；`MachineStartupContext`（`onStart`）对回合结束后的新执行与交互命令使用独立授权的工作流主体，并对无明确用户主体的个人偏好写操作（如 `sessionMarkRead` / `sessionMarkUnread`）以 `forbidden` 拒绝。两端执行器均针对该 `ActorContext` 复用第一方现有的 `prefer` 与 `manage` 分级守卫（[`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts)、[`status-view/command.ts`](../packages/shared/src/status-view/command.ts)）及 E2EE `MachineSharing` / `e2eeIntent` 门禁。
+   - 第一方 UI 与第三方插件通过客户端 `lody.execute(target, command, input)` / `useLodyCommand` 及机器侧 `ctx.lody.execute(target, command, input)` **共用同一套授权与执行管线**（`sessions.{create, send, respondInteraction, requestStop, requestArchive}` 仅保留为指向 `lodyCommands.session*` 的 SDK 语义别名，IPC 线协议统一收口至单一 `lody.execute` 操作）。
+   - **`lodyCommands` 内部稳定性分级：** 核心领域命令（`sessionCreate`、`sessionSend`、`sessionRespondInteraction`、`sessionStop`、`sessionArchive`、`sessionRestore`、`sessionFork`、`sessionUpdateTitle`、`sessionSetAnnotation`、`projectSetAnnotation`、`scheduleSetEnabled`、`scheduleRunNow`）属 Tier-1 稳定契约；与当前侧边栏交互强耦合的分流命令（`sessionSetPinned`、`sessionSnooze`、`sessionSettle`、`sessionMoveToFocus`、`sessionMoveOrder`、`sessionMarkRead`、`sessionMarkUnread`、`pinSection*`，基于 [`status-view/command.ts`](../packages/shared/src/status-view/command.ts)）标注为 **shell-coupled / experimental**，避免侧边栏改版被 1.0 SDK 锁死。
+   - **按调用上下文绑定的 `ActorContext` 与第一方 `prefer` / `manage` / `execute` 复用：** 每次 `lodyCommands` 调用均绑定宿主 `ActorContext`（机器侧通过 `host_call.contextId` 关联源调用）：客户端绑定当前登录用户；机器侧 `plugin/query` 与 `plugin/mutate` 绑定发起 RPC 的已认证成员；`ToolExecutionContext` 绑定当前活跃回合的所属/签名用户；回合外的 `MachineEventContext`、`MachineStartupContext` 与 `MachineServiceContext` 在经核验的 `DeclaredWorkflowGrant` 工作流主体下执行（对无明确用户主体的个人偏好命令如 `sessionMarkRead` 一律拒绝 `forbidden`）。两端执行器均复用第一方 `prefer` 与 `manage` 分级守卫（[`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts)）、`manifest.permissions` 与 E2EE 门禁。
 1. **原子化 `(requestId, businessKey)` `sessions.create` 幂等回执：**
-   - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 持久化。
+   - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 在托管存储中永久持久化（无 TTL）。
    - 重放完全相同的归一化请求（即使目标 Session 后来已归档）始终返回原始 `SessionRef`；复用相同 `requestId` 但篡改参数时拒绝 `idempotency_conflict`。
    - 新 `requestId` 若命中尚未归档的同 `businessKey` 活跃会话则拒绝 `business_key_conflict`；Session 归档后释放 `businessKey` 预留，但永久保留原 `requestId` 回执。
 2. **前后端对称、1:1 映射内核的通用交互结算原语（`sessions.respondInteraction`）：**
-   - 客户端 `LodyClient.sessions.respondInteraction`（自定义侧边栏、Hover Card、语音/硬件控制器）与机器侧 `MachineHostPort.sessions.respondInteraction`（飞书/Slack/Telegram 远程审批桥接、自动化策略插件）对称暴露同一 `{ requestId, turnId?, outcome, originTurn? }` 原语，**1:1 映射**至内核 `sessionData.commands.respondPermission` 与 `PermissionOutcomeSchema`（[`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`message-schemas.ts`](../packages/shared/src/message-schemas.ts)）——不设伪安全的浏览器 `userActivation` 手势启发式限制，也不再发明 `answerQuestion` 等特定工具包装。需要完整表单结构的插件直接按需读取 `readSnapshot` / `useLodySnapshot({ kind: "session-transcript", session, turnIds: [turnId] })`。
-3. **免持久化事件中间件（Durable Event Broker）的增量历史对账恢复：**
-   - `lodyQueries.sessions` 提供 `sessionIds`、`agentRoleId` 与闭区间水位线过滤 `updatedAfter`（`updatedAt >= updatedAfter`），`SessionTurnSummary` / `SessionTurnRecord` 提供 `userTurnId` 与 `stopReason`。
-   - 在 `machine.onStart(ctx)` 中，工作流插件无需引入复杂的 Durable Event Broker，仅凭三项现有原语即可完成完整断线/崩溃恢复：（a）通过 `lodyQueries.sessions({ sessionIds })` 反查 `ctx.dataDir` 日志中未完结的条目以取回宿主签发的 `SessionSummary.session`（`SessionRef`）与 `SessionSummary.project`（`ProjectRef`），完整保留原始项目执行目标与 `parentSession` 父子会话关系；（b）按 `updatedAfter` 水位线扫描 `lodyQueries.sessions` 与 `lodyQueries.sessionTurns`，补齐守护进程退出期间错过 `session.turn.completed` 推送的 `stopReason === "end_turn"` 已完成回合后再推进水位线；（c）通过确定性 `(requestId, businessKey)` 对账 `SessionCreationReceipt` 实现精确幂等建会。
+   - 客户端 `LodyClient.sessions.respondInteraction`（自定义侧边栏、Hover Card、语音/硬件控制器）与机器侧 `MachineHostPort.sessions.respondInteraction`（运行在 `machine.service` 中的飞书/Slack/Telegram 远程审批桥接、自动化策略插件）对称暴露同一 `{ requestId, turnId?, outcome, originTurn? }` 原语，**1:1 映射**至内核 `sessionData.commands.respondPermission` 与 `PermissionOutcomeSchema`（[`use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`message-schemas.ts`](../packages/shared/src/message-schemas.ts)）。
+   - 机器侧调用须显式声明并获批 `manifest.permissions: ["sessions.approve"]`（在 E2EE 工作区中回合外调用还须具备有效 `DeclaredWorkflowGrant`）。
+3. **基于托管 KV + 本地事件游标的崩溃/重启恢复（免手写全历史对账）：**
+   - 工作流插件通过宿主托管原子 `ctx.storage`（第 10.2 节）保存任务状态，并通过 `{ resumeFromCursor: true }`（第 6.1.3 节）在守护进程重启后按序补收遗漏事件，结合 `SessionCreationReceipt`（`requestId`、`businessKey`）实现精确幂等去重。
+   - 若插件离线时长超出本地事件环形窗口，`lodyQueries.sessions`（`sessionIds`、`agentRoleId`、包含边界 `updatedAfter`）与 `lodyQueries.sessionTurns` 仍作为兜底追平查询可用。
 
 ---
 
 ## 8. 生命周期状态机（Lifecycle State Machine）
 
-### 8.1 机器侧插件生命周期状态
+### 8.1 机器侧插件生命周期状态与长驻服务
 
 - `Disabled`：未启用；`0` 子进程，`0` 工具/事件/Role/MCP/ACP 注册。
 - `Starting`：清单校验通过；存在 `manifest.machine` 时派生 `child_process.fork` 并等待 `10_000 ms` `ready` 握手；不含 `manifest.machine` 的插件直接以 `0` 子进程跃迁至 `Running`。
-- `Running`：活跃 `instance_id` 正常响应 RPC、事件、工具与工作流贡献。为在不引入 Durable Event Broker 的前提下彻底消除历史对账与实时事件之间的切换窗口，`PluginHost` 在收到 `ready` 的同一时刻即挂载 `subscribedEvents` 内存暂存队列，待 `machine.onStart(ctx)`（`start`）完成后按序排空暂存事件再切入实时直通（重叠事件经插件日志键与永久 `SessionCreationReceipt` 自动幂等去重）。
-- `Stopping`：按 `shutdown -> 2s SIGTERM -> 2s SIGKILL` 排空终止中。
+- `Running`：活跃 `instance_id` 正常响应 RPC（`query`、`mutation`、`tool`、`attachmentSource`）、`events`、后台 `service` 与工作流贡献。
+  - **非阻塞启动与游标事件补收：** 收到 `ready` 后立即对读查询进入 `Running`，同时将 `subscribedEvents` 接入有界启动暂存队列，触发 `machine.onStart(ctx)`（`30_000 ms` 快速初始化钩子；版本升级时先触发可选 `onUpgrade(ctx, { fromVersion, toVersion })`），随后按序重放 `{ resumeFromCursor: true }` 订阅遗漏的游标事件及启动暂存事件，并拉起已注册的长驻 `machine.service(ctx)`（其 `ctx.signal` 贯穿整个运行代次直至 `shutdown`，使 Slack/Telegram/飞书审批桥接、WebSocket 连接器与本地 Webhook 监听器不再受 `30_000 ms` `onStart` 超时限制）。
+- `Stopping`：按 `shutdown -> 2s SIGTERM -> 2s SIGKILL` 排空终止中（中止 `service` `ctx.signal` 并等待清理完成）。
 - `Stopped`：`reload` 或守护进程退出过程中的已排空中间态（`active_instance = null`）。
 - `Faulted`：意外退出、握手超时、缺失必填密钥/配置或 IPC 协议违规后的隔离态。**严禁后台自动无限重启**；仅在显式 `reload`、`disable` 或 `remove`（或补齐配置保存）时离开 `Faulted`。
-- `Removing`：移除注册表记录，默认保留 `ctx.dataDir`（除非显式传入 `--purge-data`）。
+- `Removing`：尽最大努力执行可选 `onUninstall(ctx)`（`10_000 ms` 上限）并移除注册表记录，默认保留 `ctx.dataDir` 与作用域 `storage`（除非显式传入 `--purge-data`）。
 
 ### 8.2 每插件串行生命周期队列
 
@@ -310,18 +333,19 @@ flowchart TB
 
 ### 8.4 `--dev` 独立编译子进程生命周期
 
-`--dev` 源码链接插件在 `DevPluginCompiler` 子进程中按需编译，空闲 `1000 ms` 自动退出，且随 `PluginHost` 关闭一并回收（`0` 僵尸进程）。
+`--dev` 源码链接插件在守护进程外的 `DevPluginCompiler` 子进程中按需编译，在有界空闲窗口后自动退出（实现自定义间隔，如开发态默认 `30 s` 以免每次保存重复冷启动），并在 `PluginHost` 关闭时无条件回收（`0` 僵尸进程）。
 
-### 8.5 客户端插件实例生命周期与 `clientDigest` 幂等规则
+### 8.5 工作区 vs 机器级客户端归属、多机去重与 `clientDigest` 幂等规则
 
-`ClientPluginHost` 严格区分三层客户端身份，使多机工作区在共享不可变产物字节的同时彻底隔离模块级可变状态：
+`ClientPluginHost` 严格区分**工作区/用户级纯前端插件**与**机器绑定插件**，使多机工作区既不会因单机休眠丢失 UI 体验，也不会重复挂载多份同名 UI/事件插件：
 
-- **安装实例键（Installation Key：`(workspace_id, source_key, plugin_id)`，其中 `source_key` 为 `"machine:<machine_id>"` 或 `"local"`）：** 决定实例归属、来源机器 RPC 路由、绑定 `config`、`abort_controller`、事件订阅与 `query_cache`。
-- **不可变产物键（Bundle Key：`(plugin_id, clientDigest)`）：** 仅用于去重共享 `plugin/bundle-chunk` 网络下载、SHA-256 完整性校验、托管缓存落盘与不可变静态资源 `assets/*`。
-- **按安装实例隔离的模块求值（Per-Installation Module Evaluation：`(workspace_id, source_key, plugin_id, clientDigest)`）：** 每个 Installation 在**各自独立的 ES 模块求值实例**中执行 `client.js`（例如按安装实例分配并在卸载/HMR 时吊销的独立 Blob/Module URL，同时共享宿主外置的 `react` / `zod` / `@lody/ui` / `@lody/plugin-sdk/*` 单例），确保插件 `client.tsx` 顶层的模块级变量在两台机器的同名插件实例之间绝不串台。
+- **工作区/用户级前端安装（`source_key = "workspace"`）：** 纯前端插件（主题、样式、音效、侧边栏视图、通用工具/消息块渲染器、Slash Commands）归属工作区/用户级，非敏感 `scope: "client"` 配置落盘于用户/工作区偏好，**按工作区单实例挂载**，且不受单台机器离线影响。
+- **机器绑定配套安装（`source_key = "machine:<machine_id>"` 或 `"local"`）：** 含 `manifest.machine` 或机器级工作流贡献的插件以 `(workspace_id, source_key, plugin_id)` 绑定来源机器 RPC 路由与机器专属面板。当同一 `plugin_id` 在同一工作区的多台在线机器上启用时，`ClientPluginHost` **MUST** 将工作区全局客户端贡献（`events.on`、`commands`、`composer.slashCommands`、`composer.beforeSend`、`tools.matchRender`、`messages.renderBlock`、`sidebar.*`、`screens`、`themes`、`styles`）去重收敛至单一确定性主客户端实例（选取最高 SemVer 版本，平局按 `source_key ASC` 决出），彻底杜绝双倍音效、重复侧边栏入口或同类匹配器自遮蔽。
+- **不可变产物键（Bundle Key：`(plugin_id, clientDigest)`）：** 用于去重共享 `plugin/bundle-chunk` 网络下载、SHA-256 完整性校验、托管缓存落盘与不可变静态资源 `assets/*`。
+- **按活跃实例隔离的模块求值：** 每个活跃客户端实例在独立的 ES 模块实例中求值 `client.js`（卸载/HMR 时吊销），同时共享宿主外置的 `react` / `zod` / `@lody/ui` / `@lody/plugin-sdk/*` 单例。
 
 - 若 `clientDigest` 未变且处于 `Active`，调和过程 **MUST** 原地保留现有实例、事件监听与 `query_cache`。
-- 当 `clientDigest` 变化或执行 `disable` 时，**MUST** 先触发 `abort_controller.abort()`（摘除全部 `events.on` 与进行中查询）、执行 `cleanup_fn`、注销全部 UI/匹配器/主题贡献、移除 `<style>` 节点并清空 `query_cache`，随后才允许挂载新实例。
+- 当 `clientDigest` 变化或执行 `disable` 时，**MUST** 先触发 `abort_controller.abort()`（摘除全部 `events.on` 与进行中查询）、执行 `cleanup_fn`、注销全部 UI/匹配器/命令/主题贡献、移除 `<style>` 节点并清空 `query_cache`，随后才允许挂载新实例。
 
 ---
 
@@ -331,21 +355,21 @@ flowchart TB
 
 `PluginHost` 与 `machine` 子进程通过 `stdio: ['ignore', 'pipe', 'pipe', 'ipc']` 通信：
 
-- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`config`）、`start`（`ready` 后派发一次以触发 `machine.onStart`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`actorUserId`、`input`）、`event`（`eventId`、`eventType`、`payload`、`actorUserId?`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
-- **Child -> Host：** `ready`（`handlers`、`subscribedEvents`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`op`: `"lody.read" | "lody.readSnapshot" | "lody.execute" | "sessions.create" | "sessions.send" | "sessions.respondInteraction" | "sessions.requestStop" | "sessions.requestArchive"`）。
+- **Host -> Child：** `init`（`pluginId`、`instanceId`、`dataDir`、`config`、`permissions`）、`start`（`ready` 后派发一次以触发 `onUpgrade?` + `onStart` 并启动 `service?`）、`invoke`（`callId`、`kind`、`descriptorId`、`scope`、`target`、`actorUserId`、`input`）、`event`（`eventId`、`seq`、`eventType`、`payload`、`actorUserId?`、`rootUserTurnId?`）、`cancel`（`callId`）、`host_result`、`shutdown`（`graceMs`）。
+- **Child -> Host：** `ready`（`handlers`、`subscribedEvents`、`hasService`）、`result`（`callId`、`ok`、`data`/`error`）、`invalidate`、`host_call`（`hostCallId`、`contextId` —— 绑定源 `callId`、`eventId`、`"start"` 或 `"service"` 以便宿主解析精确 `ActorContext`，`op`: `"lody.read" | "lody.unstable.readSnapshot" | "lody.execute" | "storage.get" | "storage.set" | "storage.delete" | "storage.update"`，`payload`）。SDK 便捷方法 `ctx.lody.sessions.*` 直接映射至 `op: "lody.execute"`，不在协议层重复定义操作码。
 - `stdout` 与 `stderr` 仅作诊断日志写入 `logs_ring`；畸形 IPC 帧立即终止子进程并置为 `Faulted`。
 
 ### 9.2 Core 远程 `MachineRpc` 与前端产物分页流式传输
 
 为在 `Core Conformance` 中确保 Desktop 与 Web 完全一致的插件体验，`WorkspaceMachineRpcFacade` 暴露固定白名单方法：
 
-- `plugin/catalog`：返回已安装/启用插件列表、`clientDigest`、声明式 `config` Schema 与能力摘要。
+- `plugin/catalog`：返回已安装/启用插件列表、`clientDigest`、声明的 `permissions`、活跃 `workflowGrant` 摘要、声明式 `config` Schema 与能力摘要。
 - `plugin/bundle-chunk`：以 `256 KiB` `purpose 9` 分片流式读取 `client.js` 与 `themes`/`styles`/`assets`（`<= 4 MiB`），客户端在落盘缓存与执行前强制校验 `clientDigest`。
 - `plugin/query`、`plugin/mutate`、`plugin/attachment-search`、`plugin/attachment-resolve`：单帧 `<= 256 KiB` 调用。
 
 ### 9.3 超时、取消信号与会话 `Stop` 传播
 
-- **超时上限：** `init -> ready` 为 `10_000 ms`；`start`（`machine.onStart`）/ `query` / `mutation` / `attachment-*` / `event` 为 `30_000 ms`；`defineTool` 为 `600_000 ms`（`10 min`）。
+- **超时上限：** `init -> ready` 为 `10_000 ms`；`start`（`machine.onStart`）/ `query` / `mutation` / `attachment-*` / `event` 为 `30_000 ms`；`defineTool` 为 `600_000 ms`（`10 min`）；`machine.service` 随插件运行期无固定超时直至 `shutdown`（`disable` / `reload` / 守护进程退出时中止 `ctx.signal`）。
 - **取消与即时 Session `Stop`：** 客户端卸载、入参变更或用户点击 Session `Stop` 均发送 `cancel(callId)` 中止 `ctx.signal`；用户 Session `Stop` 立即完成宿主回合结算，绝不被挂死的插件阻塞。
 
 ### 9.4 错误码分类体系与零自动重试铁律
@@ -358,20 +382,27 @@ flowchart TB
 
 ## 10. 持久化、历史写入与数据归属（Persistence, History & Data Ownership）
 
-### 10.1 有界会话历史写入（`HistoryWriter`）
+### 10.1 有界会话历史写入（`HistoryWriter`）与宿主产物自动溢出
 
 - `defineTool` 执行期间 **MUST NOT** 进行流式 Loro 历史写入。
-- 工具完成时对校验后的输出序列化为 UTF-8 JSON：`<= 16,384` 字节（`MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES`）经 `HistoryWriter` 单次写入；`> 16,384` 字节直接以 `validation_failed` 拒绝且不修改历史（大体积产物存入 `ctx.dataDir` 并按需经 `defineQuery` 读取）。
+- 工具完成时对校验后的输出序列化为 UTF-8 JSON：
+  - `<= 16,384` 字节（`MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES`）经 `HistoryWriter` 直接内联写入。
+  - `16,384` 字节至 `2 MiB` 的载荷由**宿主自动溢出**至受托管作用域约束的回合产物存储（生命周期与会话绑定回收），并通过 `HistoryWriter` 写入有界内联摘要与产物引用指针，既不丢 LLM/UI 结果，也不逼插件手写文件 GC。超过 `2 MiB` 的载荷以 `validation_failed` 拒绝。
 
-### 10.2 插件 `ctx.dataDir` 目录归属、原子写入与清理
+### 10.2 宿主托管作用域存储（`storage`）与插件 `ctx.dataDir`
 
-- 按 `(workspace_id, plugin_id)` 隔离（E2EE 工作区下位于 `<account>/<workspace>/<genesis>/<signing-key>` 托管目录内）。
-- 并发落盘 **MUST** 写入独占唯一临时文件（`flag: 'wx'`）再执行 `fs.rename` 原子替换；读/写/解析故障不得破坏上一份已提交数据。
-- `disable` 与 `remove` 默认保留 `ctx.dataDir`；`remove --purge-data` 仅在 `Drain-Before-Respawn` 确认子进程退出后清理目录。
+- **宿主托管作用域 KV/JSON 存储（`ctx.storage` 与客户端 `lody.storage`）：**
+  - 宿主 **MUST** 提供受托管作用域保护的原子 KV/JSON 存储原语（`get`、`set`、`delete` 与串行 CAS `update`），机器侧落盘于本地 SQLite，客户端/工作区侧落盘于用户/工作区偏好存储。
+  - 消除机器侧插件手写临时文件锁的样板代码，并使零子进程的纯前端插件无需滥用无作用域 `localStorage` 即可存取结构化状态；在 E2EE 成员移除或设备吊销时自动原子擦除。
+- **插件 `ctx.dataDir`（大文件 / 二进制 / SQLite）：**
+  - 按 `(workspace_id, plugin_id)` 隔离（E2EE 工作区下位于 `<account>/<workspace>/<genesis>/<signing-key>` 托管目录内）。
+  - 直接替换状态文件时 **SHOULD** 采用临时文件 + `fs.rename` 原子替换。
+  - `disable` 与 `remove` 默认保留 `ctx.dataDir` 与 `storage`；`remove --purge-data` 仅在 `Drain-Before-Respawn` 确认子进程退出后一并清理。
 
 ### 10.3 声明式配置与钥匙串密钥隔离存储
 
-- `scope: "client"` / `"both"` 的非敏感 `manifest.config` 值持久化于用户/工作区偏好配置，同步注入 `lody.config.get()` 与 `usePluginConfig()`。
+- `scope: "client"` / `"both"` 的非敏感 `manifest.config` 值持久化于用户/工作区偏好配置（绝不锁死在单台机器的 `catalog.json` 中），同步注入 `lody.config.get()` 与 `usePluginConfig()`。
+- `scope: "project"` 的非敏感 `manifest.config` 值按项目持久化（与 `settings.pages.add({ binding: "project" })` 对齐）。
 - `type: "secret"` 与 `scope: "machine"` 值**仅**存入目标机器系统钥匙串（OS Keychain / 守护进程加密存储），绝不进入 Loro/Flock 同步文档或下发给客户端。
 
 ### 10.4 作用域查询缓存与精准失效
@@ -384,31 +415,31 @@ flowchart TB
 
 ### 11.1 从零到一脚手架（`lody plugin create`）
 
-`lody plugin create <id> --template <ui | sound | renderer | workflow>` **MUST** 在 `< 5 秒` 内生成零配置可运行工程，包含：
+`lody plugin create <id> --template <ui | sound | renderer | workflow>` **MUST** 生成零配置可运行工程，包含：
 
-1. 合法的 `lody.plugin.json` 与强类型 `@lody/plugin-sdk` 导入。
+1. 合法的 `lody.plugin.json`、强类型 `@lody/plugin-sdk` 导入及显式 `permissions`。
 2. 预置浏览器纯度（`tsconfig.json`）与 Node 纯度（`tsconfig.machine.json`）双编译配置。
 3. 可直接运行的示例源码与 `node --test` 本地契约测试。
 
 ### 11.2 `--dev` 实时编译与 Desktop + Web 同步热预览
 
 1. `lody plugin link --dev <path>` 监听 `lody.plugin.json`、`client`、`machine`、`themes`、`styles`、`assets`、`skills` 与 `agentRoles`。
-2. 修改前端/主题/样式文件时，`DevPluginCompiler`（空闲 `1000 ms` 回收）增量构建并更新 `clientDigest`，**同时向本地 Electron 桌面端与已连接的 Web 浏览器会话实时热替换 `ClientPluginInstance`**（开发者按第 13.2 节授予一次受限 **Trusted Dev Session** 后，同会话内每次保存均免重复弹窗确认），不重启 `machine` 子进程、不打断运行中的 Agent 回合。
-3. 修改 `machine` 文件时自动执行串行 `Drain-Before-Respawn` 平滑切换。
+2. 修改前端/主题/样式文件时，`DevPluginCompiler` 增量构建并更新 `clientDigest`，**同时向本地 Electron 桌面端与已连接的 Web 浏览器会话实时热替换 `ClientPluginInstance`**（开发者按第 13.2 节授予一次受限 **Trusted Dev Session** 后，同会话内每次保存均免重复弹窗确认），不重启 `machine` 子进程、不打断运行中的 Agent 回合。
+3. 修改 `machine` 文件时自动执行串行 `Drain-Before-Respawn` 平滑切换并重新注册处理器、事件与后台服务。
 4. `lody plugin preview <path>` 启动内置沙盒预览台（预置合成的 `ObservedToolCall`、`MessageBlock` 与 `SessionSummary` 样本），支持在 Desktop、Web 与 Mobile 紧凑视口下一键验证 UI 与通用匹配器，无需消耗真实大模型 Token。
 
 ### 11.3 插件检视器与贡献诊断（Plugin Inspector & Diagnostics）
 
 宿主 **MUST** 在“设置 -> 插件 -> 诊断检视器”及 `lody plugin doctor <path>` 中提供结构化可定位诊断，严禁静默吞掉注册失败：
 
-- 清单校验拒绝、Zod `safeParse` 失败、`tools.matchRender` 优先级被遮蔽（`matcher_shadowed`，明确给出胜出的 `plugin_id:id` 与 `priority`）、`SurfaceErrorBoundary` 捕获崩溃（`surface_render_crashed` 含组件栈）、移动端不支持的宽屏槽位（`capability_unavailable_on_platform`）以及 E2EE 意图拒绝（`e2ee_intent_rejected`）均记录于 `PluginInstallation.diagnostics`。
-- 检视器实时展示 `lifecycle_state`、OS `pid`、`clientDigest`、活跃扩展面/匹配器/事件/Role/MCP/ACP 列表与 `500` 行 `logs_ring`。
+- 清单校验拒绝、Zod `safeParse` 失败、`"replace"` `tools.matchRender` 优先级被遮蔽（`matcher_shadowed`，明确给出胜出的 `plugin_id:id` 与 `priority`）、`SurfaceErrorBoundary` 捕获崩溃（`surface_render_crashed` 含组件栈）、移动端不支持的宽屏槽位（`capability_unavailable_on_platform`）、缺失权限拒绝（`permission_denied`）以及 E2EE 意图拒绝（`e2ee_intent_rejected`）均记录于 `PluginInstallation.diagnostics`。
+- 检视器实时展示 `lifecycle_state`、OS `pid`、`clientDigest`、已获批 `permissions` / `DeclaredWorkflowGrant` 范围、活跃扩展面/命令/匹配器/事件/Role/MCP/ACP 列表与 `500` 行 `logs_ring`。
 
 ### 11.4 打包、分享与 SemVer 更新回滚
 
-- `lody plugin pack` 校验环境纯度、打包产物、验证 `MAX_PACKED_CLIENT_BUNDLE_BYTES`（`<= 4 MiB`）、生成内嵌 `SHA-256` 清单与 `clientDigest` 的确定性 `.lodypkg` 归档包。
-- 支持从本地目录/`.lodypkg`、Git Release / HTTPS 归档链接或工作区目录安装。
-- 升级插件时经 `Drain-Before-Respawn` 平滑切换、完整保留 `ctx.dataDir` 与已有 `config` 值、仅对新增必填项弹出补充引导，并保留上一代 `.lodypkg` 支持一键 `lody plugin rollback <id>`。
+- `lody plugin pack` 校验环境纯度、打包产物、验证 `MAX_PACKED_CLIENT_BUNDLE_BYTES`（`<= 4 MiB`），输出兼容标准 npm 的 `.tgz` 归档包（可选 `.lodypkg` 后缀），内嵌 `SHA-256` 完整性清单与 `lody.plugin.json`。
+- 支持从本地目录/`.tgz`/`.lodypkg`、兼容 npm 的源包、Git Release / HTTPS 归档链接或工作区目录安装。
+- 升级插件时经 `Drain-Before-Respawn` 平滑切换、触发可选 `onUpgrade(ctx, { fromVersion, toVersion })`、完整保留 `ctx.storage`、`ctx.dataDir` 与已有 `config` 值、仅在新增 `permissions` 或必填项时重新弹窗确认，并保留上一代产物支持一键 `lody plugin rollback <id>`。
 
 ---
 
@@ -416,30 +447,35 @@ flowchart TB
 
 ### 12.1 发现、权限透明披露与信任确认
 
-在启用未知来源插件或信任新的远程 `clientDigest` 前，Lody **MUST** 展示从 `lody.plugin.json` 自动提取的清晰能力披露卡片：
+在启用未知来源插件、授予新权限或信任新的远程 `clientDigest` 前，Lody **MUST** 展示从 `lody.plugin.json` 自动提取的清晰能力披露卡片：
 
 - `在机器 <machine_name> 上运行本地代码`（`manifest.machine`）
 - `提供 Agent Role / MCP / ACP 运行时`（`agentRoles`、`mcpServers`、`acpProviders`）
-- `接管工具或消息块渲染`（`client`）
+- `接管工具或消息块渲染与注册命令`（`client`）
 - `应用主题或自定义 CSS 样式`（`themes`、`styles`）
 - `需要配置敏感密钥`（`manifest.config` `secret` 字段）
+- 来自 `manifest.permissions` 的显式高权限清单：
+  - `创建 / 发送 / 停止会话`（`sessions.write`）
+  - `批准或拒绝 Agent 权限弹窗`（`sessions.approve`）
+  - `在机器 <machine_name> 上后台自主运行工作流`（`workflow.autonomous` —— 明确展示 `DeclaredWorkflowGrant` 覆盖的项目与 Role 范围）
+  - `读取 Unstable 内部状态投影`（`unstable.rawState`）
 
 ### 12.2 Agent 辅助创建插件与人类确认审批流（`lody_plugin` MCP）
 
 用户 **MUST** 能够在任意聊天会话中直接让 Agent“帮我写一个某某插件并装上”，在保证绝对执行安全的前提下完成从想法到可用插件的闭环——直接复用 [`schedules/AGENTS.md`](../apps/cli/src/lib/schedules/AGENTS.md)（`schedule_proposal.ts`）与 `lody_agent_role` 的成熟架构：
 
 1. **`lody_plugin` MCP 开放动作：** 仅包含只读与提议类动作：`list`、`inspect`、`diagnostics`、`scaffold`、`propose_install`、`propose_update`、`propose_enable`、`propose_reload`。
-2. **幂等 `plugin_proposal` 聊天审批卡片：** 调用 `propose_*` 时先执行 `lody plugin doctor` 静态校验、冻结包 `SHA-256` 摘要与权限摘要，并按 `requestId` 在当前会话写入唯一幂等的 `plugin_proposal` 系统卡片；重复调用返回最新人类审批结果（`pending` | `approved` | `rejected`）。
-3. **严格人类确认门禁：** `lody_plugin` 暴露 **`0` 个**直接安装/启用/重载/写密钥接口；唯有当人类用户在宿主可信卡片上点击**“批准并启用（Approve & Enable）”**（或在已清除 `LODY_AGENT_SESSION_ID` 的人类交互终端执行 `lody plugin ...`）且包摘要与冻结值一致时，宿主才激活插件代码。
+2. **幂等 `plugin_proposal` 聊天审批卡片：** 调用 `propose_*` 时先执行 `lody plugin doctor` 静态校验、冻结包 `SHA-256` 摘要与请求的 `permissions`，并按 `requestId` 在当前会话写入唯一幂等的 `plugin_proposal` 系统卡片；重复调用返回最新人类审批结果（`pending` | `approved` | `rejected`）。
+3. **人类确认门禁：** `lody_plugin` 暴露 **`0` 个**直接安装/启用/重载/签发工作流授权/写密钥接口；唯有当人类用户在宿主可信卡片上点击**“批准并启用（Approve & Enable）”**（同步签发获批的 `DeclaredWorkflowGrant`）或执行人类交互终端命令时，宿主才激活插件代码。
 
 ### 12.3 声明式配置表单与首次使用引导抽屉
 
-- 凡声明 `manifest.config` 的插件，Lody 在 Desktop、Web 与 Mobile 端自动渲染原生设置表单（文本框、掩码钥匙串输入框、数值步进/滑块、开关与下拉单选），90% 的插件无需手写任何设置 UI。
+- 凡声明 `manifest.config` 的插件，Lody 在 Desktop、Web 与 Mobile 端跨工作区、项目与机器作用域自动渲染原生设置表单（文本框、掩码钥匙串输入框、数值步进/滑块、开关与下拉单选），无需手写常规设置 UI。
 - 启用插件时若声明了 `manifest.onboarding` 或存在未填写的 `required: true` `manifest.config` 字段，宿主自动弹出**首次使用引导抽屉（First-Run Setup Sheet）**，用户提交后立即拉起进入 `Running`。插件仍可按需通过 `lody.settings.pages.add` 挂载高级自定义设置页。
 
 ### 12.4 跨设备无缝体验与故障自愈 UX
 
-- 在 **Web 浏览器**打开工作区时自动通过 `plugin/bundle-chunk` 流式加载已信任前端产物，获得与 **Electron 桌面端**完全一致的自定义工具卡片、侧边栏、全屏页、主题与音效/事件体验。
+- 在 **Web 浏览器**打开工作区时自动加载工作区级前端插件并从在线机器流式拉取受信任配套 `clientDigest` 产物（`plugin/bundle-chunk`），获得与 **Electron 桌面端**完全一致的自定义工具卡片、命令面板、侧边栏、全屏页、主题与音效/事件体验。
 - 在 **Mobile Capacitor** 打开工作区时原生渲染自定义工具/消息卡片与声明式设置，宽屏专属面板按 `useHostCapabilities()` 优雅折叠协商。
 - 插件进入 `Faulted` 或渲染抛错时展示非模态内联恢复横幅（`[重载插件]` / `[查看日志]` / `[禁用]`），并始终提供 `lody --safe-mode` 一键逃生舱。
 
@@ -449,7 +485,7 @@ flowchart TB
 
 ### 13.1 人类确认门禁与子进程环境变量最小化
 
-- 仅限宿主可信 UI 的人类确认操作或清除了 `LODY_AGENT_SESSION_ID` 的人类终端命令可激活或重载插件。
+- 仅限宿主可信 UI 确认（设置 / `plugin_proposal` 批准按钮）或交互式人类 CLI 命令可激活、授予工作流权限或重载插件代码。CLI 检查 `LODY_AGENT_SESSION_ID` 仅属于**防止协作 Agent 误触自启用的护栏**，绝不是针对具备 Shell 能力 Agent（可自行取消环境变量）的安全边界；来自非受信或沙箱环境的守护进程特权变更必须经由可信 UI 批准或守护进程交互确认令牌。
 - 派生的 `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量仅保留最小系统变量（`PATH`、`HOME`、`TMPDIR`、`LANG`、`TZ`、`NODE_ENV`）及 `envKeys` 显式引用的本插件 `manifest.config` 键；守护进程 E2EE 签名密钥、KEK、云端令牌与兄弟插件密钥 **MUST NEVER** 注入子进程。
 
 ### 13.2 前端产物信任门控、受限 `Trusted Dev Session` 与 `lody --safe-mode`
@@ -458,7 +494,7 @@ flowchart TB
 - **面向 `--dev` 热更新的受限开发态信任会话（`Trusted Dev Session`）：** 当机器所有者运行 `lody plugin link --dev` 时，`PluginHost` 为本次开发链接生成临时 128 位随机 `devSessionNonce`（在 `plugin/catalog` 中仅向机器所有者暴露 `devMode: true`）。以同一机器所有者身份登录的远程 Web/Desktop/Mobile 客户端可显式开启一项**范围受限、可随时撤销的 `Trusted Dev Session` 租约**，严格绑定至 `(workspace_id, machine_id, plugin_id, devSessionNonce)` 且仅存于当前浏览器会话内存/`sessionStorage`（绝不写入永久跨摘要信任库）：
   1. 同一 `devSessionNonce` 下后续由 `DevPluginCompiler` 产出的新 `clientDigest` 自动热替换，免除每次保存文件重复确认；
   2. 宿主顶栏常驻展示不可伪造的 **`Dev HMR Trusted · 撤销（Revoke）`** 状态徽章，支持一键即时撤销；
-  3. 若修改 `lody.plugin.json` 新增了授权时尚未包含的能力类别（如新增 `machine`、`mcpServers`、`acpProviders` 或 `secret` 配置），立即暂停自动热替换并重新弹出权限披露卡片；
+  3. 若修改 `lody.plugin.json` 新增了授权时尚未包含的能力类别或权限（如新增 `machine`、`mcpServers`、`acpProviders`、`secret` 配置或新的 `manifest.permissions` 项），立即暂停自动热替换并重新弹出权限披露卡片；
   4. 取消 `--dev` 链接、重启 `link --dev`（轮换 `devSessionNonce`）、关闭浏览器标签页或进入 `?safeMode=1` 时租约立即失效。工作区协作者**绝不**开放 `Trusted Dev Session` 自动放行。
 - **紧急逃生舱（`lody --safe-mode`）：** `lody --safe-mode`（Web 端为 `?safeMode=1`）跳过全部 `client.js`、`themes` 与 `styles`，确保核心会话查看、权限审批与 `Stop` 始终可用。
 
@@ -472,20 +508,28 @@ flowchart TB
 
 遵循 [`specs/e2ee/machine-sharing.zh.md`](e2ee/machine-sharing.zh.md)：
 
-- 插件审批启停、`machine` 密钥、`acpProviders` 凭据与 `'machine'` 作用域调用**仅限机器所有者**。
+- 插件审批启停、`DeclaredWorkflowGrant` 签发与撤销、`machine` 密钥、`acpProviders` 凭据与 `'machine'` 作用域调用**仅限机器所有者**。
 - 协作者仅在 `MachineSharing` 同时授权目标机器及全部绑定项目时可调用 `'project'` 与 `'session'` 处理器。
 
-### 13.5 跨客户端交互、工具与有根工作流事件的签名执行意图（`e2eeIntent`）
+### 13.5 双模型 E2EE 签名执行意图（活跃回合派生 vs 机主签发工作流授权）
 
-遵循 [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)：
+遵循 [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts) 与[共享成员派生规则](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)，E2EE 工作区将**回合内人类输入派生**与**回合外后台自主工作流**彻底分离，消除相互冲突：
 
-- 客户端 `useLody().sessions.create` / `send` / `respondInteraction` 在个人设备上签发 `E2EE_INTENT_KIND.memberInput`（`kind = 1`）。
-- 守护进程的 `sessions.create`、`send`、`respondInteraction` 遵循[共享成员派生规则](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)：守护进程必须在写入时确认驱动回合在运行时仍活跃，并在本地 `sessionData` 核验 `originTurn: { session, userTurnId }` 对应该回合的人类签名 `memberInput`。共享成员派生 `derivedFrom` `machineInput`（`kind = 2`）须有有效的成员/项目 `MachineSharing`，限同一机器，最多派生 20 次。已签名输入无启动期限，重启后仍可在通过当前授权检查后启动。历史记录只能证明来源，不能授权签发新输入。回合结束后，新工作必须由另行核验的机器所有者工作流激活声明授权，且仅限声明覆盖的机器和操作；执行主体是该工作流，不得提升成员权限。
-- 在 E2EE 工作区中，无交互根签名的 `MachineContext`（`query`、`mutation`、`attachmentSource`）调用 `sessions.create`、`send` 与 `respondInteraction` 一律拒绝 `forbidden`。
+1. **客户端交互写入（`memberInput`，`kind = 1`）：** 客户端 `lody.execute` / `sessions.{create, send, respondInteraction}` 在个人设备上签发 `E2EE_INTENT_KIND.memberInput`（`kind = 1`，位于用户可见的 `composer.beforeSend` 钩子之后）。
+2. **模型 A —— 活跃回合内派生（`ToolExecutionContext`）：**
+   - 仅当驱动回合在守护进程运行时**仍处于活跃状态**（例如 `defineTool` 执行期间），且 `originTurn: { session, userTurnId }` 经本地 `sessionData` 核验匹配该回合的人类签名 `memberInput` 时适用。
+   - 签发 `derivedFrom` `machineInput`（`kind = 2`），受有效的成员/项目 `MachineSharing`、同一机器及最多 20 跳派生限制。
+   - 已签名输入在守护进程重启后仍可在通过当前授权检查后启动，**但历史 `originTurn` 记录本身绝不能在驱动回合结束后授权签发全新输入**。
+3. **模型 B —— 机主签发的工作流授权（`DeclaredWorkflowGrant`，覆盖回合后事件、`onStart` 恢复与 `machine.service` 桥接）：**
+   - 因为 `session.turn.completed`、`machine.onStart` 恢复与长驻 `machine.service` 连接器（如 Slack/Telegram 审批桥接）运行在活跃人类回合**之后**或**之外**，它们 **MUST NOT** 走活跃回合共享成员派生。
+   - 它们必须同时满足：清单声明并获批相应 `manifest.permissions`（`workflow.autonomous`，以及 `sessions.write` / `sessions.approve`），且存在经核验、未撤销的**机器所有者签名 `DeclaredWorkflowGrant`**，精确覆盖 `(workspace_id, machine_id, plugin_id, op, target_project_id, role_id)`（沿用与 Schedules/Automations 相同的机主常驻策略签名模型）。
+   - 执行严格以该已声明工作流为主体（不得借机提升协作者权限，也不允许写入 `sessionMarkRead` 等个人偏好）；请求中附带的 `originTurn` 仅作审计溯源记录。
+4. **无根交互 RPC：** 在 E2EE 工作区中，无根 `MachineContext`（`query`、`mutation`、`attachmentSource`）调用 `sessions.create`、`send` 与 `respondInteraction` 一律拒绝 `forbidden`。
 
-### 13.6 托管域隔离、快照脱敏、静态明文分享与外发披露
+### 13.6 托管域隔离、白名单投影、静态明文分享与外发披露
 
-- E2EE 守护进程 `ctx.dataDir` 以及 Core Web/Desktop/Mobile 前端产物与信任缓存统一置于 `<account>/<workspace>/<genesis>/<signing-key>` 下，在工作区加密态 `unknown` 时保持未挂载，收到经证实的 `e2ee_member_removed` 或 `e2ee_device_revoked` 时原子擦除。
+- E2EE 守护进程 `ctx.dataDir`、`ctx.storage`、`SessionCreationReceipt`、`DeclaredWorkflowGrant`、本地事件游标环形表以及 Core Web/Desktop/Mobile 前端产物与信任缓存统一置于 `<account>/<workspace>/<genesis>/<signing-key>` 下，在工作区加密态 `unknown` 时保持未挂载，收到经证实的 `e2ee_member_removed` 或 `e2ee_device_revoked` 时原子擦除。
+- Tier-2 `lody.unstable.readSnapshot` **MUST** 采用白名单域投影（第 7.2.2 节），确保未来新增的内部密钥、令牌或 E2EE 凭据默认不可见。
 - 在线状态、Flock 摘要与遥测彻底剥离 `pluginId`、工具名与插件异常堆栈。
 - 静态明文会话分享仅渲染内置兜底卡片展示 `<= 16 KiB` 内联输出，绝不上传 `ctx.dataDir` 或执行第三方 `client.js`。
 
@@ -495,7 +539,7 @@ flowchart TB
 
 ### 14.1 故障分类
 
-1. **清单 / 配置校验故障：** 非法 JSON、非法 ID、声明为 `"client"` 的 `secret` 字段或缺失必填密钥。
+1. **清单 / 配置 / 权限校验故障：** 非法 JSON、非法 ID、非 `"machine"` 作用域的 `secret` 字段、缺失必填密钥或未声明的 `manifest.permissions`。
 2. **子进程派生 / 握手 / 崩溃 / 死循环：** 进程退出、`10s` `ready` 超时、`30s`/`10min` 调用超时或同步死循环。
 3. **UI 槽位 / 通用匹配器 / 事件监听器故障：** `tools.matchRender`、`messages.renderBlock` 或侧边栏渲染抛错，或 `events.on` 回调异常。
 4. **传输 / 授权冲突：** `machine_offline`、`untrusted_plugin`、`forbidden`、`idempotency_conflict`、`business_key_conflict`。
@@ -512,7 +556,7 @@ flowchart TB
 
 ### 14.3 宿主重启恢复语义
 
-- **守护进程重启与工作流恢复：** 重新拉起持久化 `enabled = true` 的插件，完整保留 `ctx.dataDir`、`SessionCreationReceipt` 与 `PluginProposalRecord`，并调用 `machine.onStart(ctx)` 使工作流插件同时对账 `ctx.dataDir` 未完结条目与停机期间错过的 `session.turn.completed` 历史状态（`lodyQueries.sessions` `updatedAfter` + `lodyQueries.sessionTurns`），在完整保留 `ProjectRef`、`parentSession` 与 E2EE `originTurn` 签名溯源的前提下幂等续跑，无需修改 Lody Core。
+- **守护进程重启与工作流恢复：** 重新拉起持久化 `enabled = true` 的插件，完整保留 `ctx.storage`、`ctx.dataDir`、`DeclaredWorkflowGrant`、`SessionCreationReceipt`、本地事件游标与 `PluginProposalRecord`。收到 `ready` 后触发 `machine.onStart(ctx)`、按序重放 `{ resumeFromCursor: true }` 遗漏事件并拉起 `machine.service(ctx)`——经 `SessionCreationReceipt` 幂等去重、经 `DeclaredWorkflowGrant` 授权回合后 E2EE 执行，避免因全历史扫描触发 `onStart` 超时。
 - **客户端刷新 / 重连：** 基于 `clientDigest` 幂等调和，不触发守护进程子进程重启。
 
 ### 14.4 操作员干预控制点
@@ -619,39 +663,52 @@ function invoke_machine_handler(host, principal, plugin_id, kind, descriptor_id,
 
   parsed_out = descriptor.output_schema.safeParse(raw_result)
   if not parsed_out.success: return error("validation_failed", parsed_out.error)
-  if kind == "tool" and utf8_byte_length(json_encode(parsed_out.data)) > MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES:
-    return error("validation_failed", "inline tool output exceeds 16 KiB; store large artifacts in ctx.dataDir")
+  if kind == "tool":
+    encoded_bytes = utf8_byte_length(json_encode(parsed_out.data))
+    if encoded_bytes > MAX_SPILLABLE_TOOL_OUTPUT_BYTES: # 2 MiB
+      return error("validation_failed", "tool output exceeds 2 MiB ceiling")
+    if encoded_bytes > MAX_INLINE_PLUGIN_TOOL_OUTPUT_BYTES:
+      return ok(spill_to_host_turn_artifact_with_summary(parsed_out.data))
   return ok(parsed_out.data)
 ```
 
-### 15.3 通用结果渲染器优先级裁决与强制回退
+### 15.3 通用结果渲染器裁决（`replace` + 可叠加 `enhance`）与强制回退
 
 ```text
 function resolve_tool_renderer(client_host, user_prefs, observed_call):
   if client_host.safe_mode_enabled or observed_call.user_toggled_raw_view:
-    return BuiltinRawToolSheet
+    return { primary: BuiltinRawToolSheet, enhancers: [] }
 
-  candidates = []
+  replace_candidates = []
+  enhancers = []
   if is_plugin_own_tool(observed_call.toolName):
     own = client_host.own_tool_renderers[observed_call.toolName]
     if own is not null:
-      candidates.push({kind: "own", priority: Infinity, plugin_id: own.plugin_id, id: own.tool_id, Component: own.Component})
+      replace_candidates.push({kind: "own", priority: Infinity, plugin_id: own.plugin_id, source_key: own.source_key, id: own.tool_id, Component: own.Component})
 
   for matcher in client_host.universal_tool_matchers:
     if matches_declarative_and_predicate(matcher.match, observed_call):
-      candidates.push({kind: "match", priority: matcher.priority ?? 0, plugin_id: matcher.plugin_id, id: matcher.id, mode: matcher.mode ?? "replace", Component: matcher.Component})
+      entry = {kind: "match", priority: matcher.priority ?? 0, plugin_id: matcher.plugin_id, source_key: matcher.source_key, id: matcher.id, mode: matcher.mode ?? "replace", Component: matcher.Component}
+      if entry.mode == "enhance":
+        enhancers.push(entry)
+      else:
+        replace_candidates.push(entry)
 
-  if candidates is empty:
-    return BuiltinRawToolSheet
+  enhancers = sort(enhancers, order_by=[priority DESC, plugin_id ASC, source_key ASC, id ASC])
+  if replace_candidates is empty:
+    return { primary: BuiltinRawToolSheet, enhancers: wrap_each_in_error_boundary(enhancers) }
 
-  winner = select_by_user_override_or_sort(candidates, user_prefs[observed_call.toolName],
-    order_by=[priority DESC, is_own DESC, plugin_id ASC, id ASC])
+  winner = select_by_user_override_or_sort(replace_candidates, user_prefs[observed_call.toolName],
+    order_by=[priority DESC, is_own DESC, plugin_id ASC, source_key ASC, id ASC])
 
-  for loser in candidates where loser != winner:
+  for loser in replace_candidates where loser != winner:
     record_diagnostic(client_host, loser.plugin_id, "matcher_shadowed", {winner: winner.plugin_id + ":" + winner.id})
 
   # 宿主外壳始终在插件子树外层强制挂载“查看原始输出”开关与 SurfaceErrorBoundary
-  return wrap_with_host_raw_toggle_and_error_boundary(winner.Component, fallback=BuiltinRawToolSheet)
+  return {
+    primary: wrap_with_host_raw_toggle_and_error_boundary(winner.Component, fallback=BuiltinRawToolSheet),
+    enhancers: wrap_each_in_error_boundary(enhancers)
+  }
 
 function mount_message_block_renderer(client_host, session_ref, turn_id, block_ordinal, block_ast, winner):
   block_id = turn_id + ":block:" + string(block_ordinal)
@@ -684,33 +741,45 @@ function mcp_propose_plugin_action(kernel, invoking_session_id, request_id, acti
     proposing_session_id: invoking_session_id,
     plugin_id: doctor_report.manifest.id,
     digest: doctor_report.package_sha256,
+    permissions: doctor_report.manifest.permissions ?? [],
     capabilities: summarize_capabilities(doctor_report.manifest),
     status: "pending",
   })
   append_system_proposal_card_to_session(invoking_session_id, proposal)
   return {status: "pending", proposalId: proposal.id}
-  # 仅当人类在宿主可信卡片点击 Approve（校验冻结的 proposal.digest）
-  # 或在无 LODY_AGENT_SESSION_ID 的人类终端执行命令时，才真正安装/启用插件代码。
+  # 仅当人类在宿主可信卡片点击 Approve（校验冻结的 proposal.digest 并同步签发 DeclaredWorkflowGrant）
+  # 或完成交互式人类 CLI 确认时，才真正安装/启用插件代码。
 ```
 
-### 15.5 E2EE 插件 RPC 与工作流事件授权门禁
+### 15.5 双模型 E2EE 插件 RPC 与工作流授权门禁
 
 ```text
-function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_event, target_machine_id):
+function authorize_e2ee_plugin_session_write(kernel, plugin, context_kind, caller_or_event, op, target_machine_id, target_project_id, role_id):
+  required_perm = (op == "sessionRespondInteraction") ? "sessions.approve" : "sessions.write"
+  if not plugin.has_granted_permission(required_perm):
+    return deny("forbidden: missing manifest permission " + required_perm)
+
   if not kernel.workspace_is_e2ee:
     return allow_unsigned()
 
   if context_kind == "client_interactive":
     return require_personal_device_member_input_signature(caller_or_event)
 
-  if context_kind in ["machine_event", "machine_startup"] and caller_or_event.principal_kind == "declared_workflow":
-    return require_owner_signed_activation_for_plugin_machine_and_operation_then_sign_as_workflow()
-
-  if context_kind in ["tool_execution", "machine_event", "machine_startup"]:
+  # 模型 A：活跃回合内派生（仅限 live driving turn，如 defineTool）
+  if context_kind == "tool_execution":
     origin = caller_or_event.bound_origin_turn
     if not verify_live_driving_turn_and_stored_member_signature(kernel, origin):
       return deny("forbidden: inactive or unverified driving turn")
     return require_active_sharing_same_machine_and_reserve_derivation_then_sign(origin, target_machine_id, limit=20)
+
+  # 模型 B：回合外自主工作流 / 重启恢复 / 后台服务桥接
+  if context_kind in ["machine_event", "machine_startup", "machine_service"]:
+    if not plugin.has_granted_permission("workflow.autonomous"):
+      return deny("forbidden: missing manifest permission workflow.autonomous")
+    grant = verify_owner_signed_workflow_grant(kernel, plugin.id, target_machine_id, op, target_project_id, role_id)
+    if grant is null:
+      return deny("forbidden: missing or out-of-scope DeclaredWorkflowGrant")
+    return sign_as_declared_workflow(grant, provenance_origin=caller_or_event.optional_origin_turn)
 
   # 无根查询 / 写操作 / 附件解析器
   return deny("forbidden: un-rooted MachineContext cannot originate E2EE Session turns")
@@ -722,51 +791,54 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 
 验证画像遵循第 1.1 节定义：第 16.1–16.6 节为 `Core Conformance`（`REQUIRED` 必选），第 16.7 节为条件扩展合规（`Workflow Provider` 与 `Mobile Extended UI`），第 16.8 节为 `Real Integration Profile`（投产发布 `REQUIRED` 必选）。
 
-### 16.1 Core Conformance — 清单、环境纯度、配置与 SDK 契约
+### 16.1 Core Conformance — 清单、环境纯度、配置、权限与 SDK 契约
 
-- 完整校验 `lody.plugin.json`（含 `config`、`onboarding`、`agentRoles`、`skills`、`mcpServers`、`acpProviders`、`themes`、`styles`、`assets`）；拒绝非法 ID、未知字段、`..`/符号链接逃逸，以及将 `secret` 声明为 `"client"` 或 `"both"` 的配置。
+- 完整校验 `lody.plugin.json`（含 SemVer 范围 `sdk`、`permissions`、`config`（`client` | `machine` | `project` | `both`）、`onboarding`、`agentRoles`、`skills`、`mcpServers`、`acpProviders`、`themes`、`styles`、`assets`）；拒绝非法 ID、未知字段、`..`/符号链接逃逸，以及非 `"machine"` 作用域的 `secret` 配置。
 - 强制浏览器纯度（`tsconfig.json`，兼容 Safari/WKWebView 16.4）与 Node 纯度（`tsconfig.machine.json`）编译边界。
-- 在编译期严格区分 `useLodyQuery`、`useLodySnapshot`、`usePluginConfig` 与 `useQuery`。
+- 在编译期严格区分 `useLodyQuery`、`useUnstableLodySnapshot`、`usePluginConfig` 与 `useQuery`。
 
-### 16.2 Core Conformance — 子进程生命周期、IPC 与故障即停
+### 16.2 Core Conformance — 子进程生命周期、IPC、存储与故障即停
 
 - 纯前端 / 音效 / 主题插件派生 `0` 个子进程；`machine` 插件派生 `1` 个独立子进程并严格遵守 FIFO 串行队列与 `Drain-Before-Respawn`（`shutdown -> 2s SIGTERM -> 2s SIGKILL`）。
-- `stdio` 环形日志（`<= 500` 行 / `256 KiB`）绝不污染 IPC 帧。
+- `host_call` 携带 `contextId` 且所有宿主命令写操作收口至 `lody.execute`；`machine.service(ctx)` 可越过 `30_000 ms` `onStart` 窗口持续运行并在 `shutdown` 时干净中止。
+- `stdio` 环形日志（`<= 500` 行 / `256 KiB`）绝不污染 IPC 帧；超出 `16 KiB`（`<= 2 MiB`）的 `defineTool` 输出自动溢出至宿主回合产物存储并保留内联摘要。
 - 超时与崩溃将未完成 `mutation` / `tool` 结算为 `outcome_unknown`（`0` 次自动重试），崩溃后进入 `Faulted` 且禁止后台死循环自动拉起。
 
-### 16.3 Core Conformance — 扩展性验收：事件总线、通用渲染器、侧边栏与双层外观
+### 16.3 Core Conformance — 扩展性验收：事件、命令、通用渲染器、侧边栏与双层外观
 
-- **产品验收场景 —— 音效插件（Sound Effect Plugin）：** 纯前端插件仅组合 `lody.events.on`（`ui.message.submitted`、`session.turn.completed`、`session.waiting_input`）、声明式 `config`（`pack`、`volume`）、`lody.assets.url`、`lody.signal` 与标准 Web Audio（`AudioContext` / `HTMLAudioElement`），零音频专用 SDK 槽位；`signal` 中止时立即暂停活跃音频，禁用后 `100%` 摘除事件监听。
-- **产品验收场景 —— 跨工具与消息块通用渲染：** `tools.matchRender` 按优先级匹配 Claude/Codex/MCP 的测试执行命令并渲染为交互式排障卡片，为低优先级竞争者记录 `matcher_shadowed`，始终暴露宿主头部“查看原始输出”开关，抛错时经 `SurfaceErrorBoundary` 自动回退，且不破坏 `ai-gui` 正文搜索与回合折叠不变量；`messages.renderBlock` 分配稳定的 `blockId = "<turnId>:block:<ordinal>"`，并在 `streaming: true -> false` 增量更新期间完整保持组件挂载实例与内部交互状态。
-- **侧边栏与双层外观：** 三层侧边栏在 `"Default"` 与自定义视图上确定性叠加；`--*` 主题令牌与可销毁 `<style>` 干净挂载与还原；`lody --safe-mode` 旁路全部前端插件。
+- **产品验收场景 —— 音效插件与多机去重：** 工作区级纯前端插件组合 `lody.events.on`、声明式 `config`、`lody.assets.url`、`lody.signal` 与标准 Web Audio，`0` 后端子进程，单机离线时仍保持可用，多机安装同一插件绝不触发双倍音效，`signal` 中止时立即暂停活跃音频，禁用后 `100%` 摘除事件监听。
+- **产品验收场景 —— 命令面板、Slash Command 与签名前 `beforeSend`：** 插件注册命令面板动作、输入栏 `/slash` 触发器与客户端 `composer.beforeSend` 钩子（在个人设备 E2EE 签名前注入用户可见上下文），并调用 `lody.ui.toast` / `confirm` 反馈。
+- **产品验收场景 —— 跨工具（`replace` + `enhance`）与消息块通用渲染：** `tools.matchRender` 对 `"replace"` 选出唯一胜出者（附带“查看原始输出”开关与 `matcher_shadowed` 诊断），同时对 `"enhance"` 可叠加挂载；`messages.renderBlock` 在 `streaming: true -> false` 增量更新期间保持组件实例与内部状态，且不破坏 `ai-gui` 正文搜索与回合折叠不变量。
+- **侧边栏、轻量槽位与双层外观：** 三层侧边栏与 Session/Message/StatusBar 槽位确定性叠加；`--*` 主题令牌与 `@layer lody-plugin` `<style>` 干净挂载与还原；`lody --safe-mode` 旁路全部前端插件。
 
-### 16.4 Core Conformance — 工作区数据、原始只读快照与工作流 Role/MCP
+### 16.4 Core Conformance — 双层工作区数据、托管存储、事件游标与工作流 Role/MCP
 
-- **产品验收场景 —— 全自由度多 Agent 指挥面板：** 自定义全屏视图组合 `lodyQueries.sessionTurns` / `subagentRun` / `agentConfigs` 与 `useLodySnapshot({ kind: "workspace-state" | "session-transcript" }, selector)`；返回的 `RawDocumentSnapshot` 深度只读冻结（`Object.freeze`）、自动剥离敏感密钥与外部 `businessKey`，且仅在 Selector 投影值变化时重渲染。
-- **产品验收场景 —— 工作流 Role + MCP + 事件编排与守护进程重启恢复：** 启用工作流插件自动注册 `plugin:<id>:<role>` 并以进程外方式拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed")` 先将任务意图原子写入 `ctx.dataDir`、读取局部会话快照并以 `(requestId, businessKey)` 幂等拉起验证子会话；无论守护进程在 `sessions.create` 中途崩溃还是在 `session.turn.completed` 送达插件前退出，`machine.onStart(ctx)` 均可通过对账 `ctx.dataDir` + `lodyQueries.sessions`（`updatedAfter`）+ `lodyQueries.sessionTurns` 完整保留原始 `ProjectRef`、`parentSession` 与 E2EE `originTurn` 幂等续跑且绝不重复创建会话。 回合结束后的新 E2EE 工作使用所有者工作流激活声明（§13.5）。
+- **产品验收场景 —— 同步 `annotations` 与 Tier-2 Unstable 逃生舱：** 插件经 `sessionSetAnnotation` 持久化 `<= 4 KiB` 跨端同步元数据（离线可读，无逐行 RPC 风暴）并经宿主托管 `storage` 存取结构化状态；声明 `permissions: ["unstable.rawState"]` 的重度面板经 `useUnstableLodySnapshot` 按白名单、必填切片与 `<= 512 KiB` 上限读取深度冻结投影，且不暴露新增内部敏感字段。
+- **产品验收场景 —— 工作流 Role + MCP + 事件游标 + 后台服务恢复：** 启用工作流插件注册 `plugin:<id>:<role>` 并进程外拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed", ..., { resumeFromCursor: true })` 在原子 `ctx.storage` 记录状态，并在机主签发的 `DeclaredWorkflowGrant` 授权下以 `(requestId, businessKey)` 幂等拉起验证子会话；守护进程重启后经事件游标补收遗漏事件，无 `onStart` 全扫超时且 `0` 重复建会。运行在 `machine.service` 中的桥接插件接收 `session.waiting_input` / `session.interaction.resolved`，并在具备 `sessions.approve` + `workflow.autonomous` 时调用 `sessions.respondInteraction` 结算审批。
 
 ### 16.5 Core Conformance — DX、UX、提议-确认审批与 Desktop/Web/Mobile 跨端体验
 
-- **产品验收场景 —— 从零到热预览 DX：** `lody plugin create` 一键生成可运行工程；`lody plugin link --dev` 在显式开启、范围受限且可随时撤销的 `Trusted Dev Session`（`(workspace_id, machine_id, plugin_id, devSessionNonce)`，普通已安装插件仍按发布 `clientDigest` 逐版确权）下**同步免弹窗热更新 Electron 桌面端与 Web 浏览器会话**，且 `DevPluginCompiler` 空闲 `1000 ms` 自动退出；插件检视器与 `lody plugin doctor` 输出结构化诊断。
-- **产品验收场景 —— Agent 辅助造插件（`lody_plugin`）：** Agent 脚手架生成插件并调用 `propose_install`；聊天流展示唯一幂等的 `plugin_proposal` 卡片；人类点击 `Approve & Enable` 前 `0` 代码执行；点击批准后弹出首次配置引导抽屉收集必填项并立即进入 `Running`。
-- **产品验收场景 —— 跨设备对等与适配：** 在 **Web** 打开工作区通过 `plugin/bundle-chunk` 流式加载 `<= 4 MiB` `clientDigest` 校验产物，展示与桌面端完全对等的全屏视图、侧边栏、通用匹配器与主题；**Mobile Capacitor** 原生渲染内联卡片与声明式设置，宽屏专属面板通过 `useHostCapabilities()` 平滑协商。
+- **产品验收场景 —— 从零到热预览 DX：** `lody plugin create` 生成可运行工程；`lody plugin link --dev` 在显式开启、范围受限且可随时撤销的 `Trusted Dev Session`（`(workspace_id, machine_id, plugin_id, devSessionNonce)`，普通已安装插件仍按发布 `clientDigest` 逐版确权）下**同步免弹窗热更新 Electron 桌面端与 Web 浏览器会话**，且 `DevPluginCompiler` 在空闲与退出时干净回收子进程；插件检视器与 `lody plugin doctor` 输出结构化诊断。
+- **产品验收场景 —— Agent 辅助造插件（`lody_plugin`）：** Agent 脚手架生成插件并调用 `propose_install`；聊天流展示列明 `manifest.permissions` 的唯一幂等 `plugin_proposal` 卡片；人类点击 `Approve & Enable` 前 `0` 代码执行；点击批准后弹出首次配置引导抽屉收集必填项并立即进入 `Running`。
+- **产品验收场景 —— 跨设备对等与适配：** 在 **Web** 打开工作区运行工作区级前端插件并通过 `plugin/bundle-chunk` 流式加载 `<= 4 MiB` `clientDigest` 校验配套产物，与桌面端对等；**Mobile Capacitor** 原生渲染内联卡片与声明式设置，宽屏专属面板通过 `useHostCapabilities()` 平滑协商。
 
-### 16.6 Core Conformance — 安全边界与 E2EE 门禁
+### 16.6 Core Conformance — 安全边界与双模型 E2EE 门禁
 
 - `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量彻底剥离守护进程 E2EE 密钥、云端令牌及兄弟插件密钥。
-- 在 E2EE 工作区中：Guest 无法调用 `plugin/query` 或 `plugin/mutate`；非所有者禁止调用 `'machine'` 作用域；协作者须具备覆盖全部绑定项目的 `MachineSharing`；有根 `ToolExecutionContext`、`MachineEventContext` 与 `MachineStartupContext`（基于本地 `sessionData` 核验人类签名的 `originTurn`）遵守 20 跳 `machineInput` 派生上限，无根查询/写操作拒绝 `sessions.create`/`send`/`respondInteraction`（`forbidden`）；成员移除或设备吊销时原子擦除 `<account>/<workspace>/<genesis>/<signing-key>` 缓存。 验证重启后已签名输入可获准启动，但从同一已结束回合新派生成员输入会被拒绝。
+- 未声明并获批对应 `manifest.permissions` 而调用 `sessions.write`、`sessions.approve`、`workflow.autonomous` 或 `unstable.rawState` 时一律返回 `forbidden`。
+- 在 E2EE 工作区中：Guest 无法调用 `plugin/query` 或 `plugin/mutate`；非所有者禁止调用 `'machine'` 作用域或签发 `DeclaredWorkflowGrant`；协作者须具备覆盖全部绑定项目的 `MachineSharing`；**模型 A**（`ToolExecutionContext`）核验活跃驱动回合与 20 跳 `machineInput` 上限（拒绝从已结束/历史回合新派生成员输入）；**模型 B**（`machine_event` / `machine_startup` / `machine_service`）要求有效且未撤销的机主签名 `DeclaredWorkflowGrant` 覆盖目标插件、机器、操作、项目与 Role（且拒绝个人 `prefer` 写操作）；无根查询/写操作拒绝会话写入（`forbidden`）；成员移除或设备吊销时原子擦除 `<account>/<workspace>/<genesis>/<signing-key>` 全部托管存储（`dataDir`、`storage`、回执、授权、游标表与产物缓存）。
 
 ### 16.7 条件扩展合规 — Workflow ACP Provider 与移动端全屏扩展 UI
 
-- **`Workflow Provider Conformance`：** 打包的 `manifest.acpProviders`（如 Sorbet Super Assistant）经 `acp-session-start-gate.ts` 受控拉起，支持 `newSession` / `loadSession` / `subagentEvents` / `configOptions`、会话级停止/取消，且严格运行在守护进程之外。
+- **`Workflow Provider Conformance`：** 声明式 `manifest.acpProviders` 桥接至 Lody 托管 ACP 扩展运行时（`LodyAI/acp-extension-core` 与 `acp-session-start-gate.ts`），复用原生认证登录、能力缓存、会话级停止/取消与进程外隔离。
 - **`Mobile Extended UI Conformance`：** 声明支持 `containers.sidebarViews` / `sessionPanels` / `screens` / `projectPages` 的移动端宿主在抽屉/半屏容器中安全挂载插件视图，严格遵守 `--safe-area-bottom` 与 `--native-keyboard-height`（[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)）。
 
 ### 16.8 Real Integration Profile — 真实操作系统子进程与跨端 E2E 套件
 
-1. **顽固子进程 Drain-Before-Respawn E2E：** 真实 Node 子进程忽略 `SIGTERM`，触发 `reload` 后在 `<= 4500 ms` 内经 `SIGKILL` 终结，新 PID 严格在旧 PID `close` 后启动，`ctx.dataDir` 零损坏。
-2. **死循环停止、崩溃 `outcome_unknown` 与零僵尸编译器 E2E：** 真实 `while(true){}` 死循环在 `disable` 后终止且主守护进程保持响应；写操作中途 `SIGKILL` 返回 `outcome_unknown`（`0` 重试）并置为 `Faulted`；`--dev` 编译器空闲 `1500 ms` 后存活子进程数为 `0`。
-3. **Desktop + Web 同步热预览与远程 Bundle E2E：** 编辑 `--dev` 插件源码，验证 Electron 与无头 Chromium Web 会话经 `plugin/bundle-chunk` 同步热更新，且订阅与 `<style>` 泄漏数为 `0`。
-4. **全场景产品验收 E2E（`sound-effects`、`test-report`、`focus-sidebar`、`sorbet-workflow`、`lody_plugin` 审批卡片与 `--safe-mode`）：** 在真实环境中验证事件音效触发、通用工具匹配渲染与“查看原始输出”切换、首次配置引导抽屉、人类确认 Agent `plugin_proposal` 卡片、移动视口卡片/配置展示以及 `lody --safe-mode` 恢复。
+1. **顽固子进程 Drain-Before-Respawn E2E：** 真实 Node 子进程忽略 `SIGTERM`，触发 `reload` 后在 `<= 4500 ms` 内经 `SIGKILL` 终结，新 PID 严格在旧 PID `close` 后启动，`ctx.storage` 与 `ctx.dataDir` 零损坏。
+2. **死循环停止、崩溃 `outcome_unknown` 与零僵尸编译器 E2E：** 真实 `while(true){}` 死循环在 `disable` 后终止且主守护进程保持响应；写操作中途 `SIGKILL` 返回 `outcome_unknown`（`0` 重试）并置为 `Faulted`；`--dev` 编译器在配置的空闲窗口后及守护进程关闭时存活子进程数为 `0`。
+3. **Desktop + Web 同步热预览与多机去重 E2E：** 编辑 `--dev` 插件源码，验证 Electron 与无头 Chromium Web 会话经 `plugin/bundle-chunk` 同步热更新且订阅与 `<style>` 泄漏数为 `0`，同时验证多机工作区不会触发重复音效或重复侧边栏条目。
+4. **全场景产品验收 E2E（`sound-effects`、`test-report`、`focus-sidebar`、`sorbet-workflow`、`lody_plugin` 审批卡片与 `--safe-mode`）：** 在真实环境中验证事件音效触发、通用工具 `"replace"` + `"enhance"` 渲染与“查看原始输出”切换、命令面板与签名前 `beforeSend`、首次配置引导抽屉、人类确认 Agent `plugin_proposal` 卡片及 `DeclaredWorkflowGrant`、移动视口卡片/配置展示以及 `lody --safe-mode` 恢复。
 
 ---
 
@@ -774,11 +846,11 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 
 ### 17.1 Core Conformance 必达条件
 
-仅当公开 `@lody/plugin-sdk`、`PluginHost`、`Workflow Harness`（`agentRoles` + `skills` + `mcpServers`）、`DevPluginCompiler`、`ClientPluginHost`（同时覆盖 Electron、Web `plugin/bundle-chunk` 与 Mobile Capacitor 内联卡片/配置）、声明式 `manifest.config` + 首次引导 UI、`lody_plugin` 提议-确认 MCP 与聊天卡片、插件诊断检视器与 CLI（`create|link|preview|doctor|pack`）、E2EE 运行时门禁及内置参考插件全部落地并通过第 16.1–16.6 节与第 16.8 节自动化验证时，才满足 v1 `Core Conformance`。
+仅当公开 `@lody/plugin-sdk`、`PluginHost`（含带 `contextId` 的 IPC、`storage`、事件游标与 `machine.service`）、`Workflow Harness`（`agentRoles` + `skills` + `mcpServers`）、`DevPluginCompiler`、`ClientPluginHost`（含工作区/机器归属分离与多机去重，覆盖 Electron、Web `plugin/bundle-chunk` 与 Mobile Capacitor 内联卡片/配置）、声明式 `manifest.config` + `manifest.permissions` + 首次引导 UI、`lody_plugin` 提议-确认 MCP 与聊天卡片、插件诊断检视器与 CLI（`create|link|preview|doctor|pack`）、双模型 E2EE 运行时门禁（`SignedTurnOrigin` + `DeclaredWorkflowGrant`）及内置参考插件全部落地并通过第 16.1–16.6 节与第 16.8 节自动化验证时，才满足 v1 `Core Conformance`。
 
 ### 17.2 条件扩展合规要求
 
-- 交付自定义打包 ACP 运行时（如 Sorbet Super Assistant `acpProviders`）须额外通过第 16.7 节 `Workflow Provider Conformance`。
+- 经 `manifest.acpProviders` 交付自定义 ACP 运行时须额外通过第 16.7 节 `Workflow Provider Conformance`。
 - 在 Mobile Capacitor 开放全屏插件视图/自定义侧边栏须额外通过第 16.7 节 `Mobile Extended UI Conformance`。
 
 ### 17.3 投产发布门禁（Operational Release Gate）
@@ -787,6 +859,8 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 
 ### 17.4 仓库证据与当前实现状态（Repository Evidence & Current Implementation Status）
 
-- **规范性文档与 SDK 契约：** 本文档、[插件架构收敛与 E2EE 工作区边界](../.agents/notes/proposed/architecture/2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md)、[插件系统实施设计与分层 PR 落地计划](../.agents/notes/proposed/architecture/2026-11-23-plugin-system-implementation-design.zh.md)，以及 [`sdk/shared.d.ts`](../scripts/fixtures/plugin-sdk/sdk/shared.d.ts)、[`sdk/client.d.ts`](../scripts/fixtures/plugin-sdk/sdk/client.d.ts)、[`sdk/machine.d.ts`](../scripts/fixtures/plugin-sdk/sdk/machine.d.ts) 与 [`sdk/manifest.d.ts`](../scripts/fixtures/plugin-sdk/sdk/manifest.d.ts)。
+- **规范性文档与 SDK 契约：** 本文档、[插件架构收敛与 E2EE 工作区边界](../.agents/notes/proposed/architecture/2026-11-22-plugin-architecture-and-e2ee-boundaries.zh.md)、[插件系统实施设计与分层 PR 落地计划](../.agents/notes/proposed/architecture/2026-11-23-plugin-system-implementation-design.zh.md)、[`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts) 以及原型契约 [`scripts/fixtures/plugin-sdk/sdk/`](../scripts/fixtures/plugin-sdk/sdk/shared.d.ts)。
 - **已核查宿主模块所有者与边界：** [`packages/ui/src/index.ts`](../packages/ui/src/index.ts)、[`packages/components/src/components/loro-app-sidebar.tsx`](../packages/components/src/components/loro-app-sidebar.tsx)、[`packages/components/src/components/sidebar-surface.ts`](../packages/components/src/components/sidebar-surface.ts)、[`packages/components/src/components/ai-gui/AGENTS.md`](../packages/components/src/components/ai-gui/AGENTS.md)、[`packages/components/src/hooks/use-permission-response.ts`](../packages/components/src/hooks/use-permission-response.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-dom.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-dom.ts)、[`packages/components/src/lib/vscode-theme/vscode-theme-css.ts`](../packages/components/src/lib/vscode-theme/vscode-theme-css.ts)、[`packages/components/src/providers/workspace-machine-rpc-facade.ts`](../packages/components/src/providers/workspace-machine-rpc-facade.ts)、[`packages/shared/src/schema.ts`](../packages/shared/src/schema.ts)、[`packages/shared/src/session-data/AGENTS.md`](../packages/shared/src/session-data/AGENTS.md)、[`packages/shared/src/acp/ask-user-question.ts`](../packages/shared/src/acp/ask-user-question.ts)、[`packages/shared/src/acp/history-apply.ts`](../packages/shared/src/acp/history-apply.ts)、[`packages/shared/src/acp/tool-call-history.ts`](../packages/shared/src/acp/tool-call-history.ts)、[`packages/shared/src/e2ee-rpc.ts`](../packages/shared/src/e2ee-rpc.ts)、[`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)、[`apps/cli/src/agent/AGENTS.md`](../apps/cli/src/agent/AGENTS.md)、[`apps/cli/src/lib/acp/AGENTS.md`](../apps/cli/src/lib/acp/AGENTS.md)、[`apps/cli/src/lib/schedules/AGENTS.md`](../apps/cli/src/lib/schedules/AGENTS.md)、[`apps/cli/src/lib/e2ee/AGENTS.md`](../apps/cli/src/lib/e2ee/AGENTS.md)、[`apps/cli/src/mcp/AGENTS.md`](../apps/cli/src/mcp/AGENTS.md)、[`apps/mobile-capacitor/AGENTS.md`](../apps/mobile-capacitor/AGENTS.md)、[`packages/platform/AGENTS.md`](../packages/platform/AGENTS.md)、[`packages/e2ee-machine-sharing/AGENTS.md`](../packages/e2ee-machine-sharing/AGENTS.md) 与 [`.agents/docs/failure-containment.md`](../.agents/docs/failure-containment.md)。
-- **已执行验证与尚未落地的运行时边界：** [`scripts/plugin-sdk-contracts.test.mjs`](../scripts/plugin-sdk-contracts.test.mjs) 当前已执行浏览器/Node 双 `tsconfig` 环境纯度校验、正反向编译期 SDK 断言（[`contracts.ts`](../scripts/fixtures/plugin-sdk/contracts.ts)、[`machine-contracts.ts`](../scripts/fixtures/plugin-sdk/machine-contracts.ts)）、六个参考插件（[`test-report`](../scripts/fixtures/plugin-sdk/examples/test-report/client.tsx)、[`issue-context`](../scripts/fixtures/plugin-sdk/examples/issue-context/machine.ts)、[`worktrees`](../scripts/fixtures/plugin-sdk/examples/worktrees/client.tsx)、[`focus-sidebar`](../scripts/fixtures/plugin-sdk/examples/focus-sidebar/client.tsx)、[`sound-effects`](../scripts/fixtures/plugin-sdk/examples/sound-effects/client.tsx)、[`sorbet-workflow`](../scripts/fixtures/plugin-sdk/examples/sorbet-workflow/client.tsx)）、`ctx.dataDir` 并发原子写故障注入、`sound-effects` 事件分发与清理以及 `sorbet-workflow` 原始快照事件编排测试。生产 SDK、机器子进程和本地 CLI 开发循环由[隔离 daemon 验收](../scripts/plugin-dev-acceptance.py)覆盖；该验收不验证客户端或加密工作流。
+- **已执行验证与当前规范-实现差异：**
+  - `PR-1` 与 `PR-2` 基础层已落于 [`packages/plugin-sdk`](../packages/plugin-sdk/src/index.ts)、[`packages/shared/src/plugins/`](../packages/shared/src/plugins/manifest-schema.ts)、[`apps/cli/src/plugins/`](../apps/cli/src/plugins/workflow/plugin-host.ts) 与 [`packages/components/src/plugins/`](../packages/components/src/plugins/client-host.ts)。[`scripts/plugin-sdk-contracts.test.mjs`](../scripts/plugin-sdk-contracts.test.mjs) 与 [`scripts/plugin-dev-acceptance.py`](../scripts/plugin-dev-acceptance.py) 验证了基础 SDK 契约、子进程生命周期与本地 CLI 开发闭环。
+  - **待 PR-3 / PR-4 对齐的已知差异：** 当前 `manifest-schema.ts` 仍硬编码 `sdk: "^1.0.0"` 且未包含 `manifest.permissions` 与 `scope: "project"`；`ipc-protocol.ts` 的 `host_call` 尚未携带 `contextId` 且重复列举了 `sessions.*` 线协议操作码；`plugin-worker-entry.ts` 每事件类型仅存单个监听器，尚未接入 `machine.service`、`ctx.storage` 与游标续传；`ClientPluginHost` 尚未拆分工作区级纯前端插件与多机去重；Tier-2 `lody.unstable.readSnapshot`、`annotations`、`commands`/`slashCommands`/`beforeSend`、`lody.ui`、宿主工具输出自动溢出、`DeclaredWorkflowGrant` 及 `lody_plugin` 审批卡尚待实现。
