@@ -688,7 +688,7 @@ describe('builtin agy quota command', () => {
         cliType: 'builtin',
         agentType: 'antigravity',
         workdir: os.tmpdir(),
-        env: { AGY_TEST_ACCOUNT: 'chosen' },
+        env: { AGY_TEST_ACCOUNT: 'chosen', ELECTRON_RUN_AS_NODE: '1' },
         logger: createSilentLogger(),
         terminalManager: {} as never,
         onUpdateMessage: () => {},
@@ -699,7 +699,7 @@ describe('builtin agy quota command', () => {
             [
               '-e',
               `
-          if (${JSON.stringify('/selected/agy')} !== ${JSON.stringify(command)} || process.env.AGY_TEST_ACCOUNT !== 'chosen' || process.env.AGY_CLI_DISABLE_AUTO_UPDATE !== 'true') process.exit(2);
+          if (${JSON.stringify('/selected/agy')} !== ${JSON.stringify(command)} || process.env.AGY_TEST_ACCOUNT !== 'chosen' || process.env.AGY_CLI_DISABLE_AUTO_UPDATE !== 'true' || process.env.ELECTRON_RUN_AS_NODE !== undefined) process.exit(2);
           if (JSON.stringify(process.argv.slice(1)) !== JSON.stringify(['--print','/usage','--output-format','json'])) process.exit(3);
           console.log(${JSON.stringify(JSON.stringify(quota))});
         `,

@@ -84,6 +84,16 @@ describe('Session buildShellEnv', () => {
     });
   });
 
+  it('strips ELECTRON_RUN_AS_NODE inherited from a desktop-launched CLI', () => {
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '1');
+    const session = new Session(createConfig(), createSilentLogger());
+
+    const env = (session as unknown as { buildShellEnv(): NodeJS.ProcessEnv }).buildShellEnv();
+
+    expect(process.env.ELECTRON_RUN_AS_NODE).toBe('1');
+    expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+
   it.each([undefined, 'opener-session-3'])(
     'keeps independent identity separate from inherited values with opener %s',
     (openedBySessionId) => {
@@ -308,6 +318,7 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     controlledHome.value = undefined;
     loginShellOverlay.value = {};
     resolvedLoginShellOverlay.value = {};
@@ -429,7 +440,6 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
     await f.installNode();
     await expect(f.session.createAgent(f.callbacks)).rejects.toBe(f.reachedSandbox);
     expect(f.captured[0]?.env.LODY_DSH_NODE_EXECUTABLE).toBe(f.node);
-    expect(f.captured[0]?.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
     expect(f.captured[0]?.env.NMEM_AGENT_ID).toBe('synthetic-memory');
     expect(f.captured[0]?.env.SYNTHETIC_LOGIN_ENV).toBe('preserved');
     expect(f.captured[0]?.env.SYNTHETIC_PROVIDER_ENV).toBe('preserved');
