@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "pnpm run build",
     "prepack": "pnpm run build"
   },
   "peerDependencies": {
