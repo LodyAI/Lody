@@ -561,5 +561,67 @@ it('keeps the Session reader leased until a plugin subagent lookup finishes', as
   await expect(lookup).resolves.toBeNull();
   expect(leased).toBe(false);
 });
-it('serializes competing preference CAS across plugin instances and fences a retired installation',async()=>{
- await import('fake-indexeddb/auto');const {clientStorage}=await import('../src/plugins/client-storage');const life=new AbortController();const a=clientStorage('workspace-a','plugin',life.signal),b=clientStorage('workspace-a','plugin',life.signal);expect((await Promise.all([a.update('key',undefined,1),b.update('key',undefined,2)])).sort()).toEqual([false,true]);expect(await a.get('key')).toBe(await b.get('key'));expect(await clientStorage('workspace-b','plugin',life.signal).get('key')).toBeUndefined();life.abort();await expect(a.delete('key')).rejects.toThrow();});
+it('refreshes cached queries when the machine reports an invalidation without re-evaluating the module', async () => {
+  const { ClientPluginHost } = await import('../src/plugins/client-host');
+  const host = new ClientPluginHost();
+  const key = { workspaceId: 'w', sourceKey: 'local' as const, pluginId: manifest.id };
+  const file = async () => Uint8Array.of(1);
+  const bytes = (await packClientBundle(manifest, file))!;
+  const digest = (await computeClientDigest(manifest, file))!;
+  let mounts = 0,
+    queries!: import('../src/plugins/query-registry').PluginQueryRegistry;
+  const install = (invalidations: number) => ({
+    ...key,
+    digest,
+    invalidations,
+    page: async () => ({ bytes, totalBytes: bytes.length }),
+    registry: (_f: unknown, _s: AbortSignal, q: typeof queries) => {
+      mounts++;
+      queries = q;
+      return {} as never;
+    },
+  });
+  await host.reconcile(key, install(0));
+  const pending: Array<PromiseWithResolvers<number>> = [];
+  const handle = queries.query('status', 'machine', 'm', {}, () => {
+    const d = Promise.withResolvers<number>();
+    pending.push(d);
+    return d.promise;
+  });
+  handle.subscribe(() => {});
+  await Promise.resolve();
+  await Promise.resolve();
+  const first = pending[0];
+  if (!first) throw Error('query did not start');
+  first.resolve(1);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(handle.getSnapshot()).toMatchObject({ status: 'ready', data: 1 });
+  await host.reconcile(key, install(1));
+  expect(handle.getSnapshot().status).toBe('loading');
+  await Promise.resolve();
+  await Promise.resolve();
+  const second = pending[1];
+  if (!second) throw Error('invalidation did not refetch');
+  second.resolve(2);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(handle.getSnapshot()).toMatchObject({ status: 'ready', data: 2 });
+  expect(mounts).toBe(1);
+  await host.reconcile(key, null);
+});
+
+it('serializes competing preference CAS across plugin instances and fences a retired installation', async () => {
+  await import('fake-indexeddb/auto');
+  const { clientStorage } = await import('../src/plugins/client-storage');
+  const life = new AbortController();
+  const a = clientStorage('workspace-a', 'plugin', life.signal),
+    b = clientStorage('workspace-a', 'plugin', life.signal);
+  expect(
+    (await Promise.all([a.update('key', undefined, 1), b.update('key', undefined, 2)])).sort()
+  ).toEqual([false, true]);
+  expect(await a.get('key')).toBe(await b.get('key'));
+  expect(await clientStorage('workspace-b', 'plugin', life.signal).get('key')).toBeUndefined();
+  life.abort();
+  await expect(a.delete('key')).rejects.toThrow();
+});

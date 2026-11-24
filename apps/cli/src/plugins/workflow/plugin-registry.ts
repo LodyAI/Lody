@@ -94,8 +94,16 @@ export interface PluginToolTurn {
 export class Registry extends Context.Service<
   Registry,
   {
-    sessionTools: () => readonly { name: string; description: string; inputSchema: Record<string, unknown> }[];
-    invokeSessionTool: (name: string, input: z.infer<ReturnType<typeof z.json>>, turn: PluginToolTurn) => Effect.Effect<unknown, unknown>;
+    sessionTools: () => readonly {
+      name: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+    }[];
+    invokeSessionTool: (
+      name: string,
+      input: z.infer<ReturnType<typeof z.json>>,
+      turn: PluginToolTurn
+    ) => Effect.Effect<unknown, unknown>;
     workflowLease: (
       id: string,
       instance: number
@@ -140,6 +148,7 @@ export function registryLayer(
         turns = new Map<string, Deferred.Deferred<void>>();
       const reloads = new Map<string, Deferred.Deferred<Record<string, unknown>, unknown>>();
       const catalogLock = yield* Semaphore.make(1);
+      const bundles = new Map<string, { digest: string; bytes: Uint8Array<ArrayBuffer> }>();
       const serialize = <T, E>(id: string, work: Effect.Effect<T, E>) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
@@ -220,7 +229,7 @@ export function registryLayer(
         );
         yield* io(() => mkdir(dataDir, { recursive: true, mode: 0o700 }));
         const rows = yield* io(() => readWorkflowContributions(b.directory, b.manifest));
-        let staged = false;
+        const replaced = yield* workflow.install(pluginId, rows, config);
         yield* host
           .reload({
             ...b,
@@ -231,17 +240,10 @@ export function registryLayer(
             workspaceId,
             machineId,
             config,
-            beforeStart: workflow.install(pluginId, rows, config).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  staged = true;
-                })
-              )
-            ),
           })
           .pipe(
             Effect.onError(() =>
-              staged ? workflow.remove(pluginId).pipe(Effect.orDie) : Effect.void
+              replaced ? workflow.remove(pluginId).pipe(Effect.orDie) : Effect.void
             )
           );
       });
@@ -316,6 +318,7 @@ export function registryLayer(
             yield* unwatch(id);
             yield* host.remove(id);
             yield* workflow.remove(id);
+            bundles.delete(id);
             yield* commit(id, undefined);
             sessions.delete(id);
             diagnostics.delete(id);
@@ -538,27 +541,54 @@ export function registryLayer(
           { concurrency: 'unbounded', discard: true }
         );
       });
-      const availableTools = () => [...items].flatMap(([pluginId, item]) =>
-        item.enabled && !item.pendingConfiguration && host.inspect(pluginId).lifecycle === 'Running'
-          ? host.tools(pluginId).map(tool => ({pluginId, item, tool})) : []);
+      const availableTools = () =>
+        [...items].flatMap(([pluginId, item]) =>
+          item.enabled &&
+          !item.pendingConfiguration &&
+          host.inspect(pluginId).lifecycle === 'Running'
+            ? host.tools(pluginId).map((tool) => ({ pluginId, item, tool }))
+            : []
+        );
       return Registry.of({
-        sessionTools: () => availableTools().map(entry => entry.tool),
+        sessionTools: () => availableTools().map((entry) => entry.tool),
         invokeSessionTool: Effect.fnUntraced(function* (name, input, turn) {
-          const matches = availableTools().filter(entry => entry.tool.name === name);
+          const matches = availableTools().filter((entry) => entry.tool.name === name);
           const entry = matches[0];
           if (!entry || matches.length !== 1 || !turn.isCurrent())
             return yield* Effect.fail(new Error('Session plugin tool unavailable'));
-          const {pluginId, item} = entry;
+          const { pluginId, item } = entry;
           const projectId = turn.projectId;
-          const target = {workspaceId, machineId, sessionId: turn.sessionId, ...(projectId ? {projectId} : {})};
-          return yield* host.invoke(pluginId, {
-            kind: 'tool', scope: 'session', descriptorId: name.slice(`plugin__${pluginId}__`.length),
-            input, target, actorUserId: turn.userId,
-            ...(projectId ? {projectConfig: resolveProjectConfig(item.current.manifest,item.projectPreferences?.[projectId])} : {}),
-          }, (...args) => {
-            if (items.get(pluginId) !== item || !turn.isCurrent()) return Promise.reject(new Error('Plugin tool invocation ended'));
-            return turn.executeHostCall(...args);
-          }, turn.onDispatch);
+          const target = {
+            workspaceId,
+            machineId,
+            sessionId: turn.sessionId,
+            ...(projectId ? { projectId } : {}),
+          };
+          return yield* host.invoke(
+            pluginId,
+            {
+              kind: 'tool',
+              scope: 'session',
+              descriptorId: name.slice(`plugin__${pluginId}__`.length),
+              input,
+              target,
+              actorUserId: turn.userId,
+              ...(projectId
+                ? {
+                    projectConfig: resolveProjectConfig(
+                      item.current.manifest,
+                      item.projectPreferences?.[projectId]
+                    ),
+                  }
+                : {}),
+            },
+            (...args) => {
+              if (items.get(pluginId) !== item || !turn.isCurrent())
+                return Promise.reject(new Error('Plugin tool invocation ended'));
+              return turn.executeHostCall(...args);
+            },
+            turn.onDispatch
+          );
         }),
         workflowLease: (id, instance) => {
           const item = items.get(id);
@@ -637,6 +667,7 @@ export function registryLayer(
                 manifest: item.current.manifest,
                 enabled: item.enabled && !item.pendingConfiguration,
                 clientDigest: item.current.clientDigest,
+                invalidations: host.inspect(id).invalidations,
                 devSessionNonce: actor.machineOwner ? sessions.get(id) : undefined,
                 inspection,
               });
@@ -740,17 +771,24 @@ export function registryLayer(
           if (r.method === 'plugin/bundle-chunk') {
             if (r.params.clientDigest !== item.current.clientDigest)
               return yield* Effect.fail(new Error('Stale bundle'));
-            const bytes = yield* io(() =>
-              packClientBundle(item.current.manifest, (p) =>
-                readFile(join(item.current.directory, p))
+            const cached = bundles.get(id);
+            let bytes: Uint8Array<ArrayBuffer> | undefined =
+              cached?.digest === r.params.clientDigest ? cached.bytes : undefined;
+            if (!bytes) {
+              const packed = yield* io(() =>
+                packClientBundle(item.current.manifest, (p) =>
+                  readFile(join(item.current.directory, p))
+                )
+              );
+              if (
+                !packed ||
+                createHash('sha256').update(packed).digest('hex') !== r.params.clientDigest
               )
-            );
+                return yield* Effect.fail(new Error('Stale bundle'));
+              bytes = packed;
+              bundles.set(id, { digest: r.params.clientDigest, bytes });
+            }
             const offset = r.params.offset;
-            if (
-              !bytes ||
-              createHash('sha256').update(bytes).digest('hex') !== r.params.clientDigest
-            )
-              return yield* Effect.fail(new Error('Stale bundle'));
             if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length)
               return yield* Effect.fail(new Error('Invalid bundle offset'));
             return {
@@ -778,7 +816,9 @@ export function registryLayer(
               return yield* Effect.fail(new Error('Plugin create forbidden'));
             return yield* io(actor.createSession);
           }
-          const { descriptorId, scope, target, input } = r.params;
+          const { descriptorId, scope, target, input, clientDigest } = r.params;
+          if (clientDigest && clientDigest !== item.current.clientDigest)
+            return yield* Effect.fail(new Error('Stale plugin generation'));
           if (
             target.workspaceId !== workspaceId ||
             target.machineId !== machineId ||

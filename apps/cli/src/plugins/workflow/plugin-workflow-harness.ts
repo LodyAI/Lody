@@ -1,6 +1,6 @@
 import { readFile, realpath, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { join, sep } from 'node:path';
 import { Cause, Deferred, Effect, Exit, Scope } from 'effect';
 import { spawnProcess, ProcessReleaseFailed } from '@lody/shared/node/process';
@@ -69,12 +69,33 @@ export async function readWorkflowContributions(directory: string, manifest: Plu
   );
   return { root, pluginId: manifest.id, roles, skills, mcpServers, acpProviders };
 }
+/** Contribution identity: a client-only edit must not age the workflow generation. */
+const contributionsSignature = (
+  rows: WorkflowContributions,
+  config: Readonly<Record<string, unknown>>
+) => {
+  const entries = <T extends { id: string }>(map: Map<string, T>) =>
+    [...map.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        root: rows.root,
+        roles: entries(rows.roles),
+        skills: entries(rows.skills),
+        mcpServers: entries(rows.mcpServers),
+        acpProviders: entries(rows.acpProviders),
+        config,
+      })
+    )
+    .digest('hex');
+};
 export type WorkflowContributions = Awaited<ReturnType<typeof readWorkflowContributions>>;
 export const makePluginWorkflowHarness = Effect.fnUntraced(function* () {
   const generations = new Map<
     string,
     {
       rows: WorkflowContributions;
+      signature: string;
       scope: Scope.Closeable;
       managed: Set<() => Promise<void>>;
       closing: boolean;
@@ -107,20 +128,26 @@ export const makePluginWorkflowHarness = Effect.fnUntraced(function* () {
       discard: true,
     })
   );
+  /** Returns whether the generation was replaced; an unchanged install keeps ACP/MCP children alive. */
   const install = Effect.fnUntraced(function* (
     pluginId: string,
     rows: WorkflowContributions,
     config: Readonly<Record<string, unknown>>
   ) {
+    const signature = contributionsSignature(rows, config),
+      current = generations.get(pluginId);
+    if (current && !current.closing && current.signature === signature) return false;
     yield* remove(pluginId);
     generations.set(pluginId, {
       rows,
       config,
+      signature,
       managed: new Set(),
       closing: false,
       leases: new Set(),
       scope: yield* Scope.make(),
     });
+    return true;
   });
   const start = Effect.fnUntraced(function* (id: string, admit?: () => void) {
     const gen = generations.get(id.split(':')[1] ?? '');

@@ -95,7 +95,10 @@ export function PluginCatalogSubscriber() {
   usePluginSessionMetaEvents(
     owner?.workspaceId,
     metaReady && !visible.isLoading && runtime?.workspaceId === owner?.workspaceId,
-    useMemo(()=>[...visible.allActiveSessions,...archivedSessions],[visible.allActiveSessions,archivedSessions])
+    useMemo(
+      () => [...visible.allActiveSessions, ...archivedSessions],
+      [visible.allActiveSessions, archivedSessions]
+    )
   );
   const reads = useMemo(() => new WorkspacePluginReads(owner?.workspaceId ?? ''), [owner]);
   const workspaceCatalog = useWorkspaceCatalog();
@@ -339,8 +342,8 @@ export function PluginCatalogSubscriber() {
             if (!active) return;
             snapshots.set(target.machineId, entries);
           } catch {
+            // A failed poll cannot prove the installation disappeared; keep serving its last catalog.
             if (!active) return;
-            snapshots.delete(target.machineId);
           }
           await owner!
             .update([...snapshots.values()].flat())

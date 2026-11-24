@@ -73,9 +73,18 @@ export class PluginStateStore {
         storedJson(frame)
       );
       const seq = Number(db.prepare('SELECT seq FROM events WHERE id=?').get(frame.eventId)?.seq);
-      db.prepare(
-        'DELETE FROM events WHERE seq <= (SELECT seq FROM events ORDER BY seq DESC LIMIT 1 OFFSET 1024)'
-      ).run();
+      // Retention follows the slowest subscriber: replay never loses an event a cursor has not
+      // passed. The hard cap bounds a subscriber that stopped draining altogether.
+      const overflow = db
+        .prepare('SELECT seq FROM events ORDER BY seq DESC LIMIT 1 OFFSET 4095')
+        .get()?.seq;
+      if (overflow !== undefined) {
+        db.prepare('DELETE FROM events WHERE seq < ?').run(overflow);
+        db.prepare('UPDATE cursors SET seq = ? WHERE seq < ?').run(Number(overflow) - 1, overflow);
+      } else
+        db.prepare(
+          'DELETE FROM events WHERE seq <= COALESCE((SELECT MIN(seq) FROM cursors), (SELECT MAX(seq) FROM events))'
+        ).run();
       db.exec('COMMIT');
       return seq;
     } catch (e) {
@@ -87,6 +96,10 @@ export class PluginStateStore {
     this.db
       .prepare('INSERT OR IGNORE INTO cursors SELECT ?,?,COALESCE(MAX(seq),0) FROM events')
       .run(plugin, type);
+  }
+  /** A disabled plugin starts fresh on re-enable instead of replaying the disabled window. */
+  unsubscribe(plugin: string) {
+    this.db.prepare('DELETE FROM cursors WHERE plugin=?').run(plugin);
   }
   next(plugin: string, types: readonly string[]) {
     if (!types.length) return;

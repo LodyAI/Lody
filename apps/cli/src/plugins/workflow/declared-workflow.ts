@@ -146,7 +146,12 @@ export function resolveDeclaredWorkflow(options: {
           ? raw.session
           : undefined;
       const method = snapshot ? (nested ? 'session-meta' : undefined) : call.payload.descriptorId;
-      if (!method || !['sessions', 'sessionTurns', 'session-meta'].includes(method))
+      if (
+        !method ||
+        !['sessions', 'sessionTurns', 'sessionDetail', 'subagentRun', 'session-meta'].includes(
+          method
+        )
+      )
         return undefined;
       const parsed = pluginSessionCreateParams.shape.target.safeParse(snapshot ? nested : raw);
       if (!parsed.success) return undefined;

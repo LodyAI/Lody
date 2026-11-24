@@ -20,7 +20,6 @@ type Invoke = Omit<Extract<HostToChildFrame, { type: 'invoke' }>, 'type' | 'call
 export interface PluginLaunchSpec {
   previousVersion?: string;
   installationId?: string;
-  beforeStart?: Effect.Effect<void, unknown>;
   pluginId: string;
   workspaceId: string;
   machineId: string;
@@ -55,6 +54,7 @@ interface Api {
     lifecycle: string;
     pid?: number;
     registrations: string[];
+    invalidations: number;
   };
   tools: (id: string) => readonly PluginMcpDescriptor[];
   logs: (id: string) => Effect.Effect<readonly string[]>;
@@ -101,6 +101,7 @@ export const makePluginHostLayer = (
       };
       const active = new Map<string, Generation>(),
         history = new Map<string, readonly string[]>(),
+        invalidations = new Map<string, number>(),
         tails = new Map<string, Deferred.Deferred<void>>();
       let generation = 0;
       const serialize = <A, E>(id: string, op: Effect.Effect<A, E>) =>
@@ -227,7 +228,6 @@ export const makePluginHostLayer = (
           old.spec.machineId === spec.machineId &&
           old.spec.dataDir === spec.dataDir
         ) {
-          if (spec.beforeStart) yield* spec.beforeStart;
           old.spec = spec;
           old.status = { ...old.status, clientDigest: spec.clientDigest };
           return old.status;
@@ -244,7 +244,6 @@ export const makePluginHostLayer = (
           buffered: [],
         };
         active.set(id, g);
-        if (spec.beforeStart) yield* spec.beforeStart;
         if (!spec.machineEntry) return g.status;
         const child = yield* Scope.provide(
           node.spawnIpcChild({
@@ -296,7 +295,11 @@ export const makePluginHostLayer = (
             const f = parsed.data;
             if (f.type === 'ready' && phase === 'init') {
               phase = 'ready';
-              g.tools = f.handlers.flatMap(h => h.kind === 'tool' && h.tool ? [{ name: `plugin__${id}__${h.descriptorId}`, ...h.tool }] : []);
+              g.tools = f.handlers.flatMap((h) =>
+                h.kind === 'tool' && h.tool
+                  ? [{ name: `plugin__${id}__${h.descriptorId}`, ...h.tool }]
+                  : []
+              );
               g.registrations = [
                 ...f.handlers.map((h) => `${h.kind}: ${h.descriptorId}`),
                 ...f.subscribedEvents.map((e) => `event: ${e}`),
@@ -413,8 +416,9 @@ export const makePluginHostLayer = (
                 ),
                 g.scope
               );
-            } else if (f.type !== 'invalidate')
-              return yield* Effect.fail(new Error('Unexpected plugin IPC'));
+            } else if (f.type === 'invalidate')
+              invalidations.set(id, (invalidations.get(id) ?? 0) + 1);
+            else return yield* Effect.fail(new Error('Unexpected plugin IPC'));
           })
         ).pipe(Effect.ensuring(ended));
         yield* Effect.forkIn(
@@ -512,7 +516,12 @@ export const makePluginHostLayer = (
             const check =
               admissions.get(next.frame.eventId) ??
               (() => readmit?.(next.frame) ?? Promise.resolve(false));
-            if (!(yield* Effect.tryPromise(check))) return;
+            if (!(yield* Effect.tryPromise(check))) {
+              // Re-admission rejected the frame against current state, so no later retry can
+              // accept it. Advancing the cursor keeps every later event deliverable.
+              store.ack(g.spec.pluginId, next.frame.eventType, next.seq);
+              continue;
+            }
             yield* deliverEvent(g, next.frame, async () => {
               if (!(await check())) throw Error('Event admission lost');
               return true;
@@ -562,11 +571,15 @@ export const makePluginHostLayer = (
         disable: (id) =>
           Effect.suspend(() => {
             trailing.delete(id);
-            return serialize(id, stop(id));
+            return serialize(
+              id,
+              stop(id).pipe(Effect.andThen(Effect.sync(() => store?.unsubscribe(id))))
+            );
           }),
         inspect: (id) => {
           const g = active.get(id);
           return {
+            invalidations: invalidations.get(id) ?? 0,
             lifecycle:
               !g || g.faulted
                 ? 'Faulted'

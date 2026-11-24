@@ -20,6 +20,8 @@ export interface InstallationKey {
 }
 export interface ClientInstallation extends InstallationKey {
   digest: string;
+  /** Machine-side nonce bumped by `ctx.invalidate`; a change refreshes this plugin's queries. */
+  invalidations?: number;
   machineId?: string;
   admissionKey?: string;
   configurationKey?: string;
@@ -36,6 +38,8 @@ interface Slot {
   configurationKey?: string;
   controller: AbortController;
   digest: string;
+  invalidations?: number;
+  queries?: PluginQueryRegistry;
   ready: Promise<void>;
   cleanup?: ClientPluginCleanup;
 }
@@ -56,18 +60,25 @@ export class ClientPluginHost {
     const previous = this.slots.get(id);
     if (
       previous &&
-      install?.digest === previous.digest &&
+      install &&
+      install.digest === previous.digest &&
       install.configurationKey === previous.configurationKey &&
       install.admissionKey === previous.admissionKey &&
       !previous.controller.signal.aborted
-    )
+    ) {
+      if (install.invalidations !== previous.invalidations) {
+        previous.invalidations = install.invalidations;
+        previous.queries?.invalidateAll();
+      }
       return previous.ready;
+    }
 
     const slot: Slot = {
       controller: new AbortController(),
       admissionKey: install?.admissionKey,
       configurationKey: install?.configurationKey,
       digest: install?.digest ?? '',
+      invalidations: install?.invalidations,
       ready: Promise.resolve(),
     };
     const continues =
@@ -83,10 +94,9 @@ export class ClientPluginHost {
     previous?.controller.abort();
     this.slots.set(id, slot);
     slot.ready = (async () => {
-      if (previous) {
-        await previous.ready.catch(() => {});
-        await previous.cleanup?.();
-      }
+      // Abort already fences the previous module: a late-resolving import rejects before it can
+      // register. Awaiting its `ready` would let a stuck evaluation block every replacement.
+      if (previous?.cleanup) await previous.cleanup();
       const signal = slot.controller.signal;
       if (!install || signal.aborted) return;
       const files = await this.bundles.load(install.pluginId, install.digest, install.page, signal);
@@ -120,7 +130,9 @@ export class ClientPluginHost {
         slot.controller.abort();
         return;
       }
-      const registry = install.registry(files, signal, new PluginQueryRegistry(signal));
+      const queries = new PluginQueryRegistry(signal);
+      const registry = install.registry(files, signal, queries);
+      slot.queries = queries;
       slot.cleanup = definition?.register(registry) || undefined;
       finishShellGeneration(signal);
     })()

@@ -69,6 +69,7 @@ export const pluginBundleParams = z.strictObject({
 export const pluginInvocationParams = z.strictObject({
   pluginId: pluginIdSchema,
   descriptorId: descriptorIdSchema,
+  clientDigest: digest.optional(),
   scope: z.enum(['machine', 'project', 'session']),
   target: z.strictObject({
     workspaceId: z.string().min(1),
@@ -141,6 +142,7 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
           })
           .optional(),
         clientDigest: digest.optional(),
+        invalidations: z.number().int().nonnegative().optional(),
         devSessionNonce: z.string().optional(),
       })
     ),

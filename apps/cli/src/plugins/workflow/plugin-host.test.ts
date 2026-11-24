@@ -1,6 +1,6 @@
 import { encryptedPluginDispatch } from '../machine-host-port';
 import { describe, expect, it } from '@effect/vitest';
-import { Deferred, Effect, Fiber } from 'effect';
+import { Deferred, Effect, Exit, Fiber, Option, Scope } from 'effect';
 import { TestClock } from 'effect/testing';
 import { makePluginInvocations } from './plugin-invocations';
 import { build } from 'esbuild';
@@ -16,6 +16,8 @@ import { nodeProcessLive, type NodeProcessApi } from '@lody/shared/node/process'
 import { hostToChildSchema } from '@lody/shared/plugins/ipc-protocol';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import { ProcessReleaseFailed, TerminationFailed } from '@lody/shared/node/process';
+import { makePluginWorkflowHarness, type WorkflowContributions } from './plugin-workflow-harness';
+import { PluginStateStore } from '../plugin-state-store';
 
 describe('machine invocation ownership', () => {
   it.effect('settles a dispatched mutation as uncertain when its generation exits', () =>
@@ -465,6 +467,124 @@ it('runs version hooks before start, composes event listeners, and aborts only t
     ]);
     expect(journal.slice(8).sort()).toEqual(['abort', 'uninstall']);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('keeps workflow children alive across an identical install and replaces them on change', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lody-workflow-generation-'));
+  try {
+    const entry = join(root, 'server.mjs');
+    await writeFile(entry, 'setInterval(() => {}, 1000);');
+    const server = { id: 'plugin:p:memory', title: 'Memory', transport: 'stdio' as const, entry };
+    const contributions = (markdown: string): WorkflowContributions => ({
+      root,
+      pluginId: 'p',
+      roles: new Map(),
+      skills: new Map([['plugin:p:skill', { id: 'plugin:p:skill', name: 'skill', markdown }]]),
+      mcpServers: new Map([[server.id, server]]),
+      acpProviders: new Map(),
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const workflow = yield* makePluginWorkflowHarness();
+        const scope = Scope.makeUnsafe();
+        try {
+          expect(yield* workflow.install('p', contributions('one'), {})).toBe(true);
+          const { processHandle } = yield* Scope.provide(workflow.start(server.id), scope);
+          const pid = processHandle.child.pid;
+          if (!pid) throw new Error('Missing workflow child pid');
+          expect(yield* workflow.install('p', contributions('one'), {})).toBe(false);
+          process.kill(pid, 0);
+          expect(yield* workflow.install('p', contributions('two'), {})).toBe(true);
+          expect(
+            Option.isSome(yield* processHandle.exited.pipe(Effect.timeoutOption('5 seconds')))
+          ).toBe(true);
+          expect(() => process.kill(pid, 0)).toThrowError(
+            expect.objectContaining({ code: 'ESRCH' })
+          );
+        } finally {
+          yield* Scope.close(scope, Exit.void);
+          yield* workflow.remove('p');
+        }
+      }).pipe(Effect.scoped, Effect.provide(processLayer({})))
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('skips a permanently rejected journal event and reports machine invalidations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lody-plugin-journal-'));
+  const store = new PluginStateStore(root);
+  try {
+    const worker = join(root, 'worker.mjs'),
+      entry = join(root, 'machine.mjs');
+    await build({
+      entryPoints: [fileURLToPath(new URL('../plugin-worker-entry.ts', import.meta.url))],
+      outfile: worker,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+    });
+    await writeFile(
+      entry,
+      `import {appendFileSync} from 'node:fs';import {join} from 'node:path';const schema={safeParse:data=>({success:true,data})};export default {kind:'machine-plugin',register(m){m.events.on('session.created',(ctx,e)=>appendFileSync(join(ctx.dataDir,'events'),e.value+'\\n'));m.mutation({id:'poke',scope:'machine',input:schema,output:schema},ctx=>{ctx.invalidate({id:'status',scope:'machine'},null);return true;});}}`
+    );
+    store.subscribe('journal', 'session.created');
+    store.record({
+      type: 'event',
+      eventType: 'session.created',
+      eventId: 'stale',
+      payload: { value: 1 },
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.reload({
+          pluginId: 'journal',
+          manifest: {
+            id: 'journal',
+            title: 'Journal',
+            sdk: '^1.0.0',
+            version: '1.0.0',
+            machine: 'machine.mjs',
+          },
+          machineEntry: entry,
+          machineId: 'm',
+          workspaceId: 'w',
+          config: {},
+          dataDir: root,
+        });
+        yield* host.broadcast({
+          type: 'event',
+          eventType: 'session.created',
+          eventId: 'fresh',
+          payload: { value: 2 },
+        });
+        yield* host.invoke('journal', {
+          kind: 'mutation',
+          descriptorId: 'poke',
+          scope: 'machine',
+          target: { workspaceId: 'w', machineId: 'm' },
+          input: null,
+          actorUserId: 'u',
+        });
+        expect(host.inspect('journal').invalidations).toBe(1);
+      }).pipe(
+        Effect.provide(
+          makePluginHostLayer(
+            worker,
+            undefined,
+            store,
+            async (frame) => frame.eventId !== 'stale'
+          ).pipe(Layer.provide(processLayer({})))
+        )
+      )
+    );
+    expect((await readFile(join(root, 'events'), 'utf8')).trim()).toBe('2');
+  } finally {
+    store.close();
     await rm(root, { recursive: true, force: true });
   }
 });

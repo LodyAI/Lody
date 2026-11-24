@@ -33,7 +33,14 @@ export async function readPluginCatalog(
           target,
           {
             method,
-            params: { pluginId, descriptorId, scope, target: ref, input: z.json().parse(input) },
+            params: {
+              pluginId,
+              descriptorId,
+              clientDigest: row.clientDigest,
+              scope,
+              target: ref,
+              input: z.json().parse(input),
+            },
           },
           { signal, requireLocal: response.transport === 'local' }
         );
@@ -132,6 +139,7 @@ export async function readPluginCatalog(
         row.inspection?.projectPreferences,
       ]),
       digest: row.clientDigest ?? '',
+      invalidations: row.invalidations ?? 0,
       client: row.manifest.client,
       enabled: row.enabled,
       dev: {

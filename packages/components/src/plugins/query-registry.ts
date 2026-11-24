@@ -101,4 +101,8 @@ export class PluginQueryRegistry {
     for (const q of this.entries.values())
       if (q.id === id && (target === undefined || target === q.target)) q.refresh();
   }
+  /** Machine invalidations carry no client-side target key; refresh every cached query. */
+  invalidateAll() {
+    for (const q of this.entries.values()) q.refresh();
+  }
 }

@@ -21,6 +21,7 @@ import { TrustedDevSessionStore, type DevInstallation } from './trust';
 import type { PluginInspection, InspectorAction } from '../components/settings/plugin-inspector';
 
 export interface ClientCatalogInstallation extends ClientInstallation {
+  invalidations?: number;
   workflowPrompts?: Readonly<Record<string, string>>;
   declaredGrant?: Omit<
     import('@lody/shared/plugins/machine-rpc').DeclaredWorkflowGrant,
