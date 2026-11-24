@@ -651,4 +651,44 @@ End of synthetic document.`,
     );
     expect(fileLinkButton).not.toBeNull();
   });
+
+  it.each([false, true])(
+    'renders ordered, unordered, and mixed task lists with task-item checkbox styling (streaming=%s)',
+    async (isStreaming) => {
+      await renderMarkdown(
+        [
+          '1. [ ] Ordered task one',
+          '2. [x] Ordered task two',
+          '',
+          '- [ ] Unordered task',
+          '- Regular bullet',
+          '',
+          '1. Regular ordered one',
+          '2. [ ] Mixed ordered task',
+          '3. Regular ordered three',
+        ].join('\n'),
+        { isStreaming }
+      );
+
+      const lists = container?.querySelectorAll('.markdown-renderer .contains-task-list');
+      expect(lists).toHaveLength(3);
+
+      const taskItems = Array.from(
+        container?.querySelectorAll('.markdown-renderer li.task-list-item') ?? []
+      );
+      expect(taskItems).toHaveLength(4);
+
+      const regularOrderedItem = container?.querySelector(
+        '.markdown-renderer ol.contains-task-list > li:not(.task-list-item)'
+      );
+      expect(regularOrderedItem).not.toBeNull();
+
+      for (const taskItem of taskItems) {
+        const checkbox = taskItem.querySelector(':scope > input[type="checkbox"]');
+        expect(checkbox).not.toBeNull();
+        expect(checkbox?.getAttribute('class')).toBeTruthy();
+        expect(taskItem.className).not.toBe(regularOrderedItem?.className);
+      }
+    }
+  );
 });
