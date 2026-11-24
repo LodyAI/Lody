@@ -21,8 +21,12 @@ const PIN_SECTION_ID_MAX_LENGTH = 200;
 /** Random bytes appended to every generated key so concurrent inserts do not collide. */
 const PIN_ORDER_JITTER_BYTES = 3;
 
+/**
+ * A usable order key. An all-zero key is a well-formed index with nothing
+ * before it, so a key above it cannot be generated; it reads as no key.
+ */
 export const isPinOrderKey = (value: unknown): value is string =>
-  FractionalIndex.isFractionalIndex(value);
+  FractionalIndex.isFractionalIndex(value) && /[1-9A-F]/u.test(value);
 
 export const normalizePinSection = (value: unknown): PinSection | undefined => {
   if (!value || typeof value !== 'object') return undefined;

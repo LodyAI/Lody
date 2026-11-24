@@ -91,11 +91,18 @@ export type TodayLink = { userId: string; date: string; workspaceId: string };
  */
 export function parseTodayLink(raw: string): TodayLink | null {
   if (raw.length > 8192 || /[\s\\]/u.test(raw)) return null;
-  const match = /^([a-zA-Z.-]+):\/\/today\/([A-Za-z0-9_.~%-]+)\/(\d{4}-\d{2}-\d{2})\?workspace=([A-Za-z0-9_-]+)$/u.exec(
-    raw
-  );
+  const match =
+    /^([a-zA-Z.-]+):\/\/today\/([A-Za-z0-9_.~%-]+)\/(\d{4}-\d{2}-\d{2})\?workspace=([A-Za-z0-9_-]+)$/u.exec(
+      raw
+    );
   if (!match || !SCHEMES.has(`${match[1]}:`)) return null;
-  const [, , encodedUser, date, workspaceId] = match as unknown as [string, string, string, string, string];
+  const [, , encodedUser, date, workspaceId] = match as unknown as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
   let userId: string;
   try {
     userId = decodeURIComponent(encodedUser);

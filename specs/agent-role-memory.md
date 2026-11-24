@@ -31,12 +31,12 @@ entry, focus and every 30 seconds while visible, skipping pending requests.
 Memory settings and the Role editor's memory section keep saved cards visible during probing
 without a loading indicator; completed failures still show inline status.
 
-The Role editor has Configuration and Team tabs sharing one draft and save
-action. Memory belongs to a machine, so it is a section of each machine tab in the
-Configuration tab ([machine targets](agent-role-machine-targets.md)). It lists saved
-associations on that tab's exact machine, using the same logo/name/description
+The Role editor is one form with one save action. Memory belongs to a machine, so
+it is part of each machine row of the "Runs on" list
+([machine targets](agent-role-machine-targets.md)). It lists saved
+associations on that row's exact machine, using the same logo/name/description
 cards as Memory settings. Clicking a card selects it; unlinking remains available.
-Workspace sharing is shown only in the Team tab. Each machine target's run
+Workspace sharing is one switch among the fields shared by every machine. Each machine target's run
 configuration and turn input still store only `{ providerId, memoryId }`; adding a
 target links memory only when that machine has the same association.
 Removing a catalog association does not rewrite existing Roles or accepted turns.
@@ -91,6 +91,11 @@ Settings never sends them to another machine, and the daemon refuses them when t
 arrive over the workspace relay or the encrypted feature ingress, because an
 approval made elsewhere would bind this machine to whoever made it.
 
+Uninstalling is the same machine-only setup step in reverse: it removes only the
+global `@everme/cli` package, using the npm and prefix the install used, and leaves
+the account's memories, the sign-in and EverMe's configuration in place. One install
+or uninstall runs per machine at a time, and neither overlaps an agent connection job.
+
 ## Evidence
 
 - [Provider contract](../packages/shared/src/memory-provider.ts)
@@ -119,8 +124,8 @@ claim a successful local metadata save.
 
 A memory with no binding in the accessible Role catalog shows a Link to a role
 action before edit/delete, once the catalog is loaded. It opens Agent Roles,
-scrolls to the first Role running on that machine and opens Roles on that machine's
-tab; new Roles preselect that machine. The action does not mutate a Role or
+scrolls to the first Role running on that machine and opens Roles with that machine's
+row open; new Roles preselect that machine. The action does not mutate a Role or
 auto-select an identity. The Role page has no machine tabs or machine filtering.
 
 Assigned memories show “Linked:” followed by the accessible bound Roles’ emoji avatars.

@@ -292,7 +292,10 @@ export function StatusPage({
           ) : null}
           <Heading {...stylex.props(styles.title, isRegion && styles.titleRegion)}>{title}</Heading>
           {description ? (
-            <p {...stylex.props(styles.description, isRegion && styles.descriptionRegion)}>
+            <p
+              {...stylex.props(styles.description, isRegion && styles.descriptionRegion)}
+              data-text-selectable
+            >
               {description}
             </p>
           ) : null}
@@ -333,6 +336,7 @@ export function StatusPageCode({
         size === 'fit' && !isRegion && styles.codeFit,
         action != null && styles.codeWithAction
       )}
+      data-text-selectable
     >
       {children}
     </pre>

@@ -40,6 +40,11 @@ import {
   replaceAccountVault,
   type VaultReplacementWorkspace
 } from '@lody/e2ee-client/vault-replacement'
+import {
+  removeVaultPasswordGuarded,
+  setVaultPasswordVerified
+} from '@lody/e2ee-client/recovery-password'
+import { recoveryServiceLocator } from '@lody/e2ee-client/recovery-locator'
 import { sqliteRecoveryVaultLocalStore } from '@lody/e2ee-core/adapters/node-sqlite'
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services'
 import { createHash, randomUUID } from 'node:crypto'
@@ -52,6 +57,21 @@ export const RECOVERY_VAULT_ENV = 'LODY_E2EE_RECOVERY_VAULT'
 export const recoveryVaultEnabled = (env: NodeJS.ProcessEnv = process.env) => {
   const value = env[RECOVERY_VAULT_ENV]
   return value === undefined || value.trim() === 'on'
+}
+
+/**
+ * The locator a desktop recovery file names and every open requires: the canonical
+ * origin of this build's product site (`VITE_SITE_URL`), the same value mobile and Web
+ * use, so one file opens on all of them. Cloud builds require the site at build time
+ * (`electron.cloud.config.ts`); a build without a usable site has no recovery service,
+ * so every recovery entry refuses as `disabled` before a passkey ceremony, save dialog
+ * or vault write rather than failing later in core or leaving an orphaned platform
+ * passkey. Never the Convex deployment URL: it may change while the site stays.
+ */
+export const recoveryVaultLocator = (siteUrl: string | undefined): string => {
+  const locator = recoveryServiceLocator(siteUrl)
+  if (locator === null) throw new Error('e2ee_recovery_disabled')
+  return locator
 }
 
 /** A canonical vault-v1 file is about 150 bytes; anything larger is not one. */
@@ -76,6 +96,7 @@ export function recoveryVaultFailure(error: unknown): Error {
     typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
   if (error instanceof E2eePasskeyCancelled) return new Error('e2ee_recovery_cancelled')
   if (publicCodes.has(code)) return new Error(`e2ee_recovery_${code}`)
+  if (code === 'locator-mismatch') return new Error('e2ee_recovery_authentication')
   if (typeof error === 'object' && error !== null && '_tag' in error) {
     if (error._tag === 'BackendError') return new Error('e2ee_recovery_unavailable')
     if (error._tag === 'LocalStoreError') return new Error('e2ee_recovery_storage')
@@ -249,7 +270,10 @@ const createVaultWithSavedFile = (
           )
       })
       created.recoveryFile.fill(0)
-      const reopened = yield* service.open({ recoveryFile: new Uint8Array(saved) })
+      const reopened = yield* service.open({
+        recoveryFile: new Uint8Array(saved),
+        locator: io.locator
+      })
       if (reopened.vaultId !== created.vault.vaultId)
         return yield* Effect.fail({ code: 'authentication' })
       yield* syncVaultMethodsSummary(reopened)
@@ -535,6 +559,7 @@ const submitFor = (target: RecoveryWorkspaceTarget) =>
 export const continueAccountVaultReplacement = (
   io: RecoveryVaultIo & {
     readonly file: Uint8Array
+    readonly locator: string
     readonly compromised: boolean
     readonly replacement: RecoveryVaultReplacement
     readonly workspaces: readonly RecoveryWorkspaceTarget[]
@@ -544,7 +569,10 @@ export const continueAccountVaultReplacement = (
     Effect.gen(function* () {
       const { current, replacing } = yield* io.replacement.state()
       if (!current || !replacing) return yield* Effect.fail({ code: 'missing' })
-      const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: new Uint8Array(io.file) })
+      const vault = yield* (yield* RecoveryVaults).open({
+        recoveryFile: new Uint8Array(io.file),
+        locator: io.locator
+      })
       if (vault.vaultId !== replacing) return yield* Effect.fail({ code: 'authentication' })
       const local = yield* RecoveryVaultLocalStore
       const workspaces: VaultReplacementWorkspace[] = []
@@ -603,9 +631,12 @@ export const abandonAccountVaultReplacement = (
     }).pipe(Effect.provide(vaults(io)))
   )
 
-/** How a vault opens: the recovery file, a passkey ceremony, or a recovery password. */
+/**
+ * How a vault opens: the recovery file, a passkey ceremony, or a recovery password.
+ * `locator` is the signed-in service's (`recoveryVaultLocator`); a file naming another fails.
+ */
 export type RecoveryUnlock =
-  | { readonly file: Uint8Array }
+  | { readonly file: Uint8Array; readonly locator: string }
   | { readonly passkey: E2eePasskeyPort; readonly locator: string }
   | {
       readonly password: string
@@ -617,7 +648,11 @@ export type RecoveryUnlock =
 const openVault = (unlock: RecoveryUnlock) =>
   Effect.gen(function* () {
     const service = yield* RecoveryVaults
-    if ('file' in unlock) return yield* service.open({ recoveryFile: new Uint8Array(unlock.file) })
+    if ('file' in unlock)
+      return yield* service.open({
+        recoveryFile: new Uint8Array(unlock.file),
+        locator: unlock.locator
+      })
     if ('passkey' in unlock)
       return yield* unlockVaultWithPasskey({
         port: unlock.passkey,
@@ -662,7 +697,10 @@ export const saveAccountRecoveryFile = (
             )
         })
         created.recoveryFile.fill(0)
-        const reopened = yield* service.open({ recoveryFile: new Uint8Array(saved) })
+        const reopened = yield* service.open({
+          recoveryFile: new Uint8Array(saved),
+          locator: vault.locator
+        })
         if (reopened.vaultId !== vault.vaultId)
           return yield* Effect.fail({ code: 'authentication' })
         yield* syncVaultMethodsSummary(reopened)
@@ -685,16 +723,10 @@ export const setRecoveryPassword = (
       const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
-      yield* vault.setPassword({
+      const reopened = yield* setVaultPasswordVerified(vault, {
         password: io.password,
         ...(io.kdf ? { kdf: io.kdf } : {})
       })
-      const reopened = yield* (yield* RecoveryVaults).openWithPassword({
-        vaultId: vault.vaultId,
-        locator: vault.locator,
-        password: io.password
-      })
-      if (reopened.vaultId !== vault.vaultId) return yield* Effect.fail({ code: 'authentication' })
       yield* syncVaultMethodsSummary(reopened)
       return { hasPassword: true as const }
     }).pipe(Effect.provide(vaults(io)))
@@ -712,15 +744,9 @@ export const removeRecoveryPassword = (
       const vault = yield* openVault(io.unlock)
       const { current } = yield* io.replacement.state()
       if (vault.vaultId !== current) return yield* Effect.fail({ code: 'authentication' })
-      const hasFile = yield* vault.hasRecoveryFile()
-      const passkeys = yield* vault.listPasskeys()
-      if (!hasFile && passkeys.length === 0) return yield* Effect.fail({ code: 'conflict' })
-      const removed = yield* Effect.exit(vault.removePassword())
-      const pending = yield* vault.pendingPasswordRemovals()
-      yield* syncVaultMethodsSummary(vault)
-      if (Exit.isFailure(removed) && pending.length === 0)
-        return yield* Effect.failCause(removed.cause)
-      return { removed: Exit.isSuccess(removed), pending: pending.length > 0 }
+      return yield* removeVaultPasswordGuarded(vault).pipe(
+        Effect.tap(() => syncVaultMethodsSummary(vault))
+      )
     }).pipe(Effect.provide(vaults(io)))
   )
 
@@ -745,11 +771,16 @@ export const enrollRecoveryPasskey = (
   io: RecoveryVaultIo & {
     readonly port: E2eePasskeyPort
     readonly label: string
-  } & ({ readonly file: Uint8Array } | { readonly unlock: RecoveryUnlock })
+  } & (
+      | { readonly file: Uint8Array; readonly locator: string }
+      | { readonly unlock: RecoveryUnlock }
+    )
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const vault = yield* openVault('unlock' in io ? io.unlock : { file: io.file })
+      const vault = yield* openVault(
+        'unlock' in io ? io.unlock : { file: io.file, locator: io.locator }
+      )
       const label = yield* Effect.try({
         try: () => passkeyLabel(io.label),
         catch: () => ({ code: 'invalid-input' })
@@ -1048,7 +1079,9 @@ export const restoreAccountWorkspaces = (
  * This proves the file and the service ciphertext still unlock together; it does
  * not restore a workspace, confirm a trust anchor or admit a device.
  */
-export const inspectRecoveryFile = (io: RecoveryVaultIo & { readonly file: Uint8Array }) =>
+export const inspectRecoveryFile = (
+  io: RecoveryVaultIo & { readonly file: Uint8Array; readonly locator: string }
+) =>
   Effect.acquireUseRelease(
     Effect.sync(() => new Uint8Array(io.file)),
     (file) =>
@@ -1056,7 +1089,10 @@ export const inspectRecoveryFile = (io: RecoveryVaultIo & { readonly file: Uint8
         Effect.gen(function* () {
           if (file.length === 0 || file.length > MAX_RECOVERY_FILE_BYTES)
             return yield* Effect.fail({ code: 'invalid-input' })
-          const vault = yield* (yield* RecoveryVaults).open({ recoveryFile: file })
+          const vault = yield* (yield* RecoveryVaults).open({
+            recoveryFile: file,
+            locator: io.locator
+          })
           const index = yield* vault.readIndex()
           return {
             vaultId: vault.vaultId,

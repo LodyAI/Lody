@@ -4,6 +4,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 
@@ -12,6 +13,10 @@ const EmojiPickerPanel = lazy(() => import('./emoji-picker-panel'));
 const FILL = `color-mix(in oklab, transparent, ${colors.label} 6%)`;
 
 const styles = stylex.create({
+  pickerSpacing: {
+    [popup.panelGap]: 'calc(var(--spacing) * 1)',
+    [popup.panelPadding]: 'calc(var(--spacing) * 1)',
+  },
   /** Edgeless and filling the slot, at the well's radius less the slot's inset. */
   trigger: {
     display: 'flex',
@@ -64,8 +69,7 @@ const styles = stylex.create({
  * `:focus-within` — and fills the slot, which is already the well's height less
  * its inset, at the well's radius less that inset.
  *
- * Shared by every settings editor that has one, so an Agent Role and a Prompt
- * Shortcut cannot end up with two different emoji controls.
+ * The one emoji control in settings; today only the Agent Role editor has one.
  */
 export function EmojiField({
   value,
@@ -108,9 +112,7 @@ export function EmojiField({
         // The list is long and the search field wants the caret; taking focus to
         // the popover root would fight the picker's own keyboard handling.
         initialFocus={false}
-        // Temporary override: the panel's 12px padding and 10px gap read loose
-        // around a dense picker grid; pull both down to the menu inset.
-        className="gap-1 p-1"
+        className={stylex.props(styles.pickerSpacing).className}
       >
         <Suspense
           fallback={

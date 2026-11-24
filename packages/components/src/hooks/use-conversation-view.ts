@@ -284,22 +284,33 @@ function indexRowsStore(view: ConversationView, includeSummary: boolean): IndexR
  */
 export function useConversationIndexRows(
   view: ConversationView | null | undefined,
-  options: { includeSummary?: boolean } = {}
+  options: { includeSummary?: boolean; enabled?: boolean } = {}
 ): readonly TurnIndexRow[] {
   const includeSummary = options.includeSummary !== false;
+  const enabled = options.enabled !== false;
   const store = useMemo(
     () => (view ? indexRowsStore(view, includeSummary) : undefined),
     [view, includeSummary]
   );
+  const retained = useRef<{ store: IndexRowsStore; rows: readonly TurnIndexRow[] } | null>(null);
   const subscribe = useCallback(
-    (listener: () => void) => (store ? subscribeOnFrame(store.subscribe, listener) : () => {}),
-    [store]
+    (listener: () => void) =>
+      store && enabled ? subscribeOnFrame(store.subscribe, listener) : () => {},
+    [store, enabled]
   );
-  const read = useCallback(() => store?.read() ?? EMPTY_ROWS, [store]);
+  const read = useCallback(() => {
+    if (retained.current?.store !== store) retained.current = null;
+    if (!store) return EMPTY_ROWS;
+    if (!enabled) return retained.current?.store === store ? retained.current.rows : EMPTY_ROWS;
+    const rows = store.read();
+    retained.current = { store, rows };
+    return rows;
+  }, [store, enabled]);
   useEffect(() => {
+    if (!enabled) return;
     const directory = view?.acquireDirectory?.();
     return () => directory?.release();
-  }, [view]);
+  }, [view, enabled]);
   return useSyncExternalStore(subscribe, read, read);
 }
 
@@ -355,28 +366,34 @@ export function useConversationTail(
  */
 export function useConversationDerivation<F>(
   view: ConversationView | null | undefined,
-  derive: DeriveTurnFact<F>
+  derive: DeriveTurnFact<F>,
+  enabled = true
 ): { facts: ReadonlyMap<string, F>; complete: boolean; version: number } {
-  const [derivation, setDerivation] = useState<ConversationDerivation<F> | null>(null);
+  const [retained, setRetained] = useState<{
+    view: ConversationView;
+    table: ConversationDerivation<F>;
+  } | null>(null);
+  const derivation = retained && retained.view === view ? retained.table : null;
   useEffect(() => {
-    if (!view) {
-      setDerivation(null);
-      return undefined;
+    if (!view || !enabled) {
+      setRetained((previous) => (previous?.view === view ? previous : null));
+      return;
     }
     const lease = acquireConversationDerivation(view, derive);
     const next = lease.table;
-    setDerivation(next);
+    setRetained((previous) =>
+      previous?.view === view && previous.table === next ? previous : { view, table: next }
+    );
     return () => {
       lease.release();
-      setDerivation((current) => (current === next ? null : current));
     };
-  }, [view, derive]);
+  }, [view, derive, enabled]);
   const subscribe = useCallback(
     (onChange: () => void) =>
-      derivation
+      derivation && enabled
         ? subscribeOnFrame((listener) => derivation.subscribe(listener), onChange)
         : () => {},
-    [derivation]
+    [derivation, enabled]
   );
   const read = useCallback(() => derivation?.version ?? -1, [derivation]);
   const version = useSyncExternalStore(subscribe, read, read);

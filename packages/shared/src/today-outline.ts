@@ -16,7 +16,7 @@ import {
  *
  * Structure lives in the `outline` LoroTree; each node's data map holds a
  * `text` LoroText created in the same commit as the node and `collapsed: true`
- * when folded. A conversation mention is one U+FFFC character of that text
+ * when folded (`todo` holds a to-do's state). A conversation mention is one U+FFFC character of that text
  * carrying the `mention = {kind, id}` mark (expand `none`). Unknown root
  * containers and data keys are ignored. Every structural operation validates
  * first, then mutates and commits once, because a Loro transaction cannot be
@@ -45,6 +45,15 @@ export type TodayRichText = { text: string; mentions: TodayMention[] };
 
 export type TodayNodeId = TreeID;
 
+export type TodayTodoState = 'todo' | 'done';
+const TODO_STATES: readonly unknown[] = ['todo', 'done'];
+export const isTodayTodoState = (value: unknown): value is TodayTodoState =>
+  TODO_STATES.includes(value);
+export const nextTodayTodoState = (
+  state: TodayTodoState | undefined
+): TodayTodoState | undefined =>
+  state === undefined ? 'todo' : state === 'todo' ? 'done' : undefined;
+
 export type TodayNodeView = {
   id: TodayNodeId;
   parentId: TodayNodeId | null;
@@ -53,6 +62,7 @@ export type TodayNodeView = {
   mentions: readonly TodayMention[];
   collapsed: boolean;
   hasChildren: boolean;
+  todo?: TodayTodoState;
 };
 
 export type TodayPageSnapshot = {
@@ -60,12 +70,18 @@ export type TodayPageSnapshot = {
   visible: readonly TodayNodeView[];
   /** No node has text (a mention counts as text). */
   isEmpty: boolean;
+  /**
+   * Replaced whenever the visible rows' order or nesting may have changed;
+   * the same object while only their text changed.
+   */
+  layout: object;
 };
 
 export type TodayFragment = {
   text: string;
   mentions?: TodayMention[];
   collapsed?: boolean;
+  todo?: TodayTodoState;
   children: TodayFragment[];
 };
 
@@ -84,19 +100,34 @@ export type TodayMoveTarget = { parentId: TodayNodeId | null; index: number };
 
 export type TodayOutline = {
   getAllNodes(): TodayNodeView[];
+  /** Child ids of `parentId` (the roots for null), in order; hidden ones included. */
+  childIds(parentId: TodayNodeId | null): TodayNodeId[];
   getSnapshot(): TodayPageSnapshot;
+  /**
+   * The rows under `rootId` for a zoomed view: its descendants, depth counted
+   * from its children (0), shown even when the root itself is folded. Null
+   * when the node is gone.
+   */
+  getSubtree(rootId: TodayNodeId): TodayPageSnapshot | null;
   getNode(id: TodayNodeId): TodayNodeView | undefined;
   getText(id: TodayNodeId): LoroText | undefined;
-  insertFirst(text?: string): FocusIntent;
-  split(id: TodayNodeId, offset: number): FocusIntent;
-  enterOnEmpty(id: TodayNodeId): FocusIntent;
-  mergeWithPrevious(id: TodayNodeId): FocusIntent;
-  mergeWithNext(id: TodayNodeId): FocusIntent;
+  /** The first line of an empty page, or with `parentId` the first child of that node. */
+  insertFirst(text?: string, parentId?: TodayNodeId): FocusIntent;
+  /** `intoChildren`: the new line becomes the first child (a zoomed root's title). */
+  split(id: TodayNodeId, offset: number, options?: { intoChildren?: boolean }): FocusIntent;
+  /** `within`: a zoomed root; its empty last child gets a sibling instead of leaving it. */
+  enterOnEmpty(id: TodayNodeId, options?: { within?: TodayNodeId }): FocusIntent;
+  /** `within`: a zoomed root. The neighbour merged with is taken from its subtree's rows. */
+  mergeWithPrevious(id: TodayNodeId, options?: { within?: TodayNodeId }): FocusIntent;
+  mergeWithNext(id: TodayNodeId, options?: { within?: TodayNodeId }): FocusIntent;
   indent(ids: readonly TodayNodeId[]): boolean;
-  outdent(ids: readonly TodayNodeId[]): boolean;
+  /** `within`: a zoomed root. Nothing moves when a node would leave its subtree. */
+  outdent(ids: readonly TodayNodeId[], options?: { within?: TodayNodeId }): boolean;
   moveUp(ids: readonly TodayNodeId[]): boolean;
   moveDown(ids: readonly TodayNodeId[]): boolean;
   moveTo(ids: readonly TodayNodeId[], target: TodayMoveTarget): boolean;
+  cycleTodo(ids: readonly TodayNodeId[]): boolean;
+  setTodo(ids: readonly TodayNodeId[], state: TodayTodoState | undefined): boolean;
   /**
    * Fold or unfold a node for this viewer and in the document. Not an undo
    * step (its commit uses a `sys:` origin).
@@ -108,7 +139,8 @@ export type TodayOutline = {
    */
   onViewChange(listener: () => void): () => void;
   dispose(): void;
-  deleteNodes(ids: readonly TodayNodeId[]): FocusIntent;
+  /** Focus moves to the previous surviving row (of a zoomed root's subtree with `within`). */
+  deleteNodes(ids: readonly TodayNodeId[], options?: { within?: TodayNodeId }): FocusIntent;
   /** Replace `deleteCount` characters at `offset` with one mention; the caret lands after it. */
   insertMention(
     id: TodayNodeId,
@@ -241,46 +273,140 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   // keeps this viewer's fold for nodes a peer refolded, until this viewer
   // folds or unfolds them. Specs/today-outline.md (Data ownership).
   const viewFolds = new Map<string, boolean>();
-  const docFolds = new Map<string, boolean>();
+  /**
+   * Snapshot caches, kept exact by the synchronous commit events: node text by
+   * node id (dropped when its LoroText changes), and the last snapshot, rebuilt
+   * in full only after a structural change.
+   */
+  const richCache = new Map<string, TodayRichText>();
+  const textOwner = new Map<string, string>();
+  let cachedSnapshot: TodayPageSnapshot | null = null;
+  /** Row of each visible node in `cachedSnapshot`, and every node's last view. */
+  let indexById = new Map<string, number>();
+  /**
+   * Bumped when text changes on a node the snapshot hides under a fold: the
+   * snapshot stays the same object then, but a zoomed subtree may show the node.
+   */
+  let hiddenTextRevision = 0;
+  const subtreeCache = new Map<
+    string,
+    { from: TodayPageSnapshot; revision: number; subtree: TodayPageSnapshot }
+  >();
+  const viewById = new Map<string, TodayNodeView>();
+  let structureDirty = true;
+  const dirtyText = new Set<string>();
+  /**
+   * The tree's shape mirrored in JS (child ids per parent, '' for the roots),
+   * kept by tree events: reading it costs no calls into the document.
+   */
+  const ROOT_KEY = '';
+  const kids = new Map<string, string[]>();
+  let mirrorBroken = true;
+  const listOf = (parent: TreeID | undefined) => {
+    const key = parent ?? ROOT_KEY;
+    let list = kids.get(key);
+    if (!list) kids.set(key, (list = []));
+    return list;
+  };
+  const detach = (target: string, parent: TreeID | undefined, index: number) => {
+    const list = listOf(parent);
+    const at = list[index] === target ? index : list.indexOf(target);
+    if (at < 0) mirrorBroken = true;
+    else list.splice(at, 1);
+  };
+  const attach = (target: string, parent: TreeID | undefined, index: number) => {
+    const list = listOf(parent);
+    if (index > list.length) mirrorBroken = true;
+    list.splice(Math.min(index, list.length), 0, target);
+  };
+  const stopCacheWatch = doc.subscribe((batch) => {
+    for (const event of batch.events) {
+      if (event.diff.type === 'tree') {
+        structureDirty = true;
+        if (mirrorBroken) continue;
+        for (const item of event.diff.diff) {
+          if (item.action === 'create') attach(item.target, item.parent, item.index);
+          else if (item.action === 'delete') detach(item.target, item.oldParent, item.oldIndex);
+          else {
+            detach(item.target, item.oldParent, item.oldIndex);
+            attach(item.target, item.parent, item.index);
+          }
+        }
+        continue;
+      }
+      if (event.diff.type === 'text') {
+        const owner = textOwner.get(String(event.target));
+        if (owner === undefined) continue;
+        richCache.delete(owner);
+        dirtyText.add(owner);
+      } else structureDirty = true;
+    }
+  });
   const viewListeners = new Set<() => void>();
   const docFold = (node: Node) => node.data.get('collapsed') === true;
-  const recordDocFolds = (remote: boolean) => {
-    const seen = new Set<string>();
-    const visit = (nodes: Node[]) => {
-      for (const node of nodes) {
-        const id = node.id as string;
-        seen.add(id);
-        const now = docFold(node);
-        const before = docFolds.get(id);
-        if (remote && before !== undefined && before !== now && !viewFolds.has(id)) {
-          viewFolds.set(id, before);
-        }
-        if (viewFolds.get(id) === now) viewFolds.delete(id);
-        docFolds.set(id, now);
-        visit(node.children() ?? []);
-      }
+  /**
+   * Fold and to-do state per node as last committed, for snapshots; dropped
+   * when the node's data map changes. Operations read the document directly.
+   */
+  type NodeAttrs = { collapsed: boolean; todo: TodayTodoState | undefined };
+  const attrCache = new Map<string, NodeAttrs>();
+  const dataOwner = new Map<string, string>();
+  const readAttrs = (node: Node): NodeAttrs => {
+    const id = node.id as string;
+    const cached = attrCache.get(id);
+    if (cached) return cached;
+    dataOwner.set(String(node.data.id), id);
+    const todo = node.data.get('todo');
+    const attrs = {
+      collapsed: node.data.get('collapsed') === true,
+      todo: isTodayTodoState(todo) ? todo : undefined,
     };
-    visit(tree.roots());
-    for (const id of docFolds.keys()) {
-      if (!seen.has(id)) {
-        docFolds.delete(id);
-        viewFolds.delete(id);
-      }
+    attrCache.set(id, attrs);
+    return attrs;
+  };
+  /**
+   * Every node's fold as this viewer first sees it: an imported change then
+   * keeps this viewer's previous fold of that node.
+   */
+  const registerAll = (nodes: Node[]) => {
+    for (const node of nodes) {
+      readAttrs(node);
+      registerAll(node.children() ?? []);
     }
   };
-  recordDocFolds(false);
-  // Registered before any page store subscribes, so the view is settled first.
-  // Typing changes only text: skip those batches.
+  registerAll(tree.roots());
   const stopFoldWatch = doc.subscribe((batch) => {
-    if (batch.events.some((event) => event.diff.type !== 'text')) {
-      recordDocFolds(batch.by === 'import');
+    for (const event of batch.events) {
+      if (event.diff.type === 'tree') {
+        for (const item of event.diff.diff) {
+          if (item.action !== 'create') continue;
+          const created = tree.getNodeByID(item.target);
+          if (created && !created.isDeleted()) readAttrs(created);
+        }
+        continue;
+      }
+      if (event.diff.type !== 'map') continue;
+      const id = dataOwner.get(String(event.target));
+      if (id === undefined) continue;
+      const before = attrCache.get(id);
+      attrCache.delete(id);
+      const node = tree.getNodeByID(id as TodayNodeId);
+      if (!node || node.isDeleted()) continue;
+      const now = readAttrs(node).collapsed;
+      if (batch.by === 'import' && before && before.collapsed !== now && !viewFolds.has(id)) {
+        viewFolds.set(id, before.collapsed);
+      }
+      if (viewFolds.get(id) === now) viewFolds.delete(id);
     }
   });
   /** Write a fold through the document and drop this viewer's kept fold. */
   const writeFold = (node: Node, collapsed: boolean) => {
     const kept = viewFolds.delete(node.id as string);
     if (docFold(node) === collapsed) {
-      if (kept) for (const listener of viewListeners) listener();
+      if (kept) {
+        structureDirty = true;
+        for (const listener of viewListeners) listener();
+      }
       return false;
     }
     if (collapsed) node.data.set('collapsed', true);
@@ -301,13 +427,35 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     return text ? readTodayText(text) : { text: '', mentions: [] };
   };
   const isCollapsed = (node: Node) => viewFolds.get(node.id as string) ?? docFold(node);
+  const todoOf = (node: Node): TodayTodoState | undefined => {
+    const value = node.data.get('todo');
+    return isTodayTodoState(value) ? value : undefined;
+  };
+  const writeTodo = (node: Node, state: TodayTodoState | undefined) => {
+    if (todoOf(node) === state) return false;
+    if (state) node.data.set('todo', state);
+    else node.data.delete('todo');
+    return true;
+  };
   const childrenOf = (parent: Node | undefined): Node[] =>
     parent ? (parent.children() ?? []) : tree.roots();
   const siblingsOf = (node: Node) => childrenOf(node.parent());
   const indexOf = (node: Node) => node.index() ?? 0;
 
+  const cachedRich = (node: Node): TodayRichText => {
+    const id = node.id as string;
+    const cached = richCache.get(id);
+    if (cached) return cached;
+    const text = textOf(node);
+    if (text) textOwner.set(String(text.id), id);
+    const rich = text ? readTodayText(text) : { text: '', mentions: [] };
+    richCache.set(id, rich);
+    return rich;
+  };
+
   const view = (node: Node, depth: number, children = childrenOf(node)): TodayNodeView => {
-    const rich = readRich(node);
+    const rich = cachedRich(node);
+    const todo = todoOf(node);
     return {
       id: node.id,
       parentId: node.parent()?.id ?? null,
@@ -316,6 +464,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       mentions: rich.mentions,
       collapsed: isCollapsed(node),
       hasChildren: children.length > 0,
+      ...(todo ? { todo } : {}),
     };
   };
 
@@ -342,13 +491,19 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   const create = (
     parent: Node | undefined,
     index: number | undefined,
-    content: { text?: string; mentions?: TodayMention[]; collapsed?: boolean }
+    content: {
+      text?: string;
+      mentions?: TodayMention[];
+      collapsed?: boolean;
+      todo?: TodayTodoState;
+    }
   ): Node => {
     const node = parent ? parent.createNode(index) : tree.createNode(undefined, index);
     const text = node.data.setContainer('text', new LoroText());
     if (content.text)
       insertTodayRich(text, 0, { text: content.text, mentions: content.mentions ?? [] });
     if (content.collapsed) node.data.set('collapsed', true);
+    if (isTodayTodoState(content.todo)) node.data.set('todo', content.todo);
     return node;
   };
 
@@ -366,10 +521,17 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
     for (const child of childrenOf(from)) child.move(to);
   };
 
-  const visibleNeighbour = (id: TodayNodeId, step: -1 | 1): TodayNodeView | undefined => {
-    const visible = walk(true);
-    const index = visible.findIndex((node) => node.id === id);
-    return index < 0 ? undefined : visible[index + step];
+  /** The rows the caret walks: the page's visible rows, or a zoomed root followed by its subtree. */
+  const visibleRows = (within?: TodayNodeId): TodayNodeId[] => {
+    if (!within) return outline.getSnapshot().visible.map((node) => node.id);
+    const subtree = outline.getSubtree(within);
+    return subtree ? [within, ...subtree.visible.map((node) => node.id)] : [];
+  };
+
+  const visibleNeighbour = (id: TodayNodeId, step: -1 | 1, within?: TodayNodeId) => {
+    const rows = visibleRows(within);
+    const index = rows.indexOf(id);
+    return index < 0 ? undefined : rows[index + step];
   };
 
   /** True when `candidate` is `ancestorId` or lies inside its subtree. */
@@ -450,28 +612,191 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       text: rich.text,
       ...(rich.mentions.length > 0 ? { mentions: rich.mentions } : {}),
       ...(isCollapsed(node) ? { collapsed: true } : {}),
+      ...(todoOf(node) ? { todo: todoOf(node) } : {}),
       children: childrenOf(node).map(toFragment),
     };
   };
 
+  const ensureMirror = () => {
+    if (!mirrorBroken) return;
+    kids.clear();
+    const mirror = (key: string, nodes: Node[]) => {
+      kids.set(
+        key,
+        nodes.map((node) => {
+          const id = node.id as string;
+          mirror(id, node.children() ?? []);
+          return id;
+        })
+      );
+    };
+    mirror(ROOT_KEY, tree.roots());
+    mirrorBroken = false;
+  };
+
+  const someNodeHasText = () => {
+    const visit = (nodes: Node[]): boolean =>
+      nodes.some((node) => !!cachedRich(node).text.trim() || visit(childrenOf(node)));
+    return visit(tree.roots());
+  };
+
   const outline: TodayOutline = {
     getAllNodes: () => walk(false),
+    childIds: (parentId) => {
+      ensureMirror();
+      return [...(kids.get(parentId ?? ROOT_KEY) ?? [])] as TodayNodeId[];
+    },
     // One pass: every node is read once, whether or not a fold hides it
     // (hidden nodes still count for `isEmpty`).
     getSnapshot: () => {
+      const previous = cachedSnapshot;
+      if (previous && !structureDirty) {
+        if (dirtyText.size === 0) return previous;
+        let visible = previous.visible;
+        let changed = false;
+        for (const id of dirtyText) {
+          const node = live(id as TodayNodeId);
+          if (!node) {
+            structureDirty = true;
+            break;
+          }
+          const rich = cachedRich(node);
+          const index = indexById.get(id);
+          if (index === undefined) {
+            hiddenTextRevision += 1;
+            continue;
+          }
+          if (!changed) visible = [...previous.visible];
+          changed = true;
+          const nodeView = {
+            ...previous.visible[index]!,
+            text: rich.text,
+            mentions: rich.mentions,
+          };
+          (visible as TodayNodeView[])[index] = nodeView;
+          viewById.set(id, nodeView);
+        }
+        if (!structureDirty) {
+          const edited = [...dirtyText];
+          dirtyText.clear();
+          const isEmpty =
+            previous.isEmpty || edited.some((id) => !richCache.get(id)?.text.trim())
+              ? !someNodeHasText()
+              : false;
+          cachedSnapshot =
+            changed || isEmpty !== previous.isEmpty
+              ? { visible, isEmpty, layout: previous.layout }
+              : previous;
+          return cachedSnapshot;
+        }
+      }
       const visible: TodayNodeView[] = [];
+      const nextIndex = new Map<string, number>();
       let isEmpty = true;
-      const visit = (nodes: Node[], depth: number, hidden: boolean) => {
-        for (const node of nodes) {
-          const children = childrenOf(node);
-          const nodeView = view(node, depth, children);
-          if (isEmpty && nodeView.text.trim()) isEmpty = false;
-          if (!hidden) visible.push(nodeView);
-          visit(children, depth + 1, hidden || nodeView.collapsed);
+      ensureMirror();
+      const visit = (key: string, depth: number, hidden: boolean, parentId: TodayNodeId | null) => {
+        for (const raw of kids.get(key) ?? []) {
+          const id = raw as TodayNodeId;
+          const children = kids.get(raw);
+          let rich = richCache.get(raw);
+          let attrs = attrCache.get(raw);
+          if (!rich || !attrs) {
+            const node = live(id);
+            if (!node) continue;
+            rich = cachedRich(node);
+            attrs = readAttrs(node);
+          }
+          const collapsed = viewFolds.get(raw) ?? attrs.collapsed;
+          const hasChildren = !!children && children.length > 0;
+          if (isEmpty && rich.text.trim()) isEmpty = false;
+          if (!hidden) {
+            // Unchanged rows keep their object, so memoized rows skip rendering.
+            const old = viewById.get(raw);
+            const nodeView =
+              old &&
+              old.text === rich.text &&
+              old.mentions === rich.mentions &&
+              old.parentId === parentId &&
+              old.depth === depth &&
+              old.collapsed === collapsed &&
+              old.hasChildren === hasChildren &&
+              old.todo === attrs.todo
+                ? old
+                : {
+                    id,
+                    parentId,
+                    depth,
+                    text: rich.text,
+                    mentions: rich.mentions,
+                    collapsed,
+                    hasChildren,
+                    ...(attrs.todo ? { todo: attrs.todo } : {}),
+                  };
+            if (nodeView !== old) viewById.set(raw, nodeView);
+            nextIndex.set(raw, visible.length);
+            visible.push(nodeView);
+          }
+          visit(raw, depth + 1, hidden || collapsed, id);
         }
       };
-      visit(tree.roots(), 0, false);
-      return { visible, isEmpty };
+      visit(ROOT_KEY, 0, false, null);
+      structureDirty = false;
+      dirtyText.clear();
+      indexById = nextIndex;
+      cachedSnapshot = { visible, isEmpty, layout: {} };
+      return cachedSnapshot;
+    },
+    getSubtree: (rootId) => {
+      const snapshot = outline.getSnapshot();
+      if (!live(rootId)) return null;
+      const cached = subtreeCache.get(rootId);
+      if (cached && cached.from === snapshot && cached.revision === hiddenTextRevision) {
+        return cached.subtree;
+      }
+      const previous = new Map(cached?.subtree.visible.map((row) => [row.id as string, row]));
+      const visible: TodayNodeView[] = [];
+      let isEmpty = true;
+      const visit = (key: string, depth: number, parentId: TodayNodeId) => {
+        for (const raw of kids.get(key) ?? []) {
+          const id = raw as TodayNodeId;
+          const node = richCache.has(raw) && attrCache.has(raw) ? undefined : live(id);
+          const rich = node ? cachedRich(node) : richCache.get(raw)!;
+          const attrs = node ? readAttrs(node) : attrCache.get(raw)!;
+          if (!rich || !attrs) continue;
+          const children = kids.get(raw);
+          const collapsed = viewFolds.get(raw) ?? attrs.collapsed;
+          const hasChildren = !!children && children.length > 0;
+          if (isEmpty && rich.text.trim()) isEmpty = false;
+          const old = previous.get(raw);
+          visible.push(
+            old &&
+              old.text === rich.text &&
+              old.mentions === rich.mentions &&
+              old.parentId === parentId &&
+              old.depth === depth &&
+              old.collapsed === collapsed &&
+              old.hasChildren === hasChildren &&
+              old.todo === attrs.todo
+              ? old
+              : {
+                  id,
+                  parentId,
+                  depth,
+                  text: rich.text,
+                  mentions: rich.mentions,
+                  collapsed,
+                  hasChildren,
+                  ...(attrs.todo ? { todo: attrs.todo } : {}),
+                }
+          );
+          if (!collapsed) visit(raw, depth + 1, id);
+        }
+      };
+      visit(rootId, 0, rootId);
+      const layout = cached && cached.from.layout === snapshot.layout ? cached.subtree.layout : {};
+      const subtree = { visible, isEmpty, layout };
+      subtreeCache.set(rootId, { from: snapshot, revision: hiddenTextRevision, subtree });
+      return subtree;
     },
     getNode: (id) => {
       const node = live(id);
@@ -482,25 +807,36 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return node ? textOf(node) : undefined;
     },
 
-    insertFirst: (text = '') => {
-      const node = create(undefined, tree.roots().length, { text });
+    insertFirst: (text = '', parentId) => {
+      const parent = parentId ? live(parentId) : undefined;
+      if (parentId && !parent) return null;
+      const node = parent
+        ? create(parent, 0, { text })
+        : create(undefined, tree.roots().length, { text });
       commit();
       return { nodeId: node.id, offset: text.length };
     },
 
-    split: (id, offset) => {
+    split: (id, offset, options) => {
       const node = live(id);
       const text = node && textOf(node);
       if (!node || !text) return null;
       const length = text.length;
+      const todo = todoOf(node) ? ('todo' as const) : undefined;
+      if (offset <= 0 && length > 0 && options?.intoChildren) {
+        const child = create(node, 0, { todo });
+        commit();
+        return { nodeId: child.id, offset: 0 };
+      }
       if (offset <= 0 && length > 0) {
-        create(node.parent(), indexOf(node), {});
+        create(node.parent(), indexOf(node), { todo });
         commit();
         return { nodeId: id, offset: 0 };
       }
-      const right = sliceTodayRich(readTodayText(text), offset);
+      const right = { ...sliceTodayRich(readTodayText(text), offset), todo };
       if (right.text) text.delete(offset, length - offset);
-      const intoChildren = childrenOf(node).length > 0 && !isCollapsed(node);
+      const intoChildren =
+        options?.intoChildren || (childrenOf(node).length > 0 && !isCollapsed(node));
       const created = intoChildren
         ? create(node, 0, right)
         : create(node.parent(), indexOf(node) + 1, right);
@@ -508,12 +844,16 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: created.id, offset: 0 };
     },
 
-    enterOnEmpty: (id) => {
+    enterOnEmpty: (id, options) => {
       const node = live(id);
       if (!node) return null;
+      if (writeTodo(node, undefined)) {
+        commit();
+        return { nodeId: id, offset: 0 };
+      }
       const parent = node.parent();
       const siblings = siblingsOf(node);
-      if (parent && siblings.at(-1)?.id === node.id) {
+      if (parent && parent.id !== options?.within && siblings.at(-1)?.id === node.id) {
         node.moveAfter(parent);
         commit();
         return { nodeId: id, offset: 0 };
@@ -523,10 +863,10 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: created.id, offset: 0 };
     },
 
-    mergeWithPrevious: (id) => {
+    mergeWithPrevious: (id, options) => {
       const node = live(id);
-      const previousView = visibleNeighbour(id, -1);
-      const previous = previousView && live(previousView.id);
+      const previousId = visibleNeighbour(id, -1, options?.within);
+      const previous = previousId && live(previousId);
       if (!node || !previous) return null;
       const previousText = textOf(previous);
       if (!previousText) return null;
@@ -539,7 +879,13 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       insertTodayRich(previousText, offset, readRich(node));
       // Merging into a folded node would hide the merged line's children under
       // it: unfold it, as indenting under it does.
-      if (isCollapsed(previous) && childrenOf(previous).length > 0) writeFold(previous, false);
+      if (
+        previous.id !== options?.within &&
+        isCollapsed(previous) &&
+        childrenOf(previous).length > 0
+      ) {
+        writeFold(previous, false);
+      }
       if (isWithin(node, previous.id)) {
         // Merging a first child into its parent: its children take its place.
         for (const child of childrenOf(node)) child.moveBefore(node);
@@ -551,13 +897,13 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return { nodeId: previous.id, offset };
     },
 
-    mergeWithNext: (id) => {
+    mergeWithNext: (id, options) => {
       const node = live(id);
       const text = node && textOf(node);
       if (!node || !text) return null;
-      if (isCollapsed(node) && childrenOf(node).length > 0) return null;
-      const nextView = visibleNeighbour(id, 1);
-      const next = nextView && live(nextView.id);
+      if (id !== options?.within && isCollapsed(node) && childrenOf(node).length > 0) return null;
+      const nextId = visibleNeighbour(id, 1, options?.within);
+      const next = nextId && live(nextId);
       if (!next) return null;
       const offset = text.length;
       insertTodayRich(text, offset, readRich(next));
@@ -583,9 +929,12 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
     // Each run as if outdented on its own, last first, so an earlier run's
     // followers (its later siblings) are taken as they stand.
-    outdent: (ids) => {
+    outdent: (ids, options) => {
       const runs = siblingRuns(ids);
       if (!runs) return false;
+      if (options?.within && runs.some((run) => run[0]!.parent()?.id === options.within)) {
+        return false;
+      }
       let changed = false;
       for (const run of [...runs].reverse()) changed = outdentRun(run) || changed;
       if (changed) commit();
@@ -631,6 +980,23 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       return true;
     },
 
+    cycleTodo: (ids) => {
+      const nodes = liveAll(ids);
+      if (!nodes || nodes.length === 0) return false;
+      for (const node of nodes) writeTodo(node, nextTodayTodoState(todoOf(node)));
+      commit();
+      return true;
+    },
+
+    setTodo: (ids, state) => {
+      const nodes = liveAll(ids);
+      if (!nodes) return false;
+      let changed = false;
+      for (const node of nodes) changed = writeTodo(node, state) || changed;
+      if (changed) commit();
+      return changed;
+    },
+
     setCollapsed: (id, collapsed) => {
       const node = live(id);
       if (!node || isCollapsed(node) === collapsed) return;
@@ -644,17 +1010,18 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
     dispose: () => {
       stopFoldWatch();
+      stopCacheWatch();
       viewListeners.clear();
     },
 
-    deleteNodes: (ids) => {
+    deleteNodes: (ids, options) => {
       const nodes = liveAll(ids);
       if (!nodes) return null;
       const removed = new Set(ids);
-      const visible = walk(true);
-      const firstIndex = visible.findIndex((node) => removed.has(node.id));
-      const isRemoved = (candidate: TodayNodeView) =>
-        nodes.some((node) => isWithin(live(candidate.id), node.id));
+      const visible = visibleRows(options?.within);
+      const firstIndex = visible.findIndex((id) => removed.has(id));
+      const isRemoved = (candidate: TodayNodeId) =>
+        nodes.some((node) => isWithin(live(candidate), node.id));
       const survivor =
         visible
           .slice(0, Math.max(firstIndex, 0))
@@ -667,7 +1034,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         }
       }
       commit();
-      return survivor ? { nodeId: survivor.id, offset: 'end' } : null;
+      return survivor ? { nodeId: survivor, offset: 'end' } : null;
     },
 
     insertMention: (id, offset, deleteCount, mention) => {
@@ -760,6 +1127,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
 
 const FENCE_PATTERN = /^(```|~~~)/;
 const BULLET_PATTERN = /^[-*+•]\s+/;
+const TASK_PATTERN = /^\[([ xX])\]\s+/;
 
 function indentWidth(line: string): number {
   let width = 0;
@@ -781,9 +1149,9 @@ export function parseTodayPasteText(input: string): TodayFragment[] {
   const lines = input.replace(/\r\n?/g, '\n').replaceAll(TODAY_MENTION_CHAR, '').split('\n');
   const roots: TodayFragment[] = [];
   const stack: { indent: number; fragment: TodayFragment }[] = [];
-  const place = (indent: number, text: string) => {
+  const place = (indent: number, text: string, todo?: TodayTodoState) => {
     while (stack.length && stack.at(-1)!.indent >= indent) stack.pop();
-    const fragment: TodayFragment = { text, children: [] };
+    const fragment: TodayFragment = { text, ...(todo ? { todo } : {}), children: [] };
     (stack.at(-1)?.fragment.children ?? roots).push(fragment);
     stack.push({ indent, fragment });
   };
@@ -806,7 +1174,10 @@ export function parseTodayPasteText(input: string): TodayFragment[] {
       index = end;
       continue;
     }
-    place(indent, trimmed.replace(BULLET_PATTERN, ''));
+    const unbulleted = trimmed.replace(BULLET_PATTERN, '');
+    const task = unbulleted === trimmed ? null : TASK_PATTERN.exec(unbulleted);
+    if (task) place(indent, unbulleted.slice(task[0].length), task[1] === ' ' ? 'todo' : 'done');
+    else place(indent, unbulleted);
   }
   return roots;
 }

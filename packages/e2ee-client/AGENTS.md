@@ -90,13 +90,10 @@ and [platform rules](../platform/AGENTS.md) before changing these boundaries.
   round, even before the current key is installed: it receives and installs before it
   distributes. At most one is in flight, spaced by an interval; it borrows the reader
   only while it runs, never opens one, and only reports failure.
-  Automatic approval never trusts the relay's `source`: it signs only after
-  `verifyAutomaticMemberAdmission` accepts the endorser-signed email offer against the
-  verified ledger (eligible endorser now, unexpired, token-derived request id, unused).
-  Desktop uses the same verifier; a refusal keeps its precise code and leaves the
-  request for explicit approval. Only that verifier requires the signature: retained
-  joins, links and lists read offers without it, and a retained join keeps its signed
-  request id rather than re-deriving one.
+  Unattended automatic approval is disabled on both portable and desktop hosts:
+  `approveMemberJoin` accepts only `'explicit'` and refuses `'automatic'` with
+  `invalid-input`. Retained joins, links and lists still read offers without signatures,
+  and a retained join keeps its signed request id.
 - Removing a member on the portable runtime follows core authority, as desktop does: only
   the owner removes and publishes the next epoch in one record. An administrator removes
   the member plainly, declaring removal support first if the ledger lacks it; that marks

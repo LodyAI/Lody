@@ -84,10 +84,10 @@ class SessionForkOperationError extends Error {
   }
 }
 
-function rewriteAttachmentNamespace(
-  item: MessageContent,
+function rewriteAttachmentNamespace<T extends MessageContent>(
+  item: T,
   sourceSessionId: SessionId
-): MessageContent {
+): T {
   if (item.type === 'image') {
     return {
       ...item,
@@ -160,6 +160,16 @@ export function cloneHistoryThroughTurn(
   const cloned = selected.map((entry) => ({
     ...entry,
     items: (entry.items ?? []).map((item) => rewriteAttachmentNamespace(item, sourceSessionId)),
+    ...(entry.inputConfig?.inputBlocks
+      ? {
+          inputConfig: {
+            ...entry.inputConfig,
+            inputBlocks: entry.inputConfig.inputBlocks.map((block) =>
+              rewriteAttachmentNamespace(block, sourceSessionId)
+            ),
+          },
+        }
+      : {}),
     fileDiff: [],
     sendStatus: undefined,
     status: entry.role === 'user' ? ('handled' as const) : entry.status,

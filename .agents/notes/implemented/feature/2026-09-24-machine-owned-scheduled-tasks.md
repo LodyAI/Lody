@@ -56,6 +56,20 @@ proposing conversation's Agent, effective mode, machine and project; a named Rol
 Agent, machine or project overrides only that part, and a named Agent gets the
 builtin default mode, never another Agent's.
 
+**Edit proposals (2026-11-23, [#2626](https://github.com/LodyAI/Lody/issues/2626)).**
+`propose_edit` publishes a separate `schedule_edit_proposal` notice with only the
+proposed title, prompt or rule; Apply saves it through the ordinary edit path. A
+field on `schedule_proposal` was rejected: a client that does not know it would
+offer Create and add a duplicate. The notice stores `baseActivityId`, the latest
+`created` or `edited` timeline activity, not a before-and-after copy (a second
+prompt of up to 32 KiB in Session history, and a schema import cycle) and not
+`updatedAt` (pause and resume write it). Apply refuses once that revision moved
+and never merges. Its activity id is derived from the Session and proposal ids,
+because a create proposal or another Session can hold `proposal-<proposalId>`; a
+repeated Apply replays that save. A repeated call compares Schedule id and patch
+alone, because the live schedule differs after Apply. Scheduled messages,
+destination, Agent, machine and project are not proposable.
+
 **Editor (2026-09-24 revision).** The editor is built from the composer's own
 parts instead of look-alikes: name and prompt (split by a hairline) share one box
 whose bottom edge carries the composer's Agent/model/permission controls; the

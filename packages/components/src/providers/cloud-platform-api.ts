@@ -10,6 +10,7 @@ import {
   usePublicConvexQuery,
   useRecoverableConvexQuery,
 } from '@/hooks/use-recoverable-convex-query';
+import { markPersistentWorkspaceSenderCloudApi } from '@/lib/workspace-sender-identity';
 
 function queryReference<Args, Result>(
   operation: CloudQuery<Args, Result>
@@ -162,6 +163,8 @@ export const cloudPlatformApi: CloudApi = {
       useAction(actionReference(operation)) as (args: Args) => Promise<Result>
     ),
 };
+
+markPersistentWorkspaceSenderCloudApi(cloudPlatformApi);
 
 /** Imperative operations for the app-owned workspace control lifecycle. Callers
  * still supply the same public descriptors as reactive UI, never private APIs.

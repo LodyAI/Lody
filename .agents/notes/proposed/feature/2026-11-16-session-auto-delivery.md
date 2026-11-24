@@ -47,8 +47,28 @@ instead of retrying.
 - **Not a return to post-turn auto commit.** The
   [2026-09-12 upkeep decision](../../implemented/architecture/2026-09-12-pr-branch-upkeep-without-auto-commit.md)
   rejected finalization-driven commit turns the user had not chosen. Auto delivery
-  sends nothing unless the user turned it on, and waits while the workspace has
-  unpushed work rather than pushing it.
+  sends nothing unless the user turned it on, and stops with a visible reason while
+  the workspace has uncommitted or unpushed work rather than pushing it; a silent
+  wait read as "waiting for CI" forever.
+- **No reported check is not a pass.** A new head reports no check until its suites
+  register, so treating `null` as green merged before CI ran. A head counts as having
+  no CI only after a five-minute grace measured between polls.
+- **Earlier pull requests are not adopted.** Only a current pull request that both
+  `SessionMeta` and its ledger observation show open or draft binds a new enablement;
+  binding a merged one ended delivery immediately. The poller records the observation
+  before it rewrites the metadata, so the property test found a pass that read a
+  closed observation under stale open metadata.
+- **Which stops are final.** A failed or cancelled request ends the enablement; a stop
+  derived from the pull request's state is recomputed from each new observation, so a
+  push or an approval resumes it within the same limits.
+- **Turning off withdraws unsent work.** The engine leaves a disabled rule's receipt
+  `blocked`, which still counted as Session automation work and kept the group from
+  settling, so archive-after-merge never ran. Turning delivery off cancels the request
+  if it has not reached the Session queue; queued input is already revoked by admission.
+- **One writer for the status line.** A delivery pass and a setting change both write
+  `SessionMeta.autoDelivery`. They share one Effect `Semaphore` separate from the
+  engine gate, so a pass cannot republish a status the user just cleared, and turning
+  the setting off never waits behind condition checks.
 
 ## Alternatives
 

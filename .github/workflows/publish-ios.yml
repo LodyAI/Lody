@@ -294,11 +294,20 @@ jobs:
             local encoded_profile="$2"
             local profile_path="$3"
             local env_key="$4"
+            local require_associated_domains="${5:-false}"
             local plist_path="${profile_path}.plist"
             decode_base64_secret "${secret_name}" "${encoded_profile}" "${profile_path}"
             if ! security cms -D -i "${profile_path}" > "${plist_path}"; then
               echo "${secret_name} decoded but is not a valid provisioning profile"
               exit 1
+            fi
+            if [[ "${require_associated_domains}" == "true" ]]; then
+              local associated_domains
+              associated_domains="$(/usr/libexec/PlistBuddy -c 'Print Entitlements:com.apple.developer.associated-domains' "${plist_path}" 2>/dev/null || true)"
+              if [[ -z "${associated_domains}" ]]; then
+                echo "${secret_name} is missing Entitlements:com.apple.developer.associated-domains (required for Passkey webcredentials:lody.ai)"
+                exit 1
+              fi
             fi
             local uuid name
             uuid="$(/usr/libexec/PlistBuddy -c 'Print UUID' "${plist_path}")"
@@ -311,7 +320,8 @@ jobs:
             "IOS_APP_PROVISIONING_PROFILE_BASE64" \
             "${IOS_APP_PROVISIONING_PROFILE_BASE64}" \
             "${RUNNER_TEMP}/app.mobileprovision" \
-            "IOS_APP_PROFILE_NAME"
+            "IOS_APP_PROFILE_NAME" \
+            "true"
           install_profile \
             "IOS_EXTENSION_PROVISIONING_PROFILE_BASE64" \
             "${IOS_EXTENSION_PROVISIONING_PROFILE_BASE64}" \
@@ -360,6 +370,10 @@ jobs:
               settings['CODE_SIGN_IDENTITY[sdk=iphoneos*]'] = 'Apple Distribution'
               settings['PROVISIONING_PROFILE_SPECIFIER'] = profile_name
               settings['DEVELOPMENT_TEAM'] = team
+              if target_name == 'App'
+                settings['LODY_PASSKEY_ENABLED'] = 'YES'
+                settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.passkey.entitlements'
+              end
             end
           end
 
@@ -379,6 +393,9 @@ jobs:
             CURRENT_PROJECT_VERSION="${MOBILE_BUILD_NUMBER}" \
             CODE_SIGN_STYLE=Manual \
             archive
+      - name: Verify iOS Passkey archive configuration
+        shell: bash
+        run: bash .github/scripts/verify-ios-passkey-archive.sh "${RUNNER_TEMP}/Lody.xcarchive"
       - name: Export iOS IPA
         shell: bash
         run: |

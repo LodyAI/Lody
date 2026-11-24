@@ -1,6 +1,8 @@
 import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import {
   DEFAULT_SCHEDULE_DESTINATION,
+  applyScheduleRecurrence,
+  getDeviceTimeZone,
   getMachineRoomId,
   getMachineFlockDocId,
   getMachineFlockLocalProjects,
@@ -14,6 +16,8 @@ import {
   previewSchedule,
   readMachineFlockRowsFromFlock,
   ScheduleCommandSchema,
+  scheduleContentRevision,
+  scheduleProposalRuleToRecurrence,
   scheduleProposalRuleToTrigger,
   validateSchedulePrompt,
   type AgentConfigId,
@@ -30,7 +34,7 @@ import type { LoroDocumentManager } from '../loro/doc';
 import type { WorkspaceSummary } from '../workspace';
 import { createSessionBackend } from '@/session/session-backend';
 import { readMergedAgentConfigById } from '../agent-config-machine-flock';
-import { publishScheduleProposal } from './schedule-proposal';
+import { publishScheduleEditProposal, publishScheduleProposal } from './schedule-proposal';
 import {
   destinationSessionProblem,
   scheduleDestinationSessionId,
@@ -50,7 +54,10 @@ export function assertScheduleCommandAllowed(
   command: ScheduleCommand,
   requesterSessionId?: SessionId
 ) {
-  if (requesterSessionId && !['list', 'show', 'pause', 'propose'].includes(command.action))
+  if (
+    requesterSessionId &&
+    !['list', 'show', 'pause', 'propose', 'propose_edit'].includes(command.action)
+  )
     throw new Error('Schedule enablement requires a human action');
 }
 
@@ -102,14 +109,9 @@ export async function executeScheduleCommand(
       nextOffset: nextOffset < rows.length ? nextOffset : undefined,
     };
   }
-  if (command.action === 'propose') {
-    if (!requesterSessionId) throw new Error('A proposal requires an invoking Session');
-    // The rule must already be a schedule the editor could show, so a card the
-    // person confirms cannot fail validation afterwards.
-    scheduleProposalRuleToTrigger(command.rule, getServerNow());
-    validateSchedulePrompt(command.prompt);
-    const session = await manager.getOrCreateSessionDoc(requesterSessionId);
-    const sessionRecord = await manager.repo.getDocMeta(getSessionRoomId(requesterSessionId));
+  const proposalChannel = async (sessionId: SessionId) => {
+    const session = await manager.getOrCreateSessionDoc(sessionId);
+    const sessionRecord = await manager.repo.getDocMeta(getSessionRoomId(sessionId));
     const sessionMeta = sessionRecord?.meta as SessionMeta | undefined;
     const backend = await createSessionBackend(session, sessionMeta);
     const actorConfig = sessionMeta?.agentConfigId
@@ -120,8 +122,32 @@ export async function executeScheduleCommand(
           sessionMeta.agentConfigId as AgentConfigId
         ).catch(() => undefined)
       : undefined;
-    const outcome = await publishScheduleProposal(
+    return {
       backend,
+      actor: {
+        ...(sessionMeta?.agentConfigId ? { agentConfigId: sessionMeta.agentConfigId } : {}),
+        ...(actorConfig?.config?.name ? { name: actorConfig.config.name } : {}),
+      },
+      confirm: async () => {
+        await manager.repo.flush();
+        if (
+          !localOnly &&
+          (!(await backend.waitUntilSynced(SYNC_CONFIRMATION)) ||
+            !(await session.waitUntilSynced(SYNC_CONFIRMATION)))
+        )
+          throw new Error('Proposal saved locally; sync pending. Retry with the same requestId.');
+      },
+    };
+  };
+  if (command.action === 'propose') {
+    if (!requesterSessionId) throw new Error('A proposal requires an invoking Session');
+    // The rule must already be a schedule the editor could show, so a card the
+    // person confirms cannot fail validation afterwards.
+    scheduleProposalRuleToTrigger(command.rule, getServerNow());
+    validateSchedulePrompt(command.prompt);
+    const channel = await proposalChannel(requesterSessionId);
+    const outcome = await publishScheduleProposal(
+      channel.backend,
       {
         proposalId: command.requestId,
         title: command.title,
@@ -130,18 +156,9 @@ export async function executeScheduleCommand(
         ...(command.destination ? { destination: command.destination } : {}),
         ...(command.target ? { target: command.target } : {}),
       },
-      {
-        ...(sessionMeta?.agentConfigId ? { agentConfigId: sessionMeta.agentConfigId } : {}),
-        ...(actorConfig?.config?.name ? { name: actorConfig.config.name } : {}),
-      }
+      channel.actor
     );
-    await manager.repo.flush();
-    if (
-      !localOnly &&
-      (!(await backend.waitUntilSynced(SYNC_CONFIRMATION)) ||
-        !(await session.waitUntilSynced(SYNC_CONFIRMATION)))
-    )
-      throw new Error('Proposal saved locally; sync pending. Retry with the same requestId.');
+    await channel.confirm();
     return { ok: true, requestId: command.requestId, enabled: false, ...outcome };
   }
   const id = command.scheduleId;
@@ -160,11 +177,10 @@ export async function executeScheduleCommand(
       runtimes,
       schedule: {
         ...document,
-        prompt: requesterSessionId ? document.prompt.slice(0, 8000) : document.prompt,
         timeline: document.timeline.slice(-20),
       },
       truncated: {
-        promptCharsOmitted: requesterSessionId ? Math.max(0, document.prompt.length - 8000) : 0,
+        promptCharsOmitted: 0,
         timelineEntriesOmitted: Math.max(0, document.timeline.length - 20),
       },
       next: previewSchedule(
@@ -173,6 +189,49 @@ export async function executeScheduleCommand(
         getServerNow()
       ),
     };
+  }
+  if (command.action === 'propose_edit') {
+    if (!requesterSessionId) throw new Error('A proposal requires an invoking Session');
+    const { patch } = command;
+    const now = getServerNow();
+    if (patch.rule) scheduleProposalRuleToTrigger(patch.rule, now);
+    if (patch.prompt !== undefined) validateSchedulePrompt(patch.prompt);
+    const channel = await proposalChannel(requesterSessionId);
+    const outcome = await publishScheduleEditProposal(
+      channel.backend,
+      { proposalId: command.requestId, scheduleId: id, patch },
+      async () => {
+        const document = await repository.owned(id, auth.userId);
+        if (document.message) throw new Error('A scheduled message has its own editor');
+        const targetMachineRecord = await manager.repo.getDocMeta(
+          getMachineRoomId(document.definition.machineId as MachineId)
+        );
+        const machineTimeZone =
+          (targetMachineRecord?.meta as MachineMeta | undefined)?.timeZone ?? getDeviceTimeZone();
+        const ruleUnchanged = !patch.rule
+          ? true
+          : patch.rule.kind === 'manual'
+            ? document.definition.trigger.kind === 'manual'
+            : applyScheduleRecurrence(
+                scheduleProposalRuleToRecurrence(patch.rule, machineTimeZone)!,
+                now,
+                document.definition.trigger
+              ) === document.definition.trigger;
+        if (
+          ruleUnchanged &&
+          (patch.title ?? document.definition.title) === document.definition.title &&
+          (patch.prompt ?? document.prompt) === document.prompt
+        )
+          throw new Error('The proposal changes nothing');
+        return {
+          title: document.definition.title,
+          baseActivityId: scheduleContentRevision(document),
+        };
+      },
+      channel.actor
+    );
+    await channel.confirm();
+    return { ok: true, requestId: command.requestId, scheduleId: id, ...outcome };
   }
   const machineId =
     command.action === 'create' || command.action === 'edit'

@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { PhotoSlider } from 'react-photo-view';
 import { toast } from '@/lib/toast';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import {
   isMacOSElectronRenderer,
   isWindowsElectronRenderer,
@@ -25,7 +26,7 @@ import {
   runImagePreviewContextMenu,
   type ImagePreviewExportOutcome,
 } from '@/lib/image-preview-export';
-import { cn } from '@/lib/utils';
+import { clsx } from 'clsx';
 import 'react-photo-view/dist/react-photo-view.css';
 import './zoomable-image-viewer.css';
 
@@ -494,6 +495,13 @@ function OpenZoomableImageViewer({
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images, allowExport);
   const { menu, closeMenu } = useImagePreviewLongPress(elements.floating, images[index]);
+  useMobileBackHandler(
+    () => {
+      if (menu) closeMenu();
+      else onClose();
+    },
+    { layer: 'modal' }
+  );
 
   // Native window controls are drawn ABOVE web content, so the top bar clears
   // them horizontally and centers its own controls on their line (the y=23
@@ -501,7 +509,7 @@ function OpenZoomableImageViewer({
   // `--mac-controls`/`--win-controls` rules in the CSS). Both hide themselves
   // in native fullscreen.
   const reservesWindowControls = !isElectronFullscreen;
-  const sliderClassName = cn(
+  const sliderClassName = clsx(
     'lody-photo-slider',
     !isMobile && 'lody-photo-slider--desktop',
     // A single image has nothing to count; "1 / 1" is only noise.
@@ -584,14 +592,14 @@ function OpenZoomableImageViewer({
           <TouchImageMenu target={menu} close={closeMenu} finalFocus={closeRef} />
         )}
         <div
-          className={cn(
+          className={clsx(
             sliderClassName,
             stylex.props(styles.controls).className,
             ...forcedThemeClassNames('dark')
           )}
         >
           <div
-            className={cn('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
+            className={clsx('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
           >
             <span className="PhotoView-Slider__Counter" aria-live="polite">
               {index + 1} / {images.length}

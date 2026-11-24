@@ -3107,6 +3107,8 @@ export async function recoverBrowser(
     tamperedPackage?: boolean;
     repair?: boolean;
     revokePersonal?: boolean;
+    /** Restore the revoked identity without its retained offer, as for a cancelled pin. */
+    replaceRevoked?: boolean;
     setup?: boolean;
     slowRecoveryIo?: boolean;
     runtime?: boolean;
@@ -3284,12 +3286,13 @@ export async function recoverBrowser(
                 checkpoint: { length: view().length, headHash: toHex(view().head.toBytes()) },
                 startIndex: 0,
                 recordsHex: records.map(toHex),
-                position: 'recovery/full',
+                position: 'opaque/' + records.length,
                 nextCursor: null,
               },
             ];
           });
         failKeys = options.failInstall ?? false;
+        let revokedKey: string | undefined;
         let recoveryRuntime: E2eeWorkspaceRuntime | undefined;
         if (options.runtime) {
           yield* host.close();
@@ -3462,6 +3465,7 @@ export async function recoverBrowser(
           });
           if (options.revokePersonal) {
             const installed = yield* Context.get(baseContext, ClientInstallationStore).read();
+            revokedKey = toHex(installed!.binding.device.toBytes());
             const command = yield* Effect.fromResult(
               prepareLedgerCommand(view(), owner.publicKey, {
                 _tag: 'RevokeDevice',
@@ -3473,7 +3477,7 @@ export async function recoverBrowser(
           }
           const repaired = yield* Effect.result(
             host.restoreRecovery({
-              offer,
+              ...(options.replaceRevoked ? {} : { offer }),
               vault,
               local,
               reference,
@@ -3495,6 +3499,10 @@ export async function recoverBrowser(
           session = yield* host.open(offer, false, true);
         }
         const current = yield* session.ledgerState();
+        const device = (yield* Context.get(baseContext, ClientInstallationStore).read())!.binding
+          .device;
+        const devices = view().inspectState().devices;
+        const progress = journal.get(`restore-progress/${offer.workspaceId}`);
         const document = yield* session.document('document:recovered', 'loro');
         const frame = yield* document.seal({
           context: {
@@ -3514,6 +3522,15 @@ export async function recoverBrowser(
           noDuplicateAdmission: records.length === admittedCount,
           recoveryVerified,
           refreshedDuringSetup,
+          progress: progress ? new TextDecoder().decode(progress) : null,
+          ...(revokedKey
+            ? {
+                replaced:
+                  toHex(device.toBytes()) !== revokedKey &&
+                  devices.has(toHex(device.toBytes())) &&
+                  !devices.has(revokedKey),
+              }
+            : {}),
         };
       }).pipe(Effect.provide(layers))
     )

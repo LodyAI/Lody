@@ -25,13 +25,37 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   explicit authorization action opens the browser. Cancel owned attempts on editor
   disposal, fence late replies, and omit the scope helper line.
 
+## Encrypted feature RPC
+
+- `e2ee-rpc.ts` `E2EE_RPC_POLICIES` is the one exhaustive table of admitted methods: its
+  lane (read, or write with an execution claim) and its scope decide who may sign and
+  which authority the receiving machine applies. Signer preparation, reply verification
+  and the receiver all derive from it; a new Machine RPC method must be classified there
+  or named local-only. `machine` work stays the machine owner's own membership.
+  `session` and `project` work may come from a shared member, is authorized against what
+  it names and runs as the verified signer, passed beside the signed request, never a
+  requested user. `session-read` methods also accept a current, revocable Session read
+  grant ([session access](../../../specs/session-access.md)), rechecked per reply frame;
+  an unknown Session is a denial. Guests never sign writes or project reads.
+- `remoteControl` methods need the target's `e2eeRemoteControl` capability: the shared
+  adapter refuses before signing, because an older machine drops the frame unread. A
+  steer refused that way returns `unsupported`, a proven non-delivery that becomes a
+  follow-up. CLI senders of an encrypted workspace use only its signed channel and never
+  the plaintext Machine RPC token.
+
+Encrypted Roost owners advertise `e2eeRoostHistory: 1`. Use signed feature requests for
+`session/history-read` and `session/history-write`. Writes admit `accept_input` and
+`accept_input_and_dispatch` with `{sessionId, operation, payload: {entry}}`; the user
+entry carries its signed `e2eeIntent`. Read grants cannot authorize either write.
+
 ## Code Collab
 
 - `codeCollabDiffBlobs` v1 gates the additive manifest/blob methods and opaque
   `[path, 'v']` generation siblings. Legacy file rows stay strict and unchanged;
   content hashes travel only through owner-scoped RPC, never the shared index.
-- Encrypted manifest/blob calls retain writer authority and execution claims; Guest
-  access is outside this capability. Manifest file-read failures, including path
+- Encrypted manifest/blob calls are `session-read` methods without execution claims or
+  write-operation logs, so a Guest with a current read grant may view them; every
+  write-lane Code Collab method stays refused for Guests. Manifest file-read failures, including path
   containment refusals, are per-file; request authorization and validation still reject
   the request.
 - File-index generation siblings count toward whole-state row/byte limits and
@@ -65,6 +89,7 @@ Parent contracts apply. Before changing MCP catalog serialization, also read
   [memory contract](../../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.
   [Contract](../../../specs/message-author-identity.md).
+
 ## Message schemas (message-schemas.ts)
 
 - Wire schemas are strict: unknown fields fail validation, never pass through.

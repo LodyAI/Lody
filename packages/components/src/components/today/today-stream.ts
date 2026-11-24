@@ -1,4 +1,4 @@
-import type { TodayDate } from '@lody/shared';
+import { parseTodayDate, type TodayDate } from '@lody/shared';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
 /**
@@ -53,6 +53,24 @@ export function todayRouteOutcome(input: {
 }): 'redirect' | 'to-column' | 'page' {
   if (!input.enabled) return 'redirect';
   return input.pinned && !input.compact ? 'to-column' : 'page';
+}
+
+/** `focus`: `'day'` for the day alone, or a node id to zoom into. */
+export type TodaySearch = { member?: string; date?: string; focus?: string };
+
+const FOCUS_PATTERN = /^(day|\d+@\d+)$/;
+
+/** The member/date search shared by the Today page and the Today window routes. */
+export function validateTodaySearch(search: Record<string, unknown>): TodaySearch {
+  return {
+    ...(typeof search.member === 'string' && search.member ? { member: search.member } : {}),
+    ...(typeof search.date === 'string' && parseTodayDate(search.date)
+      ? { date: search.date }
+      : {}),
+    ...(typeof search.focus === 'string' && FOCUS_PATTERN.test(search.focus)
+      ? { focus: search.focus }
+      : {}),
+  };
 }
 
 /**

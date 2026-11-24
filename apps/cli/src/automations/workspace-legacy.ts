@@ -9,7 +9,7 @@ import { getCachedLoginShellEnvSyncLegacy } from '@/agent/login-shell-env';
 import { platformLayer } from '@/platform/process-options';
 import { observeWorkflows, checkWorkflowEvidence } from './sources/workflows';
 import { publicActivity, actionActivity, workActivity } from './control/activities';
-import { Clock, Effect, Layer, ManagedRuntime } from 'effect';
+import { Clock, Effect, Layer, ManagedRuntime, Semaphore } from 'effect';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -44,7 +44,13 @@ import {
   sessionPolicySettings,
   upgradeCapacityPolicies,
 } from './policies/session';
-import { advanceDelivery, deliveryStepCurrent, startDeliveryEpoch } from './policies/delivery';
+import {
+  advanceDelivery,
+  DELIVERY_EVENT_SOURCE,
+  deliveryStepCurrent,
+  readDeliveryProgress,
+  startDeliveryEpoch,
+} from './policies/delivery';
 import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
@@ -54,7 +60,10 @@ import { AutomationLedger, automationIdentity } from './storage/ledger';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateCapacity } from './runtime/capacity';
 import { evaluateAutomationProgram } from './programs/codemode';
-import { AutomationSessionActionsLegacy } from './actions/session-actions-legacy';
+import {
+  AutomationSessionActionsLegacy,
+  isDurableSessionDenial,
+} from './actions/session-actions-legacy';
 import { retainsAutomationGrant, matchesPreparedOrigin } from './actions/authorization';
 import { observeCapacity } from './sources/capacity';
 import { reconcileSessionTurnsLegacy } from './sources/sessions-legacy';
@@ -110,7 +119,7 @@ export async function createAutomationWorkspaceLegacy(options: {
     auth.machineId
   );
   try {
-    upgradeCapacityPolicies(ledger, auth.userId, Date.now());
+    upgradeCapacityPolicies(ledger, Date.now());
     ledger.orphanStartedRuns(Date.now());
   } catch (error) {
     ledger.close();
@@ -132,6 +141,16 @@ export async function createAutomationWorkspaceLegacy(options: {
     return owned;
   };
   const observe = (body: () => Promise<void>) => (closing ? Promise.resolve() : ownedCall(body));
+  const deliveryStatus = Semaphore.makeUnsafe(1);
+  const withDeliveryStatus = <A>(body: (now: number) => Promise<A>) =>
+    deliveryStatus.withPermit(
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) =>
+          Effect.tryPromise({ try: () => body(now), catch: (cause) => cause })
+        ),
+        Effect.uninterruptible
+      )
+    );
   const condition = async (
     spec: AutomationCondition,
     receipt: AutomationReceipt
@@ -196,10 +215,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             ? ledger.work(workRef.ref)
             : undefined;
         const recoveryBinding =
-          work &&
-          work.bindingId === bindingId &&
-          work.sessionId === receipt.rule.scope.sessionId &&
-          work.ownerUserId === receipt.rule.ownerUserId;
+          work && work.bindingId === bindingId && work.sessionId === receipt.rule.scope.sessionId;
         if (
           !recoveryBinding &&
           ![receipt.rule.grants, ledger.rule(receipt.rule.id)?.grants].every((grant) =>
@@ -244,23 +260,30 @@ export async function createAutomationWorkspaceLegacy(options: {
         return { value: 'unknown', reason: `condition_unsupported:${spec.kind}` };
     }
   };
-  const recheck = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
+  const recheckAdmission = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
     const authorization = await actions.authorize(receipt);
-    if (authorization.value !== 'yes') return authorization;
+    if (authorization.value !== 'yes' || authorization.reason === 'archive_already_committed')
+      return authorization;
     if (receipt.intent.guard) {
       const guard = await condition(receipt.intent.guard, receipt);
-      if (guard.value !== 'yes') return guard;
+      if (guard.value !== 'yes') return { ...guard, reason: `guard:${guard.reason}` };
     }
+    return { value: 'yes', reason: 'authorized' };
+  };
+  const recheck = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
+    const admission = await recheckAdmission(receipt);
+    if (admission.value !== 'yes' || admission.reason === 'archive_already_committed')
+      return admission;
     if (receipt.intent.condition && !['queued', 'running', 'unknown'].includes(receipt.state)) {
       const predicate = await condition(receipt.intent.condition, receipt);
       if (predicate.value !== 'yes') return predicate;
     }
-    return { value: 'yes', reason: 'authorized' };
+    return admission;
   };
   const actions = new AutomationSessionActionsLegacy({
     ...options,
     ledger,
-    condition: recheck,
+    admission: recheckAdmission,
     capacity: (bindingId, modelId, receipt) =>
       condition(
         {
@@ -270,20 +293,27 @@ export async function createAutomationWorkspaceLegacy(options: {
         receipt
       ),
   });
-  const sessionContext = async (sessionId: string): Promise<AutomationProgramContext> => {
+  const sessionMeta = async (sessionId: string): Promise<SessionMeta> => {
     const record = await lody.documentManager.repo.getDocMeta(
       getSessionRoomId(sessionId as SessionId)
     );
     const meta = record?.meta as SessionMeta | undefined;
-    if (
-      !record ||
-      !meta ||
-      isLoroRepoDocDeleted(record) ||
-      meta.userId !== auth.userId ||
-      meta.machineId !== auth.machineId
-    )
+    if (!record || !meta || isLoroRepoDocDeleted(record) || meta.machineId !== auth.machineId)
       throw new Error('AUTOMATION_SESSION_UNAVAILABLE');
     if (meta.isArchived) throw new Error('AUTOMATION_SESSION_ARCHIVED');
+    return meta;
+  };
+  const assertCanEdit = async (sessionId: string, userId: string): Promise<void> => {
+    const access = await authority.canEdit(sessionId as SessionId, userId);
+    if (access === 'no') throw new Error('AUTOMATION_PERMISSION_DENIED');
+    if (access === 'unknown') throw new Error('AUTOMATION_PERMISSION_UNCONFIRMED');
+  };
+  const sessionContext = async (
+    sessionId: string,
+    userId: string
+  ): Promise<AutomationProgramContext> => {
+    await sessionMeta(sessionId);
+    await assertCanEdit(sessionId, userId);
     return { sessionId, workspaceId: workspace.id, now: Date.now() };
   };
   let managedRuns: ManagedRuns | undefined;
@@ -322,7 +352,9 @@ export async function createAutomationWorkspaceLegacy(options: {
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
         if (!ledger.claimRunStart(wait.id, now)) return false as const;
-        const cwd = yield* Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
+        const cwd = yield* Effect.tryPromise(() =>
+          sessionContext(wait.sessionId, wait.ownerUserId)
+        ).pipe(
           Effect.andThen(
             Effect.tryPromise(() => lody.resolveAutomationWorkdir(wait.sessionId as SessionId))
           ),
@@ -358,7 +390,7 @@ export async function createAutomationWorkspaceLegacy(options: {
     );
   });
   const evaluateProgram = (wait: AutomationWait) =>
-    Effect.tryPromise(() => sessionContext(wait.sessionId)).pipe(
+    Effect.tryPromise(() => sessionContext(wait.sessionId, wait.ownerUserId)).pipe(
       Effect.uninterruptible,
       Effect.flatMap((context) =>
         evaluateAutomationProgram(
@@ -395,7 +427,7 @@ export async function createAutomationWorkspaceLegacy(options: {
   const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
     status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
   /** Auto delivery reads observations already in this ledger and the Session metadata. */
-  const advanceDeliveries = async () => {
+  const advanceDeliveries = async (now: number) => {
     for (const rule of ledger.rules()) {
       const sessionId = rule.scope.sessionId;
       if (
@@ -403,7 +435,6 @@ export async function createAutomationWorkspaceLegacy(options: {
         !sessionId ||
         rule.handler.kind !== 'policy' ||
         rule.handler.policy !== 'auto-deliver' ||
-        rule.ownerUserId !== auth.userId ||
         rule.ownerMachineId !== auth.machineId
       )
         continue;
@@ -413,14 +444,35 @@ export async function createAutomationWorkspaceLegacy(options: {
         const record = await lody.documentManager.repo.getDocMeta(roomId);
         const meta = record?.meta as SessionMeta | undefined;
         if (!record || !meta || isLoroRepoDocDeleted(record) || meta.isArchived) continue;
-        const now = Date.now();
         const decision = advanceDelivery({ ledger, meta, options, now });
         if (decision.finished)
-          configureSessionPolicies(ledger, sessionId, auth.userId, { autoDeliver: false }, now);
-        if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status))
+          configureSessionPolicies(
+            ledger,
+            sessionId,
+            rule.ownerUserId,
+            { autoDeliver: false },
+            now
+          );
+        if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status)) {
+          const pr = decision.observed;
+          logger.debug(`Auto delivery ${sessionId}: ${deliveryStatusKey(decision.status)}`, {
+            step: decision.step?.step,
+            ...(pr
+              ? {
+                  head: pr.headSha,
+                  status: pr.status,
+                  ci: pr.ciState,
+                  merge: pr.mergeState,
+                  observedAt: pr.observedAt,
+                }
+              : {}),
+            workspaceDirty: meta.workspaceDirty,
+            workspaceUnpushed: meta.workspaceUnpushed,
+          });
           await lody.documentManager.repo.upsertDocMeta(roomId, {
             autoDelivery: { ...decision.status, updatedAt: now },
           });
+        }
       } catch (cause) {
         // One Session's failure leaves the others' delivery running.
         logger.warn(`Auto delivery pass failed for ${sessionId}`, cause);
@@ -456,8 +508,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             (fact) => authority.executionRelease(fact.sessionId, fact.assistantTurnId, fact.userId),
             (cause) => logger.warn('Automation turn observation awaiting reconciliation', cause)
           );
-          await advanceDeliveries();
-        }),
+        }).pipe(Effect.andThen(withDeliveryStatus(advanceDeliveries))),
         authorize: (receipt) => sessionCall(() => actions.authorize(receipt)),
         condition: (spec, receipt) => sessionCall(() => condition(spec, receipt)),
         prepare: (receipt) => sessionCall(() => actions.prepare(receipt)),
@@ -533,8 +584,12 @@ export async function createAutomationWorkspaceLegacy(options: {
     authority.setAdmission(
       async ({ sessionId, turnId, userId, origin }) => {
         const receipt = ledger.receipt(origin.invocationId);
+        if (!receipt || ['settled', 'failed', 'cancelled', 'superseded'].includes(receipt.state)) {
+          // The input outlived its receipt; leave no zombie for dispatch to re-verify.
+          await authority.cancelInput(sessionId, turnId).catch(() => false);
+          return false;
+        }
         if (
-          !receipt ||
           receipt.sessionId !== sessionId ||
           receipt.turnId !== turnId ||
           receipt.rule.ownerUserId !== userId ||
@@ -543,31 +598,41 @@ export async function createAutomationWorkspaceLegacy(options: {
           !canSubmit(sessionId, turnId, origin)
         )
           return false;
-        return (await recheck(receipt)).value === 'yes';
+        const verdict = await recheck(receipt);
+        if (verdict.value === 'yes') return true;
+        if (verdict.value === 'no' && isDurableSessionDenial(verdict)) {
+          const now = Date.now();
+          ledger.update(
+            receipt.id,
+            receipt.state,
+            { state: 'cancelling', reason: verdict.reason, retryAt: now },
+            now
+          );
+        }
+        return false;
       },
       canSubmit,
       async ({ sessionId, turnId, userId, origin }) => {
         const work = origin.workIntentId && ledger.work(origin.workIntentId);
-        if (!work || work.ownerUserId !== userId || !canSubmit(sessionId, turnId, origin))
-          return false;
+        if (!work || !canSubmit(sessionId, turnId, origin)) return false;
         const record = await lody.documentManager.repo.getDocMeta(getSessionRoomId(sessionId));
         const meta = record?.meta as SessionMeta | undefined;
         return (
           !!record &&
           !!meta &&
           !isLoroRepoDocDeleted(record) &&
-          meta.userId === userId &&
           meta.machineId === auth.machineId &&
           !meta.isArchived &&
           !meta.collaborationStopped &&
           meta.acpSessionId === work.nativeSessionId &&
-          (meta.latestUserMsgId === work.turnId || meta.latestUserMsgId === turnId)
+          (meta.latestUserMsgId === work.turnId || meta.latestUserMsgId === turnId) &&
+          (await authority.canEdit(sessionId, userId)) === 'yes'
         );
       }
     );
-    const assertReadable = (wait: AutomationWait) => {
-      if (wait.ownerUserId !== auth.userId || wait.ownerMachineId !== auth.machineId)
-        throw new Error('AUTOMATION_NOT_FOUND');
+    const assertReadable = async (wait: AutomationWait, userId: string) => {
+      if (wait.ownerMachineId !== auth.machineId) throw new Error('AUTOMATION_NOT_FOUND');
+      await assertCanEdit(wait.sessionId, userId);
     };
     const publicWait = (wait: AutomationWait) => {
       const receipt = wait.invocationId && ledger.receipt(wait.invocationId);
@@ -586,6 +651,150 @@ export async function createAutomationWorkspaceLegacy(options: {
             }
           : {}),
       };
+    };
+    const execute = async (
+      command: AutomationCommand,
+      principal: string,
+      requesterSessionId?: string
+    ): Promise<unknown> => {
+      const now = await runtime.runPromise(Clock.currentTimeMillis);
+      switch (command.type) {
+        case 'register': {
+          const sessionId = command.sessionId ?? requesterSessionId;
+          if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
+          const context = await sessionContext(sessionId, principal);
+          if (command.expiresAt !== undefined && command.expiresAt <= now)
+            throw new Error('AUTOMATION_ALREADY_EXPIRED');
+          await runtime.runPromise(
+            evaluateAutomationProgram(
+              command.program,
+              context,
+              () => Effect.fail(new Error('AUTOMATION_VALIDATION_HAS_NO_READS')),
+              true
+            )
+          );
+          if (closing) throw new Error('AUTOMATION_OWNER_CLOSING');
+          const { type: _type, sessionId: _session, ...registration } = command;
+          const wait = ledger.registerWait(registration, sessionId, principal, now);
+          await runtime.runPromise(service.wake);
+          return publicWait(wait);
+        }
+        case 'run': {
+          const sessionId = command.sessionId ?? requesterSessionId;
+          if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
+          await sessionContext(sessionId, principal);
+          const root = await lody.resolveAutomationWorkdir(sessionId as SessionId);
+          if (!root) throw new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE');
+          await runtime.runPromise(resolveAutomationCwd(root, command.cwd));
+          if (closing) throw new Error('AUTOMATION_OWNER_CLOSING');
+          const { type: _type, sessionId: _session, ...run } = command;
+          const wait = ledger.registerRun(run, sessionId, principal, managedRunLogs, now);
+          await runtime.runPromise(service.wake);
+          return publicWait(wait);
+        }
+        case 'settings':
+        case 'configure': {
+          const sessionId = command.sessionId ?? requesterSessionId;
+          if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
+          await sessionContext(sessionId, principal);
+          if (command.type === 'configure') {
+            const record =
+              command.settings.recoverCapacity === true
+                ? await lody.documentManager.repo.getDocMeta(
+                    getSessionRoomId(sessionId as SessionId)
+                  )
+                : undefined;
+            const meta = record?.meta as SessionMeta | undefined;
+            const currentTurn =
+              meta?.machineId === auth.machineId && !isLoroRepoDocDeleted(record)
+                ? meta.latestUserMsgId
+                : undefined;
+            await runtime.runPromise(
+              withDeliveryStatus(async (now) => {
+                const previous = sessionPolicySettings(ledger, sessionId);
+                const wasEnabled = previous.recoverCapacity === true;
+                const enablesDelivery =
+                  typeof command.settings.autoDeliver === 'object' &&
+                  typeof previous.autoDeliver !== 'object';
+                ledger.configureSession(
+                  () => {
+                    if (enablesDelivery) startDeliveryEpoch(ledger, sessionId, now);
+                    configureSessionPolicies(ledger, sessionId, principal, command.settings, now);
+                  },
+                  sessionId,
+                  !wasEnabled ? currentTurn : undefined,
+                  now
+                );
+                if (command.settings.autoDeliver === false)
+                  await lody.documentManager.repo.upsertDocMeta(
+                    getSessionRoomId(sessionId as SessionId),
+                    { autoDelivery: null }
+                  );
+              })
+            );
+            const lastStep =
+              command.settings.autoDeliver === false
+                ? readDeliveryProgress(ledger, sessionId)?.lastStep
+                : undefined;
+            for (const receipt of lastStep
+              ? ledger.eventReceipts(DELIVERY_EVENT_SOURCE, lastStep.eventId)
+              : [])
+              if (['accepted', 'waiting', 'resolved', 'blocked'].includes(receipt.state))
+                await runtime.runPromise(service.cancel(receipt.id));
+          }
+          await runtime.runPromise(service.wake);
+          return sessionPolicySettings(ledger, sessionId);
+        }
+        case 'list': {
+          const sessionId = command.sessionId ?? requesterSessionId;
+          if (sessionId) await assertCanEdit(sessionId, principal);
+          return ledger.waits(sessionId ? undefined : principal, sessionId).map(publicWait);
+        }
+        case 'show': {
+          const wait = ledger.wait(command.id);
+          if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
+          await assertReadable(wait, principal);
+          return publicWait(wait);
+        }
+        case 'activities': {
+          const sessionId = command.sessionId ?? requesterSessionId;
+          if (sessionId) await assertCanEdit(sessionId, principal);
+          const page = ledger.activityPage(
+            sessionId ? undefined : principal,
+            sessionId,
+            command.limit,
+            command.before
+          );
+          return { ...page, items: page.items.map(publicActivity) };
+        }
+        case 'cancel': {
+          const wait = ledger.wait(command.id);
+          if (wait) {
+            await assertReadable(wait, principal);
+            await runtime.runPromise(service.cancel(wait.id));
+            const owner = managedRuns;
+            if (wait.run && owner) await runtime.runPromise(owner.stop(wait.id));
+            const current = ledger.wait(wait.id);
+            return current && publicWait(current);
+          }
+          const receipt = ledger.receipt(command.id);
+          if (!receipt) {
+            const work = ledger.work(command.id);
+            if (!work) throw new Error('AUTOMATION_NOT_FOUND');
+            await assertCanEdit(work.sessionId, principal);
+            ledger.putWork({ ...work, state: 'cancelled', updatedAt: now });
+            if (work.invocationId) await runtime.runPromise(service.cancel(work.invocationId));
+            await runtime.runPromise(service.wake);
+            const current = ledger.work(command.id);
+            return current ? workActivity(current) : undefined;
+          }
+          await assertCanEdit(receipt.sessionId, principal);
+          await runtime.runPromise(service.cancel(command.id));
+          const current = ledger.receipt(command.id);
+          return current ? actionActivity(current) : undefined;
+        }
+      }
+      throw new Error('AUTOMATION_COMMAND_UNSUPPORTED');
     };
     const handle = {
       ledger,
@@ -620,8 +829,8 @@ export async function createAutomationWorkspaceLegacy(options: {
             authority,
           })
         ),
-      wantsWorkflowObservations: (sessionId: string) =>
-        ledger.wantsRead('github.workflowRuns', sessionId),
+      workflowObservationOwners: () =>
+        ledger.wantsReadSessions('github.workflowRuns') as Set<SessionId>,
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         observe(async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);
@@ -642,141 +851,11 @@ export async function createAutomationWorkspaceLegacy(options: {
         ownedCall(async () => {
           if (closing) throw new Error('AUTOMATION_OWNER_CLOSING');
           const command = automationCommandSchema.parse(input);
-          if (
-            requesterSessionId &&
-            authority.author(requesterSessionId as SessionId) !== auth.userId
-          )
-            throw new Error('AUTOMATION_ACTIVE_AUTHOR_REQUIRED');
-          const now = await runtime.runPromise(Clock.currentTimeMillis);
-          switch (command.type) {
-            case 'register': {
-              const sessionId = command.sessionId ?? requesterSessionId;
-              if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              const context = await sessionContext(sessionId);
-              if (command.expiresAt !== undefined && command.expiresAt <= now)
-                throw new Error('AUTOMATION_ALREADY_EXPIRED');
-              await runtime.runPromise(
-                evaluateAutomationProgram(
-                  command.program,
-                  context,
-                  () => Effect.fail(new Error('AUTOMATION_VALIDATION_HAS_NO_READS')),
-                  true
-                )
-              );
-              if (closing) throw new Error('AUTOMATION_OWNER_CLOSING');
-              const { type: _type, sessionId: _session, ...registration } = command;
-              const wait = ledger.registerWait(registration, sessionId, auth.userId, now);
-              await runtime.runPromise(service.wake);
-              return publicWait(wait);
-            }
-            case 'run': {
-              const sessionId = command.sessionId ?? requesterSessionId;
-              if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              await sessionContext(sessionId);
-              const root = await lody.resolveAutomationWorkdir(sessionId as SessionId);
-              if (!root) throw new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE');
-              await runtime.runPromise(resolveAutomationCwd(root, command.cwd));
-              if (closing) throw new Error('AUTOMATION_OWNER_CLOSING');
-              const { type: _type, sessionId: _session, ...run } = command;
-              const wait = ledger.registerRun(run, sessionId, auth.userId, managedRunLogs, now);
-              await runtime.runPromise(service.wake);
-              return publicWait(wait);
-            }
-            case 'settings':
-            case 'configure': {
-              const sessionId = command.sessionId ?? requesterSessionId;
-              if (!sessionId) throw new Error('AUTOMATION_SESSION_REQUIRED');
-              await sessionContext(sessionId);
-              if (command.type === 'configure') {
-                const record =
-                  command.settings.recoverCapacity === true
-                    ? await lody.documentManager.repo.getDocMeta(
-                        getSessionRoomId(sessionId as SessionId)
-                      )
-                    : undefined;
-                const meta = record?.meta as SessionMeta | undefined;
-                const currentTurn =
-                  meta?.userId === auth.userId &&
-                  meta.machineId === auth.machineId &&
-                  !isLoroRepoDocDeleted(record)
-                    ? meta.latestUserMsgId
-                    : undefined;
-                const previous = sessionPolicySettings(ledger, sessionId);
-                const wasEnabled = previous.recoverCapacity === true;
-                const enablesDelivery =
-                  typeof command.settings.autoDeliver === 'object' &&
-                  typeof previous.autoDeliver !== 'object';
-                // Encrypted workspaces do not run the PR poller that Auto delivery reads.
-                if (enablesDelivery && workspace.contentMode === 'e2ee')
-                  throw new Error('AUTOMATION_AUTO_DELIVER_UNAVAILABLE_ENCRYPTED');
-                ledger.configureSession(
-                  () => {
-                    if (enablesDelivery) startDeliveryEpoch(ledger, sessionId, now);
-                    configureSessionPolicies(ledger, sessionId, auth.userId, command.settings, now);
-                  },
-                  sessionId,
-                  auth.userId,
-                  !wasEnabled ? currentTurn : undefined,
-                  now
-                );
-                // Turning it off, or dismissing a finished status, clears the shown status.
-                if (command.settings.autoDeliver === false)
-                  await lody.documentManager.repo.upsertDocMeta(
-                    getSessionRoomId(sessionId as SessionId),
-                    { autoDelivery: null }
-                  );
-              }
-              await runtime.runPromise(service.wake);
-              return sessionPolicySettings(ledger, sessionId);
-            }
-            case 'list': {
-              return ledger
-                .waits(auth.userId, command.sessionId ?? requesterSessionId)
-                .map(publicWait);
-            }
-            case 'show': {
-              const wait = ledger.wait(command.id);
-              if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-              assertReadable(wait);
-              return publicWait(wait);
-            }
-            case 'activities': {
-              const page = ledger.activityPage(
-                auth.userId,
-                command.sessionId ?? requesterSessionId,
-                command.limit,
-                command.before
-              );
-              return { ...page, items: page.items.map(publicActivity) };
-            }
-            case 'cancel': {
-              const wait = ledger.wait(command.id);
-              if (wait) {
-                assertReadable(wait);
-                await runtime.runPromise(service.cancel(wait.id));
-                const owner = managedRuns;
-                if (wait.run && owner) await runtime.runPromise(owner.stop(wait.id));
-                const current = ledger.wait(wait.id);
-                return current && publicWait(current);
-              }
-              const receipt = ledger.receipt(command.id);
-              if (!receipt) {
-                const work = ledger.work(command.id);
-                if (!work || work.ownerUserId !== auth.userId)
-                  throw new Error('AUTOMATION_NOT_FOUND');
-                ledger.putWork({ ...work, state: 'cancelled', updatedAt: now });
-                if (work.invocationId) await runtime.runPromise(service.cancel(work.invocationId));
-                await runtime.runPromise(service.wake);
-                const current = ledger.work(command.id);
-                return current ? workActivity(current) : undefined;
-              }
-              if (receipt.rule.ownerUserId !== auth.userId) throw new Error('AUTOMATION_NOT_FOUND');
-              await runtime.runPromise(service.cancel(command.id));
-              const current = ledger.receipt(command.id);
-              return current ? actionActivity(current) : undefined;
-            }
-          }
-          throw new Error('AUTOMATION_COMMAND_UNSUPPORTED');
+          const principal = requesterSessionId
+            ? authority.author(requesterSessionId as SessionId)
+            : auth.userId;
+          if (!principal) throw new Error('AUTOMATION_ACTIVE_AUTHOR_REQUIRED');
+          return execute(command, principal, requesterSessionId);
         }),
       dispose: () =>
         (close ??= (async () => {
@@ -809,14 +888,12 @@ export async function createAutomationWorkspaceLegacy(options: {
           if (!verify) throw new Error('AUTOMATION_REMOTE_AUTH_UNAVAILABLE');
           const operation = remoteAutomationOperationSchema.parse(input.operation);
           const proof = remoteAutomationProofSchema.parse(input.proof);
-          if (input.requesterUserId !== auth.userId)
-            throw new Error('AUTOMATION_PERMISSION_DENIED');
           if (proof.runtimeNonce !== remoteNonce) throw new Error('AUTOMATION_RUNTIME_CHANGED');
           for (const [id, expiresAt] of consumedRemoteRequests)
             if (expiresAt <= Date.now()) consumedRemoteRequests.delete(id);
           if (consumedRemoteRequests.has(proof.requestId))
             throw new Error('AUTOMATION_REQUEST_USED');
-          await sessionContext(input.sessionId);
+          await sessionMeta(input.sessionId);
           const verified = await verify({
             intent: remoteAutomationIntentSchema.parse({
               workspaceId: workspace.id,
@@ -830,22 +907,22 @@ export async function createAutomationWorkspaceLegacy(options: {
             }),
             requestToken: proof.requestToken,
           });
-          if (verified.requesterUserId !== auth.userId || verified.expiresAt <= Date.now())
+          const requester = verified.requesterUserId;
+          if (requester !== input.requesterUserId || verified.expiresAt <= Date.now())
             throw new Error('AUTOMATION_PERMISSION_DENIED');
           if (consumedRemoteRequests.has(proof.requestId))
             throw new Error('AUTOMATION_REQUEST_USED');
           consumedRemoteRequests.set(proof.requestId, verified.expiresAt);
-          await sessionContext(input.sessionId);
+          await sessionContext(input.sessionId, requester);
           if (operation.type === 'cancel') {
             const wait = ledger.wait(operation.id);
-            if (!wait) throw new Error('AUTOMATION_NOT_FOUND');
-            assertReadable(wait);
-            if (wait.sessionId !== input.sessionId) throw new Error('AUTOMATION_NOT_FOUND');
-            await handle.command({ type: 'cancel', id: operation.id });
+            if (!wait || wait.sessionId !== input.sessionId)
+              throw new Error('AUTOMATION_NOT_FOUND');
+            await execute({ type: 'cancel', id: operation.id }, requester);
             return { type: 'cancel' as const };
           }
           if (operation.type === 'list') {
-            const all = ledger.waits(auth.userId, input.sessionId);
+            const all = ledger.waits(undefined, input.sessionId);
             const start = operation.after
               ? all.findIndex((wait) => wait.id === operation.after) + 1
               : 0;
@@ -873,7 +950,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             const next = start + waits.length < all.length ? waits.at(-1)?.id : undefined;
             return { type: 'list' as const, waits, ...(next ? { next } : {}) };
           }
-          const settings = await handle.command({ ...operation, sessionId: input.sessionId });
+          const settings = await execute({ ...operation, sessionId: input.sessionId }, requester);
           return { type: 'settings' as const, settings };
         }),
     };

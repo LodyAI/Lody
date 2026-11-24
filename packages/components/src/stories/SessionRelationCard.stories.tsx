@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider as JotaiProvider } from 'jotai';
@@ -9,6 +10,50 @@ import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view'
 import { setDocMetaByRoomIdAtom } from '@/atoms/doc-meta';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
+
+const batchFrame = stylex.create({
+  frame: {
+    width: '720px',
+    maxWidth: 'calc(100vw - 2rem)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 6)',
+  },
+});
+
+const migrationStyles = stylex.create({
+  relation: { width: '640px', maxWidth: 'calc(100vw - 2rem)' },
+  column: {
+    paddingBlock: {
+      default: 'calc(var(--spacing) * 2)',
+      '@media (width >= 40rem)': 'calc(var(--spacing) * 3)',
+    },
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '720px',
+    'max-width': 'calc(100vw - 2rem)',
+  },
+  frame2: {
+    height: '520px',
+    width: '720px',
+    'max-width': '100vw',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+  frame3: {
+    width: '720px',
+    'max-width': 'calc(100vw - 2rem)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 5)',
+  },
+  stack: {
+    display: 'flex',
+    'flex-direction': 'column',
+    'background-color': 'hsl(var(--background) / 1)',
+  },
+});
 
 const meta = {
   title: 'Sessions/SessionRelationCard',
@@ -27,7 +72,7 @@ export const CreatedConversation: Story = {
     sessionTitle: 'Audit the sidebar navigation state',
     actionLabel: 'View session',
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -39,7 +84,7 @@ export const AutomaticallyCreatedBy: Story = {
     actionLabel: 'Back to session',
     actionIcon: CornerLeftUp,
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -49,7 +94,7 @@ export const ReadOnly: Story = {
     label: 'Related session',
     sessionTitle: 'Audit the sidebar navigation state',
     actionLabel: 'View session',
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -61,7 +106,7 @@ export const WithDetail: Story = {
     actionLabel: 'View session',
     detail: 'The target machine is online and ready.',
     onAction: () => {},
-    className: 'w-[640px] max-w-[calc(100vw-2rem)]',
+    xstyle: migrationStyles.relation,
   },
 };
 
@@ -103,7 +148,7 @@ export const InCreateOperation: Story = {
     onAction: () => {},
   },
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <MessageRowView
         message={operationCompletion}
         sessionId={'storybook-opener' as SessionId}
@@ -122,7 +167,7 @@ const operationStoryArgs = {
 } as const;
 
 const renderOperation = (message: SessionHistoryParsed) => (
-  <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+  <div {...stylex.props(storyLayout.frame)}>
     <MessageRowView
       message={message}
       sessionId={'storybook-opener' as SessionId}
@@ -290,13 +335,13 @@ export const AtConversationStart: Story = {
     onAction: () => {},
   },
   render: () => (
-    <div className="h-[520px] w-[720px] max-w-[100vw] bg-background">
+    <div {...stylex.props(storyLayout.frame2)}>
       <SessionChatStreamView
         sessionId={openedSessionId}
         items={openedConversationItems}
         renderMessageRow={renderOpenedConversationMessage}
         leadingContent={
-          <ConversationColumn className="py-2 sm:py-3">
+          <ConversationColumn xstyle={migrationStyles.column}>
             <SessionRelationCard
               relation="opened-by"
               label="This session was automatically created by"
@@ -341,7 +386,7 @@ function ProgressPreview({
   status: 'created' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 }) {
   return (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)] bg-background p-5">
+    <div {...stylex.props(storyLayout.frame3)}>
       <MessageRowView
         message={progressMessage(status)}
         sessionId={'storybook-opener' as SessionId}
@@ -374,7 +419,7 @@ export const Cancelled: Story = {
 export const AllCreationStates: Story = {
   args: CreatedConversation.args,
   render: () => (
-    <div className="flex flex-col bg-background">
+    <div {...stylex.props(storyLayout.stack)}>
       {(['created', 'running', 'succeeded', 'failed', 'cancelled'] as const).map((status) => (
         <ProgressPreview key={status} status={status} />
       ))}
@@ -434,7 +479,7 @@ export const ManyCreatedSessions: Story = {
 export const FailedAndMixedBatchResults: Story = {
   args: operationStoryArgs,
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)] flex flex-col gap-6">
+    <div {...stylex.props(batchFrame.frame)}>
       {[false, true].map((mixed) => (
         <MessageRowView
           key={String(mixed)}
@@ -492,7 +537,7 @@ export const FailedAndMixedBatchResults: Story = {
 export const CompletedWorkBatch: Story = {
   args: operationStoryArgs,
   render: () => (
-    <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <div {...stylex.props(storyLayout.frame)}>
       <MessageRowView
         sessionId={'storybook-opener' as SessionId}
         message={{

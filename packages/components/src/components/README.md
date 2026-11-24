@@ -33,6 +33,9 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
+Opening a desktop session row's menu immediately dismisses its hover card.
+The card stays hidden while the menu or a submenu is open.
+
 Header controls (`sidebar-history-controls.tsx`) use the local `CuidaSidebarExpandOutline`
 SVG for the sidebar toggle and Lucide `ChevronLeft` / `ChevronRight` for history
 navigation, in 16px boxes. Every page header that offers to show a hidden sidebar
@@ -74,6 +77,14 @@ Decisions:
 [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md),
 and [details group](../../../../.agents/notes/implemented/feature/2026-10-18-sidebar-row-details-group.md).
 
+## Workspace sheets
+
+Mobile workspace creation and deletion use the Vaul-backed
+[`DrawerDescription`](../ui/drawer.tsx)'s optional physical `fontSize` to keep their
+0.78rem copy. Omitting it retains the description's original default; caller and
+slotted-child styles keep precedence. The sheet still owns validation, pending
+state and keyboard handling.
+
 In the Project (Workspace) view the Details group adds a third switch, `Hide
 Empty Projects` (`sidebarHideEmptyProjectsAtom`, on by default). On, a project
 is listed only while it has Session rows after pinned-tree separation and opener
@@ -85,18 +96,19 @@ selection lives in `selectVisibleLocalProjectSections`
 sit with the GitHub repositories and stay listed only while they have
 conversations, whatever the switch says.
 
-Status organize mode lists the same rows as Updated, split into the native mobile
-Home's status groups in its order: Needs you, Just finished, Open pull requests,
-Running, Idle. `lib/sidebar-status-group.ts` classifies each row through the new-chat
-page's `homeNowReason` (`lib/home-now.ts`), so a session reads the same reason on
-both surfaces; rows that page leaves out (quiet for days, merged or closed PR) are
-Idle here. A conversation whose latest turn failed is under Needs you unless it is
-working again: the CLI writes the failed user turn into `SessionMeta.lastFailedUserMsgId`
-together with `lastHandledUserMsgId`, and `hasFailedLatestTurn` reads it only while the
-two match, so a later handled or canceled turn retires it without another write. Child
-Tabs roll their failure into the row. `buildSidebarUpdatedBuckets` feeds both the renderer and keyboard
-navigation, empty groups are skipped, and only Idle folds behind Show all. Group
-collapse and Show all share Updated's persisted per-bucket maps, keyed by group.
+Status organize mode lists the same rows as Updated below the Pinned area, in the
+Focus, Later and Settled tiers of the [Status view Spec](../../../../specs/sidebar-status-view.md).
+The shared Status view in `packages/shared/src/status-view/` decides each row's tier,
+order and opened-by nesting and plans every Status and pin-section write;
+`buildSidebarUpdatedBuckets` adapts its tiers for both the renderer and keyboard
+navigation, and `hooks/use-session-actions.ts` performs the planned writes. Focus stays
+mounted while empty as a drop target, only Settled folds behind Show all, and tier
+collapse and Show all share Updated's persisted per-bucket maps. Members who cannot
+write shared state (an encrypted workspace's Guest, a read-only membership) are not
+offered Status actions or section management (`hooks/use-status-view-writable.ts`). A
+drop the planner refuses because it would reorder conversations the member cannot manage
+snaps back with a notice rather than silently. `lib/status-view-state.ts` turns a drop slot
+into the neighbor the planner takes, for the sidebar and the Storybook playgrounds alike.
 
 ## Entry points and layout
 
@@ -181,6 +193,11 @@ collapse and Show all share Updated's persisted per-bucket maps, keyed by group.
   beside the automatic navigation — a browser that refuses a custom-scheme
   navigation reports nothing back, so the link must already be on screen.
   [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-electron-browser-signin-account-choice.md).
+  The post-transfer Storybook states mount the real LoginPage in a same-origin
+  sandboxed iframe that blocks custom-protocol launch while the trusted fixture
+  keeps its sandbox intact. It is not an isolation boundary for hostile scripts.
+  Manual link activation is recorded without opening external software; these
+  states cover UI, not OS handoff.
 - Desktop update prompt: `sidebar-update-banner.tsx` and
   `update-changelog-dialog.tsx`, driven by the pure selectors in
   `lib/electron-update-banner.ts`.
@@ -189,6 +206,17 @@ collapse and Show all share Updated's persisted per-bucket maps, keyed by group.
   layout (`detectAppDeviceClass()` is `tablet`, viewport >= 768) with
   `viewport-fit=cover`, which is why desktop top/side padding also matters there.
   The composer owns its bottom edge; a global bottom inset would double-pad it.
+  [`workspace-layout-utils.ts`](workspace-layout-utils.ts) owns the shared StyleX
+  root/content classes and the element-local safe-area and native-keyboard readers.
+  The root helper defaults to the page surface; the main workspace explicitly
+  selects `surface: 'sidebar'`, choosing one background in the same StyleX
+  composition. Settings and existing default callers keep the page surface.
+  Its retained `h-svh` hook also serves the old-browser fallback and Electron devbar;
+  it is not an unused utility.
+  The persistent
+  [`workspace inset browser suite`](../../tests/e2e/workspace-layout-insets.spec.ts)
+  checks the real composer fixtures, local inset readers, natural keyboard-padding
+  transition, focus and draft retention against a running Storybook build.
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact

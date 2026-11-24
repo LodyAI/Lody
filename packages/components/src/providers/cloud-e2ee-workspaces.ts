@@ -31,6 +31,7 @@ export function createCloudE2eeWorkspaces(input: {
   remote: Pick<
     PlatformE2eeWorkspaces,
     | 'create'
+    | 'deleteWorkspace'
     | 'describe'
     | 'history'
     | 'memberProfiles'
@@ -186,6 +187,14 @@ export function createCloudE2eeWorkspaces(input: {
       }
       assertAccount(owner);
       return result;
+    },
+    deleteWorkspace: async ({ workspaceId }) => {
+      const owner = account();
+      const receipt = await input.remote.deleteWorkspace({ workspaceId });
+      assertAccount(owner);
+      if (receipt.workspaceId !== workspaceId || receipt.deleted !== true)
+        throw new Error('e2ee_deletion_receipt_mismatch');
+      return receipt;
     },
     describe: async (request) => {
       const owner = account();

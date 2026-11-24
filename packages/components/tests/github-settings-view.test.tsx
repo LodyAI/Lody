@@ -61,12 +61,15 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
   }),
 }));
 // This suite exercises the ordinary GitHub presentation/authorization flow.
-vi.mock('../src/hooks/use-workspace-feature', async (original) => ({
-  ...(await original<object>()),
-  useLegacyWorkspaceQueriesEnabled: () => true,
-  useAssertLegacyWorkspaceAccess: () => () => {},
-  useLegacyWorkspaceQueryStatus: () => 'allowed',
-}));
+vi.mock('../src/hooks/use-github-workspace', async () => {
+  const platform = await import('@lody/platform/react');
+  return {
+    useGithubWorkspaceStatus: () => 'allowed',
+    useGithubWorkspaceQuery: platform.useCloudQuery,
+    useGithubWorkspaceMutation: platform.useCloudMutation,
+    useGithubWorkspaceAction: platform.useCloudAction,
+  };
+});
 vi.mock('../src/hooks/use-personal-github-authorization', () => ({
   usePersonalGitHubAuthorization: () => async () => {
     authState.linkedCallback = 'operation-only';

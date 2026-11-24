@@ -15,6 +15,9 @@
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
+- Display projection caches hold weak values and bounded container metadata. Invalidate
+  affected items for local/import/checkout edits and bypass cached values after pending
+  writes; list/parent edits invalidate membership. Authoritative reads stay detached.
 - Repeated identity lookups reuse an unchanged pending transaction. Reads must not
   commit writes; uncommitted structural/ID edits and checkout still invalidate lookup.
 - Subscribe and capture the initial directory without a gap. Notifications carry

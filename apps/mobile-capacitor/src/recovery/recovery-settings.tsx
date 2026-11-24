@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+// Keep this on the public package subpath: Vite/StyleX production builds resolve it through package.json exports.
+import { themeSpace } from '@lody/components/style/theme-scale.stylex';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Alert } from '@lody/ui/alert';
@@ -16,6 +19,24 @@ type FileAction =
   | { kind: 'list' | 'refresh' }
   | { kind: 'add'; label: string }
   | { kind: 'remove'; entryId: string };
+
+const styles = stylex.create({
+  actions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+    padding: themeSpace[4],
+  },
+  opened: { paddingInline: themeSpace[4], paddingBottom: themeSpace[3] },
+  passkeyNone: { paddingInline: themeSpace[4], paddingBottom: themeSpace[4] },
+  notice: { padding: themeSpace[4] },
+  refreshActions: {
+    marginTop: themeSpace[2],
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: themeSpace[2],
+  },
+});
 
 /** Account-scoped panel. It never keeps a recovery file or an unlocked session in React state. */
 export function MobileRecoverySettings({
@@ -37,7 +58,6 @@ export function MobileRecoverySettings({
   const [notice, setNotice] = useState<'added' | 'removed'>();
   const [refresh, setRefresh] = useState<'needed' | 'failed'>();
   const [events, setEvents] = useState<readonly MobileSecurityEvent[]>([]);
-  const [activityError, setActivityError] = useState(false);
   const [naming, setNaming] = useState<string>();
   const [removing, setRemoving] = useState<{ entryId: string; label: string }>();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -51,10 +71,9 @@ export function MobileRecoverySettings({
       const next = await run(service.events());
       if (live.current && currentService.current === service) {
         setEvents(next);
-        setActivityError(false);
       }
     } catch {
-      if (live.current && currentService.current === service) setActivityError(true);
+      if (live.current && currentService.current === service) setEvents([]);
     }
   }, [run, service]);
   useEffect(() => {
@@ -120,7 +139,7 @@ export function MobileRecoverySettings({
         title={tr('mobileRecovery.title')}
         description={t('e2ee.recovery.explanation')}
       >
-        <div className="flex flex-wrap gap-2 p-4">
+        <div {...stylex.props(styles.actions)}>
           <Button
             variant="secondary"
             disabled={busy}
@@ -187,11 +206,11 @@ export function MobileRecoverySettings({
         />
         {summary && (
           <>
-            <div className="px-4 pb-3" role="status">
+            <div {...stylex.props(styles.opened)} role="status">
               {tr('mobileRecovery.opened', { count: summary.workspaces })}
             </div>
             {summary.passkeys.length === 0 ? (
-              <p className="px-4 pb-4">{t('e2ee.recovery.passkeyNone')}</p>
+              <p {...stylex.props(styles.passkeyNone)}>{t('e2ee.recovery.passkeyNone')}</p>
             ) : (
               summary.passkeys.map((row) => (
                 <MobileSettingsRow
@@ -208,12 +227,12 @@ export function MobileRecoverySettings({
           </>
         )}
         {notice && (
-          <p className="p-4" role="status">
+          <p {...stylex.props(styles.notice)} role="status">
             {t(notice === 'added' ? 'e2ee.recovery.passkeyAdded' : 'e2ee.recovery.passkeyRemoved')}
           </p>
         )}
         {refresh && (
-          <div className="p-4" role={refresh === 'failed' ? 'alert' : 'status'}>
+          <div {...stylex.props(styles.notice)} role={refresh === 'failed' ? 'alert' : 'status'}>
             <p>
               {tr(
                 refresh === 'failed'
@@ -221,7 +240,7 @@ export function MobileRecoverySettings({
                   : 'mobileRecovery.refreshNeeded'
               )}
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div {...stylex.props(styles.refreshActions)}>
               <Button
                 variant="secondary"
                 disabled={busy}
@@ -260,7 +279,7 @@ export function MobileRecoverySettings({
           </Alert.Root>
         )}
       </MobileSettingsSection>
-      {(events.length > 0 || activityError) && (
+      {events.length > 0 && (
         <MobileSettingsSection title={t('e2ee.recovery.securityEvents')}>
           {events.map((event, index) => (
             <MobileSettingsRow
@@ -276,13 +295,6 @@ export function MobileRecoverySettings({
               )}
             />
           ))}
-          {activityError && (
-            <MobileSettingsRow label={tr('mobileRecovery.activityFailed')}>
-              <Button variant="secondary" onClick={() => void refreshEvents()}>
-                {t('common.retry')}
-              </Button>
-            </MobileSettingsRow>
-          )}
         </MobileSettingsSection>
       )}
       <AlertDialog.Root

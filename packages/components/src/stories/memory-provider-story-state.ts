@@ -29,5 +29,7 @@ export const memoryProviderStoryState = (
   signInPoll: async () => result,
   install: async () => result,
   installPoll: async () => result,
+  uninstall: async () => result,
+  uninstallPoll: async () => result,
   ...overrides,
 });

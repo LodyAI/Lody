@@ -1,3 +1,4 @@
+import { encryptedGithubTokenPort } from './e2ee/runtime-cloud-port';
 import path from 'node:path';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { LodyPresenceStateMap, ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -1342,34 +1343,27 @@ export class LodyFleet {
         }
 
         const startedLody = lody;
-        // The poller reads decrypted repo/branch metadata and has independent
-        // hosted credential/association ports. Do not construct it for E2EE:
-        // sanitizing Lody's own cloud port does not fence this Fleet owner.
-        const prPollerWorkspace =
-          workspace.contentMode === 'e2ee'
-            ? null
-            : (partialPoller = createLodyPrPollerWorkspace({
-                documentManager: startedLody.documentManager,
-                workspaceId: workspace.id,
-                userId: this.userId,
-                machineId: this.machineId,
-                githubTokens: this.cloudPort.githubTokens,
-                prAssociation: this.cloudPort.prAssociation,
-                logger: workspaceLogger,
-                wantsWorkflowObservations: (sessionId) =>
-                  this.runtimes
-                    .get(workspace.id)
-                    ?.automations?.wantsWorkflowObservations(sessionId) ?? false,
-                recordWorkflowObservations: async (...args) => {
-                  await this.runtimes
-                    .get(workspace.id)
-                    ?.automations?.recordWorkflowObservations(...args);
-                },
-                recordObservations: async (...args) => {
-                  const runtime = this.runtimes.get(workspace.id);
-                  await runtime?.automations?.recordObservations(...args);
-                },
-              }));
+        const prPollerWorkspace = (partialPoller = createLodyPrPollerWorkspace({
+          documentManager: startedLody.documentManager,
+          workspaceId: workspace.id,
+          userId: this.userId,
+          machineId: this.machineId,
+          githubTokens:
+            workspace.contentMode === 'e2ee'
+              ? encryptedGithubTokenPort(this.cloudPort.githubTokens, this.userId)
+              : this.cloudPort.githubTokens,
+          prAssociation: workspace.contentMode === 'e2ee' ? null : this.cloudPort.prAssociation,
+          logger: workspaceLogger,
+          workflowObservationOwners: () =>
+            this.runtimes.get(workspace.id)?.automations?.workflowObservationOwners() ?? new Set(),
+          recordWorkflowObservations: async (...args) => {
+            await this.runtimes.get(workspace.id)?.automations?.recordWorkflowObservations(...args);
+          },
+          recordObservations: async (...args) => {
+            const runtime = this.runtimes.get(workspace.id);
+            await runtime?.automations?.recordObservations(...args);
+          },
+        }));
         // Scheduled automation: this machine runs the schedules it owns, so
         // entrusted work continues while nobody is looking.
         const schedules: ScheduleWorkspaceHandle = !workspaceSupports(
@@ -1462,7 +1456,8 @@ export class LodyFleet {
           workspace.id as WorkspaceId,
           this.machineId,
           startedLody.documentManager,
-          stop.signal
+          stop.signal,
+          { verifyProjectIdentity: startedLody.documentManager.isEncryptedWorkspace?.() === true }
         ).catch((error: unknown) => {
           workspaceLogger.warn(`Failed to reconcile local projects: ${formatErrorMessage(error)}`);
         });
@@ -2866,6 +2861,23 @@ export class LodyFleet {
         };
       }
 
+      if (message.type === 'local-project/list-branches') {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
+        const rootPath = await this.resolveWorkspaceProjectRootPath(
+          runtime,
+          message.localProjectId
+        );
+        return {
+          ok: true,
+          type: 'local-project/list-branches',
+          result: await this.localProjectControlService.listProjectBranches(rootPath, {
+            query: message.query,
+            limit: message.limit,
+            cursor: message.cursor,
+          }),
+        };
+      }
+
       if (message.type === 'local-project/list-files') {
         const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
         const rootPath = await this.resolveWorkspaceProjectRootPath(
@@ -2877,6 +2889,22 @@ export class LodyFleet {
           type: 'local-project/list-files',
           result: await this.localProjectControlService.listProjectFiles(rootPath, {
             maxFiles: message.maxFiles,
+          }),
+        };
+      }
+
+      if (message.type === 'local-project/search-files') {
+        const runtime = await this.resolveWorkspaceRuntime(message.workspaceId);
+        const rootPath = await this.resolveWorkspaceProjectRootPath(
+          runtime,
+          message.localProjectId
+        );
+        return {
+          ok: true,
+          type: 'local-project/search-files',
+          result: await this.localProjectControlService.searchProjectFiles(rootPath, {
+            query: message.query,
+            limit: message.limit,
           }),
         };
       }
@@ -2909,7 +2937,8 @@ export class LodyFleet {
           type: 'local-project/list-skills',
           result: await this.localProjectControlService.listProjectSkills(
             rootPath,
-            message.skillDirs
+            message.skillDirs,
+            { knownFingerprint: message.knownFingerprint }
           ),
         };
       }
@@ -2919,7 +2948,10 @@ export class LodyFleet {
         return {
           ok: true,
           type: 'local-project/list-global-skills',
-          result: await this.localProjectControlService.listGlobalSkills(),
+          result: await this.localProjectControlService.listGlobalSkills({
+            magpieGatewayUrl: message.magpieGatewayUrl,
+            knownFingerprint: message.knownFingerprint,
+          }),
         };
       }
 

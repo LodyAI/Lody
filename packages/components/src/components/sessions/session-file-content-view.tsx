@@ -1,3 +1,5 @@
+import { control, radius as sharedRadius } from '@lody/ui/tokens/scales.stylex';
+import { tooltip } from '@lody/ui/tooltip/tooltip.tokens.stylex';
 import { ReadOnlyHtmlPreview } from './read-only-html-preview';
 import { PagedFileViewer } from './paged-file-viewer';
 import * as stylex from '@stylexjs/stylex';
@@ -93,7 +95,7 @@ import {
   isSessionMarkdownPath,
 } from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import { usePostHog } from '@/lib/posthog-context';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
 import { useCodeCollabLiveText } from '@/hooks/use-code-collab-live-text';
@@ -215,15 +217,14 @@ const styles = stylex.create({
     flexDirection: 'column',
     overflow: 'hidden',
   },
+  /* The surface's own edge (the side-panel tab strip, the mobile drawer header)
+     already separates it; the bar is the same surface as the body, not a frame. */
   toolbar: {
     display: 'flex',
     height: '2rem',
     flexShrink: 0,
     alignItems: 'center',
     gap: '4px',
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: 'hsl(var(--border) / 0.5)',
     backgroundColor: 'hsl(var(--background))',
     paddingInline: '8px',
   },
@@ -251,7 +252,7 @@ const styles = stylex.create({
     },
     opacity: {
       default: null,
-      ':disabled': 0.5,
+      ':disabled': control.disabledOpacity,
     },
   },
   toolButtonActive: { color: 'hsl(var(--foreground))' },
@@ -284,6 +285,10 @@ const styles = stylex.create({
     lineHeight: '1.25rem',
     color: 'hsl(var(--foreground))',
     outline: 'none',
+  },
+  previewToggleTooltip: {
+    [tooltip.text]: 'var(--text-xs)',
+    [tooltip.leading]: 'var(--text-xs--line-height)',
   },
   previewToggle: {
     display: 'flex',
@@ -336,7 +341,7 @@ const styles = stylex.create({
   },
   statusItem: { display: 'flex', minWidth: 0, flexShrink: 0, alignItems: 'center', gap: '4px' },
   statusSeparator: { marginInlineEnd: '2px', color: 'hsl(var(--muted-foreground) / 0.55)' },
-  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: '9999px' },
+  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: sharedRadius.full },
   statusPositiveDot: { backgroundColor: '#10b981' },
   statusMutedDot: { backgroundColor: 'hsl(var(--muted-foreground) / 0.5)' },
   statusWarningDot: { backgroundColor: '#f59e0b' },
@@ -1385,10 +1390,19 @@ function SessionFileContentViewImpl({
     lastCopyMarkdownRequestSeqRef.current = copyMarkdownRequestSeq;
     void handleCopyMarkdown();
   }, [copyMarkdownRequestSeq, data, handleCopyMarkdown, normalizedPath]);
-  const handleDownloadHtml = useCallback(() => {
+  const handleDownloadHtml = useCallback(async () => {
     if (data.status !== 'ready' || data.snapshot.kind !== 'text') return;
     const content = latestEditorTextRef.current ?? data.snapshot.text;
-    downloadBytesAsFile(normalizedPath, new TextEncoder().encode(content));
+    const bytes = new TextEncoder().encode(content);
+    try {
+      const { saved } = await saveBytesAsFile(normalizedPath, bytes);
+      if (!saved) return;
+    } catch {
+      toast.error(
+        tRef.current('sessions.fileActions.downloadFailed', 'Could not download that file.')
+      );
+      return;
+    }
     capturePostHogEvent(postHog, 'file_preview/downloaded', {
       file_kind: getAnalyticsFileKind(normalizedPath),
       source: 'file_viewer',
@@ -1565,7 +1579,7 @@ function SessionFileContentViewImpl({
   // Typography tracks conversationFontSize so side-panel README preview matches
   // the left chat Markdown (default = text-sm; was hard-coded large/"base").
   const previewSurface: ReactNode = isMarkdownTextFile ? (
-    <div {...stylex.props(styles.markdownPreview)} data-native-selection-allow>
+    <div {...stylex.props(styles.markdownPreview)} data-text-selectable>
       <SessionLinkProvider enabled={sessionLinksEnabled}>
         {fileProvider ? (
           <MarkdownFileResources
@@ -2293,7 +2307,7 @@ function NativeMarkdownSource({
       wrap={wordWrap ? 'soft' : 'off'}
       spellCheck={false}
       aria-label={ariaLabel}
-      data-native-selection-allow
+      data-text-selectable
       {...stylex.props(styles.sourceTextarea)}
       onChange={(event) => {
         const nextValue = event.currentTarget.value;
@@ -2360,7 +2374,10 @@ function FilePreviewToggle({
           </button>
         }
       />
-      <Tooltip.Content side="bottom" className="text-xs">
+      <Tooltip.Content
+        side="bottom"
+        className={stylex.props(styles.previewToggleTooltip).className}
+      >
         {label}
       </Tooltip.Content>
     </Tooltip.Root>

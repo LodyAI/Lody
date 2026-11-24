@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useState } from 'react';
 import {
   createMemoryHistory,
@@ -14,6 +15,7 @@ import {
   useComposerNavigationFocus,
 } from '@/components/chat/submission/use-composer-navigation-focus';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useTheme } from '@/theme-provider';
 import { isNativeAppShell } from '@/lib/native-platform';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
@@ -35,6 +37,32 @@ import {
   SessionChatInputArea,
   type SessionChatInputAreaProps,
 } from '@/components/sessions/session-chat-input-area';
+const migrationStyles = stylex.create({
+  conversationCard: {
+    marginInline: 'auto',
+    maxWidth: 'var(--container-4xl, 56rem)',
+    overflow: 'hidden',
+    borderRadius: '28px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 70%, transparent)',
+    backgroundColor: 'hsl(var(--card) / 1)',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-inline': 'calc(var(--spacing) * 6)',
+    'padding-block': 'calc(var(--spacing) * 10)',
+  },
+  frame2: {
+    height: '20rem',
+    'background-color': 'color-mix(in oklab, hsl(var(--muted) / 1) 20%, transparent)',
+  },
+});
 
 const STORY_WORKSPACE_ID = 'workspace-storybook' as WorkspaceId;
 const STORY_MACHINE_ID = 'machine-storybook' as MachineId;
@@ -65,12 +93,14 @@ const storyMachineViewMeta: MachineViewMeta = {
 
 type StoryShellProps = {
   isAgentBusy: boolean;
+  isDark?: boolean;
   initialInputText?: string;
   showFreeTurnLimitNotice?: boolean;
   onSendMessage?: SessionChatInputAreaProps['onSendMessage'];
   disableImageUpload?: boolean;
   isArchived?: boolean;
   claimNavigationFocus?: () => boolean;
+  isExternalHistoryRefreshing?: boolean;
 };
 
 function createStoryStore() {
@@ -85,11 +115,13 @@ function createStoryStore() {
 
 function StoryShell({
   isAgentBusy,
+  isDark = true,
   initialInputText = '',
   showFreeTurnLimitNotice = false,
   onSendMessage = async () => true,
   claimNavigationFocus,
   disableImageUpload = true,
+  isExternalHistoryRefreshing = false,
   isArchived = false,
 }: StoryShellProps) {
   const store = useMemo(() => createStoryStore(), []);
@@ -121,9 +153,9 @@ function StoryShell({
   return (
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
-        <div className="min-h-screen bg-background px-6 py-10">
-          <div className="mx-auto max-w-4xl overflow-hidden rounded-[28px] border border-border/70 bg-card shadow-xs">
-            <div className="h-[20rem] bg-muted/20" />
+        <div {...stylex.props(storyLayout.frame)}>
+          <div {...stylex.props(migrationStyles.conversationCard)}>
+            <div {...stylex.props(storyLayout.frame2)} />
             <SessionChatInputArea
               session={session}
               claimNavigationFocus={claimNavigationFocus}
@@ -131,7 +163,7 @@ function StoryShell({
               isMachineRemoved={false}
               isAgentBusy={isAgentBusy}
               canStopAgent={isAgentBusy}
-              isDark
+              isDark={isDark}
               isEmptyConversation={false}
               selectedModeId={null}
               selectedModelId={null}
@@ -155,6 +187,10 @@ function StoryShell({
               onRemoveQueueItem={async () => {}}
               initialInputText={initialInputText}
               disableImageUpload={disableImageUpload}
+              isExternalHistoryRefreshing={isExternalHistoryRefreshing}
+              externalHistorySyncLabel={
+                isExternalHistoryRefreshing ? 'Refreshing external history' : undefined
+              }
             />
           </div>
         </div>
@@ -186,8 +222,8 @@ export const IdleDark: Story = {
   },
 };
 
-export const Archived: Story = {
-  args: { isArchived: true },
+export const ExternalHistoryRefreshing: Story = {
+  args: { initialInputText: 'Preserved history draft.', isExternalHistoryRefreshing: true },
 };
 
 export const RunningDark: Story = {
@@ -232,6 +268,29 @@ export const DeferredSubmission: Story = {
         );
       }),
   },
+};
+
+function ThemeAwareStoryShell(props: StoryShellProps) {
+  const { resolvedTheme } = useTheme();
+  return <StoryShell {...props} isDark={resolvedTheme === 'dark'} />;
+}
+
+export const PrimaryActionIdle: Story = { render: (args) => <ThemeAwareStoryShell {...args} /> };
+export const PrimaryActionRunning: Story = {
+  args: RunningDark.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
+};
+export const PrimaryActionDraft: Story = {
+  args: DraftDark.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
+};
+export const PrimaryActionExternalRefresh: Story = {
+  args: ExternalHistoryRefreshing.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
+};
+export const PrimaryActionPending: Story = {
+  args: DeferredSubmission.args,
+  render: (args) => <ThemeAwareStoryShell {...args} />,
 };
 
 function NavigationLanding() {
@@ -343,4 +402,8 @@ export const UploadingAttachmentsPendingAcceptance: Story = {
         );
       }),
   },
+};
+
+export const Archived: Story = {
+  args: { isArchived: true },
 };

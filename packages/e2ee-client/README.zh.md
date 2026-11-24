@@ -182,6 +182,16 @@ KeyReceiver 仍验证每个预览信封并实际安装密钥。能力缺失、�
 
 身份保护方式由各宿主的平台决定（`PersonalHostPlatform.protection`）。
 
+## 恢复服务定位符
+
+`recoveryServiceLocator`（`./recovery-locator`）把产品站点 URL 规范化为各宿主写入恢复文件、并传给
+core 打开流程的 `serviceLocator`：即它的规范 origin，Lody Cloud 为 `https://lody.ai`，自托管为
+`SITE_URL` 的 origin。必须是 HTTPS，仅环回主机允许 HTTP。缺失或不可用的 URL 返回 `null`，宿主以
+`disabled` 拒绝恢复；后端部署 URL 或账号 ID 永远不是定位符。桌面端读取 `VITE_SITE_URL`，移动端读取
+`VITE_SITE_URL` 并默认 Lody Cloud，Web 传入自身站点 origin，因此同一份文件三端都能打开。core 以
+`locator-mismatch` 拒绝写着其他定位符的文件，宿主将其报告为 `e2ee_recovery_authentication`（文件不对的提示）。
+[Spec](../../specs/e2ee/recovery-vault.zh.md#恢复材料与密文)。
+
 ## 验证与限制
 
 `pnpm --filter @lody/e2ee-client test` 检查固定证明和 credential 边界。
@@ -212,3 +222,13 @@ offer，为仍有受保护设备身份、但工作区密钥丢失的设备补回
 设备批准入口仍保留，此回调不传递秘密。
 
 个人设备 session 的 `abandonEpoch(baseEpoch)` 调用同一 Owner 专属暂存发布流程；要求先声明能力 2，不依赖当前代钥。调用方负责证据展示与明确确认；原始记录重试和历史恢复沿用 core。
+
+## 远程 CLI 配对
+
+可选的 `PersonalHostPlatform.remoteMachine` 为同一安装实例提供持久原件、
+有超时和账号检查的中继调用，以及本地已验证账本记录。官方云端宿主通过
+`remoteMachinePairing` 显式启用平台的四个方法。会话保留签名器、凭据和原生
+操作的生命周期；配对流程独立串行，仅本地签名、存储、账本及密钥轮次借用
+现有会话许可。网络中断后保留原签名重试。访客和失去权限的个人设备不能签名；
+只有已验证准入后才交付密钥，终止取消会归档证据。见
+[共享云端组装](../client-e2ee/README.md#remote-cli-machines)。

@@ -425,7 +425,7 @@ describe('MessageProcessor machine/acp-authenticate lanes', () => {
   });
 });
 
-it.each(['page', 'watch'] as const)(
+it.each(['page', 'subscription'] as const)(
   'runs ordered history writes while the same session %s read is parked',
   async (kind) => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
@@ -458,21 +458,24 @@ it.each(['page', 'watch'] as const)(
     };
     try {
       processor.enqueue(
-        {
-          ...target,
-          type: 'session/history-read',
-          query:
-            kind === 'page'
-              ? { kind: 'readLatestPage', limit: 40 }
-              : { kind: 'watchChanges', checkpoint: 'synthetic-checkpoint', waitMs: 15_000 },
-        },
+        kind === 'page'
+          ? {
+              ...target,
+              type: 'session/history-read',
+              query: { kind: 'readLatestPage', limit: 40 },
+            }
+          : {
+              ...target,
+              type: 'session/history-subscription',
+              subscription: { action: 'open', id: crypto.randomUUID() },
+            },
         async () => {
           enterRead();
           await reading;
         }
       );
       await entered;
-      if (kind === 'watch') {
+      if (kind === 'subscription') {
         let secondWatching!: () => void;
         const other = new Promise<void>((resolve) => {
           secondWatching = resolve;
@@ -480,15 +483,15 @@ it.each(['page', 'watch'] as const)(
         processor.enqueue(
           {
             ...target,
-            type: 'session/history-read',
-            query: { kind: 'watchChanges', checkpoint: 'synthetic-checkpoint', waitMs: 15_000 },
+            type: 'session/history-subscription',
+            subscription: { action: 'open', id: crypto.randomUUID() },
           },
           async () => {
             secondWatching();
             await reading;
           }
         );
-        await other; // A second viewer must not serialize behind the first idle watch.
+        await other; // A second viewer must not serialize behind the first owner subscription.
         let ordinaryRead!: () => void;
         const ordinary = new Promise<void>((resolve) => {
           ordinaryRead = resolve;

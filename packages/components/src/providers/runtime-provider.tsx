@@ -1,3 +1,4 @@
+import { roostHistoryDatabase } from '../lib/roost-history-cache';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { onIpcEvent } from '@/lib/electron-ipc-client';
@@ -11,6 +12,7 @@ import {
   retryRetiredEncryptedWorkspaceCleanup,
 } from '@/lib/e2ee-member-removal';
 import {
+  encryptedLocalInstance,
   readEncryptedLocalIdentity,
   retainEncryptedLocalIdentity,
   type E2eeLocalDataIdentity,
@@ -74,7 +76,7 @@ import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-poli
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
 import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
-import { isWarmWindow } from '@/lib/desktop-window';
+import { isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -116,6 +118,7 @@ type SavedMode = {
   pendingCreation: boolean;
   error: unknown;
 };
+const FIRST_KEY_RECEPTION_RETRY_MS = [1_000, 2_000, 4_000, 8_000] as const;
 const noSavedMode: SavedMode = { evidence: new Map(), pendingCreation: false, error: null };
 
 const isEncryptedDescriptor = (
@@ -708,6 +711,27 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeHasUsableKey = false;
     let nativeRefresh: Promise<void> | null = null;
     let nativeRefreshAgain = false;
+    const firstKeyPoll = (() => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let attempts = 0;
+      return {
+        stop: () => {
+          clearTimeout(timer);
+          timer = undefined;
+        },
+        next: (poll: () => void): boolean => {
+          if (timer !== undefined) return true;
+          const delay = FIRST_KEY_RECEPTION_RETRY_MS[attempts];
+          if (delay === undefined) return false;
+          attempts++;
+          timer = setTimeout(() => {
+            timer = undefined;
+            poll();
+          }, delay);
+          return true;
+        },
+      };
+    })();
     let nativeLedgerStatus: import('@lody/platform').E2eeRuntimeStatus | undefined;
     let unsubscribeNativeLedger: (() => void) | undefined;
     const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
@@ -734,11 +758,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         (status.hasCurrentKey || status.writeEpoch != null)
       ) {
         nativeHasUsableKey = true;
+        firstKeyPoll.stop();
         retryAdmission((value) => value + 1);
       }
     };
     const refreshNative = (): void => {
-      if (disposed || !nativeLease) return;
+      if (disposed || retired || !nativeLease) return;
       if (nativeRefresh) {
         nativeRefreshAgain = true;
         return;
@@ -780,7 +805,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           !nativeHasUsableKey &&
           workspaceRuntime === null
         )
-          setRuntimeInitializing(false);
+          if (!firstKeyPoll.next(refreshNative)) setRuntimeInitializing(false);
       });
     };
     retryKeyUpdateRef.current = refreshNative;
@@ -1007,6 +1032,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const retire = () => {
       if (retired) return;
       retired = true;
+      firstKeyPoll.stop();
       initializationAbort.abort(new Error('Runtime disposed'));
       setRuntime(null);
       setRuntimeInitializing(false);
@@ -1071,6 +1097,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             };
             await retirementOwners.drain({ native: targetNative });
             if (disposed || retired) return;
+            // Retire the previous projection even when the next native open is offline.
+            if (removalScope) {
+              await resumeEncryptedWorkspaceCleanup(removalScope);
+              if (disposed || retired) return;
+            }
             nativeResource = targetNative;
             const requestedReader =
               native.readerLeases === 'preallocated-v1' ? crypto.randomUUID() : undefined;
@@ -1197,6 +1228,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // lody* IndexedDB + Cache Storage now — before the runtime opens the repo
         // DB, while nothing holds those databases open. No-op on normal boots.
         await maybeClearLodyCacheOnBoot([
+          ...(localIdentity ? [roostHistoryDatabase(encryptedLocalInstance(localIdentity))] : []),
           `lody-loro-repo-db-${effectiveWorkspaceId}`,
           `lody-loro-stream-cursors-${effectiveWorkspaceId}`,
         ]);
@@ -1229,6 +1261,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceId: effectiveWorkspaceId,
           apiBaseUrl: API_BASE_URL,
           eagerSyncSurface,
+          backgroundWork: !isTodayWindow(),
           // Platform assembly is the only authority for room topology. Do not
           // re-probe Electron or cloud configuration inside the runtime.
           syncMode: encryptedAccess ? 'cloud' : runtimeSyncMode,
@@ -1326,6 +1359,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceSlug,
       });
       disposed = true;
+      firstKeyPoll.stop();
       window.removeEventListener('online', retryContentAdmission);
       window.removeEventListener('online', refreshNative);
       unsubscribeLedgerChange();

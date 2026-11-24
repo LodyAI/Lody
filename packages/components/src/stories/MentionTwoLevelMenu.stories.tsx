@@ -1,3 +1,4 @@
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import * as React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
@@ -30,6 +31,21 @@ import {
   type MachineId,
 } from '@lody/shared';
 
+const sessionRendering = stylex.create({
+  frame: {
+    backgroundColor: 'hsl(var(--input) / 1)',
+    color: 'hsl(var(--foreground) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+  input: {
+    width: '100%',
+    resize: 'none',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: 'var(--text-base)',
+    lineHeight: 'calc(var(--spacing) * 6)',
+  },
+});
+
 /* The menu body only renders inside a <Mention> root (its rows read the mention
    context). The harness mounts a forced-open root over a small textarea and
    renders the body directly, so every level and state is screenshot-verifiable
@@ -38,6 +54,19 @@ import {
    Candidates come from the real registry mappers, so a story breaks if the
    insert-text or detail mapping drifts. */
 
+const menuStory = stylex.create({
+  frame: { height: 460, width: 760, padding: 'calc(var(--spacing) * 6)' },
+  narrow: { width: 320, padding: 'calc(var(--spacing) * 3)' },
+  input: {
+    width: '100%',
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--input-border) / 1)',
+    backgroundColor: 'hsl(var(--input) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+  },
+});
 const SKILL_LABELS = {
   author: 'Author',
   path: 'Path',
@@ -354,7 +383,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
   const inputValue = `@${search}`;
 
   return (
-    <div className={narrow ? 'h-[460px] w-[320px] p-3' : 'h-[460px] w-[760px] p-6'}>
+    <div {...stylex.props(menuStory.frame, narrow && menuStory.narrow)}>
       <Mention
         open
         triggers={['@']}
@@ -371,7 +400,7 @@ function Harness({ search, categories = CATEGORIES, withDetail = true, narrow }:
         <MentionInput
           value={inputValue}
           onChange={() => {}}
-          className="w-full rounded-md border border-input-border bg-input p-2"
+          xstyle={menuStory.input}
           aria-label="composer"
         />
         <div
@@ -520,7 +549,7 @@ function FloatingHarness({
           <MentionInput
             value={value}
             onChange={() => {}}
-            className="w-full rounded-md border border-input-border bg-input p-2"
+            xstyle={menuStory.input}
             aria-label="composer"
             rows={3}
           />
@@ -584,7 +613,7 @@ function EditorBehaviourHarness({
             aria-label="composer"
             placeholder="Message"
             rows={3}
-            className="w-full resize-none rounded-md border border-input-border bg-input p-2 text-sm leading-6"
+            xstyle={mentionSceneStyles.input}
           />
           <MentionTwoLevelMenu
             categories={FLOATING_CATEGORIES}
@@ -647,7 +676,7 @@ function SessionMentionRenderingHarness() {
     },
   ]);
   return (
-    <div className="bg-input text-foreground p-4" data-testid="session-mention-rendering">
+    <div {...stylex.props(sessionRendering.frame)} data-testid="session-mention-rendering">
       <Mention
         inputValue={value}
         onInputValueChange={setValue}
@@ -661,7 +690,7 @@ function SessionMentionRenderingHarness() {
           aria-label="Message"
           placeholder="Message"
           rows={5}
-          className="w-full resize-none p-2 text-base leading-6"
+          xstyle={sessionRendering.input}
         />
       </Mention>
     </div>
@@ -781,6 +810,46 @@ export const CategoryError: Story = {
           }
         : entry
     ),
+  },
+};
+
+/** `@op` with a full list while Issues and PRs fail: each wrapped error keeps its own height. */
+export const AggregateSearchSourceError: Story = {
+  args: {
+    search: 'op',
+    narrow: true,
+    categories: [
+      category(
+        'file',
+        'file',
+        'Files',
+        'file',
+        Array.from({ length: 4 }, (_, index) =>
+          toFileCandidate({
+            kind: 'file',
+            path: `apps/desktop-setup-notes-${index}/op.ts`,
+            token: `apps/desktop-setup-notes-${index}/op.ts`,
+          })
+        )
+      ),
+      category(
+        'command',
+        'cmd',
+        'Commands',
+        'command',
+        ['output-style', 'computer-use', 'compact-op', 'open-pr'].map((name) =>
+          toCommandCandidate({ name, description: `Run ${name}` })
+        ),
+        { directTrigger: '/' }
+      ),
+      ...(['issue', 'pr'] as const).map((type) =>
+        category(type, type, type === 'issue' ? 'Issues' : 'Pull Requests', type, [], {
+          status: 'error' as const,
+          message:
+            'GitHub could not list issues for "example/example-repository-with-a-long-name". Check the integration in Settings → Integrations and try again.',
+        })
+      ),
+    ],
   },
 };
 
@@ -933,3 +1002,50 @@ export const EditorBehaviourEditorUndo: Story = {
   args: { search: '' },
   render: () => <EditorBehaviourHarness undoHistory={false} />,
 };
+
+/**
+ * A Role on three machines is three rows, one per machine: picking a row picks
+ * where it runs. The alias replaces `name · machine`; an offline machine's row
+ * stays listed but cannot be chosen.
+ */
+const MULTI_MACHINE_ROLE = agentRole({
+  id: 'multi-role' as AgentRoleId,
+  name: 'Code Reviewer',
+  promptPrefix: 'Review the diff for correctness before style.',
+});
+const multiMachineRoleItem = (
+  machineId: string,
+  machineName: string,
+  alias?: string,
+  online = true
+) =>
+  toAgentRoleCandidate(
+    {
+      availability: online
+        ? { kind: 'available' }
+        : { kind: 'unavailable', reason: 'machine_offline' },
+      slug: alias ?? `Code-Reviewer-${machineName.replace(/\s+/g, '-')}`,
+      value: `${MULTI_MACHINE_ROLE.id}@${machineId}`,
+      label: alias ?? `${MULTI_MACHINE_ROLE.name} · ${machineName}`,
+      role: { ...MULTI_MACHINE_ROLE, machineId: machineId as MachineId },
+      machine: { name: machineName },
+      agentConfig: ROLE_AGENT_CONFIG,
+    },
+    online ? undefined : 'Unavailable: its machine is offline'
+  );
+export const AgentRoleOnSeveralMachines: Story = {
+  args: {
+    search: 'role:',
+    withDetail: true,
+    categories: [
+      category('agent_role', 'role', 'Agent Roles', 'agent_role', [
+        multiMachineRoleItem('m-studio', 'Studio'),
+        multiMachineRoleItem('m-build', 'Build box', 'Reviewer-CI'),
+        multiMachineRoleItem('m-linux', 'Linux runner', undefined, false),
+        ...AGENT_ROLES.slice(1),
+      ]),
+    ],
+  },
+};
+
+const mentionSceneStyles = stylex.create({ input: { width: '100%', resize: 'none', borderWidth: 0, borderRadius: field.radiusMedium, backgroundColor: field.background, color: field.value, boxShadow: field.well, padding: 'calc(var(--spacing) * 2)' } });

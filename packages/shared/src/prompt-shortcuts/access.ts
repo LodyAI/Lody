@@ -24,9 +24,11 @@ const encode = (value: string): string => {
 };
 
 /**
- * Workspace-prefixed stream segments cannot contain `:` or `/` so `loro-streams`
- * always attributes `{workspaceId}:shortcut-index` and `{workspaceId}:shortcut:{bodyDocId}`
- * to `space_id = {workspaceId}`.
+ * Workspace-prefixed stream segments cannot contain `:`, `/`, whitespace, NUL, or `..`.
+ * Every workspace-owned stream ID must put `{workspaceId}:` first (before any feature
+ * discriminator) so Loro Streams attributes `{workspaceId}:shortcut-index` and
+ * `{workspaceId}:shortcut:{bodyDocId}` to `space_id = {workspaceId}`.
+ * See `.agents/docs/loro-streams-user-space.md`.
  */
 const encodeWorkspaceSegment = (value: string): string => {
   if (!value || value.length > 200 || /[:/\s\0]/.test(value) || value.includes('..'))

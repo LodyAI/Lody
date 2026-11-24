@@ -63,8 +63,8 @@ and what can wait or has settled.
 
 - Both the sidebar context menu and the conversation header menu (`…`)
   provide (for users with write permission on non-archived conversations):
-  - **Snooze / Later** submenu with quick presets (In 1 hour, Later today
-    +3h, Tomorrow morning 9:00, Next week Monday 9:00, Custom date/time) and
+  - **Snooze / Later** submenu with quick presets (In 1 hour, In 3 hours,
+    Tomorrow morning 9:00, Next week Monday 9:00, Custom date/time) and
     **Move to Focus** when already snoozed.
   - **Settle** when in Focus or Later, or **Move to Focus** when in Settled.
 - On desktop, Focus and Later rows reveal a one-click **Settle** action on
@@ -81,10 +81,40 @@ and what can wait or has settled.
 - Sending a message in a snoozed or settled conversation clears its
   `snoozedUntil` / `settledAt` state so it returns to Focus.
 - Dragging a row in Focus materializes real `orderKey`s for any expired-snooze
-  rows at the top of Focus (clearing their expired `snoozedUntil` while
-  preserving `focusRestoredAt`) so the user's explicit drag placement always
-  wins cleanly. Dragging a row from Later or Settled into Focus clears its
-  snooze/settled state and places it at the dropped `orderKey`.
+  rows at the top of Focus so the user's explicit drag placement always wins
+  cleanly. Dragging a row from Later, Settled or the Pinned area (which unpins
+  it) into Focus restores it at the dropped `orderKey`, and Move to Focus
+  restores it in place; its opened sub-conversations follow when included. Placement and
+  restore never consume a wake-up; only opening the conversation, sending in it
+  or settling it does. A placed or restored row records `focusRestoredAt` and
+  keeps an expired `snoozedUntil`, so it stays where it was put and stays unread
+  until it is read; a snooze still in the future is cleared on restore. A woken
+  row floats to the top of Focus only while its expired `snoozedUntil` is later
+  than its `focusRestoredAt`, so a new snooze floats it again when it expires.
+
+### Phones
+
+The phone WebView layout and the native iOS and Android clients show the same
+Pinned area and the same three tiers, in the same order, as the desktop sidebar.
+All three ship this; the design, its limits and what was verified are in the
+[phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md).
+
+- Every surface derives the list and plans its writes from one shared
+  implementation. Native clients render the layout their shared runtime computes
+  and never sort or classify these lists themselves.
+- A long press opens the full action menu, and moving while still pressed turns
+  into a drag: reorder Focus, or drop a Later or Settled row into Focus. Every drag
+  outcome is also a menu item and an accessibility action.
+- A trailing swipe offers Settle and Later on Focus and Later rows and Archive on
+  Settled rows. Later opens a bottom sheet with the presets and a custom date and
+  time. Settle and Later confirm with an Undo notice. The conversation page's "…"
+  sheet carries the same status actions.
+- The native clients' previous status grouping (Needs you, Running, Finished, Pull
+  requests, Idle) is replaced by these tiers.
+- Native clients have no live session presence. They treat a conversation as
+  working or waiting for approval from its synced status, so a snoozed or settled
+  conversation waiting for approval, or a conversation silent for seven days that
+  is running, can sit in a different tier there for a short time.
 
 ## Data ownership and ordering
 
@@ -122,7 +152,9 @@ and what can wait or has settled.
   separate changes).
 - Per-user private Focus ordering or per-session LoroDoc scratch pads / Today
   outliner (tracked for a later experimental phase).
-- Mobile native iOS/Android clients.
+- Encrypted workspaces on the native iOS and Android clients, which do not open
+  encrypted workspaces at all yet. The phone WebView supports them.
+- Live session presence on the native clients.
 
 ## Evidence
 
@@ -131,9 +163,9 @@ Implementation:
 - Shared schema, ordering & unread summary: `packages/shared/src/schema.ts`,
   `packages/shared/src/pinned-sections.ts`,
   `packages/shared/src/live-activity-summary.ts`
-- Status classification, read receipts & snooze countdown:
-  `packages/components/src/lib/sidebar-status-group.ts`,
-  `packages/components/src/lib/session-read-receipt.ts`
+- Status layout, write planning, snooze countdown & golden vectors:
+  `packages/shared/src/status-view/`
+- Read receipts: `packages/components/src/lib/session-read-receipt.ts`
 - Sidebar rendering, DnD, menus & actions:
   `packages/components/src/components/sidebar-updated-session-list.tsx`,
   `packages/components/src/components/loro-sidebar.tsx`,
@@ -144,3 +176,22 @@ Implementation:
   `packages/components/src/atoms/sidebar-state.ts`
 - Storybook:
   `packages/components/src/stories/SidebarStatusView.stories.tsx`
+- Phones: `packages/components/src/components/mobile/` (WebView); the native
+  shared runtime and lists in the `apps/mobile/ios` and `apps/mobile/android`
+  submodules.
+
+Executed validation: the golden vectors (13 layout and 38 command cases) in
+`packages/shared/tests/status-view.test.ts`, against the desktop and phone adapters
+in `packages/components` and in the iOS and Android runtime tests; the Storybook
+end-to-end suite `packages/components/tests/e2e/sidebar-status-focus-drop.spec.ts`
+(5 cases); the phone WebView in Storybook on the iOS Simulator and the Android
+emulator, and with real touch input in Chromium; the native lists with the offline
+fixture on the iOS 26.5 and 27.0 Simulators and a Pixel 8 / Android 16 emulator.
+Not verified: physical devices, iOS 16.4–17.3 runtimes, a signed-in cloud workspace
+on the native clients, the Android `/api/time` read against staging, the desktop app
+writing to a real replica, a real encrypted Guest session and the hosted gateway
+admitting the encrypted writes, VoiceOver on a device, and the Capacitor-packaged
+app. Known gap: on iOS and Android a teammate's local-project conversation offers
+no status actions, because the native runtime cannot read whether the project is
+shared; desktop offers them when it is. Details: the
+[phone note](../.agents/notes/implemented/architecture/2026-11-21-status-view-on-phones.md#verification).

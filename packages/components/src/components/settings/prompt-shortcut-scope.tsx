@@ -88,21 +88,24 @@ export function describeShortcutScope(
 /**
  * The author's scope, in the fixed Project → Machine → Agent order.
  *
- * All three unset prints one muted `Workspace` pill rather than nothing:
- * "applies anywhere in this workspace" is a decision, and blank space is not.
- * This is visibility-neutral — a `Workspace` pill never means "shared".
+ * A list row prints nothing when every axis is unset: "anywhere" is the
+ * default, and a pill on every such row only reads as "shared". A detail view
+ * that has a heading for the scope passes `showUnscoped` to say it in words.
  */
 export function ScopePills({
   scope,
   options,
+  showUnscoped = false,
   className,
 }: {
   scope: PromptShortcutScope;
   options?: ShortcutScopeOptions;
+  showUnscoped?: boolean;
   className?: string;
 }) {
   const { t } = useTranslation();
   const pills = describeShortcutScope(scope, options);
+  if (pills.length === 0 && !showUnscoped) return null;
   return (
     <span
       {...withClassName(stylex.props(styles.pills), className)}
@@ -110,7 +113,7 @@ export function ScopePills({
     >
       {pills.length === 0 ? (
         <Badge className={stylex.props(styles.pill).className}>
-          {t('settings.promptShortcuts.workspaceScope', 'Workspace')}
+          {t('settings.promptShortcuts.workspaceScope', 'Anywhere in this workspace')}
         </Badge>
       ) : (
         pills.map((pill) => (

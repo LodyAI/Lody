@@ -6,7 +6,7 @@ import {
   overriddenKeys,
   getHarness,
 } from '../src/components/harness/store';
-import { MODELS, PLUGIN_PRESETS } from '../src/components/harness/catalog';
+import { MODELS } from '../src/components/harness/catalog';
 
 /**
  * The harness config model: one shared profile, per-device overrides that fall
@@ -20,11 +20,16 @@ beforeEach(() => {
 });
 
 describe('harness store', () => {
-  it('selects a machine and writes the profile', () => {
+  it('selects a machine and remembers which profile values were set for all devices', () => {
     harness.select('machine-a');
-
     expect(getHarness().activeDevice).toBe('machine-a');
-    expect(effectiveConfig(getHarness(), 'machine-a').plugins).toEqual(PLUGIN_PRESETS.recommended);
+    expect(getHarness().profileKeys ?? []).toEqual([]);
+
+    harness.setProfileDefault('autonomy', 'auto');
+    harness.setProfileDefault('autonomy', 'ask');
+    // Only keys set through the profile can mark a device as differing.
+    expect(getHarness().profileKeys).toEqual(['autonomy']);
+    expect(getHarness().profile.autonomy).toBe('ask');
   });
 
   it('keeps a device override only while it differs from the profile', () => {

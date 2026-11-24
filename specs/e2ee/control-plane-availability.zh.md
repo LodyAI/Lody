@@ -1,6 +1,6 @@
 # 控制面可用性：废弃不可用代次与账本写入配额
 
-Status: draft
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#ga-控制面可用性故障窗口与邮件邀请显式审批)
 Translation: current
 
 [English](control-plane-availability.md)
@@ -45,7 +45,7 @@ Translation: current
 
 ### 3. 入账时拒绝低阶加密公钥
 
-账本规则在登记设备和接纳成员时，拒绝低阶或非规范编码的 X25519 公钥。这是账本 v1 的校验规则变更，须在 v1 生产冻结前完成。
+账本规则在登记设备和接纳成员时，拒绝低阶或非规范编码的 X25519 公钥。这是账本 v1 的校验规则变更，须在生产锁定 v1 向后兼容基线前完成。
 
 ## 保证
 
@@ -63,7 +63,7 @@ Translation: current
 
 ## 已考虑的取舍
 
-本修订选定以下方案。当前任务来自另一代理的转述，尚无本修订的可链接人工批准记录，因此审批状态保留 draft；实现与审批分别记录。
+owner Zixuan Chen（zxch3n）已于 2026-11-24 批准以下方案（[批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#ga-控制面可用性故障窗口与邮件邀请显式审批)）；实现与真机验收分别记录。
 
 1. **卡死期间不延长旧代写入窗口。** 延长可以避免 Owner 离线时停摆，但被扣钥的那次换代若是为了移除成员，被移除者能多读这段时间的新内容。保持 15 分钟。
 2. **Admin 仍可换代。** 把换代收回给 Owner 可以从源头消除“Admin 卡死代次”，但 Owner 不在线时无法在移除成员后换钥。保留 Admin 换代，由废弃操作兜底。

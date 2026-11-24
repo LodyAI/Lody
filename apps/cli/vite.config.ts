@@ -8,6 +8,7 @@ import { validateNightlyVersion } from '../electron/nightly-version.mjs';
 import desktopPackage from '../electron/package.json';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
 import { externalWasmPlugin } from './scripts/external-wasm.mjs';
+import { inlinePackageManifestPlugin } from './scripts/inline-package-manifest.mjs';
 import { workspaceModuleSideEffects } from './scripts/workspace-module-side-effects.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -130,6 +131,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     wasm(),
     externalWasmPlugin(),
+    inlinePackageManifestPlugin(),
     devinRuntimeContractPlugin(),
     {
       name: 'lody-cli-desktop-provenance',
@@ -165,6 +167,10 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     target: 'node22',
+    commonjsOptions: {
+      // Undici needs Node's HTTP/2 client in the packaged ESM bundle.
+      ignoreTryCatch: (id) => id !== 'node:http2',
+    },
     outDir: './dist',
     // The second packaging pass adds flat adapter entries and hashed chunks.
     emptyOutDir: mode !== 'acp-adapters',

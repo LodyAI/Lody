@@ -132,15 +132,16 @@ import {
   type LoroSessionData,
   type SessionTurn,
 } from '@lody/shared/session-data';
-import { redactProxyUrl, sanitizeUrlForLogging } from '@/utils/log-sanitize';
-import { getProxyForUrl } from 'proxy-from-env';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { sanitizeUrlForLogging } from '@/utils/log-sanitize';
+import { resolveProxyAgent } from '@/utils/proxy';
 import type { RateLimit } from 'acp-extension-core';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import {
   createCliSqliteRepoStore,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
+  createCliIncompleteRecoveryStore,
+  ProcessDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
 import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-binding';
@@ -335,17 +336,14 @@ class ProxiedWebSocket extends WebSocketOriginal {
   constructor(url: string | URL, protocols?: string | string[]) {
     const urlString = typeof url === 'string' ? url : url.toString();
 
-    const targetForProxyEnv = urlString.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
-
-    const proxyUrl = getProxyForUrl(targetForProxyEnv);
-    const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+    const { agent, proxyUrlRedacted } = resolveProxyAgent(urlString);
 
     const logger = getLogger('loro:websocket');
     logger.debug(
-      `Creating WebSocket url=${sanitizeUrlForLogging(urlString)} proxy=${proxyUrl ? redactProxyUrl(proxyUrl) : 'none'} agentValid=${!!agent}`
+      `Creating WebSocket url=${sanitizeUrlForLogging(urlString)} proxy=${proxyUrlRedacted ?? 'none'} agentValid=${!!agent}`
     );
 
-    if ((globalThis as GlobalWithOptionalBun).Bun && proxyUrl) {
+    if ((globalThis as GlobalWithOptionalBun).Bun && proxyUrlRedacted) {
       logger.debug(
         'Bun does not support WebSocket proxy yet: https://github.com/oven-sh/bun/issues/14522'
       );
@@ -418,6 +416,7 @@ export interface LoroDocumentManagerOptions {
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
   remoteStreamsAttached?: boolean;
+  attachCloudEphemeralSinks?: boolean;
   encryptedWorkspace?: Pick<
     CliE2eeWorkspaceLegacy,
     | 'content'
@@ -430,6 +429,8 @@ export interface LoroDocumentManagerOptions {
     | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
+    | 'requestFeature'
+    | 'resolveVerifiedExecutionOriginal'
   >;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
@@ -519,6 +520,8 @@ export class LoroDocumentManager {
     | 'signScheduleDeclaration'
     | 'authorizeMachineTarget'
     | 'authorizeSessionTarget'
+    | 'requestFeature'
+    | 'resolveVerifiedExecutionOriginal'
   >;
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
@@ -539,6 +542,14 @@ export class LoroDocumentManager {
     return Effect.runPromise(this.encryptedWorkspace.authorizeSessionTarget(target));
   }
 
+  /** Encrypted workspaces: one feature request signed as this machine; `null` is no reply. */
+  requestEncryptedFeature(
+    request: Parameters<CliE2eeWorkspaceLegacy['requestFeature']>[0]
+  ): ReturnType<CliE2eeWorkspaceLegacy['requestFeature']> {
+    if (!this.encryptedWorkspace) return Promise.reject(new Error('e2ee_rpc_unavailable'));
+    return this.encryptedWorkspace.requestFeature(request);
+  }
+
   /** Encrypted workspaces: a one-shot command's machine access, from this process's ledger. */
   async authorizeEncryptedMachine(machineId: string, localProjectId?: string): Promise<boolean> {
     const e2ee = this.encryptedWorkspace;
@@ -553,6 +564,24 @@ export class LoroDocumentManager {
   ): Promise<string> {
     if (!this.encryptedWorkspace) throw new Error('e2ee_signature_unavailable');
     return this.encryptedWorkspace.signScheduleDeclaration(document, manualRunKey);
+  }
+
+  async verifyRoostInput(sessionId: string, entry: SessionHistoryInput, signer: string) {
+    if (!this.encryptedWorkspace || entry.role !== 'user' || !entry.e2eeIntent)
+      throw new Error('e2ee_signature_missing');
+    const result = await Effect.runPromise(
+      this.encryptedWorkspace.resolveVerifiedExecutionOriginal(
+        {
+          workspaceId: this.workspaceId,
+          sessionId,
+          userTurnId: entry.id,
+          inputConfig: entry.inputConfig,
+        },
+        { readUserTurn: async () => entry }
+      )
+    );
+    if (!result || !('requesterDevice' in result) || result.requesterDevice !== signer)
+      throw new Error('e2ee_signature_invalid');
   }
 
   /** Encrypted workspaces: the signed intent for an input this machine writes itself, to
@@ -600,6 +629,7 @@ export class LoroDocumentManager {
     logger: Logger,
     options: {
       attachRemoteOnCreate?: boolean;
+      attachCloudEphemeralSinks?: boolean;
       /** Daemon-only reader lease; one-shot commands retain explicit sync ownership. */
       keepWorkspaceCatalogJoined?: boolean;
       /**
@@ -619,6 +649,8 @@ export class LoroDocumentManager {
         | 'signScheduleDeclaration'
         | 'authorizeMachineTarget'
         | 'authorizeSessionTarget'
+        | 'requestFeature'
+        | 'resolveVerifiedExecutionOriginal'
       >;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
@@ -658,6 +690,11 @@ export class LoroDocumentManager {
       `[${workspaceId}] Initializing local-first Loro repo: storageDb=${cliSqliteRepoStore.dbPath}`
     );
 
+    const documentRemoteCursorStore = createDocumentRemoteCursorStore(
+      cliSqliteRepoStore,
+      options.documentCursorScope ?? 'process',
+      options.encryptedWorkspace?.bucketId()
+    );
     let repo: LoroRepo | null = null;
     let presenceRuntime: CliPresenceRuntimeLegacy | null = null;
     let manager: LoroDocumentManager | null = null;
@@ -730,11 +767,9 @@ export class LoroDocumentManager {
         promptSuggestions,
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
-        documentRemoteCursorStore: createDocumentRemoteCursorStore(
-          cliSqliteRepoStore,
-          options.documentCursorScope ?? 'process'
-        ),
+        documentRemoteCursorStore,
         remoteStreamsAttached: false,
+        attachCloudEphemeralSinks: options.attachCloudEphemeralSinks,
         streamsTokens: options.streamsTokens ?? null,
         encryptedWorkspace: options.encryptedWorkspace,
         cloudBilling: options.cloudBilling ?? null,
@@ -815,6 +850,8 @@ export class LoroDocumentManager {
     return manager;
   }
 
+  private readonly attachCloudEphemeralSinks: boolean;
+
   constructor(options: LoroDocumentManagerOptions) {
     this.repo = options.repo;
     this.workspaceId = options.workspaceId;
@@ -824,6 +861,7 @@ export class LoroDocumentManager {
     this.sqliteRepoStore = options.sqliteRepoStore ?? null;
     this.documentRemoteCursorStore = options.documentRemoteCursorStore ?? null;
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
+    this.attachCloudEphemeralSinks = options.attachCloudEphemeralSinks ?? true;
     this.streamsTokens = options.streamsTokens ?? null;
     this.encryptedWorkspace = options.encryptedWorkspace;
     this.cloudBilling = options.cloudBilling ?? null;
@@ -932,6 +970,12 @@ export class LoroDocumentManager {
     if (this.encryptedWorkspace) await streamsTokens.legacy.getToken();
     const streamsTransport = await createCliStreamsTransport({
       incompleteRecoveryScope: this.incompleteRecoveryScope,
+      incompleteRecoveryStore: createCliIncompleteRecoveryStore(
+        this.sqliteRepoStore,
+        this.documentRemoteCursorStore instanceof ProcessDocumentRemoteCursorStore
+          ? 'process'
+          : 'shared-durable'
+      ),
       content: this.encryptedWorkspace?.content ?? { mode: 'plaintext' },
       bucketId: this.encryptedWorkspace?.bucketId(),
       workspaceId: this.workspaceId,
@@ -966,34 +1010,40 @@ export class LoroDocumentManager {
     );
 
     try {
-      await this.repo.addTransport('streams', streamsTransport.adapter, { ephemeral: true });
+      await this.repo.addTransport('streams', streamsTransport.adapter, {
+        ephemeral: this.attachCloudEphemeralSinks,
+      });
       this.remoteStreamsStatusUnsubscribe = detachStreamsTransportStatusListener;
       // The presence runtime already exists (created at repo init and producing
       // presence locally); attaching the cloud Streams sink additionally mirrors
       // it to the cloud presence stream.
-      const presenceAttach = this.presenceRuntime.attachStreams({
-        streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTokens.native.createAuthCallback(),
-        shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-        ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
-      });
-      if (this.encryptedWorkspace) {
-        // Liveness failure remains unknown and cannot roll back protected document sync.
-        await presenceAttach.catch(() => {
-          this.logger.warn(`[${this.workspaceId}] Presence unavailable; machine status is unknown`);
-        });
-      } else {
-        await presenceAttach;
-        this.promptSuggestions?.attachStreams({
+      if (this.attachCloudEphemeralSinks) {
+        const presenceAttach = this.presenceRuntime.attachStreams({
           streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTransport.tokenProvider.createAuthCallback(),
+          auth: streamsTokens.native.createAuthCallback(),
           shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          ...(this.encryptedWorkspace ? { bucketId: this.encryptedWorkspace.bucketId() } : {}),
         });
-        this.machineMonitorRuntime?.attachStreams({
-          streamsBaseUrl: streamsTransport.gatewayBaseUrl,
-          auth: streamsTransport.tokenProvider.createAuthCallback(),
-          shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
-        });
+        if (this.encryptedWorkspace) {
+          // Liveness failure remains unknown and cannot roll back protected document sync.
+          await presenceAttach.catch(() => {
+            this.logger.warn(
+              `[${this.workspaceId}] Presence unavailable; machine status is unknown`
+            );
+          });
+        } else {
+          await presenceAttach;
+          this.promptSuggestions?.attachStreams({
+            streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+            auth: streamsTransport.tokenProvider.createAuthCallback(),
+            shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          });
+          this.machineMonitorRuntime?.attachStreams({
+            streamsBaseUrl: streamsTransport.gatewayBaseUrl,
+            auth: streamsTransport.tokenProvider.createAuthCallback(),
+            shardHostSuffix: streamsTransport.tokenProvider.getShardHostSuffix(),
+          });
+        }
       }
       this.remoteStreamsAttached = true;
       this.remoteStreamsGeneration += 1;
@@ -1684,12 +1734,21 @@ export class LoroDocumentManager {
       });
   }
 
+  private assertHistoryBackend(backend: SessionHistoryBackendKind | undefined): void {
+    if (
+      this.encryptedWorkspace &&
+      backend &&
+      backend !== 'loro' &&
+      (backend !== 'roost' || !this.encryptedWorkspace.repositoryDirectory)
+    )
+      throw new Error('e2ee_history_backend_unavailable');
+  }
+
   async getOrCreateSessionDoc(
     sessionId: SessionId,
     options: { historyBackend?: SessionHistoryBackendKind; skipAutoRead?: boolean } = {}
   ): Promise<SessionDocument> {
-    if (this.encryptedWorkspace && options.historyBackend && options.historyBackend !== 'loro')
-      throw new Error('e2ee_history_backend_unavailable');
+    this.assertHistoryBackend(options.historyBackend);
     const docId = getSessionRoomId(sessionId);
     // An activated SessionDocument owns the live cloud room from here on. Stop
     // any one-shot renderer reconciliation without unloading the shared doc.
@@ -1744,7 +1803,8 @@ export class LoroDocumentManager {
         sessionId,
         (sessionDocId) => this.unloadDocRoom(sessionDocId),
         this.logger,
-        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter,
+        this.encryptedWorkspace?.repositoryDirectory
       );
       const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
       const historyBackend =
@@ -1752,8 +1812,7 @@ export class LoroDocumentManager {
         (!isLoroRepoDocDeleted(meta)
           ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
           : undefined);
-      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
-        throw new Error('e2ee_history_backend_unavailable');
+      this.assertHistoryBackend(historyBackend);
       // Observation commands own an isolated manager and must not arm execution's
       // auto-seen/model-summary writers. This option applies to a new open only;
       // it never changes the policies of an already-owned cached document.
@@ -1805,14 +1864,14 @@ export class LoroDocumentManager {
         sessionId,
         (snapshotDocId) => this.unloadDocRoom(snapshotDocId),
         this.logger,
-        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter,
+        this.encryptedWorkspace?.repositoryDirectory
       );
       const meta = await this.repo.getDocMeta(docId);
       const historyBackend = !isLoroRepoDocDeleted(meta)
         ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
         : undefined;
-      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
-        throw new Error('e2ee_history_backend_unavailable');
+      this.assertHistoryBackend(historyBackend);
       await sessionDoc.init({
         skipAutoRead: true,
         ...(historyBackend ? { historyBackend } : {}),
@@ -1858,14 +1917,14 @@ export class LoroDocumentManager {
           await this.unloadDocRoom(readDocId);
         },
         this.logger,
-        this.sessionHistoryFactory ?? this.ownerHistoryRouter
+        this.sessionHistoryFactory ?? this.ownerHistoryRouter,
+        this.encryptedWorkspace?.repositoryDirectory
       );
       const meta = await this.repo.getDocMeta(docId);
       const historyBackend = !isLoroRepoDocDeleted(meta)
         ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
         : undefined;
-      if (this.encryptedWorkspace && historyBackend && historyBackend !== 'loro')
-        throw new Error('e2ee_history_backend_unavailable');
+      this.assertHistoryBackend(historyBackend);
       await sessionDoc.init({
         skipAutoRead: true,
         remoteSync: false,
@@ -2256,6 +2315,23 @@ export class LoroDocumentManager {
     await this.machine.updateAcpAuthMethods(configId, authMethods);
   }
 
+  async recordObservedAcpModelConfigOptions(
+    machineId: MachineId,
+    configId: AgentConfigId,
+    sourceVersion: string,
+    configOptions: AcpConfigOptionSummary[]
+  ): Promise<boolean> {
+    if (!this.machine) {
+      this.machine = this.createMachineDocument(machineId);
+      await this.machine.init();
+    }
+    return await this.machine.recordObservedAcpModelConfigOptions(
+      configId,
+      sourceVersion,
+      configOptions
+    );
+  }
+
   async getAcpCapabilities(
     machineId: MachineId,
     configId: AgentConfigId
@@ -2608,7 +2684,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
      */
     private unloadDocRoom: (docId: string) => Promise<void>,
     private logger: Logger = getLogger('loro'),
-    readonly historyBackendFactory?: SessionBackendFactory
+    readonly historyBackendFactory?: SessionBackendFactory,
+    readonly encryptedRepositoryDirectory?: string
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
   }
@@ -4392,6 +4469,36 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     } else {
       await handle.syncOnce().catch(() => undefined);
     }
+  }
+
+  /**
+   * Passively records a model's live `configOptions` snapshot observed during an
+   * active session (model switch or `config_option_update`). Skips when no matching
+   * runtime capability row exists yet or when the stored per-model options are unchanged.
+   */
+  async recordObservedAcpModelConfigOptions(
+    configId: AgentConfigId,
+    sourceVersion: string,
+    configOptions: AcpConfigOptionSummary[]
+  ): Promise<boolean> {
+    const modelId = getAcpConfigOptionsModelId(configOptions);
+    if (!modelId || !sourceVersion || configOptions.length === 0) return false;
+    const handle = await this.openMachineFlockDoc();
+    const existing = getMachineFlockAcpCapabilities(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['acpCapability'] })
+    )[getAcpCapabilityCacheKey(configId)];
+    if (!existing || existing.sourceVersion !== sourceVersion) return false;
+    const changed = writeAcpModelConfigOptionsToFlock(handle.flock, configId, sourceVersion, {
+      [modelId]: configOptions,
+    });
+    if (!changed) return false;
+    await this.repo.flush();
+    if (this.markMachineFlockDirty) {
+      this.markMachineFlockDirty('acp-capability-update');
+    } else {
+      await handle.syncOnce().catch(() => undefined);
+    }
+    return true;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

@@ -98,6 +98,42 @@ describe('Today block selection', () => {
   });
 });
 
+describe('Today to-dos in the clipboard and on block keys', () => {
+  it('copies to-dos as Markdown tasks and pastes both forms back with their state', () => {
+    const { model, id } = outline('- [ ] a\n  - [x] a1\nb');
+    const fragments = model.extract([id('a'), id('b')]);
+    const text = serializeTodayFragments(fragments, () => '');
+    expect(text).toBe('- [ ] a\n  - [x] a1\n- b');
+    const state = (parsed: ReturnType<typeof parseTodayClipboard>) =>
+      parsed!.map((fragment) => [fragment.todo, fragment.children.map((child) => child.todo)]);
+    expect(state(parseTodayClipboard({ text }))).toEqual([
+      ['todo', ['done']],
+      [undefined, []],
+    ]);
+    expect(state(parseTodayClipboard({ json: JSON.stringify({ v: 2, fragments }) }))).toEqual([
+      ['todo', ['done']],
+      [undefined, []],
+    ]);
+  });
+
+  it('Mod+Enter cycles the to-do state; plain Enter still edits', () => {
+    const key = (mods: Partial<KeyboardEvent>) => ({
+      key: 'Enter',
+      shiftKey: false,
+      altKey: false,
+      metaKey: false,
+      ctrlKey: false,
+      isComposing: false,
+      keyCode: 13,
+      ...mods,
+    });
+    expect(resolveBlockKey(key({ metaKey: true }), 'mac')).toEqual({ type: 'cycle-todo' });
+    expect(resolveBlockKey(key({ ctrlKey: true }), 'other')).toEqual({ type: 'cycle-todo' });
+    expect(resolveBlockKey(key({ metaKey: true, isComposing: true }), 'mac')).toBeNull();
+    expect(resolveBlockKey(key({}), 'mac')).toEqual({ type: 'edit' });
+  });
+});
+
 describe('Today convert-to-task prompt', () => {
   it('is the node text followed by its children as an indented list, folded ones included', async () => {
     const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');
@@ -113,6 +149,37 @@ describe('Today convert-to-task prompt', () => {
     expect(buildConvertPrompt(fragment!, link)).toBe(
       '[@sess-1](lody://session/sess-1)Refactor sync\n- keep it deterministic\n  - no sleeps\n- [@sess-7](lody://session/sess-7)'
     );
+  });
+});
+
+describe('Today Mod+A on a block selection', () => {
+  it('climbs one ancestor per press, to the common ancestor of several, then the whole day, then stops', async () => {
+    const { escalateSelection } = await import('../src/components/today/editor/block-selection');
+    const { visible, id } = outline('a\n  b\n    c\n    d\n  e\nf');
+    expect(escalateSelection(visible, [id('c')])).toEqual([id('b')]);
+    expect(escalateSelection(visible, [id('b')])).toEqual([id('a')]);
+    expect(escalateSelection(visible, [id('c'), id('e')])).toEqual([id('a')]);
+    expect(escalateSelection(visible, [id('a')])).toEqual([id('a'), id('f')]);
+    expect(escalateSelection(visible, [id('c'), id('f')])).toEqual([id('a'), id('f')]);
+    expect(escalateSelection(visible, [id('a'), id('f')])).toBeNull();
+  });
+});
+
+describe('Today convert-to-task prompt with ancestors', () => {
+  it('nests the node and its subtree under its parents, outermost first', async () => {
+    const { buildConvertPrompt } = await import('../src/components/today/editor/block-selection');
+    const { model, id } = outline(
+      'Launch\n  Docs\n    Write the guide\n      cover install\n    other'
+    );
+    const [fragment] = model.extract([id('Write the guide')]);
+    const ancestors = [id('Launch'), id('Docs')].map((nodeId) => {
+      const node = model.getNode(nodeId)!;
+      return { text: node.text, mentions: [...node.mentions] };
+    });
+    expect(buildConvertPrompt(fragment!, () => '', ancestors)).toBe(
+      '- Launch\n  - Docs\n    - Write the guide\n      - cover install'
+    );
+    expect(buildConvertPrompt(fragment!, () => '')).toBe('Write the guide\n- cover install');
   });
 });
 

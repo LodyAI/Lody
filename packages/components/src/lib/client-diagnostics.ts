@@ -1,6 +1,7 @@
 import { collectClientBuildInfo } from './client-build-info';
 import { isNativeAppShell } from './native-platform';
 import { readClientLog, redactClientLogText } from './client-log';
+import { getStreamsHttpFallbackCounts } from '@lody/shared/streams-transport-diagnostics';
 
 const CLIENT_LOG_TAIL_CHARS = 24_000;
 const CLIENT_LOG_READ_TIMEOUT_MS = 1000;
@@ -98,6 +99,7 @@ export async function collectClientDiagnostics(): Promise<string> {
     language: navigator.language,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     online: navigator.onLine,
+    streamsHttpFallbacks: getStreamsHttpFallbackCounts(),
     viewport: {
       width: window.innerWidth,
       height: window.innerHeight,

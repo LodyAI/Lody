@@ -112,6 +112,29 @@ export async function protectedAttachmentBlob(
   return new Blob(parts, { type: args.encryption.mimeType });
 }
 
+/** Collect authenticated plaintext within the caller's byte budget. */
+export async function protectedAttachmentBytes(
+  args: Parameters<typeof protectedAttachmentChunks>[0] & { maxBytes?: number }
+): Promise<Uint8Array> {
+  if (args.maxBytes !== undefined && args.encryption.sizeBytes > args.maxBytes)
+    throw new Error('Share object exceeds size limit');
+  const parts: Uint8Array[] = [];
+  let length = 0;
+  for await (const part of protectedAttachmentChunks(args)) {
+    length += part.length;
+    if (args.maxBytes !== undefined && length > args.maxBytes)
+      throw new Error('Share object exceeds size limit');
+    parts.push(part);
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  return bytes;
+}
+
 /** Prepared local receipts keep their existing contract. Every relay reference
  * in protected history must carry a complete, matching secret manifest. */
 export function assertProtectedAttachmentReferences(blocks: readonly SessionInputBlock[]): void {

@@ -13,6 +13,28 @@ conversations can remain present and other clients may keep editing. Migration r
 the Streams `append-cas` extension and checks it before any upload; an older deployment
 fails closed. Conflicting row changes are detected on the server, not just in a local lock.
 
+## Encrypted targets
+
+E2EE workspaces require an already approved, active CLI machine paired to the selected
+workspace and account. Migration opens its retained genesis/ledger pin and checks its
+verified non-guest membership, machine ID and installed current epoch key. Missing
+pairing, revoked or removed devices, foreign accounts and missing current keys stop
+before content or attachment uploads. Pair the CLI through a trusted device first;
+this command never starts pairing or creates a replacement identity.
+
+All bodies, metadata, ownership receipts and index CAS batches use the encrypted
+content bucket returned by the device-authenticated token provider. Logical room AAD
+matches ordinary encrypted workspace readers. Attachments use the encrypted relay;
+receipts retain their secret encrypted-attachment manifests, also in historical HEAD
+archive mappings. Session import fences include original user turns, queue items and
+execution pointers before queue cleanup; schedules retain their original activation
+fence and are disabled. No imported history is signed as a new execution request.
+
+Roost, legacy task documents and unsupported named indexes are refused before any
+upload. Existing source attachment restrictions apply equally to encrypted targets.
+Manifest mode and genesis prevent reusing an ordinary-target journal for an encrypted
+workspace or a different encrypted identity. Ordinary migration is unchanged.
+
 ## Supported records and boundaries
 
 - Full Loro session operation history, including archived sessions, opaque history
@@ -55,7 +77,8 @@ fails closed. Conflicting row changes are detected on the server, not just in a 
 manifest, original/prepared full-history snapshots, referenced blobs and an atomic
 journal. The migration identity binds deployment, account, workspace and OSS workspace;
 the manifest additionally binds source path and machine identities. Keep this directory
-until the migration has been verified. It contains private conversation data.
+until the migration has been verified. It contains private conversation data and, for
+encrypted targets, attachment decryption manifests; it is a local plaintext backup.
 
 Before remote writes, check every source body/attachment, target document ID and
 shared index row. Create each document stream with its ownership receipt in the
@@ -80,12 +103,23 @@ OSS edits. Manifest/journal version 2 is required; scratch artifacts from the
 unreleased version 1 prototype are rejected rather than reused without historical
 attachments or server receipts. Source data is never deleted.
 
+Atomic PUT and append-cas use the pinned streams-crdt v2 encrypted update envelope,
+including the same published logical-room AAD encoder. The SDK does not expose an
+atomic conditional encrypted-write method, so the target owns this small framing
+adapter; SDK readback tests exercise compatibility. An SDK framing change must update
+that adapter and its encrypted migration tests together. Normal document uploads and
+all reads use encrypted StreamsCrdt directly.
+
 The command handles SIGINT/SIGTERM with a scoped abort signal and holds the migration
 lock until the interrupted callback and target cleanup finish. Signal listeners are
 removed on every exit. Network steps propagate cancellation to both attachment fetches and Streams requests,
 and have a five-minute deadline. Interruption awaits Promise settlement, with a
 five-second cleanup bound for broken adapters. Aborted uploads cannot publish a
 receipt or prepared document. Local journal writes use fsync and atomic rename.
+
+The [migration decision](../../../../../.agents/notes/implemented/feature/2026-10-12-oss-cloud-record-migration.md)
+records why atomic ownership, CAS receipts and encrypted framing share one recovery
+boundary.
 
 ## Files
 

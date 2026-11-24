@@ -4,6 +4,7 @@ import {
   LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
+import { isE2eeFeatureMethod, E2eeFeatureInputSchema, e2eeRpcPolicy } from '../src/e2ee-rpc';
 
 describe('local Machine RPC', () => {
   it('bounds Sorbet credential identifiers and excludes unexpected fields', () => {
@@ -65,6 +66,27 @@ describe('local Machine RPC', () => {
       result: { type: 'sorbet/providers-create', provider: { ...provider, id: 'endpoint' } },
     };
     expect(LocalMachineRpcResponseSchema.parse(response)).toEqual(response);
+  });
+
+  it('edits a stored endpoint without letting the client rewrite its models', () => {
+    const request = {
+      machineId: 'm',
+      workspaceId: 'w',
+      method: 'sorbet/providers-update',
+      params: {
+        configId: 'config',
+        providerId: 'endpoint',
+        provider: { name: 'Gateway', protocol: 'openai-responses', baseUrl: 'https://e.test' },
+      },
+    };
+    expect(LocalMachineRpcRequestSchema.parse(request)).toEqual(request);
+    expect(
+      LocalMachineRpcRequestSchema.safeParse({
+        ...request,
+        params: { ...request.params, provider: { ...request.params.provider, models: [] } },
+      }).success
+    ).toBe(false);
+    expect(isE2eeFeatureMethod('sorbet/providers-update')).toBe(true);
   });
 
   it('retains selected roots across file RPC parsing and defaults legacy requests to main at dispatch', () => {
@@ -168,3 +190,33 @@ it('accepts typed memory operations and rejects caller-provided commands', () =>
     }).success
   ).toBe(false);
 });
+
+it.each(['ios-simulator', 'android-emulator'] as const)(
+  'admits signed %s controls while keeping agent-control local',
+  (platform) => {
+    const request = {
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      method: `${platform}/control`,
+      params: { sessionId: 'session', requestedByUserId: 'owner', command: { action: 'list' } },
+    };
+    expect(E2eeFeatureInputSchema.parse({ requestId: '1'.repeat(32), request }).request).toEqual(
+      request
+    );
+    expect(e2eeRpcPolicy(request.method)).toEqual({
+      lane: 'write',
+      scope: 'machine',
+      remoteControl: true,
+    });
+    expect(
+      E2eeFeatureInputSchema.safeParse({
+        requestId: '2'.repeat(32),
+        request: {
+          ...request,
+          method: `${platform}/agent-control`,
+          params: { sessionId: 'session', command: { action: 'list' } },
+        },
+      }).success
+    ).toBe(false);
+  }
+);

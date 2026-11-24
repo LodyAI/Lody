@@ -31,6 +31,24 @@ bridge. This covers existing native scrollers without replacing their nodes.
 It also preserves the conversation engine's stable gutter, explicitly hidden
 bars and terminal tab-strip geometry. No second scroll controller is introduced.
 
+Every scrollbar is hidden at rest, the overlay convention of macOS and
+OverlayScrollbars. `ScrollArea` defaults to `scroll` visibility. A Chromium
+custom scrollbar cannot auto-hide or fade, so `installScrollbarPresence` (mounted
+at the app root next to focus modality) publishes `data-scrollbar-scrolling`
+after a scroll that follows wheel, touch, scroll-key or scrollbar-press input, and
+`data-scrollbar-hover` while the pointer is in the element's own gutter.
+`nativeScrollbar` and the CSS baseline paint the thumb only under those
+attributes. App scrolls, such as a conversation following a streamed reply, stay
+hidden. Both owners use a 12px hit area: the thumb is 4px at rest and 8px while
+the track is hovered or dragged. Native scrollbars can only change the thumb's
+transparent border, while overlay tracks change padding. Rejected alternatives:
+revealing on container hover, because a pointer anywhere in a pane paints its
+bar (the reason the sidebar already used `scroll`); a CSS-only thumb `:hover`,
+which cannot see the rest of the track; Chromium's removed `overflow: overlay`;
+and replacing the conversation scroller with `ScrollArea`, because the engine
+owns its viewport and first child. The wider native gutter costs 4px of content
+width.
+
 Base UI's content part replaces Radix's implicit `display: table` wrapper.
 Vertical content has `min-width: 0`; horizontal content may grow past its viewport.
 File-tree virtualization and scroll restoration retain their actual viewport refs.
@@ -69,4 +87,9 @@ cases cover the missing-API boundary, dialog closure, controlled exit animation
 and HomeDashboard. Conversation hydration/scrolling and home browser suites pass;
 the real home focus panel hides tracks during frame motion and keeps its viewport
 scrollable.
-Packaged Electron, touch input and non-Chromium engines remain unverified.
+Presence states are pinned in `packages/ui/test/scrollbar-presence.test.ts`.
+In Electron 44 (Chromium), attribute changes repaint a custom thumb. Thumb
+`:hover` and `:active` win over the attribute rules. A scrollbar drag suppresses
+`pointermove` but delivers `pointerup`, so the hover state is re-evaluated on
+release. Packaged Electron, touch input and non-Chromium engines remain
+unverified.

@@ -9,6 +9,9 @@ import {
   triggerToRecurrence,
   type ScheduleRecurrence,
   type ScheduleTrigger,
+  applyScheduleEditProposal,
+  scheduleContentRevision,
+  type ScheduleDocument,
 } from '../src';
 
 const ZONE = 'Asia/Shanghai';
@@ -143,3 +146,75 @@ describe('switching between kinds', () => {
     ).toEqual({ kind: 'weekly', weekdays: [1, 2, 3, 4, 5], hour: 9, minute: 0, timeZone: ZONE });
   });
 });
+
+describe('applying an edit proposal', () => {
+  const activity = (id: string, kind: ScheduleDocument['timeline'][number]['kind']) => ({
+    id,
+    kind,
+    actorId: 'owner',
+    createdAt: 0,
+  });
+  const document = (timeline = [activity('create', 'created')]): ScheduleDocument =>
+    ({
+      definition: {
+        title: 'Daily',
+        machineId: 'machine',
+        trigger: { kind: 'cron', expression: '0 9 * * *', timeZone: 'UTC' },
+        misfirePolicy: { kind: 'skip' },
+        overlapPolicy: 'skip',
+        agent: { agentConfigId: 'agent', modeId: 'safe' },
+        project: { kind: 'github', repoFullName: 'example/project', branch: 'main' },
+        destination: { kind: 'own_session', epoch: 2 },
+        retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      },
+      prompt: 'Old prompt',
+      timeline,
+    }) as unknown as ScheduleDocument;
+  const proposal = (patch: Parameters<typeof applyScheduleEditProposal>[0]['patch']) => ({
+    patch,
+    baseActivityId: 'create',
+  });
+
+  it('changes only the proposed fields', () => {
+    const current = document();
+    expect(
+      applyScheduleEditProposal(proposal({ prompt: 'New prompt' }), current, 0, 'UTC', 'apply')
+    ).toEqual({
+      ...current.definition,
+      prompt: 'New prompt',
+    });
+    expect(
+      applyScheduleEditProposal(
+        proposal({ title: 'Nightly', rule: { kind: 'daily', hour: 21, minute: 30 } }),
+        current,
+        0,
+        'Asia/Singapore',
+        'apply'
+      )
+    ).toMatchObject({
+      title: 'Nightly',
+      prompt: 'Old prompt',
+      trigger: { kind: 'cron', expression: '30 21 * * *', timeZone: 'Asia/Singapore' },
+      destination: { kind: 'own_session', epoch: 2 },
+    });
+  });
+
+  it('refuses once the schedule was edited, but not after a pause, a run or its own save', () => {
+    const paused = document([
+      activity('create', 'created'),
+      activity('pause', 'paused'),
+      activity('resume', 'resumed'),
+      activity('run', 'manual_run'),
+    ]);
+    expect(scheduleContentRevision(paused)).toBe('create');
+    const apply = (current: ScheduleDocument, activityId: string) =>
+      applyScheduleEditProposal(proposal({ title: 'Nightly' }), current, 0, 'UTC', activityId);
+    expect(apply(paused, 'apply')).not.toBe(null);
+    const edited = document([activity('create', 'created'), activity('edit', 'edited')]);
+    expect(apply(edited, 'apply')).toBe(null);
+    expect(apply(edited, 'edit')?.title).toBe('Daily');
+    const editedAgain = document([...edited.timeline, activity('later', 'edited')]);
+    expect(apply(editedAgain, 'edit')?.title).toBe('Daily');
+  });
+});
+

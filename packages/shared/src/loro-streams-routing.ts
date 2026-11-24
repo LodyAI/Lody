@@ -2,6 +2,10 @@
  * Loro Streams routing: bucket, shard and stream-URL helpers plus the room/stream
  * ids of every workspace document. Lives outside the package barrel so a bundle
  * can import these helpers without reaching every module the barrel re-exports.
+ *
+ * Every workspace-owned stream ID must start with `{workspaceId}:` (before any
+ * feature discriminator) so Loro Streams attributes it to `space_id = workspaceId`
+ * across buckets. See `.agents/docs/loro-streams-user-space.md`.
  */
 import {
   LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT,
@@ -216,6 +220,10 @@ const isValidLoroStreamsResourceId = (id: string): boolean =>
 /**
  * Builds a Durable Streams HTTP URL for one `(bucketId, streamId)` pair.
  *
+ * Workspace-owned `streamId` values must start with `{workspaceId}:` (never a
+ * leading feature tag) so Loro Streams maps every workspace resource to
+ * `space_id = workspaceId`; see `.agents/docs/loro-streams-user-space.md`.
+ *
  * `@loro-dev/streams-crdt@0.15` removed its `createStreamUrl` export — URL
  * building is caller-owned there now. Unlike the removed helper, `baseUrl`
  * is required: callers must always target their configured gateway, never a
@@ -276,6 +284,11 @@ export const getAgentConfigRoomId = (agentConfigId: AgentConfigId) =>
   `${AGENT_CONFIG_DOC_PREFIX}${agentConfigId}`;
 export const getSessionRoomId = (sessionId: SessionId) => `${SESSION_DOC_PREFIX}${sessionId}`;
 export const getMachineRoomId = (id: MachineId) => `${MACHINE_DOC_PREFIX}${id}`;
+/**
+ * Workspace-scoped stream IDs must always lead with `{workspaceId}:` and place
+ * feature discriminators after the first `:` (`UserSpace` contract:
+ * `.agents/docs/loro-streams-user-space.md`).
+ */
 export const getLoroMetaStreamId = (workspaceId: WorkspaceId) =>
   `${workspaceId}:${LORO_META_STREAM_SUFFIX}`;
 export const getLoroSessionStreamId = (workspaceId: WorkspaceId, sessionId: SessionId) =>

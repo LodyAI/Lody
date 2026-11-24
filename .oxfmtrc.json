@@ -20,6 +20,7 @@
     "yarn.lock",
     ".DS_Store",
     "coverage/",
+    "packages/shared/src/status-view/vectors/",
     "packages/acp-extension-claude/",
     "packages/acp-extension-codex/",
     "packages/acp-extension-core/",

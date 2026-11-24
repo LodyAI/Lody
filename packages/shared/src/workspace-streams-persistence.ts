@@ -1,3 +1,7 @@
+import { z } from 'zod';
+import { getLoroStreamsRemoteCursorUrlAliases } from './loro-streams-routing';
+import { recordStreamsHttpFallback } from './streams-transport-diagnostics';
+import type { IncompleteRecoveryStore } from '@loro-dev/streams-crdt';
 import type { JsonObject, RemoteCursor, StreamsAuthProvider } from '@loro-dev/streams-crdt';
 import type {
   StreamsReplicaPersistence,
@@ -9,11 +13,24 @@ const SNAPSHOT_COST_FACTOR = 2n;
 const PROBE_TIMEOUT_MS = 1500;
 const recoveryByOwner = new WeakMap<
   object,
-  { forced: WeakSet<object>; recovered: WeakSet<object> }
+  {
+    forced: WeakSet<object>;
+    recovered: WeakSet<object>;
+    probedUrls: Set<string>;
+    inFlightProbes: Map<string, Promise<boolean>>;
+  }
 >();
 // Stream positions are twenty decimal byte digits, beyond Number's exact range.
 const byteOffset = (value: string | null | undefined): bigint | null =>
   value && /^\d{20}$/.test(value) ? BigInt(value) : null;
+
+const isConclusiveProbeFailureStatus = (status: number): boolean =>
+  status === 404 || status === 410;
+
+type SnapshotProbeOutcome = {
+  useSnapshot: boolean;
+  conclusive: boolean;
+};
 
 function covers(local: JsonObject, remote: JsonObject): boolean {
   // Flock versions contain per-peer HLCs. Exact equality is conservative: any
@@ -40,9 +57,10 @@ async function snapshotIsCheaper(
   url: string,
   cursor: RemoteCursor,
   auth: StreamsAuthProvider | undefined
-): Promise<boolean> {
+): Promise<SnapshotProbeOutcome> {
   const local = byteOffset(cursor.nextOffset);
-  if (local === null) return false;
+  if (local === null) return { useSnapshot: false, conclusive: false };
+  recordStreamsHttpFallback('snapshot-probe');
   const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   let rejectAbort!: (reason: unknown) => void;
   const aborted = new Promise<never>((_resolve, reject) => {
@@ -68,7 +86,9 @@ async function snapshotIsCheaper(
   };
   try {
     const response = await request(url, 'HEAD');
-    if (!response.ok) return false;
+    if (!response.ok) {
+      return { useSnapshot: false, conclusive: isConclusiveProbeFailureStatus(response.status) };
+    }
     const tail = byteOffset(response.headers.get('Stream-Next-Offset'));
     const snapshot = byteOffset(response.headers.get('Stream-Snapshot-Offset'));
     if (
@@ -77,8 +97,9 @@ async function snapshotIsCheaper(
       snapshot <= local ||
       tail < snapshot ||
       tail - local <= BigInt(MIN_CATCHUP_BYTES)
-    )
-      return false;
+    ) {
+      return { useSnapshot: false, conclusive: true };
+    }
     // Pin the estimate to this snapshot, rather than /snapshot's moving latest.
     const sizeResponse = await request(
       `${url}/snapshot/${snapshot.toString().padStart(20, '0')}`,
@@ -87,14 +108,24 @@ async function snapshotIsCheaper(
     // Snapshot routes expose GET, not HEAD. Cancel the body after reading its
     // Content-Length; do not download/decrypt it twice or treat it as trusted data.
     await Promise.race([sizeResponse.body?.cancel(), aborted]);
+    if (!sizeResponse.ok) {
+      return {
+        useSnapshot: false,
+        conclusive: isConclusiveProbeFailureStatus(sizeResponse.status),
+      };
+    }
     const length = sizeResponse.headers.get('Content-Length');
-    if (!sizeResponse.ok || !length || !/^\d{1,20}$/.test(length)) return false;
+    if (!length || !/^\d{1,20}$/.test(length)) return { useSnapshot: false, conclusive: true };
     const bytes = BigInt(length);
-    if (bytes <= 0n) return false;
+    if (bytes <= 0n) return { useSnapshot: false, conclusive: true };
     const cost = SNAPSHOT_COST_FACTOR * bytes + tail - snapshot;
-    return tail - local > (cost > BigInt(MIN_CATCHUP_BYTES) ? cost : BigInt(MIN_CATCHUP_BYTES));
+    return {
+      useSnapshot:
+        tail - local > (cost > BigInt(MIN_CATCHUP_BYTES) ? cost : BigInt(MIN_CATCHUP_BYTES)),
+      conclusive: true,
+    };
   } catch {
-    return false;
+    return { useSnapshot: false, conclusive: false };
   } finally {
     signal.removeEventListener('abort', onAbort);
   }
@@ -119,10 +150,35 @@ export function createWorkspaceStreamsTransportAdapter<
   const owner = options.owner;
   let recovery = recoveryByOwner.get(owner);
   if (!recovery) {
-    recovery = { forced: new WeakSet(), recovered: new WeakSet() };
+    recovery = {
+      forced: new WeakSet(),
+      recovered: new WeakSet(),
+      probedUrls: new Set(),
+      inFlightProbes: new Map(),
+    };
     recoveryByOwner.set(owner, recovery);
   }
-  const { forced, recovered } = recovery;
+  const { forced, recovered, probedUrls, inFlightProbes } = recovery;
+  const probeSnapshotOnce = async (url: string, cursor: RemoteCursor): Promise<boolean> => {
+    if (byteOffset(cursor.nextOffset) === null) return false;
+    if (probedUrls.has(url)) return false;
+    const inFlight = inFlightProbes.get(url);
+    if (inFlight) return inFlight;
+    const probe = snapshotIsCheaper(url, cursor, options.auth)
+      .then((outcome) => {
+        if (outcome.conclusive) {
+          probedUrls.add(url);
+        }
+        return outcome.useSnapshot;
+      })
+      .finally(() => {
+        if (inFlightProbes.get(url) === probe) {
+          inFlightProbes.delete(url);
+        }
+      });
+    inFlightProbes.set(url, probe);
+    return probe;
+  };
   const adapter = createAdapter({
     ...persistence,
     cursorStoreFor: (target) => {
@@ -137,7 +193,7 @@ export function createWorkspaceStreamsTransportAdapter<
           if (
             forced.has(target.flock) ||
             (covers(target.flock.version(), cursor.serverLowerBoundVersion) &&
-              (await snapshotIsCheaper(url, cursor, options.auth)) &&
+              (await probeSnapshotOnce(url, cursor)) &&
               covers(target.flock.version(), cursor.serverLowerBoundVersion))
           ) {
             // Delete progress only. Bootstrap merges into the same replica;
@@ -183,4 +239,32 @@ export function createWorkspaceStreamsTransportAdapter<
     return result;
   };
   return adapter;
+}
+
+const incompleteRecoveryRecord = z.object({
+  streamUrl: z.string().url(),
+  observedTailOffset: z.string().min(1),
+  observedSnapshotOffset: z.string().nullable(),
+  attempts: z.number().int().nonnegative(),
+  updatedAtMs: z.number().finite(),
+});
+
+/** Advisory recovery metadata is separate from replica-bound replay cursors. */
+export function createAliasedIncompleteRecoveryStore(backend: {
+  load(key: string): Promise<unknown>;
+  save(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<void>;
+}): IncompleteRecoveryStore {
+  const keyOf = (url: string) =>
+    [url, ...getLoroStreamsRemoteCursorUrlAliases(url)].sort().at(0) ?? url;
+  return {
+    async load(streamUrl) {
+      const record = incompleteRecoveryRecord.safeParse(await backend.load(keyOf(streamUrl)));
+      return record.success && keyOf(record.data.streamUrl) === keyOf(streamUrl)
+        ? { ...record.data, streamUrl }
+        : null;
+    },
+    save: (record) => backend.save(keyOf(record.streamUrl), record),
+    delete: (url) => backend.delete(keyOf(url)),
+  };
 }

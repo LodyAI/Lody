@@ -34,6 +34,7 @@ void test('only matching authenticated, ready workspace metadata can be publishe
     workspaceId: 'workspace-a',
     workspaceSlug: 'example',
     accountId: 'user-a',
+    contentMode: 'plaintext',
   };
   const metadata = { ...runtime, runtime, ready: true };
   const input = { userId: 'user-a', hasAuthToken: true, slug: 'example', runtime, metadata };
@@ -58,7 +59,12 @@ void test('only matching authenticated, ready workspace metadata can be publishe
 
 void test('ready metadata cannot publish under a different or missing runtime account', () => {
   for (const accountId of ['user-b', null, undefined]) {
-    const runtime = { workspaceId: 'workspace-a', workspaceSlug: 'example', accountId };
+    const runtime = {
+      workspaceId: 'workspace-a',
+      workspaceSlug: 'example',
+      accountId,
+      contentMode: 'plaintext',
+    };
     assert.equal(
       resolveHomeWidgetScope({
         userId: 'user-a',
@@ -950,4 +956,26 @@ void test('quota logout clear survives a pending native write, disposal and late
   await f.flush();
   assert.equal(f.cache.get('quota'), null);
   await f.finishSignOut();
+});
+
+void test('encrypted workspace identity clears conversation and provider quota snapshots', async (t) => {
+  const f = await publishedWidgetFixture(t);
+  await f.setQuotaSources(quotaFixtureSource());
+  await f.startQuota();
+  await f.flush();
+  assert.ok(f.cache.get('conversation').items.length > 0);
+  assert.ok(f.cache.get('quota').providers.length > 0);
+  await f.change(() => {
+    const runtime = { ...f.store.get(f.runtime.runtimeAtom), contentMode: 'e2ee' };
+    f.store.set(f.runtime.runtimeAtom, runtime);
+  });
+  await f.flush();
+  assert.equal(f.store.get(f.scopeAtom), null);
+  assert.equal(f.cache.get('conversation'), null);
+  assert.equal(f.cache.get('quota'), null);
+  await f.setTask('Decrypted title must stay private');
+  await f.setQuotaSources(quotaFixtureSource(80));
+  await f.flush();
+  assert.equal(f.cache.get('conversation'), null);
+  assert.equal(f.cache.get('quota'), null);
 });

@@ -914,6 +914,7 @@ type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefres
     | 'magpieGatewayUrl'
     | 'env'
     | 'codexAuth'
+    | 'sessionDefaults'
   >;
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
@@ -1284,6 +1285,10 @@ export class SessionExecutionService {
 
   isInboxInputCanceled(sessionId: SessionId, inputId: string): boolean {
     return this.operationInbox?.inputCanceled(this.deps.workspaceId, sessionId, inputId) ?? false;
+  }
+  /** True once the input finished or was canceled; begin never admits it again. */
+  isInboxInputEnded(sessionId: SessionId, inputId: string): boolean {
+    return this.operationInbox?.inputEnded(this.deps.workspaceId, sessionId, inputId) ?? false;
   }
   quiesceInboxExecutions(): void {
     this.shutdownAbort.abort();
@@ -7724,6 +7729,14 @@ export class SessionExecutionService {
               );
               runtime.disconnectedTransport = false;
               const restoredSession = yield* restoreRetiredSession();
+              self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
+              yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));
+              self.captureStatusChanged(sessionId, 'running', undefined, 'stale_acp_recovery');
+              self.scheduleLiveActivitySummarySync(userId, {
+                sessionId,
+                triggerReason: 'stale_acp_recovery',
+                status: 'running',
+              });
               yield* applyPromptConfig(restoredSession, 'stale_acp_recovery');
               yield* maybeRecordHistoryReplayNotice();
               yield* validatePromptCredentials(restoredSession, 'stale_acp_recovery');
@@ -9507,6 +9520,7 @@ export class SessionExecutionService {
         magpieGatewayUrl: config.magpieGatewayUrl,
         env: config.env,
         codexAuth: config.codexAuth,
+        sessionDefaults: config.sessionDefaults,
       },
       options
     );
@@ -9737,6 +9751,7 @@ export class SessionExecutionService {
         {
           agentConfigId: message.configId,
           magpieGatewayUrl: message.magpieGatewayUrl,
+          sessionDefaults: message.sessionDefaults,
           signal: options.signal,
           codexProfile: codexProfile ? { profile: codexProfile } : undefined,
           onManagedRuntimeProgress: (event) => {
@@ -10259,6 +10274,7 @@ const fingerprintAcpLaunchInputs = (inputs: {
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   magpieGatewayUrl?: string;
+  sessionDefaults?: AgentConfigMeta['sessionDefaults'];
 }): string =>
   createHash('sha256')
     .update(
@@ -10272,6 +10288,8 @@ const fingerprintAcpLaunchInputs = (inputs: {
         inputs.magpieGatewayUrl
       )
     )
+    // The probe applies these, so a cached probe taken under other defaults is stale.
+    .update(`\x00${JSON.stringify(inputs.sessionDefaults ?? null)}`)
     .digest('hex');
 
 const computeAcpRefreshDedupeKey = (

@@ -613,9 +613,10 @@ test.describe('attachment upload submission', () => {
           release(action === 'failure' ? 500 : 200);
           if (action === 'cancel' || action === 'failure') await expect(input).toBeEnabled();
           if (action === 'cancel')
-            await expect(
-              page.getByRole('img', { name: 'sample.png', exact: true })
-            ).not.toHaveClass(/grayscale/);
+            await expect(page.getByRole('img', { name: 'sample.png', exact: true })).toHaveCSS(
+              'filter',
+              'none'
+            );
           if (action === 'cancel' || action === 'failure') {
             await expectComposerText(input, 'Inspect this image');
             expect(await submissions()).toEqual([]);
@@ -1089,11 +1090,14 @@ test('ordinary native iPhone PR drawer keeps an unsent comment above repeated ke
       );
     }, height);
     await expect
-      .poll(async () => {
-        const box = (await drawer.boundingBox())!;
-        return Math.round(box.y + box.height);
-      })
-      .toBe(852 - height);
+      .poll(async () =>
+        drawer.evaluate((element) =>
+          Math.round(Number.parseFloat(getComputedStyle(element).paddingBottom))
+        )
+      )
+      .toBe(height);
+    const drawerBox = (await drawer.boundingBox())!;
+    expect(Math.round(drawerBox.y + drawerBox.height)).toBe(852);
     const box = (await draft.boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.y + box.height).toBeLessThanOrEqual(852 - height);

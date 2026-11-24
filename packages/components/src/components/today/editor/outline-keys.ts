@@ -20,6 +20,9 @@ export type OutlineIntent =
   | { type: 'focus-previous-end' }
   | { type: 'focus-next-start' }
   | { type: 'block-select' }
+  | { type: 'cycle-todo' }
+  | { type: 'zoom-in' }
+  | { type: 'zoom-out' }
   /** Shift+Up/Down reached the first/last line: select to the node edge. */
   | { type: 'extend-text'; anchor: number; focus: number }
   /** Shift+Up/Down with the selection already at the node edge: select the node. */
@@ -58,6 +61,7 @@ export function resolveOutlineKey(
   const plain = !mod && !event.altKey && !event.shiftKey;
   switch (event.key) {
     case 'Enter':
+      if (mod && !event.shiftKey && !event.altKey) return { type: 'cycle-todo' };
       if (event.shiftKey || mod || event.altKey) return null;
       return caret.length === 0 ? { type: 'enter-empty' } : { type: 'split' };
     case 'Tab':
@@ -91,15 +95,32 @@ export function resolveOutlineKey(
       return null;
     }
     case 'ArrowLeft':
+      if (event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        const atStart = !caret.hasSelection && caret.offset === 0;
+        return platform !== 'mac' || atStart ? { type: 'zoom-out' } : null;
+      }
       return plain && !caret.hasSelection && caret.offset === 0
         ? { type: 'focus-previous-end' }
         : null;
     case 'ArrowRight':
+      if (event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+        const atEnd = !caret.hasSelection && caret.offset === caret.length;
+        return platform !== 'mac' || atEnd ? { type: 'zoom-in' } : null;
+      }
       return plain && !caret.hasSelection && caret.offset === caret.length
         ? { type: 'focus-next-start' }
         : null;
     case 'Escape':
       return plain ? { type: 'block-select' } : null;
+    case 'a':
+    case 'A': {
+      if (!mod || event.shiftKey || event.altKey) return null;
+      const start = Math.min(caret.anchor ?? caret.offset, caret.focus ?? caret.offset);
+      const end = Math.max(caret.anchor ?? caret.offset, caret.focus ?? caret.offset);
+      return caret.length === 0 || (start === 0 && end === caret.length)
+        ? { type: 'select-from-text' }
+        : null;
+    }
     default:
       return null;
   }

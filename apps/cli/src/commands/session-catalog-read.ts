@@ -18,7 +18,7 @@ export type MachineFlockFreshness = { confirmed: true } | { confirmed: false; er
 
 // Bind to the CLI's Repo constructors, not the shared package's pnpm peer instance.
 // Unknown failures must not acquire retryability merely because a cache is missing.
-function getSyncRetryability(
+export function getSyncRetryability(
   error: unknown,
   seen = new Set<unknown>(),
   depth = 0

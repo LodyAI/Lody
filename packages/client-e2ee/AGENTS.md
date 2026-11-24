@@ -26,12 +26,11 @@
   capability: core verifies policy signatures, pins and generations as on desktop. Its
   IndexedDB store is named per installation under the fixed namespace, its transport is
   the device-authenticated relay, and generations come only from local ledger originals.
-- Tests use synthetic identities and intercepted I/O. Injected OS-labelled custody
-  doubles prove composition, not Keychain/Keystore, product or device acceptance.
+- Tests use synthetic identities and intercepted I/O.
 
 - `personalEntry` is the sole application registry. Keep its Scope, executor
   dependency and complete incomplete-close owners until actual retirement; factory
-  calls remain synchronous and do not acquire resources during React render.
+  calls stay synchronous and acquire nothing during React render.
 - Creation uses a private `creation-<requestId>` routing scope in native custody,
   never the final workspace ID before the server names it. `recordCreated` rewraps
   the same device/epoch material into the real workspace binding, writes the
@@ -63,41 +62,50 @@
   acquiring it and each of its operations pass `project`, and the open and each refresh
   apply the status rule, so exact loss retires that pin. That rule also counts the public
   runtime's exact loss refusal of `status` (via `failureLoss`); any other status failure
-  proves nothing. The approver skips a workspace whose session fails; one broken
-  workspace never fails the list.
+  proves nothing. The approver skips a workspace whose session fails instead of
+  failing the list.
 - Hosts build pairing cloud ports with `makePersonalCloudAccountPairingPorts`, which fences
   each call on a signed-in account and bounds it. `personalEntry` bounds append, list and
-  history again on its executor's clock: the workflow is serial, so an unanswered call would
-  block every later pairing operation. A timeout is retryable, never access loss.
+  history again on its executor's clock, since one unanswered call blocks every later
+  serial pairing operation. A timeout is retryable, never access loss.
 
-- The facade in `src/entry.ts` forwards `irohReady`/`irohCall`/`irohPath` only when the wrapper passes `iroh`
-  because its ports compose a native iroh port; route selection keys on those
-  methods, so a host without the port keeps encrypted Streams RPC.
-  `irohPath` must reach the existing portable session without opening an endpoint;
-  `apps/mobile-capacitor/tests/e2ee/mobile-host.test.ts` covers the complete facade-to-plugin path.
+- Forward `irohReady`, `irohCall` and `irohPath` only when the wrapper passes `iroh`.
+  Hosts without the port keep encrypted Streams RPC. `irohPath` must reach the
+  existing portable session without opening an endpoint. See [transport composition](README.md#transport-composition).
 
 - `personalEntryRecovery` borrows the same registry/runtime as content. It exposes
   only setup/restore commands, releases only its own setup reader and marks pins
-  ready only after verified committed restore; it never creates a second host.
+  ready only after a verified committed restore that installed the current epoch key;
+  it never creates a second host. A partial restore leaves the pin unready and its
+  journal partial, so the plan keeps offering the restore. A restore never routes to a
+  cancelled pin's offer. Exact loss of a retained identity during restore cancels its
+  pin, and the engine retries once with the account offer so the host replaces it.
 - `makeClientRecovery` and `makeRecoveryWorkspaces` bound remote Convex RPCs at 90 s
   (leaving file/passkey ceremonies uncapped) so a dead WebSocket releases `commands`
-  and `active` instead of wedging recovery. `makeRecoveryWorkspaces` unlocks the vault
-  once for the selected workspaces and reports each workspace on its own. Only a
+  and `active`. `makeRecoveryWorkspaces` unlocks the vault once for the selected
+  workspaces and reports each separately. Only a
   committed, verified setup is recoverable. A timed-out 30 s wait is unconfirmed: it
   does not cancel the producer, journal, or submission. The pin database is
   `lody-e2ee:<platform>:v1:entry-pins` from the caller's fixed `web` or `mobile`
   platform, never from preferences or server input. Wrappers inject passkey and
-  commands. Secrets are wiped on the same paths as before; this engine adds no
-  persistence.
+  commands. Secrets keep their existing wipe paths; this engine adds no persistence.
+- Recovery files carry and require the signed-in site's `recoveryServiceLocator`. Web may
+  default to its HTTP(S) page origin; other wrappers pass the site URL, never an account ID
+  or backend URL. No locator refuses as `disabled`.
 - `recoveryWorkspacesPort` serves the console's recovery port from that engine. It picks
   the file before any await, wipes it after the command, returns outcomes only, and
-  answers once each workspace has a result, `Unconfirmed` included.
+  answers once each workspace has a result, `Unconfirmed` included. Restore rows carry
+  workspace IDs and partial key markers and stream to `onResult` until the call returns
+  or its observation signal aborts.
 
 - Account pairing and recovery history use the same bounded public-history DTO
   projection as ordinary history reads. Strip backend advisory fields at the network boundary
-  before passing pages to the portable host; keep its strict capture, signature,
-  scope and checkpoint verification unchanged.
+  before passing pages to the portable host, whose strict capture, signature,
+  scope and checkpoint verification stay unchanged.
   Ledger append skips genesis prefetch; backend verification and parent-tail CAS remain authoritative.
+  Only the backend's `e2ee_self_service_rate_limited` refusal with a non-negative integer
+  `retryAt` becomes core's `self-service-rate-limited` ledger reason; every other append
+  failure, including that code without a valid `retryAt`, stays an unconfirmed outcome.
   Inline history is single-use, scoped to this ledger/account and the next feed position. Bootstrap requires a decoded genesis matching the scope hash.
   Otherwise read history; LedgerFeed verifies and persists originals before advancing.
 

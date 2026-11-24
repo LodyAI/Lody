@@ -2,7 +2,10 @@ import { join } from 'node:path';
 import { openSorbetControl } from '@sorbetai/control';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import type { SorbetCustomProviderInput } from '@lody/shared/local-machine-rpc';
+import type {
+  SorbetCustomProviderEdit,
+  SorbetCustomProviderInput,
+} from '@lody/shared/local-machine-rpc';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 
 /** Resolve identity on the local machine; persisted launch fields never reach this operation. */
@@ -66,6 +69,46 @@ export function createSorbetCredentialsHandler(
       try {
         const created = await control.providers.createCustom(provider, { signal });
         return { ...created, models: created.models.map((model) => ({ ...model })) };
+      } finally {
+        await control.close();
+      }
+    },
+    /**
+     * Sorbet's update replaces the whole definition, so the edit is applied over
+     * the stored one: models and catalog references stay what the machine holds.
+     */
+    async updateProvider(
+      configId: AgentConfigId,
+      providerId: string,
+      edit: SorbetCustomProviderEdit,
+      signal?: AbortSignal
+    ) {
+      await validate(configId);
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        const stored = (await control.providers.listCustom({ signal })).find(
+          (provider) => provider.id === providerId
+        );
+        if (!stored) throw new Error('Custom provider not found');
+        const updated = await control.providers.updateCustom(
+          providerId,
+          {
+            ...edit,
+            models: stored.models,
+            ...(stored.catalogRefs ? { catalogRefs: stored.catalogRefs } : {}),
+          },
+          { signal }
+        );
+        return {
+          id: updated.id,
+          name: updated.name,
+          protocol: updated.protocol,
+          baseUrl: updated.baseUrl,
+          models: updated.models.map((model) => ({
+            id: model.id,
+            ...(model.name ? { name: model.name } : {}),
+          })),
+        };
       } finally {
         await control.close();
       }

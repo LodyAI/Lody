@@ -1,7 +1,12 @@
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
+import { radius as sharedRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors, colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
+import { tooltip, tooltip as searchTooltipTokens } from '@lody/ui/tooltip/tooltip.tokens.stylex';
+import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
@@ -10,6 +15,7 @@ import {
   useWorkspaceFeatureReason,
   useMachineRpcFeatureReason,
 } from '@/hooks/use-workspace-feature';
+import { resolveLinkedWorkspaceGitHubRepo } from '@/lib/session-repo';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { useLocalSessionContinuation } from './use-local-session-continuation';
 import { SessionContinuationNote } from './session-continuation-note';
@@ -95,7 +101,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { buildSnoozePresets, sidebarStatusGroup } from '@/lib/sidebar-status-group';
+import { buildSnoozePresets, expiredSnoozeTimestamp, statusViewTier } from '@lody/shared';
+import { useStatusViewWritable } from '@/hooks/use-status-view-writable';
+import { useOrganization } from '@/hooks/useOrganization';
 import { CustomSnoozeDialog, type CustomSnoozeDialogTarget } from '../sidebar-status-snooze-dialog';
 import { useRouter } from '@tanstack/react-router';
 import { Spinner } from '@lody/ui/spinner';
@@ -215,7 +223,12 @@ import {
   resolveSessionConversationPreparationState,
   type SessionConversationPreparationState,
 } from '@/lib/session-conversation-preparation';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import {
+  clearSessionPrMergeStatus,
+  sessionPrMergeStatusAtomFamily,
+} from '@/atoms/session-pr-merge-status';
+import { isGitHubOperationTokenConnectionLostError } from '@/lib/github-token';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -257,7 +270,14 @@ import {
   type PathLauncherOption,
 } from '@/lib/session-path-launchers';
 import { withClassName } from '@/lib/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
+import {
+  messageActionButtonTheme,
+  messageActionInkTheme,
+  messageActionLabelTheme,
+  messageActionMutedInkTheme,
+} from '../../style/message-action-button.stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
+import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { SessionSharingState } from '@/lib/session-sharing';
 import {
@@ -280,6 +300,8 @@ import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-dr
 import { sessionProjectMemberSelectionAtomFamily } from '@/atoms/session-project-member-selection';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import type { WorkspaceMember } from '@/hooks/use-workspace-members';
+import { useWorkspaceSenderProfile } from '@/hooks/use-workspace-sender-profile';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import {
   unlinkSessionPullRequestFromUi,
@@ -287,11 +309,7 @@ import {
 } from './session-pr-links';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
-import {
-  SessionInfoDialog,
-  type SessionInfoPullRequest,
-  type SessionOwnerMenuState,
-} from './session-info-dialog';
+import { SessionInfoDialog, type SessionInfoPullRequest } from './session-info-dialog';
 import { SessionInfoBar } from './session-info-bar';
 import { SessionPreviewPreload } from './session-preview-preload';
 import { CurrentSessionRelationsChip, useHasSessionRelations } from './session-relations-chip';
@@ -455,6 +473,53 @@ void import('loro-repo')
   .catch(() => {});
 
 const styles = stylex.create({
+  shrink: { flexShrink: 0 },
+  muted: { color: 'hsl(var(--muted-foreground) / 1)' },
+  badgeEnd: { marginLeft: 'auto' },
+  historyDrawer: {
+    maxWidth: { default: null, '@media (min-width: 40rem)': '28rem' },
+  },
+  continuationMenu: { width: '290px', padding: '12px' },
+  headerMenuItem: {
+    minHeight: 'calc(var(--spacing) * 8)',
+    paddingBlock: 'calc(var(--spacing) * 1.5)',
+  },
+  searchButton: {
+    borderRadius: 'var(--radius-md)',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionDuration: 'var(--default-transition-duration, 150ms)',
+    transitionTimingFunction:
+      'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
+  },
+  searchButtonDisabled: {
+    color: {
+      default: buttonTokens.ghostLabel,
+      ':disabled': 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 40%, transparent)',
+    },
+    // The 40%-alpha ink already reads as disabled; stacking the Button's own
+    // `:disabled` opacity on top dims it twice. Neutralize the element opacity.
+    opacity: { default: null, ':disabled': 1 },
+  },
+  searchInput: {
+    borderWidth: 0,
+    borderStyle: 'solid',
+    paddingBlock: 'calc(var(--spacing) * 0)',
+    letterSpacing: 'var(--tracking-tight)',
+    boxShadow: { default: 'none', ':focus-visible': 'none', ':focus-within': 'none' },
+    '::-webkit-search-cancel-button': { display: 'none' },
+  },
+  searchSeparator: {
+    marginInline: 'calc(var(--spacing) * 0.5)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+  },
+  tooltipPadding: {
+    [tooltip.text]: 'var(--text-xs)',
+    [tooltip.leading]: 'var(--text-xs--line-height)',
+    [tooltip.maxWidth]: 'calc(var(--spacing) * 64)',
+    [tooltip.paddingX]: 'calc(var(--spacing) * 2.5)',
+    [tooltip.paddingY]: 'calc(var(--spacing) * 2)',
+  },
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
   historyTriggerIconSpaced: { marginRight: 'calc(var(--spacing) * 2)' },
   historySubtitle: {
@@ -485,7 +550,7 @@ const styles = stylex.create({
     color: 'inherit',
     textAlign: 'left',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -508,7 +573,7 @@ const styles = stylex.create({
     width: 'calc(var(--spacing) * 2.5)',
     height: 'calc(var(--spacing) * 2.5)',
     marginTop: 'calc(var(--spacing) * 1)',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
   },
   statusDotInfo: { backgroundColor: colors.accent },
   statusDotWarning: { backgroundColor: colors.warning },
@@ -538,7 +603,7 @@ const styles = stylex.create({
   historySeparator: {
     width: 'var(--spacing)',
     height: 'var(--spacing)',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: colors.separator,
   },
   projectRoot: { minWidth: 0 },
@@ -615,6 +680,21 @@ const styles = stylex.create({
   menuTrailingIcon: { marginLeft: 'auto' },
   menuCopyIcon: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
   menuBranchIcon: { marginTop: 'calc(var(--spacing) * 0.5)' },
+  menuText: { minWidth: 0, flex: '1 1 0%' },
+  menuTextTruncated: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  menuTextBlock: { display: 'block' },
+  menuTextNormal: { fontWeight: 400 },
+  menuBranchValue: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  menuBaseBranch: {
+    fontSize: '0.68rem',
+    lineHeight: 'calc(var(--spacing) * 4)',
+    color: colors.secondaryLabel,
+  },
   menuForkStatus: {
     flexShrink: 0,
     fontSize: '0.75rem',
@@ -668,7 +748,7 @@ const styles = stylex.create({
     boxShadow: '0 4px 12px -4px rgba(15,23,42,0.16), 0 1px 2px rgba(15,23,42,0.06)',
     backdropFilter: 'blur(var(--blur-md))',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -683,7 +763,7 @@ const styles = stylex.create({
   searchIcon: {
     color: 'hsl(var(--muted-foreground) / 0.8)',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -700,13 +780,38 @@ const styles = stylex.create({
     letterSpacing: 'var(--tracking-tight)',
     color: colors.secondaryLabel,
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
   },
   searchCountNoResults: { color: 'hsl(var(--destructive) / 0.9)' },
   searchActions: { display: 'flex', alignItems: 'center', gap: '1px' },
+  searchInputLayout: { minWidth: 0, flex: '1 1 0%' },
+  searchInputTokens: {
+    [searchFieldTokens.background]: 'transparent',
+    [searchFieldTokens.paddingXMedium]: 'calc(var(--spacing) * 1.5)',
+    [searchFieldTokens.text]: '13px',
+    [searchFieldTokens.placeholder]: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      '@supports (color: color-mix(in lab, red, red))':
+        'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 70%, transparent)',
+    },
+  },
+  searchTooltipTokens: {
+    [searchTooltipTokens.paddingX]: 'calc(var(--spacing) * 2)',
+    [searchTooltipTokens.paddingY]: 'calc(var(--spacing) * 1)',
+    [searchTooltipTokens.text]: '11px',
+  },
+  searchTooltipLayout: { display: 'flex', alignItems: 'center', gap: themeSpace[1.5] },
+  searchSeparatorLayout: { height: themeSpace[4] },
+  forkWorktreeGlyph: { width: '100%', height: '100%' },
+  forkStatus: {
+    flexShrink: 0,
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
   headerPills: {
     display: {
       default: 'none',
@@ -743,7 +848,7 @@ const styles = stylex.create({
     },
     outlineStyle: 'none',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: 'var(--default-transition-duration, 150ms)',
     transitionTimingFunction:
       'var(--default-transition-timing-function, cubic-bezier(0.4, 0, 0.2, 1))',
@@ -755,19 +860,9 @@ const styles = stylex.create({
       default: null,
       '@media (forced-colors: active)': '2px',
     },
-    '--tw-ring-shadow': {
-      default: null,
-      ':focus-visible':
-        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor)',
-    },
-    '--tw-ring-color': {
-      default: null,
-      ':focus-visible': 'hsl(var(--ring) / 0.5)',
-    },
     boxShadow: {
       default: null,
-      ':focus-visible':
-        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+      ':focus-visible': 'none',
     },
   },
   headerLauncherPrimary: {
@@ -785,6 +880,10 @@ const styles = stylex.create({
   composerContents: { display: 'contents' },
   composerHidden: { display: 'none' },
 });
+
+function reportStatusActionError(error: unknown): void {
+  toast.error(error instanceof Error ? error.message : String(error));
+}
 
 function getErrorMessage(err: unknown): string {
   const syncError = loroSyncErrorTools?.formatLoroSyncError(err);
@@ -1156,7 +1255,7 @@ export function SessionHistoryButton({
       variant={compact ? 'ghost' : 'secondary'}
       size="small"
       icon={compact}
-      className="shrink-0"
+
       disabled={historySessions.length === 0}
     >
       <History
@@ -1169,7 +1268,7 @@ export function SessionHistoryButton({
   return (
     <Drawer.Root side={isMobile ? 'bottom' : 'end'} open={open} onOpenChange={setOpen}>
       <Drawer.Trigger render={trigger} />
-      <Drawer.Content side={isMobile ? 'bottom' : 'end'} className="sm:max-w-md">
+      <Drawer.Content side={isMobile ? 'bottom' : 'end'} xstyle={styles.historyDrawer}>
         <Drawer.Header>
           <Drawer.Title>{t('sessions.history', 'History')}</Drawer.Title>
           <p {...stylex.props(styles.historySubtitle)}>{t('sessions.newSession.title')}</p>
@@ -1310,6 +1409,21 @@ export function SessionProjectInfo({
 }
 
 /**
+ * Owner-transfer state for the "···" menu. Only resolved on multi-member
+ * workspaces — a solo workspace has nobody to hand the session to, so the
+ * caller passes `undefined` and the submenu never renders.
+ */
+export type SessionOwnerMenuState = {
+  members: WorkspaceMember[];
+  getDisabledReason?: (userId: string) => string | null;
+  /** Current `SessionMeta.userId`; may name someone who already left. */
+  ownerUserId: string;
+  onChangeOwner: (userId: string) => void | Promise<void>;
+  /** Member whose write is still in flight — keeps the row from looking inert. */
+  pendingUserId?: string | null;
+};
+
+/**
  * Navigation across the presentation-only "opened by" relationship (see
  * `lib/session-opened-by-tree.ts`). Both directions live here so an
  * MCP-opened independent Session can walk back to the Session that created it,
@@ -1328,8 +1442,6 @@ export type SessionOpenedByMenuState = {
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
 
-const SESSION_HEADER_MENU_CONTENT_CLASS =
-  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
   session,
@@ -1429,10 +1541,10 @@ export function SessionHeaderMenu({
   const [customSnoozeTarget, setCustomSnoozeTarget] = useState<CustomSnoozeDialogTarget | null>(
     null
   );
-  const statusNow = new Date();
-  const statusGroup = sidebarStatusGroup(
+  const statusNow = new Date(getServerNow());
+  const statusGroup = statusViewTier(
     {
-      latestMessageAt: session.lastMessageAt ?? session.createdAt,
+      activityAt: session.lastMessageAt ?? (Date.parse(session.createdAt ?? '') || 0),
       isWorking: session.status?.type === 'running' || session.status?.type === 'initializing',
       isWaitingPermission: session.status?.type === 'requestPermission',
       snoozedUntil: session.snoozedUntil,
@@ -1496,6 +1608,7 @@ export function SessionHeaderMenu({
       <>
         {openedBySession ? (
           <Menu.Item
+            xstyle={styles.headerMenuItem}
             disabled={!openedBySession.target}
             onClick={() => {
               if (openedBySession.target) {
@@ -1510,10 +1623,10 @@ export function SessionHeaderMenu({
         ) : null}
         {openedSessions.length > 0 ? (
           <Menu.Submenu>
-            <Menu.SubmenuTrigger icon={GitBranchPlus}>
+            <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={GitBranchPlus}>
               {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
             </Menu.SubmenuTrigger>
-            <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
+            <Menu.Content maxHeight="calc(var(--spacing) * 72)" minWidth={200} maxWidth={280}>
               {openedSessions.map((opened) => (
                 <Menu.Item
                   key={opened.sessionId}
@@ -1539,14 +1652,16 @@ export function SessionHeaderMenu({
     });
     if (openInIde.options.length === 1) {
       return (
-        <Menu.Item icon={SelectedIcon} onClick={openInIde.onOpen}>
+        <Menu.Item xstyle={styles.headerMenuItem} icon={SelectedIcon} onClick={openInIde.onOpen}>
           {openLabel}
         </Menu.Item>
       );
     }
     return (
       <Menu.Submenu>
-        <Menu.SubmenuTrigger icon={SelectedIcon}>{openLabel}</Menu.SubmenuTrigger>
+        <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={SelectedIcon}>
+          {openLabel}
+        </Menu.SubmenuTrigger>
         <Menu.Content>
           <Menu.RadioGroup
             value={getPathLauncherId(openInIde.selected)}
@@ -1604,7 +1719,11 @@ export function SessionHeaderMenu({
             <Button
               variant="ghost"
               icon
-              className="h-7 w-7 shrink-0 text-muted-foreground"
+              height="calc(var(--spacing) * 7)"
+              width="calc(var(--spacing) * 7)"
+              className={
+                stylex.props(messageActionLabelTheme, messageActionMutedInkTheme).className
+              }
               aria-label={t('sessions.moreActions', 'More actions')}
             >
               <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
@@ -1614,13 +1733,15 @@ export function SessionHeaderMenu({
           <Button
             variant="ghost"
             icon
-            className="h-7 w-7 shrink-0 text-muted-foreground"
+            height="calc(var(--spacing) * 7)"
+            width="calc(var(--spacing) * 7)"
+            xstyle={[styles.shrink, styles.muted]}
             aria-label={t('sessions.moreActions', 'More actions')}
           >
             <Ellipsis {...stylex.props(styles.historyTriggerIcon)} />
           </Button>
         </Menu.Trigger>
-        <Menu.Content align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
+        <Menu.Content align="end" minWidth={200} maxWidth={290}>
           {/* Where the session lives (repository, branch, PR, machine, path,
               access, owner) opens in one dialog instead of stacking rows here. */}
           {!compact && hasSessionInfo ? (
@@ -1635,6 +1756,7 @@ export function SessionHeaderMenu({
               controls. A trailing Switch, not a checkmark; the row stays open
               so the flip is visible. */}
           <Menu.Item
+            xstyle={styles.headerMenuItem}
             closeOnClick={false}
             onClick={() => setConversationWide(!conversationWide)}
             icon={MoveHorizontal}
@@ -1647,7 +1769,7 @@ export function SessionHeaderMenu({
                 onCheckedChange={(checked) => setConversationWide(checked === true)}
                 onClick={(event) => event.stopPropagation()}
                 aria-label={t('sessions.fullWidth', 'Full width')}
-                className="shrink-0"
+                className={stylex.props(styles.shrink).className}
               />
             }
           >
@@ -1669,6 +1791,7 @@ export function SessionHeaderMenu({
 
           {onOpenSearch && (
             <Menu.Item
+              xstyle={styles.headerMenuItem}
               icon={Search}
               onClick={() => {
                 void onOpenSearch();
@@ -1681,11 +1804,12 @@ export function SessionHeaderMenu({
           {onFork || (onCopyConversationHistory && !exportReason) ? (
             <Menu.Submenu>
               <Menu.SubmenuTrigger
+                xstyle={styles.headerMenuItem}
                 icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
               >
                 {t('sessions.forkSession', 'Fork session')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="min-w-[13rem]">
+              <Menu.Content minWidth="13rem">
                 {onFork &&
                   !isArchived &&
                   getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
@@ -1699,16 +1823,14 @@ export function SessionHeaderMenu({
                         }}
                         icon={
                           option.id === 'new-worktree' ? (
-                            <WorktreeIcon className="h-full w-full" />
+                            <WorktreeIcon {...stylex.props(styles.forkWorktreeGlyph)} />
                           ) : (
                             <Folder size="100%" />
                           )
                         }
                         endContent={
                           option.status ? (
-                            <span className="shrink-0 text-xs text-muted-foreground">
-                              {option.status}
-                            </span>
+                            <span {...stylex.props(styles.forkStatus)}>{option.status}</span>
                           ) : undefined
                         }
                       >
@@ -1748,7 +1870,7 @@ export function SessionHeaderMenu({
               <Menu.SubmenuTrigger>
                 {t('sessions.continuation.tweaks.title', '自动化设置')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="w-[290px] p-3">{continuationTweaks}</Menu.Content>
+              <Menu.Content xstyle={themeStyles.glyph}>{continuationTweaks}</Menu.Content>
             </Menu.Submenu>
           )}
 
@@ -1771,19 +1893,19 @@ export function SessionHeaderMenu({
               <Menu.SubmenuTrigger icon={CircleDot}>
                 {t('sessions.status.change', 'Change status')}
               </Menu.SubmenuTrigger>
-              <Menu.Content className="min-w-[200px]">
+              <Menu.Content xstyle={themeStyles.glyph2}>
                 {onSnooze ? (
                   <Menu.Submenu>
                     <Menu.SubmenuTrigger icon={AlarmClock}>
                       {t('sessions.contextMenu.snooze', 'Later')}
                     </Menu.SubmenuTrigger>
-                    <Menu.Content className="min-w-[200px]">
+                    <Menu.Content xstyle={themeStyles.glyph2}>
                       {buildSnoozePresets(statusNow).map((preset) => {
                         const label =
                           preset.id === 'oneHour'
                             ? t('sessions.contextMenu.snoozeOneHour', 'In 1 hour')
                             : preset.id === 'laterToday'
-                              ? t('sessions.contextMenu.snoozeLaterToday', 'Later today')
+                              ? t('sessions.contextMenu.snoozeLaterToday', 'In 3 hours')
                               : preset.id === 'tomorrowMorning'
                                 ? t(
                                     'sessions.contextMenu.snoozeTomorrowMorning',
@@ -1795,11 +1917,9 @@ export function SessionHeaderMenu({
                             key={preset.id}
                             onClick={() => void onSnooze(preset.timestamp)}
                           >
-                            <span className="flex w-full items-center justify-between gap-4">
+                            <span {...stylex.props(themeStyles.row)}>
                               <span>{label}</span>
-                              <span className="text-[11px] tabular-nums text-muted-foreground">
-                                {preset.countdown}
-                              </span>
+                              <span {...stylex.props(themeStyles.hint)}>{preset.countdown}</span>
                             </span>
                           </Menu.Item>
                         );
@@ -1837,7 +1957,7 @@ export function SessionHeaderMenu({
             <Menu.SubmenuTrigger icon={Share2}>
               {t('sharing.manager.title', 'Share')}
             </Menu.SubmenuTrigger>
-            <Menu.Content className="min-w-[200px]">
+            <Menu.Content xstyle={themeStyles.glyph2}>
               {onOpenPublicShare && !sharingReason && (
                 <Menu.Item icon={Link} onClick={onOpenPublicShare}>
                   {t('sessions.share.publicLink', 'Public link…')}
@@ -1902,8 +2022,10 @@ export function SessionHeaderMenu({
           </Menu.Submenu>
 
           <Menu.Submenu>
-            <Menu.SubmenuTrigger icon={Copy}>{t('sessions.copy', 'Copy')}</Menu.SubmenuTrigger>
-            <Menu.Content className="min-w-[200px]">
+            <Menu.SubmenuTrigger xstyle={styles.headerMenuItem} icon={Copy}>
+              {t('sessions.copy', 'Copy')}
+            </Menu.SubmenuTrigger>
+            <Menu.Content minWidth={200}>
               {showBaseBranchContext ? (
                 <>
                   <Menu.Item
@@ -1971,6 +2093,22 @@ export function SessionHeaderMenu({
             </Menu.Content>
           </Menu.Submenu>
 
+          <Menu.Item
+            xstyle={styles.headerMenuItem}
+            disabled={!!exportReason || !onShareAsImage}
+            title={exportReason}
+            onClick={() => {
+              onShareAsImage?.();
+            }}
+            icon={Image}
+          >
+            {exportReason ? (
+              <WorkspaceFeatureReasonText reason={exportReason} />
+            ) : (
+              t('sessions.shareAsImage', 'Share as image…')
+            )}
+          </Menu.Item>
+
           {rpcReason ? (
             <Menu.Item disabled>
               <WorkspaceFeatureReasonText reason={rpcReason} />
@@ -1989,6 +2127,7 @@ export function SessionHeaderMenu({
                   <Menu.Separator />
                   {onRestore && (
                     <Menu.Item
+                      xstyle={styles.headerMenuItem}
                       onClick={() => {
                         void onRestore();
                       }}
@@ -1999,6 +2138,7 @@ export function SessionHeaderMenu({
                   )}
                   {onDelete && (
                     <Menu.Item
+                      xstyle={styles.headerMenuItem}
                       tone="destructive"
                       onClick={() => {
                         void onDelete();
@@ -2014,6 +2154,7 @@ export function SessionHeaderMenu({
                 <>
                   <Menu.Separator />
                   <Menu.Item
+                    xstyle={styles.headerMenuItem}
                     onClick={() => {
                       void onArchive();
                     }}
@@ -2096,7 +2237,10 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         icon
-        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        height="calc(var(--spacing) * 6)"
+        width="calc(var(--spacing) * 6)"
+        className={stylex.props(messageActionButtonTheme, messageActionInkTheme).className}
+        xstyle={[styles.searchButton, styles.searchButtonDisabled]}
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
@@ -2108,7 +2252,10 @@ export function SessionSearchBar({
     return (
       <Tooltip.Root>
         <Tooltip.Trigger delay={400} render={button} />
-        <Tooltip.Content side="bottom" className="flex items-center gap-1.5 px-2 py-1 text-[11px]">
+        <Tooltip.Content
+          side="bottom"
+          className={stylex.props(styles.searchTooltipLayout, styles.searchTooltipTokens).className}
+        >
           <span>{label}</span>
           <span {...stylex.props(styles.searchShortcut)}>{shortcut}</span>
         </Tooltip.Content>
@@ -2142,7 +2289,8 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          controlHeight="calc(var(--spacing) * 7)"
+          xstyle={[styles.searchInputLayout, styles.searchInputTokens, styles.searchInput]}
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -2173,7 +2321,10 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
+        <Separator
+          orientation="vertical"
+          xstyle={[styles.searchSeparatorLayout, styles.searchSeparator]}
+        />
 
         <div {...stylex.props(styles.searchActions)}>
           {renderNavButton(
@@ -2191,7 +2342,12 @@ export function SessionSearchBar({
                   type="button"
                   variant="ghost"
                   icon
-                  className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
+                  height="calc(var(--spacing) * 6)"
+                  width="calc(var(--spacing) * 6)"
+                  className={
+                    stylex.props(messageActionButtonTheme, messageActionInkTheme).className
+                  }
+                  xstyle={styles.searchButton}
                   onClick={onClose}
                   aria-label={t('common.close', 'Close')}
                 >
@@ -2201,7 +2357,9 @@ export function SessionSearchBar({
             />
             <Tooltip.Content
               side="bottom"
-              className="flex items-center gap-1.5 px-2 py-1 text-[11px]"
+              className={
+                stylex.props(styles.searchTooltipLayout, styles.searchTooltipTokens).className
+              }
             >
               <span>{t('common.close', 'Close')}</span>
               <span {...stylex.props(styles.searchShortcut)}>Esc</span>
@@ -2225,6 +2383,8 @@ export interface SessionChatInterfaceProps {
   onFilePathClick?: (filePath: string) => void;
   /** Opens an agent-uploaded HTML source path directly in rendered file preview. */
   onOpenHtmlFile?: (filePath: string) => void;
+  /** Opens an attachment preview as a side-panel tab; false when there is no panel. */
+  onOpenFileAttachment?: (file: SessionFilePayload, sessionId: SessionId) => boolean;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   /** Optional replacement for the GitHub badge area in the header. */
   headerActionsSlot?: React.ReactNode;
@@ -2457,6 +2617,7 @@ export const SessionChatInterface = memo(
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
+      onOpenFileAttachment,
       messageFileDiffEntriesByTurn,
       headerActionsSlot,
       headerEndSlot,
@@ -2630,7 +2791,7 @@ export const SessionChatInterface = memo(
           (!!localMachineId &&
             !!getAutomationProofIssuer() &&
             workspaceSupports(automationContent, 'rpc') &&
-            currentUser?.id === session.userId))
+            !!currentUser?.id))
         ? {
             workspaceId,
             machineId: session.machineId,
@@ -2643,10 +2804,7 @@ export const SessionChatInterface = memo(
       isVisible
     );
     const continuationNow = useStableNow(10_000).getTime();
-    // Auto delivery reads the PR poller, which encrypted workspaces do not run.
-    const autoDeliverSupported = runtime?.contentMode !== 'e2ee';
-    const canAutoDeliver =
-      autoDeliverSupported && !!continuation.value && !continuation.value.autoDeliver;
+    const canAutoDeliver = !!continuation.value && !continuation.value.autoDeliver;
     const [autoDeliveryDialogOpen, setAutoDeliveryDialogOpen] = useState(false);
     const autoDeliveryStatus = session.autoDelivery ?? null;
     // Session-scoped UI state below stores the session it belongs to and is read
@@ -2992,17 +3150,34 @@ export const SessionChatInterface = memo(
     const [resolvingConflictsSessionId, setResolvingConflictsSessionId] =
       useState<SessionId | null>(null);
     const isResolvingConflicts = resolvingConflictsSessionId === session.id;
-    const repositories = useLegacyWorkspaceQuery(
+    const legacyQueryStatus = useGithubWorkspaceStatus(workspaceId);
+    const repositories = useGithubWorkspaceQuery(
       cloudOperations.github.getWorkspaceRepositories,
       workspaceId ? { workspaceId } : 'skip'
     );
-    const isRepoPublic = useMemo(() => {
-      if (!repoFullName || !repositories) return undefined;
-      const repo = repositories.find((r) => r.fullName === repoFullName);
-      return repo ? !repo.private : undefined;
-    }, [repoFullName, repositories]);
+    const linkedRepo = useMemo(
+      () => resolveLinkedWorkspaceGitHubRepo(repoFullName, repositories),
+      [repoFullName, repositories]
+    );
+    const isRepoPublic = linkedRepo?.isPublic;
+    const isRepoLinked = useMemo(() => {
+      if (!repoFullName || !hasHostedGitHub || legacyQueryStatus === 'blocked') return false;
+      if (session.project?.kind === 'local') return Boolean(linkedRepo);
+      if (repositories !== undefined) return Boolean(linkedRepo);
+      return undefined;
+    }, [
+      hasHostedGitHub,
+      legacyQueryStatus,
+      linkedRepo,
+      repoFullName,
+      repositories,
+      session.project?.kind,
+    ]);
 
-    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(repoFullName, isRepoPublic);
+    const { knownItems: knownIssuePrItems } = useKnownIssuePrItems(
+      isRepoLinked === false ? undefined : (linkedRepo?.fullName ?? repoFullName),
+      isRepoPublic
+    );
 
     type InputActionState = 'ready' | 'dispatching';
     const [inputActionState, setInputActionState] = useState<InputActionState>('ready');
@@ -3029,12 +3204,19 @@ export const SessionChatInterface = memo(
       () =>
         !isArchivedSession && session.cliType && session.agentType
           ? {
+              magpieGatewayUrl: sessionAgentConfig?.magpieGatewayUrl,
               cliType: session.cliType,
               agentType: session.agentType,
               machineId: session.machineId,
             }
           : undefined,
-      [isArchivedSession, session.agentType, session.cliType, session.machineId]
+      [
+        sessionAgentConfig?.magpieGatewayUrl,
+        isArchivedSession,
+        session.agentType,
+        session.cliType,
+        session.machineId,
+      ]
     );
     const editMentionContext = useMemo<UserMessageEditMentionContext>(
       () => ({
@@ -3044,6 +3226,7 @@ export const SessionChatInterface = memo(
               session,
               sessionLocalProjectRootPath: resolvedLocalProjectMeta?.rootPath ?? null,
               isRepoPublic,
+              isRepoLinked,
             },
         availableCommands,
         skillAgent: editSkillAgent,
@@ -3052,6 +3235,7 @@ export const SessionChatInterface = memo(
         availableCommands,
         editSkillAgent,
         isArchivedSession,
+        isRepoLinked,
         isRepoPublic,
         resolvedLocalProjectMeta?.rootPath,
         session,
@@ -3100,6 +3284,7 @@ export const SessionChatInterface = memo(
       settleSession,
       moveSessionToFocus,
     } = useSessionActions();
+    const statusViewWritable = useStatusViewWritable(useOrganization().role);
     // Linked pull requests: the user unlinks through their own records (the reconciler
     // alone publishes `pullRequests`). Rows open the primary PR's tab, others on GitHub.
     const prOwnerMeta = workspaceSession ?? session;
@@ -3464,7 +3649,7 @@ export const SessionChatInterface = memo(
 
     /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
     const sessionHistory = sessionTailHistory;
-    const turnFacts = useSessionTurnFacts(conversationView);
+    const turnFacts = useSessionTurnFacts(conversationView, isVisible && !hideMessageArea);
     const conversationIndexRows = useConversationIndexRows(conversationView, {
       includeSummary: false,
     });
@@ -4362,15 +4547,26 @@ export const SessionChatInterface = memo(
       }
 
       const liveEngagement = getLatestWindowReadEngagement();
+      const readGate = {
+        rendersConversation: !hideMessageArea,
+        isVisible: surfaceVisible,
+        isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
+        hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
+      };
+      const rootWokeAt =
+        session.parentSessionId && workspaceSession
+          ? expiredSnoozeTimestamp(parseTimestamp(workspaceSession.snoozedUntil), getServerNow())
+          : null;
       if (
-        !shouldMarkSessionRead({
-          rendersConversation: !hideMessageArea,
-          isVisible: surfaceVisible,
-          isWindowActive: isWindowReadActive && liveEngagement.isWindowActive,
-          hasPageInteraction: hasWindowReadInteraction && liveEngagement.hasPageInteraction,
-          lastMessageAt,
-          lastReadAt,
-        })
+        !shouldMarkSessionRead({ ...readGate, lastMessageAt, lastReadAt }) &&
+        !(
+          rootWokeAt !== null &&
+          shouldMarkSessionRead({
+            ...readGate,
+            lastMessageAt: rootWokeAt,
+            lastReadAt: parseTimestamp(workspaceSession?.lastReadAt),
+          })
+        )
       ) {
         return;
       }
@@ -4388,8 +4584,10 @@ export const SessionChatInterface = memo(
       session.id,
       session.lastMessageAt,
       session.lastReadAt,
+      session.parentSessionId,
       session.snoozedUntil,
       windowReadEngagementRevision,
+      workspaceSession,
     ]);
 
     const isDispatching = inputActionState === 'dispatching';
@@ -4533,16 +4731,19 @@ export const SessionChatInterface = memo(
       workspaceId,
     ]);
     const isFinalizing = isSessionFinalizing(liveSessionStatus);
-    // Resolve the same sender as the formal user row before owner confirmation.
-    const pendingSender = useCloudQuery(
-      cloudOperations.auth.getUserById,
-      currentUser?.id && workspaceId ? { userId: currentUser.id, workspaceId } : 'skip'
-    );
+    const pendingSenderUserId =
+      (runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ?? currentUser?.id ?? null;
+    const pendingSender = useWorkspaceSenderProfile({
+      userId: pendingSenderUserId,
+      workspaceId,
+    });
     const pendingMessages = useSessionPendingMessages({
       sessionId: session.id,
       history: conversationView,
       user: pendingSender,
+      showSenderIdentity: isMultiMember,
       conversationFontSize,
+      onNavigateSession,
     });
     // Presence owns liveness; the same pending queue as the composer supplies
     // the kind of human input. Core metadata works for every ACP provider.
@@ -5667,16 +5868,41 @@ export const SessionChatInterface = memo(
       workspaceDirty,
     ]);
 
-    const effectivePrStatus = latestPr?.status ?? null;
+    const jotaiStore = useStore();
+    const prMergeStatus = useAtomValue(sessionPrMergeStatusAtomFamily(prSessionId ?? ''));
+    const effectivePrStatus =
+      latestPr?.status === 'merged'
+        ? 'merged'
+        : prMergeStatus?.phase === 'merged' &&
+            (!prMergeStatus.prNumber || prMergeStatus.prNumber === latestPrNumber)
+          ? 'merged'
+          : (latestPr?.status ?? null);
+
+    useEffect(() => {
+      if (prSessionId) {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'failed');
+      }
+    }, [jotaiStore, prSessionId]);
+
+    useEffect(() => {
+      if (prSessionId && latestPr?.status === 'merged') {
+        clearSessionPrMergeStatus(jotaiStore, prSessionId, 'merged');
+      }
+    }, [jotaiStore, latestPr?.status, prSessionId]);
+
     const { awaiting: awaitedPrStatus, awaitStatus: awaitPrStatus } = useAwaitedPrStatus(
       latestPr?.url ?? null,
       effectivePrStatus
     );
-    const isMergeSettling = isActivePrMerging || !!awaitedPrStatus?.includes('merged');
+    const isMergeSettling =
+      isActivePrMerging ||
+      prMergeStatus?.phase === 'merging' ||
+      !!awaitedPrStatus?.includes('merged');
     const isReadySettling = isActivePrMarkingReady || !!awaitedPrStatus?.includes('open');
 
     const handleMergePullRequest = useCallback(
       async (method: GitHubMergeMethod) => {
+        const targetPrNumber = latestPrNumber;
         captureSessionEvent('session/quick_action_selected', {
           action_id: 'merge',
           merge_method: method,
@@ -5686,12 +5912,27 @@ export const SessionChatInterface = memo(
         try {
           if (await mergeActivePullRequest(method)) awaitPrStatus(['merged']);
         } catch (error) {
-          toast.error(t('sessions.prTab.mergeError', 'Failed to merge'), {
-            description: getErrorMessage(error),
-          });
+          if (isGitHubOperationTokenConnectionLostError(error)) return;
+          toast.error(
+            targetPrNumber
+              ? t('sessions.prMergeStatus.failedNumber', 'Failed to merge PR #{{number}}', {
+                  number: targetPrNumber,
+                })
+              : t('sessions.prTab.mergeError', 'Failed to merge'),
+            {
+              description: getErrorMessage(error),
+            }
+          );
         }
       },
-      [awaitPrStatus, captureSessionEvent, mergeActivePullRequest, t, workspaceDirty]
+      [
+        awaitPrStatus,
+        captureSessionEvent,
+        latestPrNumber,
+        mergeActivePullRequest,
+        t,
+        workspaceDirty,
+      ]
     );
 
     const handleMarkReadyForReview = useCallback(async () => {
@@ -7230,11 +7471,7 @@ export const SessionChatInterface = memo(
                   ),
                 },
                 autoDeliver: {
-                  supported: autoDeliverSupported || continuation.value.autoDeliver,
-                  reason: t(
-                    'sessions.autoDelivery.encryptedUnavailable',
-                    'Encrypted workspaces do not observe pull requests yet.'
-                  ),
+                  supported: true,
                 },
               }}
               autoDeliverOptions={continuation.autoDeliverOptions}
@@ -7295,19 +7532,30 @@ export const SessionChatInterface = memo(
                 }
         }
         onSnooze={
-          headerSharing?.access !== 'read'
+          statusViewWritable && headerSharing?.access !== 'read'
             ? (snoozedUntil) =>
-                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(() => undefined)
+                snoozeSessionWithConfirmation(session.id, snoozedUntil).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         onSettle={
-          headerSharing?.access !== 'read'
-            ? () => settleSessionWithConfirmation(session.id).then(() => undefined)
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? () =>
+                settleSessionWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         onMoveToFocus={
-          headerSharing?.access !== 'read'
-            ? () => moveToFocusWithConfirmation(session.id).then(() => undefined)
+          statusViewWritable && headerSharing?.access !== 'read'
+            ? () =>
+                moveToFocusWithConfirmation(session.id).then(
+                  () => undefined,
+                  reportStatusActionError
+                )
             : undefined
         }
         owner={ownerMenuState}
@@ -7638,6 +7886,7 @@ export const SessionChatInterface = memo(
                                 onFileDiffClick={onFileDiffClick}
                                 onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                                 onOpenHtmlFile={handleOpenHtmlAttachment}
+                                onOpenFileAttachment={onOpenFileAttachment}
                                 onAnnotateImage={
                                   isArchivedSession ? undefined : handleAnnotateImage
                                 }
@@ -7689,7 +7938,7 @@ export const SessionChatInterface = memo(
                       {/* Requests and their editor must survive virtual row eviction. */}
                       {workspaceId && (
                         <div {...stylex.props(styles.shareRequestsScroller)}>
-                          <ConversationColumn {...stylex.props(styles.shareRequestsColumn)}>
+                          <ConversationColumn xstyle={styles.shareRequestsColumn}>
                             <SessionShareRequestCards
                               workspaceId={workspaceId}
                               session={session}
@@ -7932,6 +8181,7 @@ export const SessionChatInterface = memo(
                             }
                             ref={inputAreaRef}
                             session={session}
+                            messageHistory={conversationView}
                             sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}
                             isMachineRemoved={isMachineRemoved}
                             isAgentBusy={isAgentBusy}
@@ -7961,6 +8211,7 @@ export const SessionChatInterface = memo(
                             configOptionSelectors={configOptionSelectors}
                             configOptionValues={configOptionValues}
                             isRepoPublic={isRepoPublic}
+                            isRepoLinked={isRepoLinked}
                             availableCommands={availableCommands}
                             commandsEnabled={isVisible}
                             freeTurnLimitNotice={freeSessionTurnNotice}
@@ -8056,3 +8307,21 @@ export const SessionChatInterface = memo(
 );
 
 SessionChatInterface.displayName = 'SessionChatInterface';
+
+const themeStyles = stylex.create({
+  glyph: { width: '290px', padding: themeSpace[3] },
+  glyph2: { minWidth: '200px' },
+  row: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[4],
+  },
+  hint: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    fontVariantNumeric: 'tabular-nums',
+    color: uiColors.secondaryLabel,
+  },
+});

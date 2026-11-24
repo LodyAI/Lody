@@ -19,7 +19,9 @@ export class RecoveryVaultError extends Data.TaggedError('RecoveryVaultError')<{
     | 'closed'
     | 'unauthorized'
     | 'pending'
-    | 'prf-unavailable';
+    | 'prf-unavailable'
+    /** The recovery file names a different service than the signed-in client's locator. */
+    | 'locator-mismatch';
 }> {}
 export const vaultError = (code: RecoveryVaultError['code']) => new RecoveryVaultError({ code });
 export const MAX_VAULT_BYTES = 256 * 1024;

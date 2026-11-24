@@ -236,9 +236,7 @@ export function EngineConversationScroller({
     const saved = getSavedScrollState(sessionId);
     controllerRef.current = new ScrollController({
       host: hostRef.current,
-      initialIntent: saved?.intent,
-      savedSizes: saved?.sizes ?? null,
-      layoutVersion: saved?.sizes?.layoutVersion ?? '',
+      savedState: saved,
       initialViewportHeight: typeof window === 'undefined' ? 800 : window.innerHeight,
       overscanPx: bufferSize,
     });
@@ -300,11 +298,7 @@ export function EngineConversationScroller({
   useLayoutEffect(() => {
     controller.resume();
     return () => {
-      saveScrollState(sessionId, {
-        formatVersion: 1,
-        intent: controller.savedIntent(),
-        sizes: controller.geometry.snapshot(),
-      });
+      saveScrollState(sessionId, controller.savedState());
       controller.dispose();
     };
   }, [controller, sessionId]);
@@ -313,6 +307,11 @@ export function EngineConversationScroller({
   useLayoutEffect(() => {
     inLayoutEffect.current = true;
     try {
+      const width = viewportRef.current?.clientWidth ?? 0;
+      if (width > 0) {
+        widthRef.current = width;
+        controller.setLayoutVersion(layoutVersion(width));
+      }
       if (!controller.afterCommit()) return;
       const pending = pendingDisclosureReveal.current;
       if (!pending) return;
@@ -332,7 +331,7 @@ export function EngineConversationScroller({
           : pending.button.nextElementSibling;
       const detail =
         pending.button.dataset.conversationDisclosure === 'group'
-          ? (body?.querySelector('[data-native-selection-allow]') ?? body)
+          ? (body?.querySelector('[data-text-selectable]') ?? body)
           : (body?.firstElementChild ?? body);
       if (!detail) return;
       pendingDisclosureReveal.current = null;
@@ -459,11 +458,7 @@ export function EngineConversationScroller({
     const onScrollEvent = () => controller.onScrollEvent();
     const handleScrollEnd = () => {
       controller.onScrollEnd();
-      saveScrollState(sessionId, {
-        formatVersion: 1,
-        intent: controller.savedIntent(),
-        sizes: controller.geometry.snapshot(),
-      });
+      saveScrollState(sessionId, controller.savedState());
     };
     const onWheel = (event: WheelEvent) => {
       if (event.defaultPrevented || event.deltaY === 0 || event.ctrlKey) return;

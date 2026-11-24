@@ -11,7 +11,6 @@ export const mobileRecoveryCopy = {
     'mobileRecovery.opened': 'Recovery vault opened ({{count}} workspaces).',
     'mobileRecovery.removeFile': 'Remove with recovery file…',
     'mobileRecovery.removePasskey': 'Remove with passkey…',
-    'mobileRecovery.activityFailed': 'Security activity could not be loaded.',
     'mobileRecovery.refreshNeeded': 'Refresh the passkey list to see the current entries.',
     'mobileRecovery.refreshFailed':
       'List refresh failed. Your completed change is saved; retry refreshing the list.',
@@ -31,7 +30,6 @@ export const mobileRecoveryCopy = {
     'mobileRecovery.opened': '恢复库已打开（{{count}} 个工作区）。',
     'mobileRecovery.removeFile': '用恢复文件移除…',
     'mobileRecovery.removePasskey': '用 passkey 移除…',
-    'mobileRecovery.activityFailed': '暂时无法加载安全事件。',
     'mobileRecovery.refreshNeeded': '请刷新 passkey 列表以查看当前条目。',
     'mobileRecovery.refreshFailed': '列表刷新失败。已完成的更改已保存，请重试刷新列表。',
     'mobileRecovery.refreshFile': '用恢复文件刷新列表…',

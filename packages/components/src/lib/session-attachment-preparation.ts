@@ -64,6 +64,7 @@ export async function prepareDraftAttachments(args: {
   throwIfSendAborted(args.signal);
   const machineId = args.record.targetMachineId ?? null;
   const route = resolveAttachmentRoute({
+    content: args.content,
     native: isElectronRenderer(),
     localMachineId: args.localMachineId(),
     targetMachineId: machineId,

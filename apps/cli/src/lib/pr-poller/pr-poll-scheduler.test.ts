@@ -121,7 +121,7 @@ class FakeWorkspace {
   hostedAssociation = true;
   automationHooks: Pick<
     PrPollerWorkspaceHandle,
-    'wantsWorkflowObservations' | 'recordObservations' | 'recordWorkflowObservations'
+    'workflowObservationOwners' | 'recordObservations' | 'recordWorkflowObservations'
   > = {};
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
@@ -339,7 +339,7 @@ describe('PrPollScheduler', () => {
     let demand = true;
     const published: Array<{ head: string; gap: boolean }> = [];
     workspace.automationHooks = {
-      wantsWorkflowObservations: () => demand,
+      workflowObservationOwners: () => (demand ? new Set([sessionId]) : new Set()),
       recordWorkflowObservations: async (_meta, _repo, headSha, _runs, gap) => {
         published.push({ head: headSha, gap });
       },
@@ -387,6 +387,29 @@ describe('PrPollScheduler', () => {
     const ended = scheduler.counters.calls;
     await advance(Math.max(config.highIntervalMs, config.lowMinIntervalMs));
     expect(scheduler.counters.calls).toBe(ended);
+  });
+
+  it('asks for workflow demand once per build, not once per tracked session', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    const owners = Array.from({ length: 8 }, (_, index) => {
+      const sessionId = sid(`s${index + 1}`);
+      workspace.metas.set(sessionId, makeMeta({ id: sessionId, pullRequests: [prMeta(11)] }));
+      return sessionId;
+    });
+    let demandCalls = 0;
+    workspace.automationHooks = {
+      workflowObservationOwners: () => {
+        demandCalls += 1;
+        return new Set(owners);
+      },
+    };
+    await startWith([workspace]);
+    expect(calls().length).toBeGreaterThan(0);
+    expect(demandCalls).toBeGreaterThan(0);
+    expect(demandCalls).toBeLessThanOrEqual(4);
+    const before = demandCalls;
+    await advance(60_000);
+    expect(demandCalls - before).toBeLessThanOrEqual(4);
   });
 
   it('a new viewer promotes a stale session without waiting for the low cadence', async () => {
@@ -690,41 +713,49 @@ describe('PrPollScheduler', () => {
     expect(calls()).toHaveLength(callsAfterTerminal);
   });
 
-  it('discovers local PRs using ambient credentials without a product-cloud association', async () => {
-    const workspace = new FakeWorkspace('ws1');
-    workspace.hostedAssociation = false;
-    workspace.credential = {
-      token: 'local-token',
-      source: 'gh',
-      credentialScope: 'github:ambient:github.com',
-    };
-    workspace.metas.set(
-      sid('s1'),
-      makeMeta({
-        project: {
-          kind: 'local',
-          localProjectId: 'local-1',
-          githubRepoFullName: 'owner/repo',
-        } as SessionMeta['project'],
-        branchName: 'feat/x',
-      })
-    );
-    clientHandler = async (batch) => {
-      const outcome = successOutcome(batch);
-      if (outcome.kind === 'success') {
-        outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
-          ...discovery,
-          prs: [observation(55)],
-        }));
-      }
-      return outcome;
-    };
-    await startWith([workspace]);
+  it.each(['gh', 'managed'] as const)(
+    'discovers PRs and feeds local Automations with %s credentials and no hosted association',
+    async (source) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.hostedAssociation = false;
+      workspace.credential = {
+        token: 'local-token',
+        source,
+        credentialScope: 'github:ambient:github.com',
+      };
+      const observed: PrObservation[] = [];
+      workspace.automationHooks.recordObservations = async (_meta, _repo, prs) => {
+        observed.push(...prs);
+      };
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: {
+            ...(source === 'gh'
+              ? { kind: 'local', localProjectId: 'local-1', githubRepoFullName: 'owner/repo' }
+              : { kind: 'github', repoFullName: 'owner/repo' }),
+          } as SessionMeta['project'],
+          branchName: 'feat/x',
+        })
+      );
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success') {
+          outcome.batch.discoveries = outcome.batch.discoveries.map((discovery) => ({
+            ...discovery,
+            prs: [observation(55)],
+          }));
+        }
+        return outcome;
+      };
+      await startWith([workspace]);
 
-    expect(workspace.associateCalls).toEqual([]);
-    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
-    expect(scheduler.counters.discoveries).toBe(1);
-  });
+      expect(workspace.associateCalls).toEqual([]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
+      expect(scheduler.counters.discoveries).toBe(1);
+      expect(observed.map((pr) => pr.number)).toEqual([55]);
+    }
+  );
 
   it('publishes a discovered PR despite association rejection and retries without duplicate writes', async () => {
     const workspace = new FakeWorkspace('ws1');

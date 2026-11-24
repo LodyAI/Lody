@@ -1,6 +1,6 @@
 # Execution freshness during a backend outage
 
-Status: draft · [prior approval](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)
+Status: approved · [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval) · [prior direction](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#execution-freshness-during-a-backend-outage)
 Translation: current
 
 [中文](execution-freshness-outage.zh.md)
@@ -100,8 +100,7 @@ allowed while the bridge it needs has already detached.
 - `authority-clock.ts` uses the greater wall/monotonic elapsed time, with no
   one-minute disagreement cutoff. Synthetic coverage includes 30-minute suspend,
   three-minute NTP rollback and exact execution/read expiry boundaries.
-- The notice is a runtime issue shown by `lody daemon status`. Other client surfaces do not
-  show it yet.
+- The notice is a runtime issue shown by `lody daemon status`. Approved for GA as implemented (2026-11-24 owner decision); desktop and mobile UI outage banners are explicitly deferred Post-GA.
 - Executed validation: `apps/cli/tests/e2ee-runtime.test.ts` ("backend outage windows")
   and `apps/cli/tests/lody-fleet-local-catalog.test.ts`, on synthetic ledgers with injected
   clocks. No real backend outage was run.

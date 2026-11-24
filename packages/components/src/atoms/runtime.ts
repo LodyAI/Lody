@@ -4,12 +4,14 @@ import type {
   CodeCollabOpenDiffManifestRequest,
   CodeCollabOpenDiffManifestResponse,
   CodeCollabReadBlobRequest,
-  CodeCollabReadBlobResponse} from '@lody/shared';
+  CodeCollabReadBlobResponse,
+} from '@lody/shared';
 import type { FileDownloadRequest, FileDownloadResponse } from '@lody/shared';
 import type {
   MemoryProviderRequest,
   MemoryProviderResponse,
-  ProjectProbeLocalMemberResult} from '@lody/shared';
+  ProjectProbeLocalMemberResult,
+} from '@lody/shared';
 import type { PendingSessionSends } from '../lib/session-pending-sends';
 import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -81,8 +83,12 @@ import type {
   CodeCollabV2SaveTextRequest,
   CodeCollabV2SaveTextResponse,
   FilePreviewV3Request,
-  FilePreviewV3Response} from '@lody/shared';
-import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
+  FilePreviewV3Response,
+} from '@lody/shared';
+import type {
+  LocalProjectGitStateRpcResponse,
+  LocalProjectListBranchesRpcResponse,
+} from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
 import type { CodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { readStoredAuthToken } from '@/lib/auth-bootstrap';
@@ -222,17 +228,32 @@ export type WorkspaceRuntime = {
   readonly contentMode?: 'plaintext' | 'e2ee';
   /** Host RPC support only; each operation still requires live admission and grants. */
   readonly protectedRpcAvailable?: boolean;
+  /** Host-verified ledger role, scoped to this runtime's account and workspace. */
+  readonly protectedMemberRole?: {
+    get(): 'owner' | 'admin' | 'member' | 'guest' | null;
+    subscribe(listener: () => void): () => void;
+  };
   /** Encrypted only: verified ledger file role for display gates; machines still authorize. */
   readonly protectedCodeCollabRole?: {
     get(): 'read' | 'write';
     subscribe(listener: () => void): () => void;
   };
   readonly attachmentToken?: () => Promise<string>;
+  readonly streamsContent?: import('@lody/shared/workspace-streams-content').WorkspaceStreamsContent;
+  readonly localDataScope?: import('../lib/e2ee-local-data').E2eeLocalDataScope;
+  readonly shortcutRole?: { get(): 'read' | 'write'; subscribe(listener: () => void): () => void };
   readonly cloudStreamsEnabled?: boolean;
+  readonly streamsWebSocketEnabled?: boolean;
   readonly getWorkspaceStreamsGrant?: (options?: {
     forceRefresh?: boolean;
     signal?: AbortSignal;
-  }) => Promise<{ token: string; gatewayBaseUrl: string }>;
+    write?: boolean;
+  }) => Promise<{
+    token: string;
+    gatewayBaseUrl: string;
+    bucketId?: string;
+    shardHostSuffix?: string;
+  }>;
   readonly sendResources: SessionSendResources;
   /** In-memory sends whose attachments are still preparing; lost with the page. */
   readonly pendingSends: PendingSessionSends | null;
@@ -601,6 +622,12 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectGitStateRpcResponse | null>;
+  requestLocalProjectBranches: (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { query?: string; limit?: number; cursor?: string; timeoutMs?: number }
+  ) => Promise<LocalProjectListBranchesRpcResponse | null>;
   /** Read-only `.gitmodules` probe of one local project, for the Project group editor. */
   requestProjectProbeLocalMember: (
     machineId: MachineId,
@@ -649,6 +676,13 @@ export type WorkspaceRuntime = {
           Extract<
             import('@lody/shared').LocalMachineRpcRequest,
             { method: 'sorbet/providers-create' }
+          >,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<
+            import('@lody/shared').LocalMachineRpcRequest,
+            { method: 'sorbet/providers-update' }
           >,
           'method' | 'params'
         >

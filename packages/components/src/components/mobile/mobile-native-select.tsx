@@ -6,10 +6,14 @@
  * trigger is branded; the invisible real `<select>` lets every touch platform
  * present its own option picker instead of an app-owned menu.
  */
-import { ChevronsUpDown, Loader2 } from 'lucide-react';
+import { ChevronsUpDown } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
 
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { clsx } from 'clsx';
+import { Spinner } from '@lody/ui/spinner';
+import { field } from '@lody/ui/field/field.tokens.stylex';
+import { control, text } from '@lody/ui/tokens/scales.stylex';
 
 export type MobileNativeSelectOption<T extends string = string> = {
   value: T;
@@ -29,6 +33,7 @@ export type MobileNativeSelectProps<T extends string = string> = {
   loadingText?: ReactNode;
   showIndicator?: boolean;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 /**
@@ -46,6 +51,7 @@ export function MobileNativeSelect<T extends string = string>({
   loadingText,
   showIndicator = true,
   className,
+  xstyle,
 }: MobileNativeSelectProps<T>) {
   const hasAlternative = options.some((option) => !option.disabled && option.value !== value);
   const isInteractive = !disabled && !loading && hasAlternative;
@@ -62,19 +68,13 @@ export function MobileNativeSelect<T extends string = string>({
     return groups;
   }, []);
 
+  const rootProps = stylex.props(styles.root, (disabled || loading) && styles.disabled, xstyle);
   return (
-    <div
-      className={cn(
-        'relative flex h-8 w-full select-none items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm font-medium',
-        'text-foreground/85 transition-colors hover:text-foreground',
-        (disabled || loading) && 'opacity-60',
-        className
-      )}
-    >
-      <span className="flex min-w-0 flex-1 items-center gap-2">
+    <div {...rootProps} className={clsx(rootProps.className, className)}>
+      <span {...stylex.props(styles.value)}>
         {loading ? (
           <>
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin opacity-70" aria-hidden="true" />
+            <Spinner diameter="14px" label={null} />
             {loadingText ?? triggerContent}
           </>
         ) : (
@@ -82,17 +82,14 @@ export function MobileNativeSelect<T extends string = string>({
         )}
       </span>
       {isInteractive && showIndicator ? (
-        <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
+        <ChevronsUpDown {...stylex.props(styles.chevron)} aria-hidden="true" />
       ) : null}
       <select
         value={value ?? ''}
         onChange={(event) => onChange(event.target.value as T)}
         disabled={!isInteractive}
         aria-label={ariaLabel}
-        className={cn(
-          'absolute inset-0 h-full w-full appearance-none opacity-0 outline-none',
-          isInteractive ? 'cursor-pointer' : 'cursor-default'
-        )}
+        {...stylex.props(styles.select, isInteractive ? styles.interactive : styles.inert)}
       >
         <option value="" disabled>
           {ariaLabel}
@@ -115,3 +112,43 @@ export function MobileNativeSelect<T extends string = string>({
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    display: 'flex',
+    height: '32px',
+    width: '100%',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: '6px',
+    borderRadius: field.radiusMedium,
+    paddingInline: '8px',
+    paddingBlock: '4px',
+    textAlign: 'left',
+    fontSize: field.text,
+    lineHeight: text.subheadlineLeading,
+    fontWeight: 500,
+    letterSpacing: text.controlTracking,
+    color: field.value,
+    backgroundColor: field.background,
+    boxShadow: {
+      default: field.well,
+      ':focus-within': `0 0 0 ${field.ringWidth} ${field.ring}, ${field.well}`,
+    },
+  },
+  disabled: { opacity: control.disabledOpacity },
+  value: { display: 'flex', minWidth: 0, flex: '1 1 0%', alignItems: 'center', gap: '8px' },
+  chevron: { width: '16px', height: '16px', flexShrink: 0, color: field.icon },
+  select: {
+    position: 'absolute',
+    inset: 0,
+    height: '100%',
+    width: '100%',
+    appearance: 'none',
+    opacity: 0,
+    outlineStyle: 'none',
+  },
+  interactive: { cursor: 'pointer' },
+  inert: { cursor: 'default' },
+});

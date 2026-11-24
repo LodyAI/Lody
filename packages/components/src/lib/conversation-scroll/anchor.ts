@@ -1,12 +1,9 @@
 import type { Geometry } from './geometry';
 import type { EngineRow, ReadingAnchor } from './types';
 
-export interface ResolvedAnchor {
-  index: number;
-  offsetPx: number;
-  /** The anchor could not be found as recorded and fell back (rules 2–6). */
-  fellBack: boolean;
-}
+export type ResolvedAnchor =
+  | { index: number; offsetPx: number; fellBack: false }
+  | { index: number; offsetPx: 0; fellBack: true };
 
 /** The anchor `offsetPx` pixels into `row`. */
 export function anchorOfRow(row: EngineRow, offsetPx: number): ReadingAnchor {
@@ -54,7 +51,8 @@ const clampOffset = (offsetPx: number, size: number) =>
  *    the recorded offset back;
  * 2. the recorded item is rendered as its own row (same index and identity):
  *    that row, at `offsetPx`;
- * 3. an item with the recorded identity elsewhere in the turn: that row;
+ * 3. an item with the recorded identity elsewhere in the turn: that row, at
+ *    `offsetPx`;
  * 4. the item is folded into a group: the last row of the turn that starts at
  *    or before it (the group header), at 0;
  * 5. the turn exists (hydrated or as a placeholder): its first row, at 0 —
@@ -135,7 +133,7 @@ export function resolveAnchor(
     return {
       index: byIdentity,
       offsetPx: clampOffset(anchor.offsetPx, geometry.size(byIdentity)),
-      fellBack: true,
+      fellBack: false,
     };
   }
   if (covering >= 0) return { index: covering, offsetPx: 0, fellBack: true };

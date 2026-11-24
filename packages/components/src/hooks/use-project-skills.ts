@@ -84,7 +84,7 @@ type NormalizedProjectSkillsSource =
       machineId: string;
     };
 
-type ProjectSkillsInternalState = Omit<ProjectSkillsState, 'groups' | 'refresh'>;
+type ProjectSkillsInternalState = Omit<ProjectSkillsState, 'groups' | 'refresh'> & { key?: string };
 
 type RegisteredSkillDirsByScope = {
   project: Set<string>;
@@ -97,6 +97,38 @@ const EMPTY_INTERNAL_STATE: ProjectSkillsInternalState = {
   rawGroups: [],
   stale: false,
 };
+
+const LOCAL_PROJECT_FINGERPRINT_PREFIX = 'project:';
+const LOCAL_GLOBAL_FINGERPRINT_PREFIX = 'global:';
+
+function formatLocalSkillsFingerprint(
+  project: string | undefined,
+  global: string | undefined
+): string {
+  return `${LOCAL_PROJECT_FINGERPRINT_PREFIX}${project ?? ''}|${LOCAL_GLOBAL_FINGERPRINT_PREFIX}${global ?? ''}`;
+}
+
+/** The host fingerprints a cached local entry was built from, to send back as `knownFingerprint`. */
+function parseLocalSkillsFingerprint(
+  value: string | undefined
+): { project?: string; global?: string } | null {
+  if (!value) return null;
+  const [projectPart, globalPart] = value.split('|');
+  if (
+    !projectPart?.startsWith(LOCAL_PROJECT_FINGERPRINT_PREFIX) ||
+    !globalPart?.startsWith(LOCAL_GLOBAL_FINGERPRINT_PREFIX)
+  ) {
+    return null;
+  }
+  const project = projectPart.slice(LOCAL_PROJECT_FINGERPRINT_PREFIX.length);
+  const global = globalPart.slice(LOCAL_GLOBAL_FINGERPRINT_PREFIX.length);
+  return { ...(project ? { project } : {}), ...(global ? { global } : {}) };
+}
+
+function parseGlobalSkillsFingerprint(value: string | undefined): string | undefined {
+  if (!value?.startsWith(LOCAL_GLOBAL_FINGERPRINT_PREFIX) || value.includes('|')) return undefined;
+  return value.slice(LOCAL_GLOBAL_FINGERPRINT_PREFIX.length) || undefined;
+}
 
 function normalizeSource(
   source: ProjectSkillsSource | null | undefined
@@ -210,6 +242,7 @@ function stateFromCache(
 ): ProjectSkillsInternalState {
   return {
     status,
+    key: entry.key,
     rawGroups: entry.groups,
     stale: false,
     fetchedAt: entry.fetchedAt,
@@ -217,7 +250,8 @@ function stateFromCache(
 }
 
 export function useProjectSkills(
-  sourceInput: ProjectSkillsSource | null | undefined
+  sourceInput: ProjectSkillsSource | null | undefined,
+  magpieGatewayUrl?: string
 ): ProjectSkillsState {
   const runtime = useAtomValue(runtimeAtom);
   const requestedByUserId = useAtomValue(userAtom)?.id ?? null;
@@ -254,21 +288,17 @@ export function useProjectSkills(
     return null;
   }, [inputKind, inputLocalProjectId, inputMachineId, inputRepoFullName, inputWorkspaceId]);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [state, setState] = useState<ProjectSkillsInternalState>(EMPTY_INTERNAL_STATE);
+  const [loadedState, setState] = useState<ProjectSkillsInternalState>(EMPTY_INTERNAL_STATE);
   const scanDirs = useMemo(() => getSkillScanCandidateDirs(), []);
   const registeredDirs = useMemo(
     () => getRegisteredDirsForSource(source, agentConfigs),
     [agentConfigs, source]
   );
-  const groups = useMemo(
-    () => annotateAndSortGroups(state.rawGroups, registeredDirs),
-    [registeredDirs, state.rawGroups]
-  );
   const refresh = useCallback(() => {
     setRefreshNonce((value) => value + 1);
   }, []);
 
-  const sourceCacheKey = useMemo(() => {
+  const baseCacheKey = useMemo(() => {
     if (!source || !requestedByUserId) {
       return null;
     }
@@ -294,6 +324,17 @@ export function useProjectSkills(
     );
   }, [requestedByUserId, source]);
 
+  const sourceCacheKey =
+    baseCacheKey && magpieGatewayUrl && source?.kind !== 'github'
+      ? baseCacheKey + ':magpie:' + encodeURIComponent(magpieGatewayUrl)
+      : baseCacheKey;
+
+  const state =
+    loadedState.key && loadedState.key !== sourceCacheKey ? EMPTY_INTERNAL_STATE : loadedState;
+  const groups = useMemo(
+    () => annotateAndSortGroups(state.rawGroups, registeredDirs),
+    [registeredDirs, state.rawGroups]
+  );
   useEffect(() => {
     if (!source || !sourceCacheKey) {
       setState(EMPTY_INTERNAL_STATE);
@@ -338,24 +379,31 @@ export function useProjectSkills(
             requestLocalProjectControl: (request, requestOptions) =>
               runtime.requestLocalProjectControl(request, requestOptions),
           });
+          const knownParts = parseLocalSkillsFingerprint(cached?.contentFingerprint);
           const [projectResult, globalResult] = await Promise.all([
-            transport.listSkills({ skillDirs: scanDirs }),
-            transport.listGlobalSkills(),
+            transport.listSkills({ skillDirs: scanDirs, knownFingerprint: knownParts?.project }),
+            transport.listGlobalSkills({ magpieGatewayUrl, knownFingerprint: knownParts?.global }),
           ]);
           if (cancelled) {
             return;
           }
 
-          const contentFingerprint = [
-            `project:${projectResult.contentFingerprint ?? ''}`,
-            `global:${globalResult.contentFingerprint ?? ''}`,
-          ].join('|');
-          const combinedGroups = [...projectResult.groups, ...globalResult.groups];
-
+          const contentFingerprint = formatLocalSkillsFingerprint(
+            projectResult.contentFingerprint,
+            globalResult.contentFingerprint
+          );
           if (cached && cached.contentFingerprint === contentFingerprint) {
             await reuseCachedEntry(cached);
             return;
           }
+          const combinedGroups = [
+            ...(projectResult.unchanged
+              ? (cached?.groups.filter((group) => group.scope === 'project') ?? [])
+              : projectResult.groups),
+            ...(globalResult.unchanged
+              ? (cached?.groups.filter((group) => group.scope !== 'project') ?? [])
+              : globalResult.groups),
+          ];
 
           const nextEntry: ProjectSkillsCacheEntry = {
             key: sourceCacheKey,
@@ -383,12 +431,15 @@ export function useProjectSkills(
             requestLocalProjectControl: (request, requestOptions) =>
               runtime.requestLocalProjectControl(request, requestOptions),
           });
-          const globalResult = await transport.listGlobalSkills();
+          const globalResult = await transport.listGlobalSkills({
+            magpieGatewayUrl,
+            knownFingerprint: parseGlobalSkillsFingerprint(cached?.contentFingerprint),
+          });
           if (cancelled) {
             return;
           }
 
-          const contentFingerprint = `global:${globalResult.contentFingerprint ?? ''}`;
+          const contentFingerprint = `${LOCAL_GLOBAL_FINGERPRINT_PREFIX}${globalResult.contentFingerprint ?? ''}`;
           if (cached && cached.contentFingerprint === contentFingerprint) {
             await reuseCachedEntry(cached);
             return;
@@ -463,7 +514,15 @@ export function useProjectSkills(
     return () => {
       cancelled = true;
     };
-  }, [requestedByUserId, refreshNonce, runtime, scanDirs, source, sourceCacheKey]);
+  }, [
+    magpieGatewayUrl,
+    requestedByUserId,
+    refreshNonce,
+    runtime,
+    scanDirs,
+    source,
+    sourceCacheKey,
+  ]);
 
   return {
     ...state,

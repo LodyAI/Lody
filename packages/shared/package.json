@@ -16,6 +16,8 @@
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
+    "./streams-crdt-factory": "./src/streams-crdt-factory.ts",
+    "./streams-transport-diagnostics": "./src/streams-transport-diagnostics.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",
@@ -33,6 +35,10 @@
       "types": "./src/session-link.ts",
       "import": "./src/session-link.ts"
     },
+    "./transient-gateway": {
+      "types": "./src/transient-gateway.ts",
+      "import": "./src/transient-gateway.ts"
+    },
     "./streams-snapshot-codec": {
       "types": "./src/streams-snapshot-codec.ts",
       "import": "./src/streams-snapshot-codec.ts"
@@ -44,6 +50,10 @@
     "./prompt-shortcuts/*": {
       "types": "./src/prompt-shortcuts/*.ts",
       "import": "./src/prompt-shortcuts/*.ts"
+    },
+    "./status-view": {
+      "types": "./src/status-view/index.ts",
+      "import": "./src/status-view/index.ts"
     },
     "./session-sharing": {
       "types": "./src/session-sharing.ts",

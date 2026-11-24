@@ -344,12 +344,30 @@ safe. `abandonVaultReplacement` gives up on the device that started, and
 `recoverySubmitOriginal` and `recoveryFetchEnvelope` adapt the service to core.
 [Spec](../../specs/e2ee/recovery-vault.md).
 
+## Recovery service locator
+
+`recoveryServiceLocator` (`./recovery-locator`) turns the product site URL into the
+`serviceLocator` that every host writes into recovery files and passes to core's open:
+its canonical origin, `https://lody.ai` for Lody Cloud and the `SITE_URL` origin for a
+self-hosted deployment. HTTPS is required, except HTTP on loopback hosts. A missing or
+unusable URL returns `null` and the host refuses recovery as `disabled`; a backend
+deployment URL or account ID is never a locator. Desktop reads `VITE_SITE_URL`, mobile reads
+`VITE_SITE_URL` with the Lody Cloud default, and Web passes its site origin, so one file
+opens on all three. Core rejects a file naming another locator as `locator-mismatch`, which
+hosts report as `e2ee_recovery_authentication` (the wrong-file message).
+[Spec](../../specs/e2ee/recovery-vault.md#recovery-material-and-ciphertext).
+
 ## Browser passkeys
 
 `browserPasskeyPort` implements the platform passkey port over `navigator.credentials`.
 It reports what the browser returned and decides nothing: a browser without PRF reports
-`prfEnabled: false` and no result, and `passkey-unlock` refuses it. Its test runs real
-Chromium on the `lody.ai` origin with a CDP virtual authenticator. No page uses it yet.
+`prfEnabled: false` and no result, and `passkey-unlock` refuses it. `available()` is true
+only when `PublicKeyCredential.getClientCapabilities()` reports `extension:prf`; WebAuthn
+alone is not enough (Safari 16.4–17.x and older Firefox create passkeys without PRF), and a
+missing or failing capability API counts as unavailable. Its test runs real Chromium on the
+`lody.ai` origin with a CDP virtual authenticator, including replaced capability reports.
+Browser-shaped hosts inject it as the recovery engine's `passkey`; the iOS shell injects
+its native port (`apps/mobile-capacitor/src/e2ee/passkey.ts`) instead.
 
 ## Verification and limits
 
@@ -382,7 +400,11 @@ real recovery test. Its key maintenance reads the latest verified epoch after se
 advances the ledger. Recovery history rejects empty/incomplete pages and verifies
 the first page's declared checkpoint against the complete signed history. `restoreRecovery` accepts an exact retained offer for a device
 whose protected identity remains but workspace keys are missing; package pins still
-must match, and recovery never replaces the identity.
+must match. An account-pairing offer, retained or derived from the package, always
+restores through the account identity, so an interrupted replacement resumes and one
+the verified history shows revoked restores as its replacement. A retained ordinary
+offer whose identity that history shows lost fails as access loss: the caller cancels
+its pin and restores with the account offer.
 
 `personalRuntimeAccountRequester` and `personalRuntimeRecovery` adapt the existing
 runtime owner for account pairing and closed recovery commands. They do not create a
@@ -395,3 +417,15 @@ Other-device approval remains a separate choice.
 The personal-device session exposes `abandonEpoch(baseEpoch)` through the same Owner-only staged publisher after declaring capability 2, without requiring the current epoch key. Callers own evidence display and explicit confirmation; exact-original retries and history recovery remain in core.
 
 Management rechecks the verified ledger before signing: ownership transfer requires a personal device of the target, and removing the last personal device requires `{ confirmedRecoveryOnly: true }`. The management view exposes `requiresRecoveryConfirmation` for the device dialog; an unconfirmed programmatic call fails with `recovery-only-confirmation-required`.
+
+## Remote CLI pairing
+
+The optional `PersonalHostPlatform.remoteMachine` supplies persistent originals,
+bounded authenticated relay calls and local verified records for one installation.
+Official cloud composition advertises the four platform methods explicitly through
+`remoteMachinePairing`. The session retains its signer/credential and native-call
+lifetime; the workflow serializes pairing operations separately, using the existing
+session permit only for local signing/storage and ledger/key rounds. Interrupted
+network work preserves its signed originals. Guests and lost personal devices fail
+before signing; key delivery follows verified admission, and terminal cancellation
+archives rather than deletes evidence. See the [shared cloud composition](../client-e2ee/README.md#remote-cli-machines).

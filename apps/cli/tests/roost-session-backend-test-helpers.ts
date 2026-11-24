@@ -16,7 +16,7 @@ import {
   type SessionHistoryWriteResponse,
   type SessionId,
 } from '@lody/shared';
-import { SessionDocument } from '../src/lib/loro/doc';
+import { LoroDocumentManager, SessionDocument } from '../src/lib/loro/doc';
 import { installRoostNodeSessionBackend } from '../src/session/roost-node-session';
 import { createSessionBackend, type SessionBackendFactory } from '../src/session/session-backend';
 import { MessageHandler } from '../src/lib/message-handler';
@@ -82,7 +82,8 @@ export const nativeAssistant = (id: string): SessionHistoryInput => ({
 export async function nativeFixture(
   id = `native-contract-${ordinal++}`,
   queued = false,
-  factory?: SessionBackendFactory
+  factory?: SessionBackendFactory,
+  encryptedDirectory?: string
 ) {
   const repo = await LoroRepo.create({});
   const sessionId = id as SessionId;
@@ -98,7 +99,8 @@ export async function nativeFixture(
     sessionId,
     (room) => repo.unloadDoc(room),
     undefined,
-    factory
+    factory,
+    encryptedDirectory
   );
   doc.handle = await repo.openPersistedDoc(getSessionRoomId(sessionId));
   doc.composeSessionData(doc.handle.doc, undefined, { historyBackend: 'roost' });
@@ -210,7 +212,16 @@ export const nativeContractFixture: SessionBackendContractFixtureFactory = async
   };
 };
 
-export async function coldHistoryHandlerFixture(count: number) {
+export async function coldHistoryHandlerFixture(
+  count: number,
+  encrypted?: {
+    resolveVerifiedExecutionOriginal: ReturnType<
+      typeof import('../src/lib/e2ee/execution-intent-verification').makeVerifiedExecutionIntent
+    >;
+    machineId: string;
+  }
+) {
+  const machineId = encrypted?.machineId ?? 'test-machine';
   const repo = await LoroRepo.create({});
   const docs = new Map<SessionId, SessionDocument>();
   for (let index = 0; index < count; index++) {
@@ -220,7 +231,17 @@ export async function coldHistoryHandlerFixture(count: number) {
       historyBackend: 'roost',
       userId: 'test-user',
     });
-    docs.set(id, new SessionDocument(repo, id, (room) => repo.unloadDoc(room)));
+    docs.set(
+      id,
+      new SessionDocument(
+        repo,
+        id,
+        (room) => repo.unloadDoc(room),
+        undefined,
+        undefined,
+        encrypted ? join(nativeDirectory, 'encrypted-owner') : undefined
+      )
+    );
   }
   const noop = () => undefined;
   const handler = new MessageHandler(
@@ -232,6 +253,9 @@ export async function coldHistoryHandlerFixture(count: number) {
     } as never,
     {
       repo,
+      workspaceId: 'test-workspace',
+      encryptedWorkspace: encrypted,
+      verifyRoostInput: LoroDocumentManager.prototype.verifyRoostInput,
       getOrCreateSessionDoc: async (id: SessionId) => {
         const doc = docs.get(id)!;
         if (!doc.handle) {
@@ -248,10 +272,11 @@ export async function coldHistoryHandlerFixture(count: number) {
     } as never,
     getDefaultLogger(),
     {
-      machineId: 'test-machine',
+      machineId,
       workspaceId: 'test-workspace' as never,
       token: 'synthetic-token',
       userId: 'test-user',
+      encryptedWorkspace: !!encrypted,
       machineName: 'synthetic',
       cliVersion: '0.0.0',
       cloudPort: createTestCloudPort(),
@@ -301,7 +326,7 @@ export async function coldHistoryHandlerFixture(count: number) {
           }),
     ready: (id: SessionId) =>
       repo.upsertDocMeta(getSessionRoomId(id), {
-        machineId: 'test-machine',
+        machineId,
         status: SessionStatusFactory.idle(),
       }),
     close: async () => {

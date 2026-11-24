@@ -186,7 +186,7 @@ jobs:
       VITE_ELECTRON_UPDATE_CHANNEL: nightly
       ELECTRON_UPDATE_CHANNEL: nightly
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
+      NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
@@ -214,7 +214,7 @@ jobs:
           import fs from "node:fs";
           import {resolveElectronReleaseProfile} from "./apps/electron/release-profile.mjs";
           const candidate=JSON.parse(fs.readFileSync("candidate/candidate.json"));
-          Object.assign(process.env,{LODY_PRIVATE_SHA:candidate.privateSha,LODY_OSS_SHA:candidate.ossSha,LODY_NIGHTLY_BUILD_NUMBER:candidate.buildNumber,LODY_BUILD_RUN_ID:candidate.runId,LODY_BUILD_TIMESTAMP:candidate.builtAt});
+          Object.assign(process.env,{LODY_SOURCE_SHA:candidate.sourceSha??candidate.ossSha,LODY_NIGHTLY_BUILD_NUMBER:candidate.buildNumber,LODY_BUILD_RUN_ID:candidate.runId,LODY_BUILD_TIMESTAMP:candidate.builtAt});
           const {version}=JSON.parse(fs.readFileSync("apps/electron/package.json"));
           const profile=resolveElectronReleaseProfile({environment:"production",baseVersion:version});
           fs.appendFileSync(process.env.GITHUB_OUTPUT,`version=${profile.version}\nnative-version=${profile.nativeVersion}\nupdate-url=${process.env.VITE_ELECTRON_UPDATE_URL.replace(/\/$/u, "")}\n`);
@@ -519,7 +519,7 @@ jobs:
       - prepare
       - validate
     if: needs.prepare.outputs.publish == 'true'
-    uses: ./.github/workflows/publish-ios.yml
+    uses: ./.github/workflows/publish-ios-native.yml
     secrets: inherit
     with:
       source-sha: ${{ needs.candidate.outputs.private-sha }}

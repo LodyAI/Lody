@@ -1,9 +1,8 @@
-import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { control, corner, duration, ease, radius, radius as sharedRadius, space, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import type { TFunction } from 'i18next';
 import { formatDistanceToNow, type Locale } from 'date-fns';
@@ -21,10 +20,12 @@ import {
   Folders,
   Github,
   Info,
+  LockKeyhole,
   Plus,
   RefreshCw,
   Search,
   TerminalSquare,
+  Users,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -118,6 +119,8 @@ export type ProjectSettingsRow = {
   shell: WorktreeSetupShell;
   project: LocalProjectMeta;
   sharedWithTeam: boolean;
+  /** Sharing status of the machine that owns this project, if known. */
+  machineSharedWithTeam?: boolean;
   conversationCount: number;
   isUpdating: boolean;
   canUpdateSharing: boolean;
@@ -208,6 +211,7 @@ export type ProjectSettingsViewProps = {
     provider: LocalProjectHistoryProvider,
     selectedIds: string[]
   ) => void;
+  onWorktreeProjectViewChange?: (projectKey: string | null) => void;
   onWorktreeSetupChange?: (
     row: ProjectSettingsRow,
     config: WorktreeSetupScriptConfig
@@ -233,6 +237,8 @@ export type ProjectSettingsViewProps = {
   onOpenGitHubSettings?: () => void;
   /** Opens Settings > MCP, where the workspace catalog a project draws on is managed. */
   onOpenMcpSettings?: () => void;
+  /** Opens Settings > Machines focused on the owning machine. */
+  onOpenMachineSettings?: (machineId: MachineId) => void;
   canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
   onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
   localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
@@ -796,10 +802,10 @@ const styles = stylex.create({
   },
   sessionRowDisabled: {
     cursor: 'default',
-    opacity: 0.7,
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
   },
   sessionText: { flexGrow: 1, minWidth: 0 },
+  sessionTextDisabled: { opacity: control.disabledOpacity },
   sessionTitle: {
     minWidth: 0,
     overflow: 'hidden',
@@ -969,6 +975,7 @@ export function ProjectSettingsComponent({
     setAddLocalProjectMachineId(machineId ?? null);
     setAddLocalProjectDialogOpen(true);
   }, []);
+  const [worktreeProjectKey, setWorktreeProjectKey] = useState<string | null>(null);
   /* All state + handlers live in `useLocalProjectsAdmin` so the mobile
      per-project surface (`MobileLocalProjectSettings`) can drive the
      same data model without duplicating mutations / catalog state. */
@@ -982,7 +989,7 @@ export function ProjectSettingsComponent({
     onHistorySelectionChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
-  } = useLocalProjectsAdmin();
+  } = useLocalProjectsAdmin(worktreeProjectKey);
   const { workspaceReposWithStatus, workspaceReposLoading } = useSettingsDataCache();
   const {
     setupSavingByKey: githubSetupSavingByKey,
@@ -1044,6 +1051,10 @@ export function ProjectSettingsComponent({
   };
 
   const handleOpenMcpSettings = useCallback(() => openSettings('mcp'), [openSettings]);
+  const handleOpenMachineSettings = useCallback(
+    (machineId: MachineId) => openSettings('machines', { machineId }),
+    [openSettings]
+  );
 
   const handleAddGitHubProject = useCallback(() => {
     if (!workspaceSlug) return;
@@ -1108,6 +1119,7 @@ export function ProjectSettingsComponent({
         onImportHistory={onImportHistory}
         onResolveHistoryConflict={onResolveHistoryConflict}
         onHistorySelectionChange={onHistorySelectionChange}
+        onWorktreeProjectViewChange={setWorktreeProjectKey}
         onWorktreeSetupChange={onWorktreeSetupChange}
         onWorktreeCleanupChange={onWorktreeCleanupChange}
         onGithubWorktreeSetupChange={onGithubWorktreeSetupChange}
@@ -1117,6 +1129,7 @@ export function ProjectSettingsComponent({
         onAddGitHubProject={workspaceSlug ? handleAddGitHubProject : undefined}
         onOpenGitHubSettings={workspaceSlug ? handleAddGitHubProject : undefined}
         onOpenMcpSettings={handleOpenMcpSettings}
+        onOpenMachineSettings={handleOpenMachineSettings}
         canRemoveLocalProject={canRemoveLocalProject}
         onRequestRemoveLocalProject={handleRequestRemoveLocalProject}
         localProjectRemovalStateByKey={localProjectRemovalStateByKey}
@@ -1151,6 +1164,7 @@ function ProjectSettingsDesktop({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
@@ -1160,6 +1174,7 @@ function ProjectSettingsDesktop({
   onAddGitHubProject,
   onOpenGitHubSettings,
   onOpenMcpSettings,
+  onOpenMachineSettings,
   canRemoveLocalProject,
   onRequestRemoveLocalProject,
   localProjectRemovalStateByKey,
@@ -1221,8 +1236,18 @@ function ProjectSettingsDesktop({
       setEditingProjectKey(initialProjectKey ?? null);
     }
   }, [initialProjectKey]);
-  const editingProject =
+  const rawEditingProject =
     allSelections.find((selection) => selection.key === editingProjectKey) ?? null;
+  const editingProject = useMemo<ProjectSettingsSelection | null>(() => {
+    if (!rawEditingProject || rawEditingProject.kind !== 'local') return rawEditingProject;
+    if (rawEditingProject.row.machineSharedWithTeam !== undefined) return rawEditingProject;
+    const section = sections.find((entry) => entry.machineId === rawEditingProject.row.machineId);
+    if (!section) return rawEditingProject;
+    return {
+      ...rawEditingProject,
+      row: { ...rawEditingProject.row, machineSharedWithTeam: section.sharedWithTeam },
+    };
+  }, [rawEditingProject, sections]);
 
   const inSettingsPane = useInSettingsPane();
   const addProjectActions =
@@ -1249,12 +1274,19 @@ function ProjectSettingsDesktop({
     onImportHistory,
     onResolveHistoryConflict,
     onHistorySelectionChange,
+    onWorktreeProjectViewChange,
     onWorktreeSetupChange,
     onWorktreeCleanupChange,
     onGithubWorktreeSetupChange,
     onGithubWorktreeCleanupChange,
     onOpenGitHubSettings,
     onOpenMcpSettings,
+    onOpenMachineSettings: onOpenMachineSettings
+      ? (machineId: MachineId) => {
+          setEditingProjectKey(null);
+          onOpenMachineSettings(machineId);
+        }
+      : undefined,
     canRemoveLocalProject,
     onRequestRemoveLocalProject,
     localProjectRemovalStateByKey,
@@ -1632,12 +1664,14 @@ function ProjectWindow({
   onImportHistory,
   onResolveHistoryConflict,
   onHistorySelectionChange,
+  onWorktreeProjectViewChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
   onOpenGitHubSettings,
   onOpenMcpSettings,
+  onOpenMachineSettings,
   canRemoveLocalProject,
   onRequestRemoveLocalProject,
   localProjectRemovalStateByKey,
@@ -1657,6 +1691,7 @@ function ProjectWindow({
     ) => Promise<void>;
     onOpenGitHubSettings?: () => void;
     onOpenMcpSettings?: () => void;
+    onOpenMachineSettings?: (machineId: MachineId) => void;
     canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
     onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
     localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
@@ -1678,6 +1713,11 @@ function ProjectWindow({
       setPage(initialPage);
     }
   }, [initialPage, isLocal]);
+  const viewedWorktreeProjectKey = page === 'worktree' ? (localRow?.key ?? null) : null;
+  useEffect(() => {
+    onWorktreeProjectViewChange?.(viewedWorktreeProjectKey);
+    return () => onWorktreeProjectViewChange?.(null);
+  }, [onWorktreeProjectViewChange, viewedWorktreeProjectKey]);
 
   const machineReachable = localRow
     ? (localMachineId != null && localRow.machineId === localMachineId) ||
@@ -1883,6 +1923,7 @@ function ProjectWindow({
                   <ProjectShareControl
                     row={localRow}
                     onSharedWithTeamChange={onSharedWithTeamChange}
+                    onOpenMachineSettings={onOpenMachineSettings}
                   />
                   {canRemoveLocalProject?.(localRow) && onRequestRemoveLocalProject ? (
                     // The header already names the machine and whether it is
@@ -2501,7 +2542,7 @@ const win = stylex.create({
     flexShrink: 0,
     width: '6px',
     height: '6px',
-    borderRadius: '9999px',
+    borderRadius: sharedRadius.full,
     backgroundColor: colors.tertiaryLabel,
   },
   statusDotOnline: { backgroundColor: colors.success },
@@ -2535,6 +2576,12 @@ const win = stylex.create({
   note: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
   mono: { fontFamily: MONO, overflowWrap: 'anywhere' },
   value: { fontSize: '0.9em', color: colors.secondaryLabel },
+  shareWarningHelper: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+  },
 
   conversations: {
     display: 'flex',
@@ -2648,47 +2695,112 @@ function revealProjectPath(path: string, t: TFunction) {
   });
 }
 
-function ProjectShareControl({
+export function ProjectShareControl({
   row,
   onSharedWithTeamChange,
+  onOpenMachineSettings,
 }: {
   readonly row: ProjectSettingsRow;
   readonly onSharedWithTeamChange?: (
     row: ProjectSettingsRow,
     sharedWithTeam: boolean
   ) => Promise<void>;
+  readonly onOpenMachineSettings?: (machineId: MachineId) => void;
 }) {
   const { t } = useTranslation();
   // Sharing is a cloud team surface; hide the control entirely on the local
   // (open-source) platform instead of rendering a permanently disabled switch.
   const teamSharingAvailable = useAppCapability('teamSharing');
-  const tooltipLabel = !row.canUpdateSharing
-    ? t(
-        'workspace.projects.sharePreparing',
-        'Sharing will be available when this machine finishes connecting.'
-      )
-    : row.sharedWithTeam
-      ? t('workspace.projects.sharedWithTeam', 'Shared with team')
-      : t('workspace.projects.private', 'Private to you');
-  const scopeDescription = t(
-    'workspace.projects.shareScopeDescription',
-    'Sharing a project also shares its machine, which teammates need to open and continue conversations.'
-  );
 
   if (!teamSharingAvailable) {
     return null;
   }
 
+  const toggleLabel = t('workspace.projects.shareToggle', 'Share project with team');
+  const machineName = row.machineName;
+  const machinePrivate = row.machineSharedWithTeam === false;
+  const blockedByPrivateMachine = row.canUpdateSharing && row.sharedWithTeam && machinePrivate;
+
+  const statusBadge = !row.canUpdateSharing ? null : blockedByPrivateMachine ? (
+    <Badge tone="warning" icon={<AlertCircle {...stylex.props(styles.glyph)} aria-hidden="true" />}>
+      {t('workspace.projects.shareState.machinePrivate', 'Machine private')}
+    </Badge>
+  ) : row.sharedWithTeam ? (
+    <Badge tone="success" icon={<Users {...stylex.props(styles.glyph)} aria-hidden="true" />}>
+      {t('workspace.projects.shareState.shared', 'Shared')}
+    </Badge>
+  ) : (
+    <Badge tone="neutral" icon={<LockKeyhole {...stylex.props(styles.glyph)} aria-hidden="true" />}>
+      {t('workspace.projects.shareState.private', 'Private')}
+    </Badge>
+  );
+
+  const helper = !row.canUpdateSharing ? (
+    t(
+      'workspace.projects.sharePreparing',
+      'Sharing will be available when this machine finishes connecting.'
+    )
+  ) : blockedByPrivateMachine ? (
+    <div {...stylex.props(win.shareWarningHelper)}>
+      <span>
+        {t(
+          'workspace.projects.shareMachinePrivateWarning',
+          'Project sharing is on, but {{machine}} is private, so teammates cannot access this project yet.',
+          { machine: machineName }
+        )}
+      </span>
+      {onOpenMachineSettings ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="mini"
+          onClick={() => onOpenMachineSettings(row.machineId)}
+        >
+          {t('workspace.projects.openMachineSettings', 'Open {{machine}} settings', {
+            machine: machineName,
+          })}
+        </Button>
+      ) : null}
+    </div>
+  ) : row.sharedWithTeam ? (
+    t(
+      'workspace.projects.shareEnabledSummary',
+      'Teammates can open and continue conversations in this project.'
+    )
+  ) : machinePrivate ? (
+    t(
+      'workspace.projects.shareEnableWithMachineHint',
+      'Turning this on also shares {{machine}}, which teammates need to open and continue conversations.',
+      { machine: machineName }
+    )
+  ) : (
+    t(
+      'workspace.projects.shareEnableHint',
+      'Turning this on lets teammates open and continue conversations in this project.'
+    )
+  );
+
+  const info = t(
+    'workspace.projects.shareInfo',
+    'Teammates can open and continue conversations in this project only when both the project and {{machine}} are shared. Turning this off keeps {{machine}} shared.',
+    { machine: machineName }
+  );
+
   return (
-    <CompactSection title={t('workspace.projects.shareLabel', 'Share project')}>
-      <CompactRow label={tooltipLabel} helper={scopeDescription}>
+    <CompactSection>
+      <CompactRow
+        label={toggleLabel}
+        info={info}
+        helper={helper}
+        helperBlock={blockedByPrivateMachine}
+        disabled={!row.canUpdateSharing}
+      >
         {row.isUpdating ? <Spinner size="small" /> : null}
+        {statusBadge}
         <Switch
           checked={row.sharedWithTeam}
           disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
-          aria-label={t('workspace.projects.shareToggle', {
-            defaultValue: 'Share project with team',
-          })}
+          aria-label={toggleLabel}
           onCheckedChange={(checked) => {
             void onSharedWithTeamChange?.(row, checked);
           }}
@@ -2716,6 +2828,7 @@ export type ProjectRowProps = {
     provider: LocalProjectHistoryProvider,
     selectedIds: string[]
   ) => void;
+  onWorktreeProjectViewChange?: (projectKey: string | null) => void;
   onWorktreeSetupChange?: (
     row: ProjectSettingsRow,
     config: WorktreeSetupScriptConfig
@@ -3297,7 +3410,12 @@ export function ProjectHistoryImportPanel({
                       if (!selectionDisabled) toggleSession(session.acpSessionId);
                     }}
                   />
-                  <div {...stylex.props(styles.sessionText)}>
+                  <div
+                    {...stylex.props(
+                      styles.sessionText,
+                      selectionDisabled && styles.sessionTextDisabled
+                    )}
+                  >
                     <div {...stylex.props(styles.sessionTitle)}>{session.title}</div>
                     <div {...stylex.props(styles.sessionTime)} title={updatedAtTitle}>
                       {updatedAtLabel}

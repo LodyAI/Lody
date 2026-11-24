@@ -5,8 +5,8 @@ Root `AGENTS.md` also applies.
 
 ## Minimum iOS compatibility
 
-- Minimum: **iOS / iPadOS 16.4 (WKWebView)**, matching Tailwind 4, including
-  shared code and Workers. Guard or polyfill newer APIs, syntax and CSS.
+- Minimum: **iOS / iPadOS 16.4 (WKWebView)**, including shared code and
+  Workers. Guard or polyfill newer APIs, syntax and CSS.
 - Keep Podfile, Xcode targets and Vite Safari target at 16.4.
   [Audit and device checks](BUILDING.md#build-compatibility).
 - Newer APIs need an early, tested polyfill or capability-gated fallback.
@@ -30,7 +30,7 @@ Root `AGENTS.md` also applies.
   WebView height. `LodyBridgeViewController` publishes the current window's keyboard
   layout guide as `--native-keyboard-height`; `src/native-keyboard.ts` handles older
   shells without its document-start marker.
-- Android: `resizeOnFullScreen` resizes WebView; CSS offset stays `0px`.
+- Android: Capacitor 8 `SystemBars` resizes WebView (omit legacy `resizeOnFullScreen`); CSS offset stays `0px`.
 - Web: browser resizes the viewport; CSS offset stays `0px`.
 
 Shared `workspace-layout-utils.ts` applies the root offset. Child surfaces use
@@ -66,6 +66,8 @@ See [composition and adoption](../../packages/platform/AGENTS.md#telemetry-priva
 - Ordinary Lody HTTP(S) links stay in the browser. Do not add `applinks` Associated Domains,
   Android HTTP(S) VIEW filters, or native startup routing for website URLs.
 - Safari's app-id-only Smart App Banner is the explicit website-to-iOS-app entry.
+- Register `lody` in iOS `CFBundleURLTypes` for OAuth and encrypted-device pairing;
+  forward cold-launch and warm-open URLs through `ApplicationDelegateProxy`.
 - Keep OAuth's `lody://` custom scheme and native push `data.route` navigation
   separate from browser links. See
   [context/mobile-app-launch.md](AGENTS.md#app-launch-policy) for ownership
@@ -77,6 +79,9 @@ See [composition and adoption](../../packages/platform/AGENTS.md#telemetry-priva
   `<html>`. Boot failures dismiss it.
   Read [startup appearance](BUILDING.md#startup-appearance) before editing
   native theme storage, launch screens, scene startup or splash handoff.
+- `src/main.tsx` awaits `initI18n` before `createRoot`, as Electron does: a
+  component rendered before react-i18next has its instance skips its hooks and
+  crashes on its next render, including the ErrorBoundary fallback.
 
 ## Blank screen recovery
 
@@ -93,6 +98,8 @@ credential removal and diagnostic ID preservation. Never delete files under a
 live WebView. Contract and device checks: [native-reset.md](native-reset.md).
 
 ## E2EE custody
+
+`CAPPlugin` follows the `CAPBridge` lifetime; a WebView soft reload does not trigger plugin `deinit`.
 
 `LodyKek`: scoped KEK operations only; never export KEKs or enable bridge logs.
 Keep calls owned until actual settlement. [iOS](e2ee-custody.md) / [Android](e2ee-android-custody.md).
@@ -112,6 +119,8 @@ App icon catalogs and Live Activity marks: [BUILDING.md](BUILDING.md#ios-app-ico
 Read those invariants before editing their Swift or image assets.
 
 ## Home Screen widgets
+
+Widget publication requires a matching, explicitly plaintext runtime; other states clear native snapshots. Live Activity also supports admitted E2EE workspaces for GA, sharing summaries with push providers while omitting HTTP permission actions; approvals open the App for signed device actions.
 
 Require matched auth/runtime/workspace; latch logout per page. Token queries use
 identity; metadata reads require readiness. Pending may retain only decoded

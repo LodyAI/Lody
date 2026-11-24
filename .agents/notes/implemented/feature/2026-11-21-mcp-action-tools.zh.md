@@ -11,7 +11,7 @@ Lody 启动的每个 Agent 都会加载完整的 Lody MCP 工具列表，不延�
 
 ## 决定
 
-- **操作工具。** `lody_session_manage`（rename、archive、share、`pr_link`、`pr_unlink`、`pr_list`）、`lody_schedule`（propose、pause）、`lody_agent_role`（create、update）、`lody_operation`（get、batch、list）和 `lody_catalog`（machines、projects、mcp_servers、agent_configs、agent_roles、schedules）。每个操作沿用原有 schema 校验 `arguments`。高频工具保留完整的预先 schema。
+- **操作工具。** `lody_session_manage`（rename、archive、share、`pr_link`、`pr_unlink`、`pr_list`）、`lody_schedule`（propose、propose_edit、pause）、`lody_agent_role`（create、update）、`lody_operation`（get、batch、list）和 `lody_catalog`（machines、projects、mcp_servers、agent_configs、agent_roles、schedules）。每个操作沿用原有 schema 校验 `arguments`。高频工具保留完整的预先 schema。
 - **读取保持可自动批准。** 客户端可能自动批准标注 `readOnlyHint` 的工具，而一个工具的标注覆盖它的所有操作。若把 Role 和 Schedule 的读取并入其写入工具族，或把 cancel 并入 `lody_operation`，这些读取就会失去该标注。因此读取放在 `lody_catalog` 和 `lody_operation`（均为只读），`lody_operation_cancel` 保持独立。`pr_list` 是唯一位于可写工具中的读取。`lody_mcp_configure` 作为执行与凭据边界保持独立。
 - **执行位置。** `share` 和 catalog 的 `schedules` 与原工具一样，在收到调用的 MCP 进程中执行（`executeLocally`）。daemon 拒绝经 IPC 执行它们。其余操作都走 daemon Session 工具路由。
 - **PR 关联。** `pr_*` 只作用于从 MCP 会话上下文解析出的调用方 Session，任何参数都无法指定其他 Session。它们以来源 `agent` 调用 `lib/session-pr-links.ts`（[显式关联](2026-11-21-session-explicit-pr-links.zh.md)）。

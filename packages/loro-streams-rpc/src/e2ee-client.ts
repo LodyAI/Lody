@@ -14,7 +14,7 @@ import {
 import type { E2eeRpcStore } from './e2ee-store';
 import { makeE2eeFeatureRpcClient } from './e2ee-feature-client';
 import { e2eeRpcResource, e2eeRpcResponseStream } from './e2ee-resource';
-import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
+import { e2eeFeatureTarget, isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 // The subpath, never the package index: this module runs in browser hosts.
 import {
   decodeE2eeIntentRecord,
@@ -191,7 +191,10 @@ export function makeE2eeRpcClient(options: {
   const authorizeRequest = Effect.fnUntraced(function* (
     input: import('@lody/shared/e2ee-rpc').E2eeFeatureInput
   ) {
-    if (!isE2eeReadQuery(input.request.method, input.request.params))
+    if (
+      !isE2eeReadQuery(input.request.method, input.request.params) ||
+      e2eeFeatureTarget(input.request).kind === 'project'
+    )
       return yield* requireDispatchWriter();
     const view = yield* options.ledger();
     const loss = requesterLoss(view);

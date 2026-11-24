@@ -50,6 +50,25 @@ import {
 } from '@/lib/prepared-session-input';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
 import type { ActionResult, ActionAuthorization } from '../runtime/engine';
+
+const durableSessionDenials = new Set([
+  'invocation_revoked',
+  'authorization_revoked',
+  'target_not_granted',
+  'target_permission_revoked',
+  'target_deleted',
+  'pending_work_target_mismatch',
+  'pending_work_binding_changed',
+  'pending_work_superseded',
+  'pending_work_ended',
+  'pending_work_already_claimed',
+  'workflow_target_changed',
+]);
+// 'no' verdicts only new authority or target state could lift; callers converge, never re-verify.
+export const isDurableSessionDenial = (observation: ActionAuthorization): boolean =>
+  observation.terminalState !== undefined ||
+  durableSessionDenials.has(observation.reason) ||
+  observation.reason.startsWith('guard:');
 import { pullRequestCheckpointId } from '../sources/pull-requests';
 import { providerBindingFingerprint } from '@/session/automation-observations';
 import { retainsAutomationGrant } from './authorization';
@@ -71,7 +90,7 @@ export class AutomationSessionActionsLegacy {
       auth: AuthContext;
       workspace: WorkspaceSummary;
       ledger: AutomationLedger;
-      condition(receipt: AutomationReceipt): Promise<ConditionObservation>;
+      admission(receipt: AutomationReceipt): Promise<ConditionObservation>;
       capacity(
         bindingId: string,
         modelId: string | undefined,
@@ -110,7 +129,6 @@ export class AutomationSessionActionsLegacy {
     const current = ledger.rule(receipt.rule.id);
     if (
       !current?.enabled ||
-      current.ownerUserId !== auth.userId ||
       current.ownerMachineId !== auth.machineId ||
       current.scope.workspaceId !== workspace.id ||
       !retainsAutomationGrant(receipt, current)
@@ -186,6 +204,8 @@ export class AutomationSessionActionsLegacy {
         }
       }
       if (invocation.target.kind === 'new') {
+        if (current.ownerUserId !== auth.userId)
+          return { value: 'no', reason: 'target_permission_revoked' };
         if (
           !current.grants.agentRoleIds.includes(invocation.target.agentRoleId) ||
           invocation.target.machineId !== auth.machineId
@@ -211,7 +231,9 @@ export class AutomationSessionActionsLegacy {
       };
     if (meta.machineId !== auth.machineId)
       return { value: 'unknown', reason: 'target_owner_unavailable' };
-    if (meta.userId !== auth.userId) return { value: 'no', reason: 'target_permission_revoked' };
+    const access = await this.authority.canEdit(sessionId as SessionId, current.ownerUserId);
+    if (access === 'no') return { value: 'no', reason: 'target_permission_revoked' };
+    if (access === 'unknown') return { value: 'unknown', reason: 'target_permission_unconfirmed' };
     if (receipt.evidence?.length) {
       const linked = new Set(
         getCurrentPullRequestsByRepository(resolveSessionPullRequests(meta)).map((pr) => pr.url)
@@ -235,12 +257,18 @@ export class AutomationSessionActionsLegacy {
       )
         return { value: 'no', reason: 'guard:maintenance_input_changed' };
     }
-    if (meta.isArchived)
+    if (meta.isArchived) {
+      if (
+        action.kind === 'session.archive' &&
+        (await this.authority.archived(sessionId as SessionId))
+      )
+        return { value: 'yes', reason: 'archive_already_committed' };
       return {
         value: 'no',
         reason: 'target_archived',
         ...(unavailableFails ? { terminalState: 'failed' } : {}),
       };
+    }
     if (meta.collaborationStopped) return { value: 'no', reason: 'target_stopped' };
     return { value: 'yes', reason: 'authorized' };
   }
@@ -473,10 +501,12 @@ export class AutomationSessionActionsLegacy {
     const allowed = await this.authorize(receipt);
     if (allowed.value !== 'yes') return { state: 'blocked', reason: allowed.reason };
     if (receipt.intent.action.kind === 'session.archive') {
+      if (allowed.reason === 'archive_already_committed')
+        return { state: 'settled', reason: allowed.reason };
       const result = await this.authority.archive(
         receipt.sessionId as SessionId,
         receipt.rule.ownerUserId,
-        () => this.options.condition(receipt),
+        () => this.options.admission(receipt),
         receipt.id
       );
       return { state: result.value === 'yes' ? 'settled' : 'blocked', reason: result.reason };
@@ -580,7 +610,7 @@ export class AutomationSessionActionsLegacy {
     );
     const meta = record?.meta as SessionMeta | undefined;
     if (record && isLoroRepoDocDeleted(record))
-      return { state: 'blocked', reason: 'target_deleted' };
+      return { state: 'cancelled', reason: 'target_deleted' };
     if (!meta) {
       if (
         receipt.prepared?.kind === 'create' &&
@@ -592,7 +622,7 @@ export class AutomationSessionActionsLegacy {
     }
     if (receipt.intent.action.kind === 'session.archive') {
       if (await this.authority.archived(receipt.sessionId as SessionId))
-        return { state: 'settled' };
+        return { state: 'settled', reason: 'archive_already_committed' };
       if (!meta.isArchived) return this.submit(receipt);
       return { state: 'unknown', reason: 'archive_group_unconfirmed' };
     }
@@ -617,8 +647,10 @@ export class AutomationSessionActionsLegacy {
       if (read.turn.status !== 'prepared') return { state: 'queued' };
     }
     if ((await backend.getMessageQueue()).some((item) => item.operationId === receipt.id)) {
-      // The process may have stopped after writing the row but before publishing
-      // its activation. Re-signal the same row; never enqueue a second input.
+      const verdict = await this.authorize(receipt);
+      if (verdict.value === 'no' && isDurableSessionDenial(verdict))
+        return { state: 'cancelling', reason: verdict.reason, retryAt: Date.now() };
+      // A stopped process may have written the row pre-activation; re-signal, never re-enqueue.
       await this.signalQueue(doc);
       return { state: 'queued' };
     }
@@ -649,8 +681,7 @@ export class AutomationSessionActionsLegacy {
     if (pr.url !== prUrl) return { value: 'no', reason: 'pr_superseded' };
     const observation = this.options.ledger.checkpoint(pullRequestCheckpointId(sessionId, prUrl));
     if (!observation) return { value: 'unknown', reason: 'pr_observation_missing' };
-    // Merged is terminal provider evidence. The poller intentionally retires it;
-    // waiting for a busy group must not turn that fact into a permanent stale hold.
+    // Merged is terminal provider evidence; a busy group must not hold that stale forever.
     if (observation.data.status === 'merged' && pr.status === 'merged')
       return { value: 'yes', reason: 'merged' };
     if (Date.now() - observation.observedAt > 5 * 60_000)
@@ -671,9 +702,14 @@ export class AutomationSessionActionsLegacy {
       receipt.sessionId as SessionId,
       receipt.turnId
     );
+    const denied =
+      receipt.reason !== undefined &&
+      isDurableSessionDenial({ value: 'no', reason: receipt.reason })
+        ? receipt.reason
+        : undefined;
     return {
-      state: cancelled ? 'cancelled' : 'unknown',
-      reason: cancelled ? 'user_cancelled' : 'cancellation_unconfirmed',
+      state: cancelled ? (denied?.startsWith('guard:') ? 'superseded' : 'cancelled') : 'unknown',
+      reason: cancelled ? (denied ?? 'user_cancelled') : 'cancellation_unconfirmed',
     };
   }
 }

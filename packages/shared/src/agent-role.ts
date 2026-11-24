@@ -1,7 +1,16 @@
 import { MemoryBindingSchema, type MemoryBinding } from './memory-provider';
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
 import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
-import { summarizeAgentRunConfigCapabilities } from './acp-run-config';
+import { isBuiltinEffortConfigId } from './acp-model-capabilities';
+import { resolveAcpConfigOptionsForModel } from './acp-model-config-options';
+import {
+  ACP_REASONING_EFFORT_CONFIG_ID,
+  getAcpModelEffortChoices,
+  getAcpModelSpeedTiers,
+  isAcpFastModeConfigId,
+  isAcpThoughtLevelConfigOption,
+  summarizeAgentRunConfigCapabilities,
+} from './acp-run-config';
 import {
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   type AcpCapabilityCacheEntry,
@@ -135,6 +144,25 @@ export const getAgentRoleMentionSlug = (role: Pick<AgentRole, 'name'>): string =
   normalizeAgentRoleMentionSlug(role.name);
 
 /**
+ * The `@` token for one target of a Role.
+ *
+ * A single-target Role is mentioned by its name. On several machines each
+ * target is its own mention — the alias, or the name and machine — so the
+ * token names where the work runs. Settings shows this exact token beside each
+ * machine, and the composer completes it, so the two can never disagree.
+ */
+export const getAgentRoleTargetMentionSlug = (input: {
+  roleName: string;
+  alias?: string;
+  machineName: string;
+  multiTarget: boolean;
+}): string =>
+  input.multiTarget
+    ? normalizeAgentRoleMentionSlug(input.alias || `${input.roleName} ${input.machineName}`) ||
+      normalizeAgentRoleMentionSlug(input.roleName)
+    : normalizeAgentRoleMentionSlug(input.roleName);
+
+/**
  * Normalize a name into a token the composer can carry.
  *
  * Whitespace is the only thing that MUST go: an `@` token ends at the next
@@ -234,6 +262,64 @@ export const normalizeAgentRoleRunConfig = (value: unknown): AgentRoleRunConfig 
     ...(modelId ? { modelId } : {}),
     ...(configOptionValues ? { configOptionValues } : {}),
   };
+};
+
+/**
+ * Reconciles a Role's `runConfig` against a runtime capability schema.
+ *
+ * Only removes non-permission option keys that the target model's schema
+ * provably does not offer (either from its own observed/snapshot option list or
+ * from per-model control declarations). Values of advertised fields, model pins,
+ * and permission/approval/sandbox pins remain untouched.
+ */
+export const reconcileAgentRoleRunConfig = (
+  runConfig: AgentRoleRunConfig,
+  capability: AcpCapabilityCacheEntry
+): AgentRoleRunConfig => {
+  if (capability.provenance !== 'runtime' || !capability.configOptions) return runConfig;
+  const resolved = resolveAcpConfigOptionsForModel(
+    capability.configOptions,
+    capability.observedModelConfigOptions,
+    runConfig.modelId
+  );
+  const effectiveOptions = resolved.configOptions ?? capability.configOptions;
+  const advertised = new Set(effectiveOptions.map((option) => option.id));
+  const modelSchemaKnown = resolved.source !== 'borrowed';
+  const targetEfforts = getAcpModelEffortChoices(capability, runConfig.modelId);
+  const targetSpeedTiers = getAcpModelSpeedTiers(capability, runConfig.modelId);
+  const snapshotEffortOptionIds = new Set(
+    capability.configOptions.filter(isAcpThoughtLevelConfigOption).map((option) => option.id)
+  );
+  const values = { ...runConfig.configOptionValues };
+  let changed = false;
+  const hasPlan = effectiveOptions.some(
+    (option) => option.id === 'plan_mode' && option.type === 'boolean'
+  );
+  if (hasPlan && values.plan_mode === undefined) {
+    const legacy = !advertised.has('collaboration_mode') ? values.collaboration_mode : undefined;
+    if (legacy === 'plan' || legacy === 'default') values.plan_mode = legacy === 'plan';
+    else if (!advertised.has('interaction_mode') && values.interaction_mode === 'plan') {
+      values.plan_mode = true;
+    }
+  }
+  for (const key of Object.keys(values)) {
+    if (/(permission|approval|sandbox)/i.test(key) || key === 'mode') continue;
+    const isEffortKey =
+      snapshotEffortOptionIds.has(key) ||
+      key === ACP_REASONING_EFFORT_CONFIG_ID ||
+      isBuiltinEffortConfigId(key);
+    const provablyUnsupportedModelControl =
+      (isEffortKey && targetEfforts?.length === 0) ||
+      (isAcpFastModeConfigId(key) && targetSpeedTiers?.length === 0);
+    if (advertised.has(key) && !provablyUnsupportedModelControl) continue;
+    const retiredPlanField =
+      hasPlan && (key === 'collaboration_mode' || key === 'interaction_mode');
+    if (!modelSchemaKnown && !retiredPlanField && !provablyUnsupportedModelControl) continue;
+    delete values[key];
+    changed = true;
+  }
+  if (!changed) return runConfig;
+  return { ...runConfig, configOptionValues: values };
 };
 
 /**

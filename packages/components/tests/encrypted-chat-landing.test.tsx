@@ -196,7 +196,15 @@ async function renderLanding(
       ready: true,
     });
   const refused: string[] = [];
+  const notifications: string[] = [];
   const useQuery: CloudApi['useQuery'] = (operation, args) => {
+    if (
+      args !== 'skip' &&
+      ['inbox:listMine', 'inbox:getSharingReviewState'].includes(operation.name)
+    ) {
+      notifications.push(operation.name);
+      return (operation.name === 'inbox:listMine' ? [] : null) as never;
+    }
     if (args !== 'skip' && /^(machines:|localProjects:|inbox:|github:)/.test(operation.name)) {
       refused.push(operation.name);
       throw Object.assign(new Error('e2ee_control_only'), { data: { code: 'e2ee_control_only' } });
@@ -276,12 +284,15 @@ async function renderLanding(
       </PlatformContext.Provider>
     );
   });
-  return { store, refused, router };
+  return { store, refused, router, notifications };
 }
 
-it('renders the real encrypted chat controller without legacy machines, projects, inbox or GitHub queries', async () => {
-  const { refused } = await renderLanding();
+it('renders encrypted chat with its own Inbox while legacy machine, project and GitHub catalogs stay closed', async () => {
+  const { refused, notifications } = await renderLanding();
   expect(refused).toEqual([]);
+  expect(new Set(notifications)).toEqual(
+    new Set(['inbox:listMine', 'inbox:getSharingReviewState'])
+  );
   expect(container.querySelector('textarea[aria-label="New chat"]')).not.toBeNull();
 });
 
@@ -573,6 +584,47 @@ it('an embedded landing hands the accepted session to its host instead of naviga
     expect(landing.pending.at(-1)).toBe(false);
     expect(landing.store.get(chatLandingSessionStateAtomFamily(SURFACE_DRAFT_KEY)).prompt).toBe('');
     landing.expectPageDraftUntouched();
+  } finally {
+    await landing.repo.destroy();
+  }
+});
+
+it('the Convert-to-task dialog includes parent nodes by default and switches them while the prompt is unedited', async () => {
+  const landing = await renderEmbeddedLanding(
+    async () => {},
+    undefined,
+    () => (
+      <TodayConvertDialog
+        open
+        prompt={'Write the guide'}
+        promptWithAncestors={'- Launch\n  - Write the guide'}
+        onAccepted={() => {}}
+        onOpenChange={() => {}}
+      />
+    )
+  );
+  try {
+    const dialog = document.querySelector('[data-testid="today-convert-dialog"]')!;
+    const prompt = () => dialog.querySelector<HTMLTextAreaElement>('#today-convert-prompt')!.value;
+    const box = () =>
+      dialog.querySelector<HTMLElement>(
+        '[data-testid="today-convert-ancestors"] [role="checkbox"]'
+      )!;
+    expect(prompt()).toBe('- Launch\n  - Write the guide');
+    expect(box().getAttribute('aria-checked')).toBe('true');
+    await act(async () => box().click());
+    expect(prompt()).toBe('Write the guide');
+    expect(box().getAttribute('aria-checked')).toBe('false');
+    await act(async () => box().click());
+    expect(prompt()).toBe('- Launch\n  - Write the guide');
+    await act(async () => {
+      landing.store.set(chatLandingSessionStateAtomFamily(SURFACE_DRAFT_KEY), (previous) => ({
+        ...previous,
+        prompt: 'my own words',
+      }));
+    });
+    expect(box().hasAttribute('data-disabled')).toBe(true);
+    expect(dialog.textContent).toContain('Prompt edited');
   } finally {
     await landing.repo.destroy();
   }

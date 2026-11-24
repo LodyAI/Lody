@@ -66,12 +66,14 @@ export type QueuedMessageBehaviorControlProps = {
   value: QueuedMessageBehavior;
   onChange: (value: QueuedMessageBehavior) => void;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 export function QueuedMessageBehaviorControl({
   value,
   onChange,
   className,
+  xstyle,
 }: QueuedMessageBehaviorControlProps) {
   const { t } = useTranslation();
   const options: Array<{ value: QueuedMessageBehavior; label: string }> = [
@@ -92,7 +94,7 @@ export function QueuedMessageBehaviorControl({
         'settings.general.sessions.queuedMessageBehavior.label',
         'Queued message behavior'
       )}
-      {...withClassName(stylex.props(styles.track), className)}
+      {...withClassName(stylex.props(styles.track, xstyle), className)}
     >
       {options.map((option) => {
         const selected = value === option.value;

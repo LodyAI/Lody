@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
@@ -34,9 +34,38 @@ async function root() {
   return d;
 }
 describe('Magpie runtime preparation', () => {
+  it('exposes only installed Magpie skills, preserves local entries and removes stale links', async () => {
+    const home = await root();
+    const directory = join(home, 'magpie');
+    const native = join(home, '.codex', 'skills');
+    for (const name of ['magpie-skills', 'magpie-setup', 'private-skill']) {
+      await mkdir(join(native, name), { recursive: true });
+      await writeFile(join(native, name, 'SKILL.md'), name);
+    }
+    const launch = () =>
+      prepareMagpieRuntime('codex', gateway, undefined, directory, fetcher, home);
+    const skills = join((await launch()).env.CODEX_HOME!, 'skills');
+    expect((await readdir(skills)).sort()).toEqual(['magpie-setup', 'magpie-skills']);
+    expect(await readFile(join(skills, 'magpie-skills/SKILL.md'), 'utf8')).toBe('magpie-skills');
+    await rm(join(skills, 'magpie-setup'));
+    await mkdir(join(skills, 'magpie-setup'));
+    await writeFile(join(skills, 'magpie-setup/SKILL.md'), 'user-owned');
+    await rm(native, { recursive: true });
+    await launch();
+    expect(await readdir(skills)).toEqual(['magpie-setup']);
+    expect(await readFile(join(skills, 'magpie-setup/SKILL.md'), 'utf8')).toBe('user-owned');
+  });
+
   it('produces isolated usable Codex and Pi profiles from the gateway catalog', async () => {
     const directory = await root();
-    const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, fetcher);
+    const codex = await prepareMagpieRuntime(
+      'codex',
+      gateway,
+      undefined,
+      directory,
+      fetcher,
+      directory
+    );
     const config = JSON.parse(codex.env.CODEX_CONFIG ?? '{}');
     expect(config.model_provider).toBe('magpie');
     expect(config.model_catalog_json).toBeUndefined();
@@ -245,7 +274,14 @@ describe('Magpie runtime preparation', () => {
       'bare/model',
       'vision/model',
     ]);
-    const codex = await prepareMagpieRuntime('codex', gateway, undefined, directory, mixed);
+    const codex = await prepareMagpieRuntime(
+      'codex',
+      gateway,
+      undefined,
+      directory,
+      mixed,
+      directory
+    );
     expect(
       JSON.parse(codex.env.CODEX_CONFIG ?? '{}').model_providers.magpie.model_catalog_url
     ).toBe(`${gateway}/v1/codex/models?agent=lody`);

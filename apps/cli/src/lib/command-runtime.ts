@@ -6,11 +6,17 @@ import {
   LORO_STREAMS_BUCKET_ID,
   getServerNow,
   sessionHistoryWriteIntentDigest,
+  type SessionHistoryReadResponse,
+  SessionHistoryReadQuerySchema,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   getMachineRoomId,
   getSessionRoomId,
   isContainedSession,
   resolveNewSessionHistoryBackend,
   machineSupportsSessionHistoryInspection,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
   type MachineMeta,
   getSessionIdFromRoomId,
   isLoroRepoDocDeleted,
@@ -39,6 +45,7 @@ import { LoroDocumentManager } from '@/lib/loro/doc';
 import { createRoostSessionBackendFactory } from '@/session/roost-session-backend';
 import { createRoostRpcSessionServices } from '@/session/roost-rpc-session';
 import {
+  callEncryptedReadFeature,
   createLoroStreamsJsonStreamClient,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
@@ -67,7 +74,9 @@ import {
   getSessionHistoryRequester,
   getDaemonWorkspace,
   getSessionCommandEnvironment,
+  resolveEncryptedMachineRpc,
   runWithEncryptedCommandAccess,
+  runWithEncryptedCommandManager,
   type EncryptedCommandAccess,
 } from './session-command-environment';
 import { assertRetainedE2eeModeAllowsOpen } from './e2ee/retained-binding';
@@ -352,6 +361,8 @@ export async function withMachineRpcClient<T>(
   args: { auth: AuthContext; workspaceId: WorkspaceId; machineId: MachineId },
   fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
 ): Promise<T> {
+  const encrypted = resolveEncryptedMachineRpc(args.workspaceId);
+  if (encrypted) return await withEncryptedMachineRpcClient(args, encrypted, fn);
   if (!LODY_AUTH_URL) throw new Error('Cloud machine RPC requires LODY_AUTH_URL');
   const logger = getLogger('session');
   const streamsTokenProvider = createCloudStreamsTokenPort({
@@ -381,6 +392,42 @@ export async function withMachineRpcClient<T>(
   });
   try {
     await client.start();
+    return await fn(client);
+  } finally {
+    client.stop();
+  }
+}
+
+async function withEncryptedMachineRpcClient<T>(
+  args: { workspaceId: WorkspaceId; machineId: MachineId },
+  manager: LoroDocumentManager,
+  fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
+): Promise<T> {
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    encryptedQuery: async (method, params, timeoutMs) =>
+      await callEncryptedReadFeature({
+        workspaceId: args.workspaceId,
+        machineId: args.machineId,
+        method,
+        params,
+        timeoutMs,
+        request: async (input) =>
+          (await manager.requestEncryptedFeature(input)) ?? {
+            ok: false,
+            error: 'Encrypted machine request timed out.',
+          },
+        supportsRemoteControl: async () =>
+          machineSupportsProtocolCapability(
+            (await manager.repo.getDocMeta(getMachineRoomId(args.machineId)))?.meta as
+              | MachineMeta
+              | undefined,
+            MACHINE_PROTOCOL_CAPABILITIES.e2eeRemoteControl
+          ),
+      }),
+  });
+  try {
     return await fn(client);
   } finally {
     client.stop();
@@ -421,20 +468,82 @@ export function createCommandSessionHistoryFactory(
         localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
       };
     };
+    if (manager.isEncryptedWorkspace()) {
+      if (
+        !machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.e2eeRoostHistory)
+      )
+        throw new Error('Update the owner machine to access encrypted Roost history.');
+      const send = async (request: Parameters<typeof manager.requestEncryptedFeature>[0]) => {
+        const requester = getSessionHistoryRequester();
+        const checkRequester = async () => {
+          if (!requester || requester.userId === auth.userId) return;
+          if (
+            request.method !== 'session/history-read' ||
+            requester.machineId !== auth.machineId ||
+            !(await manager.authorizeEncryptedSessionRead({
+              ...(await historyTarget()),
+              machineId: meta.machineId,
+              requesterUserId: requester.userId,
+            }))
+          )
+            throw new Error('e2ee_feature_requester');
+        };
+        await checkRequester();
+        const response = await manager.requestEncryptedFeature(request);
+        if (!response?.ok) throw new Error(response?.error ?? 'Encrypted owner history timed out');
+        await checkRequester();
+        return response.result;
+      };
+      const owner = { workspaceId, machineId: meta.machineId };
+      return createRoostRpcSessionServices(doc, {
+        coherentInspection: machineSupportsSessionHistoryInspection(machine),
+        encryptedInputOwner: meta.machineId,
+        read: async (query) => {
+          const response = SessionHistoryReadResponseSchema.parse(
+            await send({
+              ...owner,
+              method: 'session/history-read',
+              params: {
+                sessionId: doc.sessionId,
+                query: SessionHistoryReadQuerySchema.parse(query),
+              },
+            })
+          );
+          return response as SessionHistoryReadResponse;
+        },
+        write: async (operation, payload) => {
+          if (operation !== 'accept_input' && operation !== 'accept_input_and_dispatch')
+            throw new Error('Encrypted owner history operation unavailable');
+          const entry = payload.entry;
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+            throw new Error('Invalid encrypted history input');
+          return SessionHistoryWriteResponseSchema.parse(
+            await send({
+              ...owner,
+              method: 'session/history-write',
+              params: { sessionId: doc.sessionId, operation, payload: { entry: { ...entry } } },
+            })
+          );
+        },
+      });
+    }
+    const mintReadProof = async () => {
+      return await mintCliSessionHistoryReadProof({
+        ...(await historyTarget()),
+        token: auth.token,
+        authBaseUrl: LODY_AUTH_URL,
+        authSiteUrl: LODY_AUTH_SITE_URL,
+        logger: getLogger('session'),
+        workspaceId,
+        machineId: meta.machineId,
+        sessionId: doc.sessionId,
+        requester: getSessionHistoryRequester(),
+      });
+    };
     return createRoostRpcSessionServices(doc, {
       coherentInspection: machineSupportsSessionHistoryInspection(machine),
       read: async (query) => {
-        const readProof = await mintCliSessionHistoryReadProof({
-          ...(await historyTarget()),
-          token: auth.token,
-          authBaseUrl: LODY_AUTH_URL,
-          authSiteUrl: LODY_AUTH_SITE_URL,
-          logger: getLogger('session'),
-          workspaceId,
-          machineId: meta.machineId,
-          sessionId: doc.sessionId,
-          requester: getSessionHistoryRequester(),
-        });
+        const readProof = await mintReadProof();
         const response = await withRpc(target, (client) =>
           client.requestSessionHistoryRead({
             sessionId: doc.sessionId,
@@ -445,6 +554,23 @@ export function createCommandSessionHistoryFactory(
         );
         if (!response) throw new Error('Owner history read timed out');
         return response;
+      },
+      subscribe: async (subscription, onPublication, signal) => {
+        signal.throwIfAborted();
+        const readProof = await mintReadProof();
+        signal.throwIfAborted();
+        const end = await withRpc(target, (client) =>
+          client.requestSessionHistorySubscription({
+            sessionId: doc.sessionId,
+            ownerSessionId: meta.id,
+            subscription,
+            onPublication,
+            signal,
+            readProof,
+          })
+        );
+        if (!signal.aborted && (!end || end.event !== 'closed' || end.error))
+          throw new Error(end?.event === 'closed' ? end.error : 'Owner history subscription ended');
       },
       write: async (operation, payload) => {
         const requestId = crypto.randomUUID();
@@ -587,6 +713,7 @@ export async function withWorkspaceManager<T>(
         logger,
         {
           attachRemoteOnCreate: !e2ee,
+          attachCloudEphemeralSinks: false,
           encryptedWorkspace: e2ee,
           streamsTokens:
             e2ee?.tokens ??
@@ -624,7 +751,10 @@ export async function withWorkspaceManager<T>(
       manager.isEncryptedWorkspace()
         ? runWithEncryptedCommandAccess(
             (target) => checkEncryptedCommandAccess(manager, commandAuth.userId, target),
-            () => fn(manager)
+            () =>
+              runWithEncryptedCommandManager({ workspaceId: workspace.id, manager }, () =>
+                fn(manager)
+              )
           )
         : fn(manager),
     (error) => {

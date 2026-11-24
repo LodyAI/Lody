@@ -48,6 +48,18 @@ describe('Today day stream', () => {
   });
 });
 
+describe('Today route search', () => {
+  it('keeps a day or node focus and drops anything else', async () => {
+    const { validateTodaySearch } = await import('../src/components/today/today-stream');
+    expect(validateTodaySearch({ date: '2026-11-21', focus: 'day' })).toEqual({
+      date: '2026-11-21',
+      focus: 'day',
+    });
+    expect(validateTodaySearch({ focus: '12@3456' })).toEqual({ focus: '12@3456' });
+    expect(validateTodaySearch({ focus: '<script>' })).toEqual({});
+  });
+});
+
 describe('Today route while pinned', () => {
   it('hands the link to the pinned column, but shows the page where the column cannot appear', async () => {
     const { todayRouteOutcome } = await import('../src/components/today/today-stream');

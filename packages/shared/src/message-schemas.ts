@@ -2081,6 +2081,10 @@ export const SessionPreviewEndpointReleaseResponseSchema = z
 
 export const SESSION_HISTORY_READ_MAX_RANGE = 500;
 export const SESSION_HISTORY_READ_MAX_PAGE = 500;
+export const SESSION_HISTORY_SUBSCRIPTION_LEASE_MS = 45_000;
+export const SESSION_HISTORY_SUBSCRIPTION_TIMEOUT_MS = 55_000;
+export const SESSION_HISTORY_SUBSCRIPTION_MAX_DELTA_BYTES = 16 * 1024;
+export const SESSION_HISTORY_SUBSCRIPTION_MAX_PUBLICATIONS = 64;
 
 export const SessionHistoryReadQuerySchema = z
   .discriminatedUnion('kind', [
@@ -2111,15 +2115,6 @@ export const SessionHistoryReadQuerySchema = z
       .strict(),
     z
       .object({ kind: z.literal('readReplayPrompt'), excludeTurnId: z.string().optional() })
-      .strict(),
-    z
-      .object({
-        kind: z.literal('watchChanges'),
-        checkpoint: z.string().min(1).max(1024),
-        includeBodiesFrom: z.number().int().nonnegative().optional(),
-        withPatches: z.literal(true).optional(),
-        waitMs: z.number().int().nonnegative().max(15_000),
-      })
       .strict(),
     z
       .object({
@@ -2322,6 +2317,64 @@ export const SessionHistoryReadResponseSchema = z
     }
   });
 
+export const SessionHistorySubscriptionSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('open'),
+      id: z.uuid(),
+      checkpoint: z.string().min(1).max(1024).optional(),
+      includeBodiesFrom: z.number().int().nonnegative().optional(),
+      withPatches: z.literal(true).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal('close'), id: z.uuid() }).strict(),
+]);
+
+export const SessionHistorySubscriptionRequestSchema = z
+  .object({
+    type: z.literal('session/history-subscription'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    subscription: SessionHistorySubscriptionSchema,
+  })
+  .strict();
+
+const historySubscriptionResponse = z.object({
+  type: z.literal('session/history-subscription_response'),
+  sessionId: SessionIdSchema,
+  subscriptionId: z.uuid(),
+});
+
+export const SessionHistorySubscriptionResponseSchema = z.discriminatedUnion('event', [
+  historySubscriptionResponse
+    .extend({
+      event: z.literal('publication'),
+      publication: z
+        .object({
+          checkpoint: z.string().min(1).max(1024),
+          revision: z.number().int().nonnegative(),
+          delta: z
+            .object({
+              baseCheckpoint: z.string().min(1).max(1024),
+              includeBodiesFrom: z.number().int().nonnegative(),
+              withPatches: z.literal(true).optional(),
+              response: SessionHistoryReadResponseSchema,
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  historySubscriptionResponse
+    .extend({
+      event: z.literal('closed'),
+      error: SharedOptionalStringSchema,
+    })
+    .strict(),
+]);
+
 export const SessionHistoryWriteOperationSchema = z.enum([
   'append',
   'accept_input',
@@ -2395,6 +2448,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageResolveLocalRequestSchema,
   SessionAttachmentPrepareRequestSchema,
   SessionHistoryReadRequestSchema,
+  SessionHistorySubscriptionRequestSchema,
   SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
   SessionPreviewCreateRequestSchema,
@@ -2434,6 +2488,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageResolveLocalResponseSchema,
   SessionAttachmentPrepareResponseSchema,
   SessionHistoryReadResponseSchema,
+  SessionHistorySubscriptionResponseSchema,
   SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,
   SessionPreviewCreateResponseSchema,
@@ -2526,6 +2581,19 @@ export const LocalProjectGitStateRequestSchema = z
   })
   .strict();
 
+export const LocalProjectListBranchesRequestSchema = z
+  .object({
+    type: z.literal('local-project/list-branches'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    localProjectId: LocalProjectIdSchema,
+    query: z.string().max(256).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    cursor: z.string().trim().min(1).max(512).optional(),
+    requestedByUserId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export const LocalProjectListFilesRequestSchema = z
   .object({
     type: z.literal('local-project/list-files'),
@@ -2533,6 +2601,18 @@ export const LocalProjectListFilesRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     localProjectId: LocalProjectIdSchema,
     maxFiles: z.number().int().positive().optional(),
+    requestedByUserId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+export const LocalProjectSearchFilesRequestSchema = z
+  .object({
+    type: z.literal('local-project/search-files'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    localProjectId: LocalProjectIdSchema,
+    query: SharedStringSchema,
+    limit: z.number().int().positive().optional(),
     requestedByUserId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -2556,6 +2636,7 @@ export const LocalProjectListSkillsRequestSchema = z
     workspaceId: WorkspaceIdSchema,
     localProjectId: LocalProjectIdSchema,
     skillDirs: z.array(SharedTrimmedNonEmptyStringSchema),
+    knownFingerprint: SharedOptionalStringSchema,
     requestedByUserId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -2563,8 +2644,10 @@ export const LocalProjectListSkillsRequestSchema = z
 export const LocalProjectListGlobalSkillsRequestSchema = z
   .object({
     type: z.literal('local-project/list-global-skills'),
+    magpieGatewayUrl: z.string().refine(isMagpieGatewayUrl).optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
+    knownFingerprint: SharedOptionalStringSchema,
     requestedByUserId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -2708,7 +2791,9 @@ export const LocalProjectControlRequestSchema = z.discriminatedUnion('type', [
   LocalProjectRemovalPreflightRequestSchema,
   LocalProjectListRequestSchema,
   LocalProjectGitStateRequestSchema,
+  LocalProjectListBranchesRequestSchema,
   LocalProjectListFilesRequestSchema,
+  LocalProjectSearchFilesRequestSchema,
   LocalProjectListDirRequestSchema,
   LocalProjectListSkillsRequestSchema,
   LocalProjectListGlobalSkillsRequestSchema,
@@ -2785,6 +2870,7 @@ const ProjectSkillsResultSchema = z
   .object({
     groups: z.array(ProjectSkillGroupSchema),
     contentFingerprint: SharedOptionalStringSchema,
+    unchanged: z.boolean().optional(),
   })
   .strict();
 
@@ -2840,7 +2926,28 @@ export const LocalProjectGitStateSchema = z.discriminatedUnion('git', [
           untracked: z.boolean(),
           conflicted: z.boolean(),
         })
-        .strict(),
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      git: z.literal(false),
+    })
+    .strict(),
+]);
+
+export const LocalProjectBranchListResultSchema = z.discriminatedUnion('git', [
+  z
+    .object({
+      git: z.literal(true),
+      currentBranch: z.string().nullable(),
+      defaultBranch: z.string().nullable(),
+      pinnedBranches: z.array(SharedStringSchema),
+      branches: z.array(SharedStringSchema),
+      truncated: z.boolean(),
+      nextCursor: SharedOptionalStringSchema,
+      totalCount: z.number().int().nonnegative(),
     })
     .strict(),
   z
@@ -2965,7 +3072,9 @@ const LocalProjectControlErrorResponseSchema = z
       'local-project/removal-preflight',
       'local-project/list',
       'local-project/git-state',
+      'local-project/list-branches',
       'local-project/list-files',
+      'local-project/search-files',
       'local-project/list-dir',
       'local-project/list-skills',
       'local-project/list-global-skills',
@@ -3096,7 +3205,21 @@ export const LocalProjectControlResponseSchema = z.union([
   z
     .object({
       ok: z.literal(true),
+      type: z.literal('local-project/list-branches'),
+      result: LocalProjectBranchListResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
       type: z.literal('local-project/list-files'),
+      result: LocalProjectFileListResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      type: z.literal('local-project/search-files'),
       result: LocalProjectFileListResultSchema,
     })
     .strict(),
@@ -3580,7 +3703,10 @@ export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z
-    .object({ kind: z.literal('hours'), every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX) })
+    .object({
+      kind: z.literal('hours'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX),
+    })
     .strict(),
   z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
   z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
@@ -3625,6 +3751,26 @@ export const ScheduleProposalMetaSchema = z.object({
   target: ScheduleProposalTargetSchema.optional(),
   outcome: z.enum(['created', 'dismissed']).optional(),
   scheduleId: SharedOptionalStringSchema,
+  proposedBy: MessageItemActorSchema.optional(),
+});
+
+/** The fields an agent may propose to change; an absent field keeps its value. */
+export const ScheduleEditProposalPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    prompt: z.string().min(1).max(32768).optional(),
+    rule: ScheduleProposalRuleSchema.optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((field) => field !== undefined), 'Empty patch');
+
+export const ScheduleEditProposalMetaSchema = z.object({
+  proposalId: SharedTrimmedNonEmptyStringSchema,
+  scheduleId: SharedTrimmedNonEmptyStringSchema,
+  title: z.string().trim().min(1).max(200),
+  patch: ScheduleEditProposalPatchSchema,
+  baseActivityId: SharedStringSchema,
+  outcome: z.enum(['applied', 'dismissed']).optional(),
   proposedBy: MessageItemActorSchema.optional(),
 });
 
@@ -3895,6 +4041,11 @@ export const SystemNoticeSchema = z.discriminatedUnion('name', [
     type: z.literal('system_notice'),
     name: z.literal('schedule_proposal'),
     meta: ScheduleProposalMetaSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('system_notice'),
+    name: z.literal('schedule_edit_proposal'),
+    meta: ScheduleEditProposalMetaSchema.optional(),
   }),
   z.object({
     type: z.literal('system_notice'),

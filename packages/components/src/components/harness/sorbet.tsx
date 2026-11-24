@@ -13,7 +13,7 @@
  * the machine speaks the control protocols, then credentials, Providers, and
  * the available model catalog from the shared Sorbet data directory.
  */
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtomValue } from 'jotai';
 import {
   createContext,
   useCallback,
@@ -26,7 +26,8 @@ import {
 } from 'react';
 import {
   machineSupportsProtocolCapability,
-  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -35,14 +36,11 @@ import {
 
 import { getAgentConfigsByMachineAtomFamily } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { settingsSelectedMachineIdAtom } from '@/atoms/settings';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
-import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useRefreshMachineAcpCapabilities } from '@/hooks/use-refresh-machine-acp-capabilities';
-import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 
+import { useHarnessDevices } from './machines';
 import { harness, type EndpointProtocol, type HarnessState } from './store';
 
 /** Where the page's reads and writes land, once resolved. */
@@ -78,38 +76,16 @@ export type SorbetStatus =
   | 'no-runtime';
 
 /**
- * The machine this page manages: the settings-wide selection while it is
- * still in the list, else this device, else the first machine — the same rule
- * the old Lody Agent page used, so both surfaces agree on the default.
+ * The machine this page manages is the harness's own device selection
+ * (`useHarnessDevices`): the device switcher in the pane header is the one
+ * source of truth, so the Providers rows and the scoped pages never disagree
+ * about which machine they describe.
  */
-/**
- * The machines this surface can offer. Under the workspace shell that is the
- * visibility-filtered index — a teammate's unshared machine is never a target.
- * Without an authenticated Convex context (a bare mount, a test) the raw meta
- * map stands in so the surface still renders instead of throwing.
- */
-function useHarnessMachines() {
-  const authed = useOptionalAuthenticatedConvex();
-  if (!authed) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks -- one branch, picked once per mount
-    return { machines: useAtomValue(getMachineMetaMapAtom), isLoading: false };
-  }
-  // eslint-disable-next-line react-hooks/rules-of-hooks -- same: the branch is stable
-  const index = useVisibleMachineMetas();
-  return { machines: index.machines, isLoading: index.isLoading };
-}
-
 export function useHarnessMachine() {
-  const { machines, isLoading } = useHarnessMachines();
-  const localMachineId = useAtomValue(localMachineIdAtom);
-  const [selected, setSelected] = useAtom(settingsSelectedMachineIdAtom);
-  const machineId = useMemo(() => {
-    if (selected && machines.has(selected)) return selected;
-    if (localMachineId && machines.has(localMachineId)) return localMachineId;
-    return [...machines.keys()][0] ?? null;
-  }, [selected, machines, localMachineId]);
+  const { machines, activeDevice, select, isLoading } = useHarnessDevices();
+  const machineId = (activeDevice as MachineId | null) ?? null;
   const machine = machineId ? machines.get(machineId) : undefined;
-  return { machines, machine, machineId, isLoading, select: setSelected };
+  return { machines, machine, machineId, isLoading, select };
 }
 
 /**
@@ -125,8 +101,20 @@ export function supportsSorbetStores(machine: MachineViewMeta, localMachineId: M
     machineSupportsProtocolCapability(
       machine,
       local ? 'sorbetProviders' : 'sorbetProvidersRemote',
-      SORBET_PROVIDERS_PROTOCOL_VERSION
+      SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION
     ) && supports('sorbetCredentials')
+  );
+}
+
+/** Whether the machine can edit a stored endpoint in place (`sorbet/providers-update`). */
+export function supportsSorbetEndpointEdit(
+  machine: MachineViewMeta,
+  localMachineId: MachineId | null
+) {
+  return machineSupportsProtocolCapability(
+    machine,
+    machine.id === localMachineId ? 'sorbetProviders' : 'sorbetProvidersRemote',
+    SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION
   );
 }
 
@@ -142,16 +130,23 @@ export interface SorbetActions {
     protocol: EndpointProtocol;
     baseUrl: string;
   }) => Promise<string>;
+  /** Name, protocol and base URL; Sorbet keeps the endpoint's models. */
+  updateEndpoint: (
+    providerId: string,
+    endpoint: { name: string; protocol: EndpointProtocol; baseUrl: string }
+  ) => Promise<void>;
   deleteEndpoint: (providerId: string) => Promise<void>;
   /** A Provider write changes the agent's advertised methods, not just the list. */
   reprobe: () => Promise<void>;
-  refresh: () => Promise<void>;
+  /** Rediscovers models — every dynamic Provider, or just `providerId` — then re-reads. */
+  refresh: (providerId?: string) => Promise<void>;
 }
 
 const unavailable = () => Promise.reject(new Error('Lody Agent is unavailable'));
 const noopActions: SorbetActions = {
   disconnect: unavailable,
   createEndpoint: unavailable,
+  updateEndpoint: unavailable,
   deleteEndpoint: unavailable,
   reprobe: unavailable,
   refresh: async () => {},
@@ -322,6 +317,17 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         reread();
         return result.provider.id;
       },
+      updateEndpoint: async (providerId, endpoint) => {
+        try {
+          const result = await runtime.requestLocalSorbetProviders(machineId, {
+            method: 'sorbet/providers-update',
+            params: { configId, providerId, provider: endpoint },
+          });
+          if (result.type !== 'sorbet/providers-update') throw new Error('Unexpected response');
+        } finally {
+          reread();
+        }
+      },
       deleteEndpoint: async (providerId) => {
         let deleted = false;
         try {
@@ -346,11 +352,11 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         }
       },
       reprobe,
-      refresh: async () => {
+      refresh: async (providerId) => {
         try {
           await runtime.requestLocalSorbetProviders(machineId, {
             method: 'sorbet/providers-refresh',
-            params: { configId },
+            params: providerId ? { configId, providerId } : { configId },
           });
         } finally {
           reread();
@@ -377,7 +383,9 @@ const currentActions: { current: SorbetActions } = { current: noopActions };
 export const sorbet: SorbetActions = {
   disconnect: (providerId) => currentActions.current.disconnect(providerId),
   createEndpoint: (endpoint) => currentActions.current.createEndpoint(endpoint),
+  updateEndpoint: (providerId, endpoint) =>
+    currentActions.current.updateEndpoint(providerId, endpoint),
   deleteEndpoint: (providerId) => currentActions.current.deleteEndpoint(providerId),
   reprobe: () => currentActions.current.reprobe(),
-  refresh: () => currentActions.current.refresh(),
+  refresh: (providerId) => currentActions.current.refresh(providerId),
 };

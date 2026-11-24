@@ -1,6 +1,18 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SessionChangesSidebar } from '@/components/sessions/session-changes-sidebar';
 import type { SessionDiffChangeEntry } from '@/components/sessions/session-diff-summary';
+const storyLayout = stylex.create({
+  frame: {
+    height: '560px',
+    width: '340px',
+    overflow: 'hidden',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'hsl(var(--border) / 1)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+  },
+});
 
 const changeEntries: SessionDiffChangeEntry[] = [
   { filePath: 'packages/components/src/components/sessions/session-detail.tsx', add: 113, del: 29 },
@@ -34,7 +46,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className="h-[560px] w-[340px] overflow-hidden border border-border bg-background">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

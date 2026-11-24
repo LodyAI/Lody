@@ -3,6 +3,8 @@
 [`ci.yml`](ci.yml) runs static checks and affected package tests on pull requests,
 and full checks on main pushes and manual dispatch. Ordinary E2EE package tests
 remain in those suites.
+Tests run as one runner per group ([test groups](../../.agents/notes/implemented/testing/2026-09-26-ci-test-groups-and-pnpm-store-cache.md)),
+and every Lody typecheck uses tsgo ([typecheck decision](../../.agents/notes/implemented/testing/2026-11-23-ci-typecheck-tsgo.md)).
 
 [`conversation-acceptance.yml`](conversation-acceptance.yml) runs the Storybook
 hydration, history-header and scrolling browser regressions on manual dispatch.
@@ -27,7 +29,10 @@ automatic.
 
 [`nightly-cloud.yml`](nightly-cloud.yml) and
 [`release-clients.yml`](release-clients.yml) stage the public cloud client migration.
-The five `publish-*.yml` workflows provide commit-pinned single-platform recovery.
+The five existing `publish-*.yml` workflows provide commit-pinned single-platform recovery.
+Nightly iOS uses [`publish-ios-native.yml`](publish-ios-native.yml) to archive the
+pinned native iOS client and upload it to TestFlight. Stable iOS recovery retains
+the Capacitor publisher.
 They remain disabled until `CLIENT_RELEASES_ENABLED=true`. See the
 [integration and cutover guide](../client-releases.md) for A/B dependencies,
 environments, npm OIDC, version reservation and rollback.

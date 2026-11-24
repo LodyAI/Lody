@@ -1,12 +1,19 @@
 import { description, frame } from './h264.test-fixtures';
 import http from 'node:http';
 import { once } from 'node:events';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { Agent, fetch } from 'undici';
+import { previewTestLookup } from '@/preview/preview-test-lookup';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createSimulatorGateway } from './gateway';
 import { LocalPreviewProxyManager } from '@/preview/local-preview-proxy';
 import type { SessionId } from '@lody/shared';
 import type { SimulatorHostControl } from './host-controls';
+const viewerDispatcher = new Agent({ connect: { lookup: previewTestLookup } });
+afterAll(() => viewerDispatcher.close());
+const viewerFetch: typeof fetch = (input, init) =>
+  fetch(input, { ...init, dispatcher: viewerDispatcher });
+
 const cleanups: Array<() => Promise<unknown>> = [];
 async function waitForGatewayHandshake(native: WebSocket) {
   // The server's connection event precedes the gateway receiving the upgrade.
@@ -131,10 +138,10 @@ describe('simulator media boundary', () => {
       visualAnnotation: false,
     });
     const remoteUrl = new URL(remoteEndpoint.viewerUrl);
-    expect((await fetch(remoteUrl)).status).toBe(200);
+    expect((await viewerFetch(remoteUrl)).status).toBe(200);
     const denied = new URL(remoteUrl);
     denied.search = '';
-    expect((await fetch(denied)).status).toBe(403);
+    expect((await viewerFetch(denied)).status).toBe(403);
     const streamUrl = new URL('stream', remoteUrl);
     streamUrl.protocol = 'ws:';
     streamUrl.search = remoteUrl.search;
@@ -149,7 +156,7 @@ describe('simulator media boundary', () => {
           native.once('message', (data) => resolve(JSON.parse(String(data))));
         });
       });
-      const client = new WebSocket(url);
+      const client = new WebSocket(url, { lookup: previewTestLookup });
       peers.push(client);
       cleanups.push(async () => {
         client.terminate();
@@ -170,7 +177,7 @@ describe('simulator media boundary', () => {
   it('derives native scale from the bounded viewport and denies forged receiver credit', async () => {
     const f = await setup(undefined, undefined, true);
     const incoming = once(f.upstream, 'connection');
-    const client = new WebSocket(f.stream);
+    const client = new WebSocket(f.stream, { lookup: previewTestLookup });
     cleanups.push(async () => {
       client.terminate();
     });
@@ -217,23 +224,23 @@ describe('simulator media boundary', () => {
     asset.search = g.url.search;
     const unauthorized = new URL(asset);
     unauthorized.search = '';
-    expect((await fetch(unauthorized)).ok).toBe(false);
-    const response = await fetch(asset);
+    expect((await viewerFetch(unauthorized)).ok).toBe(false);
+    const response = await viewerFetch(asset);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ width: 440, height: 900, buttons: [] });
     const image = new URL('bezel.png', asset);
     image.search = asset.search;
-    expect(Buffer.from(await (await fetch(image)).arrayBuffer())).toEqual(png);
+    expect(Buffer.from(await (await viewerFetch(image)).arrayBuffer())).toEqual(png);
     const arbitrary = new URL('definition.json', asset);
     arbitrary.search = asset.search;
-    expect((await fetch(arbitrary)).status).toBe(404);
+    expect((await viewerFetch(arbitrary)).status).toBe(404);
     expect(requests).toEqual([
       '/simulators/5519CB11-71C9-46D9-AEFF-73C96F1104E0/definition.json',
       '/simulators/5519CB11-71C9-46D9-AEFF-73C96F1104E0/bezel.png',
     ]);
     expect(g.renewals()).toBe(0);
     g.revoke();
-    expect((await fetch(image)).status).toBe(410);
+    expect((await viewerFetch(image)).status).toBe(410);
   });
   it('serializes host controls and fences their completion after ownership is revoked', async () => {
     let began: () => void = () => {};
@@ -249,7 +256,7 @@ describe('simulator media boundary', () => {
       await finished;
     });
     const request = (requestId: string) =>
-      fetch(f.control, {
+      viewerFetch(f.control, {
         method: 'POST',
         headers: { Origin: f.url.origin, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,7 +290,7 @@ describe('simulator media boundary', () => {
       control: { kind: 'button', button: 'home' },
     };
     const send = (body: unknown, url = f.control, origin = f.url.origin) =>
-      fetch(url, {
+      viewerFetch(url, {
         method: 'POST',
         headers: { Origin: origin, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -312,26 +319,26 @@ describe('simulator media boundary', () => {
   it('serves fixed unannotated content behind capability auth and exposes no Baguette API', async () => {
     const { url, gateway } = await setup();
     const direct = `http://127.0.0.1:${gateway.port}${gateway.path}`;
-    expect((await fetch(direct, { headers: { Origin: 'https://untrusted.example' } })).status).toBe(
-      404
-    );
-    expect((await fetch(`http://127.0.0.1:${gateway.port}/`)).status).toBe(404);
-    const response = await fetch(url);
+    expect(
+      (await viewerFetch(direct, { headers: { Origin: 'https://untrusted.example' } })).status
+    ).toBe(404);
+    expect((await viewerFetch(`http://127.0.0.1:${gateway.port}/`)).status).toBe(404);
+    const response = await viewerFetch(url);
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('lody:ios-simulator:init');
     expect(html).not.toContain('data-lody');
     const denied = new URL(url);
     denied.search = '';
-    expect((await fetch(denied)).status).toBe(403);
+    expect((await viewerFetch(denied)).status).toBe(403);
     const forbidden = new URL(url);
     forbidden.pathname = '/simulators';
-    expect((await fetch(forbidden)).status).toBe(404);
+    expect((await viewerFetch(forbidden)).status).toBe(404);
   });
   it('forwards only validated touches to the bound device, never counts video as activity', async () => {
     const f = await setup();
     const incoming = once(f.upstream, 'connection');
-    const client = new WebSocket(f.stream);
+    const client = new WebSocket(f.stream, { lookup: previewTestLookup });
     cleanups.push(async () => {
       client.terminate();
     });
@@ -372,7 +379,7 @@ describe('simulator media boundary', () => {
     async (reason) => {
       const f = await setup();
       const incoming = once(f.upstream, 'connection');
-      const client = new WebSocket(f.stream);
+      const client = new WebSocket(f.stream, { lookup: previewTestLookup });
       cleanups.push(async () => {
         client.terminate();
       });
@@ -404,7 +411,7 @@ describe('simulator media boundary', () => {
   it('forwards bottom-edge gestures and preserves their edge during disconnect cleanup', async () => {
     const f = await setup();
     const incoming = once(f.upstream, 'connection');
-    const client = new WebSocket(f.stream);
+    const client = new WebSocket(f.stream, { lookup: previewTestLookup });
     cleanups.push(async () => {
       client.terminate();
     });
@@ -436,7 +443,7 @@ describe('simulator media boundary', () => {
   it.each(['outside-band', 'change-edge'])('rejects invalid edge input: %s', async (scenario) => {
     const f = await setup();
     const incoming = once(f.upstream, 'connection');
-    const client = new WebSocket(f.stream);
+    const client = new WebSocket(f.stream, { lookup: previewTestLookup });
     cleanups.push(async () => {
       client.terminate();
     });
@@ -472,7 +479,7 @@ describe('simulator media boundary', () => {
   it('revocation rejects frames and tears down the stream', async () => {
     const f = await setup();
     const incoming = once(f.upstream, 'connection');
-    const client = new WebSocket(f.stream);
+    const client = new WebSocket(f.stream, { lookup: previewTestLookup });
     cleanups.push(async () => {
       client.terminate();
     });
@@ -483,7 +490,7 @@ describe('simulator media boundary', () => {
     f.revoke();
     native.send(Buffer.from([1]));
     await closed;
-    expect((await fetch(f.url)).status).toBe(410);
+    expect((await viewerFetch(f.url)).status).toBe(410);
   });
 });
 
@@ -492,7 +499,7 @@ describe('H.264 gateway negotiation', () => {
     const f = await setup(undefined, undefined, true);
     f.stream.searchParams.set('codec', 'h264');
     const incoming = once(f.upstream, 'connection');
-    const client = new WebSocket(f.stream);
+    const client = new WebSocket(f.stream, { lookup: previewTestLookup });
     cleanups.push(async () => {
       client.terminate();
     });

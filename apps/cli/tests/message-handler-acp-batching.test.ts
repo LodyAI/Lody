@@ -1318,6 +1318,8 @@ describe('MessageHandler ACP batching', () => {
           source: 'active_turn',
         });
         expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+        expect(h.host.sessionActivePresence.getStatus(h.sessionId)).toEqual({ type: 'running' });
+        expect((await h.doc.getMetaState())?.status).toEqual({ type: 'running' });
         h.emitText('replacement ');
         h.emitText('output');
         await h.host.flushACPUpdatesNow(h.sessionId);
@@ -1964,64 +1966,75 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it('routes custom ACP usage with its accounting identity and user attribution', async () => {
-    vi.useRealTimers();
-    const sessionId = 'custom-usage' as SessionId;
-    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
-    const doc = docs.get(sessionId);
-    if (!doc) throw new Error('Missing session doc');
-    const recorded: unknown[] = [];
-    Object.assign(handler, {
-      usageTrackingService: {
-        recordSessionUsageUpdate: (input: unknown) => recorded.push(input),
-        flushSessionUsage: async () => {},
-      },
-    });
-    const host = handler as unknown as {
-      handleUsageUpdate(
-        sessionId: SessionId,
-        accountingId: string,
-        update: SessionUsageUpdate
-      ): Promise<void>;
-    };
-    const usage = { inputTokens: 12, outputTokens: 3, cacheReadInputTokens: 0, costUSD: 0.42 };
-    const update = { sessionId: 'native', usage, modelUsage: { model: usage } };
-    try {
-      await repo.upsertDocMeta(getSessionRoomId(sessionId), {
-        id: sessionId,
-        machineId: 'm-1',
-        userId: 'u-1',
-        cliType: 'custom',
-        agentType: 'custom-123e4567-e89b-12d3-a456-426614174000',
-      });
-      await doc.sessionData.commands.applyHistoryAction({
-        kind: 'upsert-turn',
-        turn: {
-          id: 'user-turn',
-          role: 'user',
-          userId: 'author',
-          status: 'handled',
-          read: true,
-          timestamp: '2026-10-17T00:00:00.000Z',
-          items: [],
-        } as SessionHistoryInput,
-      });
-      await host.handleUsageUpdate(sessionId, 'native:scope:one', update);
-      expect(recorded).toEqual([
-        {
-          workspaceId: 'ws-1',
-          sessionId,
-          acpSessionId: 'native:scope:one',
-          userId: 'author',
-          machineId: 'm-1',
-          cliType: 'custom',
-          update,
+  it.each(['plaintext', 'e2ee-own', 'e2ee-other'] as const)(
+    'routes custom ACP usage with its accounting identity and safe user attribution (%s)',
+    async (mode) => {
+      vi.useRealTimers();
+      const sessionId = 'custom-usage' as SessionId;
+      const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+      const doc = docs.get(sessionId);
+      if (!doc) throw new Error('Missing session doc');
+      const recorded: unknown[] = [];
+      Object.assign(handler, {
+        encryptedAttachments: mode !== 'plaintext',
+        cloudPort: createTestCloudPort({
+          identity: { userId: mode === 'e2ee-other' ? 'other' : 'author' },
+        }),
+        usageTrackingService: {
+          recordSessionUsageUpdate: (input: unknown) => recorded.push(input),
+          flushSessionUsage: async () => {},
         },
-      ]);
-    } finally {
-      await destroyRepoOnRealTimers(repo);
+      });
+      const host = handler as unknown as {
+        handleUsageUpdate(
+          sessionId: SessionId,
+          accountingId: string,
+          update: SessionUsageUpdate
+        ): Promise<void>;
+      };
+      const usage = { inputTokens: 12, outputTokens: 3, cacheReadInputTokens: 0, costUSD: 0.42 };
+      const update = { sessionId: 'native', usage, modelUsage: { model: usage } };
+      try {
+        await repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          id: sessionId,
+          machineId: 'm-1',
+          userId: 'u-1',
+          cliType: 'custom',
+          agentType: 'custom-123e4567-e89b-12d3-a456-426614174000',
+        });
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            id: 'user-turn',
+            role: 'user',
+            userId: 'author',
+            status: 'handled',
+            read: true,
+            timestamp: '2026-10-17T00:00:00.000Z',
+            items: [],
+          } as SessionHistoryInput,
+        });
+        await host.handleUsageUpdate(sessionId, 'native:scope:one', update);
+        expect(recorded).toEqual(
+          mode === 'e2ee-other'
+            ? []
+            : [
+                {
+                  workspaceId: 'ws-1',
+                  sessionId,
+                  acpSessionId: 'native:scope:one',
+                  userId: 'author',
+                  machineId: 'm-1',
+                  cliType: 'custom',
+                  update,
+                },
+              ]
+        );
+      } finally {
+        await destroyRepoOnRealTimers(repo);
+      }
     }
-  });
+  );
 
   it('records each turn its own token usage deltas, including late reports', async () => {
     vi.useRealTimers();

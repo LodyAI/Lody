@@ -130,7 +130,14 @@ jobs:
         run: corepack pnpm --dir apps/cli prepare:publish
       - name: Publish lody to npm
         working-directory: apps/cli/.publish/lody
-        run: pnpm publish --access public --no-git-checks --tag "${NPM_DIST_TAG}"
+        env:
+          NPM_CONFIG_LOGLEVEL: verbose
+        run: |
+          node --version
+          pnpm --version
+          npm --version
+          pnpm exec npm --version
+          pnpm publish --access public --no-git-checks --tag "${NPM_DIST_TAG}"
     needs:
       - validate-target
 concurrency:

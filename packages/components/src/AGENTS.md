@@ -30,7 +30,7 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Image previews
 
-Pending local images use only scoped host previews. Published `r2` images retain local-first previews and authenticated cloud fallback when unavailable. Follow [rendering](components/ai-gui/session-files-rendering.md) for image publication and cache behavior. Sends, schedules, and replay preserve image identity without capability preflights. Desktop prepares known matching targets locally and transfers otherwise.
+Pending local images use only scoped host previews. Published `r2` images retain local-first previews and authenticated cloud fallback when unavailable. Follow [rendering](components/ai-gui/session-files-rendering.md) for image publication and cache behavior. Sends, schedules, and replay preserve image identity without capability preflights. Plaintext desktop sends prepare known matching targets locally; protected sends and schedules always use encrypted transfer for unprepared attachments.
 
 ## Conversation exports
 

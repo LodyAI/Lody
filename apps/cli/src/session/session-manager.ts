@@ -1095,7 +1095,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
     const context = sessionId ?? 'git-identity';
     const policy = await resolveGitIdentityPolicyLegacy(
-      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
+      (attemptSignal) =>
+        tokenManager.getCredentialPolicy(
+          { requesterUserId, machineId: this.machineId },
+          attemptSignal
+        ),
       this.logger,
       context,
       signal

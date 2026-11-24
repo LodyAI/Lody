@@ -1,18 +1,19 @@
 import {
   isSensitiveAcpConfigOptionId,
+  resolveSessionDefaultConfigOptionValues,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineViewMeta,
 } from '@lody/shared';
 import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
-import { agentDefaultsCache } from '@/lib/local-storage-cache';
+import { readAgentStartDefaults } from '@/lib/local-storage-cache';
 import { resolvePreferredChatLandingAgentSelection } from '@/lib/chat-landing-defaults';
 
 /**
  * The run configuration the chat landing would show for this Agent: its
- * remembered model, options and permission (`agentDefaultsCache`), falling back
- * to the Agent's own defaults. A schedule starts from what the person already
+ * remembered model, options and permission under the Provider's session
+ * defaults (`readAgentStartDefaults`), falling back to the Agent's own defaults. A schedule starts from what the person already
  * uses to chat instead of an empty menu.
  *
  * When advertised, permission is filled — the mode the landing would display, or the
@@ -23,19 +24,36 @@ export function seedScheduleAgentRunRef(
   config: AgentConfigMeta,
   machine: Pick<MachineViewMeta, 'acpCapabilities'> | null | undefined
 ): AgentRunRef {
-  const cached = agentDefaultsCache.get(config.id);
+  const cached = readAgentStartDefaults(config);
+  const effectiveModelId =
+    cached?.modelId ??
+    (typeof cached?.configOptionValues?.model === 'string'
+      ? cached.configOptionValues.model
+      : undefined);
+  const cachedConfigOptionValues = cached
+    ? resolveSessionDefaultConfigOptionValues(
+        {
+          ...(cached.modelId ? { modelId: cached.modelId } : {}),
+          configOptionValues: cached.configOptionValues ?? {},
+          ...(cached.modelConfigOptionValues
+            ? { modelConfigOptionValues: cached.modelConfigOptionValues }
+            : {}),
+        },
+        effectiveModelId
+      )
+    : undefined;
   const options = buildAcpSelectorOptions({
     configId: config.id,
     cliType: config.cliType,
     agentType: config.agentType,
     selectedModeId: cached?.modeId,
     selectedModelId: cached?.modelId,
-    configOptionValues: cached?.configOptionValues,
+    configOptionValues: cachedConfigOptionValues,
     runtimeOverrides: config.runtimeOverrides,
     machine: machine ?? null,
   });
   const values: NonNullable<AgentRunRef['configOptionValues']> = {};
-  for (const [id, value] of Object.entries(cached?.configOptionValues ?? {})) values[id] = value;
+  for (const [id, value] of Object.entries(cachedConfigOptionValues ?? {})) values[id] = value;
   // Seed the permission shown by the composer:
   // an advertised `_permission` option wins; otherwise the mode list; otherwise
   // a `mode`-category option (how probed custom/registry agents publish it).

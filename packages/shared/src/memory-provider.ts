@@ -47,7 +47,15 @@ export const MemoryProviderRequestSchema = z.discriminatedUnion('action', [
   // it, so the secret half never has to cross back through the UI.
   z
     .object({
-      action: z.enum(['signIn', 'signInPoll', 'install', 'installPoll', 'connectPoll']),
+      action: z.enum([
+        'signIn',
+        'signInPoll',
+        'install',
+        'installPoll',
+        'uninstall',
+        'uninstallPoll',
+        'connectPoll',
+      ]),
       providerId: z.string().min(1).max(100),
     })
     .strict(),
@@ -156,6 +164,15 @@ export const MemoryInstallSchema = z
   .strict();
 export type MemoryInstall = z.infer<typeof MemoryInstallSchema>;
 
+/** Where removing a provider's global package has got to; data and config stay. */
+export const MemoryUninstallSchema = z
+  .object({
+    status: z.enum(['running', 'done', 'failed']),
+    failure: MemoryInstallFailureSchema.optional(),
+  })
+  .strict();
+export type MemoryUninstall = z.infer<typeof MemoryUninstallSchema>;
+
 /**
  * Where a connect or disconnect has got to. Each EverCLI call may take its
  * full budget, so a batch outlasts any one reply; the job runs on the machine
@@ -184,6 +201,8 @@ export const MemoryProviderResponseSchema = z
     signIn: MemorySignInSchema.optional(),
     /** Only answers to `install` and `installPoll` carry this. */
     install: MemoryInstallSchema.optional(),
+    /** Only answers to `uninstall` and `uninstallPoll` carry this. */
+    uninstall: MemoryUninstallSchema.optional(),
     /** Only answers to `connect`, `disconnect` and `connectPoll` carry this. */
     agentsJob: MemoryAgentsJobSchema.optional(),
     error: z.string().optional(),
@@ -205,7 +224,7 @@ type MemoryProviderCapabilities = {
   readonly connectsAgents: boolean;
   /** Lody drives its sign-in, so a first-time user never has to leave for a terminal. */
   readonly signsIn: boolean;
-  /** Lody can fetch it onto the machine rather than only link to it. */
+  /** Lody can fetch it onto the machine, and remove it again, rather than only link to it. */
   readonly installs: boolean;
 };
 

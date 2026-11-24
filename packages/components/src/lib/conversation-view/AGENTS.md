@@ -57,10 +57,14 @@
   together with an owner-issued checkpoint. Negotiate `sessionHistoryIncremental`
   independently; verified catch-up patches only changed rows, including revision gaps.
   Coherent checkpoint replies may advance behind newer hints; keep catching up.
-  Body-only edits retain directory cursor validity.
-  Independently negotiate `sessionHistoryWatch`; park one checkpoint observation per
-  active bridge outside body-read capacity. Hints accelerate the same recovery owner,
-  never replace its durable coverage. Idle replies do not invalidate unchanged bodies.
+  Body-only edits retain directory cursor validity. An in-flight older page may
+  join the current cache head when adjacent changes prove that its positions
+  and turn IDs remained unchanged.
+  Independently negotiate `sessionHistorySubscription`. Active bridges receive
+  durable owner checkpoints and apply inline deltas only at an exact cached base.
+  Renewals resume at the cached checkpoint. A reader adopts each committed checkpoint
+  in its own view, including those another window wrote. A repeated local checkpoint
+  leaves bodies intact.
   Unknown coverage stages a new snapshot while retaining the durable old one.
   During replacement, display reads use the owner and hints still invalidate the
   view; repeated supersessions back off. Publish only complete checkpoint coverage.
@@ -76,6 +80,10 @@
   release HOLDS the background scan and keeps the facts: deriving one needs the
   turn's body, so discarding them re-materialized the conversation on the next
   open. The table is collected with its view.
+- Retained hidden chat surfaces release optional fact/directory leases. Reacquisition
+  preserves unchanged facts and yields before history backfill; held edits invalidate
+  stale facts without deriving bodies. Body batches yield by elapsed work as well as
+  item/turn counts, retaining asynchronous read concurrency and epoch fencing.
 - `lastUpdateAt` stamps backend change notifications only, never opening,
   hydration or paging. It stays in memory and never bumps `version`. Liveness UI
   must not persist it or move `endedAt` while a turn streams, and must count it

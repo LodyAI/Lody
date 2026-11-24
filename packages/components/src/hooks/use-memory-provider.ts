@@ -12,7 +12,16 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 type MemoryProviderCommand =
   | { action: 'create' | 'update'; input: MemoryCreateInput }
   | { action: 'connect' | 'disconnect'; targets: string[] }
-  | { action: 'signIn' | 'signInPoll' | 'install' | 'installPoll' | 'connectPoll' };
+  | {
+      action:
+        | 'signIn'
+        | 'signInPoll'
+        | 'install'
+        | 'installPoll'
+        | 'uninstall'
+        | 'uninstallPoll'
+        | 'connectPoll';
+    };
 
 /** Results belong to one runtime/machine/provider; late replies cannot retarget the UI. */
 export function useMemoryProvider(
@@ -121,5 +130,8 @@ export function useMemoryProvider(
     /** Puts the provider on the machine; `installPoll` watches the job land. */
     install: () => request({ action: 'install' }),
     installPoll: () => request({ action: 'installPoll' }),
+    /** Removes the provider's global package; `uninstallPoll` watches it go. */
+    uninstall: () => request({ action: 'uninstall' }),
+    uninstallPoll: () => request({ action: 'uninstallPoll' }),
   };
 }

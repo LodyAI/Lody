@@ -1,16 +1,23 @@
 /* Native scroll containers (including portalled @lody/ui parts) share the
    @lody/ui ScrollArea tokens without requiring a class on every scrolling element.
-   The base layer lets component-level hidden/compact scrollbars override it. */
+   The base layer lets component-level hidden/compact scrollbars override it.
+   Thumbs stay transparent until `installScrollbarPresence` (@lody/ui) marks the
+   element as being scrolled or hovered on its scrollbar. */
 @layer base {
   :where(*) {
     scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  :where([data-scrollbar-scrolling], [data-scrollbar-hover]) {
     scrollbar-color: var(--lody-scrollbar-thumb) transparent;
   }
 
   /* Non-auto standard properties override WebKit thumb geometry and states in
      Chromium. Use its pseudo-elements where available; Firefox keeps thin. */
   @supports selector(::-webkit-scrollbar) {
-    :where(*) {
+    :where(*),
+    :where([data-scrollbar-scrolling], [data-scrollbar-hover]) {
       scrollbar-width: auto;
       scrollbar-color: auto;
     }
@@ -29,15 +36,25 @@
   :where(*)::-webkit-scrollbar-thumb {
     border: var(--lody-scrollbar-inset) solid transparent;
     border-radius: var(--lody-scrollbar-radius);
-    background-color: var(--lody-scrollbar-thumb);
+    background-color: transparent;
     background-clip: content-box;
   }
 
+  :where([data-scrollbar-scrolling], [data-scrollbar-hover])::-webkit-scrollbar-thumb {
+    background-color: var(--lody-scrollbar-thumb);
+  }
+
+  :where([data-scrollbar-hover])::-webkit-scrollbar-thumb {
+    border-width: var(--lody-scrollbar-hover-inset);
+  }
+
   :where(*)::-webkit-scrollbar-thumb:hover {
+    border-width: var(--lody-scrollbar-hover-inset);
     background-color: var(--lody-scrollbar-thumb-hover);
   }
 
   :where(*)::-webkit-scrollbar-thumb:active {
+    border-width: var(--lody-scrollbar-hover-inset);
     background-color: var(--lody-scrollbar-thumb-active);
   }
 }

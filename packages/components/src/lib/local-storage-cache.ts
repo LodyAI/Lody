@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import {
+  isModelScopedSessionDefaultConfigId,
+  resolveSessionDefaultConfigOptionValues,
   WorktreeSetupScriptConfigSchema,
   type AcpConfigOptionValue,
   type AgentConfigId,
+  type AgentConfigMeta,
   type WorktreeSetupScriptConfig,
 } from '@lody/shared';
 
@@ -67,9 +70,26 @@ const agentSessionDefaultsSchema = z.object({
   modeId: z.string().nullable(),
   modelId: z.string().nullable(),
   configOptionValues: z.record(z.string(), configOptionValueSchema).optional(),
+  modelConfigOptionValues: z
+    .record(z.string(), z.record(z.string(), configOptionValueSchema))
+    .optional(),
 });
 
 export type AgentSessionDefaults = z.infer<typeof agentSessionDefaultsSchema>;
+
+const resolveStoredDefaultsModelId = (
+  defaults:
+    | {
+        modelId?: string | null;
+        configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+      }
+    | null
+    | undefined
+): string | undefined =>
+  defaults?.modelId ??
+  (typeof defaults?.configOptionValues?.model === 'string'
+    ? defaults.configOptionValues.model
+    : undefined);
 
 export function persistAgentSessionDefaults(
   agentId: AgentConfigId | null | undefined,
@@ -80,14 +100,55 @@ export function persistAgentSessionDefaults(
   }
 ): void {
   if (!agentId) return;
-  const configOptionValues =
-    defaults.configOptionValues && Object.keys(defaults.configOptionValues).length > 0
-      ? defaults.configOptionValues
-      : undefined;
+  const previous = agentDefaultsCache.get(agentId);
+  const effectiveModelId = resolveStoredDefaultsModelId(defaults);
+  const nextModelConfigOptionValues: Record<string, Record<string, AcpConfigOptionValue>> = {
+    ...previous?.modelConfigOptionValues,
+  };
+
+  const previousModelId = resolveStoredDefaultsModelId(previous);
+  if (previousModelId && previous?.configOptionValues) {
+    for (const [configId, value] of Object.entries(previous.configOptionValues)) {
+      if (
+        isModelScopedSessionDefaultConfigId(configId) &&
+        nextModelConfigOptionValues[previousModelId]?.[configId] === undefined
+      ) {
+        nextModelConfigOptionValues[previousModelId] = {
+          ...nextModelConfigOptionValues[previousModelId],
+          [configId]: value,
+        };
+      }
+    }
+  }
+
+  let sessionWideValues: Record<string, AcpConfigOptionValue> | undefined;
+  if (effectiveModelId) {
+    const common: Record<string, AcpConfigOptionValue> = {};
+    const perModel: Record<string, AcpConfigOptionValue> = {};
+    for (const [configId, value] of Object.entries(defaults.configOptionValues ?? {})) {
+      if (isModelScopedSessionDefaultConfigId(configId)) {
+        perModel[configId] = value;
+      } else {
+        common[configId] = value;
+      }
+    }
+    if (Object.keys(perModel).length > 0) {
+      nextModelConfigOptionValues[effectiveModelId] = perModel;
+    } else {
+      delete nextModelConfigOptionValues[effectiveModelId];
+    }
+    sessionWideValues = Object.keys(common).length > 0 ? common : undefined;
+  } else if (defaults.configOptionValues && Object.keys(defaults.configOptionValues).length > 0) {
+    sessionWideValues = defaults.configOptionValues;
+  }
+
   agentDefaultsCache.set(agentId, {
     modeId: defaults.modeId ?? null,
     modelId: defaults.modelId ?? null,
-    configOptionValues,
+    ...(sessionWideValues ? { configOptionValues: sessionWideValues } : {}),
+    ...(Object.keys(nextModelConfigOptionValues).length > 0
+      ? { modelConfigOptionValues: nextModelConfigOptionValues }
+      : {}),
   });
 }
 
@@ -96,6 +157,89 @@ export const agentDefaultsCache = createLocalStorageCache<AgentSessionDefaults>(
   'lody:agentSessionDefaults',
   agentSessionDefaultsSchema
 );
+
+/**
+ * What a new conversation with a Provider starts from: the combination the
+ * person last ran with it on this device, under the Provider's own session
+ * defaults (Settings > Lody Agent). Those are an explicit setting, so for the
+ * values they name they win over what was merely used last.
+ */
+export function readAgentStartDefaults(
+  config: Pick<AgentConfigMeta, 'id' | 'sessionDefaults'> | undefined
+): AgentSessionDefaults | null {
+  if (!config) return null;
+  const cached = agentDefaultsCache.get(config.id) ?? null;
+  const provider = config.sessionDefaults;
+  if (!provider) return cached;
+
+  const modelId = provider.modelId ?? cached?.modelId ?? null;
+  const providerModelId = resolveStoredDefaultsModelId(provider);
+  const cachedModelId = resolveStoredDefaultsModelId(cached);
+  const effectiveModelId = modelId ?? providerModelId ?? cachedModelId;
+
+  const configOptionValues = {
+    ...resolveSessionDefaultConfigOptionValues(
+      cached
+        ? {
+            ...(cached.modelId ? { modelId: cached.modelId } : {}),
+            configOptionValues: cached.configOptionValues ?? {},
+          }
+        : undefined,
+      effectiveModelId
+    ),
+    ...resolveSessionDefaultConfigOptionValues(
+      {
+        ...(provider.modelId ? { modelId: provider.modelId } : {}),
+        configOptionValues: provider.configOptionValues ?? {},
+      },
+      effectiveModelId
+    ),
+  };
+
+  const modelConfigOptionValues: Record<string, Record<string, AcpConfigOptionValue>> = {};
+  for (const key of new Set([
+    ...Object.keys(cached?.modelConfigOptionValues ?? {}),
+    ...Object.keys(provider.modelConfigOptionValues ?? {}),
+  ])) {
+    const merged = {
+      ...cached?.modelConfigOptionValues?.[key],
+      ...provider.modelConfigOptionValues?.[key],
+    };
+    if (Object.keys(merged).length > 0) {
+      modelConfigOptionValues[key] = merged;
+    }
+  }
+  if (cachedModelId && cached?.configOptionValues) {
+    for (const [configId, value] of Object.entries(cached.configOptionValues)) {
+      if (
+        isModelScopedSessionDefaultConfigId(configId) &&
+        modelConfigOptionValues[cachedModelId]?.[configId] === undefined
+      ) {
+        modelConfigOptionValues[cachedModelId] = {
+          ...modelConfigOptionValues[cachedModelId],
+          [configId]: value,
+        };
+      }
+    }
+  }
+  if (providerModelId && provider.configOptionValues) {
+    for (const [configId, value] of Object.entries(provider.configOptionValues)) {
+      if (isModelScopedSessionDefaultConfigId(configId)) {
+        modelConfigOptionValues[providerModelId] = {
+          ...modelConfigOptionValues[providerModelId],
+          [configId]: value,
+        };
+      }
+    }
+  }
+
+  return {
+    modeId: cached?.modeId ?? null,
+    modelId,
+    ...(Object.keys(configOptionValues).length ? { configOptionValues } : {}),
+    ...(Object.keys(modelConfigOptionValues).length ? { modelConfigOptionValues } : {}),
+  };
+}
 
 // GitHub repos cache
 export const cachedGitHubRepoSchema = z.object({
@@ -122,6 +266,8 @@ export const githubReposCache = createLocalStorageCache<WorkspaceReposCache>(
 export const githubBranchesCacheSchema = z.object({
   branches: z.array(z.string()),
   defaultBranch: z.string().nullable(),
+  // Cursor for the next unloaded page; entries written before paging are complete lists.
+  nextPageUrl: z.string().nullable().optional(),
   updatedAt: z.number(),
 });
 

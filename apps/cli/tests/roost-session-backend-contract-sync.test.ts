@@ -380,12 +380,11 @@ describe('Production Roost history semantics (projections, patches and goals)', 
           kind: 'readChanges',
           ...query,
         });
-        const response = await fixture.rpc.readSessionHistoryForRpc(
-          id,
-          step % 2
-            ? { kind: 'watchChanges', waitMs: 0, ...query, withPatches: true }
-            : { kind: 'readChanges', ...query, withPatches: true }
-        );
+        const response = await fixture.rpc.readSessionHistoryForRpc(id, {
+          kind: 'readChanges',
+          ...query,
+          withPatches: true,
+        });
         expect(response.success).toBe(true);
         const changes = SessionHistoryChangesSchema.parse(response.result);
         if (changes.state !== 'ready' || !changes.patches)
@@ -773,24 +772,19 @@ describe('Production Roost history semantics (projections, patches and goals)', 
       armed.resolve();
       return value;
     });
-    vi.useFakeTimers();
-    const observed = history.waitForChanges(checkpoint, 15_000);
+    const scope = new AbortController();
+    const observed = history.waitForChanges(checkpoint, scope.signal);
     await armed.promise;
     await fixture.backend.appendHistoryTurn(nativeUser('watched-owner-write'));
     await observed;
     const next = await original();
     expect(next).not.toBe(checkpoint);
     // The durable checkpoint covers a write between the initial read and watch admission.
-    await history.waitForChanges(checkpoint, 15_000);
+    await history.waitForChanges(checkpoint, scope.signal);
     expect(await history.readTurn('watched-owner-write')).toMatchObject({ state: 'ready' });
     armed = Promise.withResolvers<void>();
-    const deadline = history.waitForChanges(next, 15_000);
-    await armed.promise;
-    await vi.advanceTimersByTimeAsync(15_000);
-    await deadline;
-    armed = Promise.withResolvers<void>();
     const abort = new AbortController();
-    const cancelled = history.waitForChanges(next, 15_000, abort.signal).catch((error) => error);
+    const cancelled = history.waitForChanges(next, abort.signal).catch((error) => error);
     await armed.promise;
     abort.abort();
     expect(await cancelled).toBeInstanceOf(Error);
@@ -799,7 +793,7 @@ describe('Production Roost history semantics (projections, patches and goals)', 
     expect(await history.readTurn('after-observer-abort')).toMatchObject({ state: 'ready' });
     const atClose = await original();
     armed = Promise.withResolvers<void>();
-    const closing = history.waitForChanges(atClose, 15_000).catch((error) => error);
+    const closing = history.waitForChanges(atClose, scope.signal).catch((error) => error);
     await armed.promise;
     await fixture.close();
     expect(await closing).toBeInstanceOf(Error);

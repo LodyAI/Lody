@@ -114,15 +114,17 @@ export class DevicePreviewService {
   control(
     request: DeviceRequest,
     remote: boolean,
-    authorizeRemote?: () => Promise<unknown>
+    authorizeRemote?: () => Promise<unknown>,
+    isRemoteCurrent?: () => boolean
   ): Promise<DeviceResponse> {
-    return this.handleControl(request, remote, authorizeRemote, false);
+    return this.handleControl(request, remote, authorizeRemote, false, isRemoteCurrent);
   }
   private async handleControl(
     request: DeviceRequest,
     remote: boolean,
     authorizeRemote: (() => Promise<unknown>) | undefined,
-    fromAgent: boolean
+    fromAgent: boolean,
+    isRemoteCurrent?: () => boolean
   ): Promise<DeviceResponse> {
     const base = { sessionId: request.sessionId };
     let ownerSessionId = request.sessionId;
@@ -132,7 +134,10 @@ export class DevicePreviewService {
     const current = () =>
       requestGeneration === (this.generations.get(request.sessionId) ?? 0) &&
       generation === (this.generations.get(ownerSessionId) ?? 0) &&
-      (!remote || (this.remoteEnabled && remoteGeneration === this.remoteGeneration));
+      (!remote ||
+        (this.remoteEnabled &&
+          remoteGeneration === this.remoteGeneration &&
+          (isRemoteCurrent?.() ?? true)));
     try {
       try {
         if (!current()) throw new Error('Remote simulator access is disabled.');
