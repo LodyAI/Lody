@@ -7,6 +7,7 @@ const LABELS = {
   redo: 'Redo',
   cut: 'Cut',
   copy: 'Copy',
+  copyLink: 'Copy Link',
   paste: 'Paste',
   selectAll: 'Select All'
 }
@@ -19,6 +20,7 @@ function params(overrides = {}) {
     isEditable: false,
     selectionText: '',
     mediaType: 'none',
+    linkURL: '',
     editFlags: {
       canUndo: true,
       canRedo: true,
@@ -88,4 +90,62 @@ void test('an editable field with nothing selected still offers Paste', () => {
 void test('labels follow the product language', () => {
   const template = buildContextMenuTemplate(params({ selectionText: '你好' }), ZH_LABELS)
   assert.deepEqual(template, [{ role: 'copy', label: '复制', enabled: true }])
+})
+
+void test('offers Copy Link alone for a link with no selection', () => {
+  const template = buildContextMenuTemplate(params({ linkURL: 'https://lody.ai/docs' }), LABELS)
+  assert.deepEqual(template, [{ action: 'copyLink', label: 'Copy Link' }])
+})
+
+void test('offers Copy Link above Copy for a link over a selection', () => {
+  const template = buildContextMenuTemplate(
+    params({ linkURL: 'https://lody.ai/docs', selectionText: 'the docs' }),
+    LABELS
+  )
+  assert.deepEqual(template, [
+    { action: 'copyLink', label: 'Copy Link' },
+    { type: 'separator' },
+    { role: 'copy', label: 'Copy', enabled: true }
+  ])
+})
+
+void test('offers Copy Link above the edit set for a link inside a field', () => {
+  const template = buildContextMenuTemplate(
+    params({ isEditable: true, linkURL: 'https://lody.ai/docs' }),
+    LABELS
+  )
+  assert.deepEqual(template[0], { action: 'copyLink', label: 'Copy Link' })
+  assert.deepEqual(template[1], { type: 'separator' })
+  assert.deepEqual(
+    template.slice(2).map((entry) => ('type' in entry ? entry.type : entry.role)),
+    ['undo', 'redo', 'separator', 'cut', 'copy', 'paste', 'separator', 'selectAll']
+  )
+})
+
+void test('guards non-web link targets', () => {
+  for (const linkURL of [
+    'javascript:alert(1)',
+    'data:text/html,<b>x</b>',
+    'file:///etc/passwd',
+    'ftp://example.com/x',
+    'not a url at all'
+  ]) {
+    assert.deepEqual(buildContextMenuTemplate(params({ linkURL }), LABELS), [], linkURL)
+    // With a selection the guarded link adds nothing: the menu is plain Copy.
+    assert.deepEqual(
+      buildContextMenuTemplate(params({ linkURL, selectionText: 'txt' }), LABELS),
+      [{ role: 'copy', label: 'Copy', enabled: true }],
+      linkURL
+    )
+  }
+})
+
+void test('an image yields its menu to the renderer even on a link', () => {
+  assert.deepEqual(
+    buildContextMenuTemplate(
+      params({ mediaType: 'image', linkURL: 'https://lody.ai/docs' }),
+      LABELS
+    ),
+    []
+  )
 })
