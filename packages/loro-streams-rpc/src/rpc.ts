@@ -85,6 +85,7 @@ import {
   type HeadStreamOutput,
   type StreamError,
   type StreamPart,
+  type StreamsClientWebSocketOptions,
   type TimeoutConfig,
 } from '@loro-dev/streams-client';
 import type {
@@ -1305,7 +1306,11 @@ export function createLoroStreamsJsonStreamClient(options: {
    * Pass `0` to disable. Defaults to {@link DEFAULT_LIVE_IDLE_TIMEOUT_MS}.
    */
   liveIdleTimeoutMs?: number;
-  webSocket?: LoroStreamsWebSocketOptions;
+  webSocket?:
+    | StreamsClientWebSocketOptions
+    | (Omit<StreamsClientWebSocketOptions, 'auth'> & {
+        readonly auth?: LoroStreamsWebSocketOptions['auth'];
+      });
   timeout?: Partial<TimeoutConfig>;
   shardUrls?: {
     readonly bootstrap?: readonly string[];
@@ -1448,9 +1453,7 @@ export function createLoroStreamsJsonStreamClient(options: {
           offset: state.nextOffset ?? 'now',
           mode: liveMode,
           ...(wsEnabled ? { webSocket: options.webSocket } : {}),
-          ...(liveOptions?.autoCreate !== undefined
-            ? { autoCreate: liveOptions.autoCreate }
-            : {}),
+          ...(liveOptions?.autoCreate !== undefined ? { autoCreate: liveOptions.autoCreate } : {}),
           signal: watchdog.signal,
         })) {
           if (event.mode === 'ws') {
@@ -2786,11 +2789,7 @@ export class LoroStreamsRpcResponseDispatcher {
       const useWsAutoCreate =
         this.shouldPrecreateResponseStream && this.options.streamClient.webSocketEnabled === true;
       try {
-        if (
-          this.shouldPrecreateResponseStream &&
-          !this.responseStreamEnsured &&
-          !useWsAutoCreate
-        ) {
+        if (this.shouldPrecreateResponseStream && !this.responseStreamEnsured && !useWsAutoCreate) {
           await this.options.streamClient.ensureJsonStream(
             this.responseStreamId,
             this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
