@@ -2,7 +2,6 @@ import { pluginRpcResultSchema } from '@lody/shared/plugins/machine-rpc'
 import { createHash } from 'node:crypto'
 import { unpackClientBundle, MAX_PACKED_CLIENT_BUNDLE_BYTES } from '@lody/shared/plugins/digest'
 
-// The reader map belongs to the native account/workspace; navigation also rotates the document key.
 const catalogs = new WeakMap<
   object,
   WeakMap<object, Map<string, Map<string, { digest: string; client: string }>>>
