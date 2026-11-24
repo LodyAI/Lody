@@ -62,6 +62,7 @@ export const defaultNS = 'translation';
 export const fallbackLanguage = 'en';
 const LANGUAGE_STORAGE_KEY = 'lody-language';
 let initializationPromise: Promise<void> | null = null;
+let latestLanguageRequest = 0;
 
 function coerceSupportedLanguage(value: unknown): SupportedLanguage | null {
   if (typeof value !== 'string') {
@@ -145,27 +146,18 @@ export function detectBrowserLanguage(): SupportedLanguage | null {
   return null;
 }
 
-export const initI18n = async (language: string) => {
-  const nextLanguage = coerceSupportedLanguage(language) ?? fallbackLanguage;
-  // Pull the locale bundle before init — with `initImmediate: false` the init
-  // itself is synchronous, so this is the only async gap. In tests that mock
-  // react-i18next without initReactI18next, the .use() chain throws — degrade
-  // to a skipped init instead of surfacing an unhandled rejection.
-  try {
-    await ensureLanguageResources(nextLanguage);
-  } catch (error) {
-    console.warn(`Failed to load i18n resources for ${nextLanguage}:`, error);
-  }
-
+function ensureI18nInitialized(): Promise<void> {
   if (!initializationPromise) {
     try {
+      // Initialize synchronously with the eager fallback (`en`) so react-i18next
+      // registers its singleton before any component renders. Otherwise a host
+      // that mounts before `initI18n` resolves hits `useTranslation()`'s `!i18n`
+      // early return (skipping hooks) and crashes with a hook-order mismatch on
+      // its next render.
       initializationPromise = i18next
         .use(initReactI18next)
         .init({
-          // The first call happens at module bootstrap with the stored/detected
-          // preference. Initializing directly in that language avoids committing
-          // one English frame before AppInitializer's effect can reconcile it.
-          lng: nextLanguage,
+          lng: fallbackLanguage,
           fallbackLng: fallbackLanguage,
           defaultNS,
           ns: [defaultNS],
@@ -190,8 +182,27 @@ export const initI18n = async (language: string) => {
       initializationPromise = Promise.resolve();
     }
   }
+  return initializationPromise;
+}
 
-  await initializationPromise;
+export const initI18n = async (language: string) => {
+  const requestId = ++latestLanguageRequest;
+  const nextLanguage = coerceSupportedLanguage(language) ?? fallbackLanguage;
+  const initPromise = ensureI18nInitialized();
+
+  let resourcesLoaded = true;
+  try {
+    await ensureLanguageResources(nextLanguage);
+  } catch (error) {
+    resourcesLoaded = false;
+    console.warn(`Failed to load i18n resources for ${nextLanguage}:`, error);
+  }
+
+  await initPromise;
+
+  if (!resourcesLoaded || requestId !== latestLanguageRequest) {
+    return;
+  }
 
   if (i18next.resolvedLanguage === nextLanguage || i18next.language === nextLanguage) {
     return;
