@@ -6,8 +6,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AttachmentAddMenu } from '../src/components/chat/attachment-add-menu';
 import { initI18n } from '../src/i18n';
-import { commands } from '../src/lib/commands';
-import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -28,7 +26,6 @@ describe('AttachmentAddMenu', () => {
 
   beforeEach(async () => {
     await initI18n('en');
-    commands.resetAllUserKeybindings();
     vi.stubGlobal('PointerEvent', TestPointerEvent);
     vi.useFakeTimers();
     container = document.createElement('div');
@@ -38,8 +35,6 @@ describe('AttachmentAddMenu', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
-    for (const command of commands.list()) commands.unregister(command.id);
-    commands.resetAllUserKeybindings();
     document.body.innerHTML = '';
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -173,91 +168,4 @@ describe('AttachmentAddMenu', () => {
       );
     }
   );
-
-  const pressAddMenuChord = (target: Window | Element) =>
-    target.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: ';',
-        code: 'Semicolon',
-        ctrlKey: true,
-        bubbles: true,
-      })
-    );
-
-  it('opens on ⌘; while the composer is focused, and stays shut elsewhere', async () => {
-    await act(async () => {
-      root.render(
-        <>
-          <CommandShortcutHost />
-          <div>
-            <textarea data-lody-composer-input="" />
-            <AttachmentAddMenu isMobile={false} onAddAttachment={vi.fn()} />
-          </div>
-        </>
-      );
-    });
-
-    await act(async () => {
-      pressAddMenuChord(window);
-      await vi.advanceTimersByTimeAsync(40);
-    });
-    expect(document.body.querySelector('[role="menu"]')).toBeNull();
-
-    await act(async () => {
-      pressAddMenuChord(container.querySelector('[data-lody-composer-input]')!);
-      await vi.advanceTimersByTimeAsync(40);
-    });
-    expect(document.body.querySelector('[role="menuitem"]')).not.toBeNull();
-  });
-
-  it('answers ⌘; only from the composer surface owning the focused field', async () => {
-    await act(async () => {
-      root.render(
-        <>
-          <CommandShortcutHost />
-          <div data-testid="box-a">
-            <textarea data-lody-composer-input="" />
-            <AttachmentAddMenu isMobile={false} onAddAttachment={vi.fn()} />
-          </div>
-          <div data-testid="box-b">
-            <textarea data-lody-composer-input="" />
-            <AttachmentAddMenu isMobile={false} onAddAttachment={vi.fn()} />
-          </div>
-        </>
-      );
-    });
-
-    const boxA = container.querySelector('[data-testid="box-a"]')!;
-    const boxB = container.querySelector('[data-testid="box-b"]')!;
-    const triggerOf = (box: Element) => box.querySelector('button[aria-label="Add attachment"]');
-
-    await act(async () => {
-      pressAddMenuChord(boxB.querySelector('[data-lody-composer-input]')!);
-      await vi.advanceTimersByTimeAsync(40);
-    });
-
-    expect(document.body.querySelectorAll('[role="menu"]')).toHaveLength(1);
-    expect(triggerOf(boxB)?.getAttribute('aria-expanded')).toBe('true');
-    expect(triggerOf(boxA)?.getAttribute('aria-expanded')).not.toBe('true');
-  });
-
-  it('does not open on ⌘; while its surface is inactive', async () => {
-    await act(async () => {
-      root.render(
-        <>
-          <CommandShortcutHost />
-          <div>
-            <textarea data-lody-composer-input="" />
-            <AttachmentAddMenu isMobile={false} onAddAttachment={vi.fn()} commandsEnabled={false} />
-          </div>
-        </>
-      );
-    });
-
-    await act(async () => {
-      pressAddMenuChord(container.querySelector('[data-lody-composer-input]')!);
-      await vi.advanceTimersByTimeAsync(40);
-    });
-    expect(document.body.querySelector('[role="menu"]')).toBeNull();
-  });
 });

@@ -31,6 +31,8 @@ import type {
   SorbetCustomProvider,
   SorbetCustomProviderEdit,
   SorbetCustomProviderInput,
+  SorbetHostSettings,
+  SorbetHostSettingsUpdate,
 } from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
 import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
@@ -185,6 +187,8 @@ import {
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
@@ -714,6 +718,12 @@ export interface MessageHandlerConfig {
     ) => Promise<
       Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
     >;
+    /** Machine-wide Sorbet Host settings; not bound to a config. */
+    getHostSettings: (signal?: AbortSignal) => Promise<SorbetHostSettings>;
+    updateHostSettings: (
+      patch: SorbetHostSettingsUpdate,
+      signal?: AbortSignal
+    ) => Promise<SorbetHostSettings>;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -4656,10 +4666,12 @@ export class MessageHandler {
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
                 sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                sorbetHostSettings: SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
                   ? {
                       sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
                       sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                      sorbetHostSettingsRemote: SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
                     }
                   : {}),
               }
@@ -7170,10 +7182,12 @@ export class MessageHandler {
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
                 sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                sorbetHostSettings: SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
                   ? {
                       sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
                       sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                      sorbetHostSettingsRemote: SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
                     }
                   : {}),
               }
@@ -8303,13 +8317,41 @@ export class MessageHandler {
       case 'sorbet/providers-update':
       case 'sorbet/providers-delete':
       case 'sorbet/providers-refresh':
-      case 'sorbet/models-list': {
+      case 'sorbet/models-list':
+      case 'sorbet/host-settings-get':
+      case 'sorbet/host-settings-update': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
           request.ownerSessionId
         )
           throw new Error('Sorbet credentials scope mismatch');
+        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
+        // Host settings are machine-wide; the rest resolve a builtin Sorbet config first.
+        const isHostSettings =
+          request.method === 'sorbet/host-settings-get' ||
+          request.method === 'sorbet/host-settings-update';
+        if (isHostSettings) {
+          try {
+            const { SorbetHostSettingsResultSchema } =
+              await import('@lody/shared/local-machine-rpc');
+            if (request.method === 'sorbet/host-settings-get') {
+              return SorbetHostSettingsResultSchema.parse({
+                type: 'sorbet/host-settings-get',
+                settings: await this.sorbetCredentials.getHostSettings(signal),
+              });
+            }
+            return SorbetHostSettingsResultSchema.parse({
+              type: 'sorbet/host-settings-update',
+              settings: await this.sorbetCredentials.updateHostSettings(
+                request.params.patch,
+                signal
+              ),
+            });
+          } catch {
+            throw new Error('Sorbet host settings operation failed');
+          }
+        }
         const configId = request.params.configId as AgentConfigId;
         const config = await this.workspaceDocument.getAgentConfigForMachineLaunch(
           configId,
@@ -8322,7 +8364,6 @@ export class MessageHandler {
           config.agentType !== 'sorbet'
         )
           throw new Error('Sorbet credentials configuration unavailable');
-        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
         try {
           const { SorbetCredentialsResultSchema, SorbetProvidersResultSchema } =
             await import('@lody/shared/local-machine-rpc');

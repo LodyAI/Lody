@@ -2490,7 +2490,6 @@ export const SessionChatInputArea = memo(
           modeOptions={modeOptions}
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
-          commandsEnabled={commandsEnabled}
         />
         {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
