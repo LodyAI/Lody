@@ -15,10 +15,12 @@ runtime 的 `protocol/proposals.ts` 把 `agent_role_proposal` 与 `schedule_prop
 
 结果通过在已打开会话文档中设置通知 `meta` 字段并追加更新写回，与权限应答同一路径。追加失败时版本保留在 `unsent` 中，投影会隐藏未确认的结果，卡片保留按钮供用户明确重试；不会自动重放。Web 卡片内的定时任务编辑未移植，需要修改规则时在创建后编辑任务。
 
+定时任务修改提议（`schedule_edit_proposal`，来自 LodyAI/Lody#3181）复用同一命令：`inspectProposal` 读取实时任务并与提议比对（已删除、`baseActivityId` 之后被修改、所有者、电脑能力、Agent 是否存在），返回提示词逐行差异；接受时在实时任务上写入提议字段，活动 id 使用 Web 的 `scheduleEditProposalActivityId`，因此任一端重试都会重放同一次保存。同一投影还携带 Web 的其他系统行（Agent 警告、分叉来源、恢复聊天记录、worktree 脚本）；未知通知名与 Web 一样隐藏，不再显示为通用事件。
+
 ## 影响
 
-Android 内置 runtime 快照已更新以包含新投影和命令，并通过桥接暴露 `decideProposal`。iOS 上已创建任务的卡片可打开定时任务页；Android 只显示回执。iOS 上 Agent 文件像附件一样可打开；Android 显示名称、类型和大小。
+Android 内置 runtime 快照已更新以包含新投影和命令，并通过桥接暴露 `decideProposal`。两端已创建或已更新任务的回执、以及修改提议的应用按钮旁都有“打开”，直接进入该任务的现有编辑页；原生端没有定时任务订阅，因此修改卡片会在对话回到前台时重新读取任务。iOS 上 Agent 文件像附件一样可打开；Android 显示名称、类型和大小。
 
 ## 验证
 
-`pnpm contract:check` 保持 Swift 合约与 runtime 方法一致。新命令与卡片尚无专门测试。本次改动未进行原生构建、Swift/Kotlin 编译或设备验证。
+`pnpm contract:check` 保持 Swift 合约与 runtime 方法一致。`apps/mobile/ios/apps/ios/tests/schedules/edit-proposal.test.mjs` 在内存定时任务流上驱动修改提议的 `inspectProposal` 与 `decideProposal`。iOS `proposal-cards` UI 用例与 Android `SystemCardsDeviceTest` 使用合成的 runtime 结果渲染卡片；Role 与定时任务创建路径仍没有 runtime 级测试。
