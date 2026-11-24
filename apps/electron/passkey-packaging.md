@@ -28,6 +28,14 @@ app identifiers cannot opt into this association.
 The hook generates files in the per-invocation temporary config directory and
 removes them after packaging. It never edits the public source or its plists.
 
-Local tests validate packaging plans, selected architecture checks and generated
-entitlements. Signed installation, notarization, provisioning and real passkey
-acceptance require the release environment and a real device.
+Local tests validate packaging plans, selected architecture checks, generated
+entitlements and profile authorization rules. Signed installation, notarization,
+provisioning and real passkey acceptance require the release environment and a real device.
+
+`codesign --verify`, notarization and Gatekeeper do not compare a signature with its
+embedded profile; AMFI does, and kills the app at launch when they disagree. Release
+verification therefore runs `node apps/electron/passkey-packaging.mjs <Lody.app>` on each
+signed archive and launches the one matching the runner's architecture. The check fails
+unless the profile lists the signing certificate, is an unexpired Developer ID profile and
+grants every signed entitlement outside `com.apple.security.*`. A profile names specific
+certificates: replacing the Developer ID certificate requires a regenerated profile.
