@@ -28,6 +28,9 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
   menu writes through `useSessionActions`; Today never derives or writes status its own way.
 - A mention is one caret position everywhere: static rows and editor decorators render the
   same `TodayMention`, and caret geometry counts `[data-today-mention]` as one character.
+- A mention drags out only through `startSessionMentionDrag` with `source: 'today'`, never a private
+  channel; the outline surface refuses that source (no line, no drop, no editor text drop), and the
+  editor's `DRAGSTART_COMMAND` leaves a drag from `[data-today-mention]` alone.
 - Folds go through `TodayOutline.setCollapsed` (a `sys:` commit, never an undo step); a peer's fold
   change never refolds an open page's view (`viewFolds` in the outline).
 - `TodayToolbar` takes `surface: 'page' | 'pinned' | 'standalone'`: every surface is a window-top

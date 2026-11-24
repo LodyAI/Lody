@@ -73,6 +73,7 @@ import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import {
   hasAcceptableSessionMentionTransfer,
+  isSessionMentionDragFrom,
   readSessionMentionDragSessionId,
   registerSessionMentionPointerTarget,
 } from '@/lib/session-mention-drag';
@@ -894,6 +895,12 @@ export function TodayOutlineSurface(props: {
         // Captured so the node editor never inserts the dragged title as text.
         event.preventDefault();
         event.stopPropagation();
+        // A mention dragged out of Today is meant for a conversation, never a drop here.
+        if (isSessionMentionDragFrom(event.dataTransfer, 'today')) {
+          event.dataTransfer.dropEffect = 'none';
+          controller.leaveExternal();
+          return;
+        }
         event.dataTransfer.dropEffect = 'copy';
         controller.hoverExternal(event.clientX, event.clientY);
       }}
@@ -906,7 +913,9 @@ export function TodayOutlineSurface(props: {
         if (!controller || !hasAcceptableSessionMentionTransfer(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
-        const sessionId = readSessionMentionDragSessionId(event.dataTransfer);
+        const sessionId = isSessionMentionDragFrom(event.dataTransfer, 'today')
+          ? null
+          : readSessionMentionDragSessionId(event.dataTransfer);
         if (sessionId) controller.dropExternal(sessionId, event.clientX, event.clientY);
         else controller.leaveExternal();
       }}

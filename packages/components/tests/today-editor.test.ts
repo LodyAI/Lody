@@ -11,14 +11,20 @@ import { LoroDoc } from 'loro-crdt';
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Provider, createStore } from 'jotai';
 import {
   TODAY_MENTION_CHAR as M,
   createTodayPageUndo,
+  getSessionRoomId,
   openTodayOutline,
   readTodayText,
 } from '@lody/shared';
 import { bindLoroText } from '../src/components/today/editor/loro-lexical-binding';
 import { TodayDaySection } from '../src/components/today/today-day-section';
+import { TodayEditorContext } from '../src/components/today/editor/today-editor-context';
+import { TodayOutlineSurface } from '../src/components/today/today-view';
+import { SessionMentionDropLayer } from '../src/components/sessions/session-mention-drop-layer';
+import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
 import type { TodayPageStoreCache } from '../src/providers/today-page-store-cache';
 import { createTodayPageStore } from '../src/lib/today/today-page-store';
 import { createTestI18n, withTestI18n } from './test-i18n';
@@ -36,7 +42,13 @@ import {
   $writeComposerValue,
 } from '../src/ui/mention/composer-document';
 import { MentionDecoratorNode } from '../src/ui/mention/mention-node';
-import { clearSessionMentionDrag, startSessionMentionDrag } from '../src/lib/session-mention-drag';
+import {
+  clearSessionMentionDrag,
+  getInFlightSessionMentionDragId,
+  SESSION_MENTION_DRAG_TYPE,
+  startSessionMentionDrag,
+} from '../src/lib/session-mention-drag';
+import { createSessionMentionTransfer } from './helpers/session-mention-transfer';
 
 describe('Today text diff', () => {
   it('never splits a surrogate pair', () => {
@@ -958,6 +970,32 @@ describe('Today editor around mentions', () => {
     ctx.done();
   });
 
+  it('a mention dragged out while editing carries no text drag of the editor', async () => {
+    const ctx = await mount('ab');
+    ctx.store.outline.insertMention(ctx.nodeId, 1, 0, { kind: 'session', id: 's1' });
+    ctx.controller.activate(ctx.store, ctx.nodeId, 2);
+    ctx.controller.attachRoot(ctx.root);
+    // A ranged selection is what the editor would otherwise mark as its drag source.
+    await ctx.press('ArrowLeft');
+    expect(ctx.selection()).toEqual({ start: 1, end: 2 });
+    const dragStart = (target: Element) => {
+      const transfer = createSessionMentionTransfer();
+      const event = new Event('dragstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', { value: transfer });
+      target.dispatchEvent(event);
+      return transfer.types;
+    };
+    const chip = document.createElement('span');
+    chip.setAttribute('data-today-mention', '');
+    ctx.root.querySelector('[data-lexical-decorator]')!.append(chip);
+    expect(dragStart(chip)).not.toContain('application/x-lexical-drag');
+    // Dragging the selected text itself stays the editor's own drag.
+    expect(dragStart(ctx.root.querySelector('[data-lexical-text]') ?? ctx.root)).toContain(
+      'application/x-lexical-drag'
+    );
+    ctx.done();
+  });
+
   it('Backspace after a mention selects it, and only a second Backspace deletes it', async () => {
     const ctx = await mount('ab');
     ctx.store.outline.insertMention(ctx.nodeId, 1, 0, { kind: 'session', id: 's1' });
@@ -968,6 +1006,189 @@ describe('Today editor around mentions', () => {
     expect(ctx.selection()).toEqual({ start: 1, end: 2 });
     await ctx.press('Backspace');
     expect(ctx.store.outline.getNode(ctx.nodeId)).toMatchObject({ text: 'ab', mentions: [] });
+    ctx.done();
+  });
+});
+
+describe('Today mention drag-out', () => {
+  afterEach(() => clearSessionMentionDrag());
+
+  async function setup() {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const { createTodayPageStoreCache } = await import('../src/providers/today-page-store-cache');
+    const { TodayEditorController } =
+      await import('../src/components/today/editor/today-editor-controller');
+    const { getTodayDocId, parseTodayPasteText } = await import('@lody/shared');
+    const cache = createTodayPageStoreCache({
+      releaseDelayMs: 1000,
+      idleCap: 2,
+      setTimer: () => () => {},
+      retryDelayMs: () => 1000,
+      repo: {
+        openDoc: async () => ({ doc: new LoroDoc(), joinRoom: async () => null }),
+        isRegistered: async () => true,
+        upsertDocMeta: async () => {},
+        unloadDoc: async () => {},
+        observeDocs: () => ({ docIds: [], unsubscribe: () => {} }),
+      },
+    });
+    const date = '2026-11-20' as never;
+    const store = await cache.acquire(getTodayDocId('u1', date));
+    store.outline.paste({ kind: 'page-start' }, parseTodayPasteText('ask \nlater'));
+    const [first] = store.getSnapshot().visible;
+    store.outline.insertMention(first!.id, 4, 0, { kind: 'session', id: 's1' });
+    store.outline.insertMention(first!.id, 5, 0, { kind: 'session', id: 's9' });
+    const controller = new TodayEditorController(cache);
+    const opened: string[] = [];
+    const menus: string[] = [];
+    controller.onOpenSession = (sessionId) => opened.push(sessionId);
+    controller.onMentionMenu = (sessionId) => menus.push(sessionId);
+    const jotai = createStore();
+    jotai.set(sessionMetaCacheAtom, {
+      [getSessionRoomId('s1')]: { title: 'Fix login' } as never,
+    });
+    // Metadata has settled: `s9` is a deleted conversation.
+    jotai.set(docMetaCacheReadyAtom, true);
+    const dropped: string[] = [];
+    const layer = (testId: string, excludeSessionId: string) =>
+      createElement(
+        'div',
+        { 'data-testid': testId },
+        createElement(SessionMentionDropLayer, {
+          enabled: true,
+          excludeSessionId,
+          onDropSessionId: (sessionId: string) => dropped.push(sessionId),
+          children: createElement('div', null, 'conversation'),
+        })
+      );
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        withTestI18n(
+          createElement(
+            Provider,
+            { store: jotai },
+            createElement(
+              TodayEditorContext.Provider,
+              { value: controller },
+              createElement(TodayOutlineSurface, {
+                controller,
+                children: createElement(TodayDaySection, {
+                  cache,
+                  userId: 'u1',
+                  date,
+                  today: date,
+                  isTop: true,
+                  onEmptyChange: () => {},
+                }),
+              }),
+              layer('other-conversation', 'sess_open'),
+              layer('same-conversation', 's1')
+            )
+          ),
+          createTestI18n()
+        )
+      )
+    );
+    const transfer = () => Object.assign(createSessionMentionTransfer(), { dropEffect: 'none' });
+    const fire = (target: EventTarget, type: string, dataTransfer: ReturnType<typeof transfer>) => {
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: 0,
+        clientY: 0,
+      });
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+      act(() => void target.dispatchEvent(event));
+      return event;
+    };
+    const overlay = (testId: string) =>
+      container.querySelector(
+        `[data-testid="${testId}"] [data-testid="conversation-drop-overlay"]`
+      ) !== null;
+    const row = () => container.querySelector('[data-today-node]')!;
+    const mentions = () =>
+      store.getSnapshot().visible.flatMap((node) => node.mentions.map((mention) => mention.id));
+    const done = () => {
+      act(() => root.unmount());
+      container.remove();
+      controller.dispose();
+    };
+    return {
+      container,
+      controller,
+      dropped,
+      opened,
+      menus,
+      transfer,
+      fire,
+      overlay,
+      row,
+      mentions,
+      done,
+    };
+  }
+
+  it('drags a mention to a conversation like a sidebar row, and Today never takes it back', async () => {
+    const ctx = await setup();
+    const chip = ctx.container.querySelector('[data-today-session="s1"]')!;
+    expect(chip.getAttribute('draggable')).toBe('true');
+    const dragged = ctx.transfer();
+    ctx.fire(chip, 'dragstart', dragged);
+    expect(dragged.getData(SESSION_MENTION_DRAG_TYPE)).toBe('s1');
+    expect(dragged.getData('text/plain')).toBe('Fix login');
+    // Picked up: other conversations light up at once; the conversation itself does not.
+    expect(ctx.overlay('other-conversation')).toBe(true);
+    expect(ctx.overlay('same-conversation')).toBe(false);
+
+    // Over Today, its own mention draws no line, is refused, and never reaches the editor.
+    const over = ctx.fire(ctx.row(), 'dragover', dragged);
+    expect(over.defaultPrevented).toBe(true);
+    expect(dragged.dropEffect).toBe('none');
+    expect(ctx.controller.getDropIndicator()).toBeNull();
+    const drop = ctx.fire(ctx.row(), 'drop', dragged);
+    expect(drop.defaultPrevented).toBe(true);
+    expect(ctx.mentions()).toEqual(['s1', 's9']);
+
+    ctx.fire(window, 'dragend', dragged);
+    expect(ctx.overlay('other-conversation')).toBe(false);
+
+    // The same place takes a conversation dragged from the sidebar.
+    const fromSidebar = ctx.transfer();
+    act(() => startSessionMentionDrag({ dataTransfer: fromSidebar }, { sessionId: 's2' }));
+    ctx.fire(ctx.row(), 'dragover', fromSidebar);
+    expect(fromSidebar.dropEffect).toBe('copy');
+    ctx.fire(ctx.row(), 'drop', fromSidebar);
+    expect(ctx.mentions()).toContain('s2');
+    ctx.done();
+  });
+
+  it('keeps the status icon and title clicks, and a deleted conversation does not drag', async () => {
+    const ctx = await setup();
+    const chip = ctx.container.querySelector('[data-today-session="s1"]')!;
+    const status = chip.querySelector('[data-today-mention-status]')!;
+    act(
+      () => void status.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }))
+    );
+    const fromStatus = ctx.fire(chip, 'dragstart', ctx.transfer());
+    expect(fromStatus.defaultPrevented).toBe(true);
+    expect(getInFlightSessionMentionDragId()).toBeNull();
+    act(() => (status as HTMLElement).click());
+    expect(ctx.menus).toEqual(['s1']);
+    act(() => (chip.querySelector('[role="button"]') as HTMLElement).click());
+    expect(ctx.opened).toEqual(['s1']);
+    // A press on the title arms the drag again.
+    act(
+      () => void chip.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true }))
+    );
+    expect(ctx.fire(chip, 'dragstart', ctx.transfer()).defaultPrevented).toBe(false);
+    expect(getInFlightSessionMentionDragId()).toBe('s1');
+
+    const missing = ctx.container.querySelector('[data-today-session="s9"]')!;
+    expect(missing.textContent).toBe('Session deleted / No access');
+    expect(missing.hasAttribute('draggable')).toBe(false);
     ctx.done();
   });
 });
