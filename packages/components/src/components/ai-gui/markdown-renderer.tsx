@@ -709,8 +709,8 @@ function MarkdownActionLink({
   const Icon = target.kind === 'schedules' ? CalendarClock : SlidersHorizontal;
   const body = (
     <>
-      <Icon className="h-[0.95em] w-[0.95em] shrink-0 self-center" aria-hidden="true" />
-      <span className="min-w-0 truncate">{title}</span>
+      <Icon {...stylex.props(markdownStyles.emLinkGlyph)} aria-hidden="true" />
+      <span {...stylex.props(markdownStyles.emText)}>{title}</span>
     </>
   );
   if (!navigate || inert) {
@@ -718,7 +718,10 @@ function MarkdownActionLink({
       <span
         data-action-link={canonicalHref}
         title={title}
-        className={SESSION_LINK_CHIP_CLASS_NAME}
+        className={clsx(
+          SESSION_LINK_CHIP_CLASS_NAME,
+          stylex.props(markdownStyles.sessionChip).className
+        )}
       >
         {body}
       </span>
@@ -729,7 +732,10 @@ function MarkdownActionLink({
       type="button"
       data-action-link={canonicalHref}
       title={title}
-      className={cn(SESSION_LINK_CHIP_CLASS_NAME, 'cursor-pointer')}
+      className={clsx(
+        SESSION_LINK_CHIP_CLASS_NAME,
+        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
+      )}
       onClick={() => navigate(target)}
     >
       {body}
