@@ -38,6 +38,15 @@ unconfirmed outcome so the card keeps its buttons for an explicit retry; nothing
 replayed automatically. Web's in-card Edit for schedules is not ported; a person who
 wants to change the rule edits the schedule afterwards.
 
+Schedule edit proposals (`schedule_edit_proposal`, from LodyAI/Lody#3181) reuse the
+same command: an `inspectProposal` read compares the live schedule with the proposal
+(deleted, edited since `baseActivityId`, owner, machine capability, Agent present) and
+returns the prompt line diff, and accept saves the patched fields over the live
+schedule under web's `scheduleEditProposalActivityId`, so a retry on either client
+replays the same save. The same projection carries web's other system rows (agent
+warnings, fork origin, resumed history, worktree scripts); unknown notice names are
+hidden as on web instead of reading as a generic event.
+
 ## Consequences
 
 The Android vendored runtime is re-snapshotted for the new projection and command and
@@ -48,5 +57,8 @@ attachments; Android shows name, type and size.
 ## Verification
 
 `pnpm contract:check` keeps the Swift contract in step with the runtime methods.
-The new command and cards have no dedicated tests yet. Native builds,
-Swift and Kotlin compilation, and device behavior were not exercised in this change.
+`apps/mobile/ios/apps/ios/tests/schedules/edit-proposal.test.mjs` drives `inspectProposal`
+and `decideProposal` for edit proposals against in-memory schedule streams. The iOS
+`proposal-cards` UI case and Android `SystemCardsDeviceTest` render the cards with
+synthetic runtime answers; the Role and schedule create paths still have no
+runtime-level test.
