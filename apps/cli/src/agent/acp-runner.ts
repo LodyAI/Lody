@@ -95,7 +95,10 @@ import {
   classifyCliSpawnReason,
   resolveAcpLauncher,
 } from './acp-analytics';
-import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
+import {
+  resolveElectronRunAsNodeEnv,
+  withoutElectronBootstrapCredentials,
+} from '@/electron-bootstrap-env';
 import { ACP_STARTUP_QUEUE_WAIT_TIMEOUT_MS } from '@lody/shared/acp-startup-budget';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { withAcpSessionStartSlot } from './acp-session-start-gate';
@@ -280,7 +283,11 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     {
       command: executable.command,
       args: executable.args,
-      options: { cwd: options.workdir, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] },
+      options: {
+        cwd: options.workdir,
+        env: resolveElectronRunAsNodeEnv(executable.command, options.env),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
       processGroup: true,
     },
     toShared(withSpawn(options.spawnImpl))
