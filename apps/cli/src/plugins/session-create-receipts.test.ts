@@ -76,10 +76,47 @@ it('preserves the real session metadata on replay after archive and manager rest
       logger: getLogger('plugin-test'),
     });
   let manager = await open();
-  const { PluginDaemon } = await import('./plugin-host-legacy');
+  const { Registry, registryLayer } = await import('./workflow/plugin-registry');
+  const { makePluginHostLayer } = await import('./workflow/plugin-host');
+  const { DevPluginCompiler } = await import('./workflow/dev-plugin-compiler');
+  const { platformLayer } = await import('../platform/process-options');
+  const { dispatchMachineHostCall } = await import('./workflow/daemon-command-executor');
+  const { Effect, Layer, ManagedRuntime } = await import('effect');
   const { MessageHandler } = await import('../lib/message-handler');
   const { writeFileSync } = await import('node:fs');
-  const daemon = new PluginDaemon(dir, workspaceId, 'm', () => {});
+  const worker = join(dir, 'worker.mjs'),
+    machineEntry = join(dir, 'plugin.mjs');
+  const { fileURLToPath } = await import('node:url');
+  await (
+    await import('esbuild')
+  ).build({
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    entryPoints: [fileURLToPath(new URL('./plugin-worker-entry.ts', import.meta.url))],
+    outfile: worker,
+  });
+  writeFileSync(
+    machineEntry,
+    `export default {kind:'machine-plugin',register(m){const schema={safeParse:data=>({success:true,data})};for (const scope of ['session','project']) m.query({id:'inspect-'+scope,scope,input:schema,output:schema},async(ctx,p)=>p.snapshot?ctx.lody.readSnapshot(p.snapshot):ctx.lody.read(p.target,{id:p.id},p.input));m.mutation({id:'create',scope:'machine',input:schema,output:schema},(ctx,input)=>ctx.lody.sessions.create(ctx.machine,input));m.mutation({id:'rename',scope:'session',input:schema,output:schema},async(ctx,input)=>{await ctx.lody.execute(ctx.target,{id:'sessionUpdateTitle'},{title:input});const title=(await ctx.lody.readSnapshot({kind:'session-meta',session:ctx.target})).doc.title;await ctx.lody.sessions.send(ctx.target,{prompt:'ready for review'});const detail=await ctx.lody.read(ctx.target,{id:'sessionDetail'});return {title,queued:detail.queuedCount,first:detail.recentTurns[0].previewText}})}}`
+  );
+  let dropAcceptedReply = false;
+  let unacknowledged: unknown;
+  const hostCall: typeof dispatchMachineHostCall = async (call, signal) => {
+    const result = await dispatchMachineHostCall(call, signal);
+    if (dropAcceptedReply && call.op === 'sessions.create') {
+      dropAcceptedReply = false;
+      unacknowledged = result;
+      throw Object.assign(Error('synthetic lost acceptance reply'), { code: 'outcome_unknown' });
+    }
+    return result;
+  };
+  const runtime = ManagedRuntime.make(
+    registryLayer(dir, workspaceId, 'm', () => {}).pipe(
+      Layer.provide(Layer.merge(makePluginHostLayer(worker, hostCall), DevPluginCompiler.layer)),
+      Layer.provide(platformLayer({}))
+    )
+  );
   const digest = '1'.repeat(64);
   writeFileSync(
     join(dir, 'catalog.json'),
@@ -90,6 +127,7 @@ it('preserves the real session metadata on replay after archive and manager rest
         enabled: true,
         current: {
           directory: dir,
+          machineEntry,
           clientDigest: digest,
           manifest: {
             sdk: '^1.0.0',
@@ -97,6 +135,7 @@ it('preserves the real session metadata on replay after archive and manager rest
             title: 'Plugin',
             version: '1.0.0',
             client: 'client.js',
+            machine: 'plugin.mjs',
           },
         },
       },
@@ -114,7 +153,13 @@ it('preserves the real session metadata on replay after archive and manager rest
       get workspaceDocument() {
         return manager;
       },
-      pluginRpc: daemon.dispatchMachineRpc.bind(daemon),
+      pluginRpc: ((request, actor, signal) =>
+        runtime.runPromise(
+          Effect.flatMap(Registry, (r) => r.machineRpc(request, actor)),
+          { signal }
+        )) satisfies NonNullable<
+        import('../lib/message-handler').MessageHandlerConfig['pluginRpc']
+      >,
     }
   );
   type Input = Extract<
@@ -154,7 +199,183 @@ it('preserves the real session metadata on replay after archive and manager rest
   };
   try {
     const agentConfigId = await manager.createAgentConfig('builtin', 'codex', machineId);
-    await daemon.start();
+    await runtime.runPromise(Effect.flatMap(Registry, (r) => r.start));
+    const invokeCreate = (requestId = 'machine-write') =>
+      handler.handlePluginMachineRpc(
+        {
+          method: 'plugin/mutate',
+          workspaceId,
+          machineId,
+          params: {
+            scope: 'machine',
+            pluginId: 'plugin',
+            descriptorId: 'create',
+            target: { workspaceId, machineId },
+            input: { prompt: 'machine plugin', requestId },
+          },
+        },
+        'owner',
+        true
+      );
+    const [reply, concurrent] = await Promise.all([invokeCreate(), invokeCreate()]);
+    expect(concurrent).toEqual(reply);
+    expect(reply).toMatchObject({
+      ok: true,
+      result: {
+        type: 'plugin/mutate',
+        data: { workspaceId, machineId, sessionId: expect.any(String) },
+      },
+    });
+    expect(await invokeCreate()).toEqual(reply);
+    if (!reply.ok || reply.result.type !== 'plugin/mutate') throw Error('Missing plugin session');
+    const created = (reply.result.data as { sessionId: string }).sessionId;
+    const backend = await (
+      await import('../session/session-backend')
+    ).createSessionBackend(
+      await manager.getOrCreateSessionDoc(created as import('@lody/shared').SessionId)
+    );
+    expect(await backend.history.count()).toBe(1);
+    expect(await backend.readTurn(`plugin-create:${created}`)).toMatchObject({
+      state: 'ready',
+      turn: { userId: 'owner' },
+    });
+    const rename = (user: string) =>
+      handler.handlePluginMachineRpc(
+        {
+          method: 'plugin/mutate',
+          workspaceId,
+          machineId,
+          params: {
+            scope: 'session',
+            pluginId: 'plugin',
+            descriptorId: 'rename',
+            target: { workspaceId, machineId, sessionId: created },
+            input: 'Receipt session',
+          },
+        },
+        user,
+        false,
+        undefined,
+        { sessionId: created }
+      );
+    await expect(rename('other')).rejects.toBeDefined();
+    expect(await rename('owner')).toMatchObject({
+      ok: true,
+      result: { data: { title: 'Receipt session', queued: 1, first: 'machine plugin' } },
+    });
+    expect(await backend.getMessageQueue()).toMatchObject([
+      { userId: 'owner', task: 'ready for review' },
+    ]);
+
+    const selected = 'chosen' as import('@lody/shared').LocalProjectId;
+    await (
+      await import('../lib/local-project-meta')
+    ).upsertMachineLocalProject(manager.repo, workspaceId, machineId, {
+      id: selected,
+      name: 'Chosen',
+      rootPath: dir,
+      createdAtMs: 1,
+    });
+    const sid = created as import('@lody/shared').SessionId;
+    await manager.repo.upsertDocMeta(getSessionRoomId(sid), {
+      project: { kind: 'local', localProjectId: selected },
+      agentRoleId: 'architect',
+    });
+    const other = await create('foreign-session', true, { businessKey: 'other' });
+    await manager.repo.upsertDocMeta(getSessionRoomId(other), {
+      project: { kind: 'local', localProjectId: 'foreign' },
+      agentRoleId: 'architect',
+    });
+    const { SessionExecutionService } = await import('../session/session-execution-service');
+    Object.assign(handler, {
+      executionService: Object.assign(Object.create(SessionExecutionService.prototype), {
+        deps: {
+          workspaceId,
+          machineId,
+          workspaceDocument: manager,
+          sessionManager: { getSession: () => undefined },
+        },
+      }),
+    });
+    const project = { workspaceId, machineId, projectId: selected },
+      session = { ...project, sessionId: sid };
+    const probe = (scope: 'project' | 'session', input: import('zod').core.util.JSONType) =>
+      handler.handlePluginMachineRpc(
+        {
+          method: 'plugin/query',
+          workspaceId,
+          machineId,
+          params: {
+            pluginId: 'plugin',
+            scope,
+            target: scope === 'project' ? project : session,
+            descriptorId: `inspect-${scope}`,
+            input,
+          },
+        },
+        'member',
+        false,
+        undefined,
+        scope === 'session' ? { projectId: selected, sessionId: sid } : { projectId: selected }
+      );
+    const full = vi.spyOn(backend.history, 'readAll').mockImplementation(() => {
+      throw Error('Unexpected full transcript scan');
+    });
+    const ranges = vi.spyOn(backend.history, 'readRange');
+    try {
+      const result = await probe('project', {
+        target: project,
+        id: 'sessions',
+        input: { agentRoleId: 'architect' },
+      });
+      expect(result).toMatchObject({ ok: true, result: { data: { items: [{ session }] } } });
+      expect(ranges).not.toHaveBeenCalled();
+      expect(
+        await probe('project', { snapshot: { kind: 'project-state', project, path: ['name'] } })
+      ).toMatchObject({ ok: true, result: { data: { doc: 'Chosen' } } });
+      for (const input of [
+        { target: session, id: 'sessionTurns' },
+        { snapshot: { kind: 'workspace-state', workspace: { workspaceId } } },
+        { snapshot: { kind: 'schedule-doc', workspace: { workspaceId }, scheduleId: 'foreign' } },
+      ])
+        await expect(probe('project', input)).rejects.toBeDefined();
+      await backend.appendHistoryTurn({
+        id: 'review-turn',
+        role: 'assistant',
+        userTurnId: `plugin-create:${sid}`,
+        timestamp: '2026-10-01T00:00:00Z',
+        finished: true,
+        items: [{ type: 'text', text: 'Reviewed' }],
+        fileDiff: [],
+      });
+      expect(
+        await probe('session', { target: session, id: 'sessionTurns', input: { limit: 1 } })
+      ).toMatchObject({
+        result: {
+          data: {
+            nextCursor: '1',
+            items: [
+              {
+                turnId: 'review-turn',
+                userTurnId: `plugin-create:${sid}`,
+                stopReason: 'end_turn',
+                proseMarkdown: 'Reviewed',
+              },
+            ],
+          },
+        },
+      });
+      expect(ranges.mock.calls).toEqual([[1, 2]]);
+      expect(
+        await probe('session', {
+          snapshot: { kind: 'session-transcript', session, turnIds: ['review-turn'] },
+        })
+      ).toMatchObject({ result: { data: { doc: { turns: [{ id: 'review-turn' }] } } } });
+      expect(ranges.mock.calls).toEqual([[1, 2]]);
+    } finally {
+      ranges.mockRestore();
+      full.mockRestore();
+    }
     await expect(create('denied', false)).rejects.toThrow('denied');
     const [first, again] = await Promise.all([create('1'), create('1')]);
     expect(first).toBe(again);
@@ -193,7 +414,6 @@ it('preserves the real session metadata on replay after archive and manager rest
     await expect(
       create('child', true, { ...options, pullRequestUrl: 'file:///bad' })
     ).rejects.toThrow(/pull request/);
-    const { Effect } = await import('effect');
     Object.assign(handler, {
       encryptedExecution: {
         resolveDerivationOrigin: () =>
@@ -259,11 +479,27 @@ it('preserves the real session metadata on replay after archive and manager rest
       isArchived: true,
       title: 'edited',
     });
+    dropAcceptedReply = true;
+    await expect(invokeCreate('lost-reply')).rejects.toBeDefined();
+    expect(unacknowledged).toMatchObject({ sessionId: expect.any(String) });
     // Simulate an archive received while the daemon watcher is offline.
     await manager.repo.flush();
     await manager.cleanUp({ fast: true });
     manager = await open();
     expect(await create('1')).toBe(first);
+    const recovered = await invokeCreate('lost-reply');
+    expect(recovered).toMatchObject({ ok: true, result: { data: unacknowledged } });
+    const recoveredId = (unacknowledged as { sessionId: import('@lody/shared').SessionId })
+      .sessionId;
+    const recoveredBackend = await (
+      await import('../session/session-backend')
+    ).createSessionBackend(await manager.getOrCreateSessionDoc(recoveredId));
+    expect(await recoveredBackend.history.count()).toBe(1);
+    expect(await recoveredBackend.readTurn(`plugin-create:${recoveredId}`)).toMatchObject({
+      state: 'ready',
+      turn: { role: 'user' },
+    });
+
     expect((await manager.repo.getDocMeta(getSessionRoomId(first)))?.meta).toMatchObject({
       title: 'edited',
       createdByPluginId: 'plugin',
@@ -273,7 +509,7 @@ it('preserves the real session metadata on replay after archive and manager rest
     expect(await create('2')).not.toBe(first);
   } finally {
     await manager.cleanUp({ fast: true });
-    await daemon.dispose();
+    await runtime.dispose();
     vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   }

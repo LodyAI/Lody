@@ -475,6 +475,117 @@ function describeDocOpener(stack: string | undefined): string {
 }
 
 export class LoroDocumentManager {
+  pluginDaemon?: () => Promise<import('../../plugins/plugin-host-legacy').PluginDaemon | undefined>;
+  async pluginWorkflows() {
+    return (await (await this.pluginDaemon?.())?.workflowCatalog()) ?? [];
+  }
+  workflowSessionAuthority?: (
+    pluginId: string,
+    installation: string,
+    projectId: string
+  ) => Promise<() => void>;
+  async authorizeWorkflowChild(
+    sessionId: SessionId,
+    principal: string,
+    projectId: string | undefined,
+    roleId: string | undefined,
+    kind: 'acpProviders' | 'mcpServers',
+    descriptorId: string
+  ) {
+    const pluginId = descriptorId.split(':')[1],
+      prefix = `plugin-workflow:${pluginId}:`;
+    if (
+      !this.isEncryptedWorkspace() ||
+      !principal.startsWith(prefix) ||
+      !this.workflowMachineId ||
+      !projectId ||
+      !roleId ||
+      !pluginId ||
+      !existsSync(this.pluginReceiptsPath) ||
+      !this.workflowSessionAuthority
+    )
+      throw Error('Workflow child forbidden');
+    const receipts = new SessionCreateReceipts(this.pluginReceiptsPath);
+    try {
+      if (
+        !receipts.matchesScope(sessionId, {
+          workspaceId: this.workspaceId,
+          callerUserId: principal,
+          canonicalTargetKey: JSON.stringify([this.workflowMachineId, projectId]),
+          pluginId,
+        })
+      )
+        throw Error('Workflow session receipt mismatch');
+      const { pluginInitialRole } = await import('@lody/shared/plugins/machine-rpc');
+      if (pluginInitialRole.parse(receipts.initialRole(sessionId)).snapshot.id !== roleId)
+        throw Error('Workflow role mismatch');
+    } finally {
+      receipts.close();
+    }
+    const check = await this.workflowSessionAuthority(
+      pluginId,
+      principal.slice(prefix.length),
+      projectId
+    );
+    const role = (await this.pluginWorkflows())
+      .find((g) => g.pluginId === pluginId)
+      ?.roles.get(roleId);
+    if (
+      !role ||
+      !(kind === 'acpProviders'
+        ? role.defaultProvider === descriptorId
+        : role.mcpServers.includes(descriptorId))
+    )
+      throw Error('Workflow child not bound to approved role');
+    check();
+    return check;
+  }
+  workflowMachineId?: MachineId;
+  async workflowProviders(machineId: MachineId): Promise<AgentConfigMeta[]> {
+    if (this.workflowMachineId !== machineId) return [];
+    return (await this.pluginWorkflows()).flatMap((g) =>
+      [...g.acpProviders.values()].map((p) => ({
+        id: p.id as AgentConfigId,
+        machineId,
+        name: p.title,
+        description: p.description,
+        cliType: 'custom' as const,
+        agentType: p.id,
+        env: {},
+      }))
+    );
+  }
+  async workflowAgentRoles(machineId: MachineId) {
+    const { workflowAgentRoles } = await import('../../plugins/workflow/plugin-workflow-harness');
+    const rows = await this.pluginWorkflows();
+    if (!rows.length) return [];
+    return workflowAgentRoles(
+      rows,
+      machineId,
+      this.userId,
+      await listMergedAgentConfigs(this.repo, this.workspaceId, [machineId])
+    );
+  }
+  async workflowSkills() {
+    const { buildProjectSkill } = await import('@lody/shared');
+    return (await this.pluginWorkflows())
+      .filter((rows) => rows.skills.size)
+      .map((rows) => ({
+        scope: 'global' as const,
+        dir: `plugin:${rows.pluginId}`,
+        truncated: false,
+        skills: [...rows.skills.values()].map((s) => ({
+          ...buildProjectSkill({
+            groupDir: `plugin:${rows.pluginId}`,
+            displaySkillDir: s.name,
+            markdown: s.markdown,
+            relativePath: `skills/${s.name}/SKILL.md`,
+            isSymlink: false,
+          }),
+          id: s.id,
+        })),
+      }));
+  }
   public readonly repo: LoroRepo;
   // A cloud transport can be detached and replaced while this manager's replica
   // remains alive. Keep its repair budget across those adapter generations.
@@ -1997,10 +2108,13 @@ export class LoroDocumentManager {
   }
 
   async createClientPluginSession(
-    p: Extract<
-      import('@lody/shared/plugins/machine-rpc').PluginMachineRequest,
-      { method: 'plugin/session-create' }
-    >['params'],
+    p: Omit<
+      Extract<
+        import('@lody/shared/plugins/machine-rpc').PluginMachineRequest,
+        { method: 'plugin/session-create' }
+      >['params'],
+      'clientDigest'
+    >,
     userId: string,
     machineId: MachineId,
     admitWrite: () => void
@@ -2025,8 +2139,24 @@ export class LoroDocumentManager {
       if (!row || !canReadAgentRole(row, userId)) throw Error('Plugin role unavailable');
       role = selectAgentRoleTarget([row], row.id, { machineId });
     }
+    const selected = (p.input.skillIds ?? []).filter((id) => id.startsWith('plugin:'));
+    const contributions =
+      selected.length || role?.id.startsWith('plugin:') ? await this.pluginWorkflows() : [];
+    const workflowRole =
+      role && contributions.find((g) => g.roles.has(role.id))?.roles.get(role.id);
+    const skillPrompt = selected
+      .filter((id) => !workflowRole?.skills.includes(id))
+      .map((id) => {
+        const s = contributions.find((g) => g.skills.has(id))?.skills.get(id);
+        if (!s) throw Error('Plugin skill unavailable');
+        return s.markdown;
+      })
+      .join('\n\n');
     const providerId = role?.agentConfigId ?? p.input.providerId;
-    const configs = await listMergedAgentConfigs(this.repo, this.workspaceId, [machineId]);
+    const configs = [
+      ...(await listMergedAgentConfigs(this.repo, this.workspaceId, [machineId])),
+      ...(await this.workflowProviders(machineId)),
+    ];
     const config = configs.find(
       (c) => c.machineId === machineId && (!providerId || c.id === providerId)
     );
@@ -2080,8 +2210,14 @@ export class LoroDocumentManager {
       },
       admitWrite,
       role
-        ? { snapshot: snapshotAgentRole(role), prefix: role.promptPrefix, ...role.runConfig }
-        : undefined
+        ? {
+            snapshot: snapshotAgentRole(role),
+            prefix: role.promptPrefix,
+            ...role.runConfig,
+            mcpServerIds: workflowRole?.mcpServers,
+          }
+        : undefined,
+      skillPrompt
     );
     admitWrite();
     const record = await this.repo.getDocMeta(getSessionRoomId(id));
@@ -2090,8 +2226,9 @@ export class LoroDocumentManager {
       throw Error('Session receipt mismatch');
     const { pluginInitialRole } = await import('@lody/shared/plugins/machine-rpc');
     const receipts = new SessionCreateReceipts(this.pluginReceiptsPath);
-    let frozenRole;
+    let frozenRole, frozenSkills;
     try {
+      frozenSkills = receipts.skillPrompt(id);
       frozenRole = pluginInitialRole.optional().parse(receipts.initialRole(id));
     } finally {
       receipts.close();
@@ -2104,6 +2241,7 @@ export class LoroDocumentManager {
       cliType: meta.cliType,
       agentType: meta.agentType,
       role: frozenRole,
+      skillPrompt: frozenSkills,
       archived: !!record?.deleted || !!meta.isArchived,
     };
   }
@@ -2134,7 +2272,8 @@ export class LoroDocumentManager {
     normalizedPayload: Parameters<SessionCreateReceipts['reserve']>[3],
     meta: Omit<SessionMeta, 'id' | 'userId'>,
     admitWrite: () => void,
-    initialRole?: object
+    initialRole?: object,
+    skillPrompt?: string
   ): Promise<SessionId> {
     admitWrite();
     const receipts = new SessionCreateReceipts(this.pluginReceiptsPath);
@@ -2146,7 +2285,8 @@ export class LoroDocumentManager {
           requestId,
           businessKey,
           normalizedPayload,
-          initialRole
+          initialRole,
+          skillPrompt
         ) as SessionId;
       try {
         id = reserve();
@@ -2282,6 +2422,16 @@ export class LoroDocumentManager {
     agentConfigId: AgentConfigId,
     machineId?: MachineId
   ): Promise<AgentConfigMeta | null> {
+    if (
+      agentConfigId.startsWith('plugin:') &&
+      this.workflowMachineId &&
+      (!machineId || machineId === this.workflowMachineId)
+    )
+      return (
+        (await this.workflowProviders(this.workflowMachineId)).find(
+          (c) => c.id === agentConfigId
+        ) ?? null
+      );
     if (machineId) {
       return (
         await readMergedAgentConfigById(this.repo, this.workspaceId, machineId, agentConfigId)

@@ -40,10 +40,12 @@ export const loadWorkspaceAgentRoleCatalog = async (
   });
   const handle = await manager.repo.openFlockDoc(docId);
   return new Map(
-    listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).map((role) => [
-      role.id,
-      role,
-    ])
+    [
+      ...(manager.workflowMachineId
+        ? await manager.workflowAgentRoles(manager.workflowMachineId)
+        : []),
+      ...listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)),
+    ].map((role) => [role.id, role])
   );
 };
 

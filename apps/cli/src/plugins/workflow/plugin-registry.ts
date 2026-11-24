@@ -1,5 +1,9 @@
+import { bindHostInvocation } from './daemon-command-executor';
+import type { DispatchMachineHostCall } from '../machine-host-port';
 import { packClientBundle, PLUGIN_BUNDLE_CHUNK_BYTES } from '@lody/shared/plugins/digest';
 import {
+  workflowApprovalReceipt,
+  type WorkflowApprovalReceipt,
   pluginInspectionSchema,
   type PluginMachineRequest,
   type PluginMachineResult,
@@ -10,6 +14,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { Layer, Effect, Stream, Fiber, Context, Deferred, Semaphore, Cause } from 'effect';
 import { pluginManifestSchema, pluginIdSchema } from '@lody/shared/plugins/manifest-schema';
+import { makePluginWorkflowHarness, readWorkflowContributions } from './plugin-workflow-harness';
 import { PluginHost } from './plugin-host';
 import { DevPluginCompiler, watchPluginSources } from './dev-plugin-compiler';
 import { machineConfig, MissingPluginConfiguration, valueFor } from '../plugin-machine-config';
@@ -26,6 +31,7 @@ const installation = z.object({
   source: z.string(),
   dev: z.boolean(),
   enabled: z.boolean(),
+  workflowReceipt: workflowApprovalReceipt.optional(),
   pendingConfiguration: z.boolean().optional(),
   preferences: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
 });
@@ -56,6 +62,10 @@ type Item = z.infer<typeof installation>;
 type Request = z.infer<typeof request>;
 const io = <T>(fn: () => Promise<T>) => Effect.tryPromise({ try: fn, catch: (e) => e });
 export interface VerifiedPluginGrant {
+  targetDevice?: string;
+  workflowReceipt?: WorkflowApprovalReceipt;
+  workflowCurrent?: () => boolean;
+  executeHostCall?: DispatchMachineHostCall;
   createSession?: () => Promise<Extract<PluginMachineResult, { type: 'plugin/session-create' }>>;
   userId: string;
   machineOwner: boolean;
@@ -65,6 +75,18 @@ export interface VerifiedPluginGrant {
 export class Registry extends Context.Service<
   Registry,
   {
+    workflowLease: (
+      id: string,
+      instance: number
+    ) =>
+      | {
+          receipt: WorkflowApprovalReceipt;
+          installationId: string;
+          machineDigest: string;
+          isCurrent: () => boolean;
+        }
+      | undefined;
+    workflow: Effect.Success<ReturnType<typeof makePluginWorkflowHarness>>;
     start: Effect.Effect<void, unknown>;
     machineRpc: (
       request: PluginMachineRequest,
@@ -86,6 +108,8 @@ export function registryLayer(
       const host = yield* PluginHost,
         compiler = yield* DevPluginCompiler,
         scope = yield* Effect.scope;
+      const workflow = yield* makePluginWorkflowHarness();
+      const disable = (id: string) => workflow.remove(id).pipe(Effect.andThen(host.disable(id)));
       const generations = join(root, 'generations'),
         catalog = join(root, 'catalog.json');
       const items = new Map<string, Item>(),
@@ -114,7 +138,7 @@ export function registryLayer(
             );
           })
         );
-      const commit = (id: string, item: Item) =>
+      const commit = (id: string, item: Item, admit?: () => void) =>
         catalogLock.withPermits(1)(
           io(async () => {
             const next = new Map(items);
@@ -123,6 +147,7 @@ export function registryLayer(
             await mkdir(root, { recursive: true, mode: 0o700 });
             try {
               await writeFile(tmp, JSON.stringify([...next.values()]), { mode: 0o600, flag: 'wx' });
+              admit?.();
               await rename(tmp, catalog);
             } finally {
               await rm(tmp, { force: true });
@@ -171,7 +196,30 @@ export function registryLayer(
           machineConfig(b.manifest, workspaceId, machineId, vault).resolve(item.preferences)
         );
         yield* io(() => mkdir(dataDir, { recursive: true, mode: 0o700 }));
-        yield* host.reload({ ...b, pluginId, dataDir, workspaceId, machineId, config });
+        const rows = yield* io(() => readWorkflowContributions(b.directory, b.manifest));
+        let staged = false;
+        yield* host
+          .reload({
+            ...b,
+            installationId: basename(b.directory),
+            pluginId,
+            dataDir,
+            workspaceId,
+            machineId,
+            config,
+            beforeStart: workflow.install(pluginId, rows, config).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  staged = true;
+                })
+              )
+            ),
+          })
+          .pipe(
+            Effect.onError(() =>
+              staged ? workflow.remove(pluginId).pipe(Effect.orDie) : Effect.void
+            )
+          );
       });
       const unwatch = Effect.fnUntraced(function* (id: string) {
         const w = watches.get(id);
@@ -248,8 +296,13 @@ export function registryLayer(
             };
           let item: Item;
           if (r.action === 'disable') {
-            yield* host.disable(id);
-            item = { ...old!, enabled: false, pendingConfiguration: false };
+            yield* disable(id);
+            item = {
+              ...old!,
+              workflowReceipt: undefined,
+              enabled: false,
+              pendingConfiguration: false,
+            };
           } else if (
             r.action === 'configure' ||
             r.action === 'configure-many' ||
@@ -300,7 +353,7 @@ export function registryLayer(
           }
           const restoreCommitted = Effect.gen(function* () {
             if (old?.enabled && !old.pendingConfiguration) yield* launch(old);
-            else yield* host.disable(id);
+            else yield* disable(id);
             yield* clean(item.current.directory);
           }).pipe(
             Effect.catchCause(() =>
@@ -317,7 +370,7 @@ export function registryLayer(
               Effect.catch((e) => {
                 if (e instanceof MissingPluginConfiguration) {
                   item.pendingConfiguration = true;
-                  return old?.enabled && !old.pendingConfiguration ? host.disable(id) : Effect.void;
+                  return old?.enabled && !old.pendingConfiguration ? disable(id) : Effect.void;
                 }
                 diagnostics.set(id, 'Generation failed to start');
                 if (!old)
@@ -406,6 +459,29 @@ export function registryLayer(
         );
       });
       return Registry.of({
+        workflowLease: (id, instance) => {
+          const item = items.get(id);
+          if (!item?.enabled || !item.workflowReceipt || !item.current.machineDigest)
+            return undefined;
+          const live = () => {
+            const running = host.inspect(id);
+            return (
+              items.get(id) === item &&
+              running.instanceId === instance &&
+              running.machineDigest === item.current.machineDigest &&
+              running.installationId === basename(item.current.directory)
+            );
+          };
+          return live()
+            ? {
+                receipt: item.workflowReceipt,
+                installationId: basename(item.current.directory),
+                machineDigest: item.current.machineDigest,
+                isCurrent: live,
+              }
+            : undefined;
+        },
+        workflow,
         start,
         machineRpc: Effect.fnUntraced(function* (r, actor): Effect.fn.Return<
           PluginMachineResult,
@@ -422,7 +498,29 @@ export function registryLayer(
                     Effect.catch(() => Effect.succeed(undefined))
                   )
                 : undefined;
+              const contributions = actor.machineOwner
+                ? workflow.catalog().find((g) => g.pluginId === id)
+                : undefined;
               installations.push({
+                workflowPrompts: contributions
+                  ? Object.fromEntries(
+                      [...contributions.roles.values()].map((role) => [
+                        role.id.split(':')[2]!,
+                        [
+                          role.prompt,
+                          ...role.skills.map((s) => contributions.skills.get(s)!.markdown),
+                        ].join('\n\n'),
+                      ])
+                    )
+                  : undefined,
+                workflowInstallation:
+                  actor.machineOwner && actor.targetDevice && item.current.machineDigest
+                    ? {
+                        installationId: basename(item.current.directory),
+                        machineDigest: item.current.machineDigest,
+                        targetDevice: actor.targetDevice,
+                      }
+                    : undefined,
                 manifest: item.current.manifest,
                 enabled: item.enabled && !item.pendingConfiguration,
                 clientDigest: item.current.clientDigest,
@@ -435,6 +533,40 @@ export function registryLayer(
           const id = r.params.pluginId;
           const item = items.get(id);
           if (!item) return yield* Effect.fail(new Error('Plugin unavailable'));
+          if (r.method === 'plugin/workflow-create-approval')
+            return yield* serialize(
+              id,
+              Effect.gen(function* () {
+                const current = items.get(id),
+                  a = r.params;
+                if (
+                  !actor.machineOwner ||
+                  !actor.workflowReceipt ||
+                  !actor.workflowCurrent?.() ||
+                  !current?.enabled ||
+                  current.pendingConfiguration ||
+                  basename(current.current.directory) !== a.installationId ||
+                  current.current.machineDigest !== a.machineDigest ||
+                  actor.targetDevice !== a.targetDevice
+                )
+                  throw Error('Workflow approval forbidden');
+                yield* commit(
+                  id,
+                  {
+                    ...current,
+                    workflowReceipt: a.action === 'grant' ? actor.workflowReceipt : undefined,
+                  },
+                  () => {
+                    if (
+                      !actor.workflowCurrent?.() ||
+                      (a.action === 'grant' && Date.now() >= a.expiresAt)
+                    )
+                      throw Error('Workflow approval withdrawn');
+                  }
+                );
+                return { type: r.method, active: a.action === 'grant' };
+              })
+            );
           if (r.method === 'plugin/control') {
             if (!actor.machineOwner) return yield* Effect.fail(new Error('Owner required'));
             const t = r.params;
@@ -525,14 +657,20 @@ export function registryLayer(
                   : 'attachment-resolve';
           if (!host.inspect(id).registrations.includes(`${kind}: ${descriptorId}`))
             return yield* Effect.fail(new Error('Plugin handler unavailable'));
-          const data = yield* host.invoke(id, {
-            kind,
-            descriptorId,
-            scope,
-            target,
-            input,
-            actorUserId: actor.userId,
-          });
+          const boundTarget = Object.freeze({ ...target });
+          const release = actor.executeHostCall
+            ? bindHostInvocation(boundTarget, actor.executeHostCall)
+            : () => {};
+          const data = yield* host
+            .invoke(id, {
+              kind,
+              descriptorId,
+              scope,
+              target: boundTarget,
+              input,
+              actorUserId: actor.userId,
+            })
+            .pipe(Effect.ensuring(Effect.sync(release)));
           return { type: r.method, data: z.json().parse(data) };
         }),
         dispatch: Effect.fnUntraced(function* (raw: unknown) {

@@ -354,6 +354,7 @@ export function AgentRoleRow({
             {role.visibility === 'workspace' ? (
               <Badge>{t('settings.agentRoles.visibility.workspace')}</Badge>
             ) : null}
+            {role.id.startsWith('plugin:') ? <Badge>{role.id.split(':')[1]}</Badge> : null}
             {role.promptPrefix ? <Badge>{t('settings.agentRoles.hasPrompt')}</Badge> : null}
           </span>
           <span {...stylex.props(catalog.meta)}>
@@ -377,7 +378,7 @@ export function AgentRoleRow({
       </button>
       <AgentRoleMachines targets={targets} allMachines={allMachines} />
       <div {...stylex.props(catalog.actions)}>
-        {canManage ? (
+        {canManage && !role.id.startsWith('plugin:') ? (
           <Button
             type="button"
             variant="ghost"

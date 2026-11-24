@@ -2,7 +2,13 @@ import { fileURLToPath } from 'node:url';
 import { Cause, Context, Deferred, Effect, Exit, Layer, Scope, Stream } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 import { NodeProcess, ProcessReleaseFailed } from '@lody/shared/node/process';
-import { childToHostSchema, type HostToChildFrame } from '@lody/shared/plugins/ipc-protocol';
+import { z } from 'zod';
+import type { DispatchMachineHostCall, MachineHostOrigin } from '../machine-host-port';
+import {
+  pluginIpcErrorSchema,
+  childToHostSchema,
+  type HostToChildFrame,
+} from '@lody/shared/plugins/ipc-protocol';
 import { lostInvocationCode } from '../pure/call-policy';
 import { makePluginInvocations, type InvocationFailure } from './plugin-invocations';
 
@@ -11,6 +17,8 @@ import type { PluginManifest } from '@lody/shared/plugins/manifest-schema';
 type Init = Extract<HostToChildFrame, { type: 'init' }>;
 type Invoke = Omit<Extract<HostToChildFrame, { type: 'invoke' }>, 'type' | 'callId'>;
 export interface PluginLaunchSpec {
+  installationId?: string;
+  beforeStart?: Effect.Effect<void, unknown>;
   pluginId: string;
   workspaceId: string;
   machineId: string;
@@ -28,16 +36,25 @@ interface Status {
 }
 type HostEvent = Extract<HostToChildFrame, { type: 'event' }>;
 interface Api {
+  broadcast: (frame: HostEvent, admit?: () => Promise<boolean>) => Effect.Effect<void, unknown>;
   event: (id: string, frame: HostEvent) => Effect.Effect<void, unknown>;
   reload: (spec: PluginLaunchSpec) => Effect.Effect<Status, unknown>;
   disable: (id: string) => Effect.Effect<void, unknown>;
-  inspect: (id: string) => { lifecycle: string; pid?: number; registrations: string[] };
+  inspect: (id: string) => {
+    instanceId?: number;
+    installationId?: string;
+    machineDigest?: string;
+    lifecycle: string;
+    pid?: number;
+    registrations: string[];
+  };
   logs: (id: string) => Effect.Effect<readonly string[]>;
   invoke: (id: string, frame: Invoke) => Effect.Effect<unknown, InvocationFailure>;
 }
 export class PluginHost extends Context.Service<PluginHost, Api>()('lody/plugins/PluginHost') {}
 export const makePluginHostLayer = (
-  worker = fileURLToPath(new URL('./plugin-worker.js', import.meta.url))
+  worker = fileURLToPath(new URL('./plugin-worker.js', import.meta.url)),
+  dispatch?: DispatchMachineHostCall
 ) =>
   Layer.effect(
     PluginHost,
@@ -56,8 +73,9 @@ export const makePluginHostLayer = (
         lease?: ProcessReleaseFailed;
         running?: boolean;
         subscribed?: Set<string>;
+        origins: Map<string, { origin: MachineHostOrigin; controller: AbortController }>;
         registrations?: string[];
-        buffered: HostEvent[];
+        buffered: { frame: HostEvent; admit?: () => Promise<boolean> }[];
         eventTail?: Deferred.Deferred<void>;
         eventReply?: { id: string; reply: Deferred.Deferred<void, Error> };
       };
@@ -93,6 +111,8 @@ export const makePluginHostLayer = (
           const child = g.child;
           const disconnected = g.faulted;
           g.faulted = true;
+          for (const o of g.origins.values()) o.controller.abort();
+          g.origins.clear();
           yield* g.calls.close();
           if (child) {
             yield* child
@@ -116,7 +136,11 @@ export const makePluginHostLayer = (
           discard: true,
         })
       );
-      const deliverEvent = Effect.fnUntraced(function* (g: Generation, frame: HostEvent) {
+      const deliverEvent = Effect.fnUntraced(function* (
+        g: Generation,
+        frame: HostEvent,
+        admit?: () => Promise<boolean>
+      ) {
         const previous = g.eventTail;
         const done = yield* Deferred.make<void>();
         g.eventTail = done;
@@ -125,7 +149,20 @@ export const makePluginHostLayer = (
             if (previous) yield* Deferred.await(previous);
             const child = g.child;
             if (!child || g.faulted) return;
+            if (
+              admit &&
+              !(yield* Effect.tryPromise(admit).pipe(
+                Effect.timeout(3000),
+                Effect.orElseSucceed(() => false)
+              ))
+            )
+              return;
+            if (g.faulted) return;
             const reply = yield* Deferred.make<void, Error>();
+            g.origins.set(frame.eventId, {
+              origin: { type: 'event', frame },
+              controller: new AbortController(),
+            });
             g.eventReply = { id: frame.eventId, reply };
             yield* child
               .send(frame)
@@ -133,6 +170,8 @@ export const makePluginHostLayer = (
           }).pipe(
             Effect.ensuring(
               Effect.gen(function* () {
+                g.origins.get(frame.eventId)?.controller.abort();
+                g.origins.delete(frame.eventId);
                 g.eventReply = undefined;
                 if (g.eventTail === done) g.eventTail = undefined;
                 yield* Deferred.succeed(done, undefined);
@@ -156,6 +195,8 @@ export const makePluginHostLayer = (
           old.spec.machineId === spec.machineId &&
           old.spec.dataDir === spec.dataDir
         ) {
+          if (spec.beforeStart) yield* spec.beforeStart;
+          old.spec = spec;
           old.status = { ...old.status, clientDigest: spec.clientDigest };
           return old.status;
         }
@@ -166,9 +207,11 @@ export const makePluginHostLayer = (
           status: { clientDigest: spec.clientDigest },
           calls: makePluginInvocations(),
           faulted: false,
+          origins: new Map(),
           buffered: [],
         };
         active.set(id, g);
+        if (spec.beforeStart) yield* spec.beforeStart;
         if (!spec.machineEntry) return g.status;
         const child = yield* Scope.provide(
           node.spawnIpcChild({
@@ -203,6 +246,8 @@ export const makePluginHostLayer = (
         let phase: 'init' | 'ready' | 'running' = 'init';
         const ended = Effect.gen(function* () {
           g.faulted = true;
+          for (const o of g.origins.values()) o.controller.abort();
+          g.origins.clear();
           const err = new Error('Plugin worker disconnected');
           yield* Deferred.fail(ready, err);
           yield* Deferred.fail(started, err);
@@ -221,8 +266,14 @@ export const makePluginHostLayer = (
                 ...f.subscribedEvents.map((e) => `event: ${e}`),
               ];
               g.subscribed = new Set(f.subscribedEvents);
+              g.origins.set('start', {
+                origin: { type: 'start' },
+                controller: new AbortController(),
+              });
               yield* Deferred.succeed(ready, undefined);
             } else if (f.type === 'result' && phase === 'ready' && f.callId === 'start' && f.ok) {
+              g.origins.get('start')?.controller.abort();
+              g.origins.delete('start');
               phase = 'running';
 
               yield* Deferred.succeed(started, undefined);
@@ -231,14 +282,62 @@ export const makePluginHostLayer = (
               else yield* Deferred.fail(g.eventReply.reply, new Error('Plugin event failed'));
             } else if (f.type === 'result' && phase === 'running')
               yield* g.calls.settle(f.callId, f);
-            else if (f.type === 'host_call')
-              yield* child.send({
-                type: 'host_result',
-                hostCallId: f.hostCallId,
-                ok: false,
-                error: { code: 'forbidden', message: 'Host operation unavailable' },
-              });
-            else if (f.type !== 'invalidate')
+            else if (f.type === 'host_call') {
+              const authority = g.origins.get(f.contextId);
+              const instanceId = g.status.instanceId;
+              if (!authority || !dispatch || !instanceId || g.faulted) {
+                yield* child.send({
+                  type: 'host_result',
+                  hostCallId: f.hostCallId,
+                  ok: false,
+                  error: { code: 'forbidden', message: 'Host call has no active authority' },
+                });
+                return;
+              }
+              const call = {
+                pluginId: id,
+                workspaceId: spec.workspaceId,
+                machineId: spec.machineId,
+                instanceId,
+                origin: authority.origin,
+                op: f.op,
+                payload: f.payload,
+              };
+              yield* Effect.forkIn(
+                Effect.tryPromise({
+                  try: async (signal) =>
+                    z
+                      .json()
+                      .parse(
+                        (await dispatch(
+                          call,
+                          AbortSignal.any([signal, authority.controller.signal])
+                        )) ?? null
+                      ),
+                  catch: (e) => {
+                    const parsed = pluginIpcErrorSchema.safeParse(
+                      e instanceof Error ? { message: e.message, code: Reflect.get(e, 'code') } : e
+                    );
+                    return parsed.success
+                      ? parsed.data
+                      : { code: 'handler_error' as const, message: 'Host call failed' };
+                  },
+                }).pipe(
+                  Effect.matchEffect({
+                    onSuccess: (data) =>
+                      child.send({ type: 'host_result', hostCallId: f.hostCallId, ok: true, data }),
+                    onFailure: (error) =>
+                      child.send({
+                        type: 'host_result',
+                        hostCallId: f.hostCallId,
+                        ok: false,
+                        error,
+                      }),
+                  })
+                ),
+                g.scope
+              );
+            } else if (f.type !== 'invalidate')
               return yield* Effect.fail(new Error('Unexpected plugin IPC'));
           })
         ).pipe(Effect.ensuring(ended));
@@ -270,7 +369,7 @@ export const makePluginHostLayer = (
           .pipe(Effect.andThen(Deferred.await(started)), Effect.timeout(30000));
         while (g.buffered.length) {
           const frame = g.buffered.shift();
-          if (frame) yield* deliverEvent(g, frame);
+          if (frame) yield* deliverEvent(g, frame.frame, frame.admit);
         }
         g.running = true;
         return g.status;
@@ -306,18 +405,28 @@ export const makePluginHostLayer = (
           })
         );
       });
+      const event = (id: string, frame: HostEvent, admit?: () => Promise<boolean>) =>
+        Effect.suspend(() => {
+          const g = active.get(id);
+          if (!g || g.faulted || !g.subscribed?.has(frame.eventType)) return Effect.void;
+          if (!g.running) {
+            g.buffered.push({ frame, admit });
+            return Effect.void;
+          }
+          return deliverEvent(g, frame, admit);
+        });
       return PluginHost.of({
         reload,
-        event: (id, frame) =>
-          Effect.suspend(() => {
-            const g = active.get(id);
-            if (!g || g.faulted || !g.subscribed?.has(frame.eventType)) return Effect.void;
-            if (!g.running) {
-              g.buffered.push(frame);
-              return Effect.void;
-            }
-            return deliverEvent(g, frame);
-          }),
+        event,
+        broadcast: (frame, admit) =>
+          Effect.forEach([...active.keys()], (id) => event(id, frame, admit).pipe(Effect.exit), {
+            concurrency: 'unbounded',
+          }).pipe(
+            Effect.flatMap((exits) => {
+              const failed = exits.find(Exit.isFailure);
+              return failed ? Effect.failCause(failed.cause) : Effect.void;
+            })
+          ),
         disable: (id) =>
           Effect.suspend(() => {
             trailing.delete(id);
@@ -332,6 +441,9 @@ export const makePluginHostLayer = (
                 : g.running || !g.spec.machineEntry
                   ? 'Running'
                   : 'Starting',
+            installationId: g?.spec.installationId,
+            machineDigest: g?.spec.machineDigest,
+            instanceId: g && !g.faulted && !g.lease ? g.status.instanceId : undefined,
             pid: g?.status.pid,
             registrations: g?.registrations ?? [],
           };
@@ -343,20 +455,39 @@ export const makePluginHostLayer = (
               child = g?.child;
             if (!g || !child || !g.running || g.faulted)
               return Effect.fail({ code: 'plugin_faulted', message: 'Plugin unavailable' });
-            return g.calls.invoke(
-              frame.kind,
-              (callId) =>
-                child.send({ type: 'invoke', callId, ...frame }).pipe(
-                  Effect.mapError(() => ({
-                    code: lostInvocationCode(frame.kind, 'exit'),
-                    message: 'Plugin disconnected',
-                  }))
-                ),
-              (callId) =>
-                child
-                  .send({ type: 'cancel', callId })
-                  .pipe(Effect.timeoutOption(100), Effect.ignore)
-            );
+            let dispatched: string | undefined;
+            return g.calls
+              .invoke(
+                frame.kind,
+                (callId) => {
+                  dispatched = callId;
+                  const invocation = { type: 'invoke' as const, callId, ...frame };
+                  g.origins.set(callId, {
+                    origin: { type: 'invoke', frame: invocation },
+                    controller: new AbortController(),
+                  });
+                  return child.send(invocation).pipe(
+                    Effect.mapError(() => ({
+                      code: lostInvocationCode(frame.kind, 'exit'),
+                      message: 'Plugin disconnected',
+                    }))
+                  );
+                },
+                (callId) =>
+                  child
+                    .send({ type: 'cancel', callId })
+                    .pipe(Effect.timeoutOption(100), Effect.ignore)
+              )
+              .pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    if (dispatched) {
+                      g.origins.get(dispatched)?.controller.abort();
+                      g.origins.delete(dispatched);
+                    }
+                  })
+                )
+              );
           }),
       });
     })

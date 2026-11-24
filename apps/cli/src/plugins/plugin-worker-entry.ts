@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { invocationDeadlineMs } from './pure/call-policy';
 import { pathToFileURL } from 'node:url';
@@ -101,29 +102,79 @@ const registry = {
     );
   },
 };
-const unavailable = () => Promise.reject(new Error('Workspace host operation unavailable'));
-const context = (signal: AbortSignal) => ({
-  workspace: { workspaceId },
-  machine: { workspaceId, machineId },
-  config: init?.config,
-  dataDir: init?.dataDir,
-  signal,
-  lody: {
-    read: unavailable,
-    execute: unavailable,
-    readSnapshot: unavailable,
-    sessions: {
-      create: unavailable,
-      send: unavailable,
-      respondInteraction: unavailable,
-      requestStop: unavailable,
-      requestArchive: unavailable,
+type HostReply = Extract<HostToChildFrame, { type: 'host_result' }>;
+function freezeSnapshot(value: unknown): unknown {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) freezeSnapshot(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+const replies = new Map<string, (reply: HostReply) => void>();
+const context = (contextId: string, signal: AbortSignal) => {
+  const call = (
+    op: Extract<ChildToHostFrame, { type: 'host_call' }>['op'],
+    target: unknown,
+    input?: unknown,
+    descriptorId?: string
+  ) =>
+    new Promise<unknown>((resolve, reject) => {
+      signal.throwIfAborted();
+      const hostCallId = randomUUID();
+      const abort = () => {
+        replies.delete(hostCallId);
+        reject(signal.reason);
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      replies.set(hostCallId, (reply) => {
+        signal.removeEventListener('abort', abort);
+        replies.delete(hostCallId);
+        if (reply.ok) resolve(reply.data);
+        else reject(Object.assign(new Error(reply.error.message), { code: reply.error.code }));
+      });
+      try {
+        send({
+          type: 'host_call',
+          contextId,
+          hostCallId,
+          op,
+          payload: {
+            target,
+            ...(input !== undefined ? { input } : {}),
+            ...(descriptorId ? { descriptorId } : {}),
+          },
+        });
+      } catch (error) {
+        signal.removeEventListener('abort', abort);
+        replies.delete(hostCallId);
+        reject(error);
+      }
+    });
+  return {
+    workspace: { workspaceId },
+    machine: { workspaceId, machineId },
+    config: init?.config,
+    dataDir: init?.dataDir,
+    signal,
+    lody: {
+      read: (target: unknown, d: { id: string }, input?: unknown) =>
+        call('lody.read', target, input, d.id),
+      execute: (target: unknown, d: { id: string }, input?: unknown) =>
+        call('lody.execute', target, input, d.id),
+      readSnapshot: (target: unknown) => call('lody.readSnapshot', target).then(freezeSnapshot),
+      sessions: {
+        create: (t: unknown, i: unknown) => call('sessions.create', t, i),
+        send: (t: unknown, i: unknown) => call('sessions.send', t, i),
+        respondInteraction: (t: unknown, i: unknown) => call('sessions.respondInteraction', t, i),
+        requestStop: (t: unknown) => call('sessions.requestStop', t),
+        requestArchive: (t: unknown) => call('sessions.requestArchive', t),
+      },
     },
-  },
-  invalidate(d: Descriptor, target: unknown) {
-    send({ type: 'invalidate', descriptorId: d.id, scope: d.scope, target });
-  },
-});
+    invalidate(d: Descriptor, target: unknown) {
+      send({ type: 'invalidate', descriptorId: d.id, scope: d.scope, target });
+    },
+  };
+};
 async function receive(frame: HostToChildFrame) {
   switch (frame.type) {
     case 'shutdown':
@@ -157,7 +208,7 @@ async function receive(frame: HostToChildFrame) {
       if (phase !== 'ready') throw new Error('Unexpected start');
       phase = 'starting';
       await start?.(
-        context(AbortSignal.any([life.signal, AbortSignal.timeout(30_000)])),
+        context('start', AbortSignal.any([life.signal, AbortSignal.timeout(30_000)])),
         undefined
       );
       if (life.signal.aborted) return;
@@ -177,7 +228,15 @@ async function receive(frame: HostToChildFrame) {
             once(signal, 'abort', { signal: listener.signal }),
             Promise.resolve().then(() =>
               events.get(frame.eventType)?.(
-                { ...context(signal), eventType: frame.eventType },
+                {
+                  ...context(frame.eventId, signal),
+                  eventType: frame.eventType,
+                  ...(frame.payload &&
+                  typeof frame.payload === 'object' &&
+                  !Array.isArray(frame.payload)
+                    ? { session: frame.payload.session, project: frame.payload.project }
+                    : {}),
+                },
                 frame.payload
               )
             ),
@@ -197,7 +256,8 @@ async function receive(frame: HostToChildFrame) {
       }
       return;
     case 'host_result':
-      throw new Error('Unexpected host result');
+      replies.get(frame.hostCallId)?.(frame);
+      return;
     case 'invoke': {
       if (phase !== 'running' || calls.has(frame.callId)) throw new Error('Unexpected invocation');
       const c = new AbortController();
@@ -211,6 +271,7 @@ async function receive(frame: HostToChildFrame) {
         const result = await h.handler(
           {
             ...context(
+              frame.callId,
               AbortSignal.any([
                 life.signal,
                 c.signal,

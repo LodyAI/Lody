@@ -37,6 +37,7 @@ const supportsSharedExecution = (request: E2eeFeatureInput['request']) =>
   request.method === 'session/fork' ||
   (isPluginMachineRequest(request) &&
     request.method !== 'plugin/control' &&
+    request.method !== 'plugin/workflow-create-approval' &&
     (!('scope' in request.params) || request.params.scope !== 'machine'));
 const CLOCK_SKEW_TOLERANCE_MS = 10 * 60_000;
 const featureTtl = (method: string) =>
@@ -574,6 +575,24 @@ export function makeE2eeFeatureRpcClient(options: {
     return complete?.outcome ?? null;
   });
   return {
+    readWorkflowApproval: (machineId: string, signer: string, id: string) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const saved = yield* options.originals.read(
+            'received',
+            JSON.stringify(['feature', signer, id])
+          );
+          if (!saved || saved.target !== machineId || saved.signer !== signer) return undefined;
+          const verified = yield* openFrames(machineId, unpackFrames(saved.frame));
+          if (
+            verified.requestId !== id ||
+            verified.requesterDevice !== signer ||
+            verified.input.request.method !== 'plugin/workflow-create-approval'
+          )
+            return undefined;
+          return verified.input.request;
+        })
+      ),
     verifyFeatureRequest: (request: Opened) =>
       Effect.scoped(
         openFrames(request.input.request.machineId, unpackFrames(request.frame)).pipe(Effect.asVoid)

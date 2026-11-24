@@ -66,6 +66,25 @@ describe('createWorkspaceMachineRpcFacade', () => {
       })
     ).rejects.toThrow('256 KiB');
   });
+  it('exposes project creation approval only on an owner catalog and sends no implicit read permission', async () => {
+    const { readPluginCatalog } = await import('../src/plugins/workspace-catalog');
+    const issued: LocalMachineRpcRequest[] = [];
+    const workflowInstallation = {installationId:'12345678-1234-4123-8123-123456789abc',machineDigest:'1'.repeat(64),targetDevice:'2'.repeat(64)};
+    const facade = createWorkspaceMachineRpcFacade({workspaceId,protectedContent:true,targetRouter:{getPlaneForMachine:()=> 'local',resolvePlaneForMachine:async()=> 'local'},getMachineRpcClient:async()=>{throw Error('No plaintext route');},requestEncryptedFeature:async request=>{
+      if(request.method==='plugin/catalog') return {ok:true,result:{type:request.method,installations:[{manifest:{id:'test-workflow',title:'Verifier',version:'1.0.0',sdk:'^1.0.0',machine:'machine.js'},enabled:true,workflowInstallation}]}};
+      if(request.method!=='plugin/workflow-create-approval') throw Error('Unexpected request');
+      issued.push(request);
+      return {ok:true,result:{type:request.method,active:request.params.action==='grant'}};
+    }});
+    const catalog = (owner:boolean)=>readPluginCatalog(workspaceId,{machineId:remoteMachineId,owner},facade.requestPlugin,()=>()=>{throw Error('No plugin execution');});
+    expect((await catalog(false))[0]?.workflowApproval).toBeUndefined();
+    const approval=(await catalog(true))[0]!.workflowApproval!;
+    expect(issued).toEqual([]);
+    const expiresAt=await approval('project-1','grant');
+    expect(issued[0]?.params).toEqual({...workflowInstallation,pluginId:'test-workflow',operation:'sessions.create',action:'grant',projectId:'project-1',expiresAt});
+    await approval('project-1','revoke');
+    expect(issued[1]?.params).toMatchObject({action:'revoke',projectId:'project-1'});
+  });
   it('negotiates blob persistence while retaining writer-only encrypted diff authority', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],

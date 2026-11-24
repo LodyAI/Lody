@@ -6,7 +6,7 @@ const id = z.string().min(1),
   json = z.json(),
   scope = z.enum(['machine', 'session', 'project']),
   kind = z.enum(['query', 'mutation', 'tool', 'attachment-search', 'attachment-resolve']);
-const error = obj({
+export const pluginIpcErrorSchema = obj({
   code: z.enum([
     'untrusted_plugin',
     'plugin_disabled',
@@ -23,7 +23,7 @@ const error = obj({
   message: z.string(),
 });
 const success = { ok: literal(true), data: json },
-  failure = { ok: literal(false), error };
+  failure = { ok: literal(false), error: pluginIpcErrorSchema };
 export const hostToChildSchema = z.union([
   obj({
     type: literal('init'),
@@ -68,6 +68,7 @@ export const childToHostSchema = z.union([
   obj({
     type: literal('host_call'),
     hostCallId: id,
+    contextId: id,
     op: z.enum([
       'lody.read',
       'lody.readSnapshot',
@@ -78,7 +79,7 @@ export const childToHostSchema = z.union([
       'sessions.requestStop',
       'sessions.requestArchive',
     ]),
-    payload: json,
+    payload: obj({ target: json, descriptorId: descriptorId.optional(), input: json.optional() }),
   }),
 ]);
 export type HostToChildFrame = z.infer<typeof hostToChildSchema>;

@@ -308,11 +308,20 @@ export const getAgentMetaByIdAtomFamily = atomFamily((agentId?: AgentConfigId) =
       getMergedAgentConfigMap(
         get(agentConfigMetaCacheAtom),
         runtime ? machineFlockRowsByWorkspace[String(runtime.workspaceId)] : undefined
-      ).get(agentId) ?? null
+      ).get(agentId) ??
+      (get(workflowCatalogAtom)?.workspaceId === runtime?.workspaceId
+        ? get(workflowCatalogAtom)?.providers.find((c) => c.id === agentId)
+        : undefined) ??
+      null
     );
   })
 );
 
+export const workflowCatalogAtom = atom<{
+  workspaceId: string;
+  providers: AgentConfigMeta[];
+  servers: import('@lody/shared').WorkspaceMcpServerMeta[];
+} | null>(null);
 export const getAllAgentConfigAtom = atom((get) => {
   const runtime = get(activeWorkspaceRuntimeAtom);
   const machineFlockRowsByWorkspace = get(machineFlockRowsByWorkspaceAtom);
@@ -321,6 +330,9 @@ export const getAllAgentConfigAtom = atom((get) => {
       get(agentConfigMetaCacheAtom),
       runtime ? machineFlockRowsByWorkspace[String(runtime.workspaceId)] : undefined
     ).values(),
+    ...(get(workflowCatalogAtom)?.workspaceId === runtime?.workspaceId
+      ? (get(workflowCatalogAtom)?.providers ?? [])
+      : []),
   ];
 });
 
