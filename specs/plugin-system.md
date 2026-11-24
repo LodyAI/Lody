@@ -273,7 +273,7 @@ To guarantee custom Workspace / multi-Agent control planes are never bottlenecke
 0. **Unified Typed Host Command Registry (`lodyCommands` + `lody.execute` / `useLodyCommand` / `ctx.lody.execute`):**
    - Rather than inventing a second plugin-only command system or trapping first-party mutations inside React hooks, Lody exposes its canonical domain commands as typed `LodyCommandDescriptor<S, TInput, TOutput>` entries in `lodyCommands` (covering Session execution `sessionCreate` / `sessionSend` / `sessionRespondInteraction` / `sessionStop` / `sessionArchive` / `sessionRestore` / `sessionFork`, Status/Focus triage `sessionSetPinned` / `sessionSnooze` / `sessionSettle` / `sessionMoveToFocus` / `sessionMoveOrder` / `sessionUpdateTitle` / `sessionMarkRead` / `sessionMarkUnread` backed by `planStatusViewCommand` in [`status-view/command.ts`](../packages/shared/src/status-view/command.ts) and [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts), workspace pin sections `pinSection*`, and schedule controls `scheduleSetEnabled` / `scheduleRunNow`).
    - First-party UI and third-party plugins invoke the **exact same authorized command handlers** via `lody.execute(target, command, input)` / `useLodyCommand` on clients and `ctx.lody.execute(target, command, input)` on machines (with `sessions.{create, send, respondInteraction, requestStop, requestArchive}` retained as thin typed convenience aliases over `lodyCommands.session*`).
-   - **Explicit Caller Principal (`ActorContext`) & First-Party `prefer` / `manage` / `execute` Reuse:** Every `lodyCommands` invocation binds an unforgeable host `ActorContext` rather than relying on target scope alone or granting daemon plugins ambient "machine-owner god mode": client calls bind the authenticated signed-in user; daemon `plugin/query` and `plugin/mutate` RPCs bind the authenticated requesting member; `ToolExecutionContext` and `MachineEventContext` bind the owning/signing user of that Session/Turn (`SessionMeta.userId` / verified `originTurn`); and `MachineStartupContext` (`onStart`) derives the actor from verified `originTurn` for execution/interaction commands while rejecting un-attributed user-preference writes (`sessionMarkRead` / `sessionMarkUnread`). Both executors enforce Lody's existing first-party `prefer` vs `manage` session guards ([`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts), [`status-view/command.ts`](../packages/shared/src/status-view/command.ts)) plus E2EE `MachineSharing` and `e2eeIntent` gates against that `ActorContext`.
+   - **Explicit Caller Principal (`ActorContext`) & First-Party `prefer` / `manage` / `execute` Reuse:** Every `lodyCommands` invocation binds an unforgeable host `ActorContext` rather than relying on target scope alone or granting daemon plugins ambient "machine-owner god mode": client calls bind the authenticated signed-in user; daemon `plugin/query` and `plugin/mutate` RPCs bind the authenticated requesting member; `ToolExecutionContext` and `MachineEventContext` bind the owning/signing user of that Session/Turn (`SessionMeta.userId` / verified `originTurn`); and `MachineStartupContext` (`onStart`) uses the separately authorized workflow principal for new post-turn execution/interaction commands while rejecting un-attributed user-preference writes (`sessionMarkRead` / `sessionMarkUnread`). Both executors enforce Lody's existing first-party `prefer` vs `manage` session guards ([`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts), [`status-view/command.ts`](../packages/shared/src/status-view/command.ts)) plus E2EE `MachineSharing` and `e2eeIntent` gates against that `ActorContext`.
 1. **Atomic `(requestId, businessKey)` `sessions.create` Receipt:**
    - Keyed by `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` in durable storage.
    - Replaying the identical normalized payload returns the original `SessionRef` even after Session archive; replaying `requestId` with a modified payload rejects with `idempotency_conflict`.
@@ -480,7 +480,7 @@ Per [`specs/e2ee/machine-sharing.md`](e2ee/machine-sharing.md):
 Per [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts):
 
 - Client `useLody().sessions.create` / `send` / `respondInteraction` signs `E2EE_INTENT_KIND.memberInput` (`kind = 1`) on the personal device.
-- Daemon `ToolExecutionContext` AND `MachineEventContext` / `MachineStartupContext` MAY sign `derivedFrom` `E2EE_INTENT_KIND.machineInput` (`kind = 2`) for `sessions.create`, `send`, and `respondInteraction` when rooted in a verified `SignedTurnOrigin` (`originTurn: { session, userTurnId }`, auto-populated from live turn events or passed during `machine.onStart` reconciliation from `SessionTurnSummary.userTurnId`) or a machine-owner signed workflow activation declaration on that same machine. Per [shared-member derivation](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md), the daemon verifies `(originTurn.session.sessionId, originTurn.userTurnId)` directly against the stored human-signed `memberInput` Turn row in local `sessionData` (enforcing the **single-machine rule**, active member/project `MachineSharing`, and the **20-derivation cap**, with no start-time expiration deadline — making post-restart `onStart` recovery cryptographically sound without forging or weakening E2EE signatures).
+- For daemon `sessions.create`, `send`, and `respondInteraction` ([shared-member derivation](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)): At write time the daemon must verify that the driving turn is active in the live runtime and that `originTurn: { session, userTurnId }` matches its human-signed `memberInput` in local `sessionData`. Shared-member `derivedFrom` `machineInput` (`kind = 2`) requires active member/project `MachineSharing`, the same machine, and a maximum of 20 derivations. An already signed input may start after restart without a start deadline, subject to current authorization. History establishes provenance, not authority to sign another input. Once the turn is inactive, new workflow work requires a separately verified machine-owner activation covering that operation on that machine; it runs as the declared workflow, never as an elevated member.
 - Un-rooted `MachineContext` (`query`, `mutation`, `attachmentSource`) MUST reject `sessions.create`, `sessions.send`, and `sessions.respondInteraction` with `forbidden` in E2EE workspaces.
 
 ### 13.6 Custody Isolation, Snapshot Redaction, Static Share & Network Disclosure
@@ -703,19 +703,14 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
   if context_kind == "client_interactive":
     return require_personal_device_member_input_signature(caller_or_event)
 
-  if context_kind == "tool_execution":
-    return sign_derived_machine_input(root_turn_id=caller_or_event.active_user_turn_id, max_hops=20, target_machine_id)
+  if context_kind in ["machine_event", "machine_startup"] and caller_or_event.principal_kind == "declared_workflow":
+    return require_owner_signed_activation_for_plugin_machine_and_operation_then_sign_as_workflow()
 
-  if context_kind in ["machine_event", "machine_startup"]:
-    origin = request.origin_turn ?? caller_or_event.ambient_origin_turn
-    if origin is present:
-      verified_root = verify_stored_human_signed_turn_in_local_session_data(kernel, origin.session, origin.userTurnId, target_machine_id)
-      if verified_root is ok:
-        return sign_derived_machine_input(root_turn=verified_root, max_hops=20, target_machine_id)
-      return deny("forbidden: invalid or unauthorized E2EE originTurn")
-    if has_verified_human_workflow_declaration(kernel, caller_or_event.plugin_id, target_machine_id):
-      return sign_declared_workflow_machine_input(caller_or_event.plugin_id, target_machine_id)
-    return deny("forbidden: un-rooted E2EE machine context cannot originate Session turns")
+  if context_kind in ["tool_execution", "machine_event", "machine_startup"]:
+    origin = caller_or_event.bound_origin_turn
+    if not verify_live_driving_turn_and_stored_member_signature(kernel, origin):
+      return deny("forbidden: inactive or unverified driving turn")
+    return require_active_sharing_same_machine_and_reserve_derivation_then_sign(origin, target_machine_id, limit=20)
 
   # Un-rooted query / mutation / attachmentSource
   return deny("forbidden: un-rooted MachineContext cannot originate E2EE Session turns")
@@ -748,7 +743,7 @@ Validation profiles follow Section 1.1: Sections 16.1–16.6 are `Core Conforman
 ### 16.4 Core Conformance — Workspace Data, Raw Snapshots & Workflow Roles/MCP
 
 - **Product Scenario — Custom Multi-Agent Control Plane:** Custom screen combines `lodyQueries.sessionTurns` / `subagentRun` / `agentConfigs` with `useLodySnapshot({ kind: "workspace-state" | "session-transcript" }, selector)`; returned `RawDocumentSnapshot` is deeply frozen (`Object.freeze`), redacted against secrets/foreign `businessKey`s, and triggers React re-renders only when selected slice values change.
-- **Product Scenario — Workflow Role + MCP + Event Orchestration & Daemon-Restart Recovery:** Enabling a workflow plugin registers `plugin:<id>:<role>` and spawns `manifest.mcpServers` out-of-daemon; `machine.events.on("session.turn.completed")` journals task intent to `ctx.dataDir`, reads scoped session snapshots, and spawns a child verifier Session with atomic `(requestId, businessKey)` idempotency; if the daemon exits either mid-`sessions.create` or before `session.turn.completed` reaches the plugin, `machine.onStart(ctx)` reconciles `ctx.dataDir` + `lodyQueries.sessions` (`updatedAfter`) + `lodyQueries.sessionTurns` and resumes with the original `ProjectRef`, `parentSession`, and E2EE `originTurn` without duplicating Sessions.
+- **Product Scenario — Workflow Role + MCP + Event Orchestration & Daemon-Restart Recovery:** Enabling a workflow plugin registers `plugin:<id>:<role>` and spawns `manifest.mcpServers` out-of-daemon; `machine.events.on("session.turn.completed")` journals task intent to `ctx.dataDir`, reads scoped session snapshots, and spawns a child verifier Session with atomic `(requestId, businessKey)` idempotency; if the daemon exits either mid-`sessions.create` or before `session.turn.completed` reaches the plugin, `machine.onStart(ctx)` reconciles `ctx.dataDir` + `lodyQueries.sessions` (`updatedAfter`) + `lodyQueries.sessionTurns` and resumes with the original `ProjectRef`, `parentSession`, and E2EE `originTurn` without duplicating Sessions. New E2EE work after completion uses the owner workflow activation (§13.5).
 
 ### 16.5 Core Conformance — DX, UX, Propose-Confirm & Desktop/Web/Mobile Parity
 
@@ -759,7 +754,7 @@ Validation profiles follow Section 1.1: Sections 16.1–16.6 are `Core Conforman
 ### 16.6 Core Conformance — Security & E2EE Gates
 
 - Subprocess environments for `machine`, `mcpServers`, and `acpProviders` exclude daemon E2EE keys, cloud tokens, and sibling plugins' secrets.
-- In E2EE workspaces: Guests cannot invoke `plugin/query` or `plugin/mutate`; non-owners cannot invoke `'machine'` scope; collaborators require active `MachineSharing` across all bound projects; rooted `ToolExecutionContext`, `MachineEventContext`, and `MachineStartupContext` (`originTurn` verified against stored human-signed `sessionData` turns) enforce the 20-derivation `machineInput` cap while un-rooted queries/mutations reject `sessions.create`/`send`/`respondInteraction` with `forbidden`; `<account>/<workspace>/<genesis>/<signing-key>` caches wipe on member removal or device revocation.
+- In E2EE workspaces: Guests cannot invoke `plugin/query` or `plugin/mutate`; non-owners cannot invoke `'machine'` scope; collaborators require active `MachineSharing` across all bound projects; rooted `ToolExecutionContext`, `MachineEventContext`, and `MachineStartupContext` (`originTurn` verified against stored human-signed `sessionData` turns) enforce the 20-derivation `machineInput` cap while un-rooted queries/mutations reject `sessions.create`/`send`/`respondInteraction` with `forbidden`; `<account>/<workspace>/<genesis>/<signing-key>` caches wipe on member removal or device revocation. Verify restart admits an already signed input but rejects a new member derivation from the same inactive turn.
 
 ### 16.7 Conditional Conformance — Workflow ACP Providers & Mobile Extended UI
 

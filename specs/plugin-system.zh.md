@@ -273,7 +273,7 @@ flowchart TB
 0. **第一方与插件共用的类型化宿主命令注册表（`lodyCommands` + `lody.execute` / `useLodyCommand` / `ctx.lody.execute`）：**
    - Lody 不另建第二套仅供插件使用的命令系统，也不将原生业务变更锁死在内部 React Hook 中，而是将宿主全部业务写操作收敛为类型化 `LodyCommandDescriptor<S, TInput, TOutput>` 注册表 `lodyCommands`（完整覆盖会话执行 `sessionCreate` / `sessionSend` / `sessionRespondInteraction` / `sessionStop` / `sessionArchive` / `sessionRestore` / `sessionFork`、基于 [`status-view/command.ts`](../packages/shared/src/status-view/command.ts) `planStatusViewCommand` 与 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts) 的状态分流命令 `sessionSetPinned` / `sessionSnooze` / `sessionSettle` / `sessionMoveToFocus` / `sessionMoveOrder` / `sessionUpdateTitle` / `sessionMarkRead` / `sessionMarkUnread`、置顶分组 `pinSection*` 以及定时任务控制 `scheduleSetEnabled` / `scheduleRunNow`）。
    - 第一方 UI 与第三方插件通过客户端 `lody.execute(target, command, input)` / `useLodyCommand` 及机器侧 `ctx.lody.execute(target, command, input)` **共用同一套授权与执行管线**（同时保留 `sessions.{create, send, respondInteraction, requestStop, requestArchive}` 作为指向 `lodyCommands.session*` 的轻量语义别名）。
-   - **显式调用主体（`ActorContext`）与第一方 `prefer` / `manage` / `execute` 授权复用：** 每次 `lodyCommands` 调用均绑定宿主不可伪造的 `ActorContext`，绝不仅凭 `target` 放行，也绝不因插件运行在机器所有者的 Daemon 上就赋予替全体成员改偏好或点审批的越权能力：客户端绑定当前登录用户；机器侧 `plugin/query` 与 `plugin/mutate` 绑定发起 RPC 的已认证成员；`ToolExecutionContext` 与 `MachineEventContext` 绑定该会话/回合所属授权用户（`SessionMeta.userId` / 经核验的 `originTurn` 签名人）；`MachineStartupContext`（`onStart`）对执行与交互命令强制从经核验的 `originTurn` 提取签名主体，并对无明确用户主体的个人偏好写操作（如 `sessionMarkRead` / `sessionMarkUnread`）以 `forbidden` 拒绝。两端执行器均针对该 `ActorContext` 复用第一方现有的 `prefer` 与 `manage` 分级守卫（[`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts)、[`status-view/command.ts`](../packages/shared/src/status-view/command.ts)）及 E2EE `MachineSharing` / `e2eeIntent` 门禁。
+   - **显式调用主体（`ActorContext`）与第一方 `prefer` / `manage` / `execute` 授权复用：** 每次 `lodyCommands` 调用均绑定宿主不可伪造的 `ActorContext`，绝不仅凭 `target` 放行，也绝不因插件运行在机器所有者的 Daemon 上就赋予替全体成员改偏好或点审批的越权能力：客户端绑定当前登录用户；机器侧 `plugin/query` 与 `plugin/mutate` 绑定发起 RPC 的已认证成员；`ToolExecutionContext` 与 `MachineEventContext` 绑定该会话/回合所属授权用户（`SessionMeta.userId` / 经核验的 `originTurn` 签名人）；`MachineStartupContext`（`onStart`）对回合结束后的新执行与交互命令使用独立授权的工作流主体，并对无明确用户主体的个人偏好写操作（如 `sessionMarkRead` / `sessionMarkUnread`）以 `forbidden` 拒绝。两端执行器均针对该 `ActorContext` 复用第一方现有的 `prefer` 与 `manage` 分级守卫（[`use-session-management-guard.ts`](../packages/components/src/hooks/use-session-management-guard.ts)、[`status-view/command.ts`](../packages/shared/src/status-view/command.ts)）及 E2EE `MachineSharing` / `e2eeIntent` 门禁。
 1. **原子化 `(requestId, businessKey)` `sessions.create` 幂等回执：**
    - 按 `(workspace_id, caller_user_id, canonical_target_key, plugin_id, request_id)` 持久化。
    - 重放完全相同的归一化请求（即使目标 Session 后来已归档）始终返回原始 `SessionRef`；复用相同 `requestId` 但篡改参数时拒绝 `idempotency_conflict`。
@@ -480,7 +480,7 @@ flowchart TB
 遵循 [`packages/shared/src/e2ee-execution-intent.ts`](../packages/shared/src/e2ee-execution-intent.ts)：
 
 - 客户端 `useLody().sessions.create` / `send` / `respondInteraction` 在个人设备上签发 `E2EE_INTENT_KIND.memberInput`（`kind = 1`）。
-- 守护进程 `ToolExecutionContext` 以及 `MachineEventContext` / `MachineStartupContext` 在具备经验证的 `SignedTurnOrigin`（`originTurn: { session, userTurnId }`，实时事件下由宿主自动注入，守护进程重启后的 `machine.onStart` 对账中从 `SessionTurnSummary.userTurnId` 传入）或本机所有者签名的工作流激活声明时，可对 `sessions.create`、`send` 与 `respondInteraction` 签发 `derivedFrom` `E2EE_INTENT_KIND.machineInput`（`kind = 2`）。遵循[共享成员派生](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.zh.md)，守护进程直接在本地 `sessionData` 中核验已存储的人类签名 `memberInput` 根回合记录 `(originTurn.session.sessionId, originTurn.userTurnId)`（强制执行**单机规则**、当前成员/项目 `MachineSharing` 授权与 **20 跳派生上限**，且无启动时间过期截断——从而使守护进程重启后的 `onStart` 恢复无需伪造或削弱 E2EE 签名门禁即可合法验签续跑）。
+- 守护进程的 `sessions.create`、`send`、`respondInteraction` 遵循[共享成员派生规则](../.agents/notes/implemented/architecture/2026-10-31-e2ee-shared-member-derivation.md)：守护进程必须在写入时确认驱动回合在运行时仍活跃，并在本地 `sessionData` 核验 `originTurn: { session, userTurnId }` 对应该回合的人类签名 `memberInput`。共享成员派生 `derivedFrom` `machineInput`（`kind = 2`）须有有效的成员/项目 `MachineSharing`，限同一机器，最多派生 20 次。已签名输入无启动期限，重启后仍可在通过当前授权检查后启动。历史记录只能证明来源，不能授权签发新输入。回合结束后，新工作必须由另行核验的机器所有者工作流激活声明授权，且仅限声明覆盖的机器和操作；执行主体是该工作流，不得提升成员权限。
 - 在 E2EE 工作区中，无交互根签名的 `MachineContext`（`query`、`mutation`、`attachmentSource`）调用 `sessions.create`、`send` 与 `respondInteraction` 一律拒绝 `forbidden`。
 
 ### 13.6 托管域隔离、快照脱敏、静态明文分享与外发披露
@@ -703,19 +703,14 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
   if context_kind == "client_interactive":
     return require_personal_device_member_input_signature(caller_or_event)
 
-  if context_kind == "tool_execution":
-    return sign_derived_machine_input(root_turn_id=caller_or_event.active_user_turn_id, max_hops=20, target_machine_id)
+  if context_kind in ["machine_event", "machine_startup"] and caller_or_event.principal_kind == "declared_workflow":
+    return require_owner_signed_activation_for_plugin_machine_and_operation_then_sign_as_workflow()
 
-  if context_kind in ["machine_event", "machine_startup"]:
-    origin = request.origin_turn ?? caller_or_event.ambient_origin_turn
-    if origin is present:
-      verified_root = verify_stored_human_signed_turn_in_local_session_data(kernel, origin.session, origin.userTurnId, target_machine_id)
-      if verified_root is ok:
-        return sign_derived_machine_input(root_turn=verified_root, max_hops=20, target_machine_id)
-      return deny("forbidden: invalid or unauthorized E2EE originTurn")
-    if has_verified_human_workflow_declaration(kernel, caller_or_event.plugin_id, target_machine_id):
-      return sign_declared_workflow_machine_input(caller_or_event.plugin_id, target_machine_id)
-    return deny("forbidden: un-rooted E2EE machine context cannot originate Session turns")
+  if context_kind in ["tool_execution", "machine_event", "machine_startup"]:
+    origin = caller_or_event.bound_origin_turn
+    if not verify_live_driving_turn_and_stored_member_signature(kernel, origin):
+      return deny("forbidden: inactive or unverified driving turn")
+    return require_active_sharing_same_machine_and_reserve_derivation_then_sign(origin, target_machine_id, limit=20)
 
   # 无根查询 / 写操作 / 附件解析器
   return deny("forbidden: un-rooted MachineContext cannot originate E2EE Session turns")
@@ -748,7 +743,7 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 ### 16.4 Core Conformance — 工作区数据、原始只读快照与工作流 Role/MCP
 
 - **产品验收场景 —— 全自由度多 Agent 指挥面板：** 自定义全屏视图组合 `lodyQueries.sessionTurns` / `subagentRun` / `agentConfigs` 与 `useLodySnapshot({ kind: "workspace-state" | "session-transcript" }, selector)`；返回的 `RawDocumentSnapshot` 深度只读冻结（`Object.freeze`）、自动剥离敏感密钥与外部 `businessKey`，且仅在 Selector 投影值变化时重渲染。
-- **产品验收场景 —— 工作流 Role + MCP + 事件编排与守护进程重启恢复：** 启用工作流插件自动注册 `plugin:<id>:<role>` 并以进程外方式拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed")` 先将任务意图原子写入 `ctx.dataDir`、读取局部会话快照并以 `(requestId, businessKey)` 幂等拉起验证子会话；无论守护进程在 `sessions.create` 中途崩溃还是在 `session.turn.completed` 送达插件前退出，`machine.onStart(ctx)` 均可通过对账 `ctx.dataDir` + `lodyQueries.sessions`（`updatedAfter`）+ `lodyQueries.sessionTurns` 完整保留原始 `ProjectRef`、`parentSession` 与 E2EE `originTurn` 幂等续跑且绝不重复创建会话。
+- **产品验收场景 —— 工作流 Role + MCP + 事件编排与守护进程重启恢复：** 启用工作流插件自动注册 `plugin:<id>:<role>` 并以进程外方式拉起 `manifest.mcpServers`；`machine.events.on("session.turn.completed")` 先将任务意图原子写入 `ctx.dataDir`、读取局部会话快照并以 `(requestId, businessKey)` 幂等拉起验证子会话；无论守护进程在 `sessions.create` 中途崩溃还是在 `session.turn.completed` 送达插件前退出，`machine.onStart(ctx)` 均可通过对账 `ctx.dataDir` + `lodyQueries.sessions`（`updatedAfter`）+ `lodyQueries.sessionTurns` 完整保留原始 `ProjectRef`、`parentSession` 与 E2EE `originTurn` 幂等续跑且绝不重复创建会话。 回合结束后的新 E2EE 工作使用所有者工作流激活声明（§13.5）。
 
 ### 16.5 Core Conformance — DX、UX、提议-确认审批与 Desktop/Web/Mobile 跨端体验
 
@@ -759,7 +754,7 @@ function authorize_e2ee_plugin_session_write(kernel, context_kind, caller_or_eve
 ### 16.6 Core Conformance — 安全边界与 E2EE 门禁
 
 - `machine`、`mcpServers` 与 `acpProviders` 子进程环境变量彻底剥离守护进程 E2EE 密钥、云端令牌及兄弟插件密钥。
-- 在 E2EE 工作区中：Guest 无法调用 `plugin/query` 或 `plugin/mutate`；非所有者禁止调用 `'machine'` 作用域；协作者须具备覆盖全部绑定项目的 `MachineSharing`；有根 `ToolExecutionContext`、`MachineEventContext` 与 `MachineStartupContext`（基于本地 `sessionData` 核验人类签名的 `originTurn`）遵守 20 跳 `machineInput` 派生上限，无根查询/写操作拒绝 `sessions.create`/`send`/`respondInteraction`（`forbidden`）；成员移除或设备吊销时原子擦除 `<account>/<workspace>/<genesis>/<signing-key>` 缓存。
+- 在 E2EE 工作区中：Guest 无法调用 `plugin/query` 或 `plugin/mutate`；非所有者禁止调用 `'machine'` 作用域；协作者须具备覆盖全部绑定项目的 `MachineSharing`；有根 `ToolExecutionContext`、`MachineEventContext` 与 `MachineStartupContext`（基于本地 `sessionData` 核验人类签名的 `originTurn`）遵守 20 跳 `machineInput` 派生上限，无根查询/写操作拒绝 `sessions.create`/`send`/`respondInteraction`（`forbidden`）；成员移除或设备吊销时原子擦除 `<account>/<workspace>/<genesis>/<signing-key>` 缓存。 验证重启后已签名输入可获准启动，但从同一已结束回合新派生成员输入会被拒绝。
 
 ### 16.7 条件扩展合规 — Workflow ACP Provider 与移动端全屏扩展 UI
 
