@@ -21,6 +21,7 @@ import { styles } from './subagent-task-detail.stylex';
 import { styles as panelStyles } from './subagent-task-panel.stylex';
 import {
   actorOf,
+  configurationLabelOf,
   durationOf,
   isRunning,
   latestActionOf,
@@ -307,6 +308,7 @@ export function SubagentTaskDetail({
   const result = meaningfulSummaryOf(task);
   const duration = durationOf(task);
   const usage = useUsageLabel(task);
+  const configuration = configurationLabelOf(task, t);
   const latest = latestActionOf(task, t);
   // Cancel is offered only where the run says it can be and the machine can
   // address a run: never a fallback to stopping the parent turn.
@@ -332,7 +334,9 @@ export function SubagentTaskDetail({
             ` · ${formatDurationCompact(duration, getDurationUnitLabels(t))}`
           ) : null}
           {usage ? ` · ${usage}` : null}
-          {task.run?.snapshot.modelId ? ` · ${task.run.snapshot.modelId}` : null}
+          {configuration ? (
+            <span {...stylex.props(styles.configuration)}>{` · ${configuration}`}</span>
+          ) : null}
         </Dialog.Description>
       </Dialog.Header>
 
@@ -356,7 +360,6 @@ export function SubagentTaskDetail({
 
         <TaskActivity task={task} renderHistory={renderHistory} onHistoryReady={followEnd} />
 
-        {/* A legacy task has no steps; the one line the row shows is all it has. */}
         {!task.run && latest ? (
           <Section label={t('sessions.subagentTasks.latestAction', 'Latest')}>
             <p {...stylex.props(styles.sectionText)}>{latest}</p>
