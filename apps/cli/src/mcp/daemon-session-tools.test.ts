@@ -3244,6 +3244,41 @@ describe('daemon-hosted Session tools in the cloud composition', () => {
         },
       ],
     });
+
+    const proposedCardRes = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: 'wi-proposed-card',
+        title: 'Confirm cache migration plan',
+        stage: 'proposed',
+        summary: 'Migrate local cache index before enabling multi-window sync.',
+        pendingAction: 'Confirm whether to run automatic migration on startup.',
+      })
+    );
+    expect(proposedCardRes.isError, JSON.stringify(proposedCardRes.content)).not.toBe(true);
+    const stateAfterProposed = await sessionDoc.getDocState();
+    expect(stateAfterProposed.workItems?.['wi-proposed-card']).toMatchObject({
+      id: 'wi-proposed-card',
+      title: 'Confirm cache migration plan',
+      stage: 'proposed',
+      summary: 'Migrate local cache index before enabling multi-window sync.',
+      pendingAction: 'Confirm whether to run automatic migration on startup.',
+    });
+
+    const startedCardRes = await runWithDaemonWorkspace(replyDaemon, () =>
+      executeDaemonSessionTool(context(), 'lody_coordinator_work_item', {
+        workItemId: 'wi-proposed-card',
+        stage: 'working',
+        progressNote: 'Dispatched implementation worker for cache index migration.',
+      })
+    );
+    expect(startedCardRes.isError, JSON.stringify(startedCardRes.content)).not.toBe(true);
+    const stateAfterStarted = await sessionDoc.getDocState();
+    expect(stateAfterStarted.workItems?.['wi-proposed-card']).toMatchObject({
+      id: 'wi-proposed-card',
+      stage: 'working',
+      progressNote: 'Dispatched implementation worker for cache index migration.',
+    });
+    expect(stateAfterStarted.workItems?.['wi-proposed-card']?.pendingAction).toBeUndefined();
     expect((await manager.repo.getDocMeta(getSessionRoomId(implSessionId)))?.meta).toMatchObject({
       workItemId: implSessionId,
       workItemRole: 'implement',

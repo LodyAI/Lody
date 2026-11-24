@@ -809,7 +809,7 @@ export function CoordinatorProactiveCard({
                   <div {...stylex.props(styles.collapsedRight)}>
                     {card.linkedTasks.slice(0, 2).map((task) => {
                       const num = formatTaskNumber(task.taskNumber);
-                      const diff = task.session.diffStats?.allChange;
+                      const diff = task.session?.diffStats?.allChange;
                       const showDiff = hasWorkspaceChanges(diff);
                       const prs =
                         task.pullRequests && task.pullRequests.length > 0
@@ -818,10 +818,10 @@ export function CoordinatorProactiveCard({
                             ? [task.pullRequest]
                             : [];
                       const showRepo = hasMultiplePullRequestRepos(prs);
-                      const title = task.workItemTitle?.trim() || task.session.title;
+                      const title = task.workItemTitle?.trim() || task.session?.title || '';
                       return (
                         <span
-                          key={task.workItemId || task.session.id}
+                          key={task.workItemId || task.session?.id || title}
                           {...stylex.props(styles.collapsedRight)}
                         >
                           <button
@@ -829,7 +829,7 @@ export function CoordinatorProactiveCard({
                             title={title}
                             onClick={(event) => {
                               event.stopPropagation();
-                              onOpenTask?.(task.session.id);
+                              if (task.session) onOpenTask?.(task.session.id);
                             }}
                             {...stylex.props(styles.compactTaskPill)}
                           >
@@ -905,9 +905,9 @@ export function CoordinatorProactiveCard({
                       const num = formatTaskNumber(task.taskNumber);
                       const title =
                         task.workItemTitle?.trim() ||
-                        task.session.title?.trim() ||
+                        task.session?.title?.trim() ||
                         t('sessions.untitled', 'Untitled session');
-                      const diff = task.session.diffStats?.allChange;
+                      const diff = task.session?.diffStats?.allChange;
                       const showDiff = hasWorkspaceChanges(diff);
                       const prs =
                         task.pullRequests && task.pullRequests.length > 0
@@ -918,7 +918,7 @@ export function CoordinatorProactiveCard({
                       const showRepo = hasMultiplePullRequestRepos(prs);
                       return (
                         <span
-                          key={task.workItemId || task.session.id}
+                          key={task.workItemId || task.session?.id || title}
                           {...stylex.props(styles.taskChipGroup)}
                         >
                           <button
@@ -926,7 +926,7 @@ export function CoordinatorProactiveCard({
                             title={title}
                             onClick={(event) => {
                               event.stopPropagation();
-                              onOpenTask?.(task.session.id);
+                              if (task.session) onOpenTask?.(task.session.id);
                             }}
                             {...stylex.props(styles.taskChip)}
                           >

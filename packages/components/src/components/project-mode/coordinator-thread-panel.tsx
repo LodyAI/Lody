@@ -200,7 +200,7 @@ function ThreadLinkedTaskItem({
   const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const title =
     task?.workItemTitle?.trim() ||
-    task?.session.title?.trim() ||
+    task?.session?.title?.trim() ||
     meta?.title?.trim() ||
     t('sessions.untitled', 'Untitled session');
   const number = formatTaskNumber(task?.taskNumber ?? null);

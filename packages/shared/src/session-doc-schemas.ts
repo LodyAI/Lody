@@ -23,7 +23,10 @@ import type {
   SessionId,
 } from '.';
 import type { SessionHistorySendStatus, SessionHistoryStatus, SessionPlanEntry } from './schema';
-import type { CoordinatorCollaborationMode } from './coordinator-work-items';
+import type {
+  CoordinatorCollaborationMode,
+  CoordinatorWorkItemStage,
+} from './coordinator-work-items';
 
 const historyItemAnySchema = schema.Any({ defaultLoroText: false });
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -490,11 +493,16 @@ export const coordinatorWorkItemDocSchema = schema.LoroMap({
   id: schema.String(),
   taskNumber: schema.Number({ required: false }),
   title: schema.String({ required: false }),
+  stage: schema.String<CoordinatorWorkItemStage>({ required: false }),
+  summary: schema.String({ required: false }),
+  progressNote: schema.String({ required: false }),
+  pendingAction: schema.String({ required: false }),
   mode: schema.String<CoordinatorCollaborationMode>({ required: false }),
   externalRefs: schema.LoroList(coordinatorWorkItemExternalRefDocSchema, undefined, {
     required: false,
   }),
   acceptedAt: schema.Number({ required: false }),
+  archivedAt: schema.Number({ required: false }),
   createdAt: schema.Number(),
   updatedAt: schema.Number(),
 });

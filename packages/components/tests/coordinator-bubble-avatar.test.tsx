@@ -17,6 +17,7 @@ import {
 } from '../src/components/project-mode/coordinator-bubble-avatar';
 import { CoordinatorProactiveCard } from '../src/components/project-mode/coordinator-action-bar';
 import { CoordinatorObservabilityHeaderButton } from '../src/components/project-mode/coordinator-observability-panel';
+import { ProjectBoardView } from '../src/components/project-mode/project-board';
 import { initI18n } from '../src/i18n';
 import {
   mountCoordinatorLottieOnce,
@@ -286,5 +287,165 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     expect(topology!.querySelectorAll('animateMotion').length).toBeGreaterThan(0);
     expect(dialog!.textContent).toContain('Project Store');
     expect(dialog!.textContent).toContain('已启动小队并挂载监听');
+  });
+
+  it('renders standalone proposed Task Cards and overlapping avatar-style PR stacks on the refactored ProjectBoardView', async () => {
+    await initI18n('zh_CN');
+    const sentPrompts: string[] = [];
+    const prefilledPrompts: string[] = [];
+    const prs = [
+      {
+        url: 'https://github.com/LodyAI/Lody/pull/3270',
+        repoFullName: 'LodyAI/Lody',
+        number: 3270,
+        status: 'open' as const,
+        readiness: 'y' as const,
+        state: { s: 's' as const, m: 'c' as const },
+        pr: { url: 'https://github.com/LodyAI/Lody/pull/3270', status: 'open' as const },
+      },
+      {
+        url: 'https://github.com/LodyAI/Sorbet/pull/324',
+        repoFullName: 'LodyAI/Sorbet',
+        number: 324,
+        status: 'open' as const,
+        readiness: 'y' as const,
+        state: { s: 's' as const, m: 'c' as const },
+        pr: { url: 'https://github.com/LodyAI/Sorbet/pull/324', status: 'open' as const },
+      },
+      {
+        url: 'https://github.com/LodyAI/acp-extension-kimi/pull/29',
+        repoFullName: 'LodyAI/acp-extension-kimi',
+        number: 29,
+        status: 'open' as const,
+        readiness: 'y' as const,
+        state: { s: 's' as const, m: 'c' as const },
+        pr: {
+          url: 'https://github.com/LodyAI/acp-extension-kimi/pull/29',
+          status: 'open' as const,
+        },
+      },
+      {
+        url: 'https://github.com/LodyAI/acp-extension-pi/pull/39',
+        repoFullName: 'LodyAI/acp-extension-pi',
+        number: 39,
+        status: 'open' as const,
+        readiness: 'y' as const,
+        state: { s: 's' as const, m: 'c' as const },
+        pr: { url: 'https://github.com/LodyAI/acp-extension-pi/pull/39', status: 'open' as const },
+      },
+      {
+        url: 'https://github.com/LodyAI/acp-extension-dsh/pull/38',
+        repoFullName: 'LodyAI/acp-extension-dsh',
+        number: 38,
+        status: 'open' as const,
+        readiness: 'y' as const,
+        state: { s: 's' as const, m: 'c' as const },
+        pr: { url: 'https://github.com/LodyAI/acp-extension-dsh/pull/38', status: 'open' as const },
+      },
+    ];
+
+    const fakeSession = {
+      id: 'sess-multi-pr',
+      title: '多仓库协议统一升级',
+      createdAt: '2026-11-24T00:00:00.000Z',
+    } as never;
+
+    await act(async () => {
+      root!.render(
+        React.createElement(ProjectBoardView, {
+          board: {
+            needsYou: [
+              {
+                workItemId: 'wi-prop-1',
+                workItemTitle: '拆分认证中间件重构',
+                stage: 'proposed',
+                summary: '将 token 校验与会话加载拆解为独立阶段。',
+                progressNote: null,
+                pendingAction: '请确认是否保留旧版 Cookie 兼容路径',
+                isStandalone: true,
+                collaborationMode: 'delegated',
+                externalRefs: [],
+                members: [],
+                session: null,
+                bucket: 'needsYou',
+                taskNumber: 1,
+                createdManually: false,
+                isWorking: false,
+                isWaitingPermission: false,
+                hasUnreadMessages: false,
+                sendState: null,
+                latestMessageAt: Date.parse('2026-11-24T06:00:00.000Z'),
+                pullRequest: null,
+                pullRequests: [],
+              },
+            ],
+            working: [],
+            review: [
+              {
+                workItemId: 'sess-multi-pr',
+                workItemTitle: '多仓库协议统一升级',
+                stage: 'review',
+                summary: null,
+                progressNote: '5 个仓库 PR 均已通过 CI 并处于可合并状态。',
+                pendingAction: null,
+                isStandalone: false,
+                collaborationMode: 'delegated',
+                externalRefs: [],
+                members: [
+                  {
+                    session: fakeSession,
+                    role: 'implement',
+                    bucket: 'review',
+                    isWorking: false,
+                    isWaitingPermission: false,
+                    hasUnreadMessages: false,
+                    sendState: null,
+                    latestMessageAt: Date.parse('2026-11-24T06:05:00.000Z'),
+                    pullRequests: prs,
+                  },
+                ],
+                session: fakeSession,
+                bucket: 'review',
+                taskNumber: 2,
+                createdManually: false,
+                isWorking: false,
+                isWaitingPermission: false,
+                hasUnreadMessages: false,
+                sendState: null,
+                latestMessageAt: Date.parse('2026-11-24T06:05:00.000Z'),
+                pullRequest: prs[0]!,
+                pullRequests: prs,
+              },
+            ],
+            accepted: [],
+          },
+          getSessionHref: (id) => `#${id}`,
+          onOpenSession: () => undefined,
+          onSendCoordinatorPrompt: (prompt) => sentPrompts.push(prompt),
+          onPrefillCoordinatorPrompt: (prompt) => prefilledPrompts.push(prompt),
+          onAcceptTasks: () => undefined,
+        })
+      );
+    });
+
+    expect(container!.textContent).toContain('请确认是否保留旧版 Cookie 兼容路径');
+    expect(container!.textContent).toContain('多仓库协议统一升级');
+    const prStack = container!.querySelector<HTMLButtonElement>('[data-project-board-pr-stack]');
+    expect(prStack).not.toBeNull();
+    expect(prStack!.textContent).toContain('+1');
+    expect(prStack!.textContent).toContain('5 PR');
+
+    const buttons = [...container!.querySelectorAll('button')];
+    const confirmBtn = buttons.find((b) => b.textContent?.includes('确认启动'));
+    const adjustBtn = buttons.find((b) => b.textContent?.includes('调整'));
+    expect(confirmBtn).toBeDefined();
+    expect(adjustBtn).toBeDefined();
+
+    await act(async () => {
+      confirmBtn!.click();
+      adjustBtn!.click();
+    });
+    expect(sentPrompts[0]).toContain('T1 拆分认证中间件重构');
+    expect(prefilledPrompts[0]).toContain('T1 拆分认证中间件重构');
   });
 });

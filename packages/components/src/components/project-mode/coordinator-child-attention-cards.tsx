@@ -438,7 +438,9 @@ function findPendingChildPermissions(
   return out;
 }
 
-function findLatestChildAssistantQuestion(turns: readonly (SessionHistory | null)[]): string | null {
+function findLatestChildAssistantQuestion(
+  turns: readonly (SessionHistory | null)[]
+): string | null {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
     if (!turn || turn.role !== 'assistant') continue;
@@ -595,9 +597,7 @@ function PermissionCardContent({
           {subject.type === 'command' ? (
             <>
               <span {...stylex.props(styles.subjectCode)}>{subject.command}</span>
-              {subject.cwd ? (
-                <span {...stylex.props(styles.subjectCwd)}>{subject.cwd}</span>
-              ) : null}
+              {subject.cwd ? <span {...stylex.props(styles.subjectCwd)}>{subject.cwd}</span> : null}
             </>
           ) : subject.type === 'paths' ? (
             subject.paths.map((p) => (
@@ -736,7 +736,7 @@ function LiveChildAttentionCard({
   row,
   onOpenTask,
 }: {
-  row: ProjectBoardRow;
+  row: ProjectBoardRow & { session: NonNullable<ProjectBoardRow['session']> };
   onOpenTask: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -773,8 +773,7 @@ function LiveChildAttentionCard({
     return null;
   }
 
-  const taskTitle =
-    row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
+  const taskTitle = row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
   const taskTag = formatTaskNumber(row.taskNumber);
 
   const dispatchMessageToChild = async (prompt: string) => {
@@ -1044,10 +1043,12 @@ export function CoordinatorChildAttentionCards() {
   const coordinator = useCoordinatorConversation();
   const needsYouRows = useMemo(() => {
     if (!coordinator) return [];
-    const list: ProjectBoardRow[] = [];
+    const list: Array<ProjectBoardRow & { session: NonNullable<ProjectBoardRow['session']> }> = [];
+    const seen = new Set<string>();
     for (const row of coordinator.tasks.values()) {
-      if (row.bucket === 'needsYou') {
-        list.push(row);
+      if (row.bucket === 'needsYou' && row.session && !seen.has(row.session.id)) {
+        seen.add(row.session.id);
+        list.push(row as ProjectBoardRow & { session: NonNullable<ProjectBoardRow['session']> });
       }
     }
     list.sort((a, b) => b.latestMessageAt - a.latestMessageAt);

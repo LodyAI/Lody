@@ -6,6 +6,7 @@ import {
   type CoordinatorCollaborationMode,
   type CoordinatorExternalRef,
   type CoordinatorWorkItemDoc,
+  type CoordinatorWorkItemStage,
   type MachineId,
   type SessionMeta,
   type SessionPullRequestView,
@@ -155,10 +156,15 @@ export type ProjectBoardSessionMember = {
 export type ProjectBoardRow = {
   workItemId: string;
   workItemTitle: string | null;
+  stage: CoordinatorWorkItemStage;
+  summary: string | null;
+  progressNote: string | null;
+  pendingAction: string | null;
+  isStandalone: boolean;
   collaborationMode: CoordinatorCollaborationMode;
   externalRefs: readonly CoordinatorExternalRef[];
   members: readonly ProjectBoardSessionMember[];
-  session: SessionMeta;
+  session: SessionMeta | null;
   bucket: ProjectBoardBucket;
   /** `T<n>` for a work item this coordinator opened, in creation order. */
   taskNumber: number | null;
@@ -172,6 +178,52 @@ export type ProjectBoardRow = {
   pullRequest: SessionPullRequestView | null;
   pullRequests: readonly SessionPullRequestView[];
 };
+
+export type ProjectBoardPullRequestSummary = {
+  readonly total: number;
+  readonly mergeable: number;
+  readonly merged: number;
+  readonly failingCi: number;
+  readonly pendingCi: number;
+  readonly conflicts: number;
+  readonly draft: number;
+  readonly open: number;
+};
+
+export function summarizeProjectBoardPullRequests(
+  pullRequests: readonly SessionPullRequestView[]
+): ProjectBoardPullRequestSummary {
+  let mergeable = 0;
+  let merged = 0;
+  let failingCi = 0;
+  let pendingCi = 0;
+  let conflicts = 0;
+  let draft = 0;
+  let open = 0;
+  for (const pr of pullRequests) {
+    if (pr.status === 'merged') {
+      merged += 1;
+      continue;
+    }
+    if (pr.status === 'closed') continue;
+    if (pr.status === 'draft') draft += 1;
+    else open += 1;
+    if (pr.state?.m === 'd') conflicts += 1;
+    if (pr.state?.s === 'f' || pr.state?.s === 'e') failingCi += 1;
+    else if (pr.state?.s === 'p') pendingCi += 1;
+    if (pr.readiness === 'y') mergeable += 1;
+  }
+  return {
+    total: pullRequests.length,
+    mergeable,
+    merged,
+    failingCi,
+    pendingCi,
+    conflicts,
+    draft,
+    open,
+  };
+}
 
 export type ProjectBoard = Record<ProjectBoardBucket, ProjectBoardRow[]>;
 
@@ -212,6 +264,12 @@ export function buildCoordinatorTaskNumbers(
     }
   }
 
+  for (const [workItemId, doc] of Object.entries(workItems ?? {})) {
+    if (groups.has(workItemId)) continue;
+    const docCreated = typeof doc?.createdAt === 'number' && doc.createdAt > 0 ? doc.createdAt : 0;
+    groups.set(workItemId, { earliestMs: docCreated, memberIds: [] });
+  }
+
   const ordered = [...groups.entries()].sort(
     ([idA, a], [idB, b]) => a.earliestMs - b.earliestMs || idA.localeCompare(idB)
   );
@@ -249,7 +307,7 @@ export function resolveOwnerSessionForPullRequest(
       return member.session.id;
     }
   }
-  return row.session.id;
+  return row.session?.id ?? '';
 }
 
 /**
@@ -352,13 +410,27 @@ export function buildProjectBoard(options: {
 
     const groupAcceptedByTimestamp =
       typeof workItemDoc?.acceptedAt === 'number' && workItemDoc.acceptedAt >= latestMessageAt;
-    const bucket: ProjectBoardBucket = members.some((m) => m.bucket === 'needsYou')
+    const explicitStage = workItemDoc?.stage;
+    const hasChildNeedsYou = members.some((m) => m.bucket === 'needsYou');
+    const hasChildWorking = members.some((m) => m.bucket === 'working');
+    const allChildAccepted = members.every((m) => m.bucket === 'accepted');
+    const bucket: ProjectBoardBucket = hasChildNeedsYou
       ? 'needsYou'
-      : members.some((m) => m.bucket === 'working')
+      : hasChildWorking
         ? 'working'
-        : groupAcceptedByTimestamp || members.every((m) => m.bucket === 'accepted')
-          ? 'accepted'
-          : 'review';
+        : explicitStage === 'proposed' || explicitStage === 'blocked'
+          ? 'needsYou'
+          : groupAcceptedByTimestamp || allChildAccepted || explicitStage === 'done'
+            ? 'accepted'
+            : 'review';
+    const stage: CoordinatorWorkItemStage =
+      bucket === 'accepted'
+        ? 'done'
+        : hasChildWorking
+          ? 'working'
+          : hasChildNeedsYou
+            ? 'blocked'
+            : (explicitStage ?? (bucket === 'review' ? 'review' : 'working'));
 
     const pullRequests: SessionPullRequestView[] = [];
     const seenPrUrls = new Set<string>();
@@ -380,6 +452,11 @@ export function buildProjectBoard(options: {
     board[bucket].push({
       workItemId,
       workItemTitle,
+      stage,
+      summary: workItemDoc?.summary?.trim() || null,
+      progressNote: workItemDoc?.progressNote?.trim() || null,
+      pendingAction: workItemDoc?.pendingAction?.trim() || null,
+      isStandalone: false,
       collaborationMode: workItemDoc?.mode ?? 'delegated',
       externalRefs: workItemDoc?.externalRefs ?? [],
       members,
@@ -391,9 +468,49 @@ export function buildProjectBoard(options: {
       isWaitingPermission,
       hasUnreadMessages,
       sendState,
-      latestMessageAt,
+      latestMessageAt: Math.max(latestMessageAt, workItemDoc?.updatedAt ?? 0),
       pullRequest: pullRequests[0] ?? null,
       pullRequests,
+    });
+  }
+
+  for (const [workItemId, workItemDoc] of Object.entries(normalizedWorkItems)) {
+    if (membersByWorkItem.has(workItemId)) continue;
+    if (typeof workItemDoc.archivedAt === 'number' && !options.includeArchived) continue;
+    const isDone = workItemDoc.stage === 'done' || typeof workItemDoc.acceptedAt === 'number';
+    const stage: CoordinatorWorkItemStage = isDone
+      ? 'done'
+      : (workItemDoc.stage ?? (workItemDoc.pendingAction ? 'proposed' : 'review'));
+    const bucket: ProjectBoardBucket = isDone
+      ? 'accepted'
+      : stage === 'proposed' || stage === 'blocked'
+        ? 'needsYou'
+        : stage === 'working'
+          ? 'working'
+          : 'review';
+    const latestMessageAt = Math.max(workItemDoc.updatedAt || 0, workItemDoc.createdAt || 0);
+    board[bucket].push({
+      workItemId,
+      workItemTitle: workItemDoc.title?.trim() || null,
+      stage,
+      summary: workItemDoc.summary?.trim() || null,
+      progressNote: workItemDoc.progressNote?.trim() || null,
+      pendingAction: workItemDoc.pendingAction?.trim() || null,
+      isStandalone: true,
+      collaborationMode: workItemDoc.mode ?? 'delegated',
+      externalRefs: workItemDoc.externalRefs ?? [],
+      members: [],
+      session: null,
+      bucket,
+      taskNumber: taskNumbers.get(workItemId) ?? null,
+      createdManually: false,
+      isWorking: stage === 'working',
+      isWaitingPermission: false,
+      hasUnreadMessages: false,
+      sendState: null,
+      latestMessageAt,
+      pullRequest: null,
+      pullRequests: [],
     });
   }
 

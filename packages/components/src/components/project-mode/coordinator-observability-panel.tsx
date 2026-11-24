@@ -1398,7 +1398,8 @@ export function CoordinatorObservabilityDialog({
                             const row = tasksById.get(sid);
                             const label =
                               row?.members?.find((m) => m.session.id === sid)?.session.title ||
-                              row?.session.title ||
+                              row?.session?.title ||
+                              row?.workItemTitle ||
                               sid.slice(0, 12);
                             return (
                               <button
@@ -1795,11 +1796,17 @@ export function CoordinatorObservabilityHeaderButton({
     let needsYou = false;
     const now = presenceNowMs || Date.now();
     for (const row of coordinator.tasks.values()) {
-      const wid = row.workItemId || row.session.id;
-      if (seen.has(wid)) continue;
+      const wid = row.workItemId || row.session?.id || '';
+      if (!wid || seen.has(wid)) continue;
       seen.add(wid);
       if (row.bucket === 'needsYou') needsYou = true;
-      for (const m of row.members ?? [{ session: row.session }]) {
+      const members =
+        row.members && row.members.length > 0
+          ? row.members
+          : row.session
+            ? [{ session: row.session }]
+            : [];
+      for (const m of members) {
         const live = findFreshSessionPresenceState(presenceStates, m.session.id, now);
         if (live?.status.type === 'running') running = true;
       }

@@ -217,6 +217,7 @@ export const prWorkflowRuleProvider: CoordinatorActionRuleProvider = {
   produce(ctx) {
     const actions: CoordinatorActionSpec[] = [];
     for (const task of ctx.eligibleTasks) {
+      if (!task.session) continue;
       const sid = task.session.id;
       const taskTag = formatTaskTag(task);
       const prs =
@@ -375,7 +376,7 @@ export const needsYouRuleProvider: CoordinatorActionRuleProvider = {
   produce(ctx) {
     const actions: CoordinatorActionSpec[] = [];
     for (const task of ctx.eligibleTasks) {
-      if (task.bucket !== 'needsYou') continue;
+      if (task.bucket !== 'needsYou' || !task.session) continue;
       const sid = task.session.id;
       const taskTag = formatTaskTag(task);
       actions.push({
@@ -405,7 +406,7 @@ export const taskReviewAcceptRuleProvider: CoordinatorActionRuleProvider = {
   produce(ctx) {
     const actions: CoordinatorActionSpec[] = [];
     for (const task of ctx.eligibleTasks) {
-      if (task.bucket !== 'review') continue;
+      if (task.bucket !== 'review' || !task.session) continue;
       const sid = task.session.id;
       const taskTag = formatTaskTag(task);
       actions.push({
@@ -482,7 +483,7 @@ function resolveSingleActionLiveStatus(args: {
     const prLabel = pr && pr.number !== null ? `#${pr.number}` : 'PR';
 
     if (intent.command === COORDINATOR_CLIENT_COMMANDS.taskAccept) {
-      if (task?.bucket === 'accepted' || task?.session.isArchived) {
+      if (task?.bucket === 'accepted' || task?.session?.isArchived) {
         return {
           liveState: 'completed',
           displayLabel: translate('projectMode.board.accepted', 'Accepted'),
@@ -767,7 +768,7 @@ export function resolveCoordinatorProactiveCard(args: {
   for (const sid of linkedIds) {
     const task = tasksById.get(sid);
     if (!task) continue;
-    const groupKey = task.workItemId || task.session.id;
+    const groupKey = task.workItemId || task.session?.id || sid;
     if (seenWorkItemIds.has(groupKey)) continue;
     seenWorkItemIds.add(groupKey);
     linkedTasks.push(task);
@@ -843,7 +844,7 @@ export function buildSupersededCoordinatorCardKeys(args: {
             if (task.taskNumber !== null && !taskNumbers.includes(task.taskNumber)) {
               taskNumbers.push(task.taskNumber);
             }
-            const groupTitle = task.workItemTitle?.trim() || task.session.title?.trim();
+            const groupTitle = task.workItemTitle?.trim() || task.session?.title?.trim();
             if (groupTitle && !taskTitles.includes(groupTitle)) {
               taskTitles.push(groupTitle);
             }
@@ -861,7 +862,9 @@ export function buildSupersededCoordinatorCardKeys(args: {
             const members =
               task.members && task.members.length > 0
                 ? task.members
-                : [{ session: task.session, latestMessageAt: task.latestMessageAt }];
+                : task.session
+                  ? [{ session: task.session, latestMessageAt: task.latestMessageAt }]
+                  : [];
             for (const member of members) {
               if (seenCursorIds.has(member.session.id)) continue;
               seenCursorIds.add(member.session.id);
@@ -879,6 +882,7 @@ export function buildSupersededCoordinatorCardKeys(args: {
               if (!snapTask) continue;
               const matchedMember = snapTask.members?.find((m) => m.session.id === snapSid);
               const targetSession = matchedMember?.session ?? snapTask.session;
+              if (!targetSession) continue;
               seenCursorIds.add(snapSid);
               sessionCursors.push({
                 id: snapSid,

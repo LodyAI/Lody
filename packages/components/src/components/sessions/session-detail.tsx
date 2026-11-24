@@ -5733,6 +5733,25 @@ const SessionDetail = ({
     [currentWorkspaceId, sessionId]
   );
 
+  const handleSendCoordinatorTaskCardPrompt = useCallback(
+    (prompt: string) => {
+      const handle = chatRefsMap.current.get(sessionId);
+      if (!handle || !('sendCoordinatorThreadReply' in handle)) return;
+      void handle.sendCoordinatorThreadReply(prompt);
+    },
+    [sessionId]
+  );
+
+  const handlePrefillCoordinatorTaskCardPrompt = useCallback(
+    (prompt: string) => {
+      const handle = chatRefsMap.current.get(sessionId);
+      if (handle && 'setInputText' in handle) {
+        handle.setInputText(prompt);
+      }
+    },
+    [sessionId]
+  );
+
   const handlePrefillChildSession = useCallback(
     (targetSessionId: SessionId, prompt: string) => {
       handleOpenPanelSession(targetSessionId);
@@ -8217,6 +8236,8 @@ const SessionDetail = ({
                 onOpenPr={(ownerId, pr) => {
                   handleOpenOwnedPrTab(ownerId as SessionId, pr);
                 }}
+                onSendCoordinatorPrompt={handleSendCoordinatorTaskCardPrompt}
+                onPrefillCoordinatorPrompt={handlePrefillCoordinatorTaskCardPrompt}
                 hideTitle
               />
             </div>

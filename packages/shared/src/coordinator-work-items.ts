@@ -3,6 +3,9 @@ import { extractLinkedSessionIdsFromText } from './coordinator-threads';
 
 export const WORK_ITEM_ID_MAX_CHARS = 128;
 export const WORK_ITEM_TITLE_MAX_CHARS = 160;
+export const WORK_ITEM_SUMMARY_MAX_CHARS = 320;
+export const WORK_ITEM_PROGRESS_NOTE_MAX_CHARS = 280;
+export const WORK_ITEM_PENDING_ACTION_MAX_CHARS = 180;
 export const WORK_ITEM_ROLE_MAX_CHARS = 48;
 export const WORK_ITEM_EXTERNAL_REFS_MAX_COUNT = 16;
 export const WORK_ITEM_EXTERNAL_REF_KIND_MAX_CHARS = 48;
@@ -15,6 +18,15 @@ export const COORDINATOR_CARD_SNAPSHOT_TURN_ID_MAX_CHARS = 160;
 
 export const CoordinatorCollaborationModeSchema = z.enum(['delegated', 'direct']);
 export type CoordinatorCollaborationMode = z.infer<typeof CoordinatorCollaborationModeSchema>;
+
+export const CoordinatorWorkItemStageSchema = z.enum([
+  'proposed',
+  'working',
+  'blocked',
+  'review',
+  'done',
+]);
+export type CoordinatorWorkItemStage = z.infer<typeof CoordinatorWorkItemStageSchema>;
 
 export const CoordinatorExternalRefSchema = z
   .object({
@@ -30,9 +42,14 @@ export type CoordinatorWorkItemDoc = {
   id: string;
   taskNumber?: number;
   title?: string;
+  stage?: CoordinatorWorkItemStage;
+  summary?: string;
+  progressNote?: string;
+  pendingAction?: string;
   mode?: CoordinatorCollaborationMode;
   externalRefs?: CoordinatorExternalRef[];
   acceptedAt?: number;
+  archivedAt?: number;
   createdAt: number;
   updatedAt: number;
 };
@@ -111,6 +128,19 @@ export function normalizeCoordinatorWorkItemDoc(
     typeof rec.title === 'string' && rec.title.trim().length > 0
       ? rec.title.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_TITLE_MAX_CHARS)
       : undefined;
+  const stageParsed = CoordinatorWorkItemStageSchema.safeParse(rec.stage);
+  const summary =
+    typeof rec.summary === 'string' && rec.summary.trim().length > 0
+      ? rec.summary.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_SUMMARY_MAX_CHARS)
+      : undefined;
+  const progressNote =
+    typeof rec.progressNote === 'string' && rec.progressNote.trim().length > 0
+      ? rec.progressNote.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_PROGRESS_NOTE_MAX_CHARS)
+      : undefined;
+  const pendingAction =
+    typeof rec.pendingAction === 'string' && rec.pendingAction.trim().length > 0
+      ? rec.pendingAction.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_PENDING_ACTION_MAX_CHARS)
+      : undefined;
   const modeParsed = CoordinatorCollaborationModeSchema.safeParse(rec.mode);
   const taskNumber =
     typeof rec.taskNumber === 'number' && Number.isSafeInteger(rec.taskNumber) && rec.taskNumber > 0
@@ -120,14 +150,23 @@ export function normalizeCoordinatorWorkItemDoc(
     typeof rec.acceptedAt === 'number' && Number.isFinite(rec.acceptedAt) && rec.acceptedAt > 0
       ? rec.acceptedAt
       : undefined;
+  const archivedAt =
+    typeof rec.archivedAt === 'number' && Number.isFinite(rec.archivedAt) && rec.archivedAt > 0
+      ? rec.archivedAt
+      : undefined;
   const externalRefs = normalizeCoordinatorExternalRefs(rec.externalRefs);
   return {
     id,
     ...(taskNumber !== undefined ? { taskNumber } : {}),
     ...(title ? { title } : {}),
+    ...(stageParsed.success ? { stage: stageParsed.data } : {}),
+    ...(summary ? { summary } : {}),
+    ...(progressNote ? { progressNote } : {}),
+    ...(pendingAction ? { pendingAction } : {}),
     ...(modeParsed.success ? { mode: modeParsed.data } : {}),
     ...(externalRefs.length > 0 ? { externalRefs } : {}),
     ...(acceptedAt !== undefined ? { acceptedAt } : {}),
+    ...(archivedAt !== undefined ? { archivedAt } : {}),
     createdAt,
     updatedAt,
   };

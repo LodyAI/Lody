@@ -16,6 +16,7 @@ import {
   hasMultiplePullRequestRepos,
   isSessionInCoordinatorProject,
   resolveOwnerSessionForPullRequest,
+  summarizeProjectBoardPullRequests,
   type CoordinatorProjectKey,
 } from '../src/components/project-mode/project-board-model';
 import { buildChildSessionsByParent } from '../src/components/sessions/session-list-rows';
@@ -596,5 +597,98 @@ describe('project board', () => {
         'watch_gate_status',
       ])
     );
+  });
+
+  it('includes standalone Blackboard Task Cards without child sessions and summarizes multi-repo PR CI/mergeability', () => {
+    const childSession = session('child-1', {
+      openedBySessionId: coordinator.id as SessionId,
+      createdAt: '2026-11-12T00:05:00.000Z',
+      lastMessageAt: 500,
+      pullRequests: [
+        {
+          url: 'https://github.com/LodyAI/lody/pull/3270',
+          repoFullName: 'LodyAI/lody',
+          number: 3270,
+          status: 'open',
+        },
+        {
+          url: 'https://github.com/LodyAI/sorbet/pull/324',
+          repoFullName: 'LodyAI/sorbet',
+          number: 324,
+          status: 'open',
+        },
+      ],
+      pullRequestState: {
+        'https://github.com/LodyAI/lody/pull/3270': { s: 's', m: 'c', t: 100 },
+        'https://github.com/LodyAI/sorbet/pull/324': { s: 'f', m: 'd', t: 100 },
+      },
+    });
+    const result = buildProjectBoard({
+      sessions: [coordinator, childSession],
+      childSessionsByParent: buildChildSessionsByParent([coordinator, childSession]),
+      project,
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      liveSessionStatuses: new Map(),
+      sendStates: {},
+      workItems: {
+        'wi-proposed': {
+          id: 'wi-proposed',
+          title: 'Refactor auth middleware',
+          stage: 'proposed',
+          summary: 'Split token verification from session loading across 2 packages.',
+          pendingAction: 'Confirm whether to keep legacy cookie fallback.',
+          createdAt: Date.parse('2026-11-12T00:01:00.000Z'),
+          updatedAt: 900,
+        },
+        'wi-done': {
+          id: 'wi-done',
+          title: 'Verify webhook timeout default',
+          stage: 'done',
+          progressNote: 'Confirmed default is 30s in gateway config.',
+          acceptedAt: 800,
+          createdAt: Date.parse('2026-11-12T00:02:00.000Z'),
+          updatedAt: 800,
+        },
+        'wi-archived': {
+          id: 'wi-archived',
+          title: 'Dismissed idea',
+          stage: 'proposed',
+          archivedAt: 700,
+          createdAt: Date.parse('2026-11-12T00:03:00.000Z'),
+          updatedAt: 700,
+        },
+      },
+    });
+
+    expect(result.needsYou).toHaveLength(1);
+    expect(result.needsYou[0]).toMatchObject({
+      workItemId: 'wi-proposed',
+      workItemTitle: 'Refactor auth middleware',
+      stage: 'proposed',
+      isStandalone: true,
+      session: null,
+      taskNumber: 1,
+      pendingAction: 'Confirm whether to keep legacy cookie fallback.',
+    });
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0]).toMatchObject({
+      workItemId: 'wi-done',
+      stage: 'done',
+      isStandalone: true,
+      taskNumber: 2,
+    });
+    expect(result.review).toHaveLength(1);
+    const prSummary = summarizeProjectBoardPullRequests(result.review[0]!.pullRequests);
+    expect(prSummary).toEqual({
+      total: 2,
+      mergeable: 1,
+      merged: 0,
+      failingCi: 1,
+      pendingCi: 0,
+      conflicts: 1,
+      draft: 0,
+      open: 2,
+    });
   });
 });

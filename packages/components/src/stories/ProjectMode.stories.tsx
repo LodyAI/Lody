@@ -544,7 +544,7 @@ const coordinatorTasks = new Map(
     })
   )
     .flat()
-    .map((row) => [row.session.id, row] as const)
+    .map((row) => [row.session?.id ?? row.workItemId, row] as const)
 );
 
 const BOARD_TAB = 'project-board';

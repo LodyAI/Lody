@@ -315,7 +315,8 @@ export function buildCoordinatorObservabilitySnapshot(args: {
   const sessionRowById = new Map<string, ProjectBoardRow>();
 
   for (const row of args.tasksById.values()) {
-    const wid = row.workItemId || row.session.id;
+    const wid = row.workItemId || row.session?.id || '';
+    if (!wid) continue;
     if (!seenWorkItemIds.has(wid)) {
       seenWorkItemIds.add(wid);
       uniqueWorkItemRows.push(row);
@@ -323,17 +324,19 @@ export function buildCoordinatorObservabilitySnapshot(args: {
     const members =
       row.members && row.members.length > 0
         ? row.members
-        : [
-            {
-              session: row.session,
-              role: row.session.workItemRole,
-              bucket: row.bucket,
-              latestMessageAt: row.latestMessageAt,
-              hasUnreadMessages: row.hasUnreadMessages,
-              pullRequest: row.pullRequest,
-              pullRequests: row.pullRequests ?? (row.pullRequest ? [row.pullRequest] : []),
-            },
-          ];
+        : row.session
+          ? [
+              {
+                session: row.session,
+                role: row.session.workItemRole,
+                bucket: row.bucket,
+                latestMessageAt: row.latestMessageAt,
+                hasUnreadMessages: row.hasUnreadMessages,
+                pullRequest: row.pullRequest,
+                pullRequests: row.pullRequests ?? (row.pullRequest ? [row.pullRequest] : []),
+              },
+            ]
+          : [];
     for (const member of members) {
       sessionRowById.set(member.session.id, row);
       sessionTitleById.set(
@@ -366,7 +369,7 @@ export function buildCoordinatorObservabilitySnapshot(args: {
   let shortestChildQuietMs: number | null = null;
 
   const workItems: CoordinatorObservabilityWorkItemAudit[] = uniqueWorkItemRows.map((row) => {
-    const wid = row.workItemId || row.session.id;
+    const wid = row.workItemId || row.session?.id || '';
     const doc = workItemsMap[wid];
     const prs =
       row.pullRequests && row.pullRequests.length > 0
@@ -379,18 +382,20 @@ export function buildCoordinatorObservabilitySnapshot(args: {
     const rawMembers =
       row.members && row.members.length > 0
         ? row.members
-        : [
-            {
-              session: row.session,
-              role: row.session.workItemRole,
-              bucket: row.bucket,
-              isWorking: row.isWorking,
-              latestMessageAt: row.latestMessageAt,
-              hasUnreadMessages: row.hasUnreadMessages,
-              pullRequest: row.pullRequest,
-              pullRequests: prs,
-            },
-          ];
+        : row.session
+          ? [
+              {
+                session: row.session,
+                role: row.session.workItemRole,
+                bucket: row.bucket,
+                isWorking: row.isWorking,
+                latestMessageAt: row.latestMessageAt,
+                hasUnreadMessages: row.hasUnreadMessages,
+                pullRequest: row.pullRequest,
+                pullRequests: prs,
+              },
+            ]
+          : [];
 
     const members = rawMembers.map((m) => {
       const live = findFreshSessionPresenceState(presence, m.session.id, nowMs);
@@ -422,7 +427,7 @@ export function buildCoordinatorObservabilitySnapshot(args: {
     return {
       workItemId: wid,
       taskNumber: row.taskNumber,
-      title: doc?.title?.trim() || row.workItemTitle?.trim() || row.session.title?.trim() || wid,
+      title: doc?.title?.trim() || row.workItemTitle?.trim() || row.session?.title?.trim() || wid,
       mode: doc?.mode ?? row.collaborationMode ?? 'delegated',
       bucket: row.bucket,
       memberCount: members.length,
@@ -444,7 +449,7 @@ export function buildCoordinatorObservabilitySnapshot(args: {
       const ownerRow = sessionRowById.get(member.sessionId);
       const memberPrs =
         ownerRow?.members?.find((m) => m.session.id === member.sessionId)?.pullRequests ??
-        (ownerRow?.session.id === member.sessionId ? wi.pullRequests : []);
+        (ownerRow?.session?.id === member.sessionId ? wi.pullRequests : []);
       const livePrSig = buildPrDigestSignature(memberPrs);
 
       let status: CoordinatorObservabilityCursorStatus = 'synced';

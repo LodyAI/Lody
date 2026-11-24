@@ -139,13 +139,17 @@ import {
   COORDINATOR_WORK_ITEMS_MAX_COUNT,
   CoordinatorCollaborationModeSchema,
   CoordinatorExternalRefSchema,
+  CoordinatorWorkItemStageSchema,
   normalizeCoordinatorExternalRefs,
   normalizeWorkItemId,
   normalizeWorkItemRole,
   WORK_ITEM_EXTERNAL_REFS_MAX_COUNT,
   WORK_ITEM_ID_MAX_CHARS,
   WORK_ITEM_MEMBERS_MAX_COUNT,
+  WORK_ITEM_PENDING_ACTION_MAX_CHARS,
+  WORK_ITEM_PROGRESS_NOTE_MAX_CHARS,
   WORK_ITEM_ROLE_MAX_CHARS,
+  WORK_ITEM_SUMMARY_MAX_CHARS,
   WORK_ITEM_TITLE_MAX_CHARS,
 } from '@lody/shared';
 import { makeLocalControlClientAuto } from '@lody/shared/node/local-ipc';
@@ -451,7 +455,32 @@ const CoordinatorWorkItemInputSchema = z
       .trim()
       .max(WORK_ITEM_TITLE_MAX_CHARS)
       .optional()
-      .describe('Shared task-group title in the user language.'),
+      .describe('Shared task-card title in the user language.'),
+    stage: CoordinatorWorkItemStageSchema.optional().describe(
+      'Task card stage: "proposed" (awaiting user confirmation before spawning child conversations), "working", "blocked" (needs user decision/input), "review" (ready for review/acceptance), or "done".'
+    ),
+    summary: z
+      .string()
+      .trim()
+      .max(WORK_ITEM_SUMMARY_MAX_CHARS)
+      .optional()
+      .describe('Concise goal or scope summary displayed on the Task Card (pass "" to clear).'),
+    progressNote: z
+      .string()
+      .trim()
+      .max(WORK_ITEM_PROGRESS_NOTE_MAX_CHARS)
+      .optional()
+      .describe(
+        'Latest 1-sentence milestone progress or conclusion displayed directly on the Task Card (update only at meaningful milestones, not every token; pass "" to clear).'
+      ),
+    pendingAction: z
+      .string()
+      .trim()
+      .max(WORK_ITEM_PENDING_ACTION_MAX_CHARS)
+      .optional()
+      .describe(
+        'Concise confirmation or decision prompt highlighted on the Task Card when stage is "proposed" or "blocked" (pass "" to clear).'
+      ),
     mode: CoordinatorCollaborationModeSchema.optional().describe(
       'Collaboration mode: "delegated" (coordinator relays outcomes) or "direct" (user works directly in child conversation while coordinator watches milestones).'
     ),
@@ -467,7 +496,7 @@ const CoordinatorWorkItemInputSchema = z
       .max(WORK_ITEM_MEMBERS_MAX_COUNT)
       .optional()
       .describe(
-        'Child conversations that collaborate on this WorkItem (for example an implementer conversation and a reviewer conversation, or conversations across repositories).'
+        'Child conversations that collaborate on this WorkItem (for example an implementer conversation and a reviewer conversation, or conversations across repositories). May be omitted for standalone "proposed" or coordinator-resolved task cards.'
       ),
   })
   .strict()
@@ -475,6 +504,10 @@ const CoordinatorWorkItemInputSchema = z
     (val) =>
       Boolean(val.workItemId?.trim()) ||
       Boolean(val.title?.trim()) ||
+      Boolean(val.stage) ||
+      val.summary !== undefined ||
+      val.progressNote !== undefined ||
+      val.pendingAction !== undefined ||
       Boolean(val.mode) ||
       Boolean(val.externalRefs) ||
       Boolean(val.members?.length),
@@ -5857,37 +5890,80 @@ export function buildSessionToolServer(
             typeof args.title === 'string' && args.title.trim().length > 0
               ? args.title.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_TITLE_MAX_CHARS)
               : undefined;
+          const normalizedSummary =
+            args.summary !== undefined
+              ? args.summary.replace(/\s+/g, ' ').trim().slice(0, WORK_ITEM_SUMMARY_MAX_CHARS)
+              : undefined;
+          const normalizedProgressNote =
+            args.progressNote !== undefined
+              ? args.progressNote
+                  .replace(/\s+/g, ' ')
+                  .trim()
+                  .slice(0, WORK_ITEM_PROGRESS_NOTE_MAX_CHARS)
+              : undefined;
+          const normalizedPendingAction =
+            args.pendingAction !== undefined
+              ? args.pendingAction
+                  .replace(/\s+/g, ' ')
+                  .trim()
+                  .slice(0, WORK_ITEM_PENDING_ACTION_MAX_CHARS)
+              : undefined;
           const normalizedRefs =
             args.externalRefs !== undefined
               ? normalizeCoordinatorExternalRefs(args.externalRefs)
               : undefined;
 
-          const updatedWorkItem = sessionDoc.upsertCoordinatorWorkItem(workItemId, (existing) => ({
-            id: workItemId,
-            ...(existing?.taskNumber !== undefined ? { taskNumber: existing.taskNumber } : {}),
-            ...(normalizedTitle !== undefined
-              ? { title: normalizedTitle }
-              : existing?.title
-                ? { title: existing.title }
-                : {}),
-            ...(args.mode !== undefined
-              ? { mode: args.mode }
-              : existing?.mode
-                ? { mode: existing.mode }
-                : {}),
-            ...(normalizedRefs !== undefined
-              ? normalizedRefs.length > 0
-                ? { externalRefs: normalizedRefs }
-                : {}
-              : existing?.externalRefs?.length
-                ? { externalRefs: existing.externalRefs }
-                : {}),
-            ...(existing?.acceptedAt !== undefined ? { acceptedAt: existing.acceptedAt } : {}),
-            createdAt: existing?.createdAt
-              ? Math.min(existing.createdAt, earliestMemberCreatedAt)
-              : earliestMemberCreatedAt,
-            updatedAt: now,
-          }));
+          const updatedWorkItem = sessionDoc.upsertCoordinatorWorkItem(workItemId, (existing) => {
+            const nextStage = args.stage ?? existing?.stage;
+            const nextSummary =
+              normalizedSummary !== undefined ? normalizedSummary : existing?.summary;
+            const nextProgressNote =
+              normalizedProgressNote !== undefined
+                ? normalizedProgressNote
+                : existing?.progressNote;
+            const nextPendingAction =
+              normalizedPendingAction !== undefined
+                ? normalizedPendingAction
+                : nextStage === 'working' || nextStage === 'review' || nextStage === 'done'
+                  ? ''
+                  : existing?.pendingAction;
+            const nextAcceptedAt =
+              nextStage === 'done'
+                ? (existing?.acceptedAt ?? now)
+                : args.stage && args.stage !== 'done'
+                  ? undefined
+                  : existing?.acceptedAt;
+            return {
+              id: workItemId,
+              ...(existing?.taskNumber !== undefined ? { taskNumber: existing.taskNumber } : {}),
+              ...(normalizedTitle !== undefined
+                ? { title: normalizedTitle }
+                : existing?.title
+                  ? { title: existing.title }
+                  : {}),
+              ...(nextStage ? { stage: nextStage } : {}),
+              ...(nextSummary ? { summary: nextSummary } : {}),
+              ...(nextProgressNote ? { progressNote: nextProgressNote } : {}),
+              ...(nextPendingAction ? { pendingAction: nextPendingAction } : {}),
+              ...(args.mode !== undefined
+                ? { mode: args.mode }
+                : existing?.mode
+                  ? { mode: existing.mode }
+                  : {}),
+              ...(normalizedRefs !== undefined
+                ? normalizedRefs.length > 0
+                  ? { externalRefs: normalizedRefs }
+                  : {}
+                : existing?.externalRefs?.length
+                  ? { externalRefs: existing.externalRefs }
+                  : {}),
+              ...(nextAcceptedAt !== undefined ? { acceptedAt: nextAcceptedAt } : {}),
+              createdAt: existing?.createdAt
+                ? Math.min(existing.createdAt, earliestMemberCreatedAt)
+                : earliestMemberCreatedAt,
+              updatedAt: now,
+            };
+          });
 
           for (const member of resolvedMembers) {
             await daemon.manager.repo.upsertDocMeta(getSessionRoomId(member.sessionId), {

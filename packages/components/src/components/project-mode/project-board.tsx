@@ -13,7 +13,18 @@ import {
 } from '@lody/shared';
 import { useRouter } from '@tanstack/react-router';
 import { useAtomValue } from 'jotai';
-import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  MessageSquare,
+  Play,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lodyPresenceNowMsAtom, lodyPresenceStatesAtom } from '@/atoms/presence';
@@ -28,29 +39,32 @@ import { useSessionActions } from '@/hooks/use-session-actions';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import {
   buildProjectBoard,
-  coordinatorProjectKeyId,
   findProjectCoordinatorSession,
-  hasMultiplePullRequestRepos,
   PROJECT_BOARD_BUCKETS,
-  resolveOwnerSessionForPullRequest,
   type CoordinatorProjectKey,
   type ProjectBoard as ProjectBoardData,
   type ProjectBoardBucket,
   type ProjectBoardRow,
   type ProjectBoardSessionMember,
 } from './project-board-model';
-import { ProjectBoardPrMenu } from './project-board-pr-menu';
+import { ProjectBoardPrStack } from './project-board-pr-stack';
+
+const WARNING_SOFT = `color-mix(in oklab, transparent, ${colors.warning} 13%)`;
+const WARNING_BORDER = `color-mix(in oklab, transparent, ${colors.warning} 38%)`;
+const ACCENT_SOFT = `color-mix(in oklab, transparent, ${colors.accent} 12%)`;
+const ACCENT_BORDER = `color-mix(in oklab, transparent, ${colors.accent} 36%)`;
+const SUCCESS_SOFT = `color-mix(in oklab, transparent, ${colors.success} 13%)`;
 
 const styles = stylex.create({
   column: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[4],
+    gap: space[3],
     minWidth: 0,
     height: '100%',
     overflowY: 'auto',
-    paddingBlock: space[4],
-    paddingInline: space[4],
+    paddingBlock: space[3],
+    paddingInline: space[3],
     backgroundColor: colors.secondaryBackground,
   },
   title: {
@@ -60,7 +74,56 @@ const styles = stylex.create({
     fontWeight: 600,
     color: colors.label,
   },
+  filterBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1],
+  },
+  filterPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    height: 26,
+    paddingInline: space[2],
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    borderRadius: radius.full,
+    backgroundColor: { default: colors.wellBackground, ':hover': colors.hoverFill },
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+    cursor: 'pointer',
+    transitionProperty: 'background-color, border-color, color',
+    transitionDuration: '120ms',
+  },
+  filterPillActive: {
+    borderColor: ACCENT_BORDER,
+    backgroundColor: ACCENT_SOFT,
+    color: colors.accent,
+    fontWeight: 600,
+  },
+  filterPillWarn: {
+    borderColor: WARNING_BORDER,
+    backgroundColor: WARNING_SOFT,
+    color: colors.warning,
+    fontWeight: 600,
+  },
+  filterCount: {
+    fontVariantNumeric: 'tabular-nums',
+    fontSize: 11,
+    opacity: 0.85,
+  },
   section: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  headingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minHeight: 26,
+  },
   headingWrap: { display: 'flex', minWidth: 0, flexGrow: 1, margin: 0 },
   headingButton: {
     display: 'inline-flex',
@@ -81,100 +144,210 @@ const styles = stylex.create({
     cursor: 'pointer',
   },
   headingChevron: { flexShrink: 0, color: colors.secondaryLabel },
-  count: { fontWeight: 400, color: colors.secondaryLabel },
-  card: {
+  count: { fontWeight: 400, color: colors.secondaryLabel, fontVariantNumeric: 'tabular-nums' },
+  cardStack: {
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    gap: space[2],
+    minWidth: 0,
+  },
+  taskCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    minWidth: 0,
+    paddingBlock: space[3],
+    paddingInline: space[3],
     borderRadius: radius.large,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.separator,
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
+    transitionProperty: 'border-color, box-shadow',
+    transitionDuration: '140ms',
   },
-  groupWrapper: {
+  taskCardNeedsYou: {
+    borderColor: WARNING_BORDER,
+  },
+  taskCardWorking: {
+    borderColor: ACCENT_BORDER,
+  },
+  taskCardAccepted: {
+    opacity: 0.82,
+  },
+  cardHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    minWidth: 0,
+  },
+  statusMark: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 16,
+    height: 20,
+    flexShrink: 0,
+  },
+  iconWarn: { color: colors.warning },
+  iconAccent: { color: colors.accent },
+  iconSuccess: { color: colors.success },
+  headerMain: {
     display: 'flex',
     flexDirection: 'column',
+    gap: 3,
     minWidth: 0,
-    boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    minWidth: 0,
-    paddingInlineEnd: space[3],
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
-    boxShadow: { default: 'none', ':not(:first-child)': `inset 0 0.5px 0 ${colors.separator}` },
-  },
-  groupHeaderRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    minWidth: 0,
-    paddingInlineEnd: space[3],
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
-  },
-  rowLink: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: space[3],
     flexGrow: 1,
-    minWidth: 0,
-    paddingBlock: space[3],
-    paddingInlineStart: space[3],
-    color: colors.label,
-    textDecoration: 'none',
   },
-  groupHeaderButton: {
+  titleLine: {
     display: 'flex',
-    alignItems: 'center',
-    gap: space[2],
-    flexGrow: 1,
+    alignItems: 'flex-start',
+    gap: space[1.5],
     minWidth: 0,
-    paddingBlock: space[3],
-    paddingInlineStart: space[3],
+  },
+  titleTrigger: {
+    display: 'inline',
+    minWidth: 0,
+    flexGrow: 1,
+    padding: 0,
     borderWidth: 0,
     backgroundColor: 'transparent',
     color: colors.label,
-    textAlign: 'start',
-    cursor: 'pointer',
-  },
-  taskNumber: {
-    marginInlineEnd: space[1.5],
-    fontVariantNumeric: 'tabular-nums',
-    color: colors.secondaryLabel,
-  },
-  headingRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space[2],
-    minHeight: 28,
-  },
-  rowText: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flexGrow: 1 },
-  rowTitle: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
     fontSize: text.bodySize,
     lineHeight: text.bodyLeading,
-  },
-  rowMeta: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: space[1.5],
+    fontWeight: 500,
+    textAlign: 'start',
+    cursor: 'pointer',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    wordBreak: 'break-word',
+  },
+  titleStatic: {
+    minWidth: 0,
+    flexGrow: 1,
+    color: colors.label,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    wordBreak: 'break-word',
+  },
+  taskNumberBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 18,
+    paddingInline: 5,
+    borderRadius: radius.small,
+    backgroundColor: colors.wellBackground,
+    color: colors.secondaryLabel,
+    fontSize: 11,
+    fontWeight: 600,
+    fontVariantNumeric: 'tabular-nums',
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  metaLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1.5],
     fontSize: text.footnoteSize,
     lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
   },
-  prStack: {
+  stageTag: {
     display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    paddingBlock: 1,
+    paddingInline: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.wellBackground,
+    color: colors.secondaryLabel,
+    fontSize: 11,
+    fontWeight: 500,
+  },
+  stageTagWarn: {
+    backgroundColor: WARNING_SOFT,
+    color: colors.warning,
+  },
+  stageTagAccent: {
+    backgroundColor: ACCENT_SOFT,
+    color: colors.accent,
+  },
+  stageTagSuccess: {
+    backgroundColor: SUCCESS_SOFT,
+    color: colors.success,
+  },
+  expandBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.small,
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    color: colors.tertiaryLabel,
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  pendingCallout: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+    paddingBlock: space[1.5],
+    paddingInline: space[2],
+    borderRadius: radius.medium,
+    backgroundColor: WARNING_SOFT,
+    color: colors.label,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  pendingIcon: {
+    color: colors.warning,
+    flexShrink: 0,
+    marginTop: 2,
+  },
+  progressText: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+  },
+  progressTextExpanded: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  cardFooter: {
+    display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: space[1],
+    justifyContent: 'space-between',
+    gap: space[2],
+    minWidth: 0,
+  },
+  footerSignals: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    flex: '1 1 auto',
+  },
+  footerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
     flexShrink: 0,
   },
   externalRefPill: {
@@ -191,29 +364,44 @@ const styles = stylex.create({
     textDecoration: 'none',
     flexShrink: 0,
   },
+  expandedSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    paddingTop: space[2],
+    borderTopWidth: 1,
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+  },
+  summaryBlock: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
   memberList: {
     display: 'flex',
     flexDirection: 'column',
+    gap: space[1],
     minWidth: 0,
-    paddingBottom: space[1.5],
   },
   memberRow: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: space[2],
     minWidth: 0,
-    paddingInlineStart: space[6],
-    paddingInlineEnd: space[3],
-    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    paddingBlock: space[1],
+    paddingInline: space[2],
+    borderRadius: radius.medium,
+    backgroundColor: { default: colors.wellBackground, ':hover': colors.hoverFill },
   },
   memberLink: {
     display: 'flex',
     alignItems: 'center',
-    gap: space[2],
+    gap: space[1.5],
     flexGrow: 1,
     minWidth: 0,
-    paddingBlock: space[1.5],
-    paddingInlineStart: space[2],
     color: colors.label,
     textDecoration: 'none',
   },
@@ -221,21 +409,19 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: text.subheadlineSize,
-    lineHeight: text.subheadlineLeading,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
     color: colors.label,
   },
   rolePill: {
     flexShrink: 0,
     paddingBlock: 1,
-    paddingInline: space[1.5],
+    paddingInline: 5,
     borderRadius: radius.small,
-    backgroundColor: colors.wellBackground,
+    backgroundColor: colors.elevatedBackground,
     color: colors.secondaryLabel,
-    fontSize: text.captionSize,
-    lineHeight: text.captionLeading,
+    fontSize: 11,
   },
-  mark: { display: 'flex', width: '14px', flexShrink: 0, justifyContent: 'center' },
   empty: {
     margin: 0,
     paddingInline: space[1],
@@ -260,6 +446,8 @@ const DEFAULT_COLLAPSED_BUCKETS: Record<ProjectBoardBucket, boolean> = {
 };
 
 const EMPTY_SESSION_ID = '' as SessionId;
+
+type BucketFilter = 'all' | ProjectBoardBucket;
 
 /** `T3` for a coordinator task; manual conversations have no number. */
 export const formatTaskNumber = (taskNumber: number | null): string | null =>
@@ -320,42 +508,47 @@ function useProjectBoardDataInternal(
     }
   );
 
-  const liveRef = useRef<Map<string, SessionStatus> | null>(null);
-  const liveSessionStatuses = useMemo(() => {
-    const next = new Map<string, SessionStatus>();
+  const liveStatuses = useMemo(() => {
+    const map = new Map<string, SessionStatus>();
     for (const session of allActiveSessions) {
-      const status = findFreshSessionPresenceState(
-        presenceStates,
-        session.id,
-        presenceNowMs
-      )?.status;
-      if (status) next.set(session.id, status);
+      const live = findFreshSessionPresenceState(presenceStates, session.id, presenceNowMs);
+      if (live) map.set(session.id, live.status);
     }
-    const previous = liveRef.current;
-    if (
-      previous &&
-      previous.size === next.size &&
-      [...next].every(([id, status]) => previous.get(id)?.type === status.type)
-    ) {
-      return previous;
-    }
-    liveRef.current = next;
-    return next;
+    return map;
   }, [allActiveSessions, presenceNowMs, presenceStates]);
 
-  const childSessionsByParent = useMemo(
-    () => buildChildSessionsByParent(allSessionsIncludingArchived),
-    [allSessionsIncludingArchived]
+  const acceptedChildSessions = useMemo(
+    () =>
+      allSessionsIncludingArchived.filter(
+        (session) =>
+          session.isArchived === true &&
+          (includeArchived || typeof session.coordinatorTaskAcceptedAt === 'number')
+      ),
+    [allSessionsIncludingArchived, includeArchived]
   );
-  const board = useMemo(
+
+  const boardSessions = useMemo(
+    () =>
+      acceptedChildSessions.length === 0
+        ? allActiveSessions
+        : [...allActiveSessions, ...acceptedChildSessions],
+    [acceptedChildSessions, allActiveSessions]
+  );
+
+  const childSessionsByParent = useMemo(
+    () => buildChildSessionsByParent(boardSessions),
+    [boardSessions]
+  );
+
+  return useMemo(
     () =>
       buildProjectBoard({
-        sessions: allSessionsIncludingArchived,
+        sessions: boardSessions,
         childSessionsByParent,
         project,
         coordinatorSessionId: resolvedCoordinatorSessionId,
         currentUserId,
-        liveSessionStatuses,
+        liveSessionStatuses: liveStatuses,
         sendStates,
         workItems: resolvedCoordinatorSessionId ? coordinatorDoc.workItems : undefined,
         numberingSessions: allSessionsIncludingArchived,
@@ -363,24 +556,20 @@ function useProjectBoardDataInternal(
       }),
     [
       allSessionsIncludingArchived,
+      boardSessions,
       childSessionsByParent,
       coordinatorDoc.workItems,
       currentUserId,
       includeArchived,
-      liveSessionStatuses,
+      liveStatuses,
       project,
       resolvedCoordinatorSessionId,
       sendStates,
     ]
   );
-
-  return board;
 }
 
-/**
- * Tasks for the project's right-hand board, including accepted (archived) tasks
- * so the `Accepted` group retains them while collapsed by default.
- */
+/** Board rows for a project, including accepted tasks so the Accepted section can list them. */
 export function useProjectBoardData(
   coordinatorSessionId: string | null,
   project: CoordinatorProjectKey | null
@@ -389,9 +578,9 @@ export function useProjectBoardData(
 }
 
 /**
- * Every work item of a coordinator, archived (accepted) ones included, indexed
- * by both `workItemId` and every member `session.id` so history strips, threads,
- * and cards resolve any member reference to its owning `T<n>` group.
+ * Every task this coordinator opened, keyed by both `workItemId` and each member
+ * `sessionId` (including accepted/archived ones), so conversation chips and
+ * action cards share the board's exact numbers, titles, and states.
  */
 export function useCoordinatorTasksData(
   coordinatorSessionId: string | null,
@@ -400,8 +589,8 @@ export function useCoordinatorTasksData(
   const board = useProjectBoardDataInternal(coordinatorSessionId, project, true);
   return useMemo(() => {
     const tasks = new Map<string, ProjectBoardRow>();
-    for (const rows of Object.values(board)) {
-      for (const row of rows) {
+    for (const bucket of PROJECT_BOARD_BUCKETS) {
+      for (const row of board[bucket]) {
         tasks.set(row.workItemId, row);
         for (const member of row.members) {
           tasks.set(member.session.id, row);
@@ -412,23 +601,44 @@ export function useCoordinatorTasksData(
   }, [board]);
 }
 
+/** Right-side Task Card board for a project coordinator. */
 export function ProjectBoard({
   coordinatorSessionId,
   project,
   onOpenSession,
   onOpenPr,
+  onSendCoordinatorPrompt,
+  onPrefillCoordinatorPrompt,
   hideTitle = false,
 }: {
   coordinatorSessionId: string | null;
   project: CoordinatorProjectKey | null;
   onOpenSession?: (sessionId: string) => void;
   onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
+  onSendCoordinatorPrompt?: (prompt: string) => void;
+  onPrefillCoordinatorPrompt?: (prompt: string) => void;
   hideTitle?: boolean;
 }) {
-  const board = useProjectBoardData(coordinatorSessionId, project);
-
   const router = useRouter();
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const board = useProjectBoardData(coordinatorSessionId, project);
+  const acceptTasks = useAcceptCoordinatorTasks();
+
+  const handleOpen = useCallback(
+    (sessionId: string) => {
+      if (onOpenSession) {
+        onOpenSession(sessionId);
+        return;
+      }
+      if (!workspaceSlug) return;
+      void router.navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: workspaceSlug, sessionId },
+      });
+    },
+    [onOpenSession, router, workspaceSlug]
+  );
+
   const getSessionHref = useCallback(
     (sessionId: string) =>
       router.buildLocation({
@@ -437,37 +647,30 @@ export function ProjectBoard({
       }).href,
     [router, workspaceSlug]
   );
-  const openSession = useCallback(
-    (sessionId: string) => {
-      void router.navigate({
-        to: '/$workspaceName/sessions/$sessionId',
-        params: { workspaceName: workspaceSlug ?? '', sessionId },
-      });
-    },
-    [router, workspaceSlug]
-  );
-  const acceptTasks = useAcceptCoordinatorTasks();
-  const boardKey = coordinatorSessionId ?? (project ? coordinatorProjectKeyId(project) : 'board');
+
   return (
     <ProjectBoardView
-      key={boardKey}
       board={board}
       getSessionHref={getSessionHref}
-      onOpenSession={onOpenSession ?? openSession}
+      onOpenSession={handleOpen}
       onOpenPr={onOpenPr}
       onAcceptTasks={acceptTasks}
+      onSendCoordinatorPrompt={onSendCoordinatorPrompt}
+      onPrefillCoordinatorPrompt={onPrefillCoordinatorPrompt}
       hideTitle={hideTitle}
     />
   );
 }
 
-/** The board's presentation, without data or routing. */
+/** Pure presentation of the Task Card board — also mounted by Storybook. */
 export function ProjectBoardView({
   board,
   getSessionHref,
   onOpenSession,
   onOpenPr,
   onAcceptTasks,
+  onSendCoordinatorPrompt,
+  onPrefillCoordinatorPrompt,
   hideTitle = false,
 }: {
   board: ProjectBoardData;
@@ -476,26 +679,85 @@ export function ProjectBoardView({
   onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
   /** Marks finished tasks as reviewed; omitted where accepting is not offered. */
   onAcceptTasks?: (sessionIds: readonly string[]) => void;
+  onSendCoordinatorPrompt?: (prompt: string) => void;
+  onPrefillCoordinatorPrompt?: (prompt: string) => void;
   hideTitle?: boolean;
 }) {
   const { t } = useTranslation();
+  const [activeFilter, setActiveFilter] = useState<BucketFilter>('all');
   const [collapsedByBucket, setCollapsedByBucket] =
     useState<Record<ProjectBoardBucket, boolean>>(DEFAULT_COLLAPSED_BUCKETS);
   const toggleBucket = useCallback((bucket: ProjectBoardBucket) => {
     setCollapsedByBucket((current) => ({ ...current, [bucket]: !current[bucket] }));
   }, []);
 
+  const totalCount =
+    board.needsYou.length + board.working.length + board.review.length + board.accepted.length;
+  const visibleBuckets: readonly ProjectBoardBucket[] =
+    activeFilter === 'all' ? PROJECT_BOARD_BUCKETS : [activeFilter];
+
   return (
     <aside {...stylex.props(styles.column)} data-testid="project-board">
       {hideTitle ? null : (
-        <h2 {...stylex.props(styles.title)}>{t('projectMode.board.title', 'All conversations')}</h2>
+        <h2 {...stylex.props(styles.title)}>
+          {t('projectMode.board.taskCardsTitle', 'Task cards')}
+        </h2>
       )}
-      {PROJECT_BOARD_BUCKETS.map((bucket) => {
+
+      {totalCount > 0 ? (
+        <div {...stylex.props(styles.filterBar)} role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeFilter === 'all'}
+            onClick={() => setActiveFilter('all')}
+            {...stylex.props(styles.filterPill, activeFilter === 'all' && styles.filterPillActive)}
+          >
+            <span>{t('projectMode.board.filterAll', 'All')}</span>
+            <span {...stylex.props(styles.filterCount)}>{totalCount}</span>
+          </button>
+          {PROJECT_BOARD_BUCKETS.map((bucket) => {
+            const count = board[bucket].length;
+            if (count === 0 && activeFilter !== bucket) return null;
+            const [key, fallback] = BUCKET_LABELS[bucket];
+            const isSelected = activeFilter === bucket;
+            return (
+              <button
+                key={bucket}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                onClick={() => setActiveFilter(bucket)}
+                {...stylex.props(
+                  styles.filterPill,
+                  isSelected &&
+                    (bucket === 'needsYou' ? styles.filterPillWarn : styles.filterPillActive),
+                  !isSelected && bucket === 'needsYou' && count > 0 && styles.filterPillWarn
+                )}
+              >
+                <span>{t(key, fallback)}</span>
+                <span {...stylex.props(styles.filterCount)}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {visibleBuckets.map((bucket) => {
         const rows = board[bucket];
-        if ((bucket === 'working' || bucket === 'accepted') && rows.length === 0) return null;
+        if (
+          activeFilter === 'all' &&
+          (bucket === 'working' || bucket === 'accepted') &&
+          rows.length === 0
+        ) {
+          return null;
+        }
         const [key, fallback] = BUCKET_LABELS[bucket];
-        const collapsed = collapsedByBucket[bucket];
+        const collapsed = activeFilter === 'all' ? collapsedByBucket[bucket] : false;
         const Chevron = collapsed ? ChevronRight : ChevronDown;
+        const acceptableSessionIds = rows.flatMap((row) =>
+          row.members.map((member) => member.session.id)
+        );
         return (
           <section
             key={bucket}
@@ -518,43 +780,30 @@ export function ProjectBoardView({
                   ) : null}
                 </button>
               </h3>
-              {bucket === 'review' && onAcceptTasks && rows.length > 1 ? (
+              {bucket === 'review' && onAcceptTasks && acceptableSessionIds.length > 1 ? (
                 <Button
                   size="small"
                   variant="ghost"
-                  onClick={() =>
-                    onAcceptTasks(
-                      rows.flatMap((row) => row.members.map((member) => member.session.id))
-                    )
-                  }
+                  onClick={() => onAcceptTasks(acceptableSessionIds)}
                 >
                   {t('projectMode.board.acceptAll', 'Accept all')}
                 </Button>
               ) : null}
             </div>
             {collapsed ? null : rows.length > 0 ? (
-              <div {...stylex.props(styles.card)}>
-                {rows.map((row) =>
-                  row.members.length > 1 ? (
-                    <ProjectBoardGroupRow
-                      key={row.workItemId}
-                      row={row}
-                      getSessionHref={getSessionHref}
-                      onOpen={onOpenSession}
-                      onOpenPr={onOpenPr}
-                      onAccept={onAcceptTasks}
-                    />
-                  ) : (
-                    <ProjectBoardRowLink
-                      key={row.workItemId}
-                      row={row}
-                      href={getSessionHref(row.session.id)}
-                      onOpen={onOpenSession}
-                      onOpenPr={onOpenPr}
-                      onAccept={onAcceptTasks}
-                    />
-                  )
-                )}
+              <div {...stylex.props(styles.cardStack)}>
+                {rows.map((row) => (
+                  <ProjectTaskCard
+                    key={row.workItemId}
+                    row={row}
+                    getSessionHref={getSessionHref}
+                    onOpenSession={onOpenSession}
+                    onOpenPr={onOpenPr}
+                    onAcceptTasks={onAcceptTasks}
+                    onSendCoordinatorPrompt={onSendCoordinatorPrompt}
+                    onPrefillCoordinatorPrompt={onPrefillCoordinatorPrompt}
+                  />
+                ))}
               </div>
             ) : (
               <p {...stylex.props(styles.empty)}>{t('projectMode.board.empty', 'Nothing here')}</p>
@@ -566,135 +815,289 @@ export function ProjectBoardView({
   );
 }
 
-function RowPullRequestList({
-  row,
-  onOpenPr,
-}: {
-  row: ProjectBoardRow;
-  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
-}) {
-  if (row.pullRequests.length === 0 && row.externalRefs.length === 0) return null;
-  const showRepo = hasMultiplePullRequestRepos(row.pullRequests);
-  return (
-    <div {...stylex.props(styles.prStack)}>
-      {row.externalRefs.map((ref) => (
-        <a
-          key={ref.uri}
-          href={ref.uri}
-          target="_blank"
-          rel="noreferrer"
-          title={`${ref.kind}: ${ref.label ?? ref.uri}`}
-          {...stylex.props(styles.externalRefPill)}
-        >
-          <span>{ref.label ?? ref.kind}</span>
-          <ExternalLink size={11} aria-hidden="true" />
-        </a>
-      ))}
-      {row.pullRequests.map((pr) => (
-        <ProjectBoardPrMenu
-          key={pr.url}
-          sessionId={resolveOwnerSessionForPullRequest(row, pr.url)}
-          pr={pr}
-          showRepoPrefix={showRepo}
-          onOpenPr={onOpenPr}
-        />
-      ))}
-    </div>
-  );
-}
-
-const ProjectBoardGroupRow = memo(function ProjectBoardGroupRow({
+const ProjectTaskCard = memo(function ProjectTaskCard({
   row,
   getSessionHref,
-  onOpen,
+  onOpenSession,
   onOpenPr,
-  onAccept,
+  onAcceptTasks,
+  onSendCoordinatorPrompt,
+  onPrefillCoordinatorPrompt,
 }: {
   row: ProjectBoardRow;
   getSessionHref: (sessionId: string) => string;
-  onOpen: (sessionId: string) => void;
+  onOpenSession: (sessionId: string) => void;
   onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
-  onAccept?: (sessionIds: readonly string[]) => void;
+  onAcceptTasks?: (sessionIds: readonly string[]) => void;
+  onSendCoordinatorPrompt?: (prompt: string) => void;
+  onPrefillCoordinatorPrompt?: (prompt: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const [expanded, setExpanded] = useState(row.bucket !== 'accepted');
+  const [expanded, setExpanded] = useState(false);
+
   const title =
     row.workItemTitle?.trim() ||
-    row.session.title?.trim() ||
-    t('sessions.untitled', 'Untitled session');
-  const updated = new Date(row.latestMessageAt).toLocaleString(toIntlLocaleOrEn(i18n.language), {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const taskLabel = formatTaskNumber(row.taskNumber);
-  const Chevron = expanded ? ChevronDown : ChevronRight;
+    row.session?.title?.trim() ||
+    t('sessions.untitled', 'Untitled task');
+  const taskTag = formatTaskNumber(row.taskNumber);
+  const taskLabel = taskTag ? `${taskTag} ${title}` : title;
+  const formattedTime = useFormattedTaskTime(row.latestMessageAt, i18n.language);
+
+  const hasExpandableDetails =
+    Boolean(row.summary) ||
+    Boolean(row.progressNote) ||
+    row.members.length > 1 ||
+    row.externalRefs.length > 0;
+
+  const isProposed = row.stage === 'proposed';
+  const primarySessionId = row.session?.id ?? null;
+
+  const handleConfirmStart = () => {
+    onSendCoordinatorPrompt?.(
+      t('projectMode.board.confirmStartPrompt', 'Confirm and start {{task}}.', {
+        task: taskLabel,
+      })
+    );
+  };
+
+  const handleAdjust = () => {
+    onPrefillCoordinatorPrompt?.(
+      t('projectMode.board.adjustPromptPrefix', 'About {{task}}: ', {
+        task: taskLabel,
+      })
+    );
+  };
+
+  const handleCompleteStandalone = () => {
+    onSendCoordinatorPrompt?.(
+      t('projectMode.board.completeStandalonePrompt', 'Mark {{task}} as done.', {
+        task: taskLabel,
+      })
+    );
+  };
+
+  const handleOpenPrimary = () => {
+    if (primarySessionId) {
+      onOpenSession(primarySessionId);
+      return;
+    }
+    setExpanded((prev) => !prev);
+  };
+
+  const ExpandChevron = expanded ? ChevronDown : ChevronRight;
 
   return (
-    <div {...stylex.props(styles.groupWrapper)} data-project-board-work-item-id={row.workItemId}>
-      <div {...stylex.props(styles.groupHeaderRow)}>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((prev) => !prev)}
-          {...stylex.props(styles.groupHeaderButton)}
-        >
-          <span {...stylex.props(styles.mark)}>
+    <article
+      data-project-task-card={row.workItemId}
+      data-project-board-session-id={primarySessionId ?? undefined}
+      {...stylex.props(
+        styles.taskCard,
+        row.bucket === 'needsYou' && styles.taskCardNeedsYou,
+        row.bucket === 'working' && styles.taskCardWorking,
+        row.bucket === 'accepted' && styles.taskCardAccepted
+      )}
+    >
+      <div {...stylex.props(styles.cardHeader)}>
+        <span {...stylex.props(styles.statusMark)}>
+          {row.isStandalone ? (
+            row.bucket === 'accepted' ? (
+              <CheckCircle2 size={14} aria-hidden="true" {...stylex.props(styles.iconSuccess)} />
+            ) : row.bucket === 'needsYou' ? (
+              <Sparkles size={14} aria-hidden="true" {...stylex.props(styles.iconWarn)} />
+            ) : (
+              <Check size={14} aria-hidden="true" {...stylex.props(styles.iconAccent)} />
+            )
+          ) : (
             <SessionRowStatusIndicator
-              isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
               isWorking={row.isWorking}
-              hasUnreadMessages={row.bucket !== 'accepted' && row.hasUnreadMessages}
+              isWaitingPermission={row.isWaitingPermission}
+              hasUnreadMessages={row.hasUnreadMessages}
               sendState={row.sendState}
             />
-          </span>
-          <span {...stylex.props(styles.rowText)}>
-            <span {...stylex.props(styles.rowTitle)}>
-              {taskLabel ? <span {...stylex.props(styles.taskNumber)}>{taskLabel}</span> : null}
-              {title}
-            </span>
-            <span {...stylex.props(styles.rowMeta)}>
-              <Chevron size={12} aria-hidden="true" />
-              <span>
+          )}
+        </span>
+
+        <div {...stylex.props(styles.headerMain)}>
+          <div {...stylex.props(styles.titleLine)}>
+            {taskTag ? <span {...stylex.props(styles.taskNumberBadge)}>{taskTag}</span> : null}
+            {primarySessionId ? (
+              <button
+                type="button"
+                onClick={handleOpenPrimary}
+                {...stylex.props(styles.titleTrigger)}
+              >
+                {title}
+              </button>
+            ) : (
+              <span
+                onClick={() => setExpanded((prev) => !prev)}
+                {...stylex.props(styles.titleStatic)}
+              >
+                {title}
+              </span>
+            )}
+          </div>
+
+          <div {...stylex.props(styles.metaLine)}>
+            {isProposed ? (
+              <span {...stylex.props(styles.stageTag, styles.stageTagWarn)}>
+                {t('projectMode.board.stageProposed', 'Pending confirmation')}
+              </span>
+            ) : row.stage === 'blocked' ? (
+              <span {...stylex.props(styles.stageTag, styles.stageTagWarn)}>
+                {t('projectMode.board.stageBlocked', 'Needs decision')}
+              </span>
+            ) : null}
+            {row.collaborationMode === 'direct' ? (
+              <Badge tone="neutral">{t('projectMode.board.directMode', 'Direct')}</Badge>
+            ) : null}
+            {row.members.length > 1 ? (
+              <span {...stylex.props(styles.stageTag)}>
+                <Users size={10} aria-hidden="true" />
                 {t('projectMode.board.memberCount', '{{count}} sessions', {
                   count: row.members.length,
                 })}
               </span>
-              {row.collaborationMode === 'direct' ? (
-                <>
-                  <span>·</span>
-                  <span>{t('projectMode.board.directMode', 'Direct')}</span>
-                </>
-              ) : null}
-              <span>·</span>
-              <span>{updated}</span>
-            </span>
-          </span>
-        </button>
-        <RowPullRequestList row={row} onOpenPr={onOpenPr} />
-        {row.bucket === 'review' && onAccept ? (
-          <Button
-            size="small"
-            variant="secondary"
-            onClick={() => onAccept(row.members.map((member) => member.session.id))}
+            ) : null}
+            {formattedTime ? <span>{formattedTime}</span> : null}
+          </div>
+        </div>
+
+        {hasExpandableDetails ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={
+              expanded
+                ? t('projectMode.board.collapseCard', 'Collapse card details')
+                : t('projectMode.board.expandCard', 'Expand card details')
+            }
+            onClick={() => setExpanded((prev) => !prev)}
+            {...stylex.props(styles.expandBtn)}
           >
-            {t('projectMode.board.accept', 'Accept')}
-          </Button>
+            <ExpandChevron size={14} aria-hidden="true" />
+          </button>
         ) : null}
       </div>
-      {expanded ? (
-        <div {...stylex.props(styles.memberList)}>
-          {row.members.map((member) => (
-            <ProjectBoardMemberRow
-              key={member.session.id}
-              member={member}
-              href={getSessionHref(member.session.id)}
-              onOpen={onOpen}
-            />
-          ))}
+
+      {row.pendingAction ? (
+        <div {...stylex.props(styles.pendingCallout)}>
+          <AlertCircle size={13} aria-hidden="true" {...stylex.props(styles.pendingIcon)} />
+          <span>{row.pendingAction}</span>
         </div>
       ) : null}
-    </div>
+
+      {row.progressNote ? (
+        <p {...stylex.props(expanded ? styles.progressTextExpanded : styles.progressText)}>
+          {row.progressNote}
+        </p>
+      ) : !expanded && row.summary ? (
+        <p {...stylex.props(styles.progressText)}>{row.summary}</p>
+      ) : null}
+
+      <div {...stylex.props(styles.cardFooter)}>
+        <div {...stylex.props(styles.footerSignals)}>
+          <ProjectBoardPrStack row={row} onOpenPr={onOpenPr} />
+          {!expanded && row.externalRefs.length > 0
+            ? row.externalRefs.slice(0, 2).map((ref) => (
+                <a
+                  key={ref.uri}
+                  href={ref.uri}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`${ref.kind}: ${ref.label ?? ref.uri}`}
+                  {...stylex.props(styles.externalRefPill)}
+                >
+                  <span>{ref.label ?? ref.kind}</span>
+                  <ExternalLink size={10} aria-hidden="true" />
+                </a>
+              ))
+            : null}
+        </div>
+
+        <div {...stylex.props(styles.footerActions)}>
+          {isProposed && onSendCoordinatorPrompt ? (
+            <>
+              {onPrefillCoordinatorPrompt ? (
+                <Button size="small" variant="ghost" onClick={handleAdjust}>
+                  {t('projectMode.board.adjustTask', 'Adjust')}
+                </Button>
+              ) : null}
+              <Button size="small" variant="primary" onClick={handleConfirmStart}>
+                <Play size={11} aria-hidden="true" />
+                {t('projectMode.board.confirmStart', 'Confirm & start')}
+              </Button>
+            </>
+          ) : null}
+
+          {!isProposed && row.bucket === 'review' ? (
+            row.members.length > 0 && onAcceptTasks ? (
+              <Button
+                size="small"
+                variant="secondary"
+                onClick={() => onAcceptTasks(row.members.map((member) => member.session.id))}
+              >
+                {t('projectMode.board.accept', 'Accept')}
+              </Button>
+            ) : row.isStandalone && onSendCoordinatorPrompt ? (
+              <Button size="small" variant="secondary" onClick={handleCompleteStandalone}>
+                {t('projectMode.board.markDone', 'Done')}
+              </Button>
+            ) : null
+          ) : null}
+
+          {primarySessionId && row.bucket !== 'review' && !isProposed ? (
+            <Button size="small" variant="ghost" onClick={handleOpenPrimary}>
+              <MessageSquare size={11} aria-hidden="true" />
+              {t('projectMode.board.openConversation', 'Open')}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {expanded ? (
+        <div {...stylex.props(styles.expandedSection)}>
+          {row.summary ? <p {...stylex.props(styles.summaryBlock)}>{row.summary}</p> : null}
+          {row.externalRefs.length > 0 ? (
+            <div {...stylex.props(styles.footerSignals)}>
+              {row.externalRefs.map((ref) => (
+                <a
+                  key={ref.uri}
+                  href={ref.uri}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`${ref.kind}: ${ref.label ?? ref.uri}`}
+                  {...stylex.props(styles.externalRefPill)}
+                >
+                  <span>{ref.label ?? ref.kind}</span>
+                  <ExternalLink size={10} aria-hidden="true" />
+                </a>
+              ))}
+            </div>
+          ) : null}
+          {row.members.length > 0 ? (
+            <div {...stylex.props(styles.memberList)}>
+              {row.members.map((member) => (
+                <ProjectBoardMemberRow
+                  key={member.session.id}
+                  member={member}
+                  href={getSessionHref(member.session.id)}
+                  onOpen={onOpenSession}
+                  onOpenPr={onOpenPr}
+                />
+              ))}
+            </div>
+          ) : null}
+          {onPrefillCoordinatorPrompt ? (
+            <div {...stylex.props(styles.footerActions)}>
+              <Button size="small" variant="ghost" onClick={handleAdjust}>
+                {t('projectMode.board.askCoordinator', 'Follow up with coordinator')}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
   );
 });
 
@@ -702,97 +1105,64 @@ const ProjectBoardMemberRow = memo(function ProjectBoardMemberRow({
   member,
   href,
   onOpen,
+  onOpenPr,
 }: {
   member: ProjectBoardSessionMember;
   href: string;
   onOpen: (sessionId: string) => void;
+  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
 }) {
   const { t } = useTranslation();
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+      return;
+    }
     event.preventDefault();
     onOpen(member.session.id);
   };
   const title = member.session.title?.trim() || t('sessions.untitled', 'Untitled session');
   return (
-    <div {...stylex.props(styles.memberRow)} data-project-board-session-id={member.session.id}>
+    <div {...stylex.props(styles.memberRow)} data-project-board-member-id={member.session.id}>
       <a href={href} onClick={handleClick} {...stylex.props(styles.memberLink)}>
-        <span {...stylex.props(styles.mark)}>
+        <span {...stylex.props(styles.statusMark)}>
           <SessionRowStatusIndicator
-            isWaitingPermission={member.bucket === 'needsYou' && member.sendState !== 'failed'}
             isWorking={member.isWorking}
-            hasUnreadMessages={member.bucket !== 'accepted' && member.hasUnreadMessages}
+            isWaitingPermission={member.isWaitingPermission}
+            hasUnreadMessages={member.hasUnreadMessages}
             sendState={member.sendState}
           />
         </span>
         {member.role ? <span {...stylex.props(styles.rolePill)}>{member.role}</span> : null}
         <span {...stylex.props(styles.memberTitle)}>{title}</span>
       </a>
-    </div>
-  );
-});
-
-const ProjectBoardRowLink = memo(function ProjectBoardRowLink({
-  row,
-  href,
-  onOpen,
-  onOpenPr,
-  onAccept,
-}: {
-  row: ProjectBoardRow;
-  href: string;
-  onOpen: (sessionId: string) => void;
-  onOpenPr?: (sessionId: string, pr: SessionPullRequestView) => void;
-  onAccept?: (sessionIds: readonly string[]) => void;
-}) {
-  const { t, i18n } = useTranslation();
-  const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-    event.preventDefault();
-    onOpen(row.session.id);
-  };
-  const title =
-    row.workItemTitle?.trim() ||
-    row.session.title?.trim() ||
-    t('sessions.untitled', 'Untitled session');
-  const updated = new Date(row.latestMessageAt).toLocaleString(toIntlLocaleOrEn(i18n.language), {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  const taskLabel = formatTaskNumber(row.taskNumber);
-  return (
-    <div {...stylex.props(styles.row)} data-project-board-session-id={row.session.id}>
-      <a href={href} onClick={handleClick} {...stylex.props(styles.rowLink)}>
-        <span {...stylex.props(styles.mark)}>
-          <SessionRowStatusIndicator
-            isWaitingPermission={row.bucket === 'needsYou' && row.sendState !== 'failed'}
-            isWorking={row.isWorking}
-            hasUnreadMessages={row.bucket !== 'accepted' && row.hasUnreadMessages}
-            sendState={row.sendState}
-          />
-        </span>
-        <span {...stylex.props(styles.rowText)}>
-          <span {...stylex.props(styles.rowTitle)}>
-            {taskLabel ? <span {...stylex.props(styles.taskNumber)}>{taskLabel}</span> : null}
-            {title}
-          </span>
-          <span {...stylex.props(styles.rowMeta)}>{updated}</span>
-        </span>
-        {row.collaborationMode === 'direct' ? (
-          <Badge tone="neutral">{t('projectMode.board.directMode', 'Direct')}</Badge>
-        ) : null}
-        {row.createdManually ? (
-          <Badge tone="neutral">{t('projectMode.board.createdManually', 'Created manually')}</Badge>
-        ) : null}
-      </a>
-      <RowPullRequestList row={row} onOpenPr={onOpenPr} />
-      {row.bucket === 'review' && onAccept ? (
-        <Button size="small" variant="secondary" onClick={() => onAccept([row.session.id])}>
-          {t('projectMode.board.accept', 'Accept')}
-        </Button>
+      {member.pullRequests.length > 0 ? (
+        <ProjectBoardPrStack
+          row={{
+            session: member.session,
+            members: [member],
+            pullRequests: member.pullRequests,
+          }}
+          onOpenPr={onOpenPr}
+        />
       ) : null}
     </div>
   );
 });
+
+function useFormattedTaskTime(latestMessageAt: number, language: string): string {
+  const nowRef = useRef<number>(0);
+  if (nowRef.current === 0) nowRef.current = Date.now();
+  return useMemo(() => {
+    if (latestMessageAt <= 0) return '';
+    const date = new Date(latestMessageAt);
+    const sameYear = date.getFullYear() === new Date(nowRef.current).getFullYear();
+    return new Intl.DateTimeFormat(toIntlLocaleOrEn(language), {
+      ...(sameYear ? {} : { year: 'numeric' }),
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(date);
+  }, [language, latestMessageAt]);
+}
