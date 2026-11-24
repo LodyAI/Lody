@@ -251,7 +251,7 @@ control placed on a Tailwind surface can land on its own colour.
 
 The "Show" set is inside a Radix `DropdownMenuContent`, whose fill in the
 product's dark theme is `--popover: 220 54% 11.5%`
-(`packages/components/src/tailwind/index.css`). The package's well is
+(`packages/components/src/style/index.css`). The package's well is
 `hsl(0 0% 11%)`. Those are half a percent of lightness apart, so on that one
 surface a pressed chip is carried almost entirely by its label going from
 `secondaryLabel` to `label`, plus the inset shadow's top edge — not by the fill.

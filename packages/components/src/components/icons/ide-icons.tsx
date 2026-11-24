@@ -2,7 +2,7 @@ import type { SVGProps } from 'react';
 import xcodeIconUrl from '@/assets/xcode-icon.png';
 import sublimeIconUrl from '@/assets/sublime-icon.png';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { iconSurface } from './surface';
 
 export function TerminalIcon(props: SVGProps<SVGSVGElement>) {
@@ -41,7 +41,7 @@ function AppIconImage({ src, className }: { src: string; className?: string }) {
       aria-hidden
       draggable={false}
       {...stylex.props(iconSurface.appIconImage)}
-      className={clsx(stylex.props(iconSurface.appIconImage).className, className)}
+      className={cn(stylex.props(iconSurface.appIconImage).className, className)}
     />
   );
 }

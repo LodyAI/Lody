@@ -19,7 +19,7 @@ The default interface stack listed `PingFang SC` first, so Latin text — file n
 
 ## Decision and ownership
 
-`packages/components/src/tailwind/index.css` owns `--font-sans-default`. User-chosen interface fonts still prepend to it (`local-fonts.ts`), so the setting is unaffected.
+`packages/components/src/style/index.css` owns `--font-sans-default`. User-chosen interface fonts still prepend to it (`local-fonts.ts`), so the setting is unaffected.
 
 ## Verification limits
 

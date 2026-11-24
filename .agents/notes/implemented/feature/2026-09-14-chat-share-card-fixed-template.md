@@ -149,7 +149,7 @@ over the action row; it now takes `flex-1` and `min-h-0` instead.
 `ui/slider.tsx` is new, and it is the native range input rather than a library:
 the platform supplies keyboard stepping, Home/End, the ARIA role and value, and an
 OS-correct touch target, so only the track and thumb are ours. Two global rules in
-`tailwind/index.css` had to be worked around and are recorded in
+`style/index.css` had to be worked around and are recorded in
 [the primitive's rules](../../../../packages/components/src/ui/AGENTS.md) — the
 "Pro focus style" outlines the whole control, and the `*:focus-visible` reset kills
 `ring-*` utilities on the thumb through inherited custom properties.

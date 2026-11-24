@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { themeSpace } from '../style/theme-scale.stylex';
@@ -34,7 +34,7 @@ export const WINDOW_DRAG_REGION_HEIGHT_CLASS = stylex.props(styles.height).class
 export const WINDOW_DRAG_REGION_CLASS = stylex.props(styles.drag).className;
 export const WINDOW_DRAG_EXEMPT_CLASS = stylex.props(styles.exempt).className;
 export const WINDOW_DRAG_HEADER_CLASS = `${WINDOW_DRAG_REGION_CLASS} ${stylex.props(styles.header).className}`;
-// `--window-caption-*` (tailwind/index.css) is the measured caption-button
+// `--window-caption-*` (style/index.css) is the measured caption-button
 // strip, 0 when there is none. A header that shares its row with the buttons
 // pads by the strip's width plus a gap; a full-window overlay with no such row
 // starts its chrome below `WINDOW_CAPTION_CLEAR_TOP` instead.
@@ -111,6 +111,6 @@ export function WindowDragStrip({
     xstyle
   );
   return (
-    <div aria-hidden data-window-drag-strip="" {...sx} className={clsx(sx.className, className)} />
+    <div aria-hidden data-window-drag-strip="" {...sx} className={cn(sx.className, className)} />
   );
 }

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Sparkles } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { AnthropicIcon } from './anthropic-icon';
 import { DeepSeekIcon } from './deepseek-icon';
 import { GlmIcon } from './glm-icon';
@@ -45,7 +45,7 @@ function RegistrySvg({ name, className }: { name: string; className: string | un
     <InlineSvg
       fillParent
       raw={raw}
-      className={clsx(stylex.props(iconSurface.glyphFill).className, className)}
+      className={cn(stylex.props(iconSurface.glyphFill).className, className)}
     />
   );
 }

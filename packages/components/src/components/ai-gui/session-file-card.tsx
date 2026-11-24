@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -329,7 +329,7 @@ export function SessionFileCardLayout({
   const Frame = inline ? 'span' : 'div';
   return (
     <Frame
-      className={clsx(
+      className={cn(
         stylex.props(
           stylex.defaultMarker(),
           card.root,

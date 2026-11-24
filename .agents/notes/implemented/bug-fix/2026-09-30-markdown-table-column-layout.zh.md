@@ -47,7 +47,7 @@ min-content 缩到单字符，按比例分配后短列反而被压垮，手机�
   `MARKDOWN_TABLE_MAX_COL_EM = 30`。
 - `<table>` 输出 `data-one-line-columns` / `data-break-anywhere-columns` /
   `data-wide-columns` 词表属性，并渲染 `<colgroup>`，各 `<col>` 宽度为内容
-  估算值（30em 封顶）。`src/tailwind/index.css` 用静态 `:nth-child` 选择器
+  估算值（30em 封顶）。`src/style/index.css` 用静态 `:nth-child` 选择器
   （第 1–24 列）把标记落成 `white-space: nowrap`（min-width 0）、
   `overflow-wrap: anywhere` + `max-width: 20em`，以及更高的 `min-width`
   下限（9em；视口超过 640px 时 15em）。所有单元格带 `min-width` 下限——

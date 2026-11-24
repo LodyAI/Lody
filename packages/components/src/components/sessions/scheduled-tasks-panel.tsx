@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlarmClock, CalendarClock, ChevronDown, Repeat } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { getServerNow, resolveFireMs, type PendingScheduledTask } from '@lody/shared';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -295,7 +295,7 @@ export function ScheduledTasksPanel({ tasks, className }: ScheduledTasksPanelPro
   const chevronProps = stylex.props(styles.toggleChevron, expanded && styles.toggleChevronOpen);
 
   return (
-    <div {...panelProps} className={clsx(panelProps.className, className)}>
+    <div {...panelProps} className={cn(panelProps.className, className)}>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
@@ -340,7 +340,7 @@ export function ScheduledTaskList({
   const listProps = stylex.props(styles.list);
 
   return (
-    <ul {...listProps} className={clsx('scrollbar-pro', listProps.className, className)}>
+    <ul {...listProps} className={cn('scrollbar-pro', listProps.className, className)}>
       {rows.map(({ task, fireMs }) => {
         const isWakeup = task.kind === 'wakeup';
         const timeLabel = fireMs !== undefined ? formatFireTime(fireMs, nowMs) : undefined;

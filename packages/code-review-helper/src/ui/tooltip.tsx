@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
-import { clsx } from 'clsx';
+import { cn } from '../cn';
 const enter = stylex.keyframes({
   from: {
     opacity: 0,
@@ -54,7 +54,7 @@ const TooltipContent = React.forwardRef<
         ref={ref}
         sideOffset={sideOffset}
         {...sx}
-        className={clsx('dark', sx.className, className)}
+        className={cn('dark', sx.className, className)}
         style={sx.style ? { ...sx.style, ...style } : style}
         {...props}
       />

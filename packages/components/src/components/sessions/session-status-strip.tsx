@@ -3,7 +3,7 @@ import type { ComponentType, SVGProps } from 'react';
 import { Trash2, WifiOff, Info } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeFontSize,
@@ -161,7 +161,7 @@ export function SessionStatusStrip({
   const rootProps = stylex.props(styles.root, warning ? styles.rootWarning : styles.rootMuted);
 
   return (
-    <div {...rootProps} role="status" className={clsx(rootProps.className, className)}>
+    <div {...rootProps} role="status" className={cn(rootProps.className, className)}>
       <Icon {...stylex.props(styles.icon)} aria-hidden="true" />
       <span {...stylex.props(styles.label)}>{text}</span>
     </div>

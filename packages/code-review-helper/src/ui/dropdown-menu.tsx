@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
-import { clsx } from 'clsx';
+import { cn } from '../cn';
 const enter = stylex.keyframes({
   from: { opacity: 0, transform: 'translateY(var(--crh-menu-y,0px)) scale(.95)' },
   to: { opacity: 1, transform: 'translateY(0) scale(1)' },
@@ -90,7 +90,7 @@ const DropdownMenuContent = React.forwardRef<
         ref={ref}
         sideOffset={sideOffset}
         {...sx}
-        className={clsx('dark', sx.className, className)}
+        className={cn('dark', sx.className, className)}
         style={sx.style ? { ...sx.style, ...style } : style}
         {...props}
       />
@@ -109,7 +109,7 @@ const DropdownMenuItem = React.forwardRef<
     <DropdownMenuPrimitive.Item
       ref={ref}
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -127,7 +127,7 @@ const DropdownMenuLabel = React.forwardRef<
     <DropdownMenuPrimitive.Label
       ref={ref}
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -145,7 +145,7 @@ const DropdownMenuSeparator = React.forwardRef<
     <DropdownMenuPrimitive.Separator
       ref={ref}
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />

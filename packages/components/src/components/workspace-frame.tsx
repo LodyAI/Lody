@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
@@ -44,7 +44,7 @@ export function WorkspaceCard({
       <div
         data-workspace-card
         data-anchored={anchored}
-        className={clsx('lody-workspace-card', stylex.props(styles.card).className, className)}
+        className={cn('lody-workspace-card', stylex.props(styles.card).className, className)}
       >
         {children}
       </div>

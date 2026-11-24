@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type ILink } from '@xterm/xterm';
 import { useAtomValue } from 'jotai';
@@ -444,7 +444,7 @@ export function LocalTerminalPanel({
   const host = (
     <div
       ref={hostRef}
-      className={clsx('lody-terminal-panel', stylex.props(styles.root).className, className)}
+      className={cn('lody-terminal-panel', stylex.props(styles.root).className, className)}
       onContextMenu={windowsRightClick ? handleWindowsRightClick : undefined}
     />
   );

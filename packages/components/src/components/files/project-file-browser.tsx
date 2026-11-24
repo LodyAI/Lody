@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeFontSize, themeLineHeight, themeSpace } from '../../style/theme-scale.stylex';
@@ -70,7 +70,7 @@ export function ProjectFileBrowser({
   }, [provider, selectedPath, t]);
 
   return (
-    <div className={clsx(stylex.props(styles.root).className, className)}>
+    <div className={cn(stylex.props(styles.root).className, className)}>
       <div {...stylex.props(styles.tree)}>
         <FileTreeProviderView
           fileProvider={provider}

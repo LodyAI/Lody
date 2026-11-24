@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import {
   useCallback,
@@ -305,7 +305,7 @@ export function MessageQueueDisplay({
       <Collapsible.Root
         open={expanded}
         onOpenChange={setExpanded}
-        className={clsx(
+        className={cn(
           stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).className,
           className
         )}

@@ -20,7 +20,7 @@ const scopeRule = (selector: string, scheme: 'light' | 'dark', variables: Record
  * applied. One-time and idempotent; if a bundled theme fails to resolve the
  * scope simply inherits the app's variables (graceful degradation).
  *
- * Pair with the `dark` custom variant in src/tailwind/index.css, which treats
+ * Pair with the `dark` custom variant in src/style/index.css, which treats
  * `.dark-scope` as a dark root and lets `.light-scope` opt out of an ancestor
  * `.dark`.
  */

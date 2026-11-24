@@ -21,7 +21,7 @@ import {
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -643,7 +643,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
     return (
       <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <div className={clsx(stylex.props(updatedStyles.emptyCard).className, className)}>
+        <div className={cn(stylex.props(updatedStyles.emptyCard).className, className)}>
           <div {...stylex.props(updatedStyles.emptyTitle)}>{merged.emptyTitle}</div>
           <div {...stylex.props(updatedStyles.emptyDescription)}>{merged.emptyDescription}</div>
         </div>
@@ -656,7 +656,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
 
   return (
     <Tooltip.Provider>
-      <div className={clsx(stylex.props(updatedStyles.listStack).className, className)}>
+      <div className={cn(stylex.props(updatedStyles.listStack).className, className)}>
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
           const collapsed = Boolean(collapsedBuckets?.[bucket.key]);
@@ -679,7 +679,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
           return (
             <div
               key={bucket.key}
-              className={clsx(
+              className={cn(
                 'group',
                 stylex.props(
                   updatedStyles.bucket,
@@ -735,10 +735,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                       aria-label={showMoreLabel}
                       onClick={() => onShowMore?.(bucket.key)}
                     >
-                      <span
-                        {...stylex.props(updatedStyles.showMoreBox)}
-                        aria-hidden="true"
-                      />
+                      <span {...stylex.props(updatedStyles.showMoreBox)} aria-hidden="true" />
                       <span>{showMoreLabel}</span>
                     </button>
                   ) : null}
@@ -750,12 +747,8 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                       aria-label={showLessLabel}
                       onClick={() => onShowLess?.(bucket.key)}
                     >
-                      <span
-                        {...stylex.props(updatedStyles.showMoreBox)}
-                        aria-hidden="true"
-                      />
+                      <span {...stylex.props(updatedStyles.showMoreBox)} aria-hidden="true" />
                       <span>{showLessLabel}</span>
-
                     </button>
                   ) : null}
                 </div>
@@ -957,7 +950,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
       data-menu-open={rowMenuOpen ? '' : undefined}
-      className={clsx(
+      className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's

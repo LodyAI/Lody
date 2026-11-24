@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import type { TFunction } from 'i18next';
 import { ChevronDown, MoreHorizontal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -234,9 +234,9 @@ export function SessionRowLeadingSlot({
             event.stopPropagation();
             openerTree.onToggle();
           }}
-          className={clsx(
+          className={cn(
             stylex.props(tree.disclosure, showMenuButton && tree.fade).className,
-            showMenuButton && clsx(restClassName, restPointerClassName)
+            showMenuButton && cn(restClassName, restPointerClassName)
           )}
         >
           <ChevronDown
@@ -250,7 +250,7 @@ export function SessionRowLeadingSlot({
         </button>
       ) : childTree ? (
         <div
-          className={clsx(
+          className={cn(
             stylex.props(tree.connectorBox, showMenuButton && tree.fade).className,
             restClassName
           )}
@@ -294,7 +294,7 @@ export function SessionRowLeadingSlot({
               })
             );
           }}
-          className={clsx(
+          className={cn(
             // Overlay a 20px hit target centered on the 14px leading slot so the ⋯
             // gets a visible rounded hover chip (it reads as clickable) without
             // the tiny slot footprint clipping the background.

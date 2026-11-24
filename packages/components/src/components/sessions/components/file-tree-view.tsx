@@ -19,7 +19,7 @@ import {
 } from '@/hooks/use-local-project-file-paths';
 import { buildFileTreeFromPaths, markFileTreeModified } from '@/lib/file-tree';
 import { getBasename } from '@/lib';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import {
   flattenVisibleFileTreeRows,
@@ -506,7 +506,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
         paddingLeft,
         ...(virtualStart === undefined ? {} : { transform: `translateY(${virtualStart}px)` }),
       }}
-      className={clsx(rowProps.className, 'group', item.className)}
+      className={cn(rowProps.className, 'group', item.className)}
       onClick={activate}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {

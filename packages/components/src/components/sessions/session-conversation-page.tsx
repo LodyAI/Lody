@@ -1,7 +1,7 @@
 import type { DragEventHandler, ReactNode, Ref } from 'react';
 
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   ConversationDropOverlay,
   type ConversationDropKind,
@@ -111,7 +111,7 @@ export function SessionConversationPageHeader({
   );
 
   return (
-    <div {...headerProps} className={clsx(SESSION_PAGE_CONTAINER_CLASS, headerProps.className)}>
+    <div {...headerProps} className={cn(SESSION_PAGE_CONTAINER_CLASS, headerProps.className)}>
       <div {...stylex.props(styles.headerRow)}>
         <div {...stylex.props(styles.headerStart)}>
           {startSlot}
@@ -204,7 +204,7 @@ export function SessionConversationPage({
   return (
     <div
       {...pageProps}
-      className={clsx(pageProps.className, className)}
+      className={cn(pageProps.className, className)}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}

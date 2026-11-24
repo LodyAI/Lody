@@ -82,7 +82,7 @@
    same 44px + 2px geometry and the `pl-20` inset the session header uses. The
    Windows caption overlay is a 36px strip (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`)
    with buttons centered at y=18 on the right, so the bar IS that strip and
-   clears the measured button width (`--window-caption-*`, tailwind/index.css). */
+   clears the measured button width (`--window-caption-*`, style/index.css). */
 .lody-photo-slider--desktop.lody-photo-slider--mac-controls .PhotoView-Slider__BannerWrap {
   height: 44px;
   padding-top: 2px;

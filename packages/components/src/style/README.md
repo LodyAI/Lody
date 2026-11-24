@@ -14,7 +14,7 @@ owns the deliberate replacement of preserved legacy overrides.
 
 The declaration bridge, its Tailwind-dependent profile and the Electron Tailwind
 plugin have been removed. Browser normalization and ordinary theme defaults live
-in `../tailwind/{reset,theme-defaults}.css`; the product stylesheet has no utility
+in `./{reset,theme-defaults}.css`; the product stylesheet has no utility
 compiler input. Storybook also uses local StyleX without a utility compiler.
 Components use local StyleX directly; primitive overrides compose through typed
 `xstyle` props. The [migration guide](MIGRATION.md) describes the remaining

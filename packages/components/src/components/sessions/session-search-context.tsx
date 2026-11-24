@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { createContext, useContext, useMemo, type ReactNode, Fragment } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { buildSessionSearchTextParts } from '@/lib/session-chat-search';
@@ -136,7 +136,7 @@ export const SearchHighlightedText = ({
           <mark
             key={`mark-${part.resultId ?? index}`}
             data-search-result-id={part.resultId ?? undefined}
-            className={clsx(
+            className={cn(
               SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
               part.isActive && SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME
             )}

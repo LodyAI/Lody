@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import * as SeparatorPrimitive from '@radix-ui/react-separator';
-import { clsx } from 'clsx';
+import { cn } from '../cn';
 const styles = stylex.create({
   base: { flexShrink: 0, backgroundColor: 'hsl(var(--border))' },
   horizontal: { height: 1, width: '100%' },
@@ -27,7 +27,7 @@ const Separator = React.forwardRef<
         decorative={decorative}
         orientation={orientation}
         {...sx}
-        className={clsx(sx.className, className)}
+        className={cn(sx.className, className)}
         style={sx.style ? { ...sx.style, ...style } : style}
         {...props}
       />

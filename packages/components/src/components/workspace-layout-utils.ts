@@ -37,7 +37,7 @@ export function isSettingsRoute(pathname: string): boolean {
 /**
  * Styles that shift a layout root above the native soft keyboard.
  *
- * `--native-keyboard-height` defaults to `0px` (tailwind/index.css `:root`) and
+ * `--native-keyboard-height` defaults to `0px` (style/index.css `:root`) and
  * is only updated to a non-zero value by `@capacitor/keyboard` in the iOS
  * native shell (apps/mobile/src/native-keyboard.ts), so this is a no-op on web
  * and Android — where the keyboard is instead handled by viewport/WebView
@@ -58,7 +58,7 @@ export const NATIVE_KEYBOARD_OFFSET_CLASS =
  * safe area at the top and sides (iPadOS status bar, display cutouts).
  *
  * The `--safe-area-*` variables resolve to `env(safe-area-inset-*)`
- * (tailwind/index.css `:root`), which is `0px` on desktop and in any window
+ * (style/index.css `:root`), which is `0px` on desktop and in any window
  * that does not extend under system chrome — so this is a no-op on Electron and
  * the browser, and it collapses on its own in Split View / Stage Manager, where
  * iPadOS reports no inset.

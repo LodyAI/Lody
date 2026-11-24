@@ -2,7 +2,7 @@ import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { ScrollArea } from '@lody/ui/scroll-area';
 import { field } from '@lody/ui/field/field.tokens.stylex';
 import { popup } from '@lody/ui/popup/popup.tokens.stylex';
@@ -138,7 +138,7 @@ const Command = React.forwardRef<
   return (
     <CommandPrimitive
       ref={ref}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -193,7 +193,7 @@ const CommandInput = React.forwardRef<
       <Search {...stylex.props(styles.searchIcon)} />
       <CommandPrimitive.Input
         ref={ref}
-        className={clsx(sx.className, className)}
+        className={cn(sx.className, className)}
         style={sx.style ? { ...sx.style, ...style } : style}
         {...props}
       />
@@ -230,7 +230,7 @@ const CommandList = React.forwardRef<
     ref
   ) => (
     <ScrollArea
-      className={clsx(
+      className={cn(
         stylex.props(styles.listContainer, containerXstyle).className,
         containerClassName
       )}
@@ -242,7 +242,7 @@ const CommandList = React.forwardRef<
     >
       <CommandPrimitive.List
         ref={ref}
-        className={clsx(stylex.props(styles.list).className, className)}
+        className={cn(stylex.props(styles.list).className, className)}
         {...props}
       />
     </ScrollArea>
@@ -263,7 +263,7 @@ const CommandEmpty = React.forwardRef<
       {...props}
       {...(xstyle
         ? {
-            className: clsx(sx.className, props.className),
+            className: cn(sx.className, props.className),
             style: sx.style ? { ...sx.style, ...props.style } : props.style,
           }
         : {})}
@@ -281,7 +281,7 @@ const CommandGroup = React.forwardRef<
   return (
     <CommandPrimitive.Group
       ref={ref}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -296,7 +296,7 @@ const CommandSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <CommandPrimitive.Separator
     ref={ref}
-    className={clsx(stylex.props(styles.separator).className, className)}
+    className={cn(stylex.props(styles.separator).className, className)}
     {...props}
   />
 ));
@@ -317,7 +317,7 @@ const CommandItem = React.forwardRef<
   return (
     <CommandPrimitive.Item
       ref={ref}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -327,7 +327,7 @@ const CommandItem = React.forwardRef<
 CommandItem.displayName = CommandPrimitive.Item.displayName;
 
 const CommandShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanElement>) => {
-  return <span className={clsx(stylex.props(styles.shortcut).className, className)} {...props} />;
+  return <span className={cn(stylex.props(styles.shortcut).className, className)} {...props} />;
 };
 CommandShortcut.displayName = 'CommandShortcut';
 

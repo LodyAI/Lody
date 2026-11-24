@@ -22,7 +22,6 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { clsx } from 'clsx';
 import {
   getSessionPullRequestLegacyFields,
   hasWorkspaceChanges,
@@ -666,7 +665,7 @@ export function GoalChip({
         kind: 'popover',
         ariaLabel: t('sessions.goal.banner.label', 'Goal'),
         content: (
-          <div className={clsx(stylex.props(styles.goalPanel).className, INFO_BAR_TEXT_CLASS)}>
+          <div className={cn(stylex.props(styles.goalPanel).className, INFO_BAR_TEXT_CLASS)}>
             <div {...stylex.props(styles.goalHeaderRow)}>
               <Target {...stylex.props(styles.goalGlyph, meta.textStyle)} aria-hidden="true" />
               <span {...stylex.props(styles.goalLabel, meta.textStyle)}>
@@ -689,7 +688,7 @@ export function GoalChip({
               </span>
             </div>
             <p
-              className={clsx(
+              className={cn(
                 stylex.props(styles.goalObjective).className,
                 'scrollbar-pro',
                 INFO_BAR_PROSE_CLASS
@@ -811,10 +810,7 @@ export function ScheduleChip({
         content: (
           <div {...stylex.props(styles.schedulePanel)}>
             <div
-              className={clsx(
-                stylex.props(styles.scheduleHeaderRow).className,
-                INFO_BAR_TEXT_CLASS
-              )}
+              className={cn(stylex.props(styles.scheduleHeaderRow).className, INFO_BAR_TEXT_CLASS)}
             >
               <AlarmClock {...stylex.props(styles.scheduleGlyph)} aria-hidden="true" />
               <span {...stylex.props(styles.scheduleTitle)}>{heading}</span>
@@ -890,7 +886,7 @@ function ContextChipActions({ actions }: { actions: readonly ContextChipAction[]
         onClick={primaryAction.onClick}
         disabled={primaryAction.disabled}
         title={primaryAction.label}
-        className={clsx(stylex.props(styles.actionButton).className, INFO_BAR_TEXT_CLASS)}
+        className={cn(stylex.props(styles.actionButton).className, INFO_BAR_TEXT_CLASS)}
       >
         <span {...stylex.props(styles.actionLabel)}>{primaryAction.label}</span>
       </button>
@@ -993,7 +989,7 @@ function LocationControl({
 
   const Icon = isGitHub ? Github : isFolder ? Folder : WorktreeIcon;
   const glyphProps = stylex.props(styles.locationGlyph);
-  const glyph = <Icon {...glyphProps} className={clsx(glyphProps.className, className)} />;
+  const glyph = <Icon {...glyphProps} className={cn(glyphProps.className, className)} />;
 
   return (
     <Tooltip.Provider delay={300}>
@@ -1138,7 +1134,7 @@ export function ContextChip({
         onClick={onOpenPr}
         aria-label={t('sessions.pr.openTab', 'Open pull request')}
         title={t('sessions.pr.openTab', 'Open pull request')}
-        className={clsx(stylex.props(styles.prButton).className, INFO_BAR_TEXT_CLASS)}
+        className={cn(stylex.props(styles.prButton).className, INFO_BAR_TEXT_CLASS)}
       >
         {prMarker}
       </button>
@@ -1176,7 +1172,7 @@ export function ContextChip({
         disabled={!onOpenAllChanges}
         aria-label={t('sessions.detailTabs.allChanges', 'All Changes')}
         title={t('sessions.detailTabs.allChanges', 'All Changes')}
-        className={clsx(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
+        className={cn(stylex.props(styles.diffChip).className, INFO_BAR_TEXT_CLASS)}
       >
         {diffStat.add + diffStat.del > 0 ? (
           <>
@@ -1288,7 +1284,8 @@ function PrHistoryControl({
             aria-label={label}
             title={label}
             className={cn(
-              stylex.props(linkStyles.trigger, open && linkStyles.open).className, INFO_BAR_TEXT_CLASS
+              stylex.props(linkStyles.trigger, open && linkStyles.open).className,
+              INFO_BAR_TEXT_CLASS
             )}
           >
             {children}
@@ -1382,7 +1379,8 @@ function LinkedPrControl({
             aria-label={label}
             title={label}
             className={cn(
-              stylex.props(linkStyles.trigger, open && linkStyles.open).className, INFO_BAR_TEXT_CLASS
+              stylex.props(linkStyles.trigger, open && linkStyles.open).className,
+              INFO_BAR_TEXT_CLASS
             )}
           >
             {children}
@@ -1534,8 +1532,8 @@ function PrCiPopoverBody({
   const ciRunGlyphProps = stylex.props(styles.ciRunGlyph);
   return (
     <div {...stylex.props(styles.ciPanel)}>
-      <div className={clsx(stylex.props(styles.ciHeaderRow).className, INFO_BAR_TEXT_CLASS)}>
-        <span {...ciOverallProps} className={clsx(ciOverallProps.className, toneClassName)}>
+      <div className={cn(stylex.props(styles.ciHeaderRow).className, INFO_BAR_TEXT_CLASS)}>
+        <span {...ciOverallProps} className={cn(ciOverallProps.className, toneClassName)}>
           {overallLabel ?? t('sessions.prCi.label', 'CI checks')}
         </span>
         <span {...stylex.props(styles.ciCount)}>
@@ -1544,7 +1542,7 @@ function PrCiPopoverBody({
       </div>
       <ul
         {...ciListProps}
-        className={clsx(ciListProps.className, 'scrollbar-pro', INFO_BAR_TEXT_CLASS)}
+        className={cn(ciListProps.className, 'scrollbar-pro', INFO_BAR_TEXT_CLASS)}
       >
         {runs.map((run) => {
           const { Icon: RunIcon, className: runClassName } = PR_CI_RUN_ICON[run.status];
@@ -1556,7 +1554,7 @@ function PrCiPopoverBody({
             <>
               <RunIcon
                 {...ciRunGlyphProps}
-                className={clsx(ciRunGlyphProps.className, runClassName)}
+                className={cn(ciRunGlyphProps.className, runClassName)}
                 aria-hidden="true"
               />
               <span {...stylex.props(styles.ciRunName)}>{run.name}</span>
@@ -1624,11 +1622,11 @@ export function PrCiPill({
             aria-label={label}
             title={label}
             {...pillProps}
-            className={clsx(pillProps.className, INFO_BAR_TEXT_CLASS)}
+            className={cn(pillProps.className, INFO_BAR_TEXT_CLASS)}
           >
             <VerdictIcon
               {...ciRunGlyphProps}
-              className={clsx(ciRunGlyphProps.className, toneClassName)}
+              className={cn(ciRunGlyphProps.className, toneClassName)}
               aria-hidden="true"
             />
             {overall === 'running' ? (
@@ -1668,13 +1666,34 @@ export function useScheduledTaskSignature(
 }
 
 const themeStyles = stylex.create({
-  layout: { display: { 'default': 'none', '@container (min-width: 420px)': 'inline' }, flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
+  layout: {
+    display: { default: 'none', '@container (min-width: 420px)': 'inline' },
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+  },
   glyph: { height: themeSpace[3], width: themeSpace[3], flexShrink: 0 },
-  panel: { width: 'max-content', maxWidth: 'min(20rem,90vw)', padding: 0, boxShadow: uiShadow.popover },
+  panel: {
+    width: 'max-content',
+    maxWidth: 'min(20rem,90vw)',
+    padding: 0,
+    boxShadow: uiShadow.popover,
+  },
   panel2: { width: 'min(22rem,90vw)', padding: 0, boxShadow: uiShadow.popover },
 });
 
 const linkStyles = stylex.create({
- trigger: { display: 'flex', height: 'calc(var(--spacing) * 6)', flexShrink: 0, userSelect: 'none', alignItems: 'center', gap: 'calc(var(--spacing) * 1)', borderRadius: uiRadius.small, paddingInline: 'calc(var(--spacing) * 1)', fontWeight: 500, color: linkColors.secondaryLabel, backgroundColor: { default: 'transparent', ':hover': linkPopup.highlight } },
- open: { backgroundColor: linkPopup.highlight },
+  trigger: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 6)',
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    borderRadius: uiRadius.small,
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontWeight: 500,
+    color: linkColors.secondaryLabel,
+    backgroundColor: { default: 'transparent', ':hover': linkPopup.highlight },
+  },
+  open: { backgroundColor: linkPopup.highlight },
 });

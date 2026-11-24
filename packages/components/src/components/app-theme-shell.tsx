@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 
@@ -27,7 +27,7 @@ export function AppThemeShell({
 }) {
   const shellProps = stylex.props(styles.shell);
   return (
-    <div {...shellProps} className={clsx(shellProps.className, className)}>
+    <div {...shellProps} className={cn(shellProps.className, className)}>
       <div {...stylex.props(styles.content)}>{children}</div>
     </div>
   );

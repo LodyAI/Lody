@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { corner, text } from '@lody/ui/tokens/scales.stylex';
@@ -39,7 +39,7 @@ export function VisualAnnotationDraftComposer({
   return (
     <div
       data-lody-visual-comment-draft="true"
-      className={clsx(stylex.props(styles.root).className, className)}
+      className={cn(stylex.props(styles.root).className, className)}
       style={style}
     >
       <div {...stylex.props(styles.header)}>

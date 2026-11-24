@@ -51,7 +51,7 @@ export type MobileNewChatSheetContentProps = {
   xstyle?: stylex.StyleXStyles;
 };
 
-/* Keep in sync with `.mobile-drill-in` in `tailwind/index.css`. */
+/* Keep in sync with `.mobile-drill-in` in `style/index.css`. */
 export const MOBILE_NEW_CHAT_SLIDE_MS = 280;
 const SLIDE_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
 const SWIPE_COMMIT_PX = 80;
