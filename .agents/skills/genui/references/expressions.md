@@ -51,5 +51,7 @@ Example convention: `<button onClick={() => lody.copy('text')}>`.
 - Unknown tag → renders `<tag>` inline + `catalog` diagnostic.
 - Expression that throws or hits the step budget → `eval` diagnostic.
 
-Non-fatal diagnostics appear under the surface (max 3 shown); a surface with no
-renderable view shows the error card.
+Diagnostics are model-facing, not reader-facing: in chat a surface that cannot
+mount degrades to its own fenced code block, and the truncated tail of a
+still-streaming fence is withheld rather than shown as raw markup. Only a
+direct `GenuiSurface` without a `fallback` shows the error view.

@@ -94,7 +94,8 @@ Props that matter per tag; full prop tables and per-family examples live in
 
 ## Validate before shipping
 
-A surface that fails to compile renders an error view in chat. When editing the
-runtime or catalog, the ground truth is `packages/genui` (parser + evaluator) and
-`packages/components/src/components/ai-gui/genui/` (catalog renderers); run
-`pnpm --filter @lody/genui test` to check a surface end-to-end.
+A surface that fails to compile degrades to its own fenced code block in chat —
+readers never see diagnostics, so write markup as if errors were invisible. When
+editing the runtime or catalog, the ground truth is `packages/genui` (parser +
+evaluator) and `packages/components/src/components/ai-gui/genui/` (catalog
+renderers); run `pnpm --filter @lody/genui test` to check a surface end-to-end.
