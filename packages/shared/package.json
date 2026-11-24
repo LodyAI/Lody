@@ -8,6 +8,7 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./plugins/*": "./src/plugins/*.ts",
     "./automations": {
       "types": "./src/automations/index.ts",
       "import": "./src/automations/index.ts"

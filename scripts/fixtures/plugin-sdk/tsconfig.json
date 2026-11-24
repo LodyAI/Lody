@@ -12,21 +12,19 @@
     "types": [],
     "baseUrl": ".",
     "paths": {
-      "@lody/plugin-sdk": ["./sdk/shared.d.ts"],
-      "@lody/plugin-sdk/client": ["./sdk/client.d.ts"],
-      "@lody/plugin-sdk/manifest": ["./sdk/manifest.d.ts"],
+      "@lody/plugin-sdk": ["../../../packages/plugin-sdk/src/index.ts"],
+      "@lody/plugin-sdk/client": ["../../../packages/plugin-sdk/src/client.ts"],
+      "@lody/plugin-sdk/manifest": ["../../../packages/plugin-sdk/src/manifest.ts"],
       "@lody/ui": ["../../../packages/ui/src/index.ts"],
       "zod": ["../../../packages/shared/node_modules/zod"],
       "react": ["../../../packages/ui/node_modules/@types/react"],
-      "react/jsx-runtime": [
-        "../../../packages/ui/node_modules/@types/react/jsx-runtime"
-      ]
+      "react/jsx-runtime": ["../../../packages/ui/node_modules/@types/react/jsx-runtime"]
     }
   },
   "include": [
-    "./sdk/shared.d.ts",
-    "./sdk/client.d.ts",
-    "./sdk/manifest.d.ts",
+    "../../../packages/plugin-sdk/src/index.ts",
+    "../../../packages/plugin-sdk/src/client.ts",
+    "../../../packages/plugin-sdk/src/manifest.ts",
     "./examples/**/shared.ts",
     "./examples/**/client.tsx",
     "./contracts.ts"

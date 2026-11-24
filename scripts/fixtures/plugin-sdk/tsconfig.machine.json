@@ -12,16 +12,16 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
-      "@lody/plugin-sdk": ["./sdk/shared.d.ts"],
-      "@lody/plugin-sdk/machine": ["./sdk/machine.d.ts"],
-      "@lody/plugin-sdk/manifest": ["./sdk/manifest.d.ts"],
+      "@lody/plugin-sdk": ["../../../packages/plugin-sdk/src/index.ts"],
+      "@lody/plugin-sdk/machine": ["../../../packages/plugin-sdk/src/machine.ts"],
+      "@lody/plugin-sdk/manifest": ["../../../packages/plugin-sdk/src/manifest.ts"],
       "zod": ["../../../packages/shared/node_modules/zod"]
     }
   },
   "include": [
-    "./sdk/shared.d.ts",
-    "./sdk/machine.d.ts",
-    "./sdk/manifest.d.ts",
+    "../../../packages/plugin-sdk/src/index.ts",
+    "../../../packages/plugin-sdk/src/machine.ts",
+    "../../../packages/plugin-sdk/src/manifest.ts",
     "./examples/**/shared.ts",
     "./examples/**/machine.ts",
     "./machine-contracts.ts"
