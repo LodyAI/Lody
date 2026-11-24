@@ -1,4 +1,9 @@
-import { buildAgentMessageAuthor } from '../src/message-author';
+import {
+  buildAgentMessageAuthor,
+  enrichAgentMessageAuthorModel,
+  formatAgentAuthorModelDisplayName,
+} from '../src/message-author';
+import { applyOpenAssistantTurn, createAssistantTurn } from '../src/session-data/planner';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
 
@@ -730,6 +735,86 @@ describe('single history writer', () => {
       author: { v: 1, kind: 'human', userId: 'editor' },
     }));
     expect(mirror.getState().history[0]?.author).toEqual({ v: 1, kind: 'human', userId: 'editor' });
+  });
+
+  it('prefers human-readable model names, upgrades configured assistant authors on reopen, and formats legacy/gateway IDs safely', () => {
+    const providerModelId = '550e8400-e29b-41d4-a716-446655440000/codex%2Fgpt-6.2-sol';
+    const configured = buildAgentMessageAuthor({
+      sessionId: 'source',
+      turnId: 'source-turn',
+      name: 'Lody Agent',
+      inputConfig: { modelId: providerModelId, configOptionValues: { reasoning_effort: 'medium' } },
+      modelName: 'GPT-6.2 Sol',
+    });
+    expect(configured.model).toEqual({
+      id: providerModelId,
+      name: 'GPT-6.2 Sol',
+      source: 'configured',
+    });
+    expect(formatAgentAuthorModelDisplayName(configured.model!)).toBe('GPT-6.2 Sol');
+
+    const draft = createAssistantTurn({
+      turnId: 'assistant:source-turn',
+      userTurnId: 'source-turn',
+      author: buildAgentMessageAuthor({
+        sessionId: 'source',
+        turnId: 'source-turn',
+        name: 'Lody Agent',
+        inputConfig: { modelId: providerModelId },
+      }),
+      timestamp: '2026-10-05T12:00:00.000Z',
+    });
+    applyOpenAssistantTurn(draft, {
+      turnId: 'assistant:source-turn',
+      userTurnId: 'source-turn',
+      modelInfo: { modelId: providerModelId, name: 'GPT-6.2 Sol (recommended)' },
+      timestamp: '2026-10-05T12:00:01.000Z',
+    });
+    expect(draft.author).toMatchObject({
+      sessionId: 'source',
+      turnId: 'source-turn',
+      name: 'Lody Agent',
+      model: { id: providerModelId, name: 'GPT-6.2 Sol (recommended)', source: 'runtime' },
+    });
+
+    const beforeSecondReopen = draft.author;
+    applyOpenAssistantTurn(draft, {
+      turnId: 'assistant:source-turn',
+      userTurnId: 'source-turn',
+      modelInfo: { modelId: 'other-model', name: 'Other Model' },
+      timestamp: '2026-10-05T12:00:02.000Z',
+    });
+    expect(draft.author).toEqual(beforeSecondReopen);
+
+    const upgradedWithRawRuntimeName = enrichAgentMessageAuthorModel(configured, {
+      modelId: providerModelId,
+      name: providerModelId,
+    });
+    expect(upgradedWithRawRuntimeName.model).toEqual({
+      id: providerModelId,
+      name: 'GPT-6.2 Sol',
+      source: 'runtime',
+    });
+
+    expect(
+      formatAgentAuthorModelDisplayName({
+        id: providerModelId,
+        name: 'GPT-6.2 Sol (recommended)',
+      })
+    ).toBe('GPT-6.2 Sol');
+    expect(formatAgentAuthorModelDisplayName({ id: providerModelId })).toBe('codex/gpt-6.2-sol');
+    expect(
+      formatAgentAuthorModelDisplayName({ id: providerModelId, name: providerModelId })
+    ).toBe('codex/gpt-6.2-sol');
+    expect(
+      formatAgentAuthorModelDisplayName({ id: 'openrouter/anthropic/claude-sonnet-4' })
+    ).toBe('openrouter/anthropic/claude-sonnet-4');
+    expect(
+      formatAgentAuthorModelDisplayName({ id: 'openrouter/anthropic%2Fclaude-sonnet-4' })
+    ).toBe('openrouter/anthropic/claude-sonnet-4');
+    expect(formatAgentAuthorModelDisplayName({ id: 'my-custom-model-100%' })).toBe(
+      'my-custom-model-100%'
+    );
   });
 
   it('retains child message identities and scalar tool output without altering root identity', () => {

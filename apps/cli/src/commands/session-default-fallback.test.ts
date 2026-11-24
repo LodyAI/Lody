@@ -105,7 +105,7 @@ const createModelCapability = (): AcpCapabilityCacheEntry => ({
 
 /** Real command resolution and Loro history, with only transport/storage replaced. */
 function createFixture(
-  agentType: 'codex' | 'claude',
+  agentType: 'codex' | 'claude' | 'sorbet',
   capability?: AcpCapabilityCacheEntry,
   skipAutoRead = false
 ) {
@@ -1800,6 +1800,54 @@ it.each(['CLI', 'MCP'] as const)(
     expect(author.role).toEqual(snapshot);
   }
 );
+
+it('resolves configured model display names from cached Machine Flock ACP capabilities while preserving protocol IDs', async () => {
+  const providerModelId = '550e8400-e29b-41d4-a716-446655440000/codex%2Fgpt-6.2-sol';
+  const fixture = createFixture('sorbet', {
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    cacheVersion: 11,
+    sourceVersion: 'builtin-sorbet:@sorbetai/acp@0.1.0',
+    fetchedAt: 1,
+    modes: [],
+    models: [],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: providerModelId,
+        options: [{ value: providerModelId, name: 'GPT-6.2 Sol' }],
+      },
+    ],
+  });
+  await fixture.seedChat({
+    prompt: 'Hello',
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    modelId: providerModelId,
+    configOptionValues: { reasoning_effort: 'medium' },
+  });
+  const meta = fixture.metadata.get(getSessionRoomId(sessionId)) as SessionMeta;
+  const author = await resolveSessionMessageAuthor(
+    fixture.manager,
+    meta,
+    'turn-1',
+    {
+      modelId: providerModelId,
+      configOptionValues: { reasoning_effort: 'medium' },
+    },
+    undefined,
+    workspaceId
+  );
+  expect(author.model).toEqual({
+    id: providerModelId,
+    name: 'GPT-6.2 Sol',
+    source: 'configured',
+  });
+  expect(author.reasoningEffort).toBe('medium');
+});
 
 describe('agent chat to a busy target', () => {
   const inputConfig = { prompt: 'Earlier prompt', cliType: 'builtin', agentType: 'codex' } as const;

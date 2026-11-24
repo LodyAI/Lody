@@ -1,4 +1,5 @@
 import { isSessionGoalActive, resolveLatestSessionGoalFromHistory } from '../goal';
+import { enrichAgentMessageAuthorModel, readMessageAuthor } from '../message-author';
 import type { PermissionOutcome } from '../message';
 import type {
   OpenAssistantTurnInput,
@@ -36,7 +37,15 @@ export function applyOpenAssistantTurn(draft: Draft, input: OpenAssistantTurnInp
   applyResumeAssistant(draft);
   if (draft.userTurnId === undefined && input.userTurnId !== undefined)
     draft.userTurnId = input.userTurnId;
-  if (draft.author === undefined && input.author !== undefined) draft.author = input.author;
+  if (draft.author === undefined && input.author !== undefined) {
+    draft.author = input.author;
+  } else if (input.modelInfo !== undefined) {
+    const existingAuthor = readMessageAuthor(draft.author);
+    if (existingAuthor?.kind === 'agent') {
+      const upgraded = enrichAgentMessageAuthorModel(existingAuthor, input.modelInfo);
+      if (upgraded !== existingAuthor) draft.author = upgraded;
+    }
+  }
   if (input.modelInfo !== undefined) draft.modelInfo = input.modelInfo;
 }
 
