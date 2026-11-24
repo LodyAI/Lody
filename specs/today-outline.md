@@ -34,7 +34,9 @@ any time; when off it changes none of the app's existing behavior.
   sidebar (layout: left sidebar | Today | main area). Pinned state and column width are stored on this device
   only; the width is resizable. The pinned column is a page card like the main area's (the darker
   inset sheet, same radius and rim), anchored to the sidebar with 4px of window ground between it and the main
-  card, so the two read as separate pages rather than one fused panel (user decision). With the sidebar hidden the
+  card, so the two read as separate pages rather than one fused panel (user decision). Its toolbar row belongs to the
+  window's top bar like the sidebar header and the main page's tab bar: pressing its empty space drags the window,
+  and on macOS double-clicking it zooms or minimizes the window as System Settings choose (user decision). With the sidebar hidden the
   pinned column is the window's leftmost surface: the sidebar toggle and Back/Forward move to its toolbar (right of
   the traffic lights) and leave the main page, which no longer clears the traffic lights; its content tightens so the
   content lines up with the leftmost traffic light (x 16–30): bullet dots centre on its right edge (x=30), fold
