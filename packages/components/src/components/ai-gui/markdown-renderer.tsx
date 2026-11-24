@@ -1199,9 +1199,6 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
     return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
-  // A committed ```genui fence mounts as a live surface; one still streaming
-  // mounts too, but through the tolerant partial compile so only closed
-  // constructs land — the fence's start offset keys its state across chunks.
   if (block.language === 'genui') {
     const offset = node?.position?.start.offset;
     return (
