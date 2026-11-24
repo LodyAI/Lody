@@ -2,12 +2,13 @@ import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { dialog as dialogTokens } from '@lody/ui/dialog/dialog.tokens.stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
+import { settingsActionIntentAtom } from '@/atoms';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@/lib/posthog-context';
 import { usePlatformCapability } from '@lody/platform/react';
@@ -227,6 +228,17 @@ function PromptShortcutsSettingContent({
     });
   };
   const owned = canWrite && shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
+  const [actionIntent, setActionIntent] = useAtom(settingsActionIntentAtom);
+  useEffect(() => {
+    if (!actionIntent || actionIntent.action.tab !== 'prompt-shortcuts') return;
+    if (!actionIntent.action.create || !canWrite) {
+      setActionIntent(null);
+      return;
+    }
+    if (!runtime) return;
+    setActionIntent(null);
+    create();
+  });
   return (
     <div {...stylex.props(surface.container)}>
       <SettingsPageLead>

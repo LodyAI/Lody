@@ -37,9 +37,11 @@ const streamsClientMockFns = {
 };
 
 const streamsClientInstances: MockStreamsClientInstance[] = [];
+let useRealStreamsClient = false;
 
-vi.mock('@loro-dev/streams-client', () => ({
-  StreamsClient: class {
+vi.mock('@loro-dev/streams-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-client')>();
+  class MockStreamsClient {
     readonly options: MockStreamsClientOptions;
     readonly create = vi.fn((...args: unknown[]) => streamsClientMockFns.create(...args));
     readonly head = vi.fn((...args: unknown[]) => streamsClientMockFns.head(...args));
@@ -51,9 +53,33 @@ vi.mock('@loro-dev/streams-client', () => ({
       this.options = options;
       streamsClientInstances.push(this as unknown as MockStreamsClientInstance);
     }
-  },
-}));
+  }
 
+  return {
+    ...actual,
+    StreamsClient: new Proxy(actual.StreamsClient, {
+      construct(_target, args) {
+        if (useRealStreamsClient) {
+          return new actual.StreamsClient(
+            ...(args as [ConstructorParameters<typeof actual.StreamsClient>[0]])
+          );
+        }
+        return new MockStreamsClient(...(args as [MockStreamsClientOptions]));
+      },
+    }),
+  };
+});
+
+import {
+  DS_WS_SUBPROTOCOL_V1_1,
+  acquireDurableWsMultiplexer,
+  decodeClientFrame,
+  deriveWsAuthPoolKey,
+  encodeServerFrame,
+  type DsWebSocketFactory,
+  type DsWebSocketLike,
+  type WsAppendFrame,
+} from '@loro-dev/streams-client';
 import {
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LoroStreamsGatewayError,
@@ -2938,6 +2964,169 @@ describe('createLoroStreamsJsonStreamClient', () => {
       webSocket,
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('uses WS APPEND on the shared ready multiplexer for small payloads and falls back to HTTP POST above 256 KiB', async () => {
+    const wsAppends: WsAppendFrame[] = [];
+    const httpPosts: Array<{ url: string; bodyBytes: number }> = [];
+    let wsFactoryCalls = 0;
+
+    const webSocketFactory: DsWebSocketFactory = () => {
+      wsFactoryCalls += 1;
+      const socket: DsWebSocketLike = {
+        protocol: DS_WS_SUBPROTOCOL_V1_1,
+        binaryType: 'arraybuffer',
+        onopen: null,
+        onmessage: null,
+        onclose: null,
+        onerror: null,
+        send(data) {
+          const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+          const frame = decodeClientFrame(bytes, true);
+          if (frame.type === 'auth') {
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'auth_ok',
+                    reqId: frame.reqId,
+                    expiresAtUnixSec: BigInt(Math.floor(Date.now() / 1000) + 3600),
+                  },
+                  true
+                ),
+              });
+            });
+          } else if (frame.type === 'join') {
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'join_ok',
+                    alias: frame.alias,
+                    startOffset: 0n,
+                    streamClosed: false,
+                    contentType: 'application/json',
+                  },
+                  true
+                ),
+              });
+            });
+          } else if (frame.type === 'leave') {
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'left',
+                    alias: frame.alias,
+                    serverInitiated: false,
+                  },
+                  true
+                ),
+              });
+            });
+          } else if (frame.type === 'append') {
+            wsAppends.push(frame);
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'ack',
+                    reqId: frame.reqId,
+                    nextOffset: 42n,
+                    created: false,
+                    duplicate: false,
+                  },
+                  true
+                ),
+              });
+            });
+          }
+        },
+        close() {},
+      };
+      queueMicrotask(() => socket.onopen?.({}));
+      return socket;
+    };
+
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const bodyBytes =
+          typeof init.body === 'string'
+            ? new TextEncoder().encode(init.body).byteLength
+            : init.body instanceof ArrayBuffer || ArrayBuffer.isView(init.body)
+              ? init.body.byteLength
+              : 0;
+        httpPosts.push({ url, bodyBytes });
+      }
+      return new Response(null, {
+        status: 204,
+        headers: { 'Stream-Next-Offset': '00000000000000000099' },
+      });
+    });
+
+    const authPoolKey = 'workspace-ws-append-test';
+    const wsAuth = async () => 'token-1';
+    const lease = acquireDurableWsMultiplexer({
+      url: 'https://streams.example.com',
+      authPoolKey: deriveWsAuthPoolKey({ authPoolKey }, wsAuth),
+      auth: wsAuth,
+      probe: false,
+      webSocketFactory,
+    });
+
+    const sub = lease.multiplexer.joinDurable('bucket-1/workspace-1:rpc:res', 'tail', {
+      onData() {},
+    });
+
+    useRealStreamsClient = true;
+    try {
+      await vi.waitFor(() => expect(lease.multiplexer.state).toBe('ready'));
+
+      const client = createLoroStreamsJsonStreamClient({
+        bucketId: 'bucket-1',
+        getToken: async () => 'token-1',
+        baseUrl: 'https://streams.example.com',
+        fetchImpl,
+        webSocket: {
+          enabled: true,
+          url: 'https://streams.example.com',
+          authPoolKey,
+          auth: wsAuth,
+          probe: false,
+          webSocketFactory,
+        },
+      });
+
+      const smallPayload = { jsonrpc: '2.0', id: 'req-small', method: 'machine/ping' };
+      await expect(client.appendJson('workspace-1:rpc:req:machine-1', smallPayload)).resolves.toBe(
+        '00000000000000000042'
+      );
+      expect(wsFactoryCalls).toBe(1);
+      expect(httpPosts).toHaveLength(0);
+      expect(wsAppends).toHaveLength(1);
+      expect(wsAppends[0]?.stream).toBe('bucket-1/workspace-1:rpc:req:machine-1');
+      expect(wsAppends[0]?.contentType).toBe('application/json');
+      expect(JSON.parse(new TextDecoder().decode(wsAppends[0]?.payload))).toEqual(smallPayload);
+
+      const largePayload = {
+        jsonrpc: '2.0',
+        id: 'req-large',
+        data: 'x'.repeat(270 * 1024),
+      };
+      await expect(client.appendJson('workspace-1:rpc:req:machine-1', largePayload)).resolves.toBe(
+        '00000000000000000099'
+      );
+      expect(wsAppends).toHaveLength(1);
+      expect(httpPosts).toHaveLength(1);
+      expect(httpPosts[0]?.url).toBe(
+        'https://streams.example.com/ds/bucket-1/workspace-1%3Arpc%3Areq%3Amachine-1'
+      );
+      expect(httpPosts[0]?.bodyBytes).toBeGreaterThan(256 * 1024);
+    } finally {
+      useRealStreamsClient = false;
+      await sub.leave().catch(() => {});
+      lease.release();
+    }
   });
 });
 

@@ -171,7 +171,7 @@ Lody 仍在走向完整的 local-first 支持。
 - `packages/e2ee-machine-sharing` — 机器服务共享策略
 - `packages/turn-diff-store` — 本地按内容寻址的回合快照
 - `site-docs` — 官网、文档与博客
-- [`skills`](skills/lody-cli/SKILL.md) — 面向 Lody 用户的 Agent 技能，例如 `lody-cli`
+- [`skills`](skills/README.md) — 官方 Agent 技能子模块（`LodyAI/skills`），包含 `lody` 与 `lody-cli`
 
 如果希望参与开发，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)（含社区 PR 规模限制）。
 

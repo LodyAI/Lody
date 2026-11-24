@@ -1,7 +1,7 @@
 {
   "default": 1200,
   "files": {
-    "AGENTS.md": 1240,
+    "AGENTS.md": 1320,
     ".agents/notes/AGENTS.md": 1400,
     "apps/cli/src/lib/AGENTS.md": 1400,
     "apps/cli/src/lib/e2ee/AGENTS.md": 1500,

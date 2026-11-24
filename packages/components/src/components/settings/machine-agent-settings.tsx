@@ -10,7 +10,7 @@ import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
@@ -30,7 +30,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { developerModeEnabledAtom } from '@/atoms/settings';
-import { settingsDialogOpenAtom } from '@/atoms/settings';
+import { settingsActionIntentAtom, settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -106,6 +106,7 @@ import {
 } from './my-machine-connected-resources';
 import {
   AgentConfigDialog,
+  buildCreateFormFromLinkTarget,
   type AgentConfigDialogMode,
   type AgentConfigFormData,
   type AgentConfigSubmitPayload,
@@ -1303,6 +1304,77 @@ export function MachineAgentSettings({
     setDialogMachineId(machine.id);
     setDialogMode({ kind: 'edit', config });
   }, []);
+
+  const [actionIntent, setActionIntent] = useAtom(settingsActionIntentAtom);
+  useEffect(() => {
+    if (mode !== 'agents' || !actionIntent || actionIntent.action.tab !== 'agents') return;
+    if (isLoading && machines.size === 0) return;
+    const act = actionIntent.action;
+    if (!act.create && !act.configId) {
+      setActionIntent(null);
+      return;
+    }
+    if (machines.size === 0) {
+      setActionIntent(null);
+      return;
+    }
+    if (act.configId) {
+      const config = allConfigs.find(
+        (item) => item.id === act.configId && (!act.machineId || item.machineId === act.machineId)
+      );
+      if (!config) {
+        if (!isLoading) setActionIntent(null);
+        return;
+      }
+      const targetMachine = machines.get(config.machineId);
+      if (!targetMachine) {
+        setActionIntent(null);
+        return;
+      }
+      if (resolvedSelectedMachine?.id !== targetMachine.id) {
+        onSelectedMachineChange(targetMachine.id);
+        return;
+      }
+      setActionIntent(null);
+      if (isOwnMachine(targetMachine) && !providerUnavailableReason) {
+        openEditDialog(targetMachine, config);
+      }
+      return;
+    }
+    if (act.create) {
+      const targetMachine = act.machineId
+        ? machines.get(act.machineId as MachineId)
+        : resolvedSelectedMachine;
+      if (!targetMachine) {
+        setActionIntent(null);
+        return;
+      }
+      if (resolvedSelectedMachine?.id !== targetMachine.id) {
+        onSelectedMachineChange(targetMachine.id);
+        return;
+      }
+      setActionIntent(null);
+      if (!isOwnMachine(targetMachine) || providerUnavailableReason) return;
+      const initialForm = buildCreateFormFromLinkTarget(act.create, t);
+      if (initialForm) {
+        openCreateDialog(targetMachine, initialForm);
+      }
+    }
+  }, [
+    actionIntent,
+    allConfigs,
+    isLoading,
+    isOwnMachine,
+    machines,
+    mode,
+    onSelectedMachineChange,
+    openCreateDialog,
+    openEditDialog,
+    providerUnavailableReason,
+    resolvedSelectedMachine,
+    setActionIntent,
+    t,
+  ]);
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
