@@ -1,3 +1,4 @@
+import { encryptedPluginDispatch } from '../machine-host-port';
 import { describe, expect, it } from '@effect/vitest';
 import { Deferred, Effect, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
@@ -285,3 +286,90 @@ it.effect('fences replacement behind the unreleased tree, even after its IPC wor
     );
   })
 );
+
+it('serves nested host IPC during startup, drains events in order and preserves host denial', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-host-port-'));
+  try {
+    const worker = join(root, 'worker.mjs'),
+      entry = join(root, 'machine.mjs');
+    await build({
+      entryPoints: [fileURLToPath(new URL('../plugin-worker-entry.ts', import.meta.url))],
+      outfile: worker,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+    });
+    await writeFile(
+      entry,
+      `const schema={safeParse:data=>({success:true,data})};export default {kind:'machine-plugin',register(m){const observed=[];m.onStart(async ctx=>{const snap=await ctx.lody.readSnapshot({kind:'workspace-state',workspace:ctx.workspace});observed.push(Object.isFrozen(snap.items));});m.events.on('session.created',async(ctx,event)=>{observed.push(await ctx.lody.read(ctx.machine,{id:'sessions'},{value:event.value}));});m.query({id:'inspect',scope:'machine',input:schema,output:schema},async ctx=>{for(const op of [()=>ctx.lody.sessions.send(ctx.machine,{prompt:'test'}),()=>ctx.lody.execute(ctx.machine,{id:'sessionCreate'}, {})]){try{await op();observed.push('wrote input')}catch(e){observed.push(e.code)}}try{await ctx.lody.sessions.requestStop({workspaceId:'ws',machineId:'m',sessionId:'s'})}catch(e){observed.push(e.code)}return observed;});}}`
+    );
+    let started!: () => void, release!: () => void;
+    const entered = new Promise<void>((r) => (started = r)),
+      gate = new Promise<void>((r) => (release = r));
+    const layer = makePluginHostLayer(
+      worker,
+      encryptedPluginDispatch(async (call) => {
+        if (call.op === 'lody.readSnapshot' && call.origin.type === 'start') {
+          started();
+          await gate;
+          return { items: [] };
+        }
+        if (call.op === 'lody.read' && call.origin.type === 'event') return call.payload.input;
+        if (call.op === 'sessions.requestStop' && call.origin.type === 'invoke')
+          throw Object.assign(new Error('denied'), { code: 'forbidden' });
+        throw new Error('Unexpected host call');
+      })
+    ).pipe(Layer.provide(processLayer({})));
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        const boot = yield* host
+          .reload({
+            pluginId: 'loop',
+            machineEntry: entry,
+            machineId: 'm',
+            workspaceId: 'ws',
+            config: {},
+            dataDir: root,
+          })
+          .pipe(Effect.forkChild);
+        yield* Effect.promise(() => entered);
+        for (const value of [1, 2])
+          yield* host.broadcast({
+            type: 'event',
+            eventType: 'session.created',
+            eventId: String(value),
+            payload: { value },
+          });
+        release();
+        yield* Fiber.join(boot);
+        yield* host.broadcast({
+          type: 'event',
+          eventType: 'session.created',
+          eventId: '3',
+          payload: { value: 3 },
+        });
+        expect(
+          yield* host.invoke('loop', {
+            kind: 'query',
+            descriptorId: 'inspect',
+            scope: 'machine',
+            target: { workspaceId: 'ws', machineId: 'm' },
+            input: null,
+            actorUserId: 'u',
+          })
+        ).toEqual([
+          true,
+          { value: 1 },
+          { value: 2 },
+          { value: 3 },
+          'forbidden',
+          'forbidden',
+          'forbidden',
+        ]);
+      }).pipe(Effect.provide(layer))
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

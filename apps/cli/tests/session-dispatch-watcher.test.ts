@@ -305,15 +305,24 @@ describe('SessionDispatchWatcher', () => {
       sessionId: 'paused-promotion' as SessionId,
       queue: [{ ...createQueueItem('B'), paused: true }],
       history: [createPendingUserTurn('B', 'queued B')],
-      meta: { queuePromotionLedger: { 'queue:B': createQueueReceipt('B', 'activation_published') }, latestUserMsgId: 'B' },
+      meta: {
+        queuePromotionLedger: { 'queue:B': createQueueReceipt('B', 'activation_published') },
+        latestUserMsgId: 'B',
+      },
     });
     try {
       await f.recover(f.doc, f.meta());
-      expect(await f.doc.getMessageQueue()).toEqual([expect.objectContaining({ userTurnId: 'B', paused: true })]);
-      expect((await f.doc.sessionData.history.readAll()).find((entry) => entry.id === 'B')?.status).toBe('canceled');
+      expect(await f.doc.getMessageQueue()).toEqual([
+        expect.objectContaining({ userTurnId: 'B', paused: true }),
+      ]);
+      expect(
+        (await f.doc.sessionData.history.readAll()).find((entry) => entry.id === 'B')?.status
+      ).toBe('canceled');
       expect(f.meta().queuePromotionLedger?.['queue:B']?.state).toBe('queue_consumed');
       expect(await f.promote()).toBeNull();
-    } finally { f.dispose(); }
+    } finally {
+      f.dispose();
+    }
   });
 
   it('processes pending user turns for an idle owned session', async () => {
@@ -1343,6 +1352,7 @@ describe('SessionDispatchWatcher', () => {
       };
       journal.receive(request);
       expect(journal.claim(request).state).toBe('claimed');
+      const recovered: { turnId: string; endedAt: number; outcome: string }[] = [];
       try {
         for (let restart = 0; restart < 2; restart++) {
           journal = new RealtimeJournal(filename, () => 1000);
@@ -1368,6 +1378,16 @@ describe('SessionDispatchWatcher', () => {
             workspaceId: 'workspace-1',
             workspaceDocument,
             encryptedExecution: gate,
+            turnFinalization: {
+              onRecoveredTurnFinished: (
+                _id: unknown,
+                _doc: unknown,
+                _backend: unknown,
+                turnId: string,
+                endedAt: number,
+                outcome: string
+              ) => recovered.push({ turnId, endedAt, outcome }),
+            },
             sessionManager: { getSession: () => null, getPendingSession: () => null },
           } as unknown as ConstructorParameters<typeof SessionExecutionService>[0]);
           const watcher = createWatcher({
@@ -1394,6 +1414,23 @@ describe('SessionDispatchWatcher', () => {
           const history = await doc.sessionData.history.readAll();
           expect(history.find((entry) => entry.id === turnId)?.status).toBe(
             stage === 'completed-reply' ? 'handled' : stage === 'canceled' ? 'canceled' : 'failed'
+          );
+          const expectedRecovery = [
+            'handled-pointer',
+            'processing-pointer',
+            'existing-failure',
+            'newer-pointer',
+          ].includes(stage);
+          expect(recovered).toEqual(
+            expectedRecovery
+              ? [
+                  {
+                    turnId: 'partial-reply',
+                    endedAt: history.find((row) => row.id === 'partial-reply')?.endedAt,
+                    outcome: 'error',
+                  },
+                ]
+              : []
           );
           if (stage === 'canceled') {
             expect(history.filter((entry) => entry.role === 'system')).toEqual([]);

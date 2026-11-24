@@ -1,3 +1,5 @@
+import { PluginTurnEvents } from '../plugins/session-turn-events';
+import { bindDaemonCommands } from '../plugins/workflow/daemon-command-runtime';
 import {
   isPluginMachineRequest,
   type PluginMachineRequest,
@@ -827,6 +829,7 @@ export class MessageHandler {
   >;
   private acpInteractionStopping = false;
 
+  private readonly pluginTurnEvents: PluginTurnEvents;
   private machineId: MachineId;
   private token: string;
   private userId: string;
@@ -1224,6 +1227,14 @@ export class MessageHandler {
         timestamp: new Date(getServerNow()).toISOString(),
       });
       span.end();
+      this.pluginTurnEvents.publish(
+        sessionId,
+        () => sessionDoc.getMetaState(),
+        async () => {
+          await backend.flushLocalWrites();
+          return { type: 'session.turn.started', turnId, userTurnId };
+        }
+      );
       this.logger.debug(`[${sessionId}] Assistant entry created`);
     } catch (error) {
       span.fail(error);
@@ -3351,6 +3362,13 @@ export class MessageHandler {
     this.machineName = config.machineName;
     this.cliVersion = config.cliVersion;
     this.machineId = config.machineId as MachineId;
+    this.pluginTurnEvents = new PluginTurnEvents(
+      workspaceDocument,
+      this.workspaceId,
+      this.machineId,
+      this.userId,
+      (id) => this.logger.warn(`[${id}] Plugin turn event unavailable`)
+    );
     this.sessionActivePresence = new SessionActivePresenceControllerLegacy(
       this.workspaceDocument,
       this.machineId,
@@ -3552,8 +3570,9 @@ export class MessageHandler {
       syncSessionBranchName: (sessionId, session, signal) =>
         workspaceGitService.syncSession(sessionId, session, signal),
       turnFinalization: {
-        finalizeACPState: async (sessionId, turnId) =>
-          await this.finalizeACPState(sessionId, turnId),
+        onRecoveredTurnFinished: (...args) => this.publishFinishedPluginTurn(...args),
+        finalizeACPState: async (sessionId, turnId, stopReason) =>
+          await this.finalizeACPState(sessionId, turnId, stopReason),
         persistCodeCollabTurnDiffs: async (sessionId, turnId, signal) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId, signal),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
@@ -6592,7 +6611,45 @@ export class MessageHandler {
     }
   }
 
-  private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
+  private publishFinishedPluginTurn(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    backend: SessionBackend,
+    turnId: string,
+    endedAt: number,
+    stopReason: 'cancelled' | 'error' | 'unknown'
+  ) {
+    this.pluginTurnEvents.publish(
+      sessionId,
+      () => sessionDoc.getMetaState(),
+      async () => {
+        await backend.flushLocalWrites();
+        const r = await backend.history.readTurn(turnId);
+        if (
+          r.state !== 'ready' ||
+          r.turn.role !== 'assistant' ||
+          !r.turn.finished ||
+          r.turn.endedAt !== endedAt
+        )
+          return;
+        const start = Date.parse(r.turn.timestamp);
+        return {
+          type: 'session.turn.completed',
+          stopReason,
+          turnId,
+          userTurnId: r.turn.userTurnId,
+          endedAt,
+          ...(Number.isFinite(start) && endedAt >= start ? { durationMs: endedAt - start } : {}),
+        };
+      }
+    );
+  }
+
+  private async finalizeACPState(
+    sessionId: SessionId,
+    turnId?: string,
+    stopReason: 'cancelled' | 'error' | 'unknown' = 'unknown'
+  ): Promise<void> {
     const finalizesCurrentTurn = !turnId || this.store.getTurnId(sessionId) === turnId;
     const gateToFinalize =
       finalizesCurrentTurn && this.store.has(sessionId)
@@ -6625,13 +6682,15 @@ export class MessageHandler {
       // than waiting for clearTurnState after the finalization tail. The captured
       // gate belongs to this finalization, never to a successor turn.
       gateToFinalize?.dispose();
-      await backend.applyHistoryAction({
+      const persisted = await backend.applyHistoryAction({
         kind: 'finish-assistant',
         turnId,
         endedAt,
         permissionWaitMs,
       });
       historyFinalized = true;
+      if (turnId && persisted.matched && finalizedTarget)
+        this.publishFinishedPluginTurn(sessionId, sessionDoc, backend, turnId, endedAt, stopReason);
       if (finalizedTarget) {
         await this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
       }
@@ -7897,6 +7956,115 @@ export class MessageHandler {
     )
       return { ok: false, code: 'forbidden', error: 'Plugin target forbidden' };
     if (!this.pluginRpc) return { ok: false, error: 'Plugin host unavailable' };
+    const create = async (
+      p: Omit<
+        Extract<PluginMachineRequest, { method: 'plugin/session-create' }>['params'],
+        'clientDigest'
+      >,
+      check: () => void
+    ) => {
+      check();
+      signal?.throwIfAborted();
+
+      if (
+        p.target.sessionId ||
+        (p.scope === 'machine'
+          ? !machineOwner || p.target.projectId !== undefined
+          : !scopeGrant?.projectId || p.target.projectId !== scopeGrant.projectId)
+      )
+        throw Error('Plugin create forbidden');
+      const origin = p.input.originTurn;
+      for (const ref of [p.input.parentSession, origin?.session]) {
+        if (!ref) continue;
+        if (
+          ref.workspaceId !== this.workspaceId ||
+          ref.machineId !== this.machineId ||
+          (!machineOwner && ref.projectId !== scopeGrant?.projectId)
+        )
+          throw Error('Plugin session reference forbidden');
+        const sid = ref.sessionId as SessionId;
+        const record = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sid));
+        const meta = record?.meta as SessionMeta | undefined;
+        if (
+          !meta ||
+          record?.deleted ||
+          meta.machineId !== this.machineId ||
+          (ref.projectId &&
+            (meta.project?.kind !== 'local' || meta.project.localProjectId !== ref.projectId))
+        )
+          throw Error('Plugin session reference forbidden');
+        if (!machineOwner) {
+          const scope = await this.resolveSessionExecutionScope(sid);
+          if (!scope.length || !scope.every((project) => project === scopeGrant?.projectId))
+            throw Error('Plugin session reference forbidden');
+        }
+      }
+      if (p.input.skillIds?.length) {
+        const catalogs = [await this.localProjectControlService.listGlobalSkills()];
+        if (p.target.projectId) {
+          const root = await this.sessionManager.resolveLocalProjectRootPath(
+            p.target.projectId as LocalProjectId
+          );
+          if (!root) throw Error('Plugin project unavailable');
+          catalogs.push(
+            await this.localProjectControlService.listProjectSkills(
+              root,
+              (await import('@lody/shared')).getSkillScanCandidateDirs()
+            )
+          );
+        }
+        const ids = new Set(
+          catalogs.flatMap((c) => c.groups.flatMap((g) => g.skills.map((s) => s.id)))
+        );
+        for (const g of (await this.workspaceDocument.workflowSkills?.()) ?? [])
+          for (const skill of g.skills) ids.add(skill.id);
+        if (!p.input.skillIds.every((id) => ids.has(id))) throw Error('Plugin skill unavailable');
+      }
+      if (origin) {
+        if (!this.encryptedExecution) throw Error('Signed turn origin unavailable');
+        const ref = {
+          sessionId: origin.session.sessionId,
+          userTurnId: origin.userTurnId,
+        };
+        const verified = await Effect.runPromise(
+          this.encryptedExecution.resolveDerivationOrigin(ref)
+        );
+        if (
+          !verified?.origin ||
+          verified.origin.sessionId !== ref.sessionId ||
+          verified.origin.userTurnId !== ref.userTurnId ||
+          (!machineOwner &&
+            this.executionService.getActiveInvocationContext(ref.sessionId as SessionId)
+              ?.sourceTurnId !== ref.userTurnId)
+        )
+          throw Error('Signed turn origin forbidden');
+      }
+      const admitWrite = () => {
+        check();
+        signal?.throwIfAborted();
+        if (isCurrent && !isCurrent()) throw Error('Plugin authority withdrawn');
+        if (
+          origin &&
+          (!isCurrent ||
+            (!machineOwner &&
+              this.executionService.getActiveInvocationContext(
+                origin.session.sessionId as SessionId
+              )?.sourceTurnId !== origin.userTurnId))
+        )
+          throw Error('Signed turn origin forbidden');
+      };
+      admitWrite();
+      return this.workspaceDocument.createClientPluginSession(
+        p,
+        userId,
+        this.machineId,
+        admitWrite
+      );
+    };
+    const check = () => {
+      signal?.throwIfAborted();
+      if (isCurrent && !isCurrent()) throw Error('Plugin authority withdrawn');
+    };
     return {
       ok: true,
       result: await this.pluginRpc(
@@ -7906,109 +8074,26 @@ export class MessageHandler {
           userId,
           machineOwner,
           ...(request.method === 'plugin/session-create'
+            ? { createSession: () => create(request.params, check) }
+            : {}),
+          ...('descriptorId' in request.params
             ? {
-                createSession: async () => {
-                  signal?.throwIfAborted();
-                  const p = request.params;
-                  if (
-                    p.target.sessionId ||
-                    (p.scope === 'machine'
-                      ? !machineOwner || p.target.projectId !== undefined
-                      : !scopeGrant?.projectId || p.target.projectId !== scopeGrant.projectId)
-                  )
-                    throw Error('Plugin create forbidden');
-                  const origin = p.input.originTurn;
-                  for (const ref of [p.input.parentSession, origin?.session]) {
-                    if (!ref) continue;
-                    if (
-                      ref.workspaceId !== this.workspaceId ||
-                      ref.machineId !== this.machineId ||
-                      (!machineOwner && ref.projectId !== scopeGrant?.projectId)
-                    )
-                      throw Error('Plugin session reference forbidden');
-                    const sid = ref.sessionId as SessionId;
-                    const record = await this.workspaceDocument.repo.getDocMeta(
-                      getSessionRoomId(sid)
-                    );
-                    const meta = record?.meta as SessionMeta | undefined;
-                    if (
-                      !meta ||
-                      record?.deleted ||
-                      meta.machineId !== this.machineId ||
-                      (ref.projectId &&
-                        (meta.project?.kind !== 'local' ||
-                          meta.project.localProjectId !== ref.projectId))
-                    )
-                      throw Error('Plugin session reference forbidden');
-                    if (!machineOwner) {
-                      const scope = await this.resolveSessionExecutionScope(sid);
-                      if (
-                        !scope.length ||
-                        !scope.every((project) => project === scopeGrant?.projectId)
-                      )
-                        throw Error('Plugin session reference forbidden');
-                    }
-                  }
-                  if (p.input.skillIds?.length) {
-                    const catalogs = [await this.localProjectControlService.listGlobalSkills()];
-                    if (p.target.projectId) {
-                      const root = await this.sessionManager.resolveLocalProjectRootPath(
-                        p.target.projectId as LocalProjectId
-                      );
-                      if (!root) throw Error('Plugin project unavailable');
-                      catalogs.push(
-                        await this.localProjectControlService.listProjectSkills(
-                          root,
-                          (await import('@lody/shared')).getSkillScanCandidateDirs()
-                        )
-                      );
-                    }
-                    const ids = new Set(
-                      catalogs.flatMap((c) => c.groups.flatMap((g) => g.skills.map((s) => s.id)))
-                    );
-                    if (!p.input.skillIds.every((id) => ids.has(id)))
-                      throw Error('Plugin skill unavailable');
-                  }
-                  if (origin) {
-                    if (!this.encryptedExecution) throw Error('Signed turn origin unavailable');
-                    const ref = {
-                      sessionId: origin.session.sessionId,
-                      userTurnId: origin.userTurnId,
-                    };
-                    const verified = await Effect.runPromise(
-                      this.encryptedExecution.resolveDerivationOrigin(ref)
-                    );
-                    if (
-                      !verified?.origin ||
-                      verified.origin.sessionId !== ref.sessionId ||
-                      verified.origin.userTurnId !== ref.userTurnId ||
-                      (!machineOwner &&
-                        this.executionService.getActiveInvocationContext(ref.sessionId as SessionId)
-                          ?.sourceTurnId !== ref.userTurnId)
-                    )
-                      throw Error('Signed turn origin forbidden');
-                  }
-                  const admitWrite = () => {
-                    signal?.throwIfAborted();
-                    if (isCurrent && !isCurrent()) throw Error('Plugin authority withdrawn');
-                    if (
-                      origin &&
-                      (!isCurrent ||
-                        (!machineOwner &&
-                          this.executionService.getActiveInvocationContext(
-                            origin.session.sessionId as SessionId
-                          )?.sourceTurnId !== origin.userTurnId))
-                    )
-                      throw Error('Signed turn origin forbidden');
-                  };
-                  admitWrite();
-                  return this.workspaceDocument.createClientPluginSession(
-                    p,
-                    userId,
-                    this.machineId,
-                    admitWrite
-                  );
-                },
+                executeHostCall: bindDaemonCommands({
+                  workspaceId: this.workspaceId,
+                  machineId: this.machineId,
+                  pluginId: request.params.pluginId,
+                  userId,
+                  machineOwner,
+                  ...scopeGrant,
+                  check,
+                  create,
+                  manager: this.workspaceDocument,
+                  execution: this.executionService,
+                  sessionScope: (sid) => this.resolveSessionExecutionScope(sid),
+                  signalDispatch: (sid) => {
+                    if (!this.cleanedUp) void this.sessionDispatchWatcher.enqueueSessionCheck(sid);
+                  },
+                }),
               }
             : {}),
         },
@@ -12077,7 +12162,12 @@ export class MessageHandler {
       return {
         ok: true,
         type: 'local-project/list-global-skills',
-        result: await this.localProjectControlService.listGlobalSkills(),
+        result: {
+          groups: [
+            ...(await this.localProjectControlService.listGlobalSkills()).groups,
+            ...(await this.workspaceDocument.workflowSkills()),
+          ],
+        },
       };
     } catch (error) {
       return this.toLocalProjectControlError(
@@ -12257,6 +12347,7 @@ export class MessageHandler {
       this.logger.error('Inbox shutdown retains resources', cause)
     );
     this.cancelPendingHistoryWatches();
+    this.pluginTurnEvents.close();
     this.historyOwnerAbort.abort();
     await Promise.all([
       this.iosSimulatorService.closeAll(),

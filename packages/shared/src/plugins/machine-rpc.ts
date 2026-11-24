@@ -20,6 +20,25 @@ export const pluginInspectionSchema = z.object({
   preferences: configValues,
   configured: z.array(z.string()),
 });
+export const workflowReadOperation = z.enum(['sessions', 'sessionTurns', 'session-meta']);
+export type WorkflowReadOperation = z.infer<typeof workflowReadOperation>;
+export const workflowCreateApproval = z.strictObject({
+  pluginId: pluginIdSchema,
+  installationId: z.string().uuid(),
+  machineDigest: digest,
+  targetDevice: digest,
+  operation: z.literal('sessions.create'),
+  readOperations: z.array(workflowReadOperation).max(3).optional(),
+  projectId: z.string().trim().min(1),
+  expiresAt: z.number().int().positive(),
+  action: z.enum(['grant', 'revoke']),
+});
+export type WorkflowCreateApproval = z.infer<typeof workflowCreateApproval>;
+export const workflowApprovalReceipt = z.strictObject({
+  requestId: z.string().regex(/^[0-9a-f]{32}$/),
+  signer: digest,
+});
+export type WorkflowApprovalReceipt = z.infer<typeof workflowApprovalReceipt>;
 export const pluginCatalogParams = z.strictObject({});
 export const pluginBundleParams = z.strictObject({
   pluginId: pluginIdSchema,
@@ -43,6 +62,7 @@ const createSessionRef = pluginInvocationParams.shape.target.extend({
 });
 export const pluginInitialRole = z.strictObject({
   snapshot: AgentRoleSnapshotSchema,
+  mcpServerIds: z.array(z.string()).optional(),
   prefix: z.string().optional(),
   modeId: z.string().optional(),
   modelId: z.string().optional(),
@@ -76,9 +96,11 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
     createdAt: z.string(),
     archived: z.boolean(),
     role: pluginInitialRole.optional(),
+    skillPrompt: z.string().optional(),
     cliType: z.enum(['builtin', 'custom', 'registry']),
     agentType: z.string(),
   }),
+  z.strictObject({ type: z.literal('plugin/workflow-create-approval'), active: z.boolean() }),
   z.strictObject({ type: z.literal('plugin/control'), inspection: pluginInspectionSchema }),
   z.strictObject({
     type: z.literal('plugin/catalog'),
@@ -87,6 +109,14 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
         manifest: pluginManifestSchema,
         enabled: z.boolean(),
         inspection: pluginInspectionSchema.optional(),
+        workflowPrompts: z.record(descriptorIdSchema, z.string()).optional(),
+        workflowInstallation: z
+          .strictObject({
+            installationId: z.string().uuid(),
+            machineDigest: digest,
+            targetDevice: digest,
+          })
+          .optional(),
         clientDigest: digest.optional(),
         devSessionNonce: z.string().optional(),
       })
@@ -119,6 +149,7 @@ export function isPluginMachineRequest(
 }
 export const pluginMethods: ReadonlySet<string> = new Set([
   'plugin/control',
+  'plugin/workflow-create-approval',
   'plugin/catalog',
   'plugin/session-create',
   'plugin/bundle-chunk',

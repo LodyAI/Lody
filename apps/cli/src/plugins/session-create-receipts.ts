@@ -35,14 +35,15 @@ export class SessionCreateReceipts {
         scope TEXT NOT NULL, request TEXT NOT NULL, digest TEXT NOT NULL,
         session TEXT NOT NULL UNIQUE, active_key TEXT,
         PRIMARY KEY(scope,request), UNIQUE(scope,active_key)
-      ); CREATE TABLE IF NOT EXISTS receipt_roles(session TEXT PRIMARY KEY, role_json TEXT NOT NULL)`);
+      ); CREATE TABLE IF NOT EXISTS receipt_roles(session TEXT PRIMARY KEY, role_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS receipt_skills(session TEXT PRIMARY KEY, prompt TEXT NOT NULL)`);
   }
   reserve(
     scope: CreateScope,
     requestId: string,
     businessKey: string | null,
     payload: Json,
-    initialRole?: object
+    initialRole?: object,
+    skillPrompt?: string
   ): string {
     const custody = JSON.stringify([
       scope.workspaceId,
@@ -70,6 +71,8 @@ export class SessionCreateReceipts {
             'INSERT INTO receipts(scope,request,digest,session,active_key) VALUES(?,?,?,?,?)'
           )
           .run(custody, requestId, digest, session, businessKey);
+        if (skillPrompt)
+          this.db.prepare('INSERT INTO receipt_skills VALUES(?,?)').run(session, skillPrompt);
         if (initialRole)
           this.db
             .prepare('INSERT INTO receipt_roles(session,role_json) VALUES(?,?)')
@@ -81,6 +84,25 @@ export class SessionCreateReceipts {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+  matchesScope(session: string, scope: CreateScope): boolean {
+    return !!this.db
+      .prepare('SELECT 1 FROM receipts WHERE session=? AND scope=?')
+      .get(
+        session,
+        JSON.stringify([
+          scope.workspaceId,
+          scope.callerUserId,
+          scope.canonicalTargetKey,
+          scope.pluginId,
+        ])
+      );
+  }
+  skillPrompt(session: string) {
+    const value = this.db
+      .prepare('SELECT prompt FROM receipt_skills WHERE session=?')
+      .get(session)?.prompt;
+    return typeof value === 'string' ? value : undefined;
   }
   initialRole(session: string): unknown {
     const row = this.db.prepare('SELECT role_json FROM receipt_roles WHERE session=?').get(session);

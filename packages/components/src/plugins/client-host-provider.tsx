@@ -21,6 +21,13 @@ import { TrustedDevSessionStore, type DevInstallation } from './trust';
 import type { PluginInspection, InspectorAction } from '../components/settings/plugin-inspector';
 
 export interface ClientCatalogInstallation extends ClientInstallation {
+  workflowPrompts?: Readonly<Record<string, string>>;
+  workflowBinding?: string;
+  workflowApproval?: (
+    projectId: string,
+    action: 'grant' | 'revoke',
+    readOperations?: import('@lody/shared/plugins/machine-rpc').WorkflowReadOperation[]
+  ) => Promise<number>;
   reserveSession?: import('./client-session-create').ReserveClientSession;
   dev: DevInstallation;
   enabled: boolean;

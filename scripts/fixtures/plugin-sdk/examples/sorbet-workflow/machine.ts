@@ -144,17 +144,14 @@ async function runTurnVerification(
     }));
   }
 
-  // Always preserve original ProjectRef target, parentSession lineage, and E2EE human-signed originTurn
-  const target = params.project ?? ctx.machine;
-  const verifier = await ctx.lody.sessions.create(target, {
+  if (!params.project) return;
+  const verifier = await ctx.lody.sessions.create(params.project, {
     requestId,
     businessKey,
     roleId: VERIFIER_ROLE_ID,
     providerId: SORBET_PROVIDER_ID,
     parentSession: params.session,
-    originTurn: userTurnId
-      ? { session: params.session, userTurnId }
-      : undefined,
+    ...(userTurnId ? { originTurn: { session: params.session, userTurnId } } : {}),
     skillIds: ["sorbet-verifier"],
     prompt: `Verify completed Architect turn ${params.turnId}.`,
   });
@@ -220,7 +217,7 @@ export default defineMachinePlugin((machine) => {
       const page = await ctx.lody.read(ctx.machine, lodyQueries.sessions, {
         agentRoleId: ARCHITECT_ROLE_ID,
         updatedAfter: journal.lastReconciledUpdatedAt,
-        cursor,
+        ...(cursor ? { cursor } : {}),
       });
       for (const item of page.items) {
         if (item.updatedAt > maxUpdatedAt) {
@@ -232,7 +229,7 @@ export default defineMachinePlugin((machine) => {
           const turnsPage = await ctx.lody.read(
             item.session,
             lodyQueries.sessionTurns,
-            { limit: 20, cursor: turnCursor },
+            { limit: 20, ...(turnCursor ? { cursor: turnCursor } : {}) },
           );
           for (const turn of turnsPage.items) {
             if (

@@ -43,6 +43,48 @@ export async function readPluginCatalog(
       },
     };
     const entry: ClientCatalogInstallation = {
+      ...(row.enabled &&
+      row.workflowInstallation &&
+      response.transport === 'encrypted' &&
+      machine.owner
+        ? {
+            workflowBinding: JSON.stringify([
+              workspaceId,
+              target,
+              pluginId,
+              row.clientDigest,
+              row.workflowInstallation.installationId,
+              row.workflowInstallation.machineDigest,
+              row.workflowInstallation.targetDevice,
+            ]),
+            workflowApproval: async (
+              projectId: string,
+              action: 'grant' | 'revoke',
+              readOperations?: import('@lody/shared/plugins/machine-rpc').WorkflowReadOperation[]
+            ) => {
+              const expiresAt = Date.now() + 3600000;
+              const result = await request(target, {
+                method: 'plugin/workflow-create-approval',
+                params: {
+                  ...row.workflowInstallation!,
+                  pluginId,
+                  projectId,
+                  action,
+                  operation: 'sessions.create',
+                  ...(action === 'grant' && readOperations?.length ? { readOperations } : {}),
+                  expiresAt,
+                },
+              });
+              if (
+                result.type !== 'plugin/workflow-create-approval' ||
+                result.active !== (action === 'grant')
+              )
+                throw Error('Workflow approval not confirmed');
+              return expiresAt;
+            },
+          }
+        : {}),
+      workflowPrompts: row.workflowPrompts,
       async reserveSession(ref, input, signal) {
         if (!row.clientDigest || ref.workspaceId !== workspaceId || ref.machineId !== target)
           throw Error('Plugin create forbidden');

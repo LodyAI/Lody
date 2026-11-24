@@ -1,3 +1,6 @@
+import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
+import type { WorkspaceId } from '@lody/shared';
+import type { ClientCatalogInstallation } from '../../plugins/client-host-provider';
 import { PluginInstallationSettings } from '../../plugins/shell-surfaces';
 import { clientDiagnostics } from '../../plugins/client-diagnostics';
 import { activatePluginTheme } from '../../plugins/appearance';
@@ -286,6 +289,82 @@ function Inspection({
   );
 }
 
+function WorkflowApproval({ entry }: { entry: ClientCatalogInstallation }) {
+  const { t } = useTranslation();
+  const owner = useWorkspaceClientPlugins();
+  const { projects } = useVisibleLocalProjects({ workspaceId: entry.workspaceId as WorkspaceId });
+  const [id, setId] = useState(''),
+    [message, status] = useState(''),
+    [busy, setBusy] = useState(false);
+  const [reads, setReads] = useState<
+    import('@lody/shared/plugins/machine-rpc').WorkflowReadOperation[]
+  >([]);
+  const available = [...projects.values()].filter((p) => p.machine.id === entry.machineId);
+  const change = async (action: 'grant' | 'revoke') => {
+    if (!entry.workflowApproval || !entry.workflowBinding || !owner?.installations().some(i=>i.workflowApproval && i.workflowBinding === entry.workflowBinding) || !available.some(p=>p.project.id===id) || pluginSafeMode()) return;
+    setBusy(true);
+    try {
+      const expiresAt = await entry.workflowApproval(id, action, reads);
+      status(action === 'grant' ? t('settings.plugins.workflowGranted',{expiration:new Date(expiresAt).toLocaleString()}) : t('settings.plugins.workflowRevoked'));
+    } catch {
+      status(t('settings.plugins.workflowFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <fieldset disabled={busy || pluginSafeMode()}>
+      <legend>{t('settings.plugins.workflowTitle')}</legend>
+      <p>{t('settings.plugins.workflowScope',{plugin:entry.pluginId,machine:entry.machineId})}</p>
+      <label>
+        {t('settings.plugins.workflowProject')}{' '}
+        <select
+          value={id}
+          onChange={(e) => {
+            setId(e.target.value);
+            setReads([]);
+            status('');
+          }}
+        >
+          <option value="">{t('settings.plugins.workflowSelect')}</option>
+          {available.map(({ project }) => (
+            <option key={project.id} value={project.id}>
+              {project.name} ({project.id})
+            </option>
+          ))}
+        </select>
+      </label>
+      {(
+        [
+          ['sessions', 'settings.plugins.workflowList'],
+          ['session-meta', 'settings.plugins.workflowMeta'],
+          ['sessionTurns', 'settings.plugins.workflowTurns'],
+        ] as const
+      ).map(([op, label]) => (
+        <label key={op}>
+          <input
+            type="checkbox"
+            checked={reads.includes(op)}
+            onChange={(e) =>
+              setReads(e.target.checked ? [...reads, op] : reads.filter((r) => r !== op))
+            }
+          />
+          {t(label)}
+        </label>
+      ))}
+      <Button
+        disabled={!available.some((p) => p.project.id === id)}
+        onClick={() => void change('grant')}
+      >
+        {t('settings.plugins.workflowGrant')}
+      </Button>
+      <Button disabled={!available.some(p=>p.project.id===id)} variant="secondary" onClick={() => void change('revoke')}>
+        {t('settings.plugins.workflowRevoke')}
+      </Button>
+      <p role="status">{message}</p>
+    </fieldset>
+  );
+}
 const noopSubscribe = () => () => {};
 const zero = () => 0;
 export function PluginsSettings() {
@@ -345,6 +424,7 @@ export function PluginsSettings() {
                 await i.control(action, changes);
               }}
             />
+            {i.workflowBinding && i.workflowApproval && <WorkflowApproval key={i.workflowBinding} entry={i} />}
             <PluginInstallationSettings entry={i} />
           </section>
         ))}

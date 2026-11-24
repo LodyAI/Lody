@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { strict as assert } from 'node:assert';
 import { test } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compilePlugin } from './plugin-build';
@@ -118,4 +120,51 @@ test('a skill-only plugin stages its named SKILL.md without a process entry or c
   assert.equal(machineDigest, undefined);
   assert.equal(clientDigest, undefined);
   assert.equal(await readFile(join(stage, 'skills/review/SKILL.md'), 'utf8'), '# Review');
+});
+
+test('Sorbet contributions speak ACP and MCP over stdio from an external plugin directory', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'sorbet-reference-'));
+  t.onTestFinished(() => rm(root, { recursive: true, force: true }));
+  const sourceDir = join(root, 'source');
+  const stage = join(root, 'staged');
+  await cp(
+    fileURLToPath(
+      new URL('../../../../scripts/fixtures/plugin-sdk/examples/sorbet-workflow/', import.meta.url)
+    ),
+    sourceDir,
+    { recursive: true }
+  );
+  await mkdir(stage);
+  const { manifest, machineDigest, clientDigest } = await compilePlugin({ sourceDir, stage });
+  assert.ok(machineDigest && clientDigest);
+  const exchange = (entry: string, calls: [string, object][]) => {
+    const result = spawnSync(process.execPath, [entry], {
+      cwd: stage,
+      encoding: 'utf8',
+      timeout: 10000,
+      input:
+        calls
+          .map(([method, params], id) => JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+          .join('\n') + '\n',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+  };
+  const mcp = exchange(manifest.mcpServers![0]!.entry, [
+    ['initialize', { protocolVersion: '2025-03-26' }],
+    ['tools/call', { name: 'remember', arguments: { key: 'plan', text: 'Synthetic scope' } }],
+    ['tools/call', { name: 'recall', arguments: { key: 'plan' } }],
+  ]);
+  assert.equal(mcp[2].result.content[0].text, 'Synthetic scope');
+  const acp = exchange(manifest.acpProviders![0]!.entry, [
+    ['initialize', { protocolVersion: 1 }],
+    ['session/new', { cwd: root, mcpServers: [] }],
+    ['session/prompt', { sessionId: 'unknown', prompt: [] }],
+  ]);
+  assert.equal(acp[0].result.protocolVersion, 1);
+  assert.ok(acp[1].result.sessionId);
+  assert.ok(acp[2].error);
 });

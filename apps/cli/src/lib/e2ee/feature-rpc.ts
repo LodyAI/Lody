@@ -220,7 +220,8 @@ export const makeEncryptedFeatureReceiver = Effect.fnUntraced(function* (options
     const plugin = isPluginMachineRequest(opened.input.request) ? opened.input.request : undefined;
     const invocation = plugin && 'scope' in plugin.params ? plugin.params : undefined;
     const authorize: AuthorizeEncryptedExecution =
-      plugin && invocation?.scope === 'machine'
+      plugin &&
+      (invocation?.scope === 'machine' || plugin.method === 'plugin/workflow-create-approval')
         ? (workspace, device) =>
             options.authorizePluginOwner?.(workspace, device) ??
             Effect.succeed({ _tag: 'Denied' as const, reason: 'not-authorized' as const })
