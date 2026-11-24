@@ -12373,6 +12373,7 @@ export class MessageHandler {
         ok: true,
         type: 'local-project/list-global-skills',
         result: await this.localProjectControlService.listGlobalSkills({
+          magpieGatewayUrl: request.magpieGatewayUrl,
           knownFingerprint: request.knownFingerprint,
         }),
       };

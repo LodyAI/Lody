@@ -15,6 +15,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   projectRepositoryMembers: 'projectRepositoryMembers',
   operationInbox: 'operationInbox',
   magpieImport: 'magpieImport',
+  magpieCodexSkills: 'magpieCodexSkills',
   dshProviderIsolation: 'dshProviderIsolation',
   terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
@@ -243,6 +244,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.operationInbox]: OPERATION_INBOX_PROTOCOL_VERSION,
   providerRateLimitsRefresh: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.magpieCodexSkills]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.dshProviderIsolation]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.terminalNotifications]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
@@ -319,7 +321,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
  * answer returns `null` so the caller never sends it.
  */
 export function adaptLocalProjectControlRequestToMachine<
-  TRequest extends { type: string; knownFingerprint?: string },
+  TRequest extends { type: string; knownFingerprint?: string; magpieGatewayUrl?: string },
 >(
   machine: MachineProtocolCapabilityCarrier | null | undefined,
   request: TRequest
@@ -333,6 +335,14 @@ export function adaptLocalProjectControlRequestToMachine<
     )
   ) {
     return null;
+  }
+  if (
+    request.type === 'local-project/list-global-skills' &&
+    request.magpieGatewayUrl &&
+    !machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.magpieCodexSkills)
+  ) {
+    request = { ...request };
+    delete request.magpieGatewayUrl;
   }
   if (
     request.knownFingerprint !== undefined &&

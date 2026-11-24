@@ -8,7 +8,8 @@ import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 
-import type { AcpCommandSummary, AgentConfigCliType } from '@lody/shared';
+import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
+import type { AcpCommandSummary } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
@@ -222,7 +223,7 @@ export interface ChatLandingViewProps {
   /** Selected ACP provider — filters the `$` skill mention to its skill dirs.
      `machineId` (the selected agent's machine) lets the `$` menu surface that
      machine's global skills in non-local chats. */
-  skillAgent?: { cliType: AgentConfigCliType; agentType: string; machineId?: string };
+  skillAgent?: SkillMentionAgent;
   /** Page title displayed above the composer */
   title: string;
   /** Current prompt value */

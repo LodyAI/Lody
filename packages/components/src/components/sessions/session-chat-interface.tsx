@@ -3204,12 +3204,19 @@ export const SessionChatInterface = memo(
       () =>
         !isArchivedSession && session.cliType && session.agentType
           ? {
+              magpieGatewayUrl: sessionAgentConfig?.magpieGatewayUrl,
               cliType: session.cliType,
               agentType: session.agentType,
               machineId: session.machineId,
             }
           : undefined,
-      [isArchivedSession, session.agentType, session.cliType, session.machineId]
+      [
+        sessionAgentConfig?.magpieGatewayUrl,
+        isArchivedSession,
+        session.agentType,
+        session.cliType,
+        session.machineId,
+      ]
     );
     const editMentionContext = useMemo<UserMessageEditMentionContext>(
       () => ({

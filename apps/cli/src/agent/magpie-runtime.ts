@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { magpieProfileDirectory, syncCodexMagpieSkills, writeMagpieFile } from './magpie-profile';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { MAGPIE_TOKEN, normalizeMagpieGateway } from '@lody/shared';
@@ -195,25 +196,14 @@ export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieMo
   ].join('\n');
 }
 
-async function writeAtomic(path: string, value: unknown): Promise<void> {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, typeof value === 'string' ? value : JSON.stringify(value), {
-      mode: 0o600,
-    });
-    await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
-
 /** Local generated catalogs live outside the user's native profiles. */
 export async function prepareMagpieRuntime(
   agentType: string,
   gateway: string,
   signal?: AbortSignal,
   root = join(getLodyDataDir(), 'magpie'),
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  home = homedir()
 ): Promise<{ env: Record<string, string>; args: string[] }> {
   const base = normalizeMagpieGateway(gateway);
   if (!['claude', 'codex', 'pi', 'deepseek', 'kimi', 'grok', 'bub'].includes(agentType))
@@ -251,18 +241,14 @@ export async function prepareMagpieRuntime(
       },
     };
   }
-  const directory = join(
-    root,
-    createHash('sha256').update(base).digest('hex').slice(0, 24),
-    agentType
-  );
+  const directory = magpieProfileDirectory(root, base, agentType);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (agentType === 'kimi' || agentType === 'grok') {
     const config =
       agentType === 'kimi'
         ? buildMagpieKimiConfig(base, models)
         : buildMagpieGrokConfig(base, models);
-    await writeAtomic(join(directory, 'config.toml'), config);
+    await writeMagpieFile(join(directory, 'config.toml'), config);
     return {
       args: [],
       env:
@@ -277,12 +263,13 @@ export async function prepareMagpieRuntime(
     };
   }
   if (agentType === 'pi') {
-    await writeAtomic(join(directory, 'models.json'), buildMagpiePiCatalog(base, models));
+    await writeMagpieFile(join(directory, 'models.json'), buildMagpiePiCatalog(base, models));
     return {
       args: ['--provider', 'magpie', '--model', first.id],
       env: { PI_CODING_AGENT_DIR: directory },
     };
   }
+  await syncCodexMagpieSkills(directory, home);
   // Codex reads the catalog Magpie serves in Codex's own shape, so capability
   // metadata is mapped once, on the side that knows the vendor's answer, the
   // user's per-model override and Codex's field vocabulary. `agent=lody` keeps

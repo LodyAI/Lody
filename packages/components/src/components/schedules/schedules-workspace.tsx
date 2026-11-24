@@ -986,6 +986,7 @@ function ScheduleEditor({
       skillAgent={
         selected?.cliType && selected.agentType
           ? {
+              magpieGatewayUrl: selected.magpieGatewayUrl,
               cliType: selected.cliType,
               agentType: selected.agentType,
               machineId: selected.machineId,

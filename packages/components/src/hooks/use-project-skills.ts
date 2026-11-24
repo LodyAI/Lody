@@ -84,7 +84,7 @@ type NormalizedProjectSkillsSource =
       machineId: string;
     };
 
-type ProjectSkillsInternalState = Omit<ProjectSkillsState, 'groups' | 'refresh'>;
+type ProjectSkillsInternalState = Omit<ProjectSkillsState, 'groups' | 'refresh'> & { key?: string };
 
 type RegisteredSkillDirsByScope = {
   project: Set<string>;
@@ -242,6 +242,7 @@ function stateFromCache(
 ): ProjectSkillsInternalState {
   return {
     status,
+    key: entry.key,
     rawGroups: entry.groups,
     stale: false,
     fetchedAt: entry.fetchedAt,
@@ -249,7 +250,8 @@ function stateFromCache(
 }
 
 export function useProjectSkills(
-  sourceInput: ProjectSkillsSource | null | undefined
+  sourceInput: ProjectSkillsSource | null | undefined,
+  magpieGatewayUrl?: string
 ): ProjectSkillsState {
   const runtime = useAtomValue(runtimeAtom);
   const requestedByUserId = useAtomValue(userAtom)?.id ?? null;
@@ -286,21 +288,17 @@ export function useProjectSkills(
     return null;
   }, [inputKind, inputLocalProjectId, inputMachineId, inputRepoFullName, inputWorkspaceId]);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const [state, setState] = useState<ProjectSkillsInternalState>(EMPTY_INTERNAL_STATE);
+  const [loadedState, setState] = useState<ProjectSkillsInternalState>(EMPTY_INTERNAL_STATE);
   const scanDirs = useMemo(() => getSkillScanCandidateDirs(), []);
   const registeredDirs = useMemo(
     () => getRegisteredDirsForSource(source, agentConfigs),
     [agentConfigs, source]
   );
-  const groups = useMemo(
-    () => annotateAndSortGroups(state.rawGroups, registeredDirs),
-    [registeredDirs, state.rawGroups]
-  );
   const refresh = useCallback(() => {
     setRefreshNonce((value) => value + 1);
   }, []);
 
-  const sourceCacheKey = useMemo(() => {
+  const baseCacheKey = useMemo(() => {
     if (!source || !requestedByUserId) {
       return null;
     }
@@ -326,6 +324,17 @@ export function useProjectSkills(
     );
   }, [requestedByUserId, source]);
 
+  const sourceCacheKey =
+    baseCacheKey && magpieGatewayUrl && source?.kind !== 'github'
+      ? baseCacheKey + ':magpie:' + encodeURIComponent(magpieGatewayUrl)
+      : baseCacheKey;
+
+  const state =
+    loadedState.key && loadedState.key !== sourceCacheKey ? EMPTY_INTERNAL_STATE : loadedState;
+  const groups = useMemo(
+    () => annotateAndSortGroups(state.rawGroups, registeredDirs),
+    [registeredDirs, state.rawGroups]
+  );
   useEffect(() => {
     if (!source || !sourceCacheKey) {
       setState(EMPTY_INTERNAL_STATE);
@@ -373,7 +382,7 @@ export function useProjectSkills(
           const knownParts = parseLocalSkillsFingerprint(cached?.contentFingerprint);
           const [projectResult, globalResult] = await Promise.all([
             transport.listSkills({ skillDirs: scanDirs, knownFingerprint: knownParts?.project }),
-            transport.listGlobalSkills({ knownFingerprint: knownParts?.global }),
+            transport.listGlobalSkills({ magpieGatewayUrl, knownFingerprint: knownParts?.global }),
           ]);
           if (cancelled) {
             return;
@@ -423,6 +432,7 @@ export function useProjectSkills(
               runtime.requestLocalProjectControl(request, requestOptions),
           });
           const globalResult = await transport.listGlobalSkills({
+            magpieGatewayUrl,
             knownFingerprint: parseGlobalSkillsFingerprint(cached?.contentFingerprint),
           });
           if (cancelled) {
@@ -504,7 +514,15 @@ export function useProjectSkills(
     return () => {
       cancelled = true;
     };
-  }, [requestedByUserId, refreshNonce, runtime, scanDirs, source, sourceCacheKey]);
+  }, [
+    magpieGatewayUrl,
+    requestedByUserId,
+    refreshNonce,
+    runtime,
+    scanDirs,
+    source,
+    sourceCacheKey,
+  ]);
 
   return {
     ...state,

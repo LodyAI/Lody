@@ -55,13 +55,16 @@ const group = (
   ],
 });
 
-function Probe() {
-  const skills = useProjectSkills({
-    kind: 'local',
-    workspaceId: 'ws',
-    machineId: 'machine-1',
-    localProjectId: 'lp-1',
-  });
+function Probe({ gateway }: { gateway?: string }) {
+  const skills = useProjectSkills(
+    {
+      kind: 'local',
+      workspaceId: 'ws',
+      machineId: 'machine-1',
+      localProjectId: 'lp-1',
+    },
+    gateway
+  );
   return (
     <span>
       {skills.status}:{skills.rawGroups.map((g) => g.skills[0]?.name).join(',')}
@@ -108,4 +111,26 @@ it('sends the cached fingerprints and keeps the half the host reports unchanged'
   ]);
   expect(container.textContent).toBe('ready:Review,Deploy');
   expect(state.cache.get(key)).toMatchObject({ contentFingerprint: 'project:P1|global:G2' });
+});
+
+it('keeps Magpie skill results out of the ordinary provider cache when switching providers', async () => {
+  state.control.mockImplementation(
+    async (request: { type: string; magpieGatewayUrl?: string }) => ({
+      ok: true,
+      type: request.type,
+      result: {
+        groups: request.magpieGatewayUrl
+          ? [group('global', '~/.codex/skills/magpie-skills', 'Router')]
+          : [],
+        contentFingerprint: request.magpieGatewayUrl ? 'router' : 'ordinary',
+      },
+    })
+  );
+  await act(async () => root.render(<Probe gateway="http://127.0.0.1:3425" />));
+  expect(container.textContent).toBe('ready:Router');
+  const key = getLocalProjectSkillsCacheKey('user-1', 'ws', 'machine-1', 'lp-1');
+  expect(state.cache.has(key)).toBe(false);
+  await act(async () => root.render(<Probe />));
+  expect(container.textContent).toBe('ready:');
+  expect(state.cache.get(key)).toMatchObject({ groups: [] });
 });

@@ -2644,6 +2644,7 @@ export const LocalProjectListSkillsRequestSchema = z
 export const LocalProjectListGlobalSkillsRequestSchema = z
   .object({
     type: z.literal('local-project/list-global-skills'),
+    magpieGatewayUrl: z.string().refine(isMagpieGatewayUrl).optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     knownFingerprint: SharedOptionalStringSchema,
