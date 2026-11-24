@@ -1,0 +1,8 @@
+{
+  "id": "worktrees",
+  "version": "0.1.0",
+  "sdk": "^1.0.0",
+  "title": "Worktrees",
+  "description": "Browse project worktrees and their sessions.",
+  "client": "./client.tsx"
+}

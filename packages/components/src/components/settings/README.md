@@ -30,6 +30,17 @@ PR review Markdown offers per-image HTTPS loading; automatic loading is a
 device-local preference, off by default. The isolated desktop image document
 keeps the main renderer's image policy unchanged. [Decision](../../../../../.agents/notes/implemented/feature/2026-11-02-pr-remote-images.md).
 
+## Plugins
+
+Settings → Plugins shows installations reported by the workspace’s online machines.
+Approve a remote client bundle by digest, or grant a machine owner’s development session
+permission to hot-reload in this tab. The host’s **Dev HMR Trusted · Revoke** indicator
+revokes that lease without opening settings. Lifecycle and configuration changes use
+local control on the owning machine, not the encrypted plugin invocation channel.
+The setup dialog keeps existing credentials masked; leaving a configured field untouched
+preserves its stored value. Web startup with `?safeMode=1` and desktop startup with
+`--safe-mode` bypass client bundles, themes and styles.
+
 ## Helper text and info buttons
 
 A visible helper under a row, field or form section is reserved for what the

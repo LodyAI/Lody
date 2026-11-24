@@ -14,11 +14,10 @@ Machine RPC contracts: [transport map](../../.agents/docs/rpc-loro-streams-rpc.m
   as success. Acquire returned plaintext and owned decoded buffers atomically
   with wipe registration; never put remote policy waits under that uninterruptible section.
 
-- Encrypted machine RPC uses one feature DTO/chunk codec and shared complete-response assembler.
-  The closed pure-read list uses fresh read authority, never execution journals; other admitted
-  Code Collab/preview actions require write authority and execution claims. Keep same-member
-  machine binding except for `session/history-read` and session-scoped `session/fork`, exact
-  originals and explicit size errors; never fall back to ordinary RPC.
+- Encrypted machine RPC shares one feature codec and response assembler. Closed-list reads require
+  fresh read authority without execution journals; Code Collab/preview writes require write authority
+  and execution claims. Only history reads, forks, plugin catalog/bundles and project/session plugin
+  calls allow shared machines. Preserve exact originals, explicit size errors and no plaintext fallback.
 - Encrypted dispatch fails with `e2ee_machine_not_shared` only when `authorizeTarget`
   returns a verified `false`. An unknown policy signs, because senders withhold input
   only for a known withdrawal and the receiving machine decides.

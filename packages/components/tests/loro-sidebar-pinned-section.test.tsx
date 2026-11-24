@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 
+import {
+  beginShellGeneration,
+  endShellGeneration,
+  finishShellGeneration,
+} from '../src/plugins/shell-generation';
+import { PluginScreenOutlet, openPluginScreen } from '../src/plugins/shell-surfaces';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SessionRow, type SessionSummary } from '@lody/plugin-sdk/client';
+import { createProductionSurfaces } from '../src/plugins/surface-factory';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -82,6 +90,137 @@ describe('LoroSidebar pinned section', () => {
     await vi.advanceTimersByTimeAsync(40);
   };
 
+  it('keeps plugin navigation alongside a selected view and restores native sessions on disable', () => {
+    const controller = new AbortController();
+    const entry = {
+      workspaceId: 'workspace',
+      digest: 'test',
+      sourceKey: 'local',
+      pluginId: 'sample',
+      dev: { machineId: 'm', manifest: {} },
+    } as Parameters<typeof createProductionSurfaces>[0];
+    const { sidebar } = createProductionSurfaces(
+      entry,
+      controller.signal,
+      {} as Parameters<typeof createProductionSurfaces>[2],
+      { url: () => '' }
+    );
+    const session = {
+      title: 'Custom body',
+      session: { workspaceId: 'workspace', machineId: 'm', sessionId: 's' },
+    } as SessionSummary;
+    try {
+      sidebar.headerItems.add({ id: 'hub', Component: () => <span>Plugin hub</span> });
+      sidebar.sessionRow.decorate({ id: 'badge', trailing: () => <span>Waiting badge</span> });
+      sidebar.views.add({
+        id: 'focus',
+        Component: () => <SessionRow session={session} />,
+        title: 'Focus view',
+      });
+      renderSidebar({});
+      expect(container?.textContent).toContain(pinnedItem.title);
+      flushSync(() =>
+        Array.from(container!.querySelectorAll('button'))
+          .find((b) => b.textContent === 'Focus view')!
+          .click()
+      );
+      expect(container?.textContent).toContain('Plugin hub');
+      expect(container?.textContent).toContain('Custom body');
+      expect(container?.textContent).toContain('Waiting badge');
+      expect(container?.textContent).not.toContain(pinnedItem.title);
+      flushSync(() => controller.abort());
+      expect(container?.textContent).toContain(pinnedItem.title);
+      expect(container?.textContent).not.toContain('Plugin hub');
+    } finally {
+      controller.abort();
+    }
+  });
+  it('rebinds a selected view and open screen to fresh implementations without replay after revocation', () => {
+    const controllers: AbortController[] = [];
+    const mount = (digest: string, prev?: AbortController) => {
+      const c = new AbortController();
+      controllers.push(c);
+      beginShellGeneration(c.signal, prev?.signal);
+      prev?.abort();
+      const entry = {
+        workspaceId: 'workspace',
+        sourceKey: 'local',
+        pluginId: 'sample',
+        digest,
+        dev: { machineId: 'm', manifest: {} },
+      } as Parameters<typeof createProductionSurfaces>[0];
+      const registry = createProductionSurfaces(
+        entry,
+        c.signal,
+        {} as Parameters<typeof createProductionSurfaces>[2],
+        { url: () => '' }
+      );
+      registry.sidebar.views.add({
+        id: 'tree',
+        title: 'Agent Tree',
+        Component: () => <span>view:{digest}</span>,
+      });
+      registry.screens.add({
+        id: 'detail',
+        title: 'Detail',
+        Component: ({ params }) => (
+          <span>
+            screen:{digest}:{params.item}
+          </span>
+        ),
+      });
+      finishShellGeneration(c.signal);
+      return c;
+    };
+    const pressed = (name: string) =>
+      Array.from(container!.querySelectorAll('button'))
+        .find((b) => b.textContent === name)
+        ?.getAttribute('aria-pressed');
+    try {
+      const a = mount('one');
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      flushSync(() =>
+        root!.render(
+          <>
+            <LoroSidebar {...baseProps} />
+            <PluginScreenOutlet workspaceId="workspace" />
+          </>
+        )
+      );
+      flushSync(() => {
+        Array.from(container!.querySelectorAll('button'))
+          .find((b) => b.textContent === 'Agent Tree')!
+          .click();
+        openPluginScreen('workspace', JSON.stringify(['sample', 'local', 'one']), 'detail', {
+          item: 'chosen',
+        });
+      });
+      expect(pressed('Agent Tree')).toBe('true');
+      let b!: AbortController;
+      flushSync(() => {
+        b = mount('two', a);
+      });
+      expect(pressed('Agent Tree')).toBe('true');
+      expect(pressed('Default')).toBe('false');
+      expect(document.body.textContent).toContain('screen:two:chosen');
+      expect(container.textContent).toContain('view:two');
+      flushSync(() => {
+        endShellGeneration(b.signal);
+        b.abort();
+        mount('three');
+      });
+      expect(pressed('Default')).toBe('true');
+      expect(pressed('Agent Tree')).toBe('false');
+      expect(document.body.textContent).not.toContain('screen:three');
+    } finally {
+      controllers.forEach((c) => {
+        endShellGeneration(c.signal);
+        c.abort();
+      });
+    }
+  });
   it('offers workspace context actions without switching the selected workspace', async () => {
     const previous = window.__LODY_ELECTRON__;
     window.__LODY_ELECTRON__ = true;

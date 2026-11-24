@@ -1,4 +1,9 @@
 import {
+  getActivePluginPalette,
+  subscribePluginPalette,
+  resetPluginPalette,
+} from './plugins/appearance';
+import {
   createContext,
   useCallback,
   useContext,
@@ -6,6 +11,7 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { ThemeProvider as NextThemesProvider, useTheme as useNextTheme } from 'next-themes';
 import { getIpcServices, onIpcEvent } from '@/lib/electron-ipc-client';
@@ -88,13 +94,7 @@ export function nextCycledTheme(current: Theme): Theme {
   return THEME_CYCLE_ORDER[(index + 1) % THEME_CYCLE_ORDER.length];
 }
 
-/**
- * The app ships exactly two palettes: neutral Lody Light and Vesper
- * (dark). Users pick light, dark, or system (follow the OS). The underlying
- * VS Code theme selection is FIXED — there is no per-mode theme picker or
- * persistence. The bundled VS Code theme machinery stays only to drive syntax
- * colors for the editor/diff/terminal at these two ids.
- */
+// Plugin selection is installation-scoped; only the built-in mode persists across launches.
 const FIXED_VSCODE_THEME_SELECTION = DEFAULT_VSCODE_THEME_SELECTION;
 
 type ThemeProviderProps = {
@@ -191,7 +191,18 @@ function LodyThemeProvider({
   const [nativeSystemTheme, setNativeSystemTheme] = useState<ResolvedTheme>();
 
   const browserResolvedTheme: ResolvedTheme = browserSystemTheme === 'dark' ? 'dark' : 'light';
-  const resolvedTheme = theme === 'system' ? (nativeSystemTheme ?? browserResolvedTheme) : theme;
+  const palette = useSyncExternalStore(
+    subscribePluginPalette,
+    getActivePluginPalette,
+    () => undefined
+  );
+  const resolvedTheme = palette
+    ? palette.theme.type === 'dark'
+      ? 'dark'
+      : 'light'
+    : theme === 'system'
+      ? (nativeSystemTheme ?? browserResolvedTheme)
+      : theme;
 
   useEffect(() => {
     return onIpcEvent('app.nativeTheme', (resolved) => {
@@ -238,19 +249,36 @@ function LodyThemeProvider({
       return undefined;
     }
 
-    const activeTheme = getBundledVSCodeThemeByIdSync(activeThemeId);
+    const activeTheme = palette?.theme ?? getBundledVSCodeThemeByIdSync(activeThemeId);
     if (!activeTheme) {
       return undefined;
     }
     const application = applyVSCodeThemeCssVariables(root, activeTheme);
 
+    const tokens = palette?.tokens;
+    const previous = new Map<string, string>();
+    for (const [name, value] of Object.entries({
+      '--font-sans': tokens?.fontSans,
+      '--font-mono': tokens?.fontMono,
+      '--radius': tokens?.radius,
+      '--density': tokens?.density,
+    })) {
+      if (!value) continue;
+      previous.set(name, root.style.getPropertyValue(name));
+      root.style.setProperty(name, value);
+    }
     return () => {
+      for (const [name, value] of previous) {
+        if (value) root.style.setProperty(name, value);
+        else root.style.removeProperty(name);
+      }
       application.dispose();
     };
-  }, [resolvedTheme]);
+  }, [resolvedTheme, palette]);
 
   const setTheme = useCallback(
     (nextTheme: Theme) => {
+      resetPluginPalette();
       setPreviewedTheme(undefined);
       setStoredTheme(nextTheme);
     },
@@ -284,14 +312,25 @@ export const useResolvedTheme = (): ResolvedTheme => {
 
 export const useActiveVSCodeThemeId = (): string | undefined => {
   const resolvedTheme = useResolvedTheme();
-  return getActiveVSCodeThemeId(resolvedTheme);
+  const palette = useSyncExternalStore(
+    subscribePluginPalette,
+    getActivePluginPalette,
+    () => undefined
+  );
+  return palette?.theme.id ?? getActiveVSCodeThemeId(resolvedTheme);
 };
 
 export const useActiveVSCodeTheme = (): LodyResolvedVSCodeTheme | undefined => {
   const activeThemeId = useActiveVSCodeThemeId();
+  const palette = useSyncExternalStore(
+    subscribePluginPalette,
+    getActivePluginPalette,
+    () => undefined
+  );
   return useMemo(
-    () => (activeThemeId ? getBundledVSCodeThemeByIdSync(activeThemeId) : undefined),
-    [activeThemeId]
+    () =>
+      palette?.theme ?? (activeThemeId ? getBundledVSCodeThemeByIdSync(activeThemeId) : undefined),
+    [activeThemeId, palette]
   );
 };
 
@@ -339,7 +378,10 @@ export const useSelectableBundledVSCodeThemes = (): LodyResolvedVSCodeTheme[] =>
 };
 
 export const useActiveVSCodeDiffThemeName = (): string | undefined => {
-  const activeTheme = useActiveVSCodeTheme();
+  // The diff registry has no unregister. Do not retain plugin palettes after their owner closes.
+  const mode = useResolvedTheme();
+  const bundledId = getActiveVSCodeThemeId(mode);
+  const activeTheme = bundledId ? getBundledVSCodeThemeByIdSync(bundledId) : undefined;
   const activeDiffThemeName = activeTheme ? createLodyVSCodeShikiThemeName(activeTheme) : undefined;
   const [registeredDiffThemeName, setRegisteredDiffThemeName] = useState<string | undefined>(() =>
     activeTheme ? getRegisteredLodyVSCodeThemeForDiffs(activeTheme) : undefined

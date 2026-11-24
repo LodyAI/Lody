@@ -2190,6 +2190,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalSorbetProviders,
     requestMemoryProvider,
     requestMachinePiExtensions,
+    requestPlugin,
   } = createWorkspaceMachineRpcFacade({
     waitForContentAdmission,
     getSessionToken: () => authToken,
@@ -2209,8 +2210,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     ...(protectedRpcAvailable
       ? {
           requestEncryptedFeature: async (
-            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
-          ) => (await ensureEncryptedRpc()).requestFeature(request),
+            request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest,
+            options?: { signal?: AbortSignal }
+          ) => (await ensureEncryptedRpc()).requestFeature(request, options),
         }
       : {}),
   });
@@ -6592,6 +6594,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalSorbetProviders,
     requestMemoryProvider,
     requestMachinePiExtensions,
+    requestPlugin,
     dispose,
   };
 }

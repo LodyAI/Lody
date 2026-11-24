@@ -1,3 +1,4 @@
+import { pluginMethods } from './plugins/machine-rpc';
 /** Narrow dispatch intent; the target validates inputConfig with its existing turn codec. */
 export type E2eeDispatchInput = {
   sessionId: string;
@@ -33,6 +34,7 @@ import { LocalMachineRpcRequestSchema, type LocalMachineRpcRequest } from './loc
 
 /** Network access stays restricted to the existing feature surfaces and owner credentials. */
 export const isE2eeFeatureMethod = (method: string): boolean =>
+  (method !== 'plugin/control' && pluginMethods.has(method)) ||
   method === 'machine/acp-interaction' ||
   method.startsWith('code-collab/') ||
   method === 'sorbet/credentials-list' ||

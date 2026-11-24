@@ -634,6 +634,9 @@ export type SessionMeta = SessionPullRequestRecordFields & {
   id: SessionId;
   machineId: MachineId;
   createdAt: string;
+  /** Creation provenance, not a grant of access. */
+  createdByPluginId?: string;
+  businessKey?: string;
   /** Feedback post id bound at session start, when the session originates from lody-feedback. */
   fromFeedbackPostId?: string;
   /** 36-byte UUID activation index; content lives in the session control doc. */
@@ -685,6 +688,7 @@ export type SessionMeta = SessionPullRequestRecordFields & {
    * these fields: a later Role edit or delete must not change execution.
    */
   agentRoleId?: AgentRoleId;
+  pluginOriginTurn?: { sessionId: string; userTurnId: string };
   agentRoleRevision?: number;
   /** Schedule provenance only, a UUID of at most 50 UTF-8 bytes. */
   scheduleId?: string;

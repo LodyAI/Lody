@@ -346,6 +346,70 @@ import {
   getThoughtSearchBlockId,
 } from '@/lib/session-chat-search';
 
+import { fences, TranscriptMarkdown, TranscriptTool } from '../../plugins/transcript-surfaces';
+import { eventRefs, toolFact } from '../../plugins/session-events';
+import type { ObservedToolCall } from '@lody/plugin-sdk';
+function useTranscriptTarget(sessionId: SessionId) {
+  const workspaceId = useSessionCopyWorkspaceId();
+  const meta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  return workspaceId && meta ? eventRefs(workspaceId, meta) : undefined;
+}
+function PluginMarkdown({
+  sessionId,
+  turnId,
+  ordinal,
+  ...props
+}: React.ComponentProps<typeof MarkdownBlock> & {
+  sessionId: SessionId;
+  turnId: string;
+  ordinal: number;
+}) {
+  const target = useTranscriptTarget(sessionId);
+  return (
+    <TranscriptMarkdown
+      target={target}
+      turnId={turnId}
+      ordinal={ordinal}
+      streaming={!!props.isStreaming}
+      text={props.text}
+      render={(text, prose) => (
+        <MarkdownBlock
+          {...props}
+          text={text}
+          searchBlockId={prose ? props.searchBlockId : undefined}
+        />
+      )}
+    />
+  );
+}
+function PluginTool({
+  sessionId,
+  tool,
+  children,
+}: {
+  sessionId: SessionId;
+  tool: ToolCallMessage;
+  children: ReactNode;
+}) {
+  const target = useTranscriptTarget(sessionId);
+  const fact = toolFact(tool);
+  const name = fact.toolName.split('__');
+  return (
+    <TranscriptTool
+      target={target}
+      call={{
+        ...fact,
+        mcpServer: name[0] === 'mcp' ? name[1] : undefined,
+        rawInput: tool.rawInput as ObservedToolCall['rawInput'],
+        rawOutput: tool.rawOutput as ObservedToolCall['rawOutput'],
+        command: typeof tool.rawInput?.command === 'string' ? tool.rawInput.command : undefined,
+        outputText:
+          typeof tool.rawOutput === 'string' ? tool.rawOutput : JSON.stringify(tool.rawOutput),
+      }}
+      raw={children}
+    />
+  );
+}
 const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
 
 function useSessionCopyWorkspaceId(): string | undefined {
@@ -6143,6 +6207,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
         const { entry } = content.block;
         return renderAssistantContent(entry.content, row.item.sessionId, {
           messageId: message.id,
+          ordinal: (message.items ?? [])
+            .slice(0, entry.itemIndex)
+            .reduce((n, i) => n + (i.type === 'text' ? fences(i.text).length : 0), 0),
           itemIndex: entry.itemIndex,
           isStreaming: message.finished !== true,
           onFilePathClick,
@@ -6170,12 +6237,14 @@ const AssistantChatItem = memo(function AssistantChatItem({
            rail. The disclosure chevron and the group header carry the
            hierarchy — see `cardSiblingGap` above and `ai-gui/AGENTS.md`. */
         return isAssistantToolCallActivityEntry(entry) ? (
-          <AssistantToolCallVirtualRow
-            messageId={message.id}
-            entry={entry}
-            onFilePathClick={onFilePathClick}
-            fontSize={conversationFontSize}
-          />
+          <PluginTool tool={entry.content} sessionId={row.item.sessionId}>
+            <AssistantToolCallVirtualRow
+              messageId={message.id}
+              entry={entry}
+              onFilePathClick={onFilePathClick}
+              fontSize={conversationFontSize}
+            />
+          </PluginTool>
         ) : (
           <AssistantThoughtVirtualRow
             messageId={message.id}
@@ -6517,6 +6586,7 @@ const renderAssistantContent = (
   options?: {
     messageId: string;
     itemIndex: number;
+    ordinal?: number;
     isStreaming?: boolean;
     onFilePathClick?: (filePath: string) => void;
     conversationFontSize?: ConversationFontSize;
@@ -6533,7 +6603,10 @@ const renderAssistantContent = (
   switch (content.type) {
     case 'text':
       return (
-        <MarkdownBlock
+        <PluginMarkdown
+          turnId={messageId}
+          sessionId={sessionId}
+          ordinal={options?.ordinal ?? 0}
           text={content.text}
           size={conversationFontSize}
           isStreaming={options?.isStreaming}
@@ -6612,11 +6685,13 @@ const renderAssistantContent = (
           planRenderedSeparately={options?.planRenderedSeparately}
         />
       ) : (
-        <ToolCallCard
-          toolCall={content}
-          onFilePathClick={options?.onFilePathClick}
-          fontSize={conversationFontSize}
-        />
+        <PluginTool sessionId={sessionId} tool={content}>
+          <ToolCallCard
+            toolCall={content}
+            onFilePathClick={options?.onFilePathClick}
+            fontSize={conversationFontSize}
+          />
+        </PluginTool>
       );
     case 'available_commands':
       return null;

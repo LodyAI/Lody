@@ -6,9 +6,12 @@
   "description": "Plays subtle audio cues on message send, Agent completion, and pending user questions.",
   "client": "./client.tsx",
   "assets": [
-    "./assets/send.mp3",
-    "./assets/complete.mp3",
-    "./assets/question.mp3"
+    "./assets/soft-wood-send.mp3",
+    "./assets/soft-wood-complete.mp3",
+    "./assets/soft-wood-question.mp3",
+    "./assets/retro-synth-send.mp3",
+    "./assets/retro-synth-complete.mp3",
+    "./assets/retro-synth-question.mp3"
   ],
   "config": {
     "pack": {
@@ -17,8 +20,14 @@
       "label": "Sound Pack",
       "default": "soft-wood",
       "options": [
-        { "value": "soft-wood", "label": "Soft Wood" },
-        { "value": "retro-synth", "label": "Retro Synth" }
+        {
+          "value": "soft-wood",
+          "label": "Soft Wood"
+        },
+        {
+          "value": "retro-synth",
+          "label": "Retro Synth"
+        }
       ]
     },
     "volume": {
@@ -40,6 +49,9 @@
   "onboarding": {
     "title": "Configure Sound Effects",
     "summary": "Pick a cue style and volume before your next Agent session.",
-    "fields": ["pack", "volume"]
+    "fields": [
+      "pack",
+      "volume"
+    ]
   }
 }

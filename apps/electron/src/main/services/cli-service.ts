@@ -404,7 +404,8 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
     // The public source is shared by local and cloud composition roots. Make
     // the selected platform explicit because the standalone source defaults
     // to local when no selector is present.
-    LODY_PLATFORM: mainPlatformKind
+    LODY_PLATFORM: mainPlatformKind,
+    ...(process.argv.includes('--safe-mode') ? { LODY_PLUGIN_SAFE_MODE: '1' } : {})
   }
 
   if (isLocalPlatform()) {

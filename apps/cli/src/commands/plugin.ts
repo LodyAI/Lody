@@ -36,18 +36,25 @@ function requireOwner() {
 pluginCommand
   .command('link <path>')
   .requiredOption('--dev', 'Watch and rebuild local plugin source')
-  .action((path) =>
+  .option('--encrypted-workspace <id>', 'Install in this running encrypted workspace identity')
+  .action((path, opts) =>
     run(async () => {
       requireOwner();
       const { requestPluginControl } = await import('../plugins/plugin-control-client');
-      return requestPluginControl({ action: 'link', path: resolve(path), dev: true });
+      return requestPluginControl(
+        { action: 'link', path: resolve(path), dev: true },
+        opts.encryptedWorkspace
+      );
     })
   );
 for (const action of ['reload', 'disable', 'logs'] as const)
-  pluginCommand.command(`${action} <id>`).action((id) =>
-    run(async () => {
-      if (action !== 'logs') requireOwner();
-      const { requestPluginControl } = await import('../plugins/plugin-control-client');
-      return requestPluginControl({ action, pluginId: id });
-    })
-  );
+  pluginCommand
+    .command(`${action} <id>`)
+    .option('--encrypted-workspace <id>', 'Use this running encrypted workspace identity')
+    .action((id, opts) =>
+      run(async () => {
+        if (action !== 'logs') requireOwner();
+        const { requestPluginControl } = await import('../plugins/plugin-control-client');
+        return requestPluginControl({ action, pluginId: id }, opts.encryptedWorkspace);
+      })
+    );

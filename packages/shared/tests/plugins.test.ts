@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { pluginManifestSchema } from '../src/plugins/manifest-schema';
 import { hostToChildSchema, childToHostSchema } from '../src/plugins/ipc-protocol';
-import { computeClientDigest } from '../src/plugins/digest';
+import {
+  computeClientDigest,
+  packClientBundle,
+  receiveClientBundle,
+  PLUGIN_BUNDLE_CHUNK_BYTES,
+} from '../src/plugins/digest';
 const manifest = {
   id: 'sample',
   sdk: '^1.0.0' as const,
@@ -28,6 +33,20 @@ describe('plugin wire boundaries', () => {
     expect(childToHostSchema.safeParse(result).success).toBe(true);
     expect(hostToChildSchema.safeParse(result).success).toBe(false);
     expect(childToHostSchema.safeParse({ ...result, ok: false }).success).toBe(false);
+  });
+  it('rejects a corrupted final page before returning a remote bundle', async () => {
+    const client = { ...manifest, client: 'client.js' };
+    const read = async () => new Uint8Array(PLUGIN_BUNDLE_CHUNK_BYTES);
+    const packed = (await packClientBundle(client, read))!;
+    const digest = (await computeClientDigest(client, read))!;
+    const download = () =>
+      receiveClientBundle(digest, async (offset) => ({
+        bytes: packed.subarray(offset, offset + PLUGIN_BUNDLE_CHUNK_BYTES),
+        totalBytes: packed.length,
+      }));
+    expect((await download()).byteLength).toBe(packed.length);
+    packed[packed.length - 1] = 1;
+    await expect(download()).rejects.toThrow('digest mismatch');
   });
   it('hashes client paths and content independently of declaration order, excluding machine code', async () => {
     const read = async () => new Uint8Array([42]);

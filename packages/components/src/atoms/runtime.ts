@@ -193,6 +193,7 @@ export type ScheduleDocStore = {
 };
 
 export type WorkspaceRuntime = {
+  requestPlugin: import('../plugins/workspace-catalog').RequestPlugin;
   requestSessionAutomationControl?: (
     machineId: MachineId,
     sessionId: SessionId,

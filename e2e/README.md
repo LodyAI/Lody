@@ -12,6 +12,12 @@ signal cannot make the merge gate untrustworthy.
 | Scout soak       | Repeated lifecycle and resource recovery analysis  | Nightly or manual           | Initially informational |
 | Acceptance       | Immutable before/after evidence for a delivery     | Explicit local run          | Human reviewer          |
 
+## Plugin live preview (owner acceptance)
+
+`pnpm --dir e2e exec tsx scripts/plugin-live-preview.ts` compares the built desktop with Chromium after each of 20 edits to the same Focus Sidebar source. Both windows must show the revised header and retain their selected Agent Tree view. Run it from the machine owner's interactive terminal after building the desktop and syncing its CLI.
+
+This run needs a disposable Web workspace connected to the harness machine. Set `LODY_E2E_PLUGIN_WEB_URL` to that workspace and `LODY_E2E_PLUGIN_WEB_SETTINGS_URL` to its Plugins settings on the same origin. If the site needs a login, `LODY_E2E_PLUGIN_WEB_STORAGE_STATE` can point to a local Playwright storage-state file for the disposable owner. Keep that file outside the repository. An ordinary OSS desktop build by itself does not provide a linked Web workspace.
+
 ## Architecture
 
 [`src/support/electron-harness.ts`](./src/support/electron-harness.ts) owns the

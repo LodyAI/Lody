@@ -1575,6 +1575,23 @@ describe('machine execution authorization freshness', () => {
         })
       ));
 
+    it('expires plugin execution at fifteen minutes even while the owner can use the outage window', () =>
+      withOutage(({ fixture, gate, io }) =>
+        Effect.gen(function* () {
+          at(io, FIFTEEN_MINUTES - 1);
+          const grant = yield* gate.authorizeOwnedExecution('workspace', fixture.sender, true);
+          if (grant._tag !== 'Authorized') throw Error('Expected fresh execution authorization');
+          at(io, FIFTEEN_MINUTES);
+          expect(grant.isCurrent?.()).toBe(false);
+          expect(
+            yield* gate.authorizeOwnedExecution('workspace', fixture.sender, true)
+          ).toMatchObject({ _tag: 'Denied' });
+          expect(yield* gate.authorizeOwnedExecution('workspace', fixture.sender)).toMatchObject({
+            _tag: 'Authorized',
+          });
+        })
+      ));
+
     it('keeps the same member reading for 24 hours from the last successful read', () =>
       withOutage(({ fixture, gate, io }) =>
         Effect.gen(function* () {

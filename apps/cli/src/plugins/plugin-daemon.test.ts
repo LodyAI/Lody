@@ -1,5 +1,6 @@
 import { Effect, Layer, Deferred, Fiber } from 'effect';
-import { randomUUID } from 'node:crypto';
+import { packClientBundle, PLUGIN_BUNDLE_CHUNK_BYTES } from '@lody/shared/plugins/digest';
+import { createHash, randomUUID } from 'node:crypto';
 import { platformLayer } from '@/platform/process-options';
 import { pluginHostLayer } from './workflow/plugin-host';
 import { DevPluginCompiler } from './workflow/dev-plugin-compiler';
@@ -43,8 +44,36 @@ it('restores an enabled generation without its source checkout and preserves dis
     expect(await daemon.dispatch({ action: 'list' })).toMatchObject({
       plugins: [{ pluginId: 'test-plugin', enabled: true }],
     });
+    const request = {
+      workspaceId: 'workspace',
+      machineId: 'machine',
+      method: 'plugin/catalog' as const,
+      params: {},
+    };
+    const owner = { userId: 'owner', machineOwner: true };
+    const member = { userId: 'member', machineOwner: false };
+    expect(await daemon.dispatchMachineRpc(request, owner)).toMatchObject({
+      installations: [{ inspection: { lifecycle: 'Running' } }],
+    });
+    const catalog = await daemon.dispatchMachineRpc(request, member);
+    if (catalog.type !== 'plugin/catalog') throw Error('Unexpected catalog response');
+    expect(catalog.installations[0]?.inspection).toBeUndefined();
+    const control = {
+      ...request,
+      method: 'plugin/control' as const,
+      params: { pluginId: 'test-plugin', action: 'disable' as const, clientDigest: 'test' },
+    };
+    await expect(daemon.dispatchMachineRpc(control, member)).rejects.toThrow('Owner required');
+    await expect(
+      daemon.dispatchMachineRpc(
+        { ...control, params: { ...control.params, clientDigest: 'stale' } },
+        owner
+      )
+    ).rejects.toThrow('generation changed');
     await writeFile(join(root, 'data', 'test-plugin', 'journal'), 'checkpoint');
-    await daemon.dispatch({ action: 'disable', pluginId: 'test-plugin' });
+    expect(await daemon.dispatchMachineRpc(control, owner)).toMatchObject({
+      inspection: { lifecycle: 'Disabled' },
+    });
     await daemon.dispose();
     daemon = create();
     await daemon.start();
@@ -57,6 +86,73 @@ it('restores an enabled generation without its source checkout and preserves dis
     await rm(root, { recursive: true, force: true });
   }
 });
+it('serves digest-bound staged pages and rejects unverified invocation scopes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'plugin-pages-'));
+  const daemon = new PluginDaemon(root, 'w', 'm', () => {});
+  try {
+    const manifest = {
+      id: 'pages',
+      title: 'Pages',
+      version: '1.0.0',
+      sdk: '^1.0.0',
+      client: 'client.js',
+    };
+    const file = Buffer.alloc(PLUGIN_BUNDLE_CHUNK_BYTES, 65);
+    const packed = (await packClientBundle(manifest, async () => file))!;
+    const clientDigest = createHash('sha256').update(packed).digest('hex');
+    const current = { directory: root, manifest, clientDigest };
+    await writeFile(join(root, 'client.js'), file);
+    await writeFile(
+      join(root, 'catalog.json'),
+      JSON.stringify([{ current, enabled: true, dev: false, source: '/unused' }])
+    );
+    await daemon.start();
+    const base = { workspaceId: 'w', machineId: 'm' };
+    const actor = { userId: 'owner', machineOwner: true };
+    const page = (offset: number) =>
+      daemon.dispatchMachineRpc(
+        {
+          ...base,
+          method: 'plugin/bundle-chunk',
+          params: { pluginId: 'pages', clientDigest, offset },
+        },
+        actor
+      );
+    const pages = await Promise.all([page(0), page(PLUGIN_BUNDLE_CHUNK_BYTES)]);
+    expect(
+      Buffer.concat(
+        pages.map((p) => {
+          if (p.type !== 'plugin/bundle-chunk') throw Error('Unexpected page');
+          return Buffer.from(p.base64, 'base64');
+        })
+      )
+    ).toEqual(Buffer.from(packed));
+    await writeFile(join(root, 'client.js'), 'changed');
+    await expect(page(0)).rejects.toThrow('Stale bundle');
+    const query = {
+      ...base,
+      method: 'plugin/query' as const,
+      params: {
+        pluginId: 'pages',
+        descriptorId: 'test',
+        scope: 'session' as const,
+        target: { ...base, sessionId: 's' },
+        input: null,
+      },
+    };
+    await expect(daemon.dispatchMachineRpc(query, actor)).rejects.toThrow('scope forbidden');
+    await expect(
+      daemon.dispatchMachineRpc(query, { ...actor, sessionId: 'other' })
+    ).rejects.toThrow('scope forbidden');
+    await expect(daemon.dispatchMachineRpc(query, { ...actor, sessionId: 's' })).rejects.toThrow(
+      'handler unavailable'
+    );
+  } finally {
+    await daemon.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it('resumes a pending installation from its saved generation once all required settings exist', async () => {
   const root = await mkdtemp(join(tmpdir(), 'plugin-pending-'));
   const daemon = new PluginDaemon(root, 'workspace', 'machine', () => {});
@@ -92,7 +188,16 @@ it('resumes a pending installation from its saved generation once all required s
       daemon.dispatch({ action: 'configure', pluginId: id, key, value: 'test' });
     await configure('topic');
     expect(await list()).toMatchObject({ plugins: [{ pendingConfiguration: true }] });
-    await configure('channel');
+    expect(await daemon.dispatch({ action: 'inspect', pluginId: id })).toMatchObject({
+      lifecycle: 'PendingConfiguration',
+      configured: ['topic'],
+    });
+    await daemon.dispatch({ action: 'disable', pluginId: id });
+    await daemon.dispatch({ action: 'enable', pluginId: id, changes: { channel: 'test' } });
+    expect(await daemon.dispatch({ action: 'inspect', pluginId: id })).toMatchObject({
+      lifecycle: 'Running',
+      preferences: { channel: 'test', topic: 'test' },
+    });
     expect(await list()).toMatchObject({
       plugins: [{ enabled: true, pendingConfiguration: false }],
     });

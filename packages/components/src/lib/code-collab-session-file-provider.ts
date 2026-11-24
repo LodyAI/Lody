@@ -1427,7 +1427,7 @@ function filePreviewErrorCodeToUnavailableReason(
   throw new Error(`Unsupported file preview error code: ${String(exhaustive)}`);
 }
 
-async function decodeFilePreviewText(
+export async function decodeFilePreviewText(
   response: Extract<FilePreviewV3Response, { status: 'ok' }>
 ): Promise<string> {
   const content = response.content;

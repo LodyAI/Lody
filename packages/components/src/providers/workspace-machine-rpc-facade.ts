@@ -1,3 +1,4 @@
+import { pluginRpcResultSchema } from '@lody/shared/plugins/machine-rpc';
 import {
   type CodeCollabOpenDiffManifestRequest,
   type CodeCollabOpenDiffManifestResponse,
@@ -156,7 +157,8 @@ type LspRequest = {
 export type WorkspaceMachineRpcFacadeDeps = {
   waitForContentAdmission?: () => Promise<void>;
   requestEncryptedFeature?: (
-    request: LocalMachineRpcRequest
+    request: LocalMachineRpcRequest,
+    options?: { signal?: AbortSignal }
   ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
   getSessionToken?: () => string | null;
   /** Encrypted content: remote file work uses only `requestEncryptedFeature`, when the host has it. */
@@ -2221,7 +2223,34 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return result;
   };
 
+  type PluginRequest = Extract<LocalMachineRpcRequest, { method: `plugin/${string}` }>;
+  type PluginCall<T> = T extends PluginRequest ? Pick<T, 'method' | 'params'> : never;
+  const requestPlugin = async (
+    machineId: MachineId,
+    call: PluginCall<PluginRequest>,
+    options?: { signal?: AbortSignal; requireLocal?: boolean }
+  ) => {
+    const request = { ...call, workspaceId, machineId };
+    if (new TextEncoder().encode(JSON.stringify(request)).length > 262144)
+      throw new Error('Plugin request exceeds 256 KiB');
+    await deps.waitForContentAdmission?.();
+    const local = !deps.protectedContent && (await canUseLocalMachineRpc(machineId));
+    if (!local && (options?.requireLocal || call.method === 'plugin/control'))
+      throw Error('Local plugin route unavailable');
+    options?.signal?.throwIfAborted();
+    const send = local ? getLocalMachineRpcSender() : deps.requestEncryptedFeature;
+    if (!send) throw new Error('Plugin transport unavailable');
+    const reply = local
+      ? await send(request)
+      : await deps.requestEncryptedFeature!(request, { signal: options?.signal });
+    options?.signal?.throwIfAborted();
+    if (!reply.ok) throw new Error(reply.error);
+    const result = pluginRpcResultSchema.parse(reply.result);
+    if (result.type !== call.method) throw new Error('Unexpected plugin response');
+    return { ...result, transport: local ? ('local' as const) : ('encrypted' as const) };
+  };
   return {
+    requestPlugin,
     requestLocalSorbetCredentials,
     requestLocalSorbetProviders,
     requestSessionAutomationControl,

@@ -31,6 +31,7 @@ interface Api {
   event: (id: string, frame: HostEvent) => Effect.Effect<void, unknown>;
   reload: (spec: PluginLaunchSpec) => Effect.Effect<Status, unknown>;
   disable: (id: string) => Effect.Effect<void, unknown>;
+  inspect: (id: string) => { lifecycle: string; pid?: number; registrations: string[] };
   logs: (id: string) => Effect.Effect<readonly string[]>;
   invoke: (id: string, frame: Invoke) => Effect.Effect<unknown, InvocationFailure>;
 }
@@ -55,6 +56,7 @@ export const makePluginHostLayer = (
         lease?: ProcessReleaseFailed;
         running?: boolean;
         subscribed?: Set<string>;
+        registrations?: string[];
         buffered: HostEvent[];
         eventTail?: Deferred.Deferred<void>;
         eventReply?: { id: string; reply: Deferred.Deferred<void, Error> };
@@ -214,6 +216,10 @@ export const makePluginHostLayer = (
             const f = parsed.data;
             if (f.type === 'ready' && phase === 'init') {
               phase = 'ready';
+              g.registrations = [
+                ...f.handlers.map((h) => `${h.kind}: ${h.descriptorId}`),
+                ...f.subscribedEvents.map((e) => `event: ${e}`),
+              ];
               g.subscribed = new Set(f.subscribedEvents);
               yield* Deferred.succeed(ready, undefined);
             } else if (f.type === 'result' && phase === 'ready' && f.callId === 'start' && f.ok) {
@@ -317,6 +323,19 @@ export const makePluginHostLayer = (
             trailing.delete(id);
             return serialize(id, stop(id));
           }),
+        inspect: (id) => {
+          const g = active.get(id);
+          return {
+            lifecycle:
+              !g || g.faulted
+                ? 'Faulted'
+                : g.running || !g.spec.machineEntry
+                  ? 'Running'
+                  : 'Starting',
+            pid: g?.status.pid,
+            registrations: g?.registrations ?? [],
+          };
+        },
         logs: (id) => active.get(id)?.child?.ringBuffer ?? Effect.succeed(history.get(id) ?? []),
         invoke: (id, frame) =>
           Effect.suspend(() => {

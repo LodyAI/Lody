@@ -35,6 +35,30 @@ afterEach(() => {
 });
 
 describe('CommandRegistry keydown dispatch', () => {
+  it('workspace command events follow dispatch policy and end on workspace close', () => {
+    const workspace = new AbortController();
+    const events: string[] = [];
+    let visible = false;
+    commands.onInvoked((id) => events.push(id), workspace.signal);
+    commands.register({
+      id: 'toggle',
+      title: 'Toggle',
+      keybindings: ['Mod+b'],
+      when: () => visible,
+      run() {},
+    });
+    try {
+      commands.execute('toggle');
+      commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
+      visible = true;
+      commands.execute('toggle');
+      commands.dispatchKeybinding('Mod+b', ev({ key: 'b', ctrlKey: true }));
+    } finally {
+      workspace.abort();
+    }
+    commands.execute('toggle');
+    expect(events).toEqual(['toggle', 'toggle']);
+  });
   it('most-recently-registered binding wins on collision', () => {
     const earlier = vi.fn();
     const later = vi.fn();

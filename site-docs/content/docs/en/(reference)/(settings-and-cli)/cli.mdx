@@ -827,3 +827,12 @@ lody plugin logs demo
 lody plugin reload demo
 lody plugin disable demo
 ```
+
+To develop against a running encrypted workspace on this machine, pass its ID to `link` and to each subsequent control command:
+
+```sh
+lody plugin link --dev ./demo --encrypted-workspace "$WORKSPACE_ID"
+lody plugin logs demo --encrypted-workspace "$WORKSPACE_ID"
+```
+
+The encrypted workspace does not load plugins from the ordinary local installation. Launch `lody --safe-mode` to start without machine plugins; on Web, open the workspace with `?safeMode=1` to skip plugin code and styles in that tab.

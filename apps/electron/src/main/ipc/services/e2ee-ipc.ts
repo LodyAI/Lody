@@ -1,3 +1,9 @@
+import {
+  observePluginCatalog,
+  openAuthenticatedPluginSource
+} from '../../services/plugin-catalog-evidence'
+import { publishPluginModule, releasePluginGraph } from '../../services/plugin-module-store'
+import { getResourceOwner } from '../../services/document-resource-owner'
 import { recoveryHistoryBatcher } from '../../services/e2ee-recovery-history.mjs'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import {
@@ -2271,11 +2277,67 @@ export class E2eeIpc extends ProductWindowIpcService {
     frame: string
   ) {
     const id = sender()
+    const document = readerLifetimes.get(getIpcContext().event.sender)!
     return withDesktopE2eeAccount(
       (owner) =>
         owner.readers.get(workspaceId)?.has(id)
-          ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame)
+          ? owner.host.acceptFeatureRpcResponse(workspaceId, input, frame).pipe(
+              Effect.tap((reply) =>
+                Effect.sync(() => {
+                  if (input.request.method === 'plugin/catalog' && reply?.ok)
+                    observePluginCatalog(
+                      owner.readers.get(workspaceId)!,
+                      document,
+                      input.request.machineId,
+                      reply.result
+                    )
+                })
+              )
+            )
           : refuseUnopened(owner, workspaceId),
+      workspaceId,
+      false
+    )
+  }
+  @IpcMethod()
+  async openRemotePluginModule(
+    workspaceId: string,
+    machineId: string,
+    pluginId: string,
+    digest: string,
+    bytes: Uint8Array,
+    names: Record<string, string[]>
+  ) {
+    const id = sender(),
+      contents = getIpcContext().event.sender,
+      document = readerLifetimes.get(contents)!,
+      generation = getResourceOwner(contents)
+    if (
+      process.argv.includes('--safe-mode') ||
+      new URL(contents.getURL()).searchParams.getAll('safeMode').includes('1')
+    )
+      throw Error('Plugins disabled in safe mode')
+    return withDesktopE2eeAccount(
+      (owner) => {
+        const readers = owner.readers.get(workspaceId)
+        if (!readers?.has(id)) return refuseUnopened(owner, workspaceId)
+        return Effect.tryPromise(async () => {
+          const source = openAuthenticatedPluginSource(
+            readers,
+            document,
+            machineId,
+            pluginId,
+            digest,
+            bytes
+          )
+          const url = await publishPluginModule(generation, source, names)
+          if (readerLifetimes.get(contents) !== document || !readers.has(id)) {
+            releasePluginGraph(generation, url)
+            throw Error('Plugin reader closed')
+          }
+          return url
+        })
+      },
       workspaceId,
       false
     )

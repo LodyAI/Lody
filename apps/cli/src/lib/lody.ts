@@ -43,7 +43,9 @@ import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
+type PluginDaemon = import('../plugins/plugin-host-legacy').PluginDaemon;
 interface LodyOptions {
+  localPlugin?: () => PluginDaemon | undefined;
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
   /** True while execution relies on an outage window, with that window's ends. */
@@ -120,6 +122,7 @@ export class Lody {
   private runtime: MachineRuntime;
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
+  private encryptedPlugin?: Promise<PluginDaemon>;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
   private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
   private startReceipt?: Promise<void>;
@@ -376,6 +379,21 @@ export class Lody {
       workspaceDocument: documentManager,
       memoryPressure: options.memoryPressure,
       handlerConfig: {
+        pluginRpc: async (request, actor, signal) => {
+          if (this.cleanedUp || process.env.LODY_PLUGIN_SAFE_MODE === '1')
+            throw new Error('Plugin host unavailable');
+          const daemon =
+            options.contentMode === 'e2ee' ? await this.encryptedPlugin : options.localPlugin?.();
+          if (
+            !daemon ||
+            this.cleanedUp ||
+            this.encryptedRevocation ||
+            this.encryptedWorkspace?.pluginAuthoritySignal.aborted
+          )
+            throw new Error('Plugin host unavailable');
+          signal?.throwIfAborted();
+          return daemon.dispatchMachineRpc(request, actor, signal);
+        },
         sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
         token: this.token,
         encryptedWorkspace: options.contentMode === 'e2ee',
@@ -428,6 +446,38 @@ export class Lody {
       { workspaceId: this.workspaceId },
       async () => await this.runtime.initialize()
     );
+    if (this.encryptedWorkspace && process.env.LODY_PLUGIN_SAFE_MODE !== '1') {
+      const identity = this.encryptedWorkspace;
+      this.encryptedPlugin ??= (async () => {
+        const [{ PluginDaemon }, { identityPluginVault }, { join }] = await Promise.all([
+          import('../plugins/plugin-host-legacy'),
+          import('../plugins/identity-plugin-vault'),
+          import('node:path'),
+        ]);
+        const root = join(identity.repositoryDirectory, 'plugins');
+        if (this.cleanedUp || this.encryptedRevocation || identity.pluginAuthoritySignal.aborted)
+          throw Error('Plugin identity closed');
+        const host = new PluginDaemon(
+          root,
+          this.workspaceId,
+          this.machineId,
+          (m) => this.logger.warn(m),
+          identityPluginVault(root)
+        );
+        const stop = () => {
+          void host.dispose().catch(() => this.logger.warn('Plugin shutdown failed'));
+        };
+        identity.pluginAuthoritySignal.addEventListener('abort', stop, { once: true });
+        try {
+          await host.start();
+          return host;
+        } catch (error) {
+          await host.dispose();
+          throw error;
+        }
+      })();
+      await this.encryptedPlugin.catch(() => this.logger.warn('Encrypted plugin host unavailable'));
+    }
     await this.encryptedWorkspace?.startRpc(
       this.machineId,
       (input) => this.runtime.offerEncryptedRpcTurn(input),
@@ -626,10 +676,27 @@ export class Lody {
       await this.encryptedWorkspace?.stopRpc();
       this.clientLossRpcStopped = true;
     } finally {
-      await this.runtime.cleanup();
+      try {
+        await this.runtime.cleanup();
+      } finally {
+        await (await this.encryptedPlugin?.catch(() => undefined))?.dispose();
+      }
     }
   };
 
+  async dispatchEncryptedPluginControl(command: unknown) {
+    const identity = this.encryptedWorkspace;
+    const host = await this.encryptedPlugin;
+    if (
+      !identity ||
+      !host ||
+      this.encryptedRevocation ||
+      this.cleanedUp ||
+      identity.pluginAuthoritySignal.aborted
+    )
+      throw Error('Encrypted plugin owner unavailable');
+    return host.dispatch(command);
+  }
   async dispatchLocalControl(
     message: LocalSessionControlRequest,
     options: { onResponse?: (response: LocalSessionControlResponse) => void } = {}

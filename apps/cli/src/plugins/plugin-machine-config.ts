@@ -15,7 +15,10 @@ async function entry(key: string) {
   const { AsyncEntry } = await import('@napi-rs/keyring');
   return new AsyncEntry('Lody Plugin Configuration', key, { linux: { store: 'secret-service' } });
 }
-export const systemMachineConfigVault: MachineConfigVault = {
+export const systemMachineConfigVault: MachineConfigVault & {
+  remove(key: string): Promise<boolean>;
+} = {
+  remove: async (key) => (await entry(key)).deleteCredential(AbortSignal.timeout(30_000)),
   read: async (key) => (await entry(key)).getPassword(AbortSignal.timeout(30_000)),
   write: async (key, value) => {
     await (await entry(key)).setPassword(value, AbortSignal.timeout(30_000));
@@ -41,11 +44,24 @@ export function machineConfig(
   manifest: PluginManifest,
   workspaceId: string,
   machineId: string,
-  vault = systemMachineConfigVault
+  vault: MachineConfigVault = systemMachineConfigVault
 ) {
   const key = (name: string) => JSON.stringify([workspaceId, machineId, manifest.id, name]);
   const privateField = (field: Field) => field.type === 'secret' || field.scope === 'machine';
   return {
+    async configured(preferences: Readonly<Record<string, unknown>>) {
+      const names: string[] = [];
+      for (const [name, field] of Object.entries(manifest.config ?? {})) {
+        if (
+          ('default' in field && field.default !== undefined) ||
+          (privateField(field)
+            ? (await vault.read(key(name))) !== undefined
+            : Object.hasOwn(preferences, name))
+        )
+          names.push(name);
+      }
+      return names;
+    },
     async set(name: string, value: unknown) {
       const field = Object.entries(manifest.config ?? {}).find(([k]) => k === name)?.[1];
       if (!field || !privateField(field)) throw new Error('Not a machine configuration field');

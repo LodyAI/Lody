@@ -21,6 +21,15 @@ refuse bundle targets by their own name and documents inside ancestors with a
 bundle suffix and an `Info.plist` marker; bundle-like repository names alone do
 not block their documents.
 
+## Executable plugin modules
+
+`lody-plugin:` serves immutable module graphs scoped to one product document. Main
+reads local modules from enabled daemon installations. For remote modules it checks
+the packed bytes against the catalog accepted by the native E2EE reader for this
+document and machine. Never accept executable source, a client-chosen entry path,
+or a renderer-supplied digest alone as authority to publish a module. Release the
+graph after import and on document retirement; do not add `blob:` to `script-src`.
+
 ## Personal-device approval
 
 `E2eeIpc` keeps every `@IpcMethod()` with its input and sender/reader validation and

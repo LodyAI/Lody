@@ -49,3 +49,36 @@ void test('renderer entries may frame direct HTML previews but never load them a
     }
   }
 })
+
+void test('remote executable module bytes must match the authenticated catalog of this document and machine', async () => {
+  const { openAuthenticatedPluginSource, observePluginCatalog } =
+    await import('../main/services/plugin-catalog-evidence.ts')
+  const { computeClientDigest, packClientBundle } = await import('@lody/shared/plugins/digest')
+  const file = async () => new TextEncoder().encode('export default 1')
+  const manifest = {
+    id: 'example',
+    sdk: '^1.0.0',
+    version: '1.0.0',
+    title: 'Example',
+    client: 'client.js'
+  }
+  const bytes = await packClientBundle(manifest, file),
+    digest = await computeClientDigest(manifest, file)
+  const reader = {},
+    doc = {}
+  const catalog = (enabled) => ({
+    type: 'plugin/catalog',
+    installations: [{ manifest, enabled, clientDigest: digest }]
+  })
+  observePluginCatalog(reader, doc, 'a', catalog(true))
+  const open = (r, d, m, data) => openAuthenticatedPluginSource(r, d, m, 'example', digest, data)
+  assert.equal(open(reader, doc, 'a', bytes), 'export default 1')
+  assert.throws(() => open({}, doc, 'a', bytes))
+  assert.throws(() => open(reader, {}, 'a', bytes))
+  assert.throws(() => open(reader, doc, 'b', bytes))
+  const corrupt = bytes.slice()
+  corrupt[corrupt.length - 1] ^= 1
+  assert.throws(() => open(reader, doc, 'a', corrupt))
+  observePluginCatalog(reader, doc, 'a', catalog(false))
+  assert.throws(() => open(reader, doc, 'a', bytes))
+})

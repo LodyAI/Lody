@@ -1,3 +1,6 @@
+import { usePluginTurnEvents } from '../../plugins/use-session-events';
+import { clientPluginEvents } from '../../plugins/client-events';
+import { eventRefs } from '../../plugins/session-events';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
@@ -3475,6 +3478,16 @@ export const SessionChatInterface = memo(
 
     /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
     const sessionHistory = sessionTailHistory;
+    usePluginTurnEvents(
+      workspaceId,
+      session,
+      !hideMessageArea &&
+        isVisible &&
+        sessionDocSynced &&
+        !!conversationView &&
+        sessionHistory.length === conversationView.turnCount - sessionTailFrom,
+      sessionHistory
+    );
     const turnFacts = useSessionTurnFacts(conversationView);
     const conversationIndexRows = useConversationIndexRows(conversationView, {
       includeSummary: false,
@@ -7740,6 +7753,17 @@ export const SessionChatInterface = memo(
 
                       {/* The one place a pending permission request is answered; it stands in for the composer. */}
                       <FloatingPermissionRequest
+                        onResolved={(requestId, kind) => {
+                          if (workspaceId) {
+                            const { workspace, session: ref } = eventRefs(workspaceId, session);
+                            clientPluginEvents.publish('ui.interaction.resolved', {
+                              workspace,
+                              session: ref,
+                              requestId,
+                              kind,
+                            });
+                          }
+                        }}
                         liftAboveKeyboard={isMobile}
                         sessionId={session.id}
                         sessionStatus={liveSessionStatus ?? undefined}

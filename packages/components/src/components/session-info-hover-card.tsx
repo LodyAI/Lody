@@ -651,6 +651,7 @@ export function SessionInfoCard({
 }
 
 export type SessionInfoHoverCardProps = Omit<SessionInfoCardProps, 'now'> & {
+  extraContent?: ReactNode;
   /** The trigger (a sidebar row). Hovering it opens the card. */
   children: ReactNode;
   /** Skip the hover card entirely (e.g. on touch devices with no hover). */
@@ -718,6 +719,7 @@ function suppressCardsUntilPointerMoves(x: number, y: number) {
  * beside it (see {@link SidebarHoverCard}).
  */
 export function SessionInfoHoverCard({
+  extraContent,
   children,
   disabled,
   now,
@@ -726,7 +728,12 @@ export function SessionInfoHoverCard({
   return (
     <SidebarHoverCard
       disabled={disabled}
-      content={<SessionInfoCardWithNow {...cardProps} now={now} />}
+      content={
+        <>
+          <SessionInfoCardWithNow {...cardProps} now={now} />
+          {extraContent}
+        </>
+      }
     >
       {children}
     </SidebarHoverCard>

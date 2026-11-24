@@ -497,8 +497,9 @@ export interface RepositoryGitState {
   readonly branch: string | null;
   readonly baseBranch: string | null;
   readonly dirty: boolean;
-  readonly ahead: number;
-  readonly behind: number;
+  /** Absent when no upstream is tracked or the machine cannot report divergence. */
+  readonly ahead?: number;
+  readonly behind?: number;
 }
 
 export interface SessionDiffSummary {

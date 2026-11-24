@@ -1,0 +1,16 @@
+{
+  "id": "issue-context",
+  "version": "0.1.0",
+  "sdk": "^1.0.0",
+  "title": "Issue Context",
+  "description": "Attach project issues and start sessions from issue context.",
+  "client": "./client.tsx",
+  "machine": "./machine.ts",
+  "config": {
+    "TRACKER_API_KEY": {
+      "type": "secret",
+      "scope": "machine",
+      "label": "Tracker API key"
+    }
+  }
+}

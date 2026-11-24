@@ -457,6 +457,81 @@ describe('trusted-host encrypted dispatch originals', () => {
     );
   });
 
+  it('refuses to sign plugin queries for a Guest even when the descriptor only reads data', async () => {
+    const f = encryptedRpcFixture({ guest: true });
+    fixtures.push(f);
+    const target = {
+      workspaceId: f.workspaceId,
+      machineId: f.machineId,
+      sessionId: f.input.sessionId,
+    };
+    const input = E2eeFeatureInputSchema.parse({
+      requestId: 'ad'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'plugin/query',
+        params: { pluginId: 'sample', descriptorId: 'demo', scope: 'session', target, input: null },
+      },
+    });
+    await expect(Effect.runPromise(f.sender.prepareFeature(input))).rejects.toThrow(
+      'e2ee_rpc_denied'
+    );
+  });
+  it('returns encrypted plugin catalog pages to a shared member but refuses machine-scoped handlers and remote control', async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const codec = f.native('teammate', 'teammate');
+    const base = { workspaceId: f.workspaceId, machineId: f.machineId };
+    const input = E2eeFeatureInputSchema.parse({
+      requestId: 'ab'.repeat(16),
+      request: { ...base, method: 'plugin/catalog', params: {} },
+    });
+    const prepared = await Effect.runPromise(codec.prepareFeature(input));
+    const opened = await Effect.runPromise(f.receiver.openFeature(f.machineId, prepared.frameHex));
+    if (!opened) throw new Error('missing catalog request');
+    const reply = {
+      ok: true as const,
+      result: { type: 'plugin/catalog' as const, installations: [] },
+    };
+    const frames = await Effect.runPromise(
+      f.receiver.sealFeatureResult(f.machineId, opened, reply)
+    );
+    expect(
+      await Effect.runPromise(
+        codec.acceptFeatureResponse(input, Buffer.from(frames[0]!).toString('hex'))
+      )
+    ).toEqual(reply);
+    const ownerCall = E2eeFeatureInputSchema.parse({
+      ...input,
+      requestId: 'ac'.repeat(16),
+      request: {
+        ...base,
+        method: 'plugin/query',
+        params: {
+          scope: 'machine',
+          target: base,
+          input: null,
+          pluginId: 'sample',
+          descriptorId: 'demo',
+        },
+      },
+    });
+    await expect(Effect.runPromise(codec.prepareFeature(ownerCall))).rejects.toThrow(
+      'e2ee_machine_not_owned'
+    );
+    expect(
+      E2eeFeatureInputSchema.safeParse({
+        ...input,
+        request: {
+          ...base,
+          method: 'plugin/control',
+          params: { pluginId: 'sample', action: 'reload' },
+        },
+      }).success
+    ).toBe(false);
+  });
+
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {
     const f = encryptedRpcFixture({ teammate: true });
     fixtures.push(f);

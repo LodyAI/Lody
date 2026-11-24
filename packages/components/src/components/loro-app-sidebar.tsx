@@ -1,3 +1,4 @@
+import { PluginProjectMenu, NativePluginRow } from '../plugins/shell-surfaces';
 import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
 import { isListedEncryptedWorkspace } from '@/components/e2ee/encrypted-workspace-mark';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
@@ -673,6 +674,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             has one, with a faint worktree glyph just to its left; the ⋯ menu and
             Archive buttons replace it on desktop hover. */}
         <div className={lineBoxClassName}>
+          <NativePluginRow kind="trailing" sessionId={session.id} active={showSelectedState} />
           <SidebarRowEndSlot
             sessionId={session.id}
             selected={showSelectedState}
@@ -840,6 +842,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     return (
       <>
         <SessionInfoHoverCard
+          extraContent={
+            <NativePluginRow kind="hover" sessionId={session.id} active={showSelectedState} />
+          }
           kind="local"
           author={author ?? undefined}
           title={title}
@@ -1353,6 +1358,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           </Tooltip.Root>
           {showProjectMenu ? (
             <ContextMenu.Content className="min-w-[180px]">
+              <PluginProjectMenu machineId={machineId} projectId={project.id} />
               {onEditProject && projectCanNavigate ? (
                 <ContextMenu.Item
                   icon={Folders}

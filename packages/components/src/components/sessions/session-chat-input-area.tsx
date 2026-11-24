@@ -1,3 +1,22 @@
+import {
+  hydrateSessionDraft,
+  sessionDraftsCache,
+  type PendingFile,
+  sessionFileDraftsCache,
+  sessionPastedTextDraftsCache,
+  sessionQuoteDraftKeys,
+  getSessionFileDrafts,
+  setSessionFileDrafts,
+  sessionMentionRangesCache,
+  getSessionMentionRanges,
+  setSessionMentionRanges,
+} from '../../lib/session-composer-drafts';
+import { pluginAttachmentFile } from '../../plugins/workspace-drafts';
+import type { DraftItem } from '@lody/plugin-sdk/client';
+import { PluginComposerActions } from '../../plugins/shell-surfaces';
+import { eventRefs } from '../../plugins/session-events';
+import { messageSubmitted } from '../../plugins/session-events';
+import { registerPluginDraftComposer } from '../../plugins/workspace-navigation';
 import { SessionMetaIdentityMarker } from './automation/session-meta-identity-marker';
 import { McpDefaultsRecovery } from '../chat/mcp-defaults-recovery';
 import { getSessionChatInputAreaShellClassName } from '@/components/chat/composer-surface';
@@ -14,7 +33,6 @@ import { useSessionPromptSuggestion } from '@/hooks/use-session-prompt-suggestio
 import { snapshotAgentRole, machineSupportsMessageQuotes } from '@lody/shared';
 import {
   conversationQuoteDraftKey,
-  loadConversationQuoteDraft,
   saveConversationQuoteDraft,
 } from '@/lib/conversation-quote-draft';
 import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
@@ -125,11 +143,7 @@ import { toast } from '@/lib/toast';
 import { validateSessionImageFile } from '@/lib/session-image-upload';
 import { formatDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
 import { PendingImageMarkupDialog } from './pending-image-markup-dialog';
-import {
-  SESSION_FILE_MAX_SIZE_MB,
-  validateSessionFile,
-  type SessionFileTransferPhase,
-} from '@/lib/session-file-upload';
+import { SESSION_FILE_MAX_SIZE_MB, validateSessionFile } from '@/lib/session-file-upload';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shared';
 import type { McpServerId, SessionFilePayload } from '@lody/shared';
@@ -163,8 +177,6 @@ import {
   getComposerText,
   setComposerSelection,
 } from '@/ui/mention/composer-input';
-
-const sessionDraftsCache = new Map<SessionId, string>();
 
 const styles = stylex.create({
   footerSelectors: {
@@ -268,42 +280,11 @@ type PendingImage = {
   abort?: AbortController;
 };
 
-type PendingFile = {
-  localId: string;
-  file: File;
-  status: 'draft' | SessionFileTransferPhase | 'uploaded' | 'failed';
-  progress: number;
-  error?: string;
-  uploaded?: SessionFilePayload;
-  /** Abort controller for the in-flight upload (cleared on terminal state). */
-  abort?: AbortController;
-};
-
 const sessionImageDraftsCache = new Map<SessionId, PendingImage[]>();
-const sessionFileDraftsCache = new Map<SessionId, PendingFile[]>();
-const sessionPastedTextDraftsCache = new Map<SessionId, PastedTextDraft[]>();
-const sessionQuoteDraftKeys = new Map<SessionId, string>();
 
 const getSessionImageDrafts = (sessionId: SessionId): PendingImage[] => [
   ...(sessionImageDraftsCache.get(sessionId) ?? []),
 ];
-
-const getSessionFileDrafts = (sessionId: SessionId): PendingFile[] => [
-  ...(sessionFileDraftsCache.get(sessionId) ?? []),
-];
-
-const setSessionFileDrafts = (
-  sessionId: SessionId,
-  files: readonly PendingFile[]
-): PendingFile[] => {
-  const next = [...files];
-  if (next.length === 0) {
-    sessionFileDraftsCache.delete(sessionId);
-  } else {
-    sessionFileDraftsCache.set(sessionId, next);
-  }
-  return next;
-};
 
 const abortPendingFileUploads = (files: readonly PendingFile[]): void => {
   for (const file of files) {
@@ -314,31 +295,6 @@ const abortPendingFileUploads = (files: readonly PendingFile[]): void => {
 const getSessionPastedTextDrafts = (sessionId: SessionId): PastedTextDraft[] => [
   ...(sessionPastedTextDraftsCache.get(sessionId) ?? []),
 ];
-
-/**
- * Mention ranges for the session's draft, kept beside its text.
- *
- * Same lifetime as the other draft caches — in memory, so it covers leaving the
- * session and coming back, which is where the ranges were being lost. It does
- * not survive a restart, but neither does the draft text here, so there is
- * nothing to restore them onto.
- */
-const sessionMentionRangesCache = new Map<SessionId, PersistedMentionRange[]>();
-
-const getSessionMentionRanges = (sessionId: SessionId): PersistedMentionRange[] => [
-  ...(sessionMentionRangesCache.get(sessionId) ?? []),
-];
-
-const setSessionMentionRanges = (
-  sessionId: SessionId,
-  ranges: readonly PersistedMentionRange[]
-): void => {
-  if (ranges.length === 0) {
-    sessionMentionRangesCache.delete(sessionId);
-  } else {
-    sessionMentionRangesCache.set(sessionId, [...ranges]);
-  }
-};
 
 const setSessionImageDrafts = (
   sessionId: SessionId,
@@ -675,21 +631,8 @@ export const SessionChatInputArea = memo(
     const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
     const workspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
     useMemo(() => {
-      if (!workspaceId) return;
-      const key = conversationQuoteDraftKey(workspaceId, session.id);
-      sessionQuoteDraftKeys.set(session.id, key);
-      if (sessionDraftsCache.has(session.id)) return;
-      try {
-        const saved = loadConversationQuoteDraft(localStorage, key);
-        if (saved) {
-          sessionDraftsCache.set(session.id, saved.text);
-          sessionPastedTextDraftsCache.set(session.id, saved.drafts);
-          setSessionMentionRanges(session.id, saved.mentions ?? []);
-        }
-      } catch {
-        /* Storage can be unavailable; writing below surfaces a warning. */
-      }
-    }, [session.id, workspaceId]);
+      if (workspaceId) hydrateSessionDraft(workspaceId, session.id);
+    }, [workspaceId, session.id]);
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     // Scoped by this composer's session id; the hook resolves its machine and
@@ -1245,6 +1188,18 @@ export const SessionChatInputArea = memo(
       [isArchived, session.id, t, updatePendingFilesForSession]
     );
 
+    const appendPluginDraft = useCallback(
+      (item: DraftItem) => {
+        if (item.kind === 'attachment')
+          enqueueFileAttachments([pluginAttachmentFile(item.snapshot)]);
+        else setUserInput((sessionDraftsCache.get(session.id) ?? userInput) + item.text);
+      },
+      [enqueueFileAttachments, session.id, userInput, setUserInput]
+    );
+    useEffect(() => {
+      if (workspaceId && !isArchived)
+        return registerPluginDraftComposer(workspaceId, session.id, appendPluginDraft);
+    }, [workspaceId, isArchived, session.id, appendPluginDraft]);
     const handleAddFiles = useCallback(
       (files: File[], source: 'file_input' | 'electron_picker' | 'paste' | 'drop') => {
         if (isArchived) {
@@ -2043,6 +1998,7 @@ export const SessionChatInputArea = memo(
                 ...(mcpServerIds ? { mcpServerIds } : {}),
               });
           if (accepted) {
+            if (!scheduled.at && workspaceId) messageSubmitted(workspaceId, session);
             // A sent message answers the prediction shown before it; the next turn
             // publishes its own suggestion.
             if (!scheduled.at)
@@ -2688,6 +2644,12 @@ export const SessionChatInputArea = memo(
           }
         }}
       >
+        {workspaceId && isVisible && !isArchived && (
+          <PluginComposerActions
+            {...eventRefs(workspaceId, session)}
+            appendToDraft={appendPluginDraft}
+          />
+        )}
         <SessionMetaIdentityMarker sessionId={session.id} isVisible={isVisible} />
         {/* The Role editor is a Dialog, so it is hosted OUT here rather than
             inside the run-config menu or the mobile drawer, where it would

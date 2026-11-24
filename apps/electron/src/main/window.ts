@@ -47,6 +47,7 @@ import {
   disposeWatchdogState,
   isInRecovery,
   loadRecoveryPage,
+  loadRendererTarget,
   persistRendererFatalError,
   requestRendererReload,
   setReloadTarget,
@@ -194,13 +195,6 @@ function resolveRecoveryTarget(): ReloadTarget {
     }
   }
   return { type: 'file', filePath: join(__dirname, '../renderer/recovery.html') }
-}
-
-function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promise<void> {
-  if (target.type === 'url') {
-    return window.loadURL(target.url)
-  }
-  return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
 }
 
 function readCurrentRendererPath(window: BrowserWindow): string {

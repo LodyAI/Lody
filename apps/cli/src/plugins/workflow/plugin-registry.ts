@@ -1,4 +1,10 @@
-import { randomUUID, randomBytes } from 'node:crypto';
+import { packClientBundle, PLUGIN_BUNDLE_CHUNK_BYTES } from '@lody/shared/plugins/digest';
+import {
+  pluginInspectionSchema,
+  type PluginMachineRequest,
+  type PluginMachineResult,
+} from '@lody/shared/plugins/machine-rpc';
+import { createHash, randomUUID, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile, rm, readdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -31,8 +37,13 @@ const request = z.discriminatedUnion('action', [
   }),
   z.strictObject({ action: z.literal('list') }),
   z.strictObject({
-    action: z.enum(['disable', 'reload', 'rollback', 'logs']),
+    action: z.enum(['disable', 'reload', 'rollback', 'logs', 'inspect']),
     pluginId: pluginIdSchema,
+  }),
+  z.strictObject({
+    action: z.enum(['enable', 'configure-many']),
+    pluginId: pluginIdSchema,
+    changes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   }),
   z.strictObject({
     action: z.literal('configure'),
@@ -44,10 +55,21 @@ const request = z.discriminatedUnion('action', [
 type Item = z.infer<typeof installation>;
 type Request = z.infer<typeof request>;
 const io = <T>(fn: () => Promise<T>) => Effect.tryPromise({ try: fn, catch: (e) => e });
+export interface VerifiedPluginGrant {
+  createSession?: () => Promise<Extract<PluginMachineResult, { type: 'plugin/session-create' }>>;
+  userId: string;
+  machineOwner: boolean;
+  projectId?: string;
+  sessionId?: string;
+}
 export class Registry extends Context.Service<
   Registry,
   {
     start: Effect.Effect<void, unknown>;
+    machineRpc: (
+      request: PluginMachineRequest,
+      actor: VerifiedPluginGrant
+    ) => Effect.Effect<PluginMachineResult, unknown>;
     dispatch: (raw: unknown) => Effect.Effect<Record<string, unknown>, unknown>;
   }
 >()('lody/plugins/Registry') {}
@@ -55,7 +77,8 @@ export function registryLayer(
   root: string,
   workspaceId: string,
   machineId: string,
-  warn: (m: string) => void
+  warn: (m: string) => void,
+  vault?: import('../plugin-machine-config').MachineConfigVault
 ) {
   return Layer.effect(
     Registry,
@@ -133,8 +156,19 @@ export function registryLayer(
         const b = item.current,
           pluginId = b.manifest.id,
           dataDir = join(root, 'data', pluginId);
+        for (const [key, field] of Object.entries(b.manifest.config ?? {})) {
+          if (
+            field.scope === 'client' &&
+            field.required &&
+            field.default === undefined &&
+            !Object.hasOwn(item.preferences ?? {}, key)
+          )
+            return yield* Effect.fail(
+              new MissingPluginConfiguration(`Missing required configuration: ${key}`)
+            );
+        }
         const config = yield* io(() =>
-          machineConfig(b.manifest, workspaceId, machineId).resolve(item.preferences)
+          machineConfig(b.manifest, workspaceId, machineId, vault).resolve(item.preferences)
         );
         yield* io(() => mkdir(dataDir, { recursive: true, mode: 0o700 }));
         yield* host.reload({ ...b, pluginId, dataDir, workspaceId, machineId, config });
@@ -178,6 +212,33 @@ export function registryLayer(
           const old = items.get(id);
           if (!old && r.action !== 'link')
             return yield* Effect.fail(new Error('Plugin not installed'));
+          if (r.action === 'inspect') {
+            const item = old!,
+              manifest = item.current.manifest;
+            const status = host.inspect(id);
+            const preferences = Object.fromEntries(
+              Object.entries(item.preferences ?? {}).filter(([k]) => {
+                const f = manifest.config?.[k];
+                return f && f.type !== 'secret' && f.scope !== 'machine';
+              })
+            );
+            return {
+              ...status,
+              lifecycle: !item.enabled
+                ? 'Disabled'
+                : item.pendingConfiguration
+                  ? 'PendingConfiguration'
+                  : status.lifecycle,
+              manifest,
+              clientDigest: item.current.clientDigest,
+              preferences,
+              configured: yield* io(() =>
+                machineConfig(manifest, workspaceId, machineId, vault).configured(preferences)
+              ),
+              logs: (yield* host.logs(id)).slice(-500),
+              diagnostics: diagnostics.has(id) ? [diagnostics.get(id)!] : [],
+            };
+          }
           if (r.action === 'logs')
             return {
               logs: [
@@ -189,18 +250,30 @@ export function registryLayer(
           if (r.action === 'disable') {
             yield* host.disable(id);
             item = { ...old!, enabled: false, pendingConfiguration: false };
-          } else if (r.action === 'configure') {
-            const field = Object.entries(old!.current.manifest.config ?? {}).find(
-              ([k]) => k === r.key
-            )?.[1];
-            if (!field) return yield* Effect.fail(new Error('Unknown config field'));
-            item = { ...old! };
-            if (field.type === 'secret' || field.scope === 'machine')
-              yield* io(() =>
-                machineConfig(item.current.manifest, workspaceId, machineId).set(r.key, r.value)
-              );
-            else item.preferences = { ...item.preferences, [r.key]: valueFor(field, r.value) };
-            if (!item.pendingConfiguration || !item.enabled) {
+          } else if (
+            r.action === 'configure' ||
+            r.action === 'configure-many' ||
+            r.action === 'enable'
+          ) {
+            item = { ...old!, enabled: r.action === 'enable' || old!.enabled };
+            const manifest = item.current.manifest;
+            const updates =
+              r.action === 'configure' ? [[r.key, r.value] as const] : Object.entries(r.changes);
+            const validated = yield* Effect.try(() =>
+              updates.map(([key, value]) => {
+                const field = Object.entries(manifest.config ?? {}).find(([k]) => k === key)?.[1];
+                if (!field) throw new Error('Unknown config field');
+                return { key, field, value: valueFor(field, value) };
+              })
+            );
+            for (const { key, field, value } of validated) {
+              if (field.type === 'secret' || field.scope === 'machine')
+                yield* io(() =>
+                  machineConfig(manifest, workspaceId, machineId, vault).set(key, value)
+                );
+              else item.preferences = { ...item.preferences, [key]: value };
+            }
+            if (!item.enabled || (r.action === 'configure' && !item.pendingConfiguration)) {
               yield* commit(id, item);
               return { pluginId: id };
             }
@@ -283,8 +356,22 @@ export function registryLayer(
             (e as NodeJS.ErrnoException).code === 'ENOENT' ? Effect.succeed('[]') : Effect.fail(e)
           )
         );
-        for (const item of installation.array().parse(JSON.parse(raw)))
+        for (const item of installation.array().parse(JSON.parse(raw))) {
+          if (
+            vault &&
+            [item.current, item.previous].some(
+              (g) =>
+                g &&
+                (dirname(g.directory) !== generations ||
+                  !/^[a-f0-9-]{36}$/.test(basename(g.directory)) ||
+                  (g.machineEntry !== undefined &&
+                    (!g.manifest.machine ||
+                      g.machineEntry !== join(g.directory, g.manifest.machine))))
+            )
+          )
+            return yield* Effect.fail(new Error('Plugin generation outside identity custody'));
           items.set(item.current.manifest.id, item);
+        }
         for (const entry of yield* io(() => readdir(generations)).pipe(
           Effect.catch(() => Effect.succeed([] as string[]))
         ))
@@ -320,6 +407,134 @@ export function registryLayer(
       });
       return Registry.of({
         start,
+        machineRpc: Effect.fnUntraced(function* (r, actor): Effect.fn.Return<
+          PluginMachineResult,
+          unknown
+        > {
+          if (!actor.userId || r.workspaceId !== workspaceId || r.machineId !== machineId)
+            return yield* Effect.fail(new Error('Invalid plugin target'));
+          if (r.method === 'plugin/catalog') {
+            const installations = [];
+            for (const [id, item] of items) {
+              const inspection = actor.machineOwner
+                ? yield* change({ action: 'inspect', pluginId: id }, id).pipe(
+                    Effect.map((value) => pluginInspectionSchema.parse(value)),
+                    Effect.catch(() => Effect.succeed(undefined))
+                  )
+                : undefined;
+              installations.push({
+                manifest: item.current.manifest,
+                enabled: item.enabled && !item.pendingConfiguration,
+                clientDigest: item.current.clientDigest,
+                devSessionNonce: actor.machineOwner ? sessions.get(id) : undefined,
+                inspection,
+              });
+            }
+            return { type: r.method, installations };
+          }
+          const id = r.params.pluginId;
+          const item = items.get(id);
+          if (!item) return yield* Effect.fail(new Error('Plugin unavailable'));
+          if (r.method === 'plugin/control') {
+            if (!actor.machineOwner) return yield* Effect.fail(new Error('Owner required'));
+            const t = r.params;
+            return yield* serialize(
+              id,
+              Effect.gen(function* () {
+                if (items.get(id)?.current.clientDigest !== t.clientDigest)
+                  return yield* Effect.fail(new Error('Plugin generation changed'));
+                if (t.action !== 'inspect') {
+                  const cmd =
+                    t.action === 'enable' || t.action === 'configure-many'
+                      ? { action: t.action, pluginId: id, changes: t.changes ?? {} }
+                      : { action: t.action, pluginId: id };
+                  yield* change(cmd, id);
+                }
+                return {
+                  type: 'plugin/control' as const,
+                  inspection: pluginInspectionSchema.parse(
+                    yield* change({ action: 'inspect', pluginId: id }, id)
+                  ),
+                };
+              })
+            );
+          }
+          if (!item.enabled || item.pendingConfiguration)
+            return yield* Effect.fail(new Error('Plugin disabled'));
+          if (r.method === 'plugin/bundle-chunk') {
+            if (r.params.clientDigest !== item.current.clientDigest)
+              return yield* Effect.fail(new Error('Stale bundle'));
+            const bytes = yield* io(() =>
+              packClientBundle(item.current.manifest, (p) =>
+                readFile(join(item.current.directory, p))
+              )
+            );
+            const offset = r.params.offset;
+            if (
+              !bytes ||
+              createHash('sha256').update(bytes).digest('hex') !== r.params.clientDigest
+            )
+              return yield* Effect.fail(new Error('Stale bundle'));
+            if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length)
+              return yield* Effect.fail(new Error('Invalid bundle offset'));
+            return {
+              type: r.method,
+              base64: Buffer.from(
+                bytes.subarray(offset, offset + PLUGIN_BUNDLE_CHUNK_BYTES)
+              ).toString('base64'),
+              totalBytes: bytes.length,
+            };
+          }
+          if (r.method === 'plugin/session-create') {
+            const { scope, target, clientDigest } = r.params;
+            if (
+              !actor.createSession ||
+              clientDigest !== item.current.clientDigest ||
+              !item.current.manifest.client ||
+              target.workspaceId !== workspaceId ||
+              target.machineId !== machineId ||
+              target.sessionId ||
+              (scope === 'machine'
+                ? !actor.machineOwner || target.projectId !== undefined
+                : !actor.projectId || actor.projectId !== target.projectId)
+            )
+              return yield* Effect.fail(new Error('Plugin create forbidden'));
+            return yield* io(actor.createSession);
+          }
+          const { descriptorId, scope, target, input } = r.params;
+          if (
+            target.workspaceId !== workspaceId ||
+            target.machineId !== machineId ||
+            (scope === 'machine' &&
+              (!actor.machineOwner || target.projectId || target.sessionId)) ||
+            (scope === 'project' &&
+              (!actor.projectId || target.projectId !== actor.projectId || target.sessionId)) ||
+            (scope === 'session' &&
+              (!actor.sessionId ||
+                target.sessionId !== actor.sessionId ||
+                target.projectId !== actor.projectId))
+          )
+            return yield* Effect.fail(new Error('Plugin scope forbidden'));
+          const kind =
+            r.method === 'plugin/query'
+              ? 'query'
+              : r.method === 'plugin/mutate'
+                ? 'mutation'
+                : r.method === 'plugin/attachment-search'
+                  ? 'attachment-search'
+                  : 'attachment-resolve';
+          if (!host.inspect(id).registrations.includes(`${kind}: ${descriptorId}`))
+            return yield* Effect.fail(new Error('Plugin handler unavailable'));
+          const data = yield* host.invoke(id, {
+            kind,
+            descriptorId,
+            scope,
+            target,
+            input,
+            actorUserId: actor.userId,
+          });
+          return { type: r.method, data: z.json().parse(data) };
+        }),
         dispatch: Effect.fnUntraced(function* (raw: unknown) {
           const r = request.parse(raw);
           if (r.action === 'list')

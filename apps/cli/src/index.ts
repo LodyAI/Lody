@@ -86,6 +86,10 @@ program
   .name('lody')
   .description('Lody Agent CLI tool for managing remote command execution')
   .version(version, '-v, --version', 'display version number')
+  .option('--safe-mode', 'Start without loading machine plugins')
+  .on('option:safe-mode', () => {
+    process.env.LODY_PLUGIN_SAFE_MODE = '1';
+  })
   .enablePositionalOptions();
 
 if (registerUserCommands) {
@@ -106,6 +110,7 @@ export default program;
 void (async () => {
   try {
     const userArgs = process.argv.slice(2);
+    if (userArgs.length === 1 && userArgs[0] === '--safe-mode') userArgs.push('start');
 
     // Handle case where no command is provided
     if (!userArgs.length) {

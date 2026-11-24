@@ -1,3 +1,4 @@
+import { ClientPluginHostProvider } from '../plugins/client-host-provider';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { onIpcEvent } from '@/lib/electron-ipc-client';
@@ -178,6 +179,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const currentUser = useAtomValue(userAtom);
   const retirements = useRef(createWorkspaceRuntimeRetirements());
   const runtime = useAtomValue(runtimeAtom);
+  const [pluginAdmission, setPluginAdmission] = useState<{
+    runtime: NonNullable<typeof runtime>;
+    workspaceId: string;
+    workspaceSlug: string;
+    accountId: string | null;
+    genesis?: string;
+    signal: AbortSignal;
+  } | null>(null);
   const setRuntime = useSetAtom(runtimeAtom);
   const setRuntimeInitFailure = useSetAtom(workspaceRuntimeInitFailureAtom);
   const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
@@ -693,6 +702,53 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       readProof();
     };
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
+    let pluginLease: AbortController | undefined;
+    const publishPluginAdmission = () => {
+      if (
+        !workspaceRuntime ||
+        pluginLease ||
+        initializationAbort.signal.aborted ||
+        !(
+          isLocalPlatform ||
+          verifiedOrdinary ||
+          (encryptedAccess && localIdentity && nativeHasUsableKey)
+        )
+      )
+        return;
+      const identity = platform.identity.session.get();
+      if (
+        !isLocalPlatform &&
+        (identity.status === 'unauthenticated' ||
+          (identity.status === 'authenticated' && identity.user.id !== accountId))
+      )
+        return;
+      pluginLease = new AbortController();
+      const signal = AbortSignal.any([pluginLease.signal, initializationAbort.signal]);
+      setPluginAdmission({
+        runtime: workspaceRuntime,
+        workspaceId: effectiveWorkspaceId,
+        workspaceSlug,
+        accountId,
+        genesis: localIdentity?.genesisHash,
+        signal,
+      });
+    };
+    // A logout and new login can be batched into one React render. Fence the old
+    // installation at the identity notification, not merely on the next commit.
+    const stopPluginIdentity = isLocalPlatform
+      ? () => {}
+      : platform.identity.session.subscribe(() => {
+          const identity = platform.identity.session.get();
+          if (
+            identity.status === 'unauthenticated' ||
+            (identity.status === 'authenticated' && identity.user.id !== accountId)
+          ) {
+            pluginLease?.abort();
+            pluginLease = undefined;
+            setPluginAdmission(null);
+          } else if (identity.status === 'authenticated') publishPluginAdmission();
+        });
+    initializationAbort.signal.addEventListener('abort', stopPluginIdentity, { once: true });
     let disposal: Promise<void> | null = null;
     let contentDisposal: Promise<void> | undefined;
     let contentClosed = false,
@@ -710,10 +766,23 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let nativeRefreshAgain = false;
     let nativeLedgerStatus: import('@lody/platform').E2eeRuntimeStatus | undefined;
     let unsubscribeNativeLedger: (() => void) | undefined;
+    const matchesNativeIdentity = (status: import('@lody/platform').E2eeRuntimeStatus) => {
+      if (
+        localIdentity &&
+        (status.genesisHash !== localIdentity.genesisHash ||
+          status.signingPublicKey !== localIdentity.signingPublicKey)
+      ) {
+        retire();
+        retryAdmission((value) => value + 1);
+        return false;
+      }
+      return true;
+    };
     const acceptStatus = async (status: import('@lody/platform').E2eeRuntimeStatus) => {
       const native = encryptedRuntime;
       if (!native || !nativeLease || disposed || retired) return;
       const leased = nativeLease;
+      if (!matchesNativeIdentity(status)) return;
       nativeLedgerStatus = status;
 
       encryptedAccess?.updateStatus(status);
@@ -761,7 +830,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // Reception failure stays retryable. Local edits remain intact; new
           // seals still require the verified current epoch key.
           try {
-            encryptedAccess?.updateStatus(await native.status(leased));
+            const status = await native.status(leased);
+            if (!disposed && !retired && matchesNativeIdentity(status))
+              encryptedAccess?.updateStatus(status);
           } catch {
             /* The next explicit/reconnect refresh can retry. */
           }
@@ -902,6 +973,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         admissionFailed = false;
         verifiedOrdinary = true;
         plaintextAdmission.resolve();
+        publishPluginAdmission();
         if (recovering && workspaceRuntime && tokenRef.current)
           void workspaceRuntime.setAuthToken(tokenRef.current).catch((error: unknown) => {
             logRuntimeOperationError('resume remote sync after content admission', error);
@@ -1007,6 +1079,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const retire = () => {
       if (retired) return;
       retired = true;
+      setPluginAdmission(null);
       initializationAbort.abort(new Error('Runtime disposed'));
       setRuntime(null);
       setRuntimeInitializing(false);
@@ -1283,6 +1356,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return;
         }
         setRuntime(workspaceRuntime);
+        publishPluginAdmission();
         // Local runtime (IndexedDB-backed Loro repo) is ready — unblock UI
         // rendering immediately. WebSocket sync state is tracked separately
         // via lodyControlConnectionStateAtom.
@@ -1332,6 +1406,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       unsubscribeLedgerChange();
       unsubscribeAccessLost();
       initializationAbort.abort();
+      setPluginAdmission(null);
       setRuntime(null);
       setControlConnectionState('idle');
       // Reset to true for next initialization cycle
@@ -1430,7 +1505,24 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           onRetry={hostIdentityWait.retry}
         />
       )}
-      {children}
+      <ClientPluginHostProvider
+        admission={
+          pluginAdmission &&
+          pluginAdmission.runtime === runtime &&
+          pluginAdmission.accountId === accountId &&
+          pluginAdmission.workspaceSlug === workspaceSlug &&
+          pluginAdmission.workspaceId === effectiveWorkspaceId &&
+          !pluginAdmission.signal.aborted &&
+          !savedMode.error &&
+          (!verifiedDescriptor ||
+            !isEncryptedDescriptor(verifiedDescriptor) ||
+            pluginAdmission.genesis === verifiedDescriptor.genesisHash)
+            ? pluginAdmission
+            : null
+        }
+      >
+        {children}
+      </ClientPluginHostProvider>
       <SessionPendingSendsHost runtime={runtime} />
     </>
   );

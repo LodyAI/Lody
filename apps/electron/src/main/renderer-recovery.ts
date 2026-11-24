@@ -80,11 +80,17 @@ export function clearMountWatchdog(window: BrowserWindow): void {
   }
 }
 
-function loadTarget(window: BrowserWindow, target: ReloadTarget): Promise<void> {
+export function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promise<void> {
+  const safeMode = process.argv.includes('--safe-mode')
   if (target.type === 'url') {
-    return window.loadURL(target.url)
+    const url = new URL(target.url)
+    if (safeMode) url.searchParams.set('safeMode', '1')
+    return window.loadURL(url.href)
   }
-  return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
+  return window.loadFile(target.filePath, {
+    hash: target.hash,
+    ...(safeMode ? { query: { safeMode: '1' } } : {})
+  })
 }
 
 export function requestRendererReload(
@@ -96,13 +102,13 @@ export function requestRendererReload(
   const wasInRecovery = state.inRecovery
   state.hasNotifiedMounted = false
   state.inRecovery = false
-  if (options.ignoreCache && !wasInRecovery) {
+  if (options.ignoreCache && !wasInRecovery && !process.argv.includes('--safe-mode')) {
     window.webContents.reloadIgnoringCache()
     return
   }
   const target = state.reloadTarget
   if (target) {
-    void loadTarget(window, target).catch((error) => {
+    void loadRendererTarget(window, target).catch((error) => {
       console.error('[Electron] Failed to reload renderer', error)
     })
     return

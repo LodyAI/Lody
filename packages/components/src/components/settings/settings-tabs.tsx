@@ -48,6 +48,7 @@ export type SettingsTabId =
   | 'ai-usage'
   | 'billing'
   | 'data'
+  | 'plugins'
   | 'about';
 
 export type SettingsPath =
@@ -70,6 +71,7 @@ export type SettingsPath =
   | '/$workspaceName/settings/ai-usage'
   | '/$workspaceName/settings/billing'
   | '/$workspaceName/settings/data'
+  | '/$workspaceName/settings/plugins'
   | '/$workspaceName/settings/about';
 
 export type SettingsTabConfig = {
@@ -249,6 +251,14 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     path: '/$workspaceName/settings/data',
   },
   {
+    id: 'plugins',
+    section: 'workspace',
+    labelKey: 'settings.tabs.plugins',
+    descriptionKey: 'settings.categories.plugins.description',
+    icon: Plug,
+    path: '/$workspaceName/settings/plugins',
+  },
+  {
     id: 'about',
     section: 'other',
     labelKey: 'settings.tabs.about',
@@ -295,6 +305,7 @@ export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
     ['/settings/ai-usage', 'ai-usage'],
     ['/settings/stats', 'ai-usage'],
     ['/settings/billing', 'billing'],
+    ['/settings/plugins', 'plugins'],
     ['/settings/about', 'about'],
   ];
   return suffixes.find(([suffix]) => pathname.endsWith(suffix))?.[1] ?? null;

@@ -1725,6 +1725,73 @@ describe('useSessionActions', () => {
     expect(tree.metaRepo.getSession(root.id)?.lastReadAt).toBeGreaterThanOrEqual(wokeAt);
   });
 
+  it('plugin create signs and activates exactly the reserved initial turn and fails closed without its device signer', async () => {
+    const { bindClientSessionCreate } = await import('../src/plugins/client-session-create');
+    const { encryptedDispatchSigner } = await import('./helpers/encrypted-dispatch-signer');
+    const id = crypto.randomUUID() as SessionId;
+    const meta = existingSession(id);
+    const metadata = createSessionMetaRepo([meta]);
+    const runtime = createRuntime({repo:metadata.repo});
+    const signer = encryptedDispatchSigner();
+    Object.assign(runtime,{contentMode:'e2ee'});
+    const create = bindClientSessionCreate(runtime,meta.userId,runtime.workspaceId,meta.machineId,new AbortController().signal,async()=>({type:'plugin/session-create',sessionId:id,userId:meta.userId,cliType:'builtin',agentType:'codex',createdAt:meta.createdAt,archived:false,role:{snapshot:{id:'reviewer',revision:2,name:'Reviewer',emoji:'R'},prefix:'Review carefully',modeId:'plan'}}));
+    const target = {workspaceId:runtime.workspaceId,machineId:meta.machineId} as import('@lody/plugin-sdk').MachineRef;
+    const request = {requestId:'request',prompt:'hello',skillIds:['review']};
+    await expect(create(target,request)).rejects.toThrow();
+    expect(await readHistory(runtime,id)).toEqual([]);
+    Object.assign(runtime,{prepareEncryptedDispatch:signer.prepareEncryptedDispatch});
+    expect(await Promise.all([create(target,request),create(target,request)])).toEqual([expect.objectContaining({sessionId:id}),expect.objectContaining({sessionId:id})]);
+    await create(target,request);
+    expect(await readHistory(runtime,id)).toEqual([expect.objectContaining({id:signer.signed[0]?.userTurnId,e2eeIntent:expect.any(String)})]);
+    expect(signer.signed[0]?.inputConfig).toMatchObject({prompt:'Review carefully\n\nhello $review',agentRoleId:'reviewer',modeId:'plan'});
+    expect(metadata.getSession(id)?.latestUserMsgId).toBe(signer.signed[0]?.userTurnId);
+  });
+
+  it('plugin queued input stores the signed member input, and refuses an unsigned retry', async () => {
+    const tree = createOpenedSubTree('plugin-send');
+    const meta = {...tree.rootSession,cliType:'builtin',agentType:'codex'} as SessionMeta;
+    tree.metaRepo.setMeta(getSessionRoomId(meta.id),meta);
+    const runtime=createRuntime({repo:tree.metaRepo.repo});
+    const {encryptedDispatchSigner}=await import('./helpers/encrypted-dispatch-signer');
+    const signer=encryptedDispatchSigner();
+    Object.assign(runtime,{contentMode:'e2ee', prepareEncryptedDispatch:signer.prepareEncryptedDispatch});
+    const {executeSessionLifecycle}=await import('../src/commands/session-lifecycle');
+    const actions=await renderActions(runtime);
+    const rows:Record<string,unknown>[]=[];
+    runtime.writer.enqueueSessionMessage=async (_id,row)=>{rows.push(row);};
+    const send=()=>executeSessionLifecycle('sessionSend',{prompt:'hello'},meta,runtime,'synthetic-member',actions,new AbortController().signal);
+    const receipt=await send();
+    expect(receipt).toMatchObject({disposition:'queued'});
+    expect(rows).toEqual([expect.objectContaining({userId:'synthetic-member',userTurnId:signer.signed[0]?.userTurnId,e2eeIntent:expect.any(String)})]);
+    Object.assign(runtime,{prepareEncryptedDispatch:undefined});
+    await expect(send()).rejects.toThrow();
+    expect(rows).toHaveLength(1);
+  });
+
+  it('protected plugin interaction refuses the unsigned permission writer', async () => {
+    const tree = createOpenedSubTree('plugin-approval');
+    const runtime = createRuntime({ repo: tree.metaRepo.repo });
+    Object.assign(runtime, { contentMode: 'e2ee' });
+    const actions = await renderActions(runtime);
+    const { executeSessionLifecycle } = await import('../src/commands/session-lifecycle');
+    await expect(executeSessionLifecycle('sessionRespondInteraction', {
+      requestId: 'test-request', outcome: { outcome: 'cancelled' },
+    }, tree.rootSession, runtime, 'synthetic-member', actions, new AbortController().signal)).rejects.toMatchObject({code:'forbidden'});
+  });
+
+  it('plugin pinning uses the session writer only for the installed machine', async () => {
+    const tree = createOpenedSubTree('plugin-pin');
+    const runtime = createRuntime({ repo: tree.metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const pin = (machine: string) => actions.executePluginSessionCommand(
+      runtime.workspaceId, machine, tree.rootSession.id, 'sessionSetPinned', { pinned: true }, new AbortController().signal
+    );
+    await expect(pin('wrong-machine')).rejects.toMatchObject({ code: 'forbidden' });
+    expect(tree.metaRepo.getSession(tree.rootSession.id)?.isPinned).not.toBe(true);
+    await pin(tree.rootSession.machineId!);
+    expect(tree.metaRepo.getSession(tree.rootSession.id)?.isPinned).toBe(true);
+  });
+
   it('status actions on an opened tree leave archived sub-conversations alone', async () => {
     const tree = createOpenedSubTree('tree-archived');
     const until = Date.now() + 60 * 60_000;

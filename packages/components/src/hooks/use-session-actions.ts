@@ -1,3 +1,9 @@
+import { lifecycleCommandInputs } from '@lody/shared/commands/host-commands';
+import { executeSessionLifecycle } from '../commands/session-lifecycle';
+import { userAtom } from '../atoms';
+import { lodyCommands, type WorkspaceRef } from '@lody/plugin-sdk';
+import { clientPluginEvents } from '../plugins/client-events';
+import { createWorkspaceCommandExecutor } from '../commands/workspace-command-executor';
 import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
 import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
@@ -229,6 +235,18 @@ async function deleteMachineFlockRowsBestEffort(
 }
 
 export type SessionActions = {
+  executePluginSessionCommand: (
+    workspaceId: string,
+    machineId: string,
+    id: SessionId,
+    command: string,
+    input: unknown,
+    signal: AbortSignal
+  ) => Promise<
+    | void
+    | import('@lody/plugin-sdk').SendSessionMessageReceipt
+    | import('@lody/plugin-sdk').SessionRef
+  >;
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
     payload: SessionToCreate,
@@ -1214,48 +1232,88 @@ export function useSessionActions(): SessionActions {
   const runStatusViewCommandRef = useRef(runStatusViewCommand);
   runStatusViewCommandRef.current = runStatusViewCommand;
 
-  const setSessionPinned = useCallback(
-    async (sessionId: SessionId, pinned: boolean) => {
-      await runStatusViewCommand({ type: 'setPinned', sessionId, pinned });
-    },
-    [runStatusViewCommand]
+  const dispatch = useMemo(
+    () =>
+      createWorkspaceCommandExecutor({
+        runStatusViewCommand,
+        markSessionRead,
+        markSessionUnread,
+        updateSessionTitle,
+      }),
+    [runStatusViewCommand, markSessionRead, markSessionUnread, updateSessionTitle]
   );
-
-  const snoozeSession = useCallback(
-    async (sessionId: SessionId, until: number, options?: { includeOpenedSessions?: boolean }) => {
-      await runStatusViewCommand({
-        type: 'snooze',
-        sessionId,
-        until,
-        includeOpened: options?.includeOpenedSessions === true,
-      });
+  const execute = useCallback(
+    async (...args: Parameters<typeof dispatch>) => {
+      await dispatch(...args);
+      if (runtime)
+        clientPluginEvents.publish('ui.command.invoked', {
+          workspace: { workspaceId: String(runtime.workspaceId) } as WorkspaceRef,
+          commandId: args[1],
+        });
     },
-    [runStatusViewCommand]
+    [runtime, dispatch]
   );
-
-  const settleSession = useCallback(
-    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
-      await runStatusViewCommand({
-        type: 'settle',
-        sessionId,
-        includeOpened: options?.includeOpenedSessions === true,
-      });
-    },
-    [runStatusViewCommand]
+  const triage = useMemo<
+    Pick<
+      SessionActions,
+      | 'updateSessionTitle'
+      | 'markSessionRead'
+      | 'markSessionUnread'
+      | 'setSessionPinned'
+      | 'snoozeSession'
+      | 'settleSession'
+      | 'moveSessionToFocus'
+    >
+  >(
+    () => ({
+      updateSessionTitle: (id, title) => execute(id, lodyCommands.sessionUpdateTitle.id, { title }),
+      markSessionRead: (id, at) => execute(id, lodyCommands.sessionMarkRead.id, undefined, at),
+      markSessionUnread: (id) => execute(id, lodyCommands.sessionMarkUnread.id),
+      setSessionPinned: (id, pinned) => execute(id, lodyCommands.sessionSetPinned.id, { pinned }),
+      snoozeSession: (id, until, opts) =>
+        execute(id, lodyCommands.sessionSnooze.id, { until, ...opts }),
+      settleSession: (id, opts) => execute(id, lodyCommands.sessionSettle.id, opts),
+      moveSessionToFocus: (id, opts) => execute(id, lodyCommands.sessionMoveToFocus.id, opts),
+    }),
+    [execute]
   );
-
-  const moveSessionToFocus = useCallback(
-    async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
-      await runStatusViewCommand({
-        type: 'moveToFocus',
-        sessionId,
-        includeOpened: options?.includeOpenedSessions === true,
-      });
-    },
-    [runStatusViewCommand]
-  );
-
   return {
+    ...triage,
+    executePluginSessionCommand: async (workspaceId, machineId, id, command, input, signal) => {
+      signal.throwIfAborted();
+      if (
+        !runtime ||
+        runtime.workspaceId !== workspaceId ||
+        store.get(activeWorkspaceRuntimeAtom) !== runtime
+      )
+        throw Object.assign(Error('Workspace unavailable'), { code: 'forbidden' });
+      const [meta] = await readSessionMetas(id, false);
+      signal.throwIfAborted();
+      if (meta?.machineId !== machineId || store.get(activeWorkspaceRuntimeAtom) !== runtime)
+        throw Object.assign(Error('Session outside installation'), { code: 'forbidden' });
+      if (Object.hasOwn(lifecycleCommandInputs, command)) {
+        await assertCanManageSessions([id]);
+        signal.throwIfAborted();
+        const actor = store.get(userAtom)?.id;
+        if (!actor || store.get(activeWorkspaceRuntimeAtom) !== runtime)
+          throw Object.assign(Error('Authenticated member required'), { code: 'forbidden' });
+        const result = await executeSessionLifecycle(
+          command as keyof typeof lifecycleCommandInputs,
+          input,
+          meta,
+          runtime,
+          actor,
+          { archiveSession, restoreSession, requestSessionCancel },
+          signal
+        );
+        clientPluginEvents.publish('ui.command.invoked', {
+          workspace: { workspaceId } as WorkspaceRef,
+          commandId: command,
+        });
+        return result;
+      }
+      await execute(id, command, input);
+    },
     createSession,
     startSession,
     addSessionHistory,
@@ -1265,21 +1323,14 @@ export function useSessionActions(): SessionActions {
     requestSessionGoal,
     touchSessionActivity,
     updateSessionStatus,
-    updateSessionTitle,
     updateSessionMetadata,
     setSessionTabClosed,
     transferSessionOwner,
-    markSessionRead,
-    markSessionUnread,
     deleteSessions,
     archiveSession,
     setTreeCollaborationStopped,
     restoreSession,
     deleteArchivedSession,
-    setSessionPinned,
     runStatusViewCommand,
-    snoozeSession,
-    settleSession,
-    moveSessionToFocus,
   };
 }

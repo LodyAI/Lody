@@ -791,3 +791,12 @@ lody plugin logs demo
 lody plugin reload demo
 lody plugin disable demo
 ```
+
+如果插件要在本机正在运行的加密工作区中开发，链接时以及后续管理操作都要指定该工作区的 ID：
+
+```sh
+lody plugin link --dev ./demo --encrypted-workspace "$WORKSPACE_ID"
+lody plugin logs demo --encrypted-workspace "$WORKSPACE_ID"
+```
+
+加密工作区不会加载普通本机安装的插件。运行 `lody --safe-mode` 可在不加载机器插件的情况下启动；在 Web 工作区地址中加入 `?safeMode=1`，则当前标签页不会加载插件代码和样式。

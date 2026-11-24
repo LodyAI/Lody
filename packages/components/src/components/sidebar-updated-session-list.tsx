@@ -1,3 +1,4 @@
+import { NativePluginRow } from '../plugins/shell-surfaces';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -1463,6 +1464,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <div className={cn('flex shrink-0 items-center', SIDEBAR_ROW_LINE_CLASS)}>
+          <NativePluginRow kind="trailing" sessionId={item.id} active={showSelectedState} />
           <SidebarRowEndSlot
             sessionId={item.id}
             selected={showSelectedState}
@@ -1791,6 +1793,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
   return (
     <SessionInfoHoverCard
+      extraContent={<NativePluginRow kind="hover" sessionId={item.id} active={showSelectedState} />}
       kind={item.kind}
       author={item.owner ?? undefined}
       title={item.title}

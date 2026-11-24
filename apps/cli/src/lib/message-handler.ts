@@ -1,3 +1,8 @@
+import {
+  isPluginMachineRequest,
+  type PluginMachineRequest,
+  type PluginMachineResult,
+} from '@lody/shared/plugins/machine-rpc';
 import type { MachineStatusResponse } from '@lody/shared';
 import { readManagedOperation } from './managed-daemon-release';
 import type { ManagedDaemonUpgradeOptions } from '@lody/shared';
@@ -652,6 +657,12 @@ function formatLiveActivityUpdatedAt(value: number, nowMs: number): string {
 }
 
 export interface MessageHandlerConfig {
+  pluginRpc?: (
+    request: PluginMachineRequest,
+    actor: import('../plugins/workflow/plugin-registry').VerifiedPluginGrant,
+    signal?: AbortSignal
+  ) => Promise<PluginMachineResult>;
+
   sorbetCredentials?: {
     list: (
       configId: AgentConfigId,
@@ -932,6 +943,7 @@ export class MessageHandler {
   private executionService: SessionExecutionService;
   /** Encrypted workspaces only: claims, derivation origins and agent-control grants. */
   private readonly encryptedExecution?: EncryptedAgentExecution;
+  private readonly pluginRpc?: MessageHandlerConfig['pluginRpc'];
   private readonly sorbetCredentials?: MessageHandlerConfig['sorbetCredentials'];
   private providerSetupManager: ProviderSetupManager;
   private previewService: PreviewService;
@@ -3325,6 +3337,7 @@ export class MessageHandler {
     config: MessageHandlerConfig
   ) {
     this.sessionManager = sessionManager;
+    this.pluginRpc = config.pluginRpc;
     this.sorbetCredentials = config.sorbetCredentials;
     this.encryptedAttachments = config.encryptedWorkspace === true;
     // Create a child logger with workspace context for file logging
@@ -4936,6 +4949,11 @@ export class MessageHandler {
       return;
     }
     this.archiveInFlight.add(sessionId);
+    try {
+      this.workspaceDocument.releaseArchivedPluginSession(sessionId);
+    } catch (error) {
+      this.logger.warn(`Failed to release plugin business key: ${formatErrorMessage(error)}`);
+    }
     try {
       await this.releaseArchivedSessionRuntime(sessionId);
     } catch (error) {
@@ -7853,11 +7871,175 @@ export class MessageHandler {
     return downloadLocalAttachment(request, this.machineId);
   }
 
+  async handlePluginMachineRpc(
+    request: PluginMachineRequest,
+    userId: string,
+    machineOwner: boolean,
+    signal?: AbortSignal,
+    scopeGrant?: { projectId?: string; sessionId?: string },
+    isCurrent?: () => boolean
+  ): Promise<LocalMachineRpcResponse> {
+    if (
+      !userId ||
+      request.workspaceId !== this.workspaceId ||
+      request.machineId !== this.machineId ||
+      request.ownerSessionId ||
+      signal?.aborted
+    )
+      return { ok: false, code: 'forbidden', error: 'Plugin request forbidden' };
+    if (Buffer.byteLength(JSON.stringify(request)) > 262144)
+      return { ok: false, code: 'validation_failed', error: 'Plugin request exceeds 256 KiB' };
+    if (
+      'scope' in request.params &&
+      (request.params.target.machineId !== this.machineId ||
+        request.params.target.workspaceId !== this.workspaceId ||
+        (!machineOwner && request.params.scope === 'machine'))
+    )
+      return { ok: false, code: 'forbidden', error: 'Plugin target forbidden' };
+    if (!this.pluginRpc) return { ok: false, error: 'Plugin host unavailable' };
+    return {
+      ok: true,
+      result: await this.pluginRpc(
+        request,
+        {
+          ...scopeGrant,
+          userId,
+          machineOwner,
+          ...(request.method === 'plugin/session-create'
+            ? {
+                createSession: async () => {
+                  signal?.throwIfAborted();
+                  const p = request.params;
+                  if (
+                    p.target.sessionId ||
+                    (p.scope === 'machine'
+                      ? !machineOwner || p.target.projectId !== undefined
+                      : !scopeGrant?.projectId || p.target.projectId !== scopeGrant.projectId)
+                  )
+                    throw Error('Plugin create forbidden');
+                  const origin = p.input.originTurn;
+                  for (const ref of [p.input.parentSession, origin?.session]) {
+                    if (!ref) continue;
+                    if (
+                      ref.workspaceId !== this.workspaceId ||
+                      ref.machineId !== this.machineId ||
+                      (!machineOwner && ref.projectId !== scopeGrant?.projectId)
+                    )
+                      throw Error('Plugin session reference forbidden');
+                    const sid = ref.sessionId as SessionId;
+                    const record = await this.workspaceDocument.repo.getDocMeta(
+                      getSessionRoomId(sid)
+                    );
+                    const meta = record?.meta as SessionMeta | undefined;
+                    if (
+                      !meta ||
+                      record?.deleted ||
+                      meta.machineId !== this.machineId ||
+                      (ref.projectId &&
+                        (meta.project?.kind !== 'local' ||
+                          meta.project.localProjectId !== ref.projectId))
+                    )
+                      throw Error('Plugin session reference forbidden');
+                    if (!machineOwner) {
+                      const scope = await this.resolveSessionExecutionScope(sid);
+                      if (
+                        !scope.length ||
+                        !scope.every((project) => project === scopeGrant?.projectId)
+                      )
+                        throw Error('Plugin session reference forbidden');
+                    }
+                  }
+                  if (p.input.skillIds?.length) {
+                    const catalogs = [await this.localProjectControlService.listGlobalSkills()];
+                    if (p.target.projectId) {
+                      const root = await this.sessionManager.resolveLocalProjectRootPath(
+                        p.target.projectId as LocalProjectId
+                      );
+                      if (!root) throw Error('Plugin project unavailable');
+                      catalogs.push(
+                        await this.localProjectControlService.listProjectSkills(
+                          root,
+                          (await import('@lody/shared')).getSkillScanCandidateDirs()
+                        )
+                      );
+                    }
+                    const ids = new Set(
+                      catalogs.flatMap((c) => c.groups.flatMap((g) => g.skills.map((s) => s.id)))
+                    );
+                    if (!p.input.skillIds.every((id) => ids.has(id)))
+                      throw Error('Plugin skill unavailable');
+                  }
+                  if (origin) {
+                    if (!this.encryptedExecution) throw Error('Signed turn origin unavailable');
+                    const ref = {
+                      sessionId: origin.session.sessionId,
+                      userTurnId: origin.userTurnId,
+                    };
+                    const verified = await Effect.runPromise(
+                      this.encryptedExecution.resolveDerivationOrigin(ref)
+                    );
+                    if (
+                      !verified?.origin ||
+                      verified.origin.sessionId !== ref.sessionId ||
+                      verified.origin.userTurnId !== ref.userTurnId ||
+                      (!machineOwner &&
+                        this.executionService.getActiveInvocationContext(ref.sessionId as SessionId)
+                          ?.sourceTurnId !== ref.userTurnId)
+                    )
+                      throw Error('Signed turn origin forbidden');
+                  }
+                  const admitWrite = () => {
+                    signal?.throwIfAborted();
+                    if (isCurrent && !isCurrent()) throw Error('Plugin authority withdrawn');
+                    if (
+                      origin &&
+                      (!isCurrent ||
+                        (!machineOwner &&
+                          this.executionService.getActiveInvocationContext(
+                            origin.session.sessionId as SessionId
+                          )?.sourceTurnId !== origin.userTurnId))
+                    )
+                      throw Error('Signed turn origin forbidden');
+                  };
+                  admitWrite();
+                  return this.workspaceDocument.createClientPluginSession(
+                    p,
+                    userId,
+                    this.machineId,
+                    admitWrite
+                  );
+                },
+              }
+            : {}),
+        },
+        signal
+      ),
+    };
+  }
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated,
     signal?: AbortSignal
   ): Promise<LocalMachineRpcResponse> {
     try {
+      if (isPluginMachineRequest(request)) {
+        const p = request.params;
+        const denied = { ok: false as const, code: 'forbidden', error: 'Unknown plugin target' };
+        if (request.machineId !== this.machineId || request.workspaceId !== this.workspaceId)
+          return denied;
+        let grant: { projectId?: string; sessionId?: string } | undefined;
+        if ('scope' in p && p.scope === 'project') {
+          const id = p.target.projectId as LocalProjectId | undefined;
+          if (!id || !(await this.sessionManager.resolveLocalProjectRootPath(id))) return denied;
+          grant = { projectId: id };
+        } else if ('scope' in p && p.scope === 'session') {
+          const id = p.target.sessionId as SessionId | undefined;
+          if (!id) return denied;
+          const projects = await this.resolveSessionExecutionScope(id);
+          if (p.target.projectId && !projects.includes(p.target.projectId)) return denied;
+          grant = { sessionId: id, projectId: p.target.projectId };
+        }
+        return await this.handlePluginMachineRpc(request, this.userId, true, signal, grant);
+      }
       const result = await this.dispatchLocalMachineRpc(request, signal);
       return { ok: true, result };
     } catch (error) {
@@ -7929,7 +8111,7 @@ export class MessageHandler {
   }
 
   private async dispatchLocalMachineRpc(
-    request: LocalMachineRpcRequestValidated,
+    request: Exclude<LocalMachineRpcRequestValidated, PluginMachineRequest>,
     signal?: AbortSignal
   ): Promise<LocalMachineRpcResult> {
     const assertOwner = async (sessionId: SessionId): Promise<void> => {
@@ -8561,6 +8743,9 @@ export class MessageHandler {
   /** Synced ownership/containment is the accepted UI trust boundary, not a registry. */
   /** Every local project this machine would run a session's work in (encrypted sharing). */
   async resolveSessionExecutionScope(sessionId: SessionId): Promise<readonly string[]> {
+    const entry = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!entry || entry.deleted || entry.meta.machineId !== this.machineId)
+      throw new Error('Unknown session execution target');
     return await this.executionService.encryptedSessionExecutionScope(sessionId);
   }
 

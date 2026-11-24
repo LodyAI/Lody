@@ -41,6 +41,7 @@
     "package:nightly:linux-arm64": "node package-electron.mjs --production --linux AppImage deb --arm64 --publish never"
   },
   "dependencies": {
+    "es-module-lexer": "2.3.2",
     "@better-auth/electron": "catalog:",
     "@convex-dev/better-auth": "catalog:",
     "@devframes/agentic": "catalog:",

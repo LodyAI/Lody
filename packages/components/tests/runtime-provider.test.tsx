@@ -12,6 +12,7 @@ import {
 import { resumeEncryptedWorkspaceCleanup } from '../src/lib/e2ee-member-removal';
 import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
 
+import { useWorkspaceClientPlugins } from '../src/plugins/client-host-provider';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -160,6 +161,7 @@ vi.mock('@/atoms/control-connection', () => ({
   browserOnlineAtom: atom(true),
 }));
 vi.mock('@/lib', () => ({ API_BASE_URL: '' }));
+vi.mock('../src/plugins/catalog-subscriber', () => ({ PluginCatalogSubscriber: () => null }));
 vi.mock('@/lib/local-storage-cache', () => ({
   getCachedWorkspaceId: () => environment.cachedWorkspaceId,
 }));
@@ -257,11 +259,21 @@ describe('RuntimeProvider warm workspace preparation', () => {
       typeof import('../src/providers/create-workspace-runtime')
     >('../src/providers/create-workspace-runtime');
   }, 0);
+  let pluginOwner: ReturnType<typeof useWorkspaceClientPlugins> = null;
+  function PluginOwnerProbe() {
+    const owner = useWorkspaceClientPlugins();
+    React.useLayoutEffect(() => {
+      pluginOwner = owner;
+    }, [owner]);
+    return null;
+  }
   const render = () =>
     act(async () => {
       root.render(
         <Provider store={store}>
-          <RuntimeProvider>{null}</RuntimeProvider>
+          <RuntimeProvider>
+            <PluginOwnerProbe />
+          </RuntimeProvider>
         </Provider>
       );
     });
@@ -610,6 +622,81 @@ describe('RuntimeProvider warm workspace preparation', () => {
     );
   });
 
+  it.each(['genesisHash', 'signingPublicKey'] as const)(
+    'retires plugin trust when native %s changes under the same workspace id',
+    async (field) => {
+      ordinaryCloud();
+      listEncrypted();
+      const original = {
+        genesisHash: '11'.repeat(32),
+        signingPublicKey: '22'.repeat(32),
+        epoch: 0,
+        hasCurrentKey: true,
+        rotationRequired: false,
+      };
+      let current = original;
+      const replacement = Promise.withResolvers<typeof original>();
+      let opened = false;
+      environment.e2eeWorkspaces!.describe = async () => encryptedDescriptor('local:workspace');
+      environment.e2eeWorkspaces!.runtime = {
+        open: async () => {
+          if (opened) return replacement.promise;
+          opened = true;
+          return original;
+        },
+        status: async () => current,
+        refresh: async () => current,
+        close: async () => {},
+      } as unknown as E2eeWorkspaceRuntime;
+      await render();
+      const first = pluginOwner!;
+      expect(first.workspaceId).toBe('local:workspace');
+      const entry: import('../src/plugins/client-host-provider').ClientCatalogInstallation = {
+        workspaceId: first.workspaceId,
+        sourceKey: 'machine:m',
+        pluginId: 'demo',
+        enabled: false,
+        digest: 'f'.repeat(64),
+        dev: {
+          workspaceId: first.workspaceId,
+          machineId: 'm',
+          owner: true,
+          devMode: true,
+          devSessionNonce: 'a'.repeat(32),
+          manifest: {
+            id: 'demo',
+            title: 'Demo',
+            sdk: '^1.0.0',
+            version: '1.0.0',
+            client: 'client.js',
+          },
+        },
+        page: async () => {
+          throw Error('disabled');
+        },
+        registry: () => {
+          throw Error('disabled');
+        },
+      };
+      await act(async () => {
+        await first.update([entry]);
+        await first.trustDev(entry);
+      });
+      expect(first.trustState(entry)).toBe('dev');
+      current = { ...original, [field]: '33'.repeat(32) };
+      await act(async () => notifyE2eeLedgerChanged('local:user', 'local:workspace'));
+      expect(pluginOwner).toBeNull();
+      expect(first.trustState(entry)).toBe(false);
+      expect(first.installations()).toEqual([]);
+      await act(async () => replacement.resolve(current));
+      if (field === 'genesisHash') expect(pluginOwner).toBeNull();
+      else {
+        expect(pluginOwner?.workspaceId).toBe(first.workspaceId);
+        expect(pluginOwner).not.toBe(first);
+        expect(pluginOwner?.trustState(entry)).toBe(false);
+      }
+    }
+  );
   it.each(['success', 'temporary failure'])(
     'keeps the local replica without a key warning after background refresh %s',
     async (outcome) => {
@@ -782,10 +869,12 @@ describe('RuntimeProvider warm workspace preparation', () => {
       } as unknown as E2eeWorkspaceRuntime;
       await render();
       expect(store.get(runtimeAtom)).toBe(prepared);
+      expect(pluginOwner?.workspaceId).toBe('local:workspace');
       await act(async () =>
         rejectRefresh(new Error(`Error invoking remote method 'e2ee.refresh': Error: ${code}`))
       );
       expect(store.get(runtimeAtom)).toBeNull();
+      expect(pluginOwner).toBeNull();
       expect(prepared.disposed).toBe(true);
       expect(closed).toBe(true);
       expect(store.get(workspaceRuntimeInitFailureAtom)).toMatchObject({
