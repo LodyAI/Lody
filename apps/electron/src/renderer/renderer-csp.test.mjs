@@ -59,3 +59,12 @@ void test('renderer entries allow local resource and blob media without opening 
     assert.ok(!mediaSources.includes('https:'))
   }
 })
+
+void test('MCP Apps frame only the dedicated sandbox scheme, never inherited local documents', () => {
+  const frameSources = getDirectiveSources(rendererHtml, 'frame-src')
+  assert.ok(frameSources.includes('lody-mcp-app:'))
+  for (const source of ['blob:', 'data:', "'unsafe-inline'"]) {
+    assert.ok(!frameSources.includes(source))
+  }
+  assert.ok(!getDirectiveSources(rendererHtml, 'script-src').includes("'unsafe-inline'"))
+})

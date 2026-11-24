@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { SessionHistoryContentPatchSchema } from './session-data/history-patches';
 import { BugReportClientLogSchema } from './bug-report';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
+import { McpAppToolCallSchema } from './mcp-app';
 import {
   isLodySubagentSnapshot,
   isLodySubagentProgress,
@@ -3868,6 +3869,7 @@ export const ToolCallMessageSchema = z.object({
   toolName: SharedOptionalStringSchema,
   schedulingTimeZone: SharedOptionalStringSchema,
   recordedAtMs: z.number().optional(),
+  mcpApp: McpAppToolCallSchema.optional(),
   permissionRequest: PermissionRequestInfoSchema.optional(),
 });
 

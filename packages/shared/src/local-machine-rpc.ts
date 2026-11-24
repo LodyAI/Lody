@@ -36,6 +36,7 @@ import {
 import { RpcSecretEnvelopeSchema, RpcSecretPublicKeySchema } from './rpc-secret';
 import { McpAuthenticationResultSchema, McpLocalAuthenticationSchema } from './mcp-authentication';
 import { SESSION_GOAL_ACTIONS } from './goal';
+import { SessionMcpAppRequestSchema, SessionMcpAppResponseSchema } from './mcp-app';
 import {
   CodeCollabV2ErrorSchema,
   CodeCollabV2FileIndexRequestSchema,
@@ -682,6 +683,10 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/mcp-app'),
+    params: SessionMcpAppRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-create'),
     params: SessionPreviewCreateRequestSchema.omit({
       type: true,
@@ -946,6 +951,7 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionPreviewRevokeResponseSchema,
   SessionPreviewStatusResponseSchema,
   SessionGoalResponseSchema,
+  SessionMcpAppResponseSchema,
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,
   SessionDirectoryListResponseSchema,

@@ -26,6 +26,7 @@ the reasoning behind those rules.
 | User rows               | `view.tsx`                                                                                        | Multi-member sender metadata and desktop profile.                                       |
 | Turns                   | `assistant-turn-render-blocks.ts`                                                                 | Activity groups and foldable segments.                                                  |
 | Outline                 | `conversation-outline-*`                                                                          | Round ticks and navigation.                                                             |
+| MCP Apps                | `mcp-app/`                                                                                        | "Opened …" card, sandbox frame, SEP-1865 bridge; never folded while completed.          |
 | Image sharing selection | [`message-selection.tsx`](message-selection.tsx)                                                  | Temporary message selection, drag rectangle, range modifiers, and edge scrolling.       |
 | Chat quotes             | [`message-quote-action.tsx`](message-quote-action.tsx)                                            | Portal action over a retained native prose selection, outside viewport layout.          |
 | Typography              | [`conversation-font-size-classes.ts`](conversation-font-size-classes.ts), `markdown-renderer.tsx` | Shared text roles; explicit preview size and compact tool prose without nested scaling. |

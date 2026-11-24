@@ -89,6 +89,7 @@ const LodyCapabilitiesSchema = z
     worktreeProject: VersionOneSchema.optional(),
     sessionActivity: VersionOneSchema.optional().catch(undefined),
     promptSuggestions: VersionOneSchema.optional().catch(undefined),
+    mcpApps: VersionOneSchema.optional().catch(undefined),
   })
   .partial();
 

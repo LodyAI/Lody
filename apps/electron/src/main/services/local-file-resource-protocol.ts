@@ -5,6 +5,7 @@ import {
   isHtmlPreviewPermissionRequester,
   LocalHtmlPreviewSites
 } from './local-html-preview'
+import { MCP_APP_SANDBOX_SCHEME, respondMcpAppSandbox } from './mcp-app-sandbox'
 
 export const localFileResources = new LocalFileResources()
 export const localHtmlPreviewSites = new LocalHtmlPreviewSites()
@@ -31,13 +32,15 @@ export function registerLocalFileResourceScheme() {
         supportFetchAPI: true,
         stream: true
       }
-    }
+    },
+    { scheme: MCP_APP_SANDBOX_SCHEME, privileges: { standard: true, secure: true } }
   ])
 }
 
 export function installLocalFileResourceProtocol() {
   protocol.handle('lody-resource', (request) => localFileResources.respond(request))
   protocol.handle(HTML_PREVIEW_SCHEME, (request) => localHtmlPreviewSites.respond(request))
+  protocol.handle(MCP_APP_SANDBOX_SCHEME, respondMcpAppSandbox)
   denyHtmlPreviewPermissions()
 }
 

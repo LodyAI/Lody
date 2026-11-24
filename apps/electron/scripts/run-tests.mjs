@@ -35,6 +35,7 @@ export const ELECTRON_TEST_GROUPS = [
       'src/main/ipc/ipc-channel-list.test.mjs',
       'src/main/services/local-file-resource.test.mjs',
       'src/main/services/local-html-preview.test.mjs',
+      'src/main/services/mcp-app-sandbox.test.mjs',
       'src/main/services/local-path-launcher-core.test.mjs',
       'src/main/services/notification-delivery.test.mjs',
       'src/main/services/public-browser-state.test.mjs',

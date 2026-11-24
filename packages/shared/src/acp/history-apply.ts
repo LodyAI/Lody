@@ -10,6 +10,7 @@ import {
   hasAssistantTextTags,
   shouldDedupeHistoryChunk as shouldDedupeChunk,
 } from '../history-stream-text';
+import { parseMcpAppToolCallMeta } from '../mcp-app';
 
 import { parseCodexTerminalCommand, parseCodexTerminalOutput } from './codex-raw';
 import type { AcpSessionNotification } from './schema';
@@ -1026,6 +1027,7 @@ const mergeToolCallMessage = (
         : prev.schedulingTimeZone,
     recordedAtMs: prev.recordedAtMs ?? incoming.recordedAtMs,
     toolName: incoming.toolName ?? prev.toolName,
+    mcpApp: incoming.mcpApp ?? prev.mcpApp,
     activityKind: incoming.activityKind !== undefined ? incoming.activityKind : prev.activityKind,
   };
 };
@@ -1345,6 +1347,8 @@ const buildToolCallMessageForHistory = (
       : undefined,
     schedulingTimeZone: isSchedulingTool ? resolveMachineTimeZone() : undefined,
     activityKind,
+    mcpApp:
+      parseMcpAppToolCallMeta((update as ToolCallUpdateWithMeta)._meta) ?? previousTool?.mcpApp,
   };
 };
 
