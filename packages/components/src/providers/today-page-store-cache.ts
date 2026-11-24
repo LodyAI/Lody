@@ -1,4 +1,4 @@
-import { getTodayDocIdPrefix, parseTodayDocId, type TodayDate } from '@lody/shared';
+import { parseTodayDocId, TODAY_DOC_PREFIX, type TodayDate } from '@lody/shared';
 import type { LoroDoc } from 'loro-crdt';
 import {
   createTodayPageStore,
@@ -54,15 +54,40 @@ export function createTodayPageStoreCache(options: {
   onBackgroundError?: (docId: string, stage: string, error: unknown) => void;
 }): TodayPageStoreCache {
   const { repo } = options;
+  // Cache-level registration index: active while any page is held, opening, or
+  // any member's dates are observed. Keeping this at the cache level (instead
+  // of only inside `observeDates`) ensures a peer's registration arriving while
+  // `openDoc` is in-flight or before `observeDates` mounts still joins the room.
+  const dateListeners = new Map<string, Set<(dates: readonly TodayDate[]) => void>>();
+  const registeredDocs = new Set<string>();
+  let pendingAcquires = 0;
+  let docObservation: { unsubscribe(): void } | null = null;
+
+  const datesForUser = (userId: string): TodayDate[] => {
+    const dates: TodayDate[] = [];
+    for (const docId of registeredDocs) {
+      const page = parseTodayDocId(docId);
+      if (page && page.userId === userId) dates.push(page.date);
+    }
+    return dates.sort().reverse();
+  };
+
+  const emitUser = (userId: string) => {
+    const listeners = dateListeners.get(userId);
+    if (!listeners) return;
+    const dates = datesForUser(userId);
+    for (const listener of listeners) listener(dates);
+  };
+
   const stores = createManagedStoreCache<string, TodayPageStore>({
     releaseDelayMs: options.releaseDelayMs,
     unload: (docId) => repo.unloadDoc(docId),
     create: async (docId) => {
-      const [handle, registered] = await Promise.all([
+      const [handle, registeredFromRepo] = await Promise.all([
         repo.openDoc(docId),
         // A hint only: an unreadable index must not keep the page from opening.
-        // Unregistered pages still register on content, and the date index
-        // marks pages a peer registered.
+        // Unregistered pages still register on content, and the cache-level
+        // observer marks pages a peer registered.
         repo.isRegistered(docId).catch((error: unknown) => {
           options.onBackgroundError?.(docId, 'registered-check', error);
           return false;
@@ -71,7 +96,7 @@ export function createTodayPageStoreCache(options: {
       return createTodayPageStore({
         docId,
         doc: handle.doc,
-        registered,
+        registered: registeredFromRepo || registeredDocs.has(docId),
         join: (signal) => handle.joinRoom(signal),
         register: (meta) => repo.upsertDocMeta(docId, meta),
         setTimer: options.setTimer,
@@ -91,12 +116,56 @@ export function createTodayPageStoreCache(options: {
     if (index >= 0) idle.splice(index, 1);
   };
 
+  const ensureObserving = () => {
+    if (docObservation) return;
+    const observation = repo.observeDocs(
+      (event) => {
+        const page = parseTodayDocId(event.docId);
+        if (!page) return;
+        if (event.exists) {
+          const added = !registeredDocs.has(event.docId);
+          registeredDocs.add(event.docId);
+          stores.peek(event.docId)?.markRegistered();
+          if (added) emitUser(page.userId);
+        } else if (registeredDocs.delete(event.docId)) {
+          emitUser(page.userId);
+        }
+      },
+      { prefix: TODAY_DOC_PREFIX }
+    );
+    docObservation = observation;
+    for (const docId of observation.docIds) {
+      if (!parseTodayDocId(docId)) continue;
+      registeredDocs.add(docId);
+      stores.peek(docId)?.markRegistered();
+    }
+  };
+
+  const maybeStopObserving = () => {
+    if (!docObservation) return;
+    if (dateListeners.size > 0 || held.size > 0 || pendingAcquires > 0) return;
+    docObservation.unsubscribe();
+    docObservation = null;
+    registeredDocs.clear();
+  };
+
   return {
     acquire: async (docId) => {
       forgetIdle(docId);
-      const store = await stores.acquire(docId);
-      held.set(docId, (held.get(docId) ?? 0) + 1);
-      return store;
+      pendingAcquires += 1;
+      ensureObserving();
+      try {
+        const store = await stores.acquire(docId);
+        // Covers registrations that arrived in the microtask between `create`
+        // returning and `stores.peek` observing the settled store, as well as
+        // warm idle stores registered while no observer was active.
+        if (registeredDocs.has(docId)) store.markRegistered();
+        held.set(docId, (held.get(docId) ?? 0) + 1);
+        return store;
+      } finally {
+        pendingAcquires -= 1;
+        maybeStopObserving();
+      }
     },
     releaseRef: (docId) => {
       stores.releaseRef(docId);
@@ -116,38 +185,33 @@ export function createTodayPageStoreCache(options: {
         const oldest = idle.shift();
         if (oldest) void stores.releaseIfIdle(oldest);
       }
+      maybeStopObserving();
     },
     peek: (docId) => stores.peek(docId),
     observeDates: (userId, listener) => {
-      const dates = new Set<TodayDate>();
-      const emit = () => listener([...dates].sort().reverse());
-      const add = (docId: string) => {
-        const page = parseTodayDocId(docId);
-        // Prefix scans also match longer ids (`u1` vs `u1-x`): compare exactly.
-        if (!page || page.userId !== userId || dates.has(page.date)) return false;
-        dates.add(page.date);
-        stores.peek(docId)?.markRegistered();
-        return true;
+      ensureObserving();
+      let listeners = dateListeners.get(userId);
+      if (!listeners) {
+        listeners = new Set();
+        dateListeners.set(userId, listeners);
+      }
+      listeners.add(listener);
+      listener(datesForUser(userId));
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) dateListeners.delete(userId);
+        maybeStopObserving();
       };
-      const remove = (docId: string) => {
-        const page = parseTodayDocId(docId);
-        return Boolean(page && page.userId === userId && dates.delete(page.date));
-      };
-      const observation = repo.observeDocs(
-        (event) => {
-          if (event.exists ? add(event.docId) : remove(event.docId)) emit();
-        },
-        { prefix: getTodayDocIdPrefix(userId) }
-      );
-      for (const docId of observation.docIds) add(docId);
-      emit();
-      return () => observation.unsubscribe();
     },
     releaseIdle: async () => {
       idle.length = 0;
       await stores.releaseIdle();
     },
     disposeAll: async () => {
+      docObservation?.unsubscribe();
+      docObservation = null;
+      registeredDocs.clear();
+      dateListeners.clear();
       idle.length = 0;
       held.clear();
       await stores.disposeAll();
