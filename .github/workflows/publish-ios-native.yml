@@ -1,0 +1,405 @@
+name: Publish native iOS Nightly
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        type: string
+        required: true
+      nightly-version:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+env:
+  NODE_VERSION: 22.23.4
+  NODE_OPTIONS: --max-old-space-size=8192
+  LODY_ENV: production
+jobs:
+  publish-ios:
+    if:
+      github.repository == 'LodyAI/Lody' && github.ref == 'refs/heads/main' && inputs.source-sha == github.sha &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      vars.CLIENT_RELEASES_ENABLED == 'true' && inputs.nightly-version != ''
+    runs-on: xcode-27
+    concurrency:
+      group: mobile-ios-app-store-connect-release
+      cancel-in-progress: false
+    environment: cloud-nightly
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      CONVEX_URL: ${{ vars.LODY_AUTH_URL }}
+      CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL }}
+      CF_WORKER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
+      LODY_ONESIGNAL_APP_ID: ${{ vars.VITE_ONESIGNAL_APP_ID || vars.ONESIGNAL_APP_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      IOS_BUNDLE_ID: ai.lody.mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
+          submodules: recursive
+      - name: Verify Xcode SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcode-select -p
+          iphoneos_sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "iPhoneOS SDK version: ${iphoneos_sdk_version}"
+          if [[ "${iphoneos_sdk_version%%.*}" -lt 26 ]]; then
+            echo "App Store Connect requires iOS 26 SDK or later for iOS uploads."
+            exit 1
+          fi
+      - name: Prepare native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cmake >/dev/null || brew install cmake
+          command -v xcodegen >/dev/null || brew install xcodegen
+          /bin/bash apps/mobile/ios/.github/scripts/ensure-metal-toolchain.sh iphoneos
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: apps/mobile/ios/package.json
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: apps/mobile/ios/pnpm-lock.yaml
+      - name: Install native iOS dependencies
+        working-directory: apps/mobile/ios
+        run: corepack pnpm install --frozen-lockfile
+      - name: Normalize native auth origin
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="${CONVEX_SITE_URL%/}"
+          if [[ "$site_url" == *".convex.cloud" ]]; then
+            site_url="${site_url/.convex.cloud/.convex.site}"
+          fi
+          echo "CONVEX_SITE_URL=${site_url}" >> "$GITHUB_ENV"
+      - name: Generate native assets and project
+        working-directory: apps/mobile/ios
+        run: corepack pnpm prebuild
+      - name: Resolve iOS release version
+        env:
+          NIGHTLY_VERSION: ${{ inputs.nightly-version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node --input-type=module -e "import { mobileNightlyVersion } from './apps/electron/nightly-mobile.mjs'; console.log(mobileNightlyVersion(process.env.NIGHTLY_VERSION).ios)")"
+          test -n "${version}"
+          echo "MOBILE_VERSION_NAME=${version}" >> "$GITHUB_ENV"
+      - name: Validate iOS release configuration
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+          IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64 }}
+          IOS_SHARE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_SHARE_PROVISIONING_PROFILE_BASE64 }}
+          IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_envs=(
+            "CONVEX_URL"
+            "CONVEX_SITE_URL"
+            "CF_WORKER_URL"
+            "LODY_ONESIGNAL_APP_ID"
+            "APPLE_TEAM_ID"
+            "APPLE_API_KEY_P8"
+            "APPLE_API_KEY_ID"
+            "APPLE_API_ISSUER"
+            "IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64"
+            "IOS_DISTRIBUTION_CERTIFICATE_PASSWORD"
+            "IOS_APP_PROVISIONING_PROFILE_BASE64"
+            "IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64"
+            "IOS_SHARE_PROVISIONING_PROFILE_BASE64"
+            "IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64"
+            "IOS_BUNDLE_ID"
+            "MOBILE_VERSION_NAME"
+          )
+          for key in "${required_envs[@]}"; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "Missing required iOS release env: ${key}"
+              exit 1
+            fi
+          done
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_key_dir="${HOME}/.appstoreconnect/private_keys"
+          mkdir -p "${api_key_dir}"
+          api_key_path="${api_key_dir}/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "${APPLE_API_KEY_P8}" > "${api_key_path}"
+          chmod 600 "${api_key_path}"
+          echo "APPLE_API_KEY_PATH=${api_key_path}" >> "$GITHUB_ENV"
+      - name: Resolve iOS build number
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_number="$(node .github/scripts/resolve-ios-app-store-build-number.mjs)"
+          if [[ -z "${build_number}" ]]; then
+            echo "Could not resolve iOS build number"
+            exit 1
+          fi
+          echo "MOBILE_BUILD_NUMBER=${build_number}" >> "$GITHUB_ENV"
+          echo "Resolved iOS version ${MOBILE_VERSION_NAME} build ${build_number}"
+      - name: Prepare iOS signing assets
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_PROVISIONING_PROFILE_BASE64 }}
+          IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64 }}
+          IOS_SHARE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_SHARE_PROVISIONING_PROFILE_BASE64 }}
+          IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keychain_path="${RUNNER_TEMP}/lody-ios-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          certificate_path="${RUNNER_TEMP}/ios_distribution.p12"
+
+          decode_base64_secret() {
+            local secret_name="$1"
+            local secret_value="$2"
+            local output_path="$3"
+            local encoded_path="${output_path}.base64"
+
+            printf '%s' "${secret_value}" |
+              sed -e 's/\\n//g' -e 's/\\r//g' |
+              tr -d '[:space:]' > "${encoded_path}"
+            if [[ ! -s "${encoded_path}" ]]; then
+              echo "${secret_name} is empty after removing whitespace"
+              exit 1
+            fi
+
+            if ! openssl base64 -A -d -in "${encoded_path}" -out "${output_path}"; then
+              rm -f "${encoded_path}" "${output_path}"
+              echo "${secret_name} must contain base64-encoded file contents."
+              echo "Regenerate it with: openssl base64 -A -in <file>"
+              exit 1
+            fi
+            rm -f "${encoded_path}"
+          }
+
+          decode_base64_secret \
+            "IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64" \
+            "${IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64}" \
+            "${certificate_path}"
+          security create-keychain -p "${keychain_password}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${keychain_password}" "${keychain_path}"
+          security import "${certificate_path}" \
+            -k "${keychain_path}" \
+            -P "${IOS_DISTRIBUTION_CERTIFICATE_PASSWORD}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security list-keychains -d user -s "${keychain_path}" login.keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "${keychain_password}" \
+            "${keychain_path}"
+
+          mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
+
+          install_profile() {
+            local secret_name="$1"
+            local encoded_profile="$2"
+            local profile_path="$3"
+            local env_key="$4"
+            local plist_path="${profile_path}.plist"
+            decode_base64_secret "${secret_name}" "${encoded_profile}" "${profile_path}"
+            if ! security cms -D -i "${profile_path}" > "${plist_path}"; then
+              echo "${secret_name} decoded but is not a valid provisioning profile"
+              exit 1
+            fi
+            local uuid
+            uuid="$(/usr/libexec/PlistBuddy -c 'Print UUID' "${plist_path}")"
+            cp "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${uuid}.mobileprovision"
+            cp "${profile_path}" "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles/${uuid}.mobileprovision"
+            echo "${env_key}=${uuid}" >> "$GITHUB_ENV"
+          }
+
+          install_profile \
+            "IOS_APP_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_APP_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/app.mobileprovision" \
+            "IOS_APP_PROFILE_NAME"
+          install_profile \
+            "IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/extension.mobileprovision" \
+            "IOS_EXTENSION_PROFILE_NAME"
+          install_profile \
+            "IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/live-activity-widget.mobileprovision" \
+            "IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME"
+          install_profile \
+            "IOS_SHARE_PROVISIONING_PROFILE_BASE64" \
+            "${IOS_SHARE_PROVISIONING_PROFILE_BASE64}" \
+            "${RUNNER_TEMP}/share.mobileprovision" \
+            "IOS_SHARE_PROFILE_NAME"
+      - name: Generate native project with manual signing
+        working-directory: apps/mobile/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          profiles="$(python3 - <<'PYTHON'
+          import json, os
+          print(json.dumps({
+              'ai.lody.mobile': os.environ['IOS_APP_PROFILE_NAME'],
+              'ai.lody.mobile.share': os.environ['IOS_SHARE_PROFILE_NAME'],
+              'ai.lody.mobile.notification-service': os.environ['IOS_EXTENSION_PROFILE_NAME'],
+              'ai.lody.mobile.LodyLiveActivityWidget': os.environ['IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME'],
+          }))
+          PYTHON
+          )"
+          IOS_PROFILE_MAP="${profiles}" BUILD_NUMBER="${MOBILE_BUILD_NUMBER}" python3 apps/ios/scripts/prebuild-native.py
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MOBILE_VERSION_NAME}" apps/ios/.generated/Lody/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MOBILE_BUILD_NUMBER}" apps/ios/.generated/Lody/Info.plist
+          /bin/bash .github/scripts/verify-ios-build-mode.sh apps/ios
+      - name: Archive iOS app
+        working-directory: apps/mobile/ios/apps/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Lody.xcodeproj \
+            -scheme Lody \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "${RUNNER_TEMP}/Lody.xcarchive" \
+            MARKETING_VERSION="${MOBILE_VERSION_NAME}" \
+            CURRENT_PROJECT_VERSION="${MOBILE_BUILD_NUMBER}" \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+            archive
+      - name: Verify native archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="${RUNNER_TEMP}/Lody.xcarchive/Products/Applications/Lody.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = "$IOS_BUNDLE_ID"
+          for bundle in "$app" "$app"/PlugIns/*.appex; do
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$bundle/Info.plist")" = "$MOBILE_BUILD_NUMBER"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$bundle/Info.plist")" = "$MOBILE_VERSION_NAME"
+          done
+      - name: Export iOS IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          export_options="${RUNNER_TEMP}/ExportOptions.plist"
+          cat > "${export_options}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>ai.lody.mobile</key>
+              <string>${IOS_APP_PROFILE_NAME}</string>
+              <key>ai.lody.mobile.share</key>
+              <string>${IOS_SHARE_PROFILE_NAME}</string>
+              <key>ai.lody.mobile.notification-service</key>
+              <string>${IOS_EXTENSION_PROFILE_NAME}</string>
+              <key>ai.lody.mobile.LodyLiveActivityWidget</key>
+              <string>${IOS_LIVE_ACTIVITY_WIDGET_PROFILE_NAME}</string>
+            </dict>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "${RUNNER_TEMP}/Lody.xcarchive" \
+            -exportPath "${RUNNER_TEMP}/LodyIpa" \
+            -exportOptionsPlist "${export_options}"
+      - name: Verify exported native IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipa_path="$(find "${RUNNER_TEMP}/LodyIpa" -maxdepth 1 -name '*.ipa' -print -quit)"
+          test -n "$ipa_path"
+          verification_directory="${RUNNER_TEMP}/native-ipa-verification"
+          mkdir -p "$verification_directory"
+          /usr/bin/ditto -x -k "$ipa_path" "$verification_directory"
+          /bin/bash apps/mobile/ios/.github/scripts/verify-apple-bundle-linkage.sh "$verification_directory/Payload/Lody.app"
+      - name: Upload iOS IPA artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ format('nightly-ios-{0}-{1}', github.run_id, github.run_attempt) }}
+          path: ${{ runner.temp }}/LodyIpa/*.ipa
+          if-no-files-found: error
+      - name: Wait for same-run SEA verification before Nightly iOS publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/wait-release-gate.mjs
+      - name: Verify exact-version public installer immediately before iOS upload
+        run: node apps/cli/check-installer.mjs . "$DAEMON_CHANNEL" "$DAEMON_EXPECTED_VERSION"
+        env:
+          DAEMON_CHANNEL: nightly
+          DAEMON_EXPECTED_VERSION: ${{ inputs.nightly-version }}
+      - name: Upload iOS build to App Store Connect
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipa_path="$(find "${RUNNER_TEMP}/LodyIpa" -type f -name '*.ipa' | head -n 1)"
+          if [[ -z "${ipa_path}" || ! -f "${ipa_path}" ]]; then
+            echo "No IPA found"
+            exit 1
+          fi
+          xcrun altool --upload-app \
+            --type ios \
+            --file "${ipa_path}" \
+            --apiKey "${APPLE_API_KEY_ID}" \
+            --apiIssuer "${APPLE_API_ISSUER}"
+      - name: Remove iOS signing material
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/lody-ios-signing.keychain-db" || true
+          rm -f "${RUNNER_TEMP}/ios_distribution.p12" "${APPLE_API_KEY_PATH:-}"
+          for profile in app extension share live-activity-widget; do
+            plist="${RUNNER_TEMP}/${profile}.mobileprovision.plist"
+            if [[ -f "$plist" ]]; then
+              uuid="$(/usr/libexec/PlistBuddy -c 'Print UUID' "$plist")"
+              rm -f "${HOME}/Library/MobileDevice/Provisioning Profiles/${uuid}.mobileprovision"
+              rm -f "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles/${uuid}.mobileprovision"
+            fi
+            rm -f "${RUNNER_TEMP}/${profile}.mobileprovision" "$plist"
+          done
+concurrency:
+  group: ${{ format('ios-nightly-{0}', github.run_id) }}
+  cancel-in-progress: false

@@ -29,7 +29,10 @@ automatic.
 
 [`nightly-cloud.yml`](nightly-cloud.yml) and
 [`release-clients.yml`](release-clients.yml) stage the public cloud client migration.
-The five `publish-*.yml` workflows provide commit-pinned single-platform recovery.
+The five existing `publish-*.yml` workflows provide commit-pinned single-platform recovery.
+Nightly iOS uses [`publish-ios-native.yml`](publish-ios-native.yml) to archive the
+pinned native iOS client and upload it to TestFlight. Stable iOS recovery retains
+the Capacitor publisher.
 They remain disabled until `CLIENT_RELEASES_ENABLED=true`. See the
 [integration and cutover guide](../client-releases.md) for A/B dependencies,
 environments, npm OIDC, version reservation and rollback.
