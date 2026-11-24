@@ -69,9 +69,11 @@ const closedFence = `${streamingFence}5)}>Reset</button>
 
 /** The real dispatch path: an unclosed ```genui fence inside markdown. */
 export const InMarkdownStream: Story = {
+  args: { code: streamingFence },
   render: () => <MarkdownRenderer text={streamingFence} isStreaming />,
 };
 
 export const InMarkdownClosed: Story = {
+  args: { code: closedFence },
   render: () => <MarkdownRenderer text={closedFence} />,
 };
