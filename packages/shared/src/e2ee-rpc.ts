@@ -100,6 +100,8 @@ export const E2EE_RPC_POLICIES = {
   'sorbet/providers-delete': machineWrite,
   'sorbet/providers-refresh': machineWrite,
   'sorbet/models-list': machineWrite,
+  'sorbet/host-settings-get': machineWrite,
+  'sorbet/host-settings-update': machineWrite,
   'code-collab/get-file-index': machineWrite,
   'code-collab/save-text': machineWrite,
   'code-collab/open-current-diff': machineWrite,

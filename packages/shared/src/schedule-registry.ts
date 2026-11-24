@@ -129,6 +129,11 @@ export function scheduleOwnSessionId(scheduleId: string, epoch: number): Session
   return uuidV8(['lody.schedule.v1', 'own-session', scheduleId, epoch]) as SessionId;
 }
 
+/** Activity id of the save that applies one edit proposal card: fixed per card, unique across cards. */
+export function scheduleEditProposalActivityId(sessionId: string, proposalId: string): string {
+  return uuidV8(['lody.schedule.v1', 'edit-proposal', sessionId, proposalId]);
+}
+
 function uuidV8(payload: unknown): string {
   // RFC 9562 UUIDv8 with a domain-separated SHA-256 payload.
   const bytes = digest(payload).slice(0, 32).split('');

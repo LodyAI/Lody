@@ -46,9 +46,18 @@ function groupFixture() {
   const editors = new Set(['user']);
   const writes: string[] = [];
   let failRootWrite = false;
+  let listDocCalls = 0;
+  let beforeListDoc: ((call: number) => void) | undefined;
+  let afterUpsertDocMeta: ((id: SessionId) => void) | undefined;
   const repo = {
-    listDoc: async () =>
-      [...meta.values()].map((value) => ({ docId: getSessionRoomId(value.id), meta: value })),
+    listDoc: async () => {
+      listDocCalls += 1;
+      beforeListDoc?.(listDocCalls);
+      return [...meta.values()].map((value) => ({
+        docId: getSessionRoomId(value.id),
+        meta: value,
+      }));
+    },
     getDocMeta: async (room: string) => {
       const value = [...meta.values()].find((row) => getSessionRoomId(row.id) === room);
       return value ? { meta: value } : undefined;
@@ -59,6 +68,7 @@ function groupFixture() {
       if (failRootWrite && value.id === rootId) throw new Error('root persistence failed');
       meta.set(value.id, { ...value, ...patch });
       writes.push(value.id);
+      afterUpsertDocMeta?.(value.id);
     },
     flush: async () => {},
   };
@@ -129,6 +139,12 @@ function groupFixture() {
     failRoot: (value: boolean) => {
       failRootWrite = value;
     },
+    beforeListDoc: (hook: ((call: number) => void) | undefined) => {
+      beforeListDoc = hook;
+    },
+    afterUpsertDocMeta: (hook: ((id: SessionId) => void) | undefined) => {
+      afterUpsertDocMeta = hook;
+    },
   };
 }
 const evaluateAutomationProgram = (
@@ -177,7 +193,7 @@ describe('Automation Session authority', () => {
           auth: { userId: 'user', machineId: 'machine' } as AuthContext,
           workspace: { id: 'workspace' } as WorkspaceSummary,
           ledger,
-          condition: allowed,
+          admission: allowed,
           capacity: allowed,
         });
         const prepared = ledger.update(
@@ -230,7 +246,7 @@ describe('Automation Session authority', () => {
         auth: { userId: 'user', machineId: 'machine' } as AuthContext,
         workspace: { id: 'workspace' } as WorkspaceSummary,
         ledger,
-        condition: allowed,
+        admission: allowed,
         capacity: allowed,
       });
       const wait = ledger.registerWait(
@@ -296,7 +312,7 @@ describe('Automation Session authority', () => {
       auth: { userId: 'user', machineId: 'machine' } as AuthContext,
       workspace: { id: 'workspace' } as WorkspaceSummary,
       ledger,
-      condition: allowed,
+      admission: allowed,
       capacity: allowed,
     });
     const wait = ledger.registerWait(
@@ -450,7 +466,7 @@ describe('Automation Session authority', () => {
         auth: { userId: 'user', machineId: 'machine' } as AuthContext,
         workspace: { id: 'workspace' } as WorkspaceSummary,
         ledger,
-        condition: allowed,
+        admission: allowed,
         capacity: allowed,
       });
       expect(await adapter.authorize(receipt)).toMatchObject({ value: 'yes' });
@@ -581,7 +597,7 @@ describe('Automation Session authority', () => {
         auth: { userId: 'user', machineId: 'machine' } as AuthContext,
         workspace: { id: 'workspace' } as WorkspaceSummary,
         ledger,
-        condition: allowed,
+        admission: allowed,
         capacity: allowed,
       });
       const prepared = ledger.update(
@@ -635,6 +651,67 @@ describe('Automation Session authority', () => {
     expect([...f.meta.values()].every((meta) => !meta.isArchived)).toBe(true);
     expect(f.barriers.size).toBe(0);
   });
+  it('does not archive a target that appeared after the protected group was rechecked', async () => {
+    const f = groupFixture();
+    const lateId = 'late-child' as SessionId;
+    f.beforeListDoc((call) => {
+      if (call !== 3) return;
+      f.meta.set(lateId, {
+        id: lateId,
+        machineId: 'machine',
+        userId: 'user',
+        cliType: 'builtin',
+        agentType: 'synthetic',
+        status: SessionStatusFactory.idle(),
+        isArchived: false,
+        parentSessionId: f.rootId,
+      } as SessionMeta);
+    });
+
+    expect(await f.authority.archive(f.rootId, 'user', allowed)).toEqual({
+      value: 'unknown',
+      reason: 'group_membership_changed',
+    });
+    expect(f.writes).toEqual([]);
+    expect([...f.meta.values()].every((meta) => !meta.isArchived)).toBe(true);
+    expect(f.barriers.size).toBe(0);
+  });
+
+  it('keeps the root unarchived when group membership changes during child persistence', async () => {
+    const f = groupFixture();
+    const lateId = 'late-child-during-write' as SessionId;
+    f.afterUpsertDocMeta((id) => {
+      if (id !== f.childId || f.meta.has(lateId)) return;
+      f.meta.set(lateId, {
+        id: lateId,
+        machineId: 'machine',
+        userId: 'user',
+        cliType: 'builtin',
+        agentType: 'synthetic',
+        status: SessionStatusFactory.idle(),
+        isArchived: false,
+        parentSessionId: f.rootId,
+      } as SessionMeta);
+    });
+
+    expect(await f.authority.archive(f.rootId, 'user', allowed)).toEqual({
+      value: 'unknown',
+      reason: 'group_membership_changed',
+    });
+    expect(f.meta.get(f.childId)?.isArchived).toBe(true);
+    expect(f.meta.get(f.rootId)?.isArchived).toBe(false);
+    expect(f.meta.get(lateId)?.isArchived).toBe(false);
+    expect(f.writes).toEqual([f.childId]);
+    expect(f.barriers.size).toBe(0);
+
+    f.afterUpsertDocMeta(undefined);
+    expect(await f.authority.archive(f.rootId, 'user', allowed)).toMatchObject({ value: 'yes' });
+    expect(f.meta.get(f.childId)?.isArchived).toBe(true);
+    expect(f.meta.get(lateId)?.isArchived).toBe(true);
+    expect(f.meta.get(f.rootId)?.isArchived).toBe(true);
+    expect(f.writes.at(-1)).toBe(f.rootId);
+  });
+
   it('does not report a partially persisted group as archived and can finish it idempotently', async () => {
     const f = groupFixture();
     f.failRoot(true);

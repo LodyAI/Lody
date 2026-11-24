@@ -73,6 +73,7 @@ import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import {
   hasAcceptableSessionMentionTransfer,
+  isSessionMentionDragFrom,
   readSessionMentionDragSessionId,
   registerSessionMentionPointerTarget,
 } from '@/lib/session-mention-drag';
@@ -603,10 +604,11 @@ export function TodayView(props: {
 export type TodayToolbarSurface = 'page' | 'pinned' | 'standalone';
 
 /**
- * The Today toolbar. Full-page and standalone-window rows sit at the window top
- * under its drag strip (so controls must be drag-exempt), and when the sidebar
- * is hidden the main window's leftmost Today surface carries sidebar navigation.
- * A pinned sidebar column is never window-drag chrome.
+ * The Today toolbar. Every surface is a window-top row under a drag strip, so
+ * the row drags (and on macOS double-click zooms) the window and its controls
+ * are drag-exempt; when the sidebar is hidden the main window's leftmost Today
+ * surface carries sidebar navigation. Only rows that can reach the window's
+ * right edge pad for the Windows caption buttons, never the pinned column.
  */
 export function TodayToolbar(props: {
   surface?: TodayToolbarSurface;
@@ -626,21 +628,19 @@ export function TodayToolbar(props: {
     includeDesktopWeb: true,
   });
   const surface = props.surface ?? 'page';
-  const hasDragChrome = surface !== 'pinned';
   const standalone = surface === 'standalone';
-  // All surfaces line up in the window-top row; only full-page and standalone
-  // window headers participate in window drag and caption padding.
-  const exemptClassName = hasDragChrome && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
+  const exemptClassName = dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
     (standalone || !sidebarVisible) &&
     !isNativeAppShell() &&
     isMacOSElectronRenderer() &&
     !fullscreen;
-  const chromeClassName = (
-    hasDragChrome
-      ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
-      : [captionRowPadClass, trafficLightRowPadClass]
-  )
+  const chromeClassName = [
+    dragClass,
+    surface === 'pinned' ? undefined : captionPadClass,
+    captionRowPadClass,
+    trafficLightRowPadClass,
+  ]
     .filter(Boolean)
     .join(' ');
   return (
@@ -895,6 +895,12 @@ export function TodayOutlineSurface(props: {
         // Captured so the node editor never inserts the dragged title as text.
         event.preventDefault();
         event.stopPropagation();
+        // A mention dragged out of Today is meant for a conversation, never a drop here.
+        if (isSessionMentionDragFrom(event.dataTransfer, 'today')) {
+          event.dataTransfer.dropEffect = 'none';
+          controller.leaveExternal();
+          return;
+        }
         event.dataTransfer.dropEffect = 'copy';
         controller.hoverExternal(event.clientX, event.clientY);
       }}
@@ -907,7 +913,9 @@ export function TodayOutlineSurface(props: {
         if (!controller || !hasAcceptableSessionMentionTransfer(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
-        const sessionId = readSessionMentionDragSessionId(event.dataTransfer);
+        const sessionId = isSessionMentionDragFrom(event.dataTransfer, 'today')
+          ? null
+          : readSessionMentionDragSessionId(event.dataTransfer);
         if (sessionId) controller.dropExternal(sessionId, event.clientX, event.clientY);
         else controller.leaveExternal();
       }}

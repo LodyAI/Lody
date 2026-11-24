@@ -82,6 +82,9 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
+import { GenuiSurface } from './genui/genui-surface';
+import { GENU_CATALOG } from './genui/genui-catalog';
+import { remarkGenuiInline } from './genui/remark-genui-inline';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { MarkdownMermaidBlock } from './markdown-mermaid-block';
 import {
@@ -198,15 +201,15 @@ const markdownStyles = stylex.create({
   compactParagraph: { marginBottom: { default: space[1], ':last-child': 0 } },
   list: {
     marginBlock: { default: space[2], ':is(li > ul, li > ol)': space[1] },
-    paddingLeft: { default: 0, ':is(.contains-task-list)': space[3] },
-    listStyleType: { default: 'none', ':is(.contains-task-list)': 'disc' },
+    paddingLeft: 0,
+    listStyleType: 'none',
   },
   listItem: {
     position: 'relative',
     marginTop: { default: 0, ':not(:first-child)': conversation.listItemGap },
     marginBottom: 0,
     paddingBlock: 0,
-    paddingLeft: { default: space[6], ':is(.task-list-item)': 0 },
+    paddingLeft: space[6],
     '::before': {
       position: 'absolute',
       content: "''",
@@ -234,6 +237,13 @@ const markdownStyles = stylex.create({
   },
   compactListItem: { marginTop: { default: 0, ':not(:first-child)': `calc(${space[1]} / 2)` } },
   taskItem: { '::before': { content: 'none' } },
+  taskCheckbox: {
+    position: 'absolute',
+    left: conversation.railInset,
+    top: '0.5lh',
+    transform: 'translateY(-50%)',
+    margin: 0,
+  },
   quote: {
     marginTop: conversation.paragraphGap,
     marginBottom: { default: conversation.paragraphGap, ':last-child': 0 },
@@ -434,8 +444,13 @@ export interface MarkdownPartStyles {
   referenceChip?: stylex.StyleXStyles;
 }
 
-const MarkdownListKindContext = createContext<'unordered' | 'ordered' | 'task'>('unordered');
+const MarkdownListKindContext = createContext<'unordered' | 'ordered'>('unordered');
+const MarkdownTaskItemContext = createContext(false);
 const MarkdownCompactContext = createContext(false);
+
+function hasClassNameToken(className: string | undefined, token: string): boolean {
+  return className?.split(/\s+/).includes(token) ?? false;
+}
 
 function MarkdownListItem({
   node: _node,
@@ -444,20 +459,42 @@ function MarkdownListItem({
 }: ComponentPropsWithoutRef<'li'> & ExtraProps) {
   const kind = useContext(MarkdownListKindContext);
   const compact = useContext(MarkdownCompactContext);
+  const isTaskItem = hasClassNameToken(className, 'task-list-item');
   return (
-    <li
-      {...props}
-      {...withClassName(
-        stylex.props(
-          markdownStyles.listItem,
-          compact && markdownStyles.compactListItem,
-          kind === 'ordered' && markdownStyles.orderedItem,
-          kind === 'task' && markdownStyles.taskItem
-        ),
-        className
-      )}
-    />
+    <MarkdownTaskItemContext.Provider value={isTaskItem}>
+      <li
+        {...props}
+        {...withClassName(
+          stylex.props(
+            markdownStyles.listItem,
+            compact && markdownStyles.compactListItem,
+            !isTaskItem && kind === 'ordered' && markdownStyles.orderedItem,
+            isTaskItem && markdownStyles.taskItem
+          ),
+          className
+        )}
+      />
+    </MarkdownTaskItemContext.Provider>
   );
+}
+
+function MarkdownInput({
+  node: _node,
+  className,
+  type,
+  ...props
+}: ComponentPropsWithoutRef<'input'> & ExtraProps) {
+  const isTaskItem = useContext(MarkdownTaskItemContext);
+  if (isTaskItem && type === 'checkbox') {
+    return (
+      <input
+        {...props}
+        type={type}
+        {...withClassName(stylex.props(markdownStyles.taskCheckbox), className)}
+      />
+    );
+  }
+  return <input {...props} type={type} className={className} />;
 }
 
 const markdownDescendants = stylex.create({
@@ -1101,6 +1138,7 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkLinkifyFilePaths,
   remarkMarkUnclosedFences,
   [remarkMath, { singleDollarTextMath: false }],
+  remarkGenuiInline,
 ] satisfies StreamdownProps['remarkPlugins'];
 const INLINE_MATH_REMARK_PLUGINS = [
   ...MARKDOWN_REMARK_PLUGINS,
@@ -1195,6 +1233,17 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
     return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
+  if (block.language === 'genui') {
+    const offset = node?.position?.start.offset;
+    return (
+      <GenuiSurface
+        code={block.code}
+        streaming={block.isIncomplete}
+        surfaceId={offset === undefined ? undefined : `genui@${offset}`}
+        fallback={<MarkdownFencedCodeBlock {...block} />}
+      />
+    );
+  }
   return <MarkdownFencedCodeBlock {...block} />;
 }
 
@@ -1463,18 +1512,21 @@ const createMarkdownComponents = ({
     </p>
   ),
   ul: ({ node: _node, className, ...props }) => (
-    <MarkdownListKindContext.Provider
-      value={className?.split(' ').includes('contains-task-list') ? 'task' : 'unordered'}
-    >
-      <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+    <MarkdownListKindContext.Provider value="unordered">
+      <MarkdownTaskItemContext.Provider value={false}>
+        <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+      </MarkdownTaskItemContext.Provider>
     </MarkdownListKindContext.Provider>
   ),
   ol: ({ node: _node, className, ...props }) => (
     <MarkdownListKindContext.Provider value="ordered">
-      <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+      <MarkdownTaskItemContext.Provider value={false}>
+        <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+      </MarkdownTaskItemContext.Provider>
     </MarkdownListKindContext.Provider>
   ),
   li: MarkdownListItem,
+  input: MarkdownInput,
   blockquote: ({ node: _node, className, ...props }) => (
     <blockquote {...props} {...withClassName(stylex.props(markdownStyles.quote), className)} />
   ),
@@ -1667,6 +1719,24 @@ const createMarkdownComponents = ({
   // <source> is suppressed since it's only meaningful inside a real browser <picture>.
   source: () => null,
   picture: (props: MarkdownPictureProps) => <>{props.children}</>,
+  ...({
+    'genui-inline': ({ node: hastNode }: { node?: { properties?: Record<string, unknown> } }) => {
+      const tag = hastNode?.properties?.['dataGenuiTag'];
+      const raw = hastNode?.properties?.['dataGenuiProps'];
+      const renderer = typeof tag === 'string' ? GENU_CATALOG[tag] : undefined;
+      let props: Record<string, unknown> | undefined;
+      try {
+        const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+        if (typeof parsed === 'object' && parsed !== null) {
+          props = parsed as Record<string, unknown>;
+        }
+      } catch {
+        props = undefined;
+      }
+      if (!renderer || !props) return null;
+      return <>{renderer(props)}</>;
+    },
+  } as Components),
 });
 
 function ConversationMarkdownImage(props: MarkdownImageProps) {

@@ -319,7 +319,7 @@ class CommandRegistry {
     for (const { command: cmd } of activeRegistrations) {
       const override = this.userOverrides[cmd.id];
       // User overrides drop the platform/runtime filter — they were chosen on THIS device.
-      const entries: ReadonlyArray<string | KeyBinding> =
+      const entries: (string | KeyBinding)[] =
         override !== undefined ? override : (cmd.keybindings ?? []);
       const isOverride = override !== undefined;
 

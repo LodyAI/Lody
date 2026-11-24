@@ -23,6 +23,10 @@ function control(overrides: Record<string, unknown> = {}) {
       refresh: vi.fn(async () => ({ refreshed: [], errors: new Map() })),
       availableModels: vi.fn(async () => []),
     },
+    hostSettings: {
+      get: vi.fn(async () => ({})),
+      update: vi.fn(async (patch) => patch),
+    },
     close: vi.fn(async () => {}),
     ...overrides,
   };
@@ -199,6 +203,29 @@ describe('daemon Sorbet credentials', () => {
       providerId: undefined,
       signal: undefined,
     });
+  });
+
+  it('reads and patches Host settings through Sorbet control', async () => {
+    const document = { getAgentConfigForMachineLaunch: vi.fn(async () => null) };
+    const instance = control({
+      hostSettings: {
+        get: vi.fn(async () => ({ sandboxMode: 'workspace-write' })),
+        update: vi.fn(async (patch) => ({ sandboxMode: 'workspace-write', ...patch })),
+      },
+    });
+    openSorbetControl.mockResolvedValue(instance);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
+    expect(await handler.getHostSettings()).toEqual({ sandboxMode: 'workspace-write' });
+    const patch = { permissionModeCeiling: 'auto' as const };
+    expect(await handler.updateHostSettings(patch)).toEqual({
+      sandboxMode: 'workspace-write',
+      permissionModeCeiling: 'auto',
+    });
+    expect(document.getAgentConfigForMachineLaunch).not.toHaveBeenCalled();
+    expect(instance.hostSettings.get).toHaveBeenCalledWith({ signal: undefined });
+    expect(instance.hostSettings.update).toHaveBeenCalledWith(patch, { signal: undefined });
+    expect(instance.close).toHaveBeenCalledTimes(2);
   });
 
   it('closes control after an operation failure', async () => {

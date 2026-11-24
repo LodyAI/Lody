@@ -24,9 +24,6 @@ import type {
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
-import { registerBuiltInCommands } from '@/lib/commands';
-
-registerBuiltInCommands();
 
 const offlineScope = stylex.create({
   frame: {

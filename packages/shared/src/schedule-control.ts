@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ScheduleEditProposalPatchSchema,
   ScheduleProposalDestinationSchema,
   ScheduleProposalRuleSchema,
   ScheduleProposalTargetSchema,
@@ -65,6 +66,14 @@ export const ScheduleCommandSchema = z.discriminatedUnion('action', [
       rule: ScheduleProposalRuleSchema,
       destination: ScheduleProposalDestinationSchema.optional(),
       target: ScheduleProposalTargetSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('propose_edit'),
+      scheduleId: id,
+      requestId: id,
+      patch: ScheduleEditProposalPatchSchema,
     })
     .strict(),
 ]);

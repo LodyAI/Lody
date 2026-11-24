@@ -1,11 +1,17 @@
 import { join } from 'node:path';
-import { openSorbetControl } from '@sorbetai/control';
+import {
+  openSorbetControl,
+  type SorbetHostSettings,
+  type SorbetHostSettingsUpdate,
+} from '@sorbetai/control';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type {
   SorbetCustomProviderEdit,
   SorbetCustomProviderInput,
 } from '@lody/shared/local-machine-rpc';
+
+export type { SorbetHostSettings, SorbetHostSettingsUpdate };
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 
 /** Resolve identity on the local machine; persisted launch fields never reach this operation. */
@@ -139,6 +145,26 @@ export function createSorbetCredentialsHandler(
       const control = await openSorbetControl({ dataDirectory, signal });
       try {
         return [...(await control.providers.availableModels({ providerId, signal }))];
+      } finally {
+        await control.close();
+      }
+    },
+    /**
+     * Host settings live in the machine's Sorbet data directory, not on any
+     * config, so they read and patch without the per-config credential check.
+     */
+    async getHostSettings(signal?: AbortSignal) {
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        return await control.hostSettings.get({ signal });
+      } finally {
+        await control.close();
+      }
+    },
+    async updateHostSettings(patch: SorbetHostSettingsUpdate, signal?: AbortSignal) {
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        return await control.hostSettings.update(patch, { signal });
       } finally {
         await control.close();
       }

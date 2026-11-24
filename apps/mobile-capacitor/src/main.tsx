@@ -64,7 +64,6 @@ function reportBootFailure(error: unknown): void {
     bootGuard.fail(error);
     return;
   }
-  // No inline guard present (unexpected host / test env): render directly.
   const root = document.getElementById('root');
   if (root) showMobileBootFailure(root, error);
 }
