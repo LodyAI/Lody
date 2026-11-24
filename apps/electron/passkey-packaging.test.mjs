@@ -5,7 +5,13 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
-import { passkeyPackagingPlan, applyPasskeyPackaging } from './passkey-packaging.mjs'
+import { createHash } from 'node:crypto'
+import {
+  passkeyPackagingPlan,
+  applyPasskeyPackaging,
+  passkeyProfileFindings,
+  readProvisioningProfile
+} from './passkey-packaging.mjs'
 import {
   parseBuildArgs,
   resolveElectronVersion,
@@ -112,6 +118,89 @@ for (const arch of ['arm64', 'x64'])
       }
     }
   )
+const signature = {
+  profile: {
+    name: 'Synthetic Developer ID Passkey',
+    expirationDate: '2044-11-19T04:01:46Z',
+    provisionsAllDevices: true,
+    certificateSha256: ['aa'.repeat(32)],
+    entitlements: {
+      'com.apple.application-identifier': 'YTRMX32C99.ai.lody.desktop',
+      'com.apple.developer.team-identifier': 'YTRMX32C99',
+      'com.apple.developer.associated-domains': '*',
+      'keychain-access-groups': ['YTRMX32C99.*']
+    }
+  },
+  signingCertificateSha256: 'aa'.repeat(32),
+  entitlements: {
+    'com.apple.application-identifier': 'YTRMX32C99.ai.lody.desktop',
+    'com.apple.developer.team-identifier': 'YTRMX32C99',
+    'com.apple.developer.associated-domains': ['webcredentials:lody.ai'],
+    'com.apple.security.cs.allow-jit': true
+  },
+  now: new Date('2026-11-25T00:00:00Z')
+}
+test('a signed passkey app is releasable only when its embedded profile authorizes the signature', () => {
+  assert.deepEqual(passkeyProfileFindings(signature), [])
+  const rejected = (change, profile = {}) =>
+    passkeyProfileFindings({
+      ...signature,
+      ...change,
+      profile: { ...signature.profile, ...profile }
+    })
+  // 0.116.0: the profile was issued for another Developer ID certificate of the same team.
+  assert.match(rejected({ signingCertificateSha256: 'bb'.repeat(32) })[0], /signing certificate bb/)
+  assert.match(rejected({}, { expirationDate: '2026-11-24T00:00:00Z' })[0], /expired/)
+  assert.match(rejected({}, { provisionsAllDevices: false })[0], /registered devices/)
+  assert.deepEqual(rejected({}, { entitlements: {} }), [
+    'profile does not grant com.apple.application-identifier',
+    'profile does not grant com.apple.developer.team-identifier',
+    'profile does not grant com.apple.developer.associated-domains'
+  ])
+  const groups = (...values) => rejected({ entitlements: { 'keychain-access-groups': values } })
+  assert.deepEqual(groups('YTRMX32C99.ai.lody.desktop'), [])
+  assert.deepEqual(groups('YTRMX32C99.ai.lody.desktop', 'OTHERTEAM1.shared'), [
+    'profile does not grant keychain-access-groups'
+  ])
+})
+test(
+  'decoded provisioning profiles yield certificate digests, expiry and granted entitlements',
+  { skip: process.platform !== 'darwin' },
+  () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'passkey-profile-test-'))
+    try {
+      const plist = path.join(directory, 'profile.plist')
+      const data = (text) => `<data>${Buffer.from(text).toString('base64')}</data>`
+      writeFileSync(
+        plist,
+        `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
+<key>Name</key><string>Synthetic Developer ID Passkey</string>
+<key>ExpirationDate</key><date>2044-11-19T04:01:46Z</date>
+<key>ProvisionsAllDevices</key><true/>
+<key>DeveloperCertificates</key><array>${data('first certificate')}${data('second certificate')}</array>
+<key>Entitlements</key><dict>
+<key>com.apple.developer.associated-domains</key><string>*</string>
+<key>keychain-access-groups</key><array><string>YTRMX32C99.*</string></array>
+</dict></dict></plist>`
+      )
+      const digest = (text) => createHash('sha256').update(text).digest('hex')
+      assert.deepEqual(readProvisioningProfile(plist), {
+        name: 'Synthetic Developer ID Passkey',
+        expirationDate: '2044-11-19T04:01:46Z',
+        provisionsAllDevices: true,
+        certificateSha256: [digest('first certificate'), digest('second certificate')],
+        entitlements: {
+          'com.apple.developer.associated-domains': '*',
+          'keychain-access-groups': ['YTRMX32C99.*']
+        }
+      })
+      writeFileSync(plist, '<plist version="1.0"><dict/></plist>')
+      assert.deepEqual(readProvisioningProfile(plist).certificateSha256, [])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }
+)
 test('build-passkey-addons resolves the pinned Electron version and local node-gyp binary without network installs', () => {
   const pkg = JSON.parse(
     readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')

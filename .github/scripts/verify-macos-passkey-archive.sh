@@ -40,6 +40,15 @@ for arch in arm64 x64; do
     exit 1
   fi
 
+  # codesign, notarization and Gatekeeper accept an app whose embedded profile does
+  # not authorize its signature; AMFI then kills it at launch on every Mac.
+  node apps/electron/passkey-packaging.mjs "${app}"
+  if [[ "$(uname -m)" == "${macho_arch}" ]] &&
+    ! ELECTRON_RUN_AS_NODE=1 "${app}/Contents/MacOS/Lody" -e 'process.exit(0)'; then
+    echo "macOS refused to launch Lody.app (${arch}); see the amfid and taskgated-helper logs"
+    exit 1
+  fi
+
   addon="${app}/Contents/Resources/passkey_bridge.node"
   if [[ ! -f "${addon}" ]]; then
     echo "Missing Contents/Resources/passkey_bridge.node in ${app}"
