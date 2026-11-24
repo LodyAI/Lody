@@ -308,6 +308,7 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     controlledHome.value = undefined;
     loginShellOverlay.value = {};
     resolvedLoginShellOverlay.value = {};
@@ -318,6 +319,7 @@ describe('Session.createAgent DeepSeek Node prerequisites', () => {
     const root = await mkdtemp(join(tmpdir(), 'lody-session-dsh-node-'));
     roots.push(root);
     controlledHome.value = root;
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '1');
     const bin = join(root, 'Node with spaces');
     await mkdir(bin);
     const node = join(bin, process.platform === 'win32' ? 'node.exe' : 'node');
