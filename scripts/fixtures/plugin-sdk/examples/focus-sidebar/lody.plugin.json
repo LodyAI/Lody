@@ -1,0 +1,8 @@
+{
+  "id": "focus-sidebar",
+  "version": "0.1.0",
+  "sdk": "^1.0.0",
+  "title": "Focus Sidebar",
+  "description": "Triage active sessions and pending questions in the sidebar.",
+  "client": "./client.tsx"
+}

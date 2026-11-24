@@ -1,0 +1,9 @@
+{
+  "id": "test-report",
+  "version": "0.1.0",
+  "sdk": "^1.0.0",
+  "title": "Test Report",
+  "description": "Inspect structured test results from the run-suite tool.",
+  "client": "./client.tsx",
+  "machine": "./machine.ts"
+}
