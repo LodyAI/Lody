@@ -231,6 +231,8 @@ describe('EverMe is set up only on the machine itself', () => {
     { action: 'signInPoll', providerId: 'everme' },
     { action: 'install', providerId: 'everme' },
     { action: 'installPoll', providerId: 'everme' },
+    { action: 'uninstall', providerId: 'everme' },
+    { action: 'uninstallPoll', providerId: 'everme' },
     { action: 'connectPoll', providerId: 'everme' },
     { action: 'connect', providerId: 'everme', targets: ['codex'] },
     { action: 'disconnect', providerId: 'everme', targets: ['codex'] },
@@ -248,6 +250,7 @@ describe('EverMe is set up only on the machine itself', () => {
     expect(result.status).toBe('error');
     expect(result.signIn).toBeUndefined();
     expect(result.install).toBeUndefined();
+    expect(result.uninstall).toBeUndefined();
     expect(result.agents).toBeUndefined();
     expect(result.account).toBeUndefined();
     expect(ran).toEqual([]);
@@ -539,5 +542,118 @@ describe('EverMe install', () => {
     expect(result.install).toEqual({ status: 'done' });
     expect(result.status).toBe('ready');
     expect(attempts).toBe(0);
+  });
+});
+
+describe('EverMe uninstall', () => {
+  /** EverCLI answers until an npm uninstall that succeeds takes it away. */
+  const uninstallHarness = (
+    npm: (args: string[]) => Promise<{ stdout: string; stderr?: string; code?: string | number }>
+  ) => {
+    let present = true;
+    const ran: string[][] = [];
+    const provider = createEverMeMemoryProvider(
+      async (args) => {
+        if (args[0] === 'auth') return present ? signedIn : { stdout: '', code: 'ENOENT' };
+        return noPlatforms;
+      },
+      async (args) => {
+        ran.push(args);
+        const result = await npm(args);
+        if (result.code === undefined) present = args[0] === 'install';
+        return result;
+      }
+    );
+    return { provider, ran };
+  };
+  const request = (provider: MemoryProvider, action: string) =>
+    handleMemoryProviderRequest({ action, providerId: 'everme' } as MemoryProviderRequest, [
+      provider,
+    ]);
+
+  it('removes only the global @everme/cli package and lands back on not installed', async () => {
+    const harness = uninstallHarness(async () => ({ stdout: '' }));
+    const started = await request(harness.provider, 'uninstall');
+    expect(started.uninstall).toEqual({ status: 'running' });
+    await settle();
+    const done = await request(harness.provider, 'uninstallPoll');
+    expect(done.uninstall).toEqual({ status: 'done' });
+    expect(done.status).toBe('not_installed');
+    expect(done.account).toBeUndefined();
+    expect(harness.ran).toEqual([['uninstall', '--global', '@everme/cli']]);
+    // The install entry works again on the same provider.
+    await request(harness.provider, 'install');
+    await settle();
+    expect((await request(harness.provider, 'installPoll')).install).toEqual({ status: 'done' });
+    expect((await request(harness.provider, 'list')).status).toBe('ready');
+  });
+
+  it('keeps EverMe installed and retryable when npm cannot remove it', async () => {
+    let attempt = 0;
+    const harness = uninstallHarness(async () =>
+      ++attempt === 1 ? { stdout: '', stderr: 'npm error code EACCES', code: 243 } : { stdout: '' }
+    );
+    await request(harness.provider, 'uninstall');
+    await settle();
+    const failed = await request(harness.provider, 'uninstallPoll');
+    expect(failed.uninstall).toEqual({ status: 'failed', failure: 'permission' });
+    expect(failed.status).toBe('ready');
+    await request(harness.provider, 'uninstall');
+    await settle();
+    expect((await request(harness.provider, 'uninstallPoll')).uninstall).toEqual({
+      status: 'done',
+    });
+  });
+
+  it('reports a failure when npm succeeds but EverCLI still answers', async () => {
+    const provider = createEverMeMemoryProvider(
+      async (args) => (args[0] === 'auth' ? signedIn : noPlatforms),
+      async () => ({ stdout: 'up to date' })
+    );
+    await request(provider, 'uninstall');
+    await settle();
+    expect((await request(provider, 'uninstallPoll')).uninstall).toEqual({ status: 'failed' });
+  });
+
+  it('runs one npm job at a time across install, uninstall and connect', async () => {
+    let finish: (() => void) | undefined;
+    const harness = uninstallHarness(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ stdout: '' });
+        })
+    );
+    await request(harness.provider, 'uninstall');
+    expect((await request(harness.provider, 'uninstall')).uninstall).toEqual({ status: 'running' });
+    const install = await request(harness.provider, 'install');
+    expect(install.status).toBe('error');
+    expect(install.install).toBeUndefined();
+    const connect = await handleMemoryProviderRequest(
+      { action: 'connect', providerId: 'everme', targets: ['codex'] },
+      [harness.provider]
+    );
+    expect(connect.status).toBe('error');
+    expect(connect.agentsJob).toBeUndefined();
+    expect(harness.ran).toEqual([['uninstall', '--global', '@everme/cli']]);
+    finish?.();
+    await settle();
+    expect((await request(harness.provider, 'uninstallPoll')).uninstall?.status).toBe('done');
+  });
+
+  it('refuses to uninstall while an install is still running', async () => {
+    let finish: (() => void) | undefined;
+    const provider = createEverMeMemoryProvider(
+      async () => ({ stdout: '', code: 'ENOENT' }),
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ stdout: '' });
+        })
+    );
+    await request(provider, 'install');
+    const refused = await request(provider, 'uninstall');
+    expect(refused.status).toBe('error');
+    expect(refused.uninstall).toBeUndefined();
+    finish?.();
+    await settle();
   });
 });

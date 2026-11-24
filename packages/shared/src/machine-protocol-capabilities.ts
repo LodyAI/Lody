@@ -98,8 +98,9 @@ export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 // v1 serves identity providers (Nowledge Mem). v2 adds account providers
-// (EverMe): sign-in, install and agent connect/disconnect requests.
-export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
+// (EverMe): sign-in, install, connect/disconnect; v3 adds uninstall.
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 3;
+const ACCOUNT_MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
 const MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
@@ -197,6 +198,17 @@ export function machineSupportsMemoryProviders(
 
 /** Whether the daemon understands account providers' sign-in, install and connect requests. */
 export function machineSupportsAccountMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    ACCOUNT_MEMORY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon can remove an installable provider's global package again. */
+export function machineSupportsMemoryProviderUninstall(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
   return machineSupportsProtocolCapability(

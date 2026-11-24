@@ -21,6 +21,7 @@ import {
   ProjectProbeLocalMemberResultSchema,
   isLocalOnlyMemoryProvider,
   machineSupportsAccountMemoryProviders,
+  machineSupportsMemoryProviderUninstall,
   machineSupportsBugReportClientLog,
   machineSupportsLocalProjectBranchListing,
   machineSupportsMemoryProviders,
@@ -2228,6 +2229,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         !machineSupportsAccountMemoryProviders({ protocolCapabilities: capabilities ?? undefined })
       )
         return fail('Update Lody on this machine to use this memory provider.');
+      if (
+        (params.action === 'uninstall' || params.action === 'uninstallPoll') &&
+        !machineSupportsMemoryProviderUninstall({ protocolCapabilities: capabilities ?? undefined })
+      )
+        return fail('Update Lody on this machine to uninstall this memory provider.');
       const plane = targetRouter.getPlaneForMachine(machineId);
       if (plane === null) return fail('Machine RPC routing is not available.');
       if (plane === 'local') {

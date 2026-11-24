@@ -227,7 +227,7 @@ describe('MessageHandler machine registration', () => {
         magpieCodexSkills: 1,
         dshProviderIsolation: 1,
         terminalNotifications: 1,
-        memoryProviders: 2,
+        memoryProviders: 3,
         sessionHistory: 4,
         sessionHistoryIncremental: 1,
         sessionHistoryInspection: 2,

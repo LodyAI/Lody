@@ -91,6 +91,11 @@ Settings never sends them to another machine, and the daemon refuses them when t
 arrive over the workspace relay or the encrypted feature ingress, because an
 approval made elsewhere would bind this machine to whoever made it.
 
+Uninstalling is the same machine-only setup step in reverse: it removes only the
+global `@everme/cli` package, using the npm and prefix the install used, and leaves
+the account's memories, the sign-in and EverMe's configuration in place. One install
+or uninstall runs per machine at a time, and neither overlaps an agent connection job.
+
 ## Evidence
 
 - [Provider contract](../packages/shared/src/memory-provider.ts)
