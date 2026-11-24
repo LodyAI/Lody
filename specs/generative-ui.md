@@ -51,7 +51,8 @@ theme already in place.
   props) is always in context, while full prop tables and worked examples live
   in per-family reference documents the model reads only for the component
   families it uses. The skill and references live in
-  `.agents/skills/genui/`. Delivery is static, not runtime-negotiated: the
+  `apps/cli/src/mcp/skills/genui/` and reach agents through the Lody MCP
+  server's skills extension (`skill://genui/SKILL.md`). Delivery is static, not runtime-negotiated: the
   catalog ships inside Lody's own prompt/skill documents, so the DSL the
   model sees is versioned with the release that renders it — no per-request
   injection, no prompt-cache breakage, no version skew between what the
@@ -125,4 +126,5 @@ theme already in place.
   `markdown-renderer.tsx` `createMarkdownComponents`; tests in
   `remark-genui-inline.test.ts`.
 - Fence dispatch: `markdown-renderer.tsx` `MarkdownPre` (`genui` language).
-- Authoring contract: `.agents/skills/genui/` (index + per-family references).
+- Authoring contract: `apps/cli/src/mcp/skills/genui/` (index + per-family
+  references, served as the `genui` skill over Lody MCP).

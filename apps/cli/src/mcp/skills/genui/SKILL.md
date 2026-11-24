@@ -88,9 +88,9 @@ Props that matter per tag; full prop tables and per-family examples live in
 
 ## References (read on demand)
 
-- `references/expressions.md` — confined-JS subset, state semantics, `lody.*` capabilities, error shapes.
-- `references/layout-text.md` — card, row, column, divider, spacer, text, heading, badge, icon: props, examples, misuse patterns.
-- `references/controls.md` — button, input, checkbox, switch, select, slider: props, event contracts, worked examples.
+- [expressions](references/expressions.md) — confined-JS subset, state semantics, `lody.*` capabilities, error shapes.
+- [layout-text](references/layout-text.md) — card, row, column, divider, spacer, text, heading, badge, icon: props, examples, misuse patterns.
+- [controls](references/controls.md) — button, input, checkbox, switch, select, slider: props, event contracts, worked examples.
 
 ## Validate before shipping
 
