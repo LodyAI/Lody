@@ -2439,11 +2439,7 @@ export class MessageHandler {
     const hash = crypto.createHash('sha256');
     const fileHandle = await fs.promises.open(tempPath, 'wx');
     try {
-      // The blob can be renamed into the backfilled store between handoff and
-      // prompt construction. createReadStream reports a missing path through
-      // the async 'error' event, so it must be created inside the awaited
-      // iteration: subscribing the iterator before any other I/O callback runs
-      // turns that error into this catch's `false`, not an uncaught exception.
+      // Stream must open inside the awaited iteration so a post-handoff rename ENOENT lands in this catch, not as an uncaught 'error'.
       for await (const chunk of fs.createReadStream(blobPath)) {
         const buf = chunk as Buffer;
         hash.update(buf);

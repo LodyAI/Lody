@@ -208,10 +208,6 @@ describe('MessageHandler session file ACP prompt blocks', () => {
   });
 
   it('falls back to the relay download when a local blob was backfilled away', async () => {
-    // Regression: backfill renames the canonical blob before prompt construction,
-    // so createReadStream's missing-path 'error' arrives asynchronously. If the
-    // stream is awaited before its consumer subscribes, that error escapes as an
-    // uncaught exception that kills the CLI process instead of returning false.
     const fileBytes = new TextEncoder().encode('{"backfilled":true}\n');
     const fileBlock = {
       type: 'file',
@@ -226,8 +222,6 @@ describe('MessageHandler session file ACP prompt blocks', () => {
       uploadedAt: 123,
     } satisfies Extract<SessionInputBlock, { type: 'file' }>;
 
-    // Point the blob store at a data dir that never received the file: the blob
-    // path exists by construction but the file itself is absent.
     const dataDir = path.join(tmpDir, 'lody-data');
     fs.mkdirSync(path.join(dataDir, 'session-files', workspaceId, sessionId), {
       recursive: true,
@@ -235,7 +229,6 @@ describe('MessageHandler session file ACP prompt blocks', () => {
     vi.stubEnv('LODY_DATA_DIR', dataDir);
 
     const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
-    // The relay fallback must be reachable for the local miss to matter.
     (handler as unknown as { cloudPort: unknown }).cloudPort = createTestCloudPort({
       attachmentUpload: { serverBaseUrl: 'https://relay.test' },
     });
