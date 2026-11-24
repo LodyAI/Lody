@@ -21,7 +21,7 @@
     "packages/components/AGENTS.md": 1260,
     "packages/shared/AGENTS.md": 1260,
     "apps/cli/AGENTS.md": 1300,
-    "apps/cli/src/lib/loro/AGENTS.md": 1280,
+    "apps/cli/src/lib/loro/AGENTS.md": 1330,
     "packages/components/src/components/schedules/AGENTS.md": 1245
   }
 }
