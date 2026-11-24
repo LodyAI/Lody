@@ -68,6 +68,7 @@ import {
 } from './workspace-close-diagnostics';
 import {
   isLoroStreamsWebSocketEnabled,
+  loroStreamsWebSocketOptions,
   MACHINE_PROTOCOL_CAPABILITIES,
   machineSupportsProtocolCapability,
 } from '@lody/shared';
@@ -521,7 +522,9 @@ const isElectronLocalDataPlaneEnabled = (): boolean => {
 // disables the fallback/probe logic.
 const resolveMachineRpcLiveTransportPin = (): LoroStreamsLiveTransport | undefined => {
   const configured = import.meta.env.VITE_LORO_STREAMS_RPC_LIVE_MODE;
-  return configured === 'sse' || configured === 'long-poll' ? configured : undefined;
+  return configured === 'ws' || configured === 'sse' || configured === 'long-poll'
+    ? configured
+    : undefined;
 };
 
 // Generic registry for keyed control request/response round-trips: dedupes
@@ -769,6 +772,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const metaSyncState = (): RoomSyncState => metaTracker?.getSyncState() ?? 'idle';
 
   const workspaceId: WorkspaceId = deps.workspaceId;
+  const streamsWebSocketEnabled = isLoroStreamsWebSocketEnabled(
+    deps.streamsWebSocketEnabled,
+    import.meta.env.VITE_LORO_STREAMS_WS_ENABLED
+  );
 
   // Analytics is side-effect-only: never let a capture path throw into the
   // runtime control flow. The caller wires `onAnalyticsEvent` to PostHog.
@@ -2008,10 +2015,23 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   ): LoroStreamsJsonStreamClient => {
     requireWorkspaceFeature({ mode: protectedContent ? 'protected' : 'plaintext' }, 'rpc');
     if (!jsonStreamClient) {
+      const wsAuthCallback = streamsWebSocketEnabled ? provider.createAuthCallback() : undefined;
       jsonStreamClient = createLoroStreamsJsonStreamClient({
         bucketId: LORO_STREAMS_BUCKET_ID,
         getToken: async () => await provider.getToken(),
         getBaseUrl: () => getStreamsBaseUrlForProvider(provider),
+        ...loroStreamsWebSocketOptions(
+          streamsWebSocketEnabled,
+          streamsBaseUrl,
+          workspaceId,
+          wsAuthCallback
+            ? async ({ reason, previousToken }) =>
+                await wsAuthCallback({
+                  reason: reason === 'reauth' ? 'unauthorized' : 'request',
+                  previousToken,
+                })
+            : undefined
+        ),
         // The live transport for the RPC response stream is chosen per read by
         // the dispatcher's `LoroStreamsLiveModePolicy`, not by this static
         // default. The client's idle watchdog (see `liveIdleTimeoutMs`) still
@@ -4225,6 +4245,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         }
         await repo.addTransport('cloud', createStreamsDurableTransport(provider, streamsBaseUrl), {
           ephemeral: true,
+          forwardingPolicy: {
+            delayFromTransports: {
+              local: 15_000,
+            },
+          },
         });
         countCloudStream();
         if (disposePromise || !authToken || !transportAttached) {
