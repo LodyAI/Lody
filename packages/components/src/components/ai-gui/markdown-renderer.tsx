@@ -83,7 +83,7 @@ import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { GenuiSurface } from './genui/genui-surface';
-import { GENU_CATALOG } from './genui/genui-catalog';
+import { GENUI_CATALOG } from './genui/genui-catalog';
 import { remarkGenuiInline } from './genui/remark-genui-inline';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { MarkdownMermaidBlock } from './markdown-mermaid-block';
@@ -1723,7 +1723,7 @@ const createMarkdownComponents = ({
     'genui-inline': ({ node: hastNode }: { node?: { properties?: Record<string, unknown> } }) => {
       const tag = hastNode?.properties?.['dataGenuiTag'];
       const raw = hastNode?.properties?.['dataGenuiProps'];
-      const renderer = typeof tag === 'string' ? GENU_CATALOG[tag] : undefined;
+      const renderer = typeof tag === 'string' ? GENUI_CATALOG[tag] : undefined;
       let props: Record<string, unknown> | undefined;
       try {
         const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;

@@ -25,11 +25,11 @@ function collect(node: TreeNode, type: string, found: TreeNode[] = []): TreeNode
 
 describe('remarkGenuiInline', () => {
   it('rewrites a self-contained inline catalog tag in prose', () => {
-    const tree = run('status: <icon name="x-circle" color="danger" inline/> done');
+    const tree = run('status: <Icon name="x-circle" color="danger" inline/> done');
     const nodes = collect(tree, 'genuiInline');
     expect(nodes).toHaveLength(1);
     expect(nodes[0].data?.hName).toBe('genui-inline');
-    expect(nodes[0].data?.hProperties?.['dataGenuiTag']).toBe('icon');
+    expect(nodes[0].data?.hProperties?.['dataGenuiTag']).toBe('Icon');
     expect(JSON.parse(String(nodes[0].data?.hProperties?.['dataGenuiProps']))).toEqual({
       name: 'x-circle',
       color: 'danger',
@@ -38,20 +38,20 @@ describe('remarkGenuiInline', () => {
   });
 
   it('rewrites tags inside a GFM table cell', () => {
-    const tree = run('| a | b |\n|---|---|\n| <icon name="check"/> | x |');
+    const tree = run('| a | b |\n|---|---|\n| <Icon name="check"/> | x |');
     const nodes = collect(tree, 'genuiInline');
     expect(nodes).toHaveLength(1);
-    expect(nodes[0].data?.hProperties?.['dataGenuiTag']).toBe('icon');
+    expect(nodes[0].data?.hProperties?.['dataGenuiTag']).toBe('Icon');
   });
 
   it('leaves unterminated tags as plain text while streaming', () => {
-    const tree = run('status: <icon name="x-ci');
+    const tree = run('status: <Icon name="x-ci');
     expect(collect(tree, 'genuiInline')).toHaveLength(0);
     expect(collect(tree, 'html')).toHaveLength(0);
   });
 
   it('merges a tag pair wrapping plain text into one inline node', () => {
-    const tree = run('服务在线 <badge tone="success">running</badge> 其余正常');
+    const tree = run('服务在线 <Badge tone="success">running</Badge> 其余正常');
     const nodes = collect(tree, 'genuiInline');
     expect(nodes).toHaveLength(1);
     expect(JSON.parse(String(nodes[0].data?.hProperties?.['dataGenuiProps']))).toEqual({
@@ -62,18 +62,18 @@ describe('remarkGenuiInline', () => {
   });
 
   it('leaves a tag pair with formatted children as html nodes', () => {
-    const tree = run('a <badge tone="success">*bold*</badge> b');
+    const tree = run('a <Badge tone="success">*bold*</Badge> b');
     expect(collect(tree, 'genuiInline')).toHaveLength(0);
   });
 
   it('leaves non-allowlist catalog tags as html nodes', () => {
-    const tree = run('<button label="go"/>');
+    const tree = run('<Button label="go"/>');
     expect(collect(tree, 'genuiInline')).toHaveLength(0);
     expect(collect(tree, 'html')).toHaveLength(1);
   });
 
   it('leaves expression props as html nodes', () => {
-    const tree = run('<icon name={which}/>');
+    const tree = run('<Icon name={which}/>');
     expect(collect(tree, 'genuiInline')).toHaveLength(0);
     expect(collect(tree, 'html')).toHaveLength(1);
   });

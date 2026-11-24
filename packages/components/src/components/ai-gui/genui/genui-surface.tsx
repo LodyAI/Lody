@@ -36,7 +36,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GenuiCapabilitiesContext } from './genui-capabilities-context';
-import { GENU_CATALOG } from './genui-catalog.js';
+import { GENUI_CATALOG } from './genui-catalog.js';
 
 const surfaces = new Map<string, SurfaceState>();
 
@@ -111,7 +111,7 @@ function renderUiNode(node: UiNode, ctx: RenderContext, key: number): ReactNode 
       .map((part) => (part === undefined || part === null ? '' : String(part)))
       .join('');
   }
-  const renderer = GENU_CATALOG[node.tag];
+  const renderer = GENUI_CATALOG[node.tag];
   if (node.tag === '#fragment') {
     return node.children.map((child, index) => (
       <Fragment key={index}>{renderUiNode(child, ctx, index)}</Fragment>

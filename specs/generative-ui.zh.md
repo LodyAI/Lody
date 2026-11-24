@@ -21,9 +21,9 @@ Agent 用声明式的、有状态的 UI 嵌入 Markdown 来回答，超越了 `h
   JSX 子集标记加上 `{@state}` 指令。一个已写完的围栏会挂载为活的 surface；仍在流式
   输出中的围栏走容错的部分编译挂载：元素在其开标签闭合时出现，子节点流入开元素中，
   被截断的尾部在屏外等待——只有闭合的构造才会落地。
-- **内联标签**：叶子目录标签（`GENUI_INLINE_TAGS`，目前是 `icon` 和 `badge`）也可以
-  直接出现在普通 Markdown 里——句子中或表格单元格里——形如 `<icon ... />` 或
-  `<badge ...>text</badge>`。只允许字面量 prop 和纯文本子节点；表达式、事件、嵌套
+- **内联标签**：叶子目录标签（`GENUI_INLINE_TAGS`，目前是 `Icon` 和 `Badge`）也可以
+  直接出现在普通 Markdown 里——句子中或表格单元格里——形如 `<Icon ... />` 或
+  `<Badge ...>text</Badge>`。只允许字面量 prop 和纯文本子节点；表达式、事件、嵌套
   标记或不在允许名单里的标签会让这段标记保持为纯文本。一个 remark pass
   （`remarkGenuiInline`）把符合条件的节点改写进同一套 `GENUI_CATALOG` 渲染器，标签
   只在闭合时提交，所以流式写了一半的标签永远不会挂载。
@@ -37,6 +37,8 @@ Agent 用声明式的、有状态的 UI 嵌入 Markdown 来回答，超越了 `h
   `GENUI_CATALOG` 把标签映射到 @lody/ui 组件。只有已提交的节点到达 DOM：未提交的
   流式尾部被扣住，不会以原始标记的形式展示。
 - **目录（catalog）**：模型可用的完整标签清单。未知标签渲染为诊断，不进 DOM。
+  其中 SVG 族（`svg`、基础图形、`svg:text`）只放行一份固定的属性白名单——仅几何
+  与绘制属性；资源引用、脚本、内嵌 HTML 与事件都没有到达 DOM 的路径。
 - **目录下发**：模型通过渐进披露学习这套 DSL——一个紧凑索引（每个标签一行：用途
   和关键 prop）始终在上下文里，完整的 prop 表和示例放在按组件族分开的参考文档里，
   模型只为它实际使用的组件族去读这些文档。skill 和参考文件位于
@@ -51,12 +53,12 @@ Agent 用声明式的、有状态的 UI 嵌入 Markdown 来回答，超越了 `h
 ```genui
 {@state const [value, setValue] = useState(65)}
 {@state const [enabled, setEnabled] = useState(true)}
-<card>
-  <heading level={4}>Progress</heading>
-  <slider value={value} min={0} max={100} disabled={!enabled} onChange={(n) => setValue(n)} />
-  <checkbox checked={enabled} onCheckedChange={setEnabled} />
-  <button onClick={() => setValue(65)}>Reset</button>
-</card>
+<Card>
+  <Heading level={4}>Progress</Heading>
+  <Slider value={value} min={0} max={100} disabled={!enabled} onChange={(n) => setValue(n)} />
+  <Checkbox checked={enabled} onCheckedChange={setEnabled} />
+  <Button onClick={() => setValue(65)}>Reset</Button>
+</Card>
 ```
 
 - `{@state}` 体只接受 `const [name, setName] = useState(init)` 声明；状态在顶层
