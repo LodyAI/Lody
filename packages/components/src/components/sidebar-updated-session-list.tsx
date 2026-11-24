@@ -972,10 +972,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                         handleToggleOpenedBySessions(node.item.id)
                       );
                       const prevNode = visibleNodes[nodeIndex - 1];
-                      // The tall connector climbs the opener's meta line, so it
-                      // must follow the opener row's real height predicate, not
-                      // the list-level toggles: a chat or non-worktree opener
-                      // can stay single-line even with Show Branch on.
+                      // The tall connector climbs the opener's meta line, so it must
+                      // follow the opener row's real height, not the list-level toggles.
                       const openerShowsMetaLine =
                         prevNode?.depth === 0 &&
                         updatedItemMetaLines(prevNode.item, showProjectContext, showBranchContext)
@@ -1358,10 +1356,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       : undefined;
 
   const isNestedChild = openedByTree?.kind === 'child';
-  // The branch rides on the same second line as the project segment; nested
-  // children skip it like the project context does. `updatedItemMetaLines`
-  // owns the per-row conditions so the first child's tree connector sizes
-  // itself from the opener's actual height.
+  // Nested children skip the meta line. `updatedItemMetaLines` owns the
+  // conditions so the first child's connector sizes from the opener's height.
   const metaLines = updatedItemMetaLines(item, showProjectContext, showBranchContext);
   const showProjectLine = metaLines.project && !isNestedChild;
   const showBranchLine = metaLines.branch && !isNestedChild;

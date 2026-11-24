@@ -272,10 +272,8 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
   });
 
   it("sizes the first child's connector to the opener's rendered height under Show Branch", () => {
-    // Show Branch is on, but the chat opener renders no second line: the
-    // trunk must start at the row boundary, not climb a meta line that isn't
-    // drawn. The worktree opener's branch does draw a second line, so its
-    // first child still climbs it.
+    // Show Branch is on, but the chat opener draws no meta line: the trunk
+    // stays at the row boundary. The worktree opener's branch does draw one.
     render(
       [
         makeItem({ id: 'worktree-opener', kind: 'github', branchName: 'feat/tall' }),
