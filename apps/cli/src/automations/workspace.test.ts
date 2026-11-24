@@ -501,6 +501,7 @@ describe('Automation control authority', () => {
       sessionId: 'session-a',
       settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: false } },
     });
+    expect(host.deliveryObservationOwners().has('session-a' as SessionId)).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     const request = required(
       host.ledger.activities().find((receipt) => receipt.event.source === 'lody/auto-delivery')
@@ -512,6 +513,7 @@ describe('Automation control authority', () => {
       sessionId: 'session-a',
       settings: { autoDeliver: false },
     });
+    expect(host.deliveryObservationOwners().has('session-a' as SessionId)).toBe(false);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(host.ledger.receipt(request.id)?.state).toBe('cancelled');
     expect(host.ledger.hasSessionWork('session-a')).toBe(false);

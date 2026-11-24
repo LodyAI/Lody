@@ -41,7 +41,7 @@ import {
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateAutomationProgram as evaluateProgram } from './programs/codemode';
-import { observePullRequests } from './sources/pull-requests';
+import { observeNormalizedPullRequest, observePullRequests } from './sources/pull-requests';
 import type { SessionId, SessionMeta } from '@lody/shared';
 
 function required<A>(value: A | undefined): A {
@@ -2082,18 +2082,18 @@ describe('Auto delivery', () => {
             expect(pr).toMatchObject({ status: 'open', headSha: data.headSha });
             expect(current.workspaceDirty || current.workspaceUnpushed).toBe(false);
             if (data.step === 'fix_ci') {
-              expect(settings.fixCi && ['f', 'e'].includes(String(pr?.ciState))).toBe(true);
+              expect(settings.fixCi && pr?.checks === 'failed').toBe(true);
               expect(++epoch.fix).toBeLessThanOrEqual(3);
             } else if (data.step === 'resolve_conflicts') {
-              expect(settings.resolveConflicts && pr?.mergeState === 'd').toBe(true);
+              expect(settings.resolveConflicts && pr?.mergeability === 'conflicts').toBe(true);
               expect(++epoch.conflict).toBeLessThanOrEqual(3);
             } else {
-              expect(settings.merge && ['c', 'u'].includes(String(pr?.mergeState))).toBe(true);
+              expect(settings.merge && pr?.mergeability === 'clean').toBe(true);
               const graced =
-                pr?.ciState === null &&
+                pr?.checks === 'none' &&
                 progress.unreportedCi?.head === pr.headSha &&
                 pr.observedAt - progress.unreportedCi.since >= DELIVERY_CI_REPORT_GRACE_MS;
-              expect(pr?.ciState === 's' || graced).toBe(true);
+              expect(pr?.checks === 'passed' || graced).toBe(true);
               expect(epoch.merges.has(String(data.headSha))).toBe(false);
               epoch.merges.add(String(data.headSha));
             }
@@ -2219,6 +2219,188 @@ describe('Auto delivery', () => {
     expect(deliveryRequest('merge', values)).toContain(`head commit ${values.headSha}`);
     expect(deliveryRequest('merge', { ...values, headSha: undefined })).toBeUndefined();
     expect(deliveryRequest('create_pr', {})).toContain(en['sessions.prompts.prBranchUpkeep']);
+  });
+
+  it('acts immediately on an already-observed new head after a superseded step', () => {
+    const ledger = enabled({ fixCi: true, resolveConflicts: true, merge: false });
+    try {
+      const opts = { fixCi: true, resolveConflicts: true, merge: false };
+      const head1 = 'a'.repeat(40);
+      const head2 = 'b'.repeat(40);
+      observePullRequests(ledger, linked, 'owner/project', [pr(head1, 'f', 'u')], 100);
+      const first = advanceDelivery({ ledger, meta: linked, options: opts, now: 101 });
+      expect(first.step?.step).toBe('fix_ci');
+      const delivery = required(ledger.deliveries()[0]);
+      const receipt = ledger.accept(delivery, required(internalPolicy(delivery)[0]), 102);
+      ledger.finishDelivery(delivery, undefined, 102);
+      observePullRequests(ledger, linked, 'owner/project', [pr(head2, 'f', 'u')], 110);
+      ledger.update(
+        receipt.id,
+        'accepted',
+        { state: 'superseded', reason: 'guard:delivery_pr_changed' },
+        120
+      );
+      const next = advanceDelivery({ ledger, meta: linked, options: opts, now: 121 });
+      expect(next.step?.step).toBe('fix_ci');
+      expect(next.step?.pr?.headSha).toBe(head2);
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it('delivers multiple PRs across and within repositories sequentially', () => {
+    const firstUrl = 'https://github.com/owner/project/pull/42';
+    const secondUrl = 'https://github.com/owner/project/pull/43';
+    const thirdUrl = 'https://gitlab.com/team/service/-/merge_requests/7';
+    const opts = {
+      fixCi: true,
+      resolveConflicts: true,
+      merge: true,
+      mergeMethod: 'squash' as const,
+    };
+    const ledger = enabled(opts);
+    try {
+      const multiMeta = sessionMeta([
+        { url: firstUrl, status: 'open' },
+        { url: secondUrl, status: 'open' },
+        { url: thirdUrl, status: 'open' },
+      ]);
+      const head1 = 'a'.repeat(40);
+      const head2 = 'b'.repeat(40);
+      const head3 = 'c'.repeat(40);
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: firstUrl,
+        repoFullName: 'owner/project',
+        number: 42,
+        status: 'open',
+        headSha: head1,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 100,
+      });
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: secondUrl,
+        repoFullName: 'owner/project',
+        number: 43,
+        status: 'open',
+        headSha: head2,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 100,
+      });
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'gitlab',
+        url: thirdUrl,
+        repoFullName: 'team/service',
+        number: 7,
+        status: 'open',
+        headSha: head3,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 100,
+      });
+
+      const step1 = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 101 });
+      expect(step1.step?.step).toBe('merge');
+      expect(step1.step?.pr?.url).toBe(firstUrl);
+      expect(step1.status).toMatchObject({
+        state: 'merge',
+        prUrl: firstUrl,
+        prIndex: 1,
+        prTotal: 3,
+      });
+
+      const d1 = required(ledger.deliveries()[0]);
+      const r1 = ledger.accept(d1, required(internalPolicy(d1)[0]), 102);
+      ledger.finishDelivery(d1, undefined, 102);
+      ledger.update(r1.id, 'accepted', { state: 'settled' }, 103);
+
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: firstUrl,
+        repoFullName: 'owner/project',
+        number: 42,
+        status: 'merged',
+        headSha: head1,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 105,
+      });
+
+      const step2 = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 106 });
+      expect(step2.finished).toBeUndefined();
+      expect(step2.step?.step).toBe('merge');
+      expect(step2.step?.pr?.url).toBe(secondUrl);
+      expect(step2.status).toMatchObject({
+        state: 'merge',
+        prUrl: secondUrl,
+        prIndex: 2,
+        prTotal: 3,
+      });
+
+      const d2 = required(ledger.deliveries()[0]);
+      const r2 = ledger.accept(d2, required(internalPolicy(d2)[0]), 107);
+      ledger.finishDelivery(d2, undefined, 107);
+      ledger.update(r2.id, 'accepted', { state: 'settled' }, 108);
+
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: secondUrl,
+        repoFullName: 'owner/project',
+        number: 43,
+        status: 'merged',
+        headSha: head2,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 110,
+      });
+
+      const step3 = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 111 });
+      expect(step3.step?.step).toBe('merge');
+      expect(step3.step?.pr?.url).toBe(thirdUrl);
+      expect(step3.status).toMatchObject({
+        state: 'merge',
+        prUrl: thirdUrl,
+        prIndex: 3,
+        prTotal: 3,
+      });
+      const gitlabPrompt = deliveryRequest('merge', {
+        provider: 'gitlab',
+        repoFullName: 'team/service',
+        prNumber: 7,
+        prUrl: thirdUrl,
+        headSha: head3,
+        mergeMethod: 'squash',
+      });
+      expect(gitlabPrompt).toContain('merge request #7');
+      expect(gitlabPrompt).toContain('using squash merge');
+      expect(gitlabPrompt).not.toContain('`gh`');
+
+      const d3 = required(ledger.deliveries()[0]);
+      const r3 = ledger.accept(d3, required(internalPolicy(d3)[0]), 112);
+      ledger.finishDelivery(d3, undefined, 112);
+      ledger.update(r3.id, 'accepted', { state: 'settled' }, 113);
+
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'gitlab',
+        url: thirdUrl,
+        repoFullName: 'team/service',
+        number: 7,
+        status: 'merged',
+        headSha: head3,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 115,
+      });
+
+      const done = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 116 });
+      expect(done.finished).toBe(true);
+      expect(done.status.state).toBe('merged');
+    } finally {
+      ledger.close();
+    }
   });
 });
 

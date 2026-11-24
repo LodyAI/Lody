@@ -110,12 +110,17 @@ export const automationProgramContextSchema = z
   .strict();
 export type AutomationProgramContext = z.infer<typeof automationProgramContextSchema>;
 
-/** Which Auto delivery steps the Host may request; merge stays off unless chosen. */
+export const autoDeliverMergeMethodSchema = z.enum(['auto', 'squash', 'merge', 'rebase']);
+export type AutoDeliverMergeMethod = z.infer<typeof autoDeliverMergeMethodSchema>;
+
+/** Which Auto delivery steps the Host may request; merge is on by default. */
 export const autoDeliverOptionsSchema = z
   .object({
     fixCi: z.boolean().default(true),
     resolveConflicts: z.boolean().default(true),
-    merge: z.boolean().default(false),
+    merge: z.boolean().default(true),
+    mergeMethod: autoDeliverMergeMethodSchema.optional(),
+    prUrls: z.array(z.string().url()).max(32).optional(),
   })
   .strict();
 export type AutoDeliverOptions = z.infer<typeof autoDeliverOptionsSchema>;

@@ -159,7 +159,7 @@ export function configureSessionPolicies(
         maxActionsPerEvent: 1,
         // One Auto delivery enablement shares a correlation: one Create PR, bounded
         // repairs and one merge request per head.
-        maxInvocationsPerCorrelation: policy.policy === 'auto-deliver' ? 16 : 8,
+        maxInvocationsPerCorrelation: policy.policy === 'auto-deliver' ? 64 : 8,
         maxPendingActions: 128,
         maxDepth: 8,
       },
