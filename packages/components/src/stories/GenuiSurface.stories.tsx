@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { GenuiSurface } from '@/components/ai-gui/genui/genui-surface';
+import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 
 const meta = {
   title: 'AI GUI/GenUI Surface',
@@ -48,4 +49,29 @@ const streaming = `{@state const [value, setValue] = useState(65)}
 /** A fence still being written: committed nodes mount, the tail waits. */
 export const Streaming: Story = {
   args: { code: streaming, streaming: true },
+};
+
+const streamingFence = `前缀文字。
+
+\`\`\`genui
+{@state const [value, setValue] = useState(65)}
+<card>
+  <column gap={8}>
+    <slider value={value} min={0} max={100} onChange={(n) => setValue(n)} />
+    <row>
+      <button onClick={() => setValue(6`;
+
+const closedFence = `${streamingFence}5)}>Reset</button>
+    </row>
+  </column>
+</card>
+\`\`\``;
+
+/** The real dispatch path: an unclosed ```genui fence inside markdown. */
+export const InMarkdownStream: Story = {
+  render: () => <MarkdownRenderer text={streamingFence} isStreaming />,
+};
+
+export const InMarkdownClosed: Story = {
+  render: () => <MarkdownRenderer text={closedFence} />,
 };
