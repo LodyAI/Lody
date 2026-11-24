@@ -24,6 +24,7 @@ import {
   isAgentConnectProvider,
   isLocalOnlyMemoryProvider,
   machineSupportsAccountMemoryProviders,
+  machineSupportsMemoryProviderUninstall,
   providerInstalls,
   providerSignsIn,
   isMemoryIdentityMissing,
@@ -52,6 +53,7 @@ import { MemoryAgentConnectList } from './memory-agent-connect';
 import { getAgentConfigsByMachineAtomFamily } from '@/atoms/agents';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { MemoryInstallCard } from './memory-install';
+import { useMemoryUninstall } from './memory-uninstall';
 import { MemorySignInCard } from './memory-sign-in';
 import { Field, FormMessage } from './form-primitives';
 import { MemoryProviderHeading, memoryProviderActions } from './memory-provider-heading';
@@ -571,6 +573,7 @@ export function MemorySetting() {
           machineId={machineId}
           supported={machineSupportsMemoryProviders(machines.get(machineId))}
           accountSupported={machineSupportsAccountMemoryProviders(machines.get(machineId))}
+          uninstallSupported={machineSupportsMemoryProviderUninstall(machines.get(machineId))}
         />
       ) : (
         <p>{t('settings.memory.noMachine')}</p>
@@ -586,11 +589,14 @@ function MachineMemories({
   machineId,
   supported,
   accountSupported,
+  uninstallSupported,
 }: {
   machineId: MachineId;
   supported: boolean;
   /** The daemon also speaks the account providers' requests (protocol v2). */
   accountSupported: boolean;
+  /** The daemon can also uninstall an installable provider (protocol v3). */
+  uninstallSupported: boolean;
 }) {
   const { t } = useTranslation();
   const localId = useAtomValue(localMachineIdAtom);
@@ -642,6 +648,7 @@ function MachineMemories({
           onAssociateRole={synced ? () => openSettings('agent-roles', { machineId }) : undefined}
           supported={supported}
           accountSupported={accountSupported}
+          uninstallSupported={uninstallSupported}
           entries={associations.entries.filter((entry) => entry.providerId === provider.id)}
           editor={editor?.providerId === provider.id ? editor : null}
           setEditor={setEditor}
@@ -668,6 +675,7 @@ function ProviderRecords({
   provider,
   supported,
   accountSupported,
+  uninstallSupported,
   refreshToken,
   query,
   entries,
@@ -691,6 +699,7 @@ function ProviderRecords({
   supported: boolean;
   /** The daemon also speaks the account providers' requests (protocol v2). */
   accountSupported: boolean;
+  uninstallSupported: boolean;
   refreshToken: number;
   query: string;
   entries: MemoryAssociation[];
@@ -727,6 +736,12 @@ function ProviderRecords({
   // only in part.
   const [justInstalled, setJustInstalled] = useState(false);
   const [signInPending, setSignInPending] = useState(false);
+  const uninstall = useMemoryUninstall({
+    name: provider.name,
+    providerKey: provider.id,
+    state,
+    onUninstalled: () => setJustInstalled(false),
+  });
   const ready = online && supported && state.result?.status === 'ready';
   const missing = state.result?.status === 'not_installed';
   // One failed reply is not evidence the provider broke: the runner times
@@ -816,6 +831,9 @@ function ProviderRecords({
         result={state.result}
       />
     ) : null;
+  // Only a provider this machine is known to have can be removed from it.
+  const uninstallable =
+    uninstallSupported && providerInstalls(provider.id) && !installCard && (ready || signedOut);
   return (
     <div {...stylex.props(styles.stack)}>
       {installCard || signedOut ? status : null}
@@ -840,6 +858,7 @@ function ProviderRecords({
           autoStart={justInstalled}
           onPendingChange={setSignInPending}
           state={state}
+          secondaryAction={uninstallable ? uninstall.action(signInPending) : undefined}
         />
       ) : isAgentConnectProvider(provider.id) ? (
         <MemoryAgentConnectList
@@ -849,8 +868,16 @@ function ProviderRecords({
           configs={agentConfigs}
           agents={state.result?.agents ?? []}
           state={state}
-          disabled={!ready}
-          notice={status}
+          disabled={!ready || uninstall.busy}
+          notice={
+            status || uninstall.message ? (
+              <>
+                {status}
+                {uninstall.message}
+              </>
+            ) : null
+          }
+          secondaryAction={uninstallable ? uninstall.action(false) : undefined}
         />
       ) : (
         // An identity provider wears the same block as the agent-connect one:
@@ -909,6 +936,9 @@ function ProviderRecords({
           )}
         </>
       )}
+      {/* The agent list says it under its own heading; every other card here
+          is short enough for the line to sit after it. */}
+      {installCard || signedOut ? uninstall.message : null}
       {editor && !isAgentConnectProvider(provider.id) ? (
         <MemoryEditor
           key={editor.entry?.memoryId ?? 'new'}

@@ -105,11 +105,6 @@ export function initNativeBackNavigation(router: AndroidBackRouter): () => Promi
   return async () => {
     if (disposed) return;
     disposed = true;
-    try {
-      const handle = await listener;
-      await handle.remove();
-    } catch {
-      // Ignore native plugin removal failures during teardown/HMR.
-    }
+    await listener.then((handle) => handle.remove()).catch(() => {});
   };
 }

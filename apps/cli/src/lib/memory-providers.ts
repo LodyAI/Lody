@@ -12,6 +12,7 @@ import {
   type MemoryProviderResponse,
   type MemoryInstall,
   type MemorySignIn,
+  type MemoryUninstall,
 } from '@lody/shared';
 import { createEverMeMemoryProvider } from './everme-provider';
 import { runNmem, type MemoryCommandRunner } from './memory-command-runner';
@@ -42,6 +43,9 @@ export interface MemoryProvider {
   /** Providers Lody can fetch onto the machine; the rest only link to a page. */
   install?(): Promise<MemoryInstall>;
   installPoll?(): Promise<MemoryInstall>;
+  /** Removes what `install` put there; the provider's data and config stay. */
+  uninstall?(): Promise<MemoryUninstall>;
+  uninstallPoll?(): Promise<MemoryUninstall>;
 }
 
 export type MemoryAgentsSnapshot = { job: MemoryAgentsJob; agents?: MemoryAgent[] };
@@ -226,6 +230,12 @@ export async function handleMemoryProviderRequest(
       // lands. Answering without its agents would have the panel assert, for
       // one whole refresh interval, that the provider adapts none of them.
       return { ...(await settledReply(provider, await provider.probe())), install };
+    }
+    if (request.action === 'uninstall' || request.action === 'uninstallPoll') {
+      const begin = request.action === 'uninstall' ? provider.uninstall : provider.uninstallPoll;
+      if (!begin) throw new Error('This memory provider does not uninstall from Lody');
+      const uninstall = await begin.call(provider);
+      return { ...(await settledReply(provider, await provider.probe())), uninstall };
     }
     // Asking after a job reads what the job left; the probe that gated the
     // click already ran, and probing again on every tick is the slow part.
