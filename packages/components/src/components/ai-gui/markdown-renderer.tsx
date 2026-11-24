@@ -755,7 +755,7 @@ function MarkdownActionLink({
       <span
         data-action-link={canonicalHref}
         title={title}
-        className={clsx(
+        className={cn(
           SESSION_LINK_CHIP_CLASS_NAME,
           stylex.props(markdownStyles.sessionChip).className
         )}
@@ -769,7 +769,7 @@ function MarkdownActionLink({
       type="button"
       data-action-link={canonicalHref}
       title={title}
-      className={clsx(
+      className={cn(
         SESSION_LINK_CHIP_CLASS_NAME,
         stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
       )}
