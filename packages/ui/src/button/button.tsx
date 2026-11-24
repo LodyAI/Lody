@@ -57,7 +57,7 @@ const styles = stylex.create({
     fontFamily: 'inherit',
     fontWeight: 500,
     letterSpacing: text.controlTracking,
-    lineHeight: 1,
+    lineHeight: text.subheadlineLeading,
     color: 'inherit',
     cursor: { default: 'pointer', ':disabled': 'default' },
     userSelect: 'none',
@@ -81,6 +81,7 @@ const styles = stylex.create({
     paddingInline: button.paddingXMini,
     borderRadius: button.radiusMini,
     fontSize: button.textMini,
+    lineHeight: text.footnoteLeading,
   },
   small: {
     height: button.heightSmall,
