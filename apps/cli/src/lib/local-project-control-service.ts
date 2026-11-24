@@ -1,3 +1,4 @@
+import { codexMagpieSkillEntries, magpieProfileDirectory } from '../agent/magpie-profile';
 import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import path, { isAbsolute, relative, resolve as resolvePath } from 'node:path';
@@ -1019,6 +1020,7 @@ async function scanProjectSkillGroup(args: {
   rootRealPath: string;
   scope: ProjectSkillScope;
   skillDir: string;
+  singleSkillPath?: string;
   shouldIgnorePath: ((relativePath: string) => boolean) | null;
   fingerprintParts: SkillFingerprintPart[];
 }): Promise<ScannedSkillGroup | null> {
@@ -1027,7 +1029,8 @@ async function scanProjectSkillGroup(args: {
     return null;
   }
 
-  const groupPath = resolveSafeProjectDirectoryPath(args.rootRealPath, groupDir);
+  const groupPath =
+    args.singleSkillPath ?? resolveSafeProjectDirectoryPath(args.rootRealPath, groupDir);
   const resolvedGroup = await resolveProjectEntry(args.rootRealPath, groupPath);
   if (!resolvedGroup) {
     return null;
@@ -1072,6 +1075,12 @@ async function scanProjectSkillGroup(args: {
   });
   if (rootSkillResult === 'external-symlink') {
     skippedExternalSymlinks += 1;
+  }
+
+  if (args.singleSkillPath) {
+    return candidates.length || skippedExternalSymlinks
+      ? { scope: args.scope, dir: groupDir, candidates, truncated: false, skippedExternalSymlinks }
+      : null;
   }
 
   const entries = await fs.promises.readdir(resolvedGroup.realPath, { withFileTypes: true });
@@ -1377,7 +1386,8 @@ async function scanHomeSkillDirs(
   homeRealPath: string,
   knownSkillDirs: readonly string[],
   scope: Extract<ProjectSkillScope, 'global' | 'system'>,
-  fingerprintParts: SkillFingerprintPart[]
+  fingerprintParts: SkillFingerprintPart[],
+  singleSkillPaths?: ReadonlyMap<string, string>
 ): Promise<ScannedSkillGroupResult[]> {
   const uniqueSkillDirs = [
     ...new Map(
@@ -1395,6 +1405,7 @@ async function scanHomeSkillDirs(
           rootRealPath: homeRealPath,
           scope,
           skillDir: skillDir.relativeDir,
+          singleSkillPath: singleSkillPaths?.get(skillDir.displayDir),
           shouldIgnorePath: null,
           fingerprintParts,
         });
@@ -1424,7 +1435,8 @@ async function scanHomeSkillDirs(
  */
 async function listGlobalSkillsAtHomePath(
   homePath: string,
-  knownFingerprint?: string
+  knownFingerprint?: string,
+  magpieGatewayUrl?: string
 ): Promise<ProjectSkillsResult> {
   const homeRealPath = await fs.promises.realpath(homePath);
   const fingerprintParts: SkillFingerprintPart[] = [];
@@ -1434,6 +1446,31 @@ async function listGlobalSkillsAtHomePath(
     scanHomeSkillDirs(homeRealPath, ALL_KNOWN_SYSTEM_SKILL_DIRS, 'system', fingerprintParts),
   ]);
 
+  if (magpieGatewayUrl) {
+    const profile = magpieProfileDirectory(
+      path.join(getLodyDataDir(undefined, homePath), 'magpie'),
+      magpieGatewayUrl,
+      'codex'
+    );
+    const paths = new Map<string, string>();
+    for (const entry of await codexMagpieSkillEntries(profile, homeRealPath)) {
+      if (entry.existing || entry.writable) {
+        paths.set(
+          `~/.codex/skills/${entry.name}`,
+          entry.existing ? entry.destination : entry.native
+        );
+      }
+    }
+    globalGroups.push(
+      ...(await scanHomeSkillDirs(
+        homeRealPath,
+        [...paths.keys()],
+        'global',
+        fingerprintParts,
+        paths
+      ))
+    );
+  }
   return await finishSkillsResult(
     [...globalGroups, ...systemGroups],
     fingerprintParts,
@@ -1760,12 +1797,14 @@ export class LocalProjectControlService {
   }
 
   async listGlobalSkills(options?: {
+    magpieGatewayUrl?: string;
     homePath?: string;
     knownFingerprint?: string;
   }): Promise<ProjectSkillsResult> {
     return await listGlobalSkillsAtHomePath(
       options?.homePath ?? os.homedir(),
-      options?.knownFingerprint
+      options?.knownFingerprint,
+      options?.magpieGatewayUrl
     );
   }
 

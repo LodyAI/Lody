@@ -56,19 +56,13 @@ const styles = stylex.create({
         default: 'hsl(var(--foreground) / 0.05)',
         [DARK_SCOPE]: {
           '@media (hover: hover)': {
-            default: '#ffffff1a',
-            '@supports (color: color-mix(in lab, red, red))':
-              'color-mix(in oklab, var(--color-white) 10%, transparent)',
+            default: 'hsl(var(--foreground) / 0.1)',
           },
         },
       },
       ':focus-visible': {
         default: 'hsl(var(--foreground) / 0.05)',
-        [DARK_SCOPE]: {
-          default: '#ffffff1a',
-          '@supports (color: color-mix(in lab, red, red))':
-            'color-mix(in oklab, var(--color-white) 10%, transparent)',
-        },
+        [DARK_SCOPE]: 'hsl(var(--foreground) / 0.1)',
       },
     },
     color: {

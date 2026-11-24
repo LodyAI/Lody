@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 // The theme tokens are imported by path, not by the `@/` alias: the StyleX
 // compiler links a theme file on its own and does not follow bundler aliases.
 import { themeColors } from '../../style/theme-colors.stylex';
@@ -118,6 +119,8 @@ export function MobileArchiveScreen({
   children,
 }: MobileArchiveScreenProps) {
   const { t } = useTranslation();
+
+  useMobileBackHandler(onExitMultiSelect, { enabled: isMultiSelectMode, layer: 'page' });
 
   return (
     <Tooltip.Provider>

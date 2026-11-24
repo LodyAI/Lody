@@ -729,6 +729,24 @@ void test('account-wide reset archives only after in-flight workspace turns drai
   await api.closeDesktopE2eeAccount()
 })
 
+void test('projects only allowlisted transfer billing codes through the runtime boundary', async () => {
+  const native = await account()
+  for (const code of [
+    'workspace_transfer_active_subscription',
+    'workspace_transfer_payment_required'
+  ]) {
+    await assert.rejects(
+      native.api.runDesktopE2eeOperation('acc1', Effect.fail({ code, cause: 'private' })),
+      (error) => {
+        assert.equal(error.message, `e2ee_${code}`)
+        assert.equal(error.cause, undefined)
+        return true
+      }
+    )
+  }
+  await native.api.closeDesktopE2eeAccount()
+})
+
 void test('only unavailable custody exposes the availability fallback code', async () => {
   const unavailable = await account({ custody: () => Effect.fail({ code: 'unavailable' }) })
   await assert.rejects(

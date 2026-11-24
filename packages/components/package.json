@@ -19,6 +19,10 @@
       "import": "./src/components/pages/workspace-join-request-surface.tsx",
       "types": "./src/components/pages/workspace-join-request-surface.tsx"
     },
+    "./style/theme-scale.stylex": {
+      "import": "./src/style/theme-scale.stylex.ts",
+      "types": "./src/style/theme-scale.stylex.ts"
+    },
     "./atoms/*": {
       "import": "./src/atoms/*.{ts,tsx}",
       "types": "./src/atoms/*.{ts,tsx}"
@@ -154,7 +158,6 @@
     "jsonc-parser": "^3.3.1",
     "jsqr": "^1.4.0",
     "katex": "^0.16.47",
-    "konsta": "^5.0.9",
     "lexical": "0.53.0",
     "loro-adaptors": "catalog:",
     "loro-crdt": "catalog:",
@@ -212,9 +215,6 @@
     "@storybook/react-vite": "^10.6.2",
     "@stylexjs/babel-plugin": "0.19.0",
     "@stylexjs/unplugin": "0.19.0",
-    "@tailwindcss/container-queries": "^0.1.1",
-    "@tailwindcss/postcss": "^4.3.0",
-    "@tailwindcss/vite": "^4.3.0",
     "@tanstack/router-cli": "1.167.21",
     "@tanstack/router-plugin": "catalog:",
     "@types/debug": "^4.1.12",

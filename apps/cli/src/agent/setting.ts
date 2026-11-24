@@ -30,6 +30,7 @@ import { getAcpBinaryManager } from '@/agent/acp-binary-manager';
 import {
   BUILTIN_CLAUDE_CAPABILITY_SOURCE_VERSION,
   BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION,
+  formatBuiltinCodexCapabilitySourceVersion,
   BUILTIN_GROK_CAPABILITY_SOURCE_VERSION,
   BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION,
   CLAUDE_ACP_ADAPTER_VERSION,
@@ -371,7 +372,7 @@ export function getAcpCapabilitySourceVersion(
       }
       if (input.agentType === 'codex') {
         return managedRuntimeVersion
-          ? `builtin-codex-acp:${CODEX_ACP_ADAPTER_VERSION}+codex:${managedRuntimeVersion}`
+          ? formatBuiltinCodexCapabilitySourceVersion(managedRuntimeVersion)
           : `${BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
       if (input.agentType === 'claude') {

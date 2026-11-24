@@ -17,8 +17,8 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   never trust a server-provided route or expose unknown kinds as a known event.
 - The encryption console's Recovery tab is the shared section over
   `mobileRecoveryPort`, supplied by `MobileRecoveryHostProvider` under the same native iOS/Android
-  admission and runtime setting, one port per login. Its engine loads on first use. It creates vaults with files, native passkeys or Argon2id passwords and can add an offline file to a passkey/password vault. Whole-vault replacement remains unsupported. Account settings keep
-  `RecoveryEntry`: it needs no encrypted workspace and manages passkeys by passkey too.
+  admission and runtime setting, one port per login. Its engine loads on first use. It creates vaults with files, native passkeys or Argon2id passwords and can add an offline file to a passkey/password vault. Whole-vault replacement remains unsupported. Account settings gate
+  `RecoveryEntry` on an encrypted workspace so E2EE recovery controls never leak into non-E2EE workspaces.
 - Use existing shared primitives/copy and keep synthetic previews out of Git.
   [Entry, lifetime and acceptance boundary](../../e2ee-passkey.md).
 

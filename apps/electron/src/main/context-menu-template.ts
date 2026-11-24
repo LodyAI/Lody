@@ -18,8 +18,9 @@ export type ContextMenuRole = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'sele
 export type ContextMenuTemplateItem =
   | { readonly type: 'separator' }
   | { readonly role: ContextMenuRole; readonly label: string; readonly enabled: boolean }
+  | { readonly action: 'copyLink'; readonly label: string }
 
-export type ContextMenuLabels = Readonly<Record<ContextMenuRole, string>>
+export type ContextMenuLabels = Readonly<Record<ContextMenuRole | 'copyLink', string>>
 
 /** Structurally compatible with the fields this reads off `Electron.ContextMenuParams`. */
 export type ContextMenuInput = {
@@ -33,6 +34,23 @@ export type ContextMenuInput = {
     readonly canCopy: boolean
     readonly canPaste: boolean
     readonly canSelectAll: boolean
+  }
+  /** Chromium reports this for a right-click on an anchor; '' everywhere else. */
+  readonly linkURL: string
+}
+
+/**
+ * Only http(s) link targets are copyable. Chromium happily reports
+ * javascript:, data: and file: anchors too, and putting those on the
+ * clipboard is either useless or a paste-into-the-location-bar hazard; an
+ * unparseable linkURL is treated the same way.
+ */
+export function isWebLinkURL(linkURL: string): boolean {
+  try {
+    const scheme = new URL(linkURL).protocol
+    return scheme === 'http:' || scheme === 'https:'
+  } catch {
+    return false
   }
 }
 
@@ -57,9 +75,15 @@ export function buildContextMenuTemplate(
     label: labels[role],
     enabled
   })
+  const copyLink: ContextMenuTemplateItem | null =
+    params.linkURL && isWebLinkURL(params.linkURL)
+      ? { action: 'copyLink', label: labels.copyLink }
+      : null
+  const withLink = (rest: ContextMenuTemplateItem[]): ContextMenuTemplateItem[] =>
+    copyLink ? [copyLink, { type: 'separator' }, ...rest] : rest
 
   if (params.isEditable) {
-    return [
+    return withLink([
       item('undo', params.editFlags.canUndo),
       item('redo', params.editFlags.canRedo),
       { type: 'separator' },
@@ -68,7 +92,7 @@ export function buildContextMenuTemplate(
       item('paste', params.editFlags.canPaste),
       { type: 'separator' },
       item('selectAll', params.editFlags.canSelectAll)
-    ]
+    ])
   }
 
   // Read-only content offers Copy alone. `selectAll` is deliberately absent:
@@ -76,7 +100,7 @@ export function buildContextMenuTemplate(
   // shell it would sweep up the sidebar and every other panel with the
   // conversation rather than selecting "this".
   if (!params.selectionText.trim() || !params.editFlags.canCopy) {
-    return []
+    return copyLink ? [copyLink] : []
   }
-  return [item('copy', true)]
+  return withLink([item('copy', true)])
 }

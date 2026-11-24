@@ -9,7 +9,7 @@ import { getCachedLoginShellEnvSyncLegacy } from '@/agent/login-shell-env';
 import { platformLayer } from '@/platform/process-options';
 import { observeWorkflows, checkWorkflowEvidence } from './sources/workflows';
 import { publicActivity, actionActivity, workActivity } from './control/activities';
-import { Clock, Effect, Layer, ManagedRuntime } from 'effect';
+import { Clock, Effect, Layer, ManagedRuntime, Semaphore } from 'effect';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -44,7 +44,13 @@ import {
   sessionPolicySettings,
   upgradeCapacityPolicies,
 } from './policies/session';
-import { advanceDelivery, deliveryStepCurrent, startDeliveryEpoch } from './policies/delivery';
+import {
+  advanceDelivery,
+  DELIVERY_EVENT_SOURCE,
+  deliveryStepCurrent,
+  readDeliveryProgress,
+  startDeliveryEpoch,
+} from './policies/delivery';
 import type { Lody } from '@/lib/lody';
 import type { AuthContext } from '@/lib/command-runtime';
 import type { WorkspaceSummary } from '@/lib/workspace';
@@ -135,6 +141,16 @@ export async function createAutomationWorkspaceLegacy(options: {
     return owned;
   };
   const observe = (body: () => Promise<void>) => (closing ? Promise.resolve() : ownedCall(body));
+  const deliveryStatus = Semaphore.makeUnsafe(1);
+  const withDeliveryStatus = <A>(body: (now: number) => Promise<A>) =>
+    deliveryStatus.withPermit(
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) =>
+          Effect.tryPromise({ try: () => body(now), catch: (cause) => cause })
+        ),
+        Effect.uninterruptible
+      )
+    );
   const condition = async (
     spec: AutomationCondition,
     receipt: AutomationReceipt
@@ -244,23 +260,30 @@ export async function createAutomationWorkspaceLegacy(options: {
         return { value: 'unknown', reason: `condition_unsupported:${spec.kind}` };
     }
   };
-  const recheck = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
+  const recheckAdmission = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
     const authorization = await actions.authorize(receipt);
-    if (authorization.value !== 'yes') return authorization;
+    if (authorization.value !== 'yes' || authorization.reason === 'archive_already_committed')
+      return authorization;
     if (receipt.intent.guard) {
       const guard = await condition(receipt.intent.guard, receipt);
       if (guard.value !== 'yes') return { ...guard, reason: `guard:${guard.reason}` };
     }
+    return { value: 'yes', reason: 'authorized' };
+  };
+  const recheck = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
+    const admission = await recheckAdmission(receipt);
+    if (admission.value !== 'yes' || admission.reason === 'archive_already_committed')
+      return admission;
     if (receipt.intent.condition && !['queued', 'running', 'unknown'].includes(receipt.state)) {
       const predicate = await condition(receipt.intent.condition, receipt);
       if (predicate.value !== 'yes') return predicate;
     }
-    return { value: 'yes', reason: 'authorized' };
+    return admission;
   };
   const actions = new AutomationSessionActionsLegacy({
     ...options,
     ledger,
-    condition: recheck,
+    admission: recheckAdmission,
     capacity: (bindingId, modelId, receipt) =>
       condition(
         {
@@ -404,7 +427,7 @@ export async function createAutomationWorkspaceLegacy(options: {
   const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
     status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
   /** Auto delivery reads observations already in this ledger and the Session metadata. */
-  const advanceDeliveries = async () => {
+  const advanceDeliveries = async (now: number) => {
     for (const rule of ledger.rules()) {
       const sessionId = rule.scope.sessionId;
       if (
@@ -421,7 +444,6 @@ export async function createAutomationWorkspaceLegacy(options: {
         const record = await lody.documentManager.repo.getDocMeta(roomId);
         const meta = record?.meta as SessionMeta | undefined;
         if (!record || !meta || isLoroRepoDocDeleted(record) || meta.isArchived) continue;
-        const now = Date.now();
         const decision = advanceDelivery({ ledger, meta, options, now });
         if (decision.finished)
           configureSessionPolicies(
@@ -431,10 +453,26 @@ export async function createAutomationWorkspaceLegacy(options: {
             { autoDeliver: false },
             now
           );
-        if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status))
+        if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status)) {
+          const pr = decision.observed;
+          logger.debug(`Auto delivery ${sessionId}: ${deliveryStatusKey(decision.status)}`, {
+            step: decision.step?.step,
+            ...(pr
+              ? {
+                  head: pr.headSha,
+                  status: pr.status,
+                  ci: pr.ciState,
+                  merge: pr.mergeState,
+                  observedAt: pr.observedAt,
+                }
+              : {}),
+            workspaceDirty: meta.workspaceDirty,
+            workspaceUnpushed: meta.workspaceUnpushed,
+          });
           await lody.documentManager.repo.upsertDocMeta(roomId, {
             autoDelivery: { ...decision.status, updatedAt: now },
           });
+        }
       } catch (cause) {
         // One Session's failure leaves the others' delivery running.
         logger.warn(`Auto delivery pass failed for ${sessionId}`, cause);
@@ -470,8 +508,7 @@ export async function createAutomationWorkspaceLegacy(options: {
             (fact) => authority.executionRelease(fact.sessionId, fact.assistantTurnId, fact.userId),
             (cause) => logger.warn('Automation turn observation awaiting reconciliation', cause)
           );
-          await advanceDeliveries();
-        }),
+        }).pipe(Effect.andThen(withDeliveryStatus(advanceDeliveries))),
         authorize: (receipt) => sessionCall(() => actions.authorize(receipt)),
         condition: (spec, receipt) => sessionCall(() => condition(spec, receipt)),
         prepare: (receipt) => sessionCall(() => actions.prepare(receipt)),
@@ -672,28 +709,38 @@ export async function createAutomationWorkspaceLegacy(options: {
               meta?.machineId === auth.machineId && !isLoroRepoDocDeleted(record)
                 ? meta.latestUserMsgId
                 : undefined;
-            const previous = sessionPolicySettings(ledger, sessionId);
-            const wasEnabled = previous.recoverCapacity === true;
-            const enablesDelivery =
-              typeof command.settings.autoDeliver === 'object' &&
-              typeof previous.autoDeliver !== 'object';
-            // Encrypted workspaces do not run the PR poller that Auto delivery reads.
-            if (enablesDelivery && workspace.contentMode === 'e2ee')
-              throw new Error('AUTOMATION_AUTO_DELIVER_UNAVAILABLE_ENCRYPTED');
-            ledger.configureSession(
-              () => {
-                if (enablesDelivery) startDeliveryEpoch(ledger, sessionId, now);
-                configureSessionPolicies(ledger, sessionId, principal, command.settings, now);
-              },
-              sessionId,
-              !wasEnabled ? currentTurn : undefined,
-              now
+            await runtime.runPromise(
+              withDeliveryStatus(async (now) => {
+                const previous = sessionPolicySettings(ledger, sessionId);
+                const wasEnabled = previous.recoverCapacity === true;
+                const enablesDelivery =
+                  typeof command.settings.autoDeliver === 'object' &&
+                  typeof previous.autoDeliver !== 'object';
+                ledger.configureSession(
+                  () => {
+                    if (enablesDelivery) startDeliveryEpoch(ledger, sessionId, now);
+                    configureSessionPolicies(ledger, sessionId, principal, command.settings, now);
+                  },
+                  sessionId,
+                  !wasEnabled ? currentTurn : undefined,
+                  now
+                );
+                if (command.settings.autoDeliver === false)
+                  await lody.documentManager.repo.upsertDocMeta(
+                    getSessionRoomId(sessionId as SessionId),
+                    { autoDelivery: null }
+                  );
+              })
             );
-            if (command.settings.autoDeliver === false)
-              await lody.documentManager.repo.upsertDocMeta(
-                getSessionRoomId(sessionId as SessionId),
-                { autoDelivery: null }
-              );
+            const lastStep =
+              command.settings.autoDeliver === false
+                ? readDeliveryProgress(ledger, sessionId)?.lastStep
+                : undefined;
+            for (const receipt of lastStep
+              ? ledger.eventReceipts(DELIVERY_EVENT_SOURCE, lastStep.eventId)
+              : [])
+              if (['accepted', 'waiting', 'resolved', 'blocked'].includes(receipt.state))
+                await runtime.runPromise(service.cancel(receipt.id));
           }
           await runtime.runPromise(service.wake);
           return sessionPolicySettings(ledger, sessionId);

@@ -7,7 +7,8 @@ import { createStore, Provider } from 'jotai';
 
 import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
 import { WINDOW_DRAG_REGION_CLASS, WINDOW_DRAG_EXEMPT_CLASS } from '../src/ui/window-drag-region';
-import { TodayToolbar } from '../src/components/today/today-view';
+import { WebArchiveScreen } from '../src/components/archive/web-archive-screen';
+import { TodayToolbar, type TodayToolbarSurface } from '../src/components/today/today-view';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
 // The desktop window: the workspace drag strip covers the Today page's toolbar row.
@@ -22,14 +23,16 @@ describe('Today toolbar window chrome', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  afterEach(() => {
-    if (root) flushSync(() => root?.unmount());
+  afterEach(async () => {
+    await act(async () => {
+      if (root) root.unmount();
+    });
     root = undefined;
     container?.remove();
     container = undefined;
   });
 
-  async function renderToolbar(pinned: boolean, collapsed: boolean, standalone = false) {
+  async function renderToolbar(surface: TodayToolbarSurface, collapsed: boolean) {
     const store = createStore();
     store.set(sidebarCollapsedAtom, collapsed);
     container = document.createElement('div');
@@ -39,7 +42,7 @@ describe('Today toolbar window chrome', () => {
       root?.render(
         withTestI18n(
           <Provider store={store}>
-            <TodayToolbar pinned={pinned} standalone={standalone} title={null}>
+            <TodayToolbar surface={surface} title={null}>
               <button type="button">Pick a date</button>
               <button type="button">Pin</button>
               <button type="button">More</button>
@@ -62,7 +65,7 @@ describe('Today toolbar window chrome', () => {
   }
 
   it('keeps every page control clickable and restores the sidebar controls while it is hidden', async () => {
-    const { store, toolbar } = await renderToolbar(false, true);
+    const { store, toolbar } = await renderToolbar('page', true);
     expect(toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
     const buttons = [...toolbar.querySelectorAll('button')];
     expect(
@@ -84,7 +87,7 @@ describe('Today toolbar window chrome', () => {
   });
 
   it('keeps the pinned column out of the drag chrome, carrying the sidebar controls while the sidebar is hidden', async () => {
-    const hidden = await renderToolbar(true, true);
+    const hidden = await renderToolbar('pinned', true);
     expect(hidden.toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(false);
     // Pinned with the sidebar hidden, the column is the leftmost surface.
     expect(
@@ -107,7 +110,7 @@ describe('Today toolbar window chrome', () => {
   it('makes the standalone Today window toolbar its own drag chrome, without sidebar controls', async () => {
     // The Today window has no navigation sidebar, whatever its stored state says.
     for (const collapsed of [false, true]) {
-      const { toolbar } = await renderToolbar(false, collapsed, true);
+      const { toolbar } = await renderToolbar('standalone', collapsed);
       expect(toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
       const buttons = [...toolbar.querySelectorAll('button')];
       expect(buttons.map((button) => button.textContent)).toEqual(['Pick a date', 'Pin', 'More']);
@@ -132,5 +135,72 @@ describe('Today toolbar window chrome', () => {
     expect(store.get(mainPageAtWindowEdgeAtom)).toBe(false);
     store.set(sidebarCollapsedAtom, false);
     expect(store.get(mainPageAtWindowEdgeAtom)).toBe(false);
+  });
+
+  it('keeps Archive header controls clickable in Electron default and multi-select modes', async () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    const onExitMultiSelect = vi.fn();
+    const onBulkRestore = vi.fn();
+    const onRequestBulkDelete = vi.fn();
+
+    const renderArchive = (isMultiSelectMode: boolean) =>
+      act(async () =>
+        root?.render(
+          withTestI18n(
+            <Provider store={store}>
+              <WebArchiveScreen
+                archiveScope="my"
+                isMultiSelectMode={isMultiSelectMode}
+                selectedCount={isMultiSelectMode ? 2 : 0}
+                isBulkActionBusy={false}
+                onArchiveScopeChange={() => {}}
+                onExitMultiSelect={onExitMultiSelect}
+                onBulkRestore={onBulkRestore}
+                onRequestBulkDelete={onRequestBulkDelete}
+                dialogs={null}
+              >
+                <div />
+              </WebArchiveScreen>
+            </Provider>,
+            createTestI18n({ keyLabels: true })
+          )
+        )
+      );
+
+    await renderArchive(false);
+    const defaultHeader = container.querySelector('header')!;
+    expect(defaultHeader.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+    const defaultButtons = [...defaultHeader.querySelectorAll('button')];
+    expect(defaultButtons.length).toBeGreaterThan(0);
+    for (const button of defaultButtons) expect(clickable(button, defaultHeader)).toBe(true);
+
+    await renderArchive(true);
+    const multiSelectHeader = container.querySelector('header')!;
+    expect(multiSelectHeader.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+    const multiSelectButtons = [...multiSelectHeader.querySelectorAll('button')];
+    expect(
+      multiSelectButtons.map((button) => button.getAttribute('aria-label') ?? button.textContent)
+    ).toEqual([
+      'archive.multiSelect.exit',
+      'archive.multiSelect.restore',
+      'archive.multiSelect.delete',
+    ]);
+    for (const button of multiSelectButtons) {
+      expect(clickable(button, multiSelectHeader)).toBe(true);
+    }
+
+    await act(async () => {
+      multiSelectButtons[0]!.click();
+      multiSelectButtons[1]!.click();
+      multiSelectButtons[2]!.click();
+    });
+    expect(onExitMultiSelect).toHaveBeenCalledTimes(1);
+    expect(onBulkRestore).toHaveBeenCalledTimes(1);
+    expect(onRequestBulkDelete).toHaveBeenCalledTimes(1);
   });
 });

@@ -383,6 +383,81 @@ it('keeps a connect pending until the job on the machine reports back', async ()
   expect(codex().getAttribute('aria-busy')).toBe('false');
 });
 
+it('uninstalls an installed EverMe after confirming, keeps a failure retryable, then offers the install again', async () => {
+  vi.useFakeTimers();
+  mocks.machines.set(localId, {
+    ...machine(localId, 'This Mac'),
+    protocolCapabilities: { memoryProviders: 3 },
+  });
+  const reply = (overrides: Partial<MemoryProviderResponse>): MemoryProviderResponse => ({
+    type: 'machine/memory',
+    status: 'ready',
+    memories: [],
+    agents: [],
+    ...overrides,
+  });
+  let outcome: 'permission' | 'done' = 'permission';
+  const everme = {
+    ...mocks.provider,
+    result: reply({}),
+    connectPoll: vi.fn(async () => undefined),
+    uninstall: vi.fn(async () => reply({ uninstall: { status: 'running' } })),
+    uninstallPoll: vi.fn(async () =>
+      outcome === 'done'
+        ? reply({ status: 'not_installed', agents: undefined, uninstall: { status: 'done' } })
+        : reply({ uninstall: { status: 'failed', failure: 'permission' } })
+    ),
+    refresh: vi.fn(async () => {
+      everme.result = reply({ status: 'not_installed', agents: undefined });
+      return everme.result;
+    }),
+  };
+  mocks.byProvider.everme = everme;
+  await renderSetting();
+  const trigger = () => button('Uninstall');
+  const confirm = async () => {
+    const dialog = document.querySelector('[role="alertdialog"], [role="dialog"]');
+    expect(dialog?.textContent).toContain('npm uninstall -g @everme/cli');
+    expect(dialog?.textContent).toContain('memories');
+    const action = [...(dialog?.querySelectorAll('button') ?? [])].find(
+      (node) => node.textContent?.trim() === 'Uninstall'
+    );
+    await act(async () => action?.click());
+  };
+
+  await act(async () => trigger().click());
+  // Nothing runs until the user confirms.
+  expect(everme.uninstall).not.toHaveBeenCalled();
+  await confirm();
+  expect(everme.uninstall).toHaveBeenCalledTimes(1);
+  expect(trigger().disabled).toBe(true);
+  expect(container.textContent).toContain('Uninstalling EverMe');
+  await act(async () => vi.advanceTimersByTime(3_000));
+  expect(container.textContent).toContain('EverMe is still installed');
+  expect(trigger().disabled).toBe(false);
+
+  outcome = 'done';
+  await act(async () => trigger().click());
+  await confirm();
+  await act(async () => vi.advanceTimersByTime(3_000));
+  expect(everme.refresh).toHaveBeenCalled();
+  await renderSetting();
+  const labels = [...container.querySelectorAll('button')].map((node) => node.textContent);
+  expect(labels).toContain('One-click download');
+  expect(labels).not.toContain('Uninstall');
+});
+
+it('offers no uninstall on a machine whose Lody cannot run it', async () => {
+  mocks.byProvider.everme = {
+    ...mocks.provider,
+    result: { type: 'machine/memory', status: 'ready', memories: [], agents: [] },
+  };
+  await renderSetting();
+  expect(container.textContent).toContain('EverMe');
+  const labels = [...container.querySelectorAll('button')].map((node) => node.textContent);
+  expect(labels).not.toContain('Uninstall');
+});
+
 it('keeps a stopped provider named and says to start it when asked to add a memory', async () => {
   mocks.provider.result = { type: 'machine/memory', status: 'not_running', memories: [] };
   await renderSetting();

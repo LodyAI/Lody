@@ -15,6 +15,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   projectRepositoryMembers: 'projectRepositoryMembers',
   operationInbox: 'operationInbox',
   magpieImport: 'magpieImport',
+  magpieCodexSkills: 'magpieCodexSkills',
   dshProviderIsolation: 'dshProviderIsolation',
   terminalNotifications: 'terminalNotifications',
   memoryProviders: 'memoryProviders',
@@ -34,6 +35,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   e2eeSessionFork: 'e2eeSessionFork',
   e2eeSessionEditAndResend: 'e2eeSessionEditAndResend',
   e2eeRemoteControl: 'e2eeRemoteControl',
+  e2eeRoostHistory: 'e2eeRoostHistory',
   acpAuthenticationMethodSelection: 'acpAuthenticationMethodSelection',
   localProjectRemoval: 'localProjectRemoval',
   localProjectCreateDirectory: 'localProjectCreateDirectory',
@@ -90,13 +92,15 @@ export const E2EE_SESSION_FORK_PROTOCOL_VERSION = 1;
 /** Encrypted feature RPC accepts `session/edit-and-resend` from the machine owner. */
 export const E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION = 1;
 /** Encrypted feature RPC accepts `E2EE_REMOTE_CONTROL_METHODS` (`e2ee-rpc.ts`). */
+export const E2EE_ROOST_HISTORY_PROTOCOL_VERSION = 1;
 export const E2EE_REMOTE_CONTROL_PROTOCOL_VERSION = 1;
 export const SESSION_DIRECTORY_LISTING_PROTOCOL_VERSION = 1;
 
 export const OPERATION_INBOX_PROTOCOL_VERSION = 2;
 // v1 serves identity providers (Nowledge Mem). v2 adds account providers
-// (EverMe): sign-in, install and agent connect/disconnect requests.
-export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
+// (EverMe): sign-in, install, connect/disconnect; v3 adds uninstall.
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 3;
+const ACCOUNT_MEMORY_PROVIDERS_PROTOCOL_VERSION = 2;
 const MEMORY_IDENTITY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION = 1;
@@ -199,6 +203,17 @@ export function machineSupportsAccountMemoryProviders(
   return machineSupportsProtocolCapability(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    ACCOUNT_MEMORY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the daemon can remove an installable provider's global package again. */
+export function machineSupportsMemoryProviderUninstall(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
     MEMORY_PROVIDERS_PROTOCOL_VERSION
   );
 }
@@ -241,6 +256,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.operationInbox]: OPERATION_INBOX_PROTOCOL_VERSION,
   providerRateLimitsRefresh: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
+  [MACHINE_PROTOCOL_CAPABILITIES.magpieCodexSkills]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.dshProviderIsolation]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.terminalNotifications]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,
@@ -317,7 +333,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
  * answer returns `null` so the caller never sends it.
  */
 export function adaptLocalProjectControlRequestToMachine<
-  TRequest extends { type: string; knownFingerprint?: string },
+  TRequest extends { type: string; knownFingerprint?: string; magpieGatewayUrl?: string },
 >(
   machine: MachineProtocolCapabilityCarrier | null | undefined,
   request: TRequest
@@ -331,6 +347,14 @@ export function adaptLocalProjectControlRequestToMachine<
     )
   ) {
     return null;
+  }
+  if (
+    request.type === 'local-project/list-global-skills' &&
+    request.magpieGatewayUrl &&
+    !machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.magpieCodexSkills)
+  ) {
+    request = { ...request };
+    delete request.magpieGatewayUrl;
   }
   if (
     request.knownFingerprint !== undefined &&

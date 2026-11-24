@@ -116,6 +116,8 @@ export class DesktopE2eeRuntimeError extends Data.TaggedError('DesktopE2eeRuntim
     | 'management_unauthorized'
     | 'management_operator_required'
     | 'management_retry'
+    | 'workspace_transfer_active_subscription'
+    | 'workspace_transfer_payment_required'
     | 'machine_not_owned'
     | 'machine_not_shared'
     | 'sharing_conflict'
@@ -2133,6 +2135,16 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
               )
             const cause = (error as { cause?: unknown })?.cause ?? error
             const code = (cause as { code?: string })?.code
+            let refusal: unknown = error
+            for (let depth = 0; depth < 8 && refusal && typeof refusal === 'object'; depth++) {
+              const transferCode = 'code' in refusal ? refusal.code : undefined
+              if (
+                transferCode === 'workspace_transfer_active_subscription' ||
+                transferCode === 'workspace_transfer_payment_required'
+              )
+                return fail(transferCode)
+              refusal = 'cause' in refusal ? refusal.cause : undefined
+            }
             if (
               typeof code === 'string' &&
               /e2ee_(?:staging_configuration|projection_corrupt|workspace_rebuild_required|ledger_budget_exceeded|ledger_configuration)/.test(

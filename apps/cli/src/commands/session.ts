@@ -23,6 +23,7 @@ import {
 } from '@lody/shared';
 import {
   assertMachineFlockCacheSufficient,
+  getSyncRetryability,
   validateWithMachineFlockFreshness,
   type MachineFlockFreshness,
 } from './session-catalog-read';
@@ -104,7 +105,9 @@ import {
   ACP_FAST_MODE_VALUE_FAST,
   ACP_FAST_MODE_VALUE_ULTRAFAST,
   isAcpFastModeConfigId,
+  isAcpNormalSpeedAlias,
   isAcpThoughtLevelConfigOption,
+  reconcileAgentRoleRunConfig,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -1271,6 +1274,40 @@ async function syncMachineFlockDocsForRead(
     : { confirmed: true };
 }
 
+async function confirmSameReplicaMachineFlockOnMiss(
+  manager: LoroDocumentManager,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  currentFreshness: MachineFlockFreshness,
+  reason: string
+): Promise<{ retried: boolean; freshness: MachineFlockFreshness }> {
+  if (currentFreshness.confirmed) {
+    return { retried: false, freshness: currentFreshness };
+  }
+  const daemonTarget = await resolveDaemonTarget({ manager, workspaceId, machineId });
+  if (daemonTarget.isLocalEnvironment || !daemonTarget.sameReplica) {
+    return { retried: false, freshness: currentFreshness };
+  }
+  try {
+    await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
+      reason: `${reason}:${machineId}`,
+      requireRemoteConfirmation: true,
+    });
+    return { retried: true, freshness: { confirmed: true } };
+  } catch (error) {
+    getLogger('session').warn(
+      `Machine Flock same-replica miss sync was not confirmed (${reason}:${machineId}): ${formatErrorMessage(error)}`
+    );
+    return {
+      retried: false,
+      freshness: {
+        confirmed: false,
+        error: getSyncRetryability(error) === false ? error : currentFreshness.error,
+      },
+    };
+  }
+}
+
 export async function resolveLocalProjectRefOrThrow(
   manager: LoroDocumentManager,
   workspaceId: WorkspaceId,
@@ -1283,15 +1320,33 @@ export async function resolveLocalProjectRefOrThrow(
   if (!normalizedSelector) {
     throw new Error('Missing local project selector.');
   }
-  const freshness = await syncMachineFlockDocsForRead(
+  let freshness = await syncMachineFlockDocsForRead(
     manager,
     workspaceId,
     [machineId],
     'session.local-projects'
   );
-  const localProjects = Object.values(
+  let localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
+  if (
+    localProjects.length === 0 ||
+    selectLocalProjectsBySelector(localProjects, normalizedSelector).length === 0
+  ) {
+    const confirmedMiss = await confirmSameReplicaMachineFlockOnMiss(
+      manager,
+      workspaceId,
+      machineId,
+      freshness,
+      'session.local-projects'
+    );
+    freshness = confirmedMiss.freshness;
+    if (confirmedMiss.retried) {
+      localProjects = Object.values(
+        await readMachineLocalProjects(manager.repo, workspaceId, machineId)
+      );
+    }
+  }
   if (localProjects.length === 0) {
     assertMachineFlockCacheSufficient(freshness, 'Local project catalog is unavailable.', {
       kind: 'project',
@@ -2032,7 +2087,7 @@ function validateModelDependentTurnConfigOptionValues(
   const declaredSpeedTiers = getAcpModelSpeedTiers(capability, targetModelId);
   const declaredFast = getAcpModelFastSupport(capability, targetModelId);
   for (const [id, value] of Object.entries(values)) {
-    if (isTurnEffortEntry(optionsById, id)) {
+    if (isTurnEffortEntry(optionsById, id, capability)) {
       if (typeof value !== 'string') {
         throw new Error(`Config option "${id}" expects a select value.`);
       }
@@ -2044,7 +2099,9 @@ function validateModelDependentTurnConfigOptionValues(
             { kind: 'ACP option', id }
           );
           throw new Error(
-            `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${efforts.join(', ')}.`
+            efforts.length === 0
+              ? `Model ${targetModelId} does not offer a reasoning effort option.`
+              : `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${efforts.join(', ')}.`
           );
         }
         validatedIds.add(id);
@@ -2096,15 +2153,19 @@ function validateModelDependentTurnConfigOptionValues(
           validatedIds.add(id);
           continue;
         }
+        if (isAcpNormalSpeedAlias(value)) {
+          validatedIds.add(id);
+          continue;
+        }
         // A custom raw select value has no model-independent toggle meaning.
         // Leave its membership validation to the ordinary catalog validator.
-        if (value !== ACP_CONFIG_OPTION_ON_VALUE && value !== ACP_CONFIG_OPTION_OFF_VALUE) {
+        if (value !== ACP_CONFIG_OPTION_ON_VALUE) {
           continue;
         }
       } else if (
         typeof value !== 'boolean' &&
         value !== ACP_CONFIG_OPTION_ON_VALUE &&
-        value !== ACP_CONFIG_OPTION_OFF_VALUE
+        !isAcpNormalSpeedAlias(value)
       ) {
         throw new Error(`Config option "${id}" expects a boolean or on/off value.`);
       }
@@ -2129,9 +2190,16 @@ function validateModelDependentTurnConfigOptionValues(
 
 function isTurnEffortEntry(
   optionsById: ReadonlyMap<string, AcpConfigOptionSummary>,
-  id: string
+  id: string,
+  capability?: AcpCapabilityCacheEntry
 ): boolean {
-  return isAcpThoughtLevelConfigOption(optionsById.get(id) ?? { id }) || id === 'effort';
+  const knownOption =
+    optionsById.get(id) ?? capability?.configOptions?.find((option) => option.id === id);
+  return (
+    isAcpThoughtLevelConfigOption(knownOption ?? { id }) ||
+    id === 'effort' ||
+    id === 'thought_level'
+  );
 }
 
 export function filterCompatibleTurnConfigOptionValues(
@@ -2160,7 +2228,7 @@ export function filterCompatibleTurnConfigOptionValues(
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       if (targetModelId) {
-        if (isTurnEffortEntry(optionsById, id)) {
+        if (isTurnEffortEntry(optionsById, id, capability)) {
           if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
           if (keepUnverified) return typeof value === 'string';
         } else if (isAcpFastModeConfigId(id)) {
@@ -2172,6 +2240,9 @@ export function filterCompatibleTurnConfigOptionValues(
             if (value === ACP_FAST_MODE_VALUE_FAST) {
               return speedTiers.includes(ACP_FAST_MODE_VALUE_FAST);
             }
+            if (isAcpNormalSpeedAlias(value)) {
+              return true;
+            }
           }
           // A model known without Fast has nothing to carry a Fast value to.
           if (fastSupport === false) return false;
@@ -2179,7 +2250,7 @@ export function filterCompatibleTurnConfigOptionValues(
             return (
               typeof value === 'boolean' ||
               value === ACP_CONFIG_OPTION_ON_VALUE ||
-              value === ACP_CONFIG_OPTION_OFF_VALUE ||
+              isAcpNormalSpeedAlias(value) ||
               value === ACP_FAST_MODE_VALUE_FAST ||
               value === ACP_FAST_MODE_VALUE_ULTRAFAST
             );
@@ -2325,21 +2396,12 @@ type AgentAcpCapabilityReadArgs = {
   localOnly?: boolean;
 };
 
-async function readAgentAcpCapabilitySnapshot(args: AgentAcpCapabilityReadArgs): Promise<{
-  capability: AcpCapabilityCacheEntry | undefined;
-  freshness: MachineFlockFreshness;
-}> {
+async function readAgentAcpCapabilityFromRepo(
+  args: AgentAcpCapabilityReadArgs
+): Promise<AcpCapabilityCacheEntry | undefined> {
   if (!args.agentConfigId) {
-    return { capability: undefined, freshness: { confirmed: true } };
+    return undefined;
   }
-  const freshness = args.localOnly
-    ? { confirmed: true as const }
-    : await syncMachineFlockDocsForRead(
-        args.manager,
-        args.workspaceId,
-        [args.machineId],
-        'session.acp-capabilities'
-      );
   const handle = await args.manager.repo.openFlockDoc(
     getMachineFlockDocId(args.workspaceId, args.machineId)
   );
@@ -2349,11 +2411,65 @@ async function readAgentAcpCapabilitySnapshot(args: AgentAcpCapabilityReadArgs):
     })
   );
   const cached = capabilities[getAcpCapabilityCacheKey(args.agentConfigId)];
-  const capability =
-    'runtimeOverrides' in args
-      ? getReadableAcpCapabilityCacheEntryForRuntimeOverrides(cached, args.runtimeOverrides)
-      : getReadableAcpCapabilityCacheEntry(cached);
-  return { capability, freshness };
+  return 'runtimeOverrides' in args
+    ? getReadableAcpCapabilityCacheEntryForRuntimeOverrides(cached, args.runtimeOverrides)
+    : getReadableAcpCapabilityCacheEntry(cached);
+}
+
+async function readAgentAcpCapabilitySnapshot(args: AgentAcpCapabilityReadArgs): Promise<{
+  capability: AcpCapabilityCacheEntry | undefined;
+  freshness: MachineFlockFreshness;
+}> {
+  if (!args.agentConfigId) {
+    return { capability: undefined, freshness: { confirmed: true } };
+  }
+  if (args.localOnly) {
+    return {
+      capability: await readAgentAcpCapabilityFromRepo(args),
+      freshness: { confirmed: true },
+    };
+  }
+  const daemonTarget = await resolveDaemonTarget({
+    manager: args.manager,
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+  });
+  if (!daemonTarget.isLocalEnvironment && daemonTarget.sameReplica) {
+    const localCapability = await readAgentAcpCapabilityFromRepo(args);
+    if (localCapability !== undefined) {
+      return { capability: localCapability, freshness: { confirmed: true } };
+    }
+    const unconfirmed: MachineFlockFreshness = {
+      confirmed: false,
+      error: new FlockSyncUnavailableError({
+        message: `Machine Flock read used the local daemon replica without remote confirmation (session.acp-capabilities:${args.machineId})`,
+        reason: 'local-replica-unconfirmed',
+      }),
+    };
+    const confirmedMiss = await confirmSameReplicaMachineFlockOnMiss(
+      args.manager,
+      args.workspaceId,
+      args.machineId,
+      unconfirmed,
+      'session.acp-capabilities'
+    );
+    return {
+      capability: confirmedMiss.retried
+        ? await readAgentAcpCapabilityFromRepo(args)
+        : localCapability,
+      freshness: confirmedMiss.freshness,
+    };
+  }
+  const freshness = await syncMachineFlockDocsForRead(
+    args.manager,
+    args.workspaceId,
+    [args.machineId],
+    'session.acp-capabilities'
+  );
+  return {
+    capability: await readAgentAcpCapabilityFromRepo(args),
+    freshness,
+  };
 }
 
 export async function readAgentAcpCapability(
@@ -3192,6 +3308,17 @@ export function selectDefaultAgentConfigForCreate(
   return configs.length === 1 ? configs[0] : undefined;
 }
 
+function sortAgentConfigsForCreate(configs: AgentConfigMeta[]): AgentConfigMeta[] {
+  configs.sort((left, right) => {
+    const nameCompare = left.name.localeCompare(right.name);
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+    return left.id.localeCompare(right.id);
+  });
+  return configs;
+}
+
 async function resolveAgentConfigForCreate(args: {
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
@@ -3199,11 +3326,33 @@ async function resolveAgentConfigForCreate(args: {
   selector?: string;
   currentSession?: SessionMeta;
 }): Promise<AgentConfigMeta> {
-  const { configs, freshness } = await listAgentConfigsForMachine(
+  let { configs, freshness } = await listAgentConfigsForMachine(
     args.manager,
     args.workspaceId,
     args.machineId
   );
+  const selector =
+    normalizeCliValue(args.selector) ?? normalizeCliValue(process.env.LODY_AGENT_CONFIG_ID);
+  const isSelectorMissing =
+    Boolean(selector) &&
+    !configs.some(
+      (config) => config.id === selector || normalizeCliValue(config.name) === selector
+    );
+  if (configs.length === 0 || isSelectorMissing) {
+    const confirmedMiss = await confirmSameReplicaMachineFlockOnMiss(
+      args.manager,
+      args.workspaceId,
+      args.machineId,
+      freshness,
+      'session.agent-configs'
+    );
+    freshness = confirmedMiss.freshness;
+    if (confirmedMiss.retried) {
+      configs = sortAgentConfigsForCreate(
+        await listMergedAgentConfigs(args.manager.repo, args.workspaceId, [args.machineId])
+      );
+    }
+  }
   if (configs.length === 0) {
     assertMachineFlockCacheSufficient(freshness, 'Agent config catalog is unavailable.', {
       kind: 'agent config',
@@ -3211,8 +3360,6 @@ async function resolveAgentConfigForCreate(args: {
     });
     throw new Error(`No agent config exists on machine ${args.machineId}.`);
   }
-  const selector =
-    normalizeCliValue(args.selector) ?? normalizeCliValue(process.env.LODY_AGENT_CONFIG_ID);
   if (selector) {
     if (
       !configs.some(
@@ -3406,15 +3553,33 @@ async function resolveLocalProjectRefOnMachineOrThrow(
   if (!normalizedSelector) {
     throw new Error('Missing local project selector.');
   }
-  const freshness = await syncMachineFlockDocsForRead(
+  let freshness = await syncMachineFlockDocsForRead(
     manager,
     workspaceId,
     [machineId],
     'session.local-projects'
   );
-  const localProjects = Object.values(
+  let localProjects = Object.values(
     await readMachineLocalProjects(manager.repo, workspaceId, machineId)
   );
+  if (
+    localProjects.length === 0 ||
+    selectLocalProjectsBySelector(localProjects, normalizedSelector).length === 0
+  ) {
+    const confirmedMiss = await confirmSameReplicaMachineFlockOnMiss(
+      manager,
+      workspaceId,
+      machineId,
+      freshness,
+      'session.local-projects'
+    );
+    freshness = confirmedMiss.freshness;
+    if (confirmedMiss.retried) {
+      localProjects = Object.values(
+        await readMachineLocalProjects(manager.repo, workspaceId, machineId)
+      );
+    }
+  }
   if (localProjects.length === 0) {
     assertMachineFlockCacheSufficient(freshness, 'Local project catalog is unavailable.', {
       kind: 'project',
@@ -3695,6 +3860,7 @@ export async function validateSessionCreateOptions(args: {
     project: resolved.project,
     openedBySessionId: resolved.openedBySessionId,
     dispatchConfig: args.dispatchConfig ?? resolveTurnDispatchConfig({}),
+    ...(args.options.agentRoleId ? { agentRoleId: args.options.agentRoleId } : {}),
   });
 }
 
@@ -3708,6 +3874,8 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   localOnly?: boolean;
   /** Matching immutable Turn evidence, checked against frozen inherited provenance. */
   authoredInheritedModel?: { modelId: string | undefined };
+  /** Present when creating from an Agent Role; reconciles absent model option keys. */
+  agentRoleId?: string;
 }): Promise<ResolvedTurnDispatchConfig> {
   const {
     frozenInheritedInputConfig,
@@ -3801,6 +3969,17 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
         localOnly: args.localOnly,
       })
     : { capability: undefined, freshness: { confirmed: true as const } };
+  if (args.agentRoleId && capability) {
+    const reconciledRole = reconcileAgentRoleRunConfig(dispatchConfig, capability);
+    if (
+      reconciledRole.configOptionValues &&
+      Object.keys(reconciledRole.configOptionValues).length > 0
+    ) {
+      dispatchConfig.configOptionValues = reconciledRole.configOptionValues;
+    } else {
+      delete dispatchConfig.configOptionValues;
+    }
+  }
   const compatibleDefaults = filterCompatibleInheritedTurnConfig(
     inheritedDispatchConfig,
     capability
@@ -4040,6 +4219,7 @@ export async function prepareSessionInput(
     ...(Object.hasOwn(authoredDispatchOverrides, 'modelId')
       ? { authoredInheritedModel: { modelId: authoredDispatchOverrides.modelId } }
       : {}),
+    ...(options.agentRoleId ? { agentRoleId: options.agentRoleId } : {}),
   });
   Object.assign(effectiveDispatchConfig, authoredDispatchOverrides);
 

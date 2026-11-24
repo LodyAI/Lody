@@ -126,7 +126,6 @@ vi.mock('@/components/settings/e2ee-team-settings', async (importOriginal) => {
       fixture.realTeam ? createElement(actual.E2eeTeamSettingsHost, props) : null,
   };
 });
-vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
 vi.mock('@/components/pages/e2ee-personal-pairing', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../src/components/pages/e2ee-personal-pairing')>();

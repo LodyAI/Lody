@@ -42,15 +42,24 @@ Design, invariants I1–I8 and the coverage lemma:
 - A viewport without a layout box (`display: none` tab, collapsed panel) pauses the
   engine through the scroller's `hidden` prop, fed from the host's `isVisible`: no
   transaction, measurement or `onScroll` until shown, then the kept intent is written.
-  A host that keeps a stream mounted off screen must pass it.
+  A host that keeps a stream mounted off screen must pass it. Restored `savedSizes`
+  and pre-hide sizes are warm estimates only: `Geometry` advances its measurement
+  epoch on mount, reshow and layout-version changes so mounted rows are synchronously
+  re-measured from the live DOM before paint, while `snapshot()` preserves
+  version-matching sizes for unmounted offscreen rows.
 - Reading anchors are separate from React row keys: resolve through `anchor.ts`
-  rules, never by list index. A row rendering several turns lists the others in
+  rules, never by list index. Exact/identity matches (rules 1–3) preserve `offsetPx`
+  and `screenY`; fallbacks (rules 4–7 or missing fixed rows) align to `offsetPx: 0`
+  and `screenY = 0` so a disappeared disclosure never pushes the fallback row down to
+  expose earlier turns. A row rendering several turns lists the others in
   `groupTurnIds`, or a grouped anchor falls back and can loop with hydration
   ([decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-17-grouped-creation-record-anchor.md)).
 - Manual disclosures release follow and anchor the clicked header at its screen
   position. Only mobile expansion with entirely invisible details may reveal up
-  to 96px. Temporary reply room is bounded by one viewport and shrinks with reader
-  movement; layout changes must not re-arm follow.
+  to 96px. Temporary reply room is bounded by one viewport, persists with `read`
+  state (`replyRoom` / `disclosureSpace`) across unmount/remount so commit 0 does
+  not clamp upward, and shrinks as content grows or the reader scrolls; layout
+  changes must not re-arm follow.
 - Upward conversation touch input releases follow before the first scroll event;
   post-touch momentum is reader input too. Taps, pinches, horizontal gestures,
   cancelled touches and nested scrolling must not arm conversation momentum.

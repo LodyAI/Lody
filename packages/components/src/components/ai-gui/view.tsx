@@ -798,7 +798,8 @@ const viewStyles = stylex.create({
   noticeStack: { paddingBlock: themeSpace[1] },
   /** A notice that sits on its own row is indented to sit apart from the
    *  conversation; inside a turn that same indent is a broken left edge. */
-  noticeStackIndented: { default: null,
+  noticeStackIndented: {
+    default: null,
     '@container (min-width: 640px)': { paddingLeft: themeSpace[3] },
   },
 
@@ -1525,13 +1526,13 @@ function useSessionCopyWorkspaceId(): string | undefined {
 
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
 // when the user scrolls a message out of the VList buffer and back.
-interface BubbleExpandState {
+export interface BubbleExpandState {
   /** Keyed by `AssistantTurnRenderSegment.key`: a turn can have more than one
    *  foldable region (plan, then the approved implementation). */
-  expandedWorkedGroups: Record<string, boolean>;
-  expandedGroups: Record<string, boolean>;
-  expandedByIndex: Record<number, boolean>;
-  planOpen: boolean;
+  readonly expandedWorkedGroups: Readonly<Record<string, boolean>>;
+  readonly expandedGroups: Readonly<Record<string, boolean>>;
+  readonly expandedByIndex: Readonly<Record<number, boolean>>;
+  readonly planOpen: boolean;
 }
 export type SelectionTurnLayout = {
   finished: boolean;
@@ -1616,6 +1617,7 @@ type AssistantVirtualContent =
   | {
       kind: 'activity_group_header';
       block: Extract<AssistantTurnRenderBlock, { kind: 'activity_group' }>;
+      segmentKey: string;
       expanded: boolean;
       isThinking: boolean;
     }
@@ -2497,7 +2499,8 @@ export const buildChatVirtualRows = ({
       target: AssistantChatVirtualRow[],
       block: AssistantTurnRenderBlock,
       blockIndex: number,
-      isWorkedDetail: boolean
+      isWorkedDetail: boolean,
+      segmentKey: string
     ) => {
       if (block.kind === 'content') {
         target.push({
@@ -2538,7 +2541,7 @@ export const buildChatVirtualRows = ({
         key: `assistant:${message.id}:${block.key}:header`,
         messageIndex,
         item,
-        content: { kind: 'activity_group_header', block, expanded, isThinking },
+        content: { kind: 'activity_group_header', block, segmentKey, expanded, isThinking },
         isWorkedDetail,
         isLastRowForMessage: false,
       });
@@ -2630,7 +2633,7 @@ export const buildChatVirtualRows = ({
       if (!shouldUseWorkedGroup) {
         for (let blockIndex = segmentStart; blockIndex < segmentEnd; blockIndex += 1) {
           const block = blocks[blockIndex];
-          if (block) appendBlockRows(assistantRows, block, blockIndex, false);
+          if (block) appendBlockRows(assistantRows, block, blockIndex, false, segment.key);
         }
         if (segmentSubagentTasks.length > 0) {
           appendSubagentTasksRow(assistantRows, false);
@@ -2670,10 +2673,11 @@ export const buildChatVirtualRows = ({
           didInsertWorkedGroup = true;
         }
         if (segment.workBlockKeys.has(block.key)) {
-          if (isWorkedGroupExpanded) appendBlockRows(assistantRows, block, blockIndex, true);
+          if (isWorkedGroupExpanded)
+            appendBlockRows(assistantRows, block, blockIndex, true, segment.key);
           continue;
         }
-        appendBlockRows(assistantRows, block, blockIndex, false);
+        appendBlockRows(assistantRows, block, blockIndex, false, segment.key);
       }
       if (!didInsertWorkedGroup) {
         insertWorkedGroup();
@@ -3024,14 +3028,24 @@ export const SessionChatStreamView = forwardRef<
       [suppressStickyAutoScrollRef, messageSelection]
     );
     const handleAssistantGroupExpandedChange = useCallback(
-      (messageId: string, groupKey: string, expanded: boolean) => {
+      (messageId: string, groupKey: string, expanded: boolean, segmentKey: string) => {
         const cached = getExpandState(messageId);
+        const keepWorkedGroupOpen =
+          expanded && cached.expandedWorkedGroups[segmentKey] === undefined;
         setExpandState(messageId, {
           ...cached,
           expandedGroups: {
             ...cached.expandedGroups,
             [groupKey]: expanded,
           },
+          ...(keepWorkedGroupOpen
+            ? {
+                expandedWorkedGroups: {
+                  ...cached.expandedWorkedGroups,
+                  [segmentKey]: true,
+                },
+              }
+            : {}),
         });
         // The disclosure marker lets the scroll engine hold the clicked header
         // before these rows change, including when the reader was following.
@@ -5433,7 +5447,9 @@ const UserMessageRowView = ({
                 isEditing ? viewStyles.userBubbleFrameEditing : viewStyles.userBubbleFrameFitted
               )}
             >
-              {showSendingSpinner && <Spinner className={stylex.props(viewStyles.sendingSpinner).className} />}
+              {showSendingSpinner && (
+                <Spinner className={stylex.props(viewStyles.sendingSpinner).className} />
+              )}
               <div
                 {...stylex.props(
                   viewStyles.userTextFrame,
@@ -7131,7 +7147,12 @@ interface AssistantChatItemProps {
   isForking?: boolean;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
-  onGroupExpandedChange: (messageId: string, groupKey: string, expanded: boolean) => void;
+  onGroupExpandedChange: (
+    messageId: string,
+    groupKey: string,
+    expanded: boolean,
+    segmentKey: string
+  ) => void;
   onWorkedGroupExpandedChange: (messageId: string, segmentKey: string, expanded: boolean) => void;
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
@@ -7175,6 +7196,7 @@ const areAssistantVirtualContentsEqual = (
       return (
         b.kind === 'activity_group_header' &&
         a.block === b.block &&
+        a.segmentKey === b.segmentKey &&
         a.expanded === b.expanded &&
         a.isThinking === b.isThinking
       );
@@ -7316,7 +7338,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
             summary={content.block.summary}
             expanded={content.expanded}
             onExpandedChange={(expanded) =>
-              onGroupExpandedChange(message.id, content.block.key, expanded)
+              onGroupExpandedChange(message.id, content.block.key, expanded, content.segmentKey)
             }
             shimmer={shimmerGroupHeader}
             liveMessage={shimmerGroupHeader ? message : undefined}
@@ -8420,7 +8442,11 @@ function LocalAttachmentImage({
           ? t('sessions.localAttachmentUnavailable', 'Local attachment unavailable')
           : t('sessions.markdownImage.loading', 'Loading image…')
       }
-      actionIcon={failed ? null : <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />}
+      actionIcon={
+        failed ? null : (
+          <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />
+        )
+      }
       failed={failed}
       isInteractive={failed}
       onClick={() => setAttempt((value) => value + 1)}

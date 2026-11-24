@@ -113,7 +113,7 @@ const styles = stylex.create({
   fade: {
     insetInline: 0,
     top: 0,
-    height: 'calc(var(--spacing) * 17)',
+    height: `calc(${themeSpace[16]} + ${themeSpace[1]})`,
     zIndex: 10,
     borderTopLeftRadius: themeRadius.xl,
     borderTopRightRadius: themeRadius.xl,
@@ -242,7 +242,7 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
       {showTopFade && !noInternalScroll && (
         <Fade
           ref={topFadeRef}
-          background="var(--color-background)"
+          background={themeColors.background}
           {...stylex.props(styles.fade)}
           side="top"
           blur="4px"

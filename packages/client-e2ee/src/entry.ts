@@ -53,6 +53,8 @@ const pairingFail = (code: 'invalid-input' | 'pairing-tampered') =>
 const fromHex = (value: string) =>
   Uint8Array.from(value.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
 export interface PersonalEntryOptions {
+  /** Official cloud endpoints enable the portable remote CLI pairing capability. */
+  readonly remoteMachineEndpoints?: { deploymentUrl: string; ingressUrl: string };
   readonly pins: PersonalEntryPins;
   readonly run: PersonalRuntimeOptions<unknown>['run'];
   readonly ports: (input: {
@@ -61,6 +63,7 @@ export interface PersonalEntryOptions {
     drainOld: (binding: ClientCustodyBinding) => Effect.Effect<void, unknown>;
     currentAccount: () => Effect.Effect<string | null>;
     mode: 'create-or-open' | 'open-existing';
+    remoteMachineEndpoints?: { deploymentUrl: string; ingressUrl: string };
   }) => Layer.Layer<PersonalHostPorts, unknown>;
   readonly ledgerRecords: (
     accountId: string,
@@ -413,7 +416,11 @@ export function personalEntry(options: PersonalEntryOptions) {
             accountId,
             workspaceId,
             genesisHash: offer.genesisHash,
+            remoteMachinePairing: Boolean(options.remoteMachineEndpoints),
             ports: options.ports({
+              ...(options.remoteMachineEndpoints
+                ? { remoteMachineEndpoints: { ...options.remoteMachineEndpoints } }
+                : {}),
               accountId,
               offer: { ...offer },
               drainOld,
@@ -688,6 +695,17 @@ export function personalEntry(options: PersonalEntryOptions) {
         // Reacquire only after that complete Scope has confirmed retirement.
         if (pendingRoot) await retire(entry);
       },
+      ...(options.remoteMachineEndpoints
+        ? {
+            beginRemoteMachinePairing: (id) => call(id, 'beginRemoteMachinePairing', [id]),
+            inspectRemoteMachinePairing: (id, session) =>
+              call(id, 'inspectRemoteMachinePairing', [id, session]),
+            approveRemoteMachinePairing: (id, session, summary) =>
+              call(id, 'approveRemoteMachinePairing', [id, session, summary]),
+            cancelRemoteMachinePairing: (id, session) =>
+              call(id, 'cancelRemoteMachinePairing', [id, session]),
+          }
+        : {}),
       status: (id) => call(id, 'status', [id], statusLoss),
       refresh: (id, input) => call(id, 'refresh', [id, input], statusLoss),
       readIdentity: (input) => call(input.workspaceId, 'readIdentity', [input]),

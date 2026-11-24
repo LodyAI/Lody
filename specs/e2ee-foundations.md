@@ -1,9 +1,12 @@
 # E2EE foundation boundary
 
-Status: draft
+Status: approved
 Translation: current
 
 Approved revision: [`122dfeaf`](https://github.com/LodyAI/Lody/blob/122dfeaf1e88d7c2bb872d4206213e91e0bb6ae1/specs/e2ee-foundations.md)
+Approval: 2026-11-24, owner Zixuan Chen (zxch3n) approved this specification and the
+inline machine-sharing, derived-work, automatic current-workspace pairing, and instant QR join
+increments; [approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval).
 Approval: 2026-11-10, the owner approved the mobile seed handoff (WebView portable host
 to one purpose-limited native iroh plugin);
 [approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#mobile-seed-handoff).
@@ -266,10 +269,11 @@ path; do not add legacy decoding, migration, metadata guesses or re-signing of
 history. Production has no encrypted workspaces requiring that compatibility.
 This does not authorize erasing uncertain operations or execution evidence.
 
-### Machine sharing policy (pending approval increment)
+### Machine sharing policy (owner approved 2026-11-24)
 
-**Increment status: draft; not covered by the approved revision above.** The
-existing approved machine identity and execution contracts remain in force.
+**Increment status: approved.** Owner Zixuan Chen (zxch3n) approved this increment on
+2026-11-24 ([approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval)).
+The existing approved machine identity and execution contracts remain in force.
 
 Each machine binding generation has one complete encrypted owner-personal policy:
 machine sharing plus shared localProjectIds. New generations and absent projects
@@ -324,7 +328,7 @@ clock uncertainty requires revalidation; unrelated content/local work stays usab
 The machine-sharing host performs these reads, caches and execution checks for the CLI;
 product enablement remains separate. See the [proposed sharing decision](../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md).
 
-**Derived work (proposed revision, draft).** On 2026-10-31 the owner chose to restore
+**Derived work (owner approved 2026-11-24).** On 2026-10-31 the owner chose to restore
 work that a shared member's turn derives through the machine (child Sessions, chat,
 Roles, continuations, agent control) by reusing the signed-original chain. The machine
 writes such an input with `derivedFrom: { sessionId, userTurnId }` inside the signed
@@ -496,9 +500,9 @@ product channels or establish runtime acceptance.
 
 ## Format compatibility
 
-**Freeze point.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) becomes permanent when a production deployment first enables encrypted workspace creation, because only then can a ledger exist that must never break. Merging code does not freeze it. Until that point the format may still change, but only with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. After the freeze the vector is never regenerated.
+**v1 backward-compatibility baseline.** Ledger v1 (record version 1, the `sig/v1` and `rec/v1` domains and the operation codes in the [permission-ledger Spec](e2ee/permission-ledger.zh.md)) locks its backward-compatibility baseline when a production deployment first enables encrypted workspace creation, because only then can a ledger exist whose existing records must never break. Merging code does not lock it. Until that point the format may still change with owner approval, and the same change regenerates `packages/e2ee-core/test/ledger-v1-vector.json` with its independent generator; development and staging ledgers created earlier may stop verifying. Production creation must not be enabled before a format review confirms that the record shapes, operation codes, signing domains and the open items in permission-ledger §9 (recovery vault encoding, rotation after self-revocation, recovery-device enrollment order) need no change to how existing records encode or verify. Once the production v1 backward-compatibility baseline is locked, `ledger-v1-vector.json` is never regenerated and future evolution proceeds strictly forward.
 
-**What freezes.** Every record that v1 accepts at a position must stay accepted by every later client, with the same bytes, hashes and resulting ledger state. New behavior, including relaxed or extended permissions, takes effect only through records after a capability declaration; it never changes how an existing record verifies.
+**What stays backward-compatible.** Every record that v1 accepts at a position must stay accepted by every later client, with the same bytes, hashes and resulting ledger state. New behavior, including relaxed or extended permissions, evolves strictly forward and takes effect only through records after a capability declaration or across a ReInit link to a new ledger; it never breaks or changes how an existing v1 record verifies.
 
 Ledger evolution is append-only:
 
@@ -759,11 +763,11 @@ and phase. Archived identities remain idempotent, reject different bytes at the
 same offset and can never become current again. Capacity budgets count retained
 bodies rather than archived identities.
 
-## Automatic current-workspace pairing (draft increment, 2026-11-10)
+## Automatic current-workspace pairing (owner approved 2026-11-24)
 
-The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; on an existing personal device the person enters the six-digit code the new device shows and approves once; that device signs only when the entered code equals its own, and three wrong entries end the request (owner decision, 2026-11-11). Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison cannot be skipped: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment is draft and has no independent cryptographic approval. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.
+The approved UI removes manual code transfer: a native device opening a workspace automatically requests access; on an existing personal device the person enters the six-digit code the new device shows and approves once; that device signs only when the entered code equals its own, and three wrong entries end the request (owner decision, 2026-11-11). Approval grants only that workspace. A committed ephemeral key exchange derives the secret for the existing authenticated pairing protocol; the relay receives public messages only. Both clients bind account, workspace, genesis and the original ten-minute expiry, and retain exact originals on retry. The comparison cannot be skipped: six decimal digits provide approximately 20 bits of substitution detection, rather than the manual protocol’s 128-bit out-of-band authentication. This protocol increment was approved by owner Zixuan Chen (zxch3n) on 2026-11-24 ([approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval)) without an independent external cryptographic audit. The existing approved manual protocol remains unchanged. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#automatic-current-workspace-verification-2026-11-10) records ordering, lifetime and validation limits.
 
-**Instant QR join (draft revision, owner decision 2026-11-12).** In the reverse direction an existing personal device shows a fresh one-time pairing code as a QR code. A computer shows it in the approval window as soon as a new device's request arrives, with no click; a phone shows it when the person asks, and the console's Add device action shows it at once. Scanning it is the approval: once a request submitted under that code verifies, the device that showed it signs every workspace it can approve, without the warning and workspace selection of the manual confirmation, and names the requested workspaces it cannot approve. Session recording stays paused while the code is visible. A new computer also shows its automatic comparison code as a QR code for a phone to scan; scanning only replaces typing, and the approver still compares the code and counts wrong entries. Residual risk, accepted by the owner over a click-to-reveal alternative: anyone who sees the shown code within its ten-minute lifetime, for example through screen sharing or a camera, can admit their own device to every listed workspace and its history, and with the account password they can make the code appear by sending a request. The new-device notice and revocation remain the remedy. This revision changes the approved manual confirmation and stays draft until the increment is approved. The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#instant-qr-join-2026-11-12) records the decision and its limits.
+**Instant QR join (owner approved 2026-11-24).** In the reverse direction an existing personal device shows a fresh one-time pairing code as a QR code. A computer shows it in the approval window as soon as a new device's request arrives, with no click; a phone shows it when the person asks, and the console's Add device action shows it at once. Scanning it is the approval: once a request submitted under that code verifies, the device that showed it signs every workspace it can approve, without the warning and workspace selection of the manual confirmation, and names the requested workspaces it cannot approve. Session recording stays paused while the code is visible. A new computer also shows its automatic comparison code as a QR code for a phone to scan; scanning only replaces typing, and the approver still compares the code and counts wrong entries. Residual risk, accepted by the owner over a click-to-reveal alternative: anyone who sees the shown code within its ten-minute lifetime, for example through screen sharing or a camera, can admit their own device to every listed workspace and its history, and with the account password they can make the code appear by sending a request. The new-device notice and revocation remain the remedy. Owner Zixuan Chen (zxch3n) approved this revision on 2026-11-24 ([approval record](../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval)). The [owning note](../.agents/notes/proposed/architecture/2026-11-01-e2ee-account-personal-pairing.md#instant-qr-join-2026-11-12) records the decision and its limits.
 
 ## Whitepaper technical appendix
 

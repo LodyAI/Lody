@@ -997,6 +997,8 @@ function publicE2eeFailure(error: unknown): Error {
     'management_unauthorized',
     'management_operator_required',
     'management_retry',
+    'workspace_transfer_active_subscription',
+    'workspace_transfer_payment_required',
     'restart-required',
     'local-history-recovery-required',
     'trusted-pin-unavailable'

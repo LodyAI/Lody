@@ -4,6 +4,8 @@ import {
   getAgentRoleMentionSlug,
   isAcpThoughtLevelConfigOption,
   isAgentRoleContentEqual,
+  isModelScopedSessionDefaultConfigId,
+  isPerModelControlConfigId,
   isSensitiveAgentRoleConfigOptionKey,
   normalizeAgentRoleEmoji,
   normalizeAgentRoleDescription,
@@ -24,9 +26,19 @@ import {
 import {
   coerceFastModeConfigOptionValue,
   isConfigOptionValueValid,
+  isFastModeSelector,
+  isSpeedTierSelector,
+  isThoughtLevelSelector,
   type AcpConfigOptionSelector,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
+
+const isModelDependentRoleSelector = (selector: AcpConfigOptionSelector): boolean =>
+  isThoughtLevelSelector(selector) ||
+  isFastModeSelector(selector) ||
+  isSpeedTierSelector(selector) ||
+  isPerModelControlConfigId(selector.configId) ||
+  isModelScopedSessionDefaultConfigId(selector.configId);
 
 /**
  * The authoring state of one Agent Role, and the pure rules around it.
@@ -375,18 +387,24 @@ const prepareAgentRoleTargetForSave = (
 ): AgentRoleTargetFormValue => {
   // Provisional static defaults cannot establish that a stored option was removed.
   if (selectorOptions?.capabilityAuthority !== 'authoritative') return value;
+  const borrowedModelOptions = selectorOptions.modelConfigOptionsSource === 'borrowed';
+  const nextEntries: Array<[string, string | boolean]> = [];
+  for (const selector of selectAuthorableAgentRoleConfigOptions(
+    selectorOptions.configOptionSelectors
+  )) {
+    const current = value.configOptionValues[selector.configId];
+    if (borrowedModelOptions && current === undefined && isModelDependentRoleSelector(selector)) {
+      continue;
+    }
+    const coerced = coerceFastModeConfigOptionValue(selector, current);
+    nextEntries.push([
+      selector.configId,
+      isConfigOptionValueValid(selector, coerced) ? coerced : selector.currentValue,
+    ]);
+  }
   return {
     ...value,
-    configOptionValues: Object.fromEntries(
-      selectAuthorableAgentRoleConfigOptions(selectorOptions.configOptionSelectors).map(
-        (selector) => [
-          selector.configId,
-          isConfigOptionValueValid(selector, value.configOptionValues[selector.configId])
-            ? value.configOptionValues[selector.configId]
-            : selector.currentValue,
-        ]
-      )
-    ),
+    configOptionValues: Object.fromEntries(nextEntries),
   };
 };
 
@@ -401,7 +419,9 @@ const prepareAgentRoleTargetForSave = (
  *
  * Only unset fields are filled: a saved Role keeps its stored selection even
  * when it differs from the agent's current default, which is what makes an
- * incompatible value visible instead of silently replaced.
+ * incompatible value visible instead of silently replaced. Model-dependent
+ * controls (`thought_level`, `fast-mode`, etc.) borrowed from another model's
+ * snapshot are never auto-seeded until the target model's own schema is known.
  */
 export const applyAgentRoleRunConfigDefaults = (
   value: AgentRoleTargetFormValue,
@@ -420,11 +440,13 @@ export const applyAgentRoleRunConfigDefaults = (
       ? (selectorOptions.defaultModeId ?? selectorOptions.modeOptions[0]?.value ?? null)
       : null);
 
+  const borrowedModelOptions = selectorOptions.modelConfigOptionsSource === 'borrowed';
   const configOptionValues = { ...value.configOptionValues };
   for (const selector of selectAuthorableAgentRoleConfigOptions(
     selectorOptions.configOptionSelectors
   )) {
     if (configOptionValues[selector.configId] !== undefined) continue;
+    if (borrowedModelOptions && isModelDependentRoleSelector(selector)) continue;
     configOptionValues[selector.configId] = selector.currentValue;
   }
 

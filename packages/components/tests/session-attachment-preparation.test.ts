@@ -506,18 +506,16 @@ it('admits an already prepared local file in an encrypted workspace without uplo
   );
 });
 
-it('rejects unprotected or mismatched prepared references and keeps the encrypted Roost fence', async () => {
+it('rejects unprotected or mismatched prepared references', async () => {
   const f = fixture(true);
   const value = send('rejected', ['image.png']);
-  expect(() => f.pending.enqueue({ ...value, historyBackend: 'roost' })).toThrow(
-    'e2ee_feature_unavailable'
-  );
   expect(() => f.pending.enqueue({ ...value, workspaceId: 'other' })).toThrow(
     'attachment_workspace_mismatch'
   );
   expect(() =>
     f.pending.enqueue({
       ...value,
+      historyBackend: 'roost',
       attachments: value.attachments.map((item) => ({
         ...item,
         ready: { type: 'image', ...ready(new File(['x'], 'image.png')) },

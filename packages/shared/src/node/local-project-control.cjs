@@ -425,6 +425,7 @@ function isLocalProjectControlRequest(value) {
 
   if (value.type === 'local-project/list-global-skills') {
     return (
+      isOptionalString(value.magpieGatewayUrl) &&
       typeof value.workspaceId === 'string' &&
       isOptionalString(value.knownFingerprint) &&
       isOptionalString(value.requestedByUserId)

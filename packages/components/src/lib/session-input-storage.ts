@@ -225,7 +225,9 @@ export function createSessionInputStorage(
       }),
     patch: (
       id: string,
-      patch: Partial<Pick<StoredSessionInput, 'state' | 'error' | 'canceled' | 'deliveryStarted'>>
+      patch: Partial<
+        Pick<StoredSessionInput, 'state' | 'error' | 'canceled' | 'deliveryStarted' | 'send'>
+      >
     ) =>
       transact('readwrite', async (tx) => {
         const store = tx.objectStore(INPUTS);

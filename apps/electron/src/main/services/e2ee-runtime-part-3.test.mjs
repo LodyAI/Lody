@@ -1,3 +1,4 @@
+import { LedgerLogError } from '@lody/e2ee-core/services'
 import {
   Bytes,
   Clock,
@@ -741,6 +742,23 @@ void test('ownership transfer signs one ordinary record and leaves the former ow
         )
       )
       assert.equal(missing._tag, 'Failure')
+      for (const code of [
+        'workspace_transfer_active_subscription',
+        'workspace_transfer_payment_required'
+      ]) {
+        const blocked = yield* Effect.result(
+          owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, () => ({
+            ...remote(),
+            log: {
+              ...remote().log,
+              appendCas: () => Effect.fail(new LedgerLogError({ cause: { code } }))
+            }
+          }))
+        )
+        assert.equal(blocked.failure?.code, code)
+        assert.equal((yield* owner.host.status(workspaceId)).memberRole, 'owner')
+      }
+
       assert.equal(
         yield* owner.host.manage(workspaceId, { type: 'transferOwner', membershipId }, remote),
         'Committed'

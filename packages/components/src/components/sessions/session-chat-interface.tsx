@@ -1,3 +1,4 @@
+import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
 import { radius as sharedRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { colors, colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import { button as buttonTokens } from '@lody/ui/button/button.tokens.stylex';
@@ -6,12 +7,10 @@ import { field as searchFieldTokens } from '@lody/ui/field/field.tokens.stylex';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
 import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
 import { useHorizontalFoldLayout } from '../mobile/use-horizontal-fold-layout';
 import { WorkspaceFeatureReasonText } from '@/components/workspace-feature-notice';
 import {
-  useLegacyWorkspaceQueryStatus,
   useWorkspaceFeature,
   useWorkspaceFeatureReason,
   useMachineRpcFeatureReason,
@@ -1920,9 +1919,7 @@ export function SessionHeaderMenu({
                           >
                             <span {...stylex.props(themeStyles.row)}>
                               <span>{label}</span>
-                              <span {...stylex.props(themeStyles.hint)}>
-                                {preset.countdown}
-                              </span>
+                              <span {...stylex.props(themeStyles.hint)}>{preset.countdown}</span>
                             </span>
                           </Menu.Item>
                         );
@@ -2807,10 +2804,7 @@ export const SessionChatInterface = memo(
       isVisible
     );
     const continuationNow = useStableNow(10_000).getTime();
-    // Auto delivery reads the PR poller, which encrypted workspaces do not run.
-    const autoDeliverSupported = runtime?.contentMode !== 'e2ee';
-    const canAutoDeliver =
-      autoDeliverSupported && !!continuation.value && !continuation.value.autoDeliver;
+    const canAutoDeliver = !!continuation.value && !continuation.value.autoDeliver;
     const [autoDeliveryDialogOpen, setAutoDeliveryDialogOpen] = useState(false);
     const autoDeliveryStatus = session.autoDelivery ?? null;
     // Session-scoped UI state below stores the session it belongs to and is read
@@ -3156,8 +3150,8 @@ export const SessionChatInterface = memo(
     const [resolvingConflictsSessionId, setResolvingConflictsSessionId] =
       useState<SessionId | null>(null);
     const isResolvingConflicts = resolvingConflictsSessionId === session.id;
-    const legacyQueryStatus = useLegacyWorkspaceQueryStatus(workspaceId);
-    const repositories = useLegacyWorkspaceQuery(
+    const legacyQueryStatus = useGithubWorkspaceStatus(workspaceId);
+    const repositories = useGithubWorkspaceQuery(
       cloudOperations.github.getWorkspaceRepositories,
       workspaceId ? { workspaceId } : 'skip'
     );
@@ -3210,12 +3204,19 @@ export const SessionChatInterface = memo(
       () =>
         !isArchivedSession && session.cliType && session.agentType
           ? {
+              magpieGatewayUrl: sessionAgentConfig?.magpieGatewayUrl,
               cliType: session.cliType,
               agentType: session.agentType,
               machineId: session.machineId,
             }
           : undefined,
-      [isArchivedSession, session.agentType, session.cliType, session.machineId]
+      [
+        sessionAgentConfig?.magpieGatewayUrl,
+        isArchivedSession,
+        session.agentType,
+        session.cliType,
+        session.machineId,
+      ]
     );
     const editMentionContext = useMemo<UserMessageEditMentionContext>(
       () => ({
@@ -7470,11 +7471,7 @@ export const SessionChatInterface = memo(
                   ),
                 },
                 autoDeliver: {
-                  supported: autoDeliverSupported || continuation.value.autoDeliver,
-                  reason: t(
-                    'sessions.autoDelivery.encryptedUnavailable',
-                    'Encrypted workspaces do not observe pull requests yet.'
-                  ),
+                  supported: true,
                 },
               }}
               autoDeliverOptions={continuation.autoDeliverOptions}
@@ -8314,6 +8311,17 @@ SessionChatInterface.displayName = 'SessionChatInterface';
 const themeStyles = stylex.create({
   glyph: { width: '290px', padding: themeSpace[3] },
   glyph2: { minWidth: '200px' },
-  row: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: themeSpace[4] },
-  hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+  row: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[4],
+  },
+  hint: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    fontVariantNumeric: 'tabular-nums',
+    color: uiColors.secondaryLabel,
+  },
 });

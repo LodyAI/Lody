@@ -96,8 +96,7 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   each filtered by the provider's `getRegisteredGlobalSkillDirs` /
   `getRegisteredSystemSkillDirs`; `~/.agents/skills` is a provider-specific
   alias, never a universal fallback. The scanner handles flat and catalog
-  layouts, and paths outside the registered roots appear only once their dirs
-  are added.
+  layouts. Bound Codex-magpie mentions include the gateway's two Magpie entries.
 - A registered entry mapping to no dir (`deepagents`) keeps its empty whitelist;
   an unregistered agent type gets `null` (an empty `Set` filters everything).
 

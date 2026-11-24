@@ -1,4 +1,5 @@
 import { requirePlaintextWorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
+import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import { base64ToBytes } from '@lody/shared/local-loro-data-plane';
 import {
@@ -10,7 +11,7 @@ import {
   type JsonObject,
   type StreamsCrdtOptions,
 } from '@loro-dev/streams-crdt';
-import { createLoroDocAdapter, StreamsCrdt } from '@loro-dev/streams-crdt/loro';
+import { createLoroDocAdapter, type StreamsCrdt } from '@loro-dev/streams-crdt/loro';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   readEagerSyncSnapshot,
@@ -99,9 +100,10 @@ export async function runEagerSyncWorkerTask(
         doc
       );
       if (restoredCursor) await cursors.save(restoredCursor);
-      transport = new StreamsCrdt({
+      transport = createStreamsCrdt({
         streamUrl,
-        shardUrls,
+        webSocket: 'disabled',
+        shardUrls: shardUrls ?? 'disabled',
         adapter: createLoroDocAdapter(doc),
         auth: deps.auth,
         fetch: deps.fetch,

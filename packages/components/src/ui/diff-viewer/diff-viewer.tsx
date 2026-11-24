@@ -75,8 +75,8 @@ const collapse = stylex.keyframes({
 const styles = stylex.create({
   fullWidth: { width: '100%' },
   toggleGlyph: {
-    width: 'calc(var(--spacing) * 4)',
-    height: 'calc(var(--spacing) * 4)',
+    width: themeSpace[4],
+    height: themeSpace[4],
     transitionProperty: 'transform, translate, scale, rotate',
     transitionDuration: themeDuration[200],
     rotate: { default: null, ':is([data-state="closed"] *)': '-90deg' },
@@ -108,34 +108,33 @@ const styles = stylex.create({
     overflow: 'hidden',
     borderRadius: themeRadius.xl,
     fontSize: '0.8rem',
-    minHeight: 'calc(var(--spacing) * 8)',
-    backgroundColor: 'hsl(var(--background) / 1)',
+    minHeight: themeSpace[8],
+    backgroundColor: themeColors.background,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {
-      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 12%, transparent)',
+      default: `color-mix(in oklab, ${themeColors.foreground} 12%, transparent)`,
       ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
-        'hsl(var(--border) / 1)',
+        themeColors.border,
     },
     boxShadow: '0 1px 2px hsl(0 0% 0% / .04)',
   },
   defaultHeader: {
-    height: 'calc(var(--spacing) * 8)',
-    insetInline: 'calc(var(--spacing) * 0)',
+    height: themeSpace[8],
+    insetInline: themeSpace[0],
     borderRadius: 0,
-    backgroundColor: 'hsl(var(--background) / 1)',
-    paddingLeft: 'calc(var(--spacing) * 1)',
-    paddingRight: 'calc(var(--spacing) * 4)',
+    backgroundColor: themeColors.background,
+    paddingLeft: themeSpace[1],
+    paddingRight: themeSpace[4],
   },
   defaultHeaderOpen: {
     borderBottomStyle: 'solid',
     borderBottomWidth: '1px',
     borderColor: {
-      default: 'hsl(var(--foreground) / 1)',
-      '@supports (color: color-mix(in lab, red, red))':
-        'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
+      default: themeColors.foreground,
+      '@supports (color: color-mix(in lab, red, red))': `color-mix(in oklab, ${themeColors.foreground} 8%, transparent)`,
       ':is(.dark, .dark-scope, .dark *, .dark-scope *):not(:is(.light-scope, .light-scope *))':
-        'hsl(var(--border) / 1)',
+        themeColors.border,
     },
   },
   customContent: {
@@ -165,7 +164,7 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
     fontSize: themeFontSize.sm,
     lineHeight: themeLineHeight.sm,
-    color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)',
+    color: `color-mix(in oklab, ${themeColors.foreground} 90%, transparent)`,
   },
   commentCount: {
     display: 'flex',
@@ -185,8 +184,8 @@ const styles = stylex.create({
     fontSize: themeFontSize.xs,
     lineHeight: themeLineHeight.xs,
   },
-  addition: { color: 'hsl(var(--github-addition))' },
-  deletion: { color: 'hsl(var(--github-deletion))' },
+  addition: { color: themeColors.githubAddition },
+  deletion: { color: themeColors.githubDeletion },
 });
 
 /** Minimum container width (in pixels) to auto-switch to split view */
@@ -1300,29 +1299,22 @@ function DiffViewerImpl({
     (): CSSProperties =>
       ({
         // Pierre reads these as CSS variables (inherited into its shadow root).
-        ['--diffs-light-bg' as string]: 'hsl(var(--background))',
-        ['--diffs-dark-bg' as string]: 'hsl(var(--background))',
-        ['--diffs-bg-buffer-override' as string]: 'hsl(var(--background))',
-        ['--diffs-bg-context-override' as string]: 'hsl(var(--background))',
+        ['--diffs-light-bg' as string]: themeColors.background,
+        ['--diffs-dark-bg' as string]: themeColors.background,
+        ['--diffs-bg-buffer-override' as string]: themeColors.background,
+        ['--diffs-bg-context-override' as string]: themeColors.background,
         // Default separator is only ~4% black on white (and the pill also has
         // opacity 0.65) — nearly invisible on a cool-white canvas. Use a
         // stronger muted fill so "N unmodified lines" reads as a control.
-        ['--diffs-bg-separator-override' as string]:
-          'color-mix(in oklab, hsl(var(--foreground)) 10%, hsl(var(--background)))',
-        ['--diffs-addition-color-override' as string]: 'hsl(var(--github-addition))',
-        ['--diffs-deletion-color-override' as string]: 'hsl(var(--github-deletion))',
-        ['--diffs-bg-addition-override' as string]:
-          'color-mix(in oklab, hsl(var(--github-addition)) 12%, hsl(var(--background)))',
-        ['--diffs-bg-addition-number-override' as string]:
-          'color-mix(in oklab, hsl(var(--github-addition)) 18%, hsl(var(--background)))',
-        ['--diffs-bg-addition-emphasis-override' as string]:
-          'color-mix(in oklab, hsl(var(--github-addition)) 28%, hsl(var(--background)))',
-        ['--diffs-bg-deletion-override' as string]:
-          'color-mix(in oklab, hsl(var(--github-deletion)) 12%, hsl(var(--background)))',
-        ['--diffs-bg-deletion-number-override' as string]:
-          'color-mix(in oklab, hsl(var(--github-deletion)) 18%, hsl(var(--background)))',
-        ['--diffs-bg-deletion-emphasis-override' as string]:
-          'color-mix(in oklab, hsl(var(--github-deletion)) 28%, hsl(var(--background)))',
+        ['--diffs-bg-separator-override' as string]: `color-mix(in oklab, ${themeColors.foreground} 10%, ${themeColors.background})`,
+        ['--diffs-addition-color-override' as string]: themeColors.githubAddition,
+        ['--diffs-deletion-color-override' as string]: themeColors.githubDeletion,
+        ['--diffs-bg-addition-override' as string]: `color-mix(in oklab, ${themeColors.githubAddition} 12%, ${themeColors.background})`,
+        ['--diffs-bg-addition-number-override' as string]: `color-mix(in oklab, ${themeColors.githubAddition} 18%, ${themeColors.background})`,
+        ['--diffs-bg-addition-emphasis-override' as string]: `color-mix(in oklab, ${themeColors.githubAddition} 28%, ${themeColors.background})`,
+        ['--diffs-bg-deletion-override' as string]: `color-mix(in oklab, ${themeColors.githubDeletion} 12%, ${themeColors.background})`,
+        ['--diffs-bg-deletion-number-override' as string]: `color-mix(in oklab, ${themeColors.githubDeletion} 18%, ${themeColors.background})`,
+        ['--diffs-bg-deletion-emphasis-override' as string]: `color-mix(in oklab, ${themeColors.githubDeletion} 28%, ${themeColors.background})`,
       }) as CSSProperties,
     []
   );

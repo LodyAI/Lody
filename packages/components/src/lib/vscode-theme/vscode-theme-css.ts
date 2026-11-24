@@ -656,6 +656,68 @@ const LODY_ALIAS_RULES: LodyAliasRule[] = [
   },
 ];
 
+/**
+ * Chart rungs. `charts.*` (blue/green/yellow/red/purple) is the canonical
+ * workbench chart palette but only some themes ship it, so each rung lists
+ * semantic fallback families — accent, success, warning, danger, info. Themes
+ * that reuse one hue across families (Vesper's accent = its warning, Vitesse's
+ * accent = its added decoration) or omit terminal colors entirely still end
+ * with five distinct rungs: `resolveChartRungColors` nudges colliding rungs to
+ * a readable offset instead of emitting duplicates or nothing.
+ */
+const CHART_RUNG_COLOR_ID_CANDIDATES = [
+  // Accent-led: the theme's signature hue opens the series.
+  [
+    'charts.blue',
+    'textLink.foreground',
+    'focusBorder',
+    'progressBar.background',
+    'activityBarBadge.background',
+    'button.background',
+    'terminal.ansiBlue',
+    'terminal.ansiBrightBlue',
+  ],
+  [
+    'charts.green',
+    'gitDecoration.addedResourceForeground',
+    'terminal.ansiGreen',
+    'terminal.ansiBrightGreen',
+    'testing.iconPassed',
+  ],
+  // ansiYellow precedes editorWarning: Vesper/Ayu paint warnings in accent, colliding with rung 1.
+  [
+    'charts.yellow',
+    'charts.orange',
+    'terminal.ansiYellow',
+    'terminal.ansiBrightYellow',
+    'editorWarning.foreground',
+    'list.warningForeground',
+    'terminal.ansiBrightMagenta',
+  ],
+  [
+    'charts.red',
+    'editorError.foreground',
+    'errorForeground',
+    'terminal.ansiRed',
+    'terminal.ansiBrightRed',
+    'gitDecoration.deletedResourceForeground',
+  ],
+  [
+    'charts.purple',
+    'terminal.ansiMagenta',
+    'terminal.ansiCyan',
+    'terminal.ansiBrightCyan',
+    'terminal.ansiBrightMagenta',
+  ],
+] as const;
+
+const CHART_VARIABLE_NAMES = ['--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5'];
+
+/** Minimum channel-space distance between two chart rungs, and between a
+ * rung and the canvas it is drawn on. */
+const CHART_MIN_RGB_DISTANCE = 30;
+const CHART_MIN_CANVAS_DISTANCE = 60;
+
 const SYNTAX_ALIAS_SCOPES = [
   { cssVariable: '--syntax-comment', scopes: ['comment'] },
   { cssVariable: '--syntax-string', scopes: ['string'] },
@@ -705,6 +767,14 @@ export const createLodyThemeCssVariables = (
   if (inputFieldColor) {
     variables['--input-field'] = hexColorToHslChannel(inputFieldColor);
   }
+
+  const chartRungs = resolveChartRungColors(theme, colorByCssVariable['--background']);
+  CHART_VARIABLE_NAMES.forEach((name, index) => {
+    const color = chartRungs[index];
+    if (color) {
+      variables[name] = hexColorToHslChannel(color);
+    }
+  });
 
   applyReadingBrightness(theme, colorByCssVariable, variables);
 
@@ -1048,6 +1118,167 @@ const createVisibleFallbackColor = (
 ): string => {
   const targetColor = themeType === 'light' || themeType === 'hcLight' ? '#000000' : '#FFFFFF';
   return mixHexColors(baseColor, targetColor, blendRatio);
+};
+
+/**
+ * Five chart rungs, each resolved from `CHART_RUNG_COLOR_ID_CANDIDATES` and
+ * then made mutually distinct and visible on the canvas. A theme that reuses
+ * one hue across the families a rung falls back through (Vitesse's accent =
+ * its added decoration, Ayu's accent = its warning) would otherwise emit the
+ * same color for two series; a colliding rung is moved through
+ * saturation/lightness offsets — staying in its own family — until it clears
+ * `CHART_MIN_RGB_DISTANCE` from the rungs already placed. A rung whose family
+ * the theme omits entirely (Vesper has no terminal or git colors) takes a
+ * hue-wheel slot so all five series still render.
+ */
+const resolveChartRungColors = (
+  theme: LodyResolvedVSCodeTheme,
+  backgroundColor: string | undefined
+): Array<string | undefined> => {
+  const lightCanvas = theme.type === 'light' || theme.type === 'hcLight';
+  const canvas = backgroundColor ?? (lightCanvas ? '#FFFFFF' : '#101010');
+  const base = readWorkbenchColor(theme, DEFAULT_ALIAS_BASE_COLOR_IDS) ?? canvas;
+  const rungs: Array<string | undefined> = [];
+
+  CHART_RUNG_COLOR_ID_CANDIDATES.forEach((colorIds, rungIndex) => {
+    const color = resolveFirstWorkbenchAliasColor(theme, colorIds, base);
+    if (color && isChartRungUsable(color, rungs, canvas)) {
+      rungs.push(color);
+      return;
+    }
+    rungs.push(distinctChartRung(color, rungs, canvas, lightCanvas, rungIndex));
+  });
+
+  return rungs;
+};
+
+const isChartRungUsable = (
+  color: string,
+  placed: Array<string | undefined>,
+  canvas: string
+): boolean =>
+  rgbDistance(color, canvas) >= CHART_MIN_CANVAS_DISTANCE &&
+  placed.every((other) => !other || rgbDistance(color, other) >= CHART_MIN_RGB_DISTANCE);
+
+/**
+ * A rung that is usable where `seed` was not. A seed from the theme keeps its
+ * hue and is moved through saturation/lightness offsets (a colliding green
+ * stays a green, just a different shade); a missing seed (`undefined`) draws
+ * from the hue wheel at a rung-indexed angle so every slot still lands in a
+ * distinct, readable color.
+ */
+const distinctChartRung = (
+  seed: string | undefined,
+  placed: Array<string | undefined>,
+  canvas: string,
+  lightCanvas: boolean,
+  rungIndex: number
+): string => {
+  const seedHsl = seed ? rgbToHslTriplet(hexColorToRgb(seed)) : undefined;
+  const hue = seedHsl?.hue ?? 0;
+  const lightness = seedHsl?.lightness ?? 0.5;
+  const seedSaturation = seedHsl?.saturation ?? 0;
+
+  if (seed && seedSaturation > 0.12) {
+    for (const [satDelta, lightDelta] of [
+      [0, -0.18],
+      [0, 0.18],
+      [-0.25, -0.1],
+      [0.25, 0.1],
+      [-0.25, 0.15],
+      [0.25, -0.15],
+      [0, -0.3],
+      [0, 0.3],
+    ] as const) {
+      const candidate = hslToHex(
+        hue,
+        clamp01(seedSaturation + satDelta),
+        clamp01(lightness + lightDelta)
+      );
+      if (isChartRungUsable(candidate, placed, canvas)) {
+        return candidate;
+      }
+    }
+  }
+
+  // Missing/achromatic seed or crowded shades: take a rung-indexed hue-wheel
+  // slot; lightness tracks the theme's polarity.
+  const saturation = seedSaturation > 0.12 ? Math.max(0.5, seedSaturation) : 0.55;
+  const baseLightness = seed && seedSaturation > 0.12 ? lightness : lightCanvas ? 0.42 : 0.68;
+  for (let step = 0; step < 12; step += 1) {
+    const candidate = hslToHex(
+      (rungIndex * 72 + (step + 1) * 30) % 360,
+      saturation,
+      clamp01(baseLightness + (step % 3 === 2 ? 0.12 : 0))
+    );
+    if (isChartRungUsable(candidate, placed, canvas)) {
+      return candidate;
+    }
+  }
+
+  // Last resort: a lightness ramp away from the canvas always separates.
+  for (const ratio of [0.2, 0.4, 0.6, 0.35, 0.55, 0.75]) {
+    const candidate = mixHexColors(canvas, lightCanvas ? '#000000' : '#FFFFFF', ratio);
+    if (isChartRungUsable(candidate, placed, canvas)) {
+      return candidate;
+    }
+  }
+  return seed ?? mixHexColors(canvas, lightCanvas ? '#000000' : '#FFFFFF', 0.5);
+};
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const rgbToHslTriplet = ({
+  r,
+  g,
+  b,
+}: {
+  r: number;
+  g: number;
+  b: number;
+}): {
+  hue: number;
+  saturation: number;
+  lightness: number;
+} => {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2 / 255;
+  const delta = max - min;
+  if (delta === 0) {
+    return { hue: 0, saturation: 0, lightness };
+  }
+  const saturation = delta / 255 / (1 - Math.abs(2 * lightness - 1));
+  let hue: number;
+  if (max === r) {
+    hue = 60 * (((g - b) / delta) % 6);
+  } else if (max === g) {
+    hue = 60 * ((b - r) / delta + 2);
+  } else {
+    hue = 60 * ((r - g) / delta + 4);
+  }
+  return { hue: (hue + 360) % 360, saturation: Math.min(1, saturation), lightness };
+};
+
+const hslToHex = (hue: number, saturation: number, lightness: number): string => {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const segment = (((hue % 360) + 360) % 360) / 60;
+  const x = chroma * (1 - Math.abs((segment % 2) - 1));
+  const [r1, g1, b1] =
+    segment < 1
+      ? [chroma, x, 0]
+      : segment < 2
+        ? [x, chroma, 0]
+        : segment < 3
+          ? [0, chroma, x]
+          : segment < 4
+            ? [0, x, chroma]
+            : segment < 5
+              ? [x, 0, chroma]
+              : [chroma, 0, x];
+  const match = lightness - chroma / 2;
+  const channel = (value: number) => Math.round((value + match) * 255);
+  return `#${toHex(channel(r1))}${toHex(channel(g1))}${toHex(channel(b1))}`;
 };
 
 const mixHexColors = (baseColor: string, targetColor: string, ratio: number): string => {

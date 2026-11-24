@@ -28,7 +28,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     ':is(*) > :not(:last-child)': {
       'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 2)',
+      'margin-block-end': themeSpace[2],
     },
   },
 });

@@ -39,6 +39,9 @@ Parent mobile and repository rules apply. Edit `AGENTS.md`, not `CLAUDE.md`.
   `makeMobileRecoveryWorkspaces` is the same shared per-workspace engine as Web,
   with `platform: 'mobile'` fixed; only the console's recovery port
   (`../recovery/recovery-port.ts`) uses it, over the app's existing runtime.
+- Both wrappers fix the recovery file locator to the canonical origin of `VITE_SITE_URL`,
+  defaulting to Lody Cloud, so phone files match desktop and Web. Never derive it from the
+  WebView origin, the Convex URL or the account.
 - `LodyPasskey` implements the public passkey port behind its native signing/build
   flag and runtime recovery setting. Native iOS recovery itself is enabled by default. Keep actual native completion owned,
   never add a browser passkey fallback, and retain the original default signing

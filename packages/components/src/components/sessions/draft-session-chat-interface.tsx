@@ -282,6 +282,9 @@ export const DraftSessionChatInterface = memo(
             ...(inheritedConfigOptionValues ?? {}),
             ...(draft.configOptionValues ?? {}),
           },
+          ...(preferAgentDefaults && draftAgentDefaults?.modelConfigOptionValues
+            ? { modelConfigOptionValues: draftAgentDefaults.modelConfigOptionValues }
+            : {}),
         };
       }, [
         agentRolePreference,
@@ -291,6 +294,7 @@ export const DraftSessionChatInterface = memo(
         draftAgentDefaults?.configOptionValues,
         draftAgentDefaults?.modeId,
         draftAgentDefaults?.modelId,
+        draftAgentDefaults?.modelConfigOptionValues,
         parentConversationConfig.configOptionValues,
         parentConversationConfig.modeId,
         parentConversationConfig.modelId,

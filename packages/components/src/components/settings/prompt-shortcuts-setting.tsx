@@ -1,4 +1,4 @@
-import { useLegacyWorkspaceQuery } from '@/hooks/use-legacy-workspace-query';
+import { useGithubWorkspaceQuery } from '@/hooks/use-github-workspace';
 import { WorkspaceFeatureNotice } from '@/components/workspace-feature-notice';
 import { useWorkspaceFeature } from '@/hooks/use-workspace-feature';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
@@ -184,7 +184,7 @@ function PromptShortcutsSettingContent({
 }) {
   const { t } = useTranslation();
   const postHog = usePostHog();
-  const { runtime, entries, loading } = state;
+  const { runtime, entries, loading, canWrite } = state;
   const scope = useShortcutScopeOptions(runtime?.workspaceId);
   const [editor, setEditor] = useState<{
     value: PromptShortcut;
@@ -206,7 +206,7 @@ function PromptShortcutsSettingContent({
     }
   };
   const create = () => {
-    if (!runtime) return;
+    if (!runtime || !canWrite) return;
     const now = getServerNow();
     setEditor({
       base: null,
@@ -226,7 +226,7 @@ function PromptShortcutsSettingContent({
       },
     });
   };
-  const owned = shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
+  const owned = canWrite && shownEditor ? shownEditor.value.ownerUserId === runtime?.userId : false;
   return (
     <div {...stylex.props(surface.container)}>
       <SettingsPageLead>
@@ -239,7 +239,7 @@ function PromptShortcutsSettingContent({
         currentUserId={runtime?.userId ?? null}
         loading={loading}
         busy={busy}
-        canCreate={!!runtime}
+        canCreate={!!runtime && canWrite}
         onCreate={create}
         onOpen={(entry) => void edit(entry)}
         onDelete={setRemoval}
@@ -271,10 +271,12 @@ function PromptShortcutsSettingContent({
                     'settings.promptShortcuts.editorHelp',
                     'Saved to this workspace and sent as one message.'
                   )
-                : t(
-                    'settings.promptShortcuts.readOnlyHelp',
-                    'Shared by another member. Only its author can change it.'
-                  )}
+                : !canWrite
+                  ? t('settings.promptShortcuts.readOnly', 'Read-only')
+                  : t(
+                      'settings.promptShortcuts.readOnlyHelp',
+                      'Shared by another member. Only its author can change it.'
+                    )}
             </Dialog.Description>
           </Dialog.Header>
           {shownEditor && runtime ? (
@@ -287,6 +289,7 @@ function PromptShortcutsSettingContent({
                 scope={scope}
                 onCancel={() => setEditor(null)}
                 onSave={async (value) => {
+                  if (!canWrite) return;
                   setBusy(true);
                   try {
                     await runtime.save({
@@ -338,10 +341,10 @@ function PromptShortcutsSettingContent({
           <AlertDialog.Footer>
             <AlertDialog.Cancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
             <Button
-              disabled={busy}
+              disabled={busy || !canWrite}
               variant="destructive"
               onClick={() => {
-                if (!runtime || !removal) return;
+                if (!runtime || !removal || !canWrite) return;
                 setBusy(true);
                 const deleted = removal;
                 void runtime
@@ -435,7 +438,7 @@ export function PromptShortcutsList({
               <PromptShortcutRow
                 entry={entry}
                 options={options}
-                canManage={entry.ownerUserId === currentUserId}
+                canManage={canCreate && entry.ownerUserId === currentUserId}
                 busy={busy}
                 onOpen={() => onOpen(entry)}
                 onDelete={() => onDelete(entry)}
@@ -608,7 +611,7 @@ function useShortcutScopeOptions(workspaceIdInput?: string) {
     workspaceId ? { workspaceId } : undefined
   );
   const configs = useAtomValue(getAllAgentConfigAtom);
-  const repositories = useLegacyWorkspaceQuery(
+  const repositories = useGithubWorkspaceQuery(
     cloudOperations.github.getWorkspaceRepositories,
     workspaceId ? { workspaceId } : 'skip'
   );
@@ -692,6 +695,7 @@ function ShortcutEditor({
         skillAgent={
           config
             ? {
+                magpieGatewayUrl: config.magpieGatewayUrl,
                 cliType: config.cliType,
                 agentType: config.agentType,
                 machineId: editor.scope.machineId,

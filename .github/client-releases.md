@@ -6,6 +6,10 @@ draft until the dependencies below are integrated and the owner completes cutove
 It does not change the local-only default build, private web deployment, or legacy
 cross-repository publishers.
 
+`MOBILE_IOS_RELEASE_ENABLED=true` belongs in Repository Variables: the stable
+iOS job checks it before entering `cloud-production`, so an Environment-only
+value cannot enable that job.
+
 ## Entry points and order
 
 ```mermaid
@@ -63,9 +67,42 @@ runs Release Please again and selects one client component plus its required SEA
 publication/check. Other partial releases
 use the component workflow or rerun failed jobs; ambiguous state fails closed.
 
+## Native iOS Nightly
+
+Nightly calls `publish-ios-native.yml` to build the pinned `apps/mobile/ios`
+submodule, including its nested dependencies. It installs the native client's own
+pnpm workspace and lockfile, generates runtime assets and the XcodeGen project,
+then archives the `Lody` scheme. It does not install or sync Capacitor. Stable
+and manual production recovery continue to use `publish-ios.yml`.
+
+The native publisher keeps the reserved Nightly marketing version, App Store
+Connect build-number lookup, non-canceling iOS lock, exact-source admission and
+same-run SEA publication gate. It stamps the generated app Info.plist and passes
+the version/build to every archived target, verifies the archived versions and
+exported dynamic-library linkage, then uploads the IPA to App Store Connect.
+It uses the existing `cloud-nightly` Apple API key, distribution certificate and
+team configuration. Provisioning profiles must cover all four native targets:
+
+| Secret                                                 | Bundle ID                               |
+| ------------------------------------------------------ | --------------------------------------- |
+| `IOS_APP_PROVISIONING_PROFILE_BASE64`                  | `ai.lody.mobile`                        |
+| `IOS_SHARE_PROVISIONING_PROFILE_BASE64`                | `ai.lody.mobile.share`                  |
+| `IOS_NOTIFICATION_SERVICE_PROVISIONING_PROFILE_BASE64` | `ai.lody.mobile.notification-service`   |
+| `IOS_LIVE_ACTIVITY_WIDGET_PROVISIONING_PROFILE_BASE64` | `ai.lody.mobile.LodyLiveActivityWidget` |
+
+The share and notification-service profiles are native-specific; the Capacitor
+notification profile cannot sign the native notification bundle. Configure them
+in `cloud-nightly` before the first run. `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL` and
+`LODY_SERVER_URL` (or `SERVER_URL`) supply the native `CONVEX_URL`,
+`CONVEX_SITE_URL` and `CF_WORKER_URL` HTTPS origins. `VITE_ONESIGNAL_APP_ID` (or
+`ONESIGNAL_APP_ID`) supplies `LODY_ONESIGNAL_APP_ID`. These public values apply
+identically to the generated Swift configuration and bundled cloud runtime.
+The runner needs Xcode 27.1, Metal Toolchain, CMake and XcodeGen; preparation uses
+the pinned native client's Metal setup script and installs missing build tools.
+
 ## Build duration and memory
 
-All mobile dependency installs set `LODY_SKIP_ELECTRON_POSTINSTALL=1` and select
+Capacitor mobile dependency installs set `LODY_SKIP_ELECTRON_POSTINSTALL=1` and select
 `{./apps/mobile-capacitor}...`, including its complete dependency closure. Track A's
 package is named `@lody/mobile-capacitor`; the directory selector includes its
 complete dependency closure independently of the package selector. `@lody/shared` brings
@@ -73,7 +110,7 @@ complete dependency closure independently of the package selector. `@lody/shared
 runtime export. Android sets up Java before installation and hashes only the
 Capacitor Gradle files and wrapper properties for its dependency cache.
 
-Nightly and stable iOS start dependency installation/archive/export after common
+Native Nightly and Capacitor stable iOS start dependency installation/archive/export after common
 validation (and Nightly version reservation), concurrently with SEA. Immediately
 before uploading, `wait-release-gate.mjs` waits up to 60 minutes for the current
 run's exact-source `verify-daemon-installation` job to succeed. Failure, cancellation,

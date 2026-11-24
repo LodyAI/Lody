@@ -51,6 +51,7 @@ import {
 } from './block-selection';
 import { MENTION_KEYS, resolveMentionKey } from './mention-keys';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
+import { getInFlightSessionMentionPreviewOffsetX } from '@/lib/session-mention-drag';
 import { projectTodayDrop, type TodayDropRow, type TodayDropTarget } from '../today-dnd';
 import { $readTodayEditorRich, bindLoroText } from './loro-lexical-binding';
 import { isImeKey, resolveOutlineKey, type OutlineIntent } from './outline-keys';
@@ -361,18 +362,25 @@ export class TodayEditorController {
   /**
    * Project a drop and place its line. `depthOrigin` is the x at which the
    * pointer means depth 0: for a node drag it follows the grab point, so a
-   * purely vertical drag keeps the node's depth; otherwise it is the bullet
-   * column. The line starts at the target depth's bullet, where the node lands.
+   * purely vertical drag keeps the node's depth. A sidebar drag whose preview
+   * offset is known aims with the preview's left edge against the rows' left
+   * edges; otherwise the pointer aims against the bullet column. The line
+   * starts at the target depth's bullet, where the node lands.
    */
   private project(
     store: TodayPageStore,
     day: Element,
     point: { x: number; y: number },
     excluded: ReadonlySet<string>,
-    depthOrigin?: number
+    depthOrigin: number | { previewOffsetX: number | null }
   ): TodayDropTarget | null {
     const { rows, contentLeft, right } = this.dayRows(store, day);
-    const origin = depthOrigin ?? contentLeft + TODAY_BULLET_CENTER_PX;
+    const origin =
+      typeof depthOrigin === 'number'
+        ? depthOrigin
+        : depthOrigin.previewOffsetX === null
+          ? contentLeft + TODAY_BULLET_CENTER_PX
+          : contentLeft + depthOrigin.previewOffsetX;
     const target = projectTodayDrop(rows, point, origin, TODAY_INDENT_PX, excluded);
     if (!target) {
       this.dropIndicator = null;
@@ -574,7 +582,10 @@ export class TodayEditorController {
 
   private projectExternal(x: number, y: number) {
     const located = this.dayAt(x, y);
-    const target = located ? this.project(located.store, located.day, { x, y }, new Set()) : null;
+    const previewOffsetX = getInFlightSessionMentionPreviewOffsetX();
+    const target = located
+      ? this.project(located.store, located.day, { x, y }, new Set(), { previewOffsetX })
+      : null;
     return { located, target };
   }
 

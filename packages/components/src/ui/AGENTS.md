@@ -8,6 +8,8 @@ feature directory.
 
 - Native iOS side drawers stay CSS-sized. Non-chat panels opt into
   `nativeKeyboardInset`; chat composers own their lift.
+- Side-drawer keyboard insets use `paddingBottom`, never `bottom`, so `DrawerContent`
+  stays full-viewport and never exposes `DrawerOverlay` or the screen underneath.
 - `DrawerContent` keeps popup/modal hosts state-backed, no-drag, inside the
   modal and outside scrollers. Body portals inherit pointer lock and pass clicks through.
 
@@ -76,7 +78,9 @@ strings on i18n rather than the registry's inline English.
 - Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
 Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
-  `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
+  `aria-describedby` — so an icon-only trigger names itself with `aria-label`
+  (keep it static on `aria-pressed` `Toggle`s). Pass `disabled={open}` on
+  `Menu.Trigger`/`Popover.Trigger` tooltips.
 - Overlay list hover (menus, command palette, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the

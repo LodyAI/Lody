@@ -40,3 +40,13 @@ admission, IDB stores and native adapter, with synthetic network/OS boundaries.
 They are not installed-app acceptance. Simulator verification uses only the
 `test-build` profile; stable publication and physical-device first-unlock/hardware
 checks are outside its proof.
+
+## Remote CLI pairing
+
+`mobilePersonalHost` supplies `VITE_CONVEX_DEPLOY_URL` and `VITE_SERVER_URL` to the
+shared entry's `remoteMachineEndpoints`. The existing devices console inherits its
+command, material fingerprint/location, explicit approval/resume and cancellation
+methods. Signing and current epoch delivery stay in the approved portable session;
+no extra native bridge is added. The command uses portable UTF-8/base64url encoding,
+WebCrypto randomness and IndexedDB, available on iOS 16.4. Native-host tests cover
+capability forwarding and cancellation; no installed two-machine acceptance is claimed.

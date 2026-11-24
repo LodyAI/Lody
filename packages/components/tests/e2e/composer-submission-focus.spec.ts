@@ -1090,11 +1090,14 @@ test('ordinary native iPhone PR drawer keeps an unsent comment above repeated ke
       );
     }, height);
     await expect
-      .poll(async () => {
-        const box = (await drawer.boundingBox())!;
-        return Math.round(box.y + box.height);
-      })
-      .toBe(852 - height);
+      .poll(async () =>
+        drawer.evaluate((element) =>
+          Math.round(Number.parseFloat(getComputedStyle(element).paddingBottom))
+        )
+      )
+      .toBe(height);
+    const drawerBox = (await drawer.boundingBox())!;
+    expect(Math.round(drawerBox.y + drawerBox.height)).toBe(852);
     const box = (await draft.boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.y + box.height).toBeLessThanOrEqual(852 - height);

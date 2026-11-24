@@ -1143,10 +1143,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     />
                   ) : null}
                   <div {...stylex.props(taskStyles.rowContent)}>
-                    <SessionRowLeadingSlot
-                      showMenuButton={hasMenuActions}
-                      menuLabel={moreActionsLabel}
-                    />
+                    <SessionRowLeadingSlot />
                     <div
                       className={clsx(
                         stylex.props(taskStyles.titleRow).className,

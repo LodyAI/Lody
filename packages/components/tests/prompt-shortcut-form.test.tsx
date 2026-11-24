@@ -1,3 +1,5 @@
+import { PromptShortcutsList } from '../src/components/settings/prompt-shortcuts-setting';
+import { projectShortcutIndex } from '@lody/shared/prompt-shortcuts';
 // @vitest-environment jsdom
 
 import { act } from 'react';
@@ -83,6 +85,35 @@ describe('PromptShortcutForm command field', () => {
     Array.from(document.body.querySelectorAll('div')).some((el) =>
       el.textContent?.includes(RULE_TEXT)
     );
+
+  it('shows owned encrypted prompts as read-only and exposes no guest mutation actions', async () => {
+    await act(async () =>
+      root?.render(
+        <PromptShortcutsList
+          entries={[projectShortcutIndex(shortcut(), 'body')]}
+          currentUserId="user-1"
+          loading={false}
+          busy={false}
+          canCreate={false}
+          onCreate={() => {
+            throw new Error('guest create');
+          }}
+          onOpen={() => {}}
+          onDelete={() => {
+            throw new Error('guest delete');
+          }}
+        />
+      )
+    );
+    expect(container?.textContent).toContain('Read-only');
+    expect(container?.querySelector('[aria-label="Edit"]')).toBeNull();
+    expect(container?.querySelector('[aria-label="Delete Prompt"]')).toBeNull();
+    const create = [...container!.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('New Prompt')
+    );
+    expect(create?.disabled).toBe(true);
+    expect(container?.querySelector('[aria-label="View"]')).not.toBeNull();
+  });
 
   it('keeps a mid-token dash while typing a command', async () => {
     await renderForm(shortcut());

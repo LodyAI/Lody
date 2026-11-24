@@ -160,7 +160,8 @@ any time; when off it changes none of the app's existing behavior.
 - Dragging works only within one day; over another date it shows "Can't move to another date" and the card
   flies back on release. Esc during a drag only cancels the drag.
 - Dragging a conversation from any section of the left sidebar between two nodes creates a node holding its
-  mention.
+  mention. Its depth follows the dragged card's left edge, not the pointer inside the card: a card aligned with
+  the node above lands as its sibling.
   Dropping into a node's text to make an inline reference is not supported.
 - Visuals reuse the pinned section's floating card, 5px threshold and ~100ms settle animation, with an insertion
   line instead of opening a gap.

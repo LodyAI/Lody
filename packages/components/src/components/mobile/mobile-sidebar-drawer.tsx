@@ -11,6 +11,7 @@ import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { canUseSidebarSwipeOpenGesture } from '@/lib/native-platform';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeEasing, themeSpace } from '../../style/theme-scale.stylex';
 
@@ -271,6 +272,7 @@ export function MobileSidebarDrawer({
   children: ReactNode;
 }) {
   const { t } = useTranslation();
+  useMobileBackHandler(() => onOpenChange(false), { enabled: open, layer: 'drawer' });
   /* Swipe-to-open is disabled across every mobile surface as of the
      2026-05 mobile redesign — the sidebar is now reached via explicit
      navigation chips (workspace switcher, project rows on the home
@@ -586,7 +588,9 @@ export function MobileSidebarDrawer({
           style={{ width, maxWidth: '80vw', x: drawerX }}
         >
           {/* Let long sidebar content shrink inside the drawer instead of leaking past the 80vw cap. */}
-          <div {...stylex.props(styles.panelBody)}>{children}</div>
+          <div {...stylex.props(styles.panelBody)}>
+            <MobileBackDepthProvider>{children}</MobileBackDepthProvider>
+          </div>
         </motion.aside>
       </div>
     </>

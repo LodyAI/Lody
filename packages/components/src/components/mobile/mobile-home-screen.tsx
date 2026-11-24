@@ -2657,14 +2657,10 @@ export function MobileHomeScreen({
      dock tabbar at the bottom remains the only way to switch tabs. */
 
   return (
-    /* No Konsta App wrapper anymore — the flat lists use plain
-       Tailwind-styled rows. The `safe-areas` class still has to be
-       here because Konsta's `pt-safe-*` / `ps-safe-*` / `pe-safe-*`
-       utilities (used by the header below and by other mobile screens
-       in this tree) only resolve the `--k-safe-area-*` vars when an
-       ancestor opts in via this class — `<App safeAreas>` used to do
-       it for us; now we do it directly. The class is just a CSS hook
-       (from konsta/styles/safe-areas.css), no Konsta runtime needed. */
+    /* The `safe-areas` class opts this subtree into the `--k-safe-area-*`
+       vars (defined in `tailwind/theme-defaults.css`): without an ancestor
+       carrying it the vars stay 0px, so the mobile header/tabbar that read
+       them would lose their insets. */
     <div {...withClassName(stylex.props(styles.appRoot), 'mobile-home-app safe-areas')}>
       {/* Column flex so the header + Chat-tab pill bar sit ABOVE the
          scroll region — keeps the vertical scrollbar contained to

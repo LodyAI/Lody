@@ -438,6 +438,8 @@ export async function queryLocalAcpRateLimits(options: StartLocalAcpAgentOptions
         mergeLoginShellEnv(options.env ?? process.env, await getLoginShellEnvLegacy())
       )
     );
+    /** Desktop launches the CLI under ELECTRON_RUN_AS_NODE; the quota probe is a normal Node process and must not inherit it. */
+    delete env.ELECTRON_RUN_AS_NODE;
     let quotaChild: ChildProcess | undefined;
     const output = await runPromiseSquashedLegacy(
       runCommandOk({
@@ -608,6 +610,8 @@ async function startLocalAcpProtocol<T>(
     logger: options.logger,
     signal: options.signal,
   });
+  /** Desktop launches the CLI under ELECTRON_RUN_AS_NODE; probed/spawned agents are normal Node processes and must not inherit it. */
+  delete mergedStartupEnv.ELECTRON_RUN_AS_NODE;
   const envWithAcpStartup = isTitleAgentCodexRun
     ? withTitleAgentCodexConfig(mergedStartupEnv)
     : mergedStartupEnv;
