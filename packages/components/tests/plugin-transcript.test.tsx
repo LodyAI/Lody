@@ -197,3 +197,27 @@ it('keeps raw identity isolated, secrets absent and selection stable across unre
   scope.abort();
   await expect(bindings.readSnapshot(target)).rejects.toThrow();
 });
+
+it('opens a Capacitor plugin screen in-app and removes it when its installation retires', async () => {
+  const { scopedSlots, openPluginScreen, PluginScreenOutlet } =
+    await import('../src/plugins/shell-surfaces');
+  const { vi } = await import('vitest');
+  vi.stubGlobal('__LODY_NATIVE__', true);
+  const root = createRoot(document.createElement('div'));
+  const scope = new AbortController();
+  try {
+    const add = scopedSlots('workspace', 'source', {} as never, scope.signal);
+    add('screen', 'report', () => <article>Report contents</article>, 'Report');
+    await act(async () => {
+      openPluginScreen('workspace', 'source', 'report');
+      root.render(<PluginScreenOutlet workspaceId="workspace" />);
+    });
+    expect(document.querySelector('[data-slot="drawer-content"] article')?.textContent).toBe('Report contents');
+    await act(async () => scope.abort());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  } finally {
+    scope.abort();
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});

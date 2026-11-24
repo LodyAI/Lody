@@ -5,7 +5,7 @@ import { lodyCommands } from '@lody/plugin-sdk';
 import { isNativeAppShell } from '../lib/native-platform';
 import { SidebarHoverCard } from '../components/session-info-hover-card';
 import { NavButton } from '../components/loro-sidebar';
-import { useIsMobile } from '../hooks/use-mobile';
+import { useIsMobile, useIsCompactDesktop } from '../hooks/use-mobile';
 import type { ClientHostBindings, WorkspaceRef } from '@lody/plugin-sdk/client';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { scopedSlots, PluginRowDecorations, openPluginScreen } from './shell-surfaces';
@@ -84,11 +84,20 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         await entry.control!('configure', { [k]: v as string | number | boolean });
       },
     }),
-    useHostCapabilities: () => ({
-      platform: getIpcServices() ? 'desktop' : isNativeAppShell() ? 'mobile' : 'web',
-      formFactor: matchMedia('(max-width: 700px)').matches ? 'compact' : 'wide',
-      containers: { sidebarViews: true, screens: true, sessionPanels: true, projectPages: true },
-    }),
+    useHostCapabilities() {
+      const mobileLayout = useIsMobile();
+      const compactDesktop = useIsCompactDesktop();
+      return {
+        platform: getIpcServices() ? 'desktop' : isNativeAppShell() ? 'mobile' : 'web',
+        formFactor: mobileLayout || compactDesktop ? 'compact' : 'wide',
+        containers: {
+          sidebarViews: !isNativeAppShell(),
+          screens: true,
+          sessionPanels: true,
+          projectPages: true,
+        },
+      };
+    },
     useLody() {
       const nav = hooks.useNavigation();
       const execute = hooks.useExecute();
@@ -160,7 +169,16 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     sidebar: {
       headerItems: { add: (s) => add('header', s.id, s.Component) },
       footerItems: { add: (s) => add('footer', s.id, s.Component) },
-      views: { add: (s) => add('view', s.id, s.Component, s.title) },
+      views: {
+        add: (s) =>
+          isNativeAppShell()
+            ? clientDiagnostics.report(
+                entry,
+                'capability_unavailable_on_platform',
+                `sidebar.views:${s.id}`
+              )
+            : add('view', s.id, s.Component, s.title),
+      },
       sessionRow: {
         decorate: (s) => {
           if (s.trailing) add('trailing', s.id, s.trailing);

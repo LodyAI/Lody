@@ -1,5 +1,7 @@
 import { bindHostInvocation } from './daemon-command-executor';
 import type { DispatchMachineHostCall } from '../machine-host-port';
+import type { PluginProposalMeta } from '@lody/shared/plugins/proposal';
+import { installPackage } from '../plugin-package';
 import { packClientBundle, PLUGIN_BUNDLE_CHUNK_BYTES } from '@lody/shared/plugins/digest';
 import {
   workflowApprovalReceipt,
@@ -21,6 +23,7 @@ import { machineConfig, MissingPluginConfiguration, valueFor } from '../plugin-m
 const build = z.object({
   manifest: pluginManifestSchema,
   directory: z.string(),
+  packageSha256: z.string().optional(),
   machineEntry: z.string().optional(),
   machineDigest: z.string().optional(),
   clientDigest: z.string().optional(),
@@ -28,6 +31,8 @@ const build = z.object({
 const installation = z.object({
   current: build,
   previous: build.optional(),
+  previousSource: z.string().optional(),
+  previousDev: z.boolean().optional(),
   source: z.string(),
   dev: z.boolean(),
   enabled: z.boolean(),
@@ -41,6 +46,11 @@ const request = z.discriminatedUnion('action', [
     action: z.literal('link'),
     path: z.string().min(1),
     dev: z.boolean().default(false),
+  }),
+  z.strictObject({
+    action: z.literal('install'),
+    path: z.string().min(1),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
   }),
   z.strictObject({ action: z.literal('list') }),
   z.strictObject({
@@ -88,6 +98,7 @@ export class Registry extends Context.Service<
         }
       | undefined;
     workflow: Effect.Success<ReturnType<typeof makePluginWorkflowHarness>>;
+    activateProposal: (meta: PluginProposalMeta, path: string) => Effect.Effect<unknown, unknown>;
     start: Effect.Effect<void, unknown>;
     machineRpc: (
       request: PluginMachineRequest,
@@ -334,17 +345,34 @@ export function registryLayer(
             }
           } else {
             const current =
-              r.action === 'rollback' ? old?.previous : (built ?? (yield* build(old!.source)));
+              r.action === 'rollback'
+                ? old?.previous
+                : (built ??
+                  (old!.current.packageSha256 ? old!.current : yield* build(old!.source)));
             if (!current || current.manifest.id !== id) {
               yield* clean(current?.directory);
               return yield* Effect.fail(new Error('No matching plugin generation'));
             }
             item = {
               current,
-              previous: old?.current,
+              previous: old?.current.directory === current.directory ? old.previous : old?.current,
               enabled: true,
-              source: r.action === 'link' ? resolve(r.path) : old!.source,
-              dev: r.action === 'link' ? r.dev : old!.dev,
+              previousSource:
+                old?.current.directory === current.directory ? old.previousSource : old?.source,
+              previousDev:
+                old?.current.directory === current.directory ? old.previousDev : old?.dev,
+              source:
+                r.action === 'link'
+                  ? resolve(r.path)
+                  : r.action === 'rollback'
+                    ? (old!.previousSource ?? old!.source)
+                    : old!.source,
+              dev:
+                r.action === 'link'
+                  ? r.dev
+                  : r.action === 'rollback'
+                    ? (old!.previousDev ?? old!.dev)
+                    : old!.dev,
               preferences: Object.fromEntries(
                 Object.entries(old?.preferences ?? {}).filter(([k]) => {
                   const field = current.manifest.config?.[k];
@@ -388,7 +416,7 @@ export function registryLayer(
           if (
             item.pendingConfiguration ||
             !item.enabled ||
-            (!watched && (!watches.has(id) || r.action === 'link'))
+            (!watched && (!watches.has(id) || r.action === 'link' || r.action === 'rollback'))
           ) {
             yield* unwatch(id);
             yield* watch(id, item);
@@ -489,6 +517,37 @@ export function registryLayer(
             : undefined;
         },
         workflow,
+        activateProposal: (meta, path) =>
+          serialize(
+            meta.artifact.pluginId,
+            Effect.gen(function* () {
+              const id = meta.artifact.pluginId,
+                old = items.get(id),
+                action = meta.command.action;
+              if (
+                meta.workspaceId !== workspaceId ||
+                meta.machineId !== machineId ||
+                (action === 'propose_install'
+                  ? !!old
+                  : !old ||
+                    old.dev ||
+                    (action === 'propose_reload' && !old.enabled) ||
+                    old.current.packageSha256 !== meta.artifact.sha256)
+              )
+                return yield* Effect.fail(Error('Plugin generation not eligible'));
+              const artifact = yield* io(() =>
+                installPackage(path, generations, meta.artifact.sha256)
+              );
+              if (artifact.manifest.id !== id) {
+                yield* clean(artifact.directory);
+                return yield* Effect.fail(Error('Plugin identity changed'));
+              }
+              return yield* change({ action: 'link', path, dev: false }, id, {
+                ...artifact,
+                packageSha256: meta.artifact.sha256,
+              });
+            })
+          ),
         start,
         machineRpc: Effect.fnUntraced(function* (r, actor): Effect.fn.Return<
           PluginMachineResult,
@@ -496,6 +555,8 @@ export function registryLayer(
         > {
           if (!actor.userId || r.workspaceId !== workspaceId || r.machineId !== machineId)
             return yield* Effect.fail(new Error('Invalid plugin target'));
+          if (r.method === 'plugin/proposal-decision')
+            return yield* Effect.fail(Error('Host proposal ledger required'));
           if (r.method === 'plugin/catalog') {
             const installations = [];
             for (const [id, item] of items) {
@@ -696,6 +757,19 @@ export function registryLayer(
                 clientDigest: i.current.clientDigest,
               })),
             };
+          if (r.action === 'install') {
+            const artifact = yield* io(() =>
+              installPackage(resolve(r.path), generations, r.sha256)
+            );
+            const id = artifact.manifest.id;
+            return yield* serialize(
+              id,
+              change({ action: 'link', path: resolve(r.path), dev: false }, id, {
+                ...artifact,
+                packageSha256: r.sha256,
+              })
+            );
+          }
           const built = r.action === 'link' ? yield* build(resolve(r.path)) : undefined,
             id = r.action === 'link' ? built!.manifest.id : r.pluginId;
           if (r.action === 'reload' && items.get(id)?.dev) {

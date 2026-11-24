@@ -792,6 +792,10 @@ lody plugin reload demo
 lody plugin disable demo
 ```
 
+使用 `lody plugin pack ./demo -o demo.lodypkg` 将插件声明的文件打成发布包。在所有者的交互终端运行 `lody plugin install ./demo.lodypkg`，核对能力与 SHA-256 后确认安装。同 ID 的新包会更新现有安装；`lody plugin rollback demo` 恢复上一代代码，不回退插件数据。`install` 也接受本地源码目录。完整性校验不代表发布者签名。
+
+运行 `lody plugin preview ./demo` 可在浏览器中查看合成的工具调用、消息和会话。切换桌面、Web 或紧凑移动视口，修改命令或代码块语言以测试渲染器匹配。独立页面只在沙箱内运行客户端代码，不激活插件，也不连接工作区。使用 `--no-open --output demo.html` 可保存到新文件。
+
 如果插件要在本机正在运行的加密工作区中开发，链接时以及后续管理操作都要指定该工作区的 ID：
 
 ```sh

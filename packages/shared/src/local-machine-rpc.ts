@@ -1,3 +1,4 @@
+import { pluginDecisionParams } from './plugins/proposal';
 import {
   pluginSessionCreateParams,
   workflowCreateApproval,
@@ -286,6 +287,10 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('plugin/workflow-create-approval'),
     params: workflowCreateApproval,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/proposal-decision'),
+    params: pluginDecisionParams,
   }),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('plugin/session-create'),

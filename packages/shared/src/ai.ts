@@ -1460,6 +1460,7 @@ export type SystemNoticeName =
   | 'agent_warning'
   | 'task_proposal'
   | 'schedule_proposal'
+  | 'plugin_proposal'
   | 'agent_role_proposal'
   | 'session_fork_origin';
 
@@ -1637,6 +1638,7 @@ export type SystemNoticeMeta = {
   agent_warning: AgentWarningMeta;
   task_proposal: TaskProposalMeta;
   schedule_proposal: ScheduleProposalMeta;
+  plugin_proposal: import('./plugins/proposal').PluginProposalMeta;
   agent_role_proposal: AgentRoleProposalMeta;
   session_fork_origin: SessionForkOriginMeta;
 };

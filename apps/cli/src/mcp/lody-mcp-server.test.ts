@@ -329,6 +329,7 @@ describe('Lody MCP tool catalog', () => {
       'lody_mcp_configure',
       'lody_operation',
       'lody_operation_cancel',
+      'lody_plugin',
       'lody_report_preview_candidate',
       'lody_schedule',
       'lody_session_cancel',

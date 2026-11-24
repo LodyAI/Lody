@@ -1,3 +1,5 @@
+import { registerPluginTools } from './plugin-tools';
+import { proposePlugin } from '../lib/plugin-proposal';
 import { canReadSessionForCliRequester } from '@/lib/cloud-cli-port';
 import { LODY_AUTH_URL } from '@/utils/const';
 import { isContainedSession, type ScheduleCommand } from '@lody/shared';
@@ -5178,6 +5180,28 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     handlers
   );
 
+  registerPluginTools(registerSessionTool, async (command) => {
+    const ctx = getSessionContext(),
+      source = await resolveInvokingTurnSource(),
+      auth = getCliAuthContextOrThrow('mcp'),
+      workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
+    if (!ctx.machineId || source.userId !== auth.userId || ctx.machineId !== auth.machineId)
+      throw Error('Plugin proposal requires the invoking machine member');
+    return withWorkspaceManager(auth, workspace, 'plugin-proposal', (manager) =>
+      proposePlugin(
+        manager,
+        {
+          workspaceId: workspace.id,
+          machineId: ctx.machineId,
+          sessionId: ctx.sessionId,
+          requesterUserId: source.userId,
+        },
+        command,
+        ctx.workdir,
+        !!getSessionCommandEnvironment()
+      )
+    );
+  });
   registerAgentRoleTools(
     registerSessionTool,
     async (command) => {

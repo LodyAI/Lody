@@ -828,6 +828,10 @@ lody plugin reload demo
 lody plugin disable demo
 ```
 
+`lody plugin pack ./demo -o demo.lodypkg` writes a new release archive from declared plugin files. From an interactive owner terminal, run `lody plugin install ./demo.lodypkg` and confirm the capabilities and SHA-256. Installing another release with the same ID updates it; `lody plugin rollback demo` restores the previous generation without reverting plugin data. `install` also accepts a local source directory. Archive integrity is not a publisher signature.
+
+Run `lody plugin preview ./demo` to open synthetic tool, message and session fixtures. Switch between Desktop, Web and Compact mobile; change the command or fence language to exercise renderer matching. The standalone page runs client code in a sandbox, without activating the plugin or connecting to a workspace. Use `--no-open --output demo.html` to save a new file instead.
+
 To develop against a running encrypted workspace on this machine, pass its ID to `link` and to each subsequent control command:
 
 ```sh

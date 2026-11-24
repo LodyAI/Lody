@@ -186,7 +186,21 @@ function Inspection({
             </Button>
           </>
         ) : (
-          <p>{t('settings.plugins.localControl')}</p>
+          <>
+            <p>{t('settings.plugins.localControl')}</p>
+            <dl>
+              {fields.flatMap(([key, field]) =>
+                field.type === 'secret' || field.scope === 'machine'
+                  ? []
+                  : [
+                      <div key={key}>
+                        <dt>{field.label}</dt>
+                        <dd>{String(p.preferences[key] ?? field.default ?? '—')}</dd>
+                      </div>,
+                    ]
+              )}
+            </dl>
+          </>
         )}
         {canControl && form && (
           <Dialog.Root

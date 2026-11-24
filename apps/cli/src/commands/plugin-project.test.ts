@@ -54,5 +54,11 @@ test('registered CLI creates and checks source but rejects activation in an agen
   await invoke('create', 'sample', '--template', 'workflow');
   const path = join(cwd, 'sample');
   expect(await readFile(join(path, 'machine/index.ts'), 'utf8')).toContain('defineMachinePlugin');
+  const { path: renderer } = await createPlugin('renderer', 'renderer', cwd);
+  const output = join(cwd, 'preview.html');
+  await invoke('preview', renderer, '--no-open', '--output', output);
+  await expect(invoke('preview', renderer, '--no-open', '--output', output)).rejects.toMatchObject({
+    code: 'EEXIST',
+  });
   await expect(invoke('link', '--dev', path)).rejects.toThrow('interactive owner terminal');
 });

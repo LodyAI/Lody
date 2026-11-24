@@ -113,3 +113,9 @@ each layer must only handle its own:
 The native guard reads the stable `index.html` title via `webView.title`.
 Never write `document.title` or broaden `rootLooksBlank()` to mounted-but-stuck
 React: reloading a live app discards in-flight work.
+
+### Workspace plugins
+
+The router mounts the shared `RuntimeProvider`. Plugins use that workspace's admitted runtime, verified remote bundle, and installation trust; the WebView does not start a daemon or acquire a second native reader. Leaving the document unmounts plugin contributions before closing the personal-device host. A back/forward-cache suspension is not a document exit.
+
+Inline transcript cards, composer actions, events and session row decorations use the shared registrations. Plugin screens, project pages and session panels open in a keyboard-aware in-app sheet. Capacitor does not advertise replacement sidebar views. Settings shows declarative non-secret, non-machine preferences; daemon configuration changes still require the local control surface. Boot recovery offers **Reload without plugins** without erasing device data.
