@@ -29,6 +29,18 @@ export const roostCloudHistoryGrantSchema = z.object({
 });
 
 export type RoostCloudHistoryGrant = z.infer<typeof roostCloudHistoryGrantSchema>;
+
+export class RoostCloudHistoryRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`Roost history request failed (HTTP ${status})`);
+    this.name = 'RoostCloudHistoryRequestError';
+  }
+
+  get retryable(): boolean {
+    return this.status >= 500 || this.status === 408 || this.status === 409 || this.status === 429;
+  }
+}
+
 export type RoostCloudHistoryTarget = {
   workspaceId: WorkspaceId;
   machineId: string;

@@ -537,7 +537,9 @@ export class LoroDocumentManager {
   private roostCloudHistoryMachineId?: MachineId;
   private roostCloudHistoryCloud?: NonNullable<CloudAccessPort['roostHistory']>;
   private roostCloudHistory?: {
-    publisher: RoostCloudHistoryPublisher;
+    publisher?: RoostCloudHistoryPublisher;
+    createPublisher: () => RoostCloudHistoryPublisher;
+    pending: Map<SessionId, boolean>;
     unsubscribe: () => void;
   };
 
@@ -558,14 +560,16 @@ export class LoroDocumentManager {
   private startRoostCloudHistory(): void {
     const machineId = this.roostCloudHistoryMachineId;
     const cloud = this.roostCloudHistoryCloud;
-    if (
-      this.cleaningUp ||
-      !machineId ||
-      !cloud ||
-      !this.remoteStreamsAttached ||
-      this.roostCloudHistory
-    )
+    if (this.cleaningUp || !machineId || !cloud || !this.remoteStreamsAttached) return;
+    if (this.roostCloudHistory) {
+      const state = this.roostCloudHistory;
+      if (state.publisher) return;
+      state.publisher = state.createPublisher();
+      for (const [sessionId, removed] of state.pending)
+        this.enqueueRoostCloudHistory(sessionId, removed);
+      state.pending.clear();
       return;
+    }
     const target = (sessionId: SessionId) => ({
       workspaceId: this.workspaceId,
       machineId,
@@ -585,71 +589,77 @@ export class LoroDocumentManager {
         authority: RoostCloudHistoryAuthority;
       }
     >();
-    const publisher = new RoostCloudHistoryPublisher({
-      workspaceId: this.workspaceId,
-      machineId,
-      grant: (sessionId, binding, signal) =>
-        cloud.uploadGrant({ ...target(sessionId), binding }, signal),
-      isOwned: async (sessionId) => {
-        const meta = await metadata(sessionId);
-        if (!owns(meta)) return false;
-        indexed.set(sessionId, meta.parentSessionId);
-        return true;
-      },
-      publish: async (sessionId, binding, signal) => {
-        const meta = await metadata(sessionId);
-        if (!owns(meta)) return;
-        const child = { ...meta, id: sessionId };
-        const parentId = child.parentSessionId;
-        const parentMeta = parentId ? await metadata(parentId) : undefined;
-        const parent = parentMeta && parentId ? { ...parentMeta, id: parentId } : undefined;
-        const root = parent && isContainedSession(child, parent) ? parent : child;
-        const authority = {
-          rootSessionId: root.id,
-          sessionOwnerUserId: root.userId,
-          localProjectId:
-            child.project?.kind === 'local' ? child.project.localProjectId : undefined,
-        };
-        const notice = { binding, authority };
-        if (!isDeepStrictEqual(published.get(sessionId), notice)) {
-          await cloud.publish({ ...target(sessionId), ...notice }, signal);
-          published.set(sessionId, notice);
-        }
-        const roostCloudGeneration = binding.generation;
-        const roostCloudAuthor = binding.ownerPublicKey;
-        signal.throwIfAborted();
-        if (
-          !owns(await metadata(sessionId)) ||
-          (meta.roostCloudGeneration === roostCloudGeneration &&
-            meta.roostCloudAuthor === roostCloudAuthor)
-        )
-          return;
-        await this.repo.upsertDocMeta(getSessionRoomId(sessionId), {
-          roostCloudGeneration,
-          roostCloudAuthor,
-        });
-      },
-      unpublish: async (sessionId, signal) => {
-        await cloud.unpublish(target(sessionId), signal);
-        published.delete(sessionId);
-      },
-      logger: this.logger,
-    });
+    const createPublisher = () =>
+      new RoostCloudHistoryPublisher({
+        workspaceId: this.workspaceId,
+        machineId,
+        grant: (sessionId, binding, signal) =>
+          cloud.uploadGrant({ ...target(sessionId), binding }, signal),
+        isOwned: async (sessionId) => {
+          const meta = await metadata(sessionId);
+          if (!owns(meta)) return false;
+          indexed.set(sessionId, meta.parentSessionId);
+          return true;
+        },
+        publish: async (sessionId, binding, signal) => {
+          const meta = await metadata(sessionId);
+          if (!owns(meta)) return;
+          const child = { ...meta, id: sessionId };
+          const parentId = child.parentSessionId;
+          const parentMeta = parentId ? await metadata(parentId) : undefined;
+          const parent = parentMeta && parentId ? { ...parentMeta, id: parentId } : undefined;
+          const root = parent && isContainedSession(child, parent) ? parent : child;
+          const authority = {
+            rootSessionId: root.id,
+            sessionOwnerUserId: root.userId,
+            localProjectId:
+              child.project?.kind === 'local' ? child.project.localProjectId : undefined,
+          };
+          const notice = { binding, authority };
+          if (!isDeepStrictEqual(published.get(sessionId), notice)) {
+            await cloud.publish({ ...target(sessionId), ...notice }, signal);
+            published.set(sessionId, notice);
+          }
+          const roostCloudGeneration = binding.generation;
+          const roostCloudAuthor = binding.ownerPublicKey;
+          signal.throwIfAborted();
+          if (
+            !owns(await metadata(sessionId)) ||
+            (meta.roostCloudGeneration === roostCloudGeneration &&
+              meta.roostCloudAuthor === roostCloudAuthor)
+          )
+            return;
+          await this.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+            roostCloudGeneration,
+            roostCloudAuthor,
+          });
+        },
+        unpublish: async (sessionId, signal) => {
+          await cloud.unpublish(target(sessionId), signal);
+          published.delete(sessionId);
+        },
+        logger: this.logger,
+      });
     const observation = this.repo.observeDocs(
       (event) => {
         if (event.kind !== 'doc-metadata' && event.kind !== 'doc-existence-changed') return;
         const sessionId = getSessionIdFromRoomId(event.docId);
         if (!sessionId) return;
         if (event.kind === 'doc-existence-changed' && event.to === 'deleted') {
-          if (indexed.delete(sessionId)) publisher.remove(sessionId);
+          if (indexed.delete(sessionId)) this.enqueueRoostCloudHistory(sessionId, true);
         } else if (event.kind === 'doc-metadata') {
           if (event.patch.machineId === machineId && event.patch.historyBackend === 'roost')
             indexed.set(sessionId, event.patch.parentSessionId as SessionId | undefined);
           if (indexed.has(sessionId) && 'parentSessionId' in event.patch)
             indexed.set(sessionId, event.patch.parentSessionId as SessionId | undefined);
-          publisher.enqueue(sessionId);
+          if (
+            indexed.has(sessionId) ||
+            event.patch.historyBackend === 'roost' ||
+            event.patch.machineId === machineId
+          )
+            this.enqueueRoostCloudHistory(sessionId);
           for (const [childId, parentId] of indexed)
-            if (parentId === sessionId) publisher.enqueue(childId);
+            if (parentId === sessionId) this.enqueueRoostCloudHistory(childId);
         }
       },
       {
@@ -660,28 +670,58 @@ export class LoroDocumentManager {
         },
       }
     );
-    this.roostCloudHistory = { publisher, unsubscribe: observation.unsubscribe };
+    this.roostCloudHistory = {
+      publisher: createPublisher(),
+      createPublisher,
+      pending: new Map(),
+      unsubscribe: observation.unsubscribe,
+    };
     for (const row of observation.snapshot) {
       const sessionId = getSessionIdFromRoomId(row.docId);
       const meta = row.meta as SessionMeta | undefined;
       if (!sessionId || !owns(meta)) continue;
-      if (row.deleted) publisher.remove(sessionId);
+      if (row.deleted) this.enqueueRoostCloudHistory(sessionId, true);
       else {
         indexed.set(sessionId, meta.parentSessionId);
-        publisher.enqueue(sessionId);
+        this.enqueueRoostCloudHistory(sessionId);
       }
     }
   }
 
-  private async closeRoostCloudHistory(): Promise<void> {
-    const current = this.roostCloudHistory;
-    this.roostCloudHistory = undefined;
-    if (!current) return;
-    try {
-      current.unsubscribe();
-    } finally {
-      await current.publisher.close();
+  private enqueueRoostCloudHistory(sessionId: SessionId, removed = false): void {
+    const state = this.roostCloudHistory;
+    if (!state) return;
+    if (state.publisher) {
+      if (removed) state.publisher.remove(sessionId);
+      else state.publisher.enqueue(sessionId);
+    } else {
+      state.pending.set(sessionId, removed || state.pending.get(sessionId) === true);
     }
+  }
+
+  private async pauseRoostCloudHistory(): Promise<void> {
+    const state = this.roostCloudHistory;
+    const publisher = state?.publisher;
+    if (!state || !publisher) return;
+    state.publisher = undefined;
+    for (const [sessionId, removed] of publisher.pendingWork())
+      this.enqueueRoostCloudHistory(sessionId, removed);
+    await publisher.close();
+  }
+
+  private async closeRoostCloudHistory(): Promise<void> {
+    const state = this.roostCloudHistory;
+    this.roostCloudHistory = undefined;
+    if (!state) return;
+    try {
+      state.unsubscribe();
+    } finally {
+      await state.publisher?.close();
+    }
+  }
+
+  prioritizeRoostCloudHistory(sessionId: SessionId): void {
+    this.roostCloudHistory?.publisher?.prioritize(sessionId);
   }
 
   /** Reader interest belongs to the daemon, never to a discovery request. */
@@ -1276,7 +1316,7 @@ export class LoroDocumentManager {
       this.presenceRuntime?.detachStreams(),
       this.machineMonitorRuntime?.detachStreams(),
       this.promptSuggestions?.detachStreams(),
-      this.closeRoostCloudHistory(),
+      this.pauseRoostCloudHistory(),
     ]);
     for (const result of detached) if (result.status === 'rejected') failures.push(result.reason);
     try {
@@ -1962,7 +2002,7 @@ export class LoroDocumentManager {
         this.logger,
         this.sessionHistoryFactory ?? this.ownerHistoryRouter,
         this.encryptedWorkspace?.repositoryDirectory,
-        () => this.roostCloudHistory?.publisher.enqueue(sessionId)
+        () => this.enqueueRoostCloudHistory(sessionId)
       );
       const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
       const historyBackend =

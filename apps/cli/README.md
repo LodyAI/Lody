@@ -156,6 +156,10 @@ to Streams. It backfills from the local store and schedules later batches from
 committed turn changes. After initial upload confirmation, it publishes the
 generation for exact-session read grants. Streams work runs independently of
 Agent writes and resumes from Roost's durable upload state after restart.
+An authorized latest-page read promotes an already queued session between
+upload batches while background sessions continue to make progress.
+Reattaching the remote bridge resumes incomplete and offline changes from the
+workspace's queue. It does not rescan sessions already processed by this daemon.
 
 ## Roost cache recovery tests
 

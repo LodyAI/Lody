@@ -4,6 +4,7 @@ import {
   roostCloudHistoryStreamId,
   roostHistoryAuthorKey,
   roostHistorySourceId,
+  RoostCloudHistoryRequestError,
   type RoostCloudHistoryBinding,
   type RoostCloudHistoryGrant,
   type SessionId,
@@ -39,13 +40,17 @@ type Options = {
 export class RoostCloudHistoryPublisher {
   private readonly lifetime = new AbortController();
   private readonly pending = new Map<SessionId, number>();
+  private readonly priority = new Set<SessionId>();
+  private prioritizedLast = false;
   private readonly removed = new Set<SessionId>();
   private readonly failures = new Map<SessionId, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
+  private publishing: SessionId | undefined;
   private owner: UploadOwner | undefined;
   private readonly grants = new Map<string, { grant: RoostCloudHistoryGrant; expires: number }>();
   private readonly remotes = new Map<string, Uint8Array>();
+  private readonly refused = new Set<string>();
   private closing: Promise<void> | undefined;
 
   constructor(private readonly options: Options) {}
@@ -56,9 +61,19 @@ export class RoostCloudHistoryPublisher {
     this.schedule();
   }
 
+  prioritize(sessionId: SessionId): void {
+    if (this.pending.has(sessionId)) this.priority.add(sessionId);
+  }
+
   remove(sessionId: SessionId): void {
     this.removed.add(sessionId);
     this.enqueue(sessionId);
+  }
+
+  pendingWork(): ReadonlyMap<SessionId, boolean> {
+    const sessions = new Set(this.pending.keys());
+    if (this.publishing) sessions.add(this.publishing);
+    return new Map([...sessions].map((sessionId) => [sessionId, this.removed.has(sessionId)]));
   }
 
   close(): Promise<void> {
@@ -66,10 +81,12 @@ export class RoostCloudHistoryPublisher {
     this.lifetime.abort();
     clearTimeout(this.timer);
     this.pending.clear();
+    this.priority.clear();
     this.removed.clear();
     this.failures.clear();
     this.grants.clear();
     this.remotes.clear();
+    this.refused.clear();
     return (this.closing = (async () => {
       await this.running;
       await this.owner?.release();
@@ -96,10 +113,19 @@ export class RoostCloudHistoryPublisher {
 
   private async step(): Promise<void> {
     const now = Date.now();
-    const next = [...this.pending].find(([, due]) => due <= now);
-    if (!next) return;
-    const [sessionId] = next;
+    let priority: SessionId | undefined;
+    let backlog: SessionId | undefined;
+    for (const [sessionId, due] of this.pending) {
+      if (due > now) continue;
+      if (this.priority.has(sessionId)) priority ??= sessionId;
+      else backlog ??= sessionId;
+      if (priority && backlog) break;
+    }
+    const sessionId = this.prioritizedLast ? (backlog ?? priority) : (priority ?? backlog);
+    if (!sessionId) return;
+    this.prioritizedLast = sessionId === priority;
     this.pending.delete(sessionId);
+    this.publishing = sessionId;
     try {
       if (this.lifetime.signal.aborted) return;
       if (this.removed.has(sessionId)) {
@@ -107,16 +133,29 @@ export class RoostCloudHistoryPublisher {
         this.removed.delete(sessionId);
       } else if (await this.options.isOwned(sessionId)) {
         const done = await this.upload(sessionId);
-        if (!done && !this.lifetime.signal.aborted) this.pending.set(sessionId, 0);
+        if (!done && !this.lifetime.signal.aborted) {
+          this.pending.set(sessionId, 0);
+          this.failures.delete(sessionId);
+          return;
+        }
       }
+      this.priority.delete(sessionId);
       this.failures.delete(sessionId);
-    } catch {
+    } catch (error) {
       if (this.lifetime.signal.aborted) return;
+      if (error instanceof RoostCloudHistoryRequestError && !error.retryable) {
+        this.priority.delete(sessionId);
+        this.failures.delete(sessionId);
+        this.options.logger.warn(`[${sessionId}] ${error.message}`);
+        return;
+      }
       const failures = (this.failures.get(sessionId) ?? 0) + 1;
       this.failures.set(sessionId, failures);
       if (failures === 1)
         this.options.logger.warn(`[${sessionId}] Roost cloud history upload will retry`);
       this.pending.set(sessionId, Date.now() + RETRY_MS * 2 ** Math.min(failures - 1, 5));
+    } finally {
+      this.publishing = undefined;
     }
   }
 
@@ -138,10 +177,17 @@ export class RoostCloudHistoryPublisher {
       sessionId,
       binding
     );
+    if (this.refused.has(physicalStream)) return true;
     const getGrant = async (currentSignal: AbortSignal, refresh = false) => {
       const cached = this.grants.get(physicalStream);
       if (!refresh && cached && Date.now() < cached.expires) return cached.grant;
-      const grant = await this.options.grant(sessionId, binding, currentSignal);
+      const grant = await this.options.grant(sessionId, binding, currentSignal).catch((error) => {
+        if (error instanceof RoostCloudHistoryRequestError && !error.retryable) {
+          if (this.refused.size >= 256) this.refused.delete(this.refused.values().next().value!);
+          this.refused.add(physicalStream);
+        }
+        throw error;
+      });
       currentSignal.throwIfAborted();
       if (
         !new URL(grant.streamUrl).pathname.endsWith(

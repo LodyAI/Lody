@@ -1,5 +1,5 @@
 import { IndexedDbStorage, Store, StoreError, type Stream } from '@loro-dev/roost';
-import { StreamsClient } from '@loro-dev/streams-client';
+import { StreamsClient, type StreamError } from '@loro-dev/streams-client';
 import {
   LodyHistory,
   toApplicationJson,
@@ -22,6 +22,7 @@ import {
   ROOST_HISTORY_BUCKET_ID,
   roostHistorySourceId,
   roostHistoryAuthorKey,
+  RoostCloudHistoryRequestError,
   roostCloudHistoryBindingSchema,
   type RoostCloudHistoryBinding,
   type RoostCloudHistoryGrant,
@@ -59,6 +60,21 @@ const unhex = (value: string) =>
 const PAGE_SIZE = 40;
 const WINDOW_BYTES = 256 * 1024;
 const MAX_WINDOW_BYTES = 64 * 1024 * 1024;
+const byteOffset = (value: string | undefined) =>
+  value !== undefined && /^\d+$/.test(value) ? BigInt(value) : undefined;
+
+function failStreamRead(error: StreamError): never {
+  const { context } = error;
+  if (
+    context?.serverErrorCode === 'space_deleted' ||
+    context?.serverErrorCode === 'space_generation_fenced'
+  )
+    throw new RoostCloudHistoryRequestError(410);
+  const status = ('status' in error ? error.status : undefined) ?? context?.status;
+  if (status !== undefined && status >= 400 && status < 600)
+    throw new RoostCloudHistoryRequestError(status);
+  throw new Error('Roost cloud history stream is unavailable');
+}
 
 async function acquireDatabase(name: string): Promise<DatabaseLease> {
   let entry = databases.get(name);
@@ -192,6 +208,10 @@ export type RoostHistoryReplicaOptions = {
  * this reader never manufactures an identity, outbox, or remote acknowledgement. */
 export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): {
   history: SessionHistoryReader;
+  published(): boolean;
+  watchPublication(listener: () => void): () => void;
+  catchUp(): Promise<void>;
+  readPublishedSnapshot(): Promise<SessionEntry[]>;
   refresh(): void;
   dispose(): void;
 } {
@@ -202,6 +222,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     },
   };
   const listeners = new Set<SessionDataChangeListener>();
+  const publicationListeners = new Set<() => void>();
   const bodies = new Map<string, CachedTurn>();
   const positions = new Map<number, string>();
   const cursors = new Map<string, ActiveBranchPageCursor>();
@@ -217,33 +238,55 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   let totalCount = 0;
   let observedBinding: RoostCloudHistoryBinding | undefined;
   let forceGrant = false;
+  let terminal: RoostCloudHistoryRequestError | undefined;
+  let readDeadline: AbortSignal | undefined;
 
   const assertLive = () => {
     if (abort.signal.aborted) throw new Error('Roost history replica is disposed');
+    if (terminal) throw terminal;
+    readDeadline?.throwIfAborted();
+  };
+  const stopOnRefusal = (error: unknown) => {
+    if (
+      error instanceof RoostCloudHistoryRequestError &&
+      !error.retryable &&
+      terminal?.status !== error.status
+    ) {
+      terminal = error;
+      bodies.clear();
+      positions.clear();
+      cursors.clear();
+      lastBranchRevision = undefined;
+      options.onSyncState?.({ reason: error.message });
+    }
   };
   const run = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = serial.then(async () => {
-      assertLive();
-      if (opened) {
-        const current = await opened;
-        const binding = observedBinding;
-        if (binding && !sameBinding(current.meta.binding, binding)) {
-          options.onSyncState?.({ reason: 'roost_cloud_history_changed' });
-          opened = undefined;
-          await current.lease.release();
-          bodies.clear();
-          positions.clear();
-          cursors.clear();
-          lastBranchRevision = undefined;
-          for (const listener of listeners)
-            listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
-        } else {
-          await changes(current);
+    const result = serial
+      .then(async () => {
+        assertLive();
+        if (opened) {
+          const current = await opened;
+          const binding = observedBinding;
+          if (binding && !sameBinding(current.meta.binding, binding)) {
+            options.onSyncState?.({ reason: 'roost_cloud_history_changed' });
+            opened = undefined;
+            await current.lease.release();
+            bodies.clear();
+            positions.clear();
+            cursors.clear();
+            lastBranchRevision = undefined;
+            for (const listener of listeners)
+              listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
+          } else {
+            await changes(current);
+          }
         }
-      }
-      return await operation();
-    });
-    serial = result.catch(() => {});
+        return await operation();
+      })
+      .catch((error) => {
+        throw terminal ?? error;
+      });
+    serial = result.catch(stopOnRefusal);
     return result;
   };
   const persistMeta = async (replica: Replica) => {
@@ -352,7 +395,8 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         options.replicaNamespace,
         options.sessionId,
       ]);
-      return await navigator.locks.request(key, { signal: abort.signal }, perform);
+      const signal = readDeadline ? AbortSignal.any([abort.signal, readDeadline]) : abort.signal;
+      return await navigator.locks.request(key, { signal }, perform);
     }
     return await perform();
   };
@@ -362,7 +406,12 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     const cached = replica.grant;
     if (!refresh && !forceGrant && cached && Date.now() < cached.expires) return cached.value;
     forceGrant = false;
-    const value = await options.requestGrant(abort.signal);
+    const value = await options
+      .requestGrant(readDeadline ? AbortSignal.any([abort.signal, readDeadline]) : abort.signal)
+      .catch((error) => {
+        stopOnRefusal(error);
+        throw error;
+      });
     assertLive();
     observedBinding = value.binding;
     if (!sameBinding(replica.meta.binding, value.binding)) {
@@ -423,12 +472,18 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       remote.id,
       replica.stream.id
     );
-    const fetchWithLifetime: typeof fetch = (input, init) => {
+    const fetchWithLifetime: typeof fetch = async (input, init) => {
       assertLive();
       const signals = [abort.signal, AbortSignal.timeout(35_000)];
+      if (readDeadline) signals.push(readDeadline);
       if (init?.signal) signals.push(init.signal);
       if (input instanceof Request) signals.push(input.signal);
-      return fetch(input, { ...init, signal: AbortSignal.any(signals) });
+      const signal = AbortSignal.any(signals);
+      const response = await fetch(input, { ...init, signal });
+      signal.throwIfAborted();
+      if (response.status === 403 || response.status === 404 || response.status === 410)
+        stopOnRefusal(new RoostCloudHistoryRequestError(response.status));
+      return response;
     };
     const auth = async (context?: { reason: string }) => {
       const current = await grantFor(replica, context?.reason === 'unauthorized');
@@ -560,7 +615,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     return report;
   };
 
-  const syncForward = async (replica: Replica) => {
+  const syncForward = async (replica: Replica, targetOffset?: bigint) => {
     await connect(replica);
     if (!replica.meta.bootstrapped || (await replica.link!.position()) === undefined)
       await fetchOlder(replica);
@@ -587,8 +642,35 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         return false;
       }
     }
+    const applied = byteOffset(replica.forwardOffset);
+    if (targetOffset !== undefined && applied !== undefined) {
+      if (applied >= targetOffset) return true;
+      if (report.upToDate)
+        throw new Error('Roost history reached the stream tail before the captured offset');
+      return false;
+    }
     return report.upToDate;
   };
+
+  const atPublishedTail = async <T>(operation: (replica: Replica) => Promise<T>) =>
+    run(async () => {
+      stopWaiting();
+      readDeadline = AbortSignal.timeout(20_000);
+      try {
+        const replica = await open();
+        return await network(replica, async () => {
+          await connect(replica);
+          const head = await replica.streamClient!.head({ signal: readDeadline });
+          if (!head.ok) failStreamRead(head.result);
+          const targetOffset = byteOffset(head.result.nextOffset);
+          while (!(await syncForward(replica, targetOffset))) assertLive();
+          return operation(replica);
+        });
+      } finally {
+        readDeadline = undefined;
+        schedule();
+      }
+    });
 
   const waitAtTail = (replica: Replica) => {
     const waiter = new AbortController();
@@ -596,13 +678,17 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     void (async () => {
       const offset = await replica.link?.position();
       if (!offset || !replica.streamClient) return;
+      const started = Date.now();
       const received = await replica.streamClient.readOnce({
         offset,
         live: 'long-poll',
         signal: waiter.signal,
       });
       waiter.signal.throwIfAborted();
-      if (!received.ok) throw new Error('Roost cloud history tail read failed');
+      if (!received.ok) {
+        if (received.result.code === 'timeout' && Date.now() - started >= 5_000) return;
+        failStreamRead(received.result);
+      }
       const { payload, nextOffset, upToDate, closed } = received.result;
       replica.livePage = {
         offset,
@@ -614,9 +700,11 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         tailWait = undefined;
         schedule();
       },
-      () => {
+      (error: unknown) => {
         if (tailWait !== waiter) return;
         tailWait = undefined;
+        stopOnRefusal(error);
+        if (terminal) return;
         failures++;
         options.onSyncState?.({ reason: 'roost_cloud_sync_unavailable' });
         schedule(Math.min(30_000, 500 * 2 ** Math.min(failures, 6)));
@@ -631,7 +719,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   };
 
   const schedule = (delay = 0) => {
-    if (abort.signal.aborted || !listeners.size) return;
+    if (abort.signal.aborted || terminal || !listeners.size) return;
     requested = true;
     if (background) return;
     stopWaiting();
@@ -656,14 +744,14 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         failures = 0;
       })
         .catch(() => {
-          if (!abort.signal.aborted) {
+          if (!abort.signal.aborted && !terminal) {
             failures++;
             options.onSyncState?.({ reason: 'roost_cloud_sync_unavailable' });
           }
         })
         .finally(() => {
           background = false;
-          if (abort.signal.aborted || !listeners.size) return;
+          if (abort.signal.aborted || terminal || !listeners.size) return;
           if (!requested && !failures && syncedReplica) waitAtTail(syncedReplica);
           else schedule(failures ? Math.min(30_000, 500 * 2 ** Math.min(failures, 6)) : 0);
         });
@@ -913,12 +1001,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       run(async () => {
         const replica = await open();
         await latest(replica);
-        for (;;) {
-          const branch = await replica.history.readActiveBranch(options.sessionId);
-          if (branch.complete) return structuredClone(project(branch.messages));
-          const prefixes = await network(replica, async () => await completePrefixes(replica));
-          if (!prefixes.bytesFetched) await network(replica, async () => await fetchOlder(replica));
-        }
+        return readComplete(replica);
       }),
     readTurnOutput: (userTurnId) =>
       run(async () => {
@@ -954,7 +1037,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         );
       }),
     observe: (listener) => {
-      assertLive();
       listeners.add(listener);
       const initialPage = run(async () => await latest(await open()));
       void initialPage.finally(() => schedule()).catch(() => {});
@@ -973,13 +1055,32 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     },
   };
 
+  const readComplete = async (replica: Replica, exclusive = false): Promise<SessionEntry[]> => {
+    const fill = async () => {
+      const prefixes = await completePrefixes(replica);
+      if (!prefixes.bytesFetched) {
+        if (replica.meta.reachedStart) throw new Error('Published Roost history is incomplete');
+        await fetchOlder(replica);
+      }
+    };
+    for (;;) {
+      assertLive();
+      const branch = await replica.history.readActiveBranch(options.sessionId);
+      if (branch.complete) return structuredClone(project(branch.messages));
+      if (exclusive) await fill();
+      else await network(replica, fill);
+    }
+  };
+
   let hint: RoostCloudHistoryBinding | undefined;
   const unsubscribeBinding = options.observeBinding(() => {
     const current = options.getBinding();
     const changed = current ? !hint || !sameBinding(current, hint) : hint !== undefined;
     if (!changed) return;
     hint = current;
+    if (current) terminal = undefined;
     forceGrant = true;
+    for (const listener of publicationListeners) listener();
     schedule();
   });
   hint = options.getBinding();
@@ -988,6 +1089,13 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
 
   return {
     history,
+    published: () => hint !== undefined || observedBinding !== undefined,
+    watchPublication(listener) {
+      publicationListeners.add(listener);
+      return () => publicationListeners.delete(listener);
+    },
+    catchUp: () => atPublishedTail(async () => {}),
+    readPublishedSnapshot: () => atPublishedTail((replica) => readComplete(replica, true)),
     refresh: () => schedule(),
     dispose: () => {
       if (abort.signal.aborted) return;
@@ -997,6 +1105,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       globalThis.removeEventListener?.('online', online);
       if (timer) clearTimeout(timer);
       listeners.clear();
+      publicationListeners.clear();
       bodies.clear();
       positions.clear();
       cursors.clear();

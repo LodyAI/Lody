@@ -38,6 +38,7 @@ import {
   LoroStreamsTokenPorts,
   deriveConvexSiteUrl,
   normalizeBaseUrl,
+  RoostCloudHistoryRequestError,
   roostCloudHistoryGrantSchema,
 } from '@lody/shared';
 import {
@@ -848,8 +849,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
         signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
       }
     );
-    if (!response.ok)
-      throw new Error(`Roost cloud history ${operation} was refused (${response.status})`);
+    if (!response.ok) throw new RoostCloudHistoryRequestError(response.status);
     return response;
   };
 

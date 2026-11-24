@@ -11,6 +11,7 @@ import {
   roostCloudHistoryStreamId,
   roostHistoryAuthorKey,
   roostHistorySourceId,
+  RoostCloudHistoryRequestError,
 } from '@lody/shared';
 import { createRoostHistoryReplica } from '../src/lib/roost-history-replica';
 
@@ -36,10 +37,57 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
-  it(
-    'opens and resumes published Roost history from Streams with its owner offline',
+  it.each([403, 404, 410])(
+    'keeps a cloud refusal terminal for published Roost history (HTTP %s)',
+    async (status) => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const workspaceId = 'workspace' as WorkspaceId;
+      const machineId = 'machine' as MachineId;
+      const sessionId = 'session' as SessionId;
+      const doc = new LoroDoc();
+      const ownerRead = async (): Promise<never> => {
+        throw new Error('unexpected owner read');
+      };
+      let requests = 0;
+      const data = createRemoteRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        requestHistoryRead: ownerRead,
+        requestHistoryWrite: ownerRead,
+        cloudHistory: () =>
+          createRoostHistoryReplica({
+            workspaceId,
+            machineId,
+            sessionId,
+            replicaNamespace: 'refusal',
+            getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
+            observeBinding: () => () => {},
+            requestGrant: async () => {
+              requests++;
+              throw new RoostCloudHistoryRequestError(status);
+            },
+          }),
+      })({ doc, sessionId, backendKind: 'roost' });
+      const observation = data.history.observe(() => {});
+      void observation.initial.catch(() => {});
+      try {
+        await expect(observation.initialPage).rejects.toMatchObject({ status });
+        await expect(data.history.readAll()).rejects.toMatchObject({ status });
+        expect(requests).toBe(1);
+      } finally {
+        observation.unsubscribe();
+        data.dispose();
+        doc.free();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
+  it.each([true, false])(
+    'opens Roost on the correct reader and resumes Streams with its owner offline (already published=%s)',
     { timeout: 30_000 },
-    async () => {
+    async (alreadyPublished) => {
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
       const workspaceId = 'roost-cloud-workspace' as WorkspaceId;
@@ -115,11 +163,21 @@ describe('createConversationSession backend seam', () => {
       const tail = String(bytes.length + incremental.length);
       const applied = Promise.withResolvers<void>();
       let requestsToTail = 0;
+      let headOffset = startOffset;
       vi.stubGlobal('fetch', (input: string | Request, init?: RequestInit) => {
         const read = new URL(input instanceof Request ? input.url : input);
         const { pathname, origin } = new URL(url);
         if (read.origin !== origin || read.pathname !== pathname)
           throw new Error('Unexpected cloud history transport');
+        if ((init?.method ?? (input instanceof Request ? input.method : 'GET')) === 'HEAD')
+          return Promise.resolve(
+            new Response(null, {
+              headers: {
+                'content-type': 'application/octet-stream',
+                'stream-next-offset': headOffset,
+              },
+            })
+          );
         if (read.searchParams.get('direction') === 'backward') {
           return Promise.resolve(
             new Response(new Uint8Array(bytes), {
@@ -156,9 +214,11 @@ describe('createConversationSession backend seam', () => {
         if (offset === startOffset) {
           if (!read.searchParams.has('live')) return Promise.resolve(next(null, startOffset));
           requestsToTail++;
+          headOffset = tail;
           return Promise.resolve(next(new Uint8Array(incremental), tail));
         }
         if (offset === tail) {
+          if (!read.searchParams.has('live')) return Promise.resolve(next(null, tail));
           const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
           return new Promise<Response>((_resolve, reject) => {
             signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
@@ -169,14 +229,18 @@ describe('createConversationSession backend seam', () => {
       const offline = async (): Promise<never> => {
         throw new Error('Synthetic owner is offline');
       };
-      let cachedBinding: typeof binding | undefined;
+      let cachedBinding: typeof binding | undefined = alreadyPublished ? binding : undefined;
+      const publicationWakes = new Set<() => void>();
       const open = (
         requestGrant: () => Promise<{
           binding: typeof binding;
           streamUrl: string;
           token: string;
           expiresIn: number;
-        }>
+        }>,
+        owner: Parameters<
+          typeof createRemoteRoostSessionDataFactory
+        >[0]['requestHistoryRead'] = offline
       ) =>
         createRemoteRoostSessionDataFactory({
           workspaceId,
@@ -188,27 +252,62 @@ describe('createConversationSession backend seam', () => {
               sessionId,
               replicaNamespace: 'test',
               getBinding: () => cachedBinding,
-              observeBinding: () => () => {},
+              observeBinding: (wake) => {
+                publicationWakes.add(wake);
+                return () => publicationWakes.delete(wake);
+              },
               requestGrant,
               onSyncState: (state) => {
                 if ('checkpoint' in state && JSON.parse(state.checkpoint)[2] === tail)
                   applied.resolve();
               },
             }),
-          requestHistoryRead: offline,
+          requestHistoryRead: owner,
           requestHistoryWrite: offline,
         })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
-      const first = open(async () => ({
-        binding,
-        streamUrl: url,
-        token: 'synthetic-read-grant',
-        expiresIn: 60,
-      }));
+      const ownerRead: Parameters<
+        typeof createRemoteRoostSessionDataFactory
+      >[0]['requestHistoryRead'] = async (_machine, _session, query) => ({
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyCount: 1,
+        historyRevision: 1,
+        result:
+          query.kind === 'readLatestPage'
+            ? {
+                startPosition: 0,
+                totalCount: 1,
+                hasMoreOlder: false,
+                cursor: null,
+                rows: [createRoostDirectoryRow(0, turn)],
+              }
+            : { state: 'ready', turn },
+        pageTurns: [turn],
+      });
+      let readGrants = 0;
+      const first = open(
+        async () => {
+          readGrants++;
+          return {
+            binding,
+            streamUrl: url,
+            token: 'synthetic-read-grant',
+            expiresIn: 60,
+          };
+        },
+        alreadyPublished ? offline : ownerRead
+      );
       try {
         const observation = first.history.observe(() => {});
         const page = await observation.initialPage;
         expect(page.rows).toMatchObject([{ turnId: turn.id }]);
         expect(await first.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
+        if (!alreadyPublished) {
+          expect(readGrants).toBe(0);
+          cachedBinding = binding;
+          for (const wake of publicationWakes) wake();
+        }
         await applied.promise;
         expect(requestsToTail).toBe(1);
         expect(await first.history.readTurn(reply.id)).toMatchObject({
@@ -221,6 +320,10 @@ describe('createConversationSession backend seam', () => {
         const older = await first.history.readOlderDirectoryPage!(latest.cursor!, 1);
         expect(older.checkpoint).toBe(latest.checkpoint);
         expect(older.rows).toMatchObject([{ turnId: turn.id }]);
+        expect((await first.snapshots.capture()).history).toMatchObject([
+          { id: turn.id },
+          { id: reply.id },
+        ]);
         observation.unsubscribe();
       } finally {
         first.dispose();
@@ -627,6 +730,18 @@ describe('createConversationSession backend seam', () => {
           expect(owner).toBe(machineId);
           return plane;
         },
+        cloudHistory: () =>
+          createRoostHistoryReplica({
+            workspaceId: 'synthetic-workspace' as WorkspaceId,
+            machineId,
+            sessionId,
+            replicaNamespace: 'local-routing-test',
+            getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
+            observeBinding: () => () => {},
+            requestGrant: async () => {
+              throw new Error('Local history must not request a cloud grant');
+            },
+          }),
         sendControl: async (request) => {
           expect(request.machineId).toBe(machineId);
           expect(request.sessionId).toBe(sessionId);

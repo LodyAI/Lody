@@ -31,6 +31,7 @@ import {
   type SessionHistoryReader,
   type SessionImportResult,
   type SessionSnapshot,
+  type SessionObservation,
   type SessionTurn,
   type SessionTurnRead,
   type SessionInputAcceptanceResult,
@@ -51,7 +52,7 @@ import {
 } from './roost-history-cache';
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
-import { SessionHistoryChangesSchema } from '@lody/shared';
+import { RoostCloudHistoryRequestError, SessionHistoryChangesSchema } from '@lody/shared';
 import type { createRoostHistoryReplica } from './roost-history-replica';
 
 type HistoryReadResponse = Extract<
@@ -85,6 +86,7 @@ type RoostHistoryTransport = {
 
 type RoostHistoryObservationOptions = {
   readonly cloudHistory?: (sessionId: SessionId) => ReturnType<typeof createRoostHistoryReplica>;
+  readonly onCloudHistoryRoute?: (active: boolean) => void;
   readonly cacheNamespace?: string;
   readonly pollIntervalMs?: number;
   readonly coherentInspection?: boolean | (() => boolean);
@@ -260,12 +262,197 @@ const assertSerializableHistoryPayload = (
   }
 };
 
+function routeRoostHistory(
+  owner: SessionHistoryReader,
+  cloud: ReturnType<typeof createRoostHistoryReplica>,
+  allowCloud: () => Promise<boolean>,
+  onCloudRoute?: (active: boolean) => void
+) {
+  type Observer = {
+    listener: SessionDataChangeListener;
+    observation?: SessionObservation;
+  };
+  let reader: SessionHistoryReader | undefined;
+  let opening: Promise<SessionHistoryReader> | undefined;
+  let switching: Promise<void> | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  let disposed = false;
+  const observers = new Set<Observer>();
+  const assertOpen = () => {
+    if (disposed) throw new Error('Roost session bridge is disposed');
+  };
+  const attach = (observer: Observer, source: SessionHistoryReader) => {
+    observer.observation?.unsubscribe();
+    const observation = source.observe((change) => {
+      if (reader === source) observer.listener(change);
+    });
+    void observation.initial.catch(() => {});
+    void observation.initialPage?.catch(() => {});
+    return (observer.observation = observation);
+  };
+  const select = (next: SessionHistoryReader) => {
+    if (disposed || reader === next) return;
+    const changed = reader !== undefined;
+    reader = next;
+    onCloudRoute?.(next === cloud.history);
+    if (changed) {
+      for (const observer of observers) {
+        if (!observer.observation) continue;
+        attach(observer, next);
+        observer.listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
+      }
+    }
+  };
+  const initialReader = () => {
+    assertOpen();
+    if (reader) return Promise.resolve(reader);
+    return (opening ??= (async () => {
+      const first = cloud.published() && (await allowCloud()) ? cloud.history : owner;
+      assertOpen();
+      select(first);
+      if (first === owner && cloud.published()) queueMicrotask(refresh);
+      return first;
+    })().finally(() => {
+      opening = undefined;
+    }));
+  };
+  const refresh = () => {
+    if (disposed || !reader || switching || (reader === owner && !cloud.published())) return;
+    if (retry) clearTimeout(retry);
+    retry = undefined;
+    switching = (async () => {
+      if (!(await allowCloud())) {
+        select(owner);
+        return;
+      }
+      if (reader === cloud.history) {
+        cloud.refresh();
+        return;
+      }
+      try {
+        await cloud.catchUp();
+      } catch (error) {
+        if (!(error instanceof RoostCloudHistoryRequestError) || error.retryable) throw error;
+      }
+      if (cloud.published() && (await allowCloud())) select(cloud.history);
+      failures = 0;
+    })()
+      .catch(() => {
+        if (!disposed && observers.size) {
+          failures++;
+          retry = setTimeout(refresh, Math.min(30_000, 500 * 2 ** Math.min(failures, 6)));
+        }
+      })
+      .finally(() => {
+        switching = undefined;
+      });
+  };
+  const unsubscribePublication = cloud.watchPublication(refresh);
+  const read = async <T>(work: (source: SessionHistoryReader) => T | Promise<T>): Promise<T> => {
+    for (;;) {
+      const source = await initialReader();
+      try {
+        const value = await work(source);
+        assertOpen();
+        if (source === reader) return value;
+      } catch (error) {
+        if (source !== reader && !disposed) continue;
+        if (
+          !disposed &&
+          source === owner &&
+          !cloud.published() &&
+          error instanceof SessionHistoryRequestError &&
+          error.failure.source === 'transport'
+        ) {
+          if (
+            (await allowCloud()) &&
+            (await cloud.catchUp().then(
+              () => true,
+              () => false
+            ))
+          ) {
+            if (await allowCloud()) {
+              assertOpen();
+              select(cloud.history);
+              continue;
+            }
+          }
+        }
+        if (source === reader || disposed) throw error;
+      }
+    }
+  };
+  const cursorPrefix = (source: SessionHistoryReader) => (source === owner ? 'owner:' : 'streams:');
+  const pageWithSource = (source: SessionHistoryReader, page: SessionHistoryDirectoryPage) =>
+    page.cursor ? { ...page, cursor: cursorPrefix(source) + page.cursor } : page;
+  const history: SessionHistoryReader = {
+    count: () => read((source) => source.count()),
+    readAt: (position) => read((source) => source.readAt(position)),
+    readTurn: (turnId) => read((source) => source.readTurn(turnId)),
+    readRange: (from, to) => read((source) => source.readRange(from, to)),
+    readDirectory: (from, to) => read((source) => source.readDirectory(from, to)),
+    readMetadata: () => read((source) => source.readMetadata!()),
+    readAll: () => read((source) => source.readAll()),
+    readTurnOutput: (id) => read((source) => source.readTurnOutput(id)),
+    readLatestDirectoryPage: (limit) =>
+      read(async (source) => pageWithSource(source, await source.readLatestDirectoryPage!(limit))),
+    readOlderDirectoryPage: (cursor, limit) =>
+      read(async (source) => {
+        const prefix = cursorPrefix(source);
+        if (!cursor.startsWith(prefix)) throw new Error('Roost history source changed');
+        return pageWithSource(
+          source,
+          await source.readOlderDirectoryPage!(cursor.slice(prefix.length), limit)
+        );
+      }),
+    observe(listener) {
+      const observer: Observer = { listener };
+      observers.add(observer);
+      const initialPage = read(async (source) => {
+        if (!observers.has(observer))
+          return pageWithSource(source, await source.readLatestDirectoryPage!(40));
+        const observation = attach(observer, source);
+        return pageWithSource(source, await observation.initialPage!);
+      });
+      return {
+        initialPage,
+        initial: initialPage.then((page) => page.rows),
+        unsubscribe() {
+          observers.delete(observer);
+          observer.observation?.unsubscribe();
+          if (!observers.size && retry) {
+            clearTimeout(retry);
+            retry = undefined;
+          }
+        },
+      };
+    },
+  };
+  return {
+    history,
+    readSnapshot: (readOwner: () => Promise<SessionEntry[]>) =>
+      read((source) => (source === cloud.history ? cloud.readPublishedSnapshot() : readOwner())),
+    usingCloud: () => reader === cloud.history,
+    refresh,
+    dispose() {
+      disposed = true;
+      unsubscribePublication();
+      if (retry) clearTimeout(retry);
+      for (const observer of observers) observer.observation?.unsubscribe();
+      observers.clear();
+      cloud.dispose();
+    },
+  };
+}
+
 const createRoostSessionDataFactoryFromTransport =
   (
     createTransport: (sessionId: SessionId) => RoostHistoryTransport,
     cacheScope: (sessionId: SessionId) => string,
     targetMachineId: MachineId,
-    options: RoostHistoryObservationOptions = {}
+    options: RoostHistoryObservationOptions = {},
+    allowCloud: () => Promise<boolean> = async () => true
   ): ConversationSessionDataFactory =>
   ({ sessionId }) => {
     const transport = createTransport(sessionId);
@@ -1215,16 +1402,6 @@ const createRoostSessionDataFactoryFromTransport =
         });
     };
 
-    const unsubscribeWake = options.subscribeWake?.(() => {
-      if (cloudHistory) {
-        cloudHistory.refresh();
-        return;
-      }
-      if (!active() || !subscriptionEnabled()) stopSubscription();
-      startSubscription();
-      if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
-    });
-
     const history: SessionHistoryReader = {
       readMetadata: async () => {
         const head = await canReadCache();
@@ -1309,6 +1486,16 @@ const createRoostSessionDataFactoryFromTransport =
         };
       },
     };
+    const routed =
+      cloudHistory &&
+      routeRoostHistory(history, cloudHistory, allowCloud, options.onCloudHistoryRoute);
+    const unsubscribeWake = options.subscribeWake?.(() => {
+      if (routed) routed.refresh();
+      if (routed?.usingCloud()) return;
+      if (!active() || !subscriptionEnabled()) stopSubscription();
+      startSubscription();
+      if (!transport.subscribeHistory || !subscriptionEnabled()) scheduleRefresh();
+    });
 
     const write = async (
       operation: SessionHistoryWriteOperation,
@@ -1317,8 +1504,8 @@ const createRoostSessionDataFactoryFromTransport =
       if (disposed) throw new Error('Roost session bridge is disposed');
       assertSerializableHistoryPayload(operation, payload);
       const receipt = await transport.writeHistory(operation, payload);
-      if (cloudHistory) {
-        cloudHistory.refresh();
+      if (routed?.usingCloud()) {
+        routed.refresh();
         return receipt.result;
       }
       await notifyChanged(
@@ -1366,10 +1553,10 @@ const createRoostSessionDataFactoryFromTransport =
 
     const snapshots: SessionSnapshotService = {
       capture: async (): Promise<SessionSnapshot> => {
+        const readOwner = async () =>
+          [...(await readEntries({ kind: 'readAll' }))] as SessionEntry[];
         const snapshot = Object.freeze({
-          history: [
-            ...(await (cloudHistory?.history.readAll() ?? readEntries({ kind: 'readAll' }))),
-          ],
+          history: await (routed ? routed.readSnapshot(readOwner) : readOwner()),
         }) as unknown as SessionSnapshot;
         snapshotProvenance.add(snapshot);
         return snapshot;
@@ -1388,7 +1575,7 @@ const createRoostSessionDataFactoryFromTransport =
 
     const sessionData = createRoostSessionData({
       sessionId,
-      history: cloudHistory?.history ?? history,
+      history: routed?.history ?? history,
       commands,
       snapshots,
       inputAcceptance: {
@@ -1402,7 +1589,7 @@ const createRoostSessionDataFactoryFromTransport =
       },
       dispose: () => {
         disposed = true;
-        cloudHistory?.dispose();
+        routed?.dispose();
         stopSubscription();
         unsubscribeWake?.();
         if (refreshTimer) clearTimeout(refreshTimer);
@@ -1573,7 +1760,8 @@ export function createLocalRoostSessionDataFactory(
     (sessionId) => localHistoryTransport(options, sessionId),
     (sessionId) => historyCacheScope(options, sessionId),
     options.machineId,
-    options
+    options,
+    async () => false
   );
 }
 
@@ -1619,6 +1807,7 @@ export function createRoostSessionDataFactoryForMachine(
     },
     (sessionId) => historyCacheScope(options, sessionId),
     options.machineId,
-    options
+    options,
+    async () => (await options.resolvePlane(options.machineId)) === 'cloud'
   );
 }

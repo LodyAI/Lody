@@ -291,6 +291,12 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 
 ## Published Roost history
 
+The conversation keeps one reader while the owning machine serves unpublished
+history and the Streams replica prepares its first readable window. Switching
+the source invalidates that window's paging cursors. Electron reads its own
+machine through local session control. A shared snapshot catches up to an
+observed Streams tail before detaching the history.
+
 The Streams replica drains persisted SDK receipts before exposing an applied
 position. Its initial live cursor comes from the observed history window. It
 persists the window hints after the frames and cursor are durable. Losing a hint
