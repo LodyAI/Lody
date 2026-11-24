@@ -5,10 +5,10 @@
  * children only, no state, no events. Anything else stays an html node and
  * follows the renderer's normal (non-raw-HTML) handling.
  *
- * Two shapes are recognized: self-closing `<icon ... />` and the pair form
- * `<badge ...>text</badge>` when micromark emits it as adjacent
+ * Two shapes are recognized: self-closing `<Icon ... />` and the pair form
+ * `<Badge ...>text</Badge>` when micromark emits it as adjacent
  * html/text/html siblings. Streaming commits on the closing `>`: an
- * unterminated `<icon name="x-ci` is plain text until the tag closes, so
+ * unterminated `<Icon name="x-ci` is plain text until the tag closes, so
  * half-written markup never mounts.
  */
 import { parseView, type UiElement, type UiNode } from '@lody/genui';

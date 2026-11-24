@@ -8,7 +8,7 @@ import { Badge, Button, Card, Checkbox, Input, Select, Separator, Switch } from 
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { icons } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { createElement, type ReactNode, type SVGProps } from 'react';
 
 export type GenuiProps = Record<string, unknown> & { children?: ReactNode };
 export type GenuiRenderer = (props: GenuiProps) => ReactNode;
@@ -47,6 +47,7 @@ const styles = stylex.create({
     flexShrink: 0,
     verticalAlign: '-0.125em',
   },
+  svg: { display: 'block', maxWidth: '100%' },
 });
 
 type IconName = keyof typeof icons;
@@ -127,14 +128,113 @@ function GenuiSelect({ items, value, onValueChange, placeholder, disabled }: Gen
   );
 }
 
-export const GENU_CATALOG: Record<string, GenuiRenderer> = {
-  card: ({ children }) => <Card.Root>{children}</Card.Root>,
-  row: ({ children, gap }) => (
+/**
+ * The SVG family: a fixed element set behind a paint/geometry attribute
+ * whitelist. An unlisted attribute is dropped, never forwarded — so `href`,
+ * `style`, event handlers, embedded HTML (`foreignObject`) and animation
+ * elements have no path to the DOM.
+ */
+const SVG_PAINT: ReadonlySet<string> = new Set([
+  'color',
+  'fill',
+  'fill-opacity',
+  'fill-rule',
+  'stroke',
+  'stroke-width',
+  'stroke-opacity',
+  'stroke-dasharray',
+  'stroke-dashoffset',
+  'stroke-linecap',
+  'stroke-linejoin',
+  'stroke-miterlimit',
+  'opacity',
+  'transform',
+  'vector-effect',
+]);
+const SVG_ROOT: ReadonlySet<string> = new Set([
+  ...SVG_PAINT,
+  'viewBox',
+  'view-box',
+  'preserveAspectRatio',
+  'preserve-aspect-ratio',
+  'width',
+  'height',
+  'role',
+  'aria-label',
+  'aria-hidden',
+]);
+const SVG_TEXT: ReadonlySet<string> = new Set([
+  ...SVG_PAINT,
+  'x',
+  'y',
+  'dx',
+  'dy',
+  'rotate',
+  'text-anchor',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'font-family',
+  'letter-spacing',
+]);
+
+/** `aria-*` keeps kebab case; other attributes camelize for React. */
+const camelAttr = (name: string) =>
+  name.startsWith('aria-')
+    ? name
+    : name.replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase());
+
+function pickSvgProps(
+  props: Record<string, unknown>,
+  allowed: ReadonlySet<string>
+): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(props)) {
+    if (!allowed.has(name)) continue;
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean')
+      continue;
+    picked[camelAttr(name)] = value;
+  }
+  return picked;
+}
+
+type SvgTag =
+  | 'svg'
+  | 'g'
+  | 'rect'
+  | 'circle'
+  | 'ellipse'
+  | 'line'
+  | 'polyline'
+  | 'polygon'
+  | 'path'
+  | 'text'
+  | 'tspan';
+
+function svgElement(tag: SvgTag, allowed: ReadonlySet<string>): GenuiRenderer {
+  return ({ children, ...rest }) =>
+    createElement(
+      tag as 'svg',
+      pickSvgProps(rest, allowed) as SVGProps<SVGSVGElement>,
+      children
+    );
+}
+
+const svgRect = new Set([...SVG_PAINT, 'x', 'y', 'width', 'height', 'rx', 'ry']);
+const svgCircle = new Set([...SVG_PAINT, 'cx', 'cy', 'r']);
+const svgEllipse = new Set([...SVG_PAINT, 'cx', 'cy', 'rx', 'ry']);
+const svgLine = new Set([...SVG_PAINT, 'x1', 'y1', 'x2', 'y2']);
+const svgPoints = new Set([...SVG_PAINT, 'points']);
+const svgPath = new Set([...SVG_PAINT, 'd']);
+
+export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
+  Card: ({ children }) => <Card.Root>{children}</Card.Root>,
+  Row: ({ children, gap }) => (
     <div {...stylex.props(styles.row)} style={{ gap: typeof gap === 'number' ? gap : undefined }}>
       {children}
     </div>
   ),
-  column: ({ children, gap }) => (
+  Column: ({ children, gap }) => (
     <div
       {...stylex.props(styles.column)}
       style={{ gap: typeof gap === 'number' ? gap : undefined }}
@@ -142,21 +242,21 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
       {children}
     </div>
   ),
-  divider: () => <Separator />,
-  spacer: ({ size }) => <span style={{ flex: 1, minWidth: num(size), minHeight: num(size) }} />,
-  text: ({ children, muted }) => (
+  Divider: () => <Separator />,
+  Spacer: ({ size }) => <span style={{ flex: 1, minWidth: num(size), minHeight: num(size) }} />,
+  Text: ({ children, muted }) => (
     <p {...stylex.props(styles.text, bool(muted) && styles.textMuted)}>{children}</p>
   ),
-  heading: ({ children, level }) => {
+  Heading: ({ children, level }) => {
     const Tag = `h${Math.min(Math.max(num(level, 3), 1), 6)}` as 'h3';
     return <Tag {...stylex.props(styles.heading)}>{children}</Tag>;
   },
-  badge: ({ children, tone }) => (
+  Badge: ({ children, tone }) => (
     <Badge tone={str(tone, 'neutral') as 'neutral' | 'success' | 'warning' | 'danger' | 'running'}>
       {children}
     </Badge>
   ),
-  icon: ({ name, size, color }) => {
+  Icon: ({ name, size, color }) => {
     const Icon = resolveIcon(str(name));
     const px = num(size, 14);
     const tone = str(color);
@@ -174,7 +274,7 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
       </span>
     ) : null;
   },
-  button: ({ children, onClick, variant, size, disabled }) => (
+  Button: ({ children, onClick, variant, size, disabled }) => (
     <Button
       variant={
         str(variant, 'secondary') as 'primary' | 'secondary' | 'ghost' | 'destructive' | 'link'
@@ -186,7 +286,7 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
       {children}
     </Button>
   ),
-  input: ({ value, onValueChange, placeholder, disabled }) => (
+  Input: ({ value, onValueChange, placeholder, disabled }) => (
     <Input
       value={str(value)}
       placeholder={str(placeholder)}
@@ -194,26 +294,44 @@ export const GENU_CATALOG: Record<string, GenuiRenderer> = {
       onValueChange={(v: string) => fn(onValueChange)(v)}
     />
   ),
-  checkbox: ({ checked, onCheckedChange, disabled }) => (
+  Checkbox: ({ checked, onCheckedChange, disabled }) => (
     <Checkbox
       checked={bool(checked)}
       disabled={bool(disabled)}
       onCheckedChange={(v: boolean) => fn(onCheckedChange)(v)}
     />
   ),
-  switch: ({ checked, onCheckedChange, disabled }) => (
+  Switch: ({ checked, onCheckedChange, disabled }) => (
     <Switch
       checked={bool(checked)}
       disabled={bool(disabled)}
       onCheckedChange={(v: boolean) => fn(onCheckedChange)(v)}
     />
   ),
-  select: (props) => <GenuiSelect {...props} />,
-  slider: (props) => <GenuiSlider {...props} />,
+  Select: (props) => <GenuiSelect {...props} />,
+  Slider: (props) => <GenuiSlider {...props} />,
+  svg: ({ children, ...rest }) => (
+    <svg
+      {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
+      {...stylex.props(styles.svg)}
+    >
+      {children}
+    </svg>
+  ),
+  g: svgElement('g', SVG_PAINT),
+  rect: svgElement('rect', svgRect),
+  circle: svgElement('circle', svgCircle),
+  ellipse: svgElement('ellipse', svgEllipse),
+  line: svgElement('line', svgLine),
+  polyline: svgElement('polyline', svgPoints),
+  polygon: svgElement('polygon', svgPoints),
+  path: svgElement('path', svgPath),
+  'svg:text': svgElement('text', SVG_TEXT),
+  'svg:tspan': svgElement('tspan', SVG_TEXT),
 };
 
 /**
  * Tags allowed outside a `genui` fence as inline markdown elements. They are
  * leaf, presentational, and take literal props only — no state, no events.
  */
-export const GENUI_INLINE_TAGS: ReadonlySet<string> = new Set(['icon', 'badge']);
+export const GENUI_INLINE_TAGS: ReadonlySet<string> = new Set(['Icon', 'Badge']);

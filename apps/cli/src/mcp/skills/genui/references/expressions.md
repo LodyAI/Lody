@@ -15,13 +15,13 @@ in ternary branches and `map` callbacks.
 
 ```genui
 {@state const [ready, setReady] = useState(false)}
-<switch checked={ready} onCheckedChange={(checked) => setReady(checked)} />
-<text muted={!ready}>{ready ? 'Ready' : 'Waiting'}</text>
-<text>{['alpha', 'beta', 'gamma'].filter((name) => name.includes('m')).map((name) => name.toUpperCase()).join(', ')}</text>
+<Switch checked={ready} onCheckedChange={(checked) => setReady(checked)} />
+<Text muted={!ready}>{ready ? 'Ready' : 'Waiting'}</Text>
+<Text>{['alpha', 'beta', 'gamma'].filter((name) => name.includes('m')).map((name) => name.toUpperCase()).join(', ')}</Text>
 ```
 
 Use a ternary for alternate text or prop values. For a variable-length list,
-map to strings and join them inside a single `<text>` tag.
+map to strings and join them inside a single `<Text>` tag.
 
 ## The confined JS subset
 
@@ -60,10 +60,10 @@ Hosts inject a `lody` object of capability functions. The manifest is fixed per
 release — only call members listed here; an absent function surfaces a
 diagnostic instead of running.
 
-- `lody.sendPrompt(text)` — submits `text` as a user message on the current
+- `lody.sendPrompt(text)` — submits `Text` as a user message on the current
   conversation, on the ordinary send path (queues behind a busy agent like the
   composer). Use for buttons that hand the reader a ready-made next step:
-  `<button onClick={() => lody.sendPrompt('Fix the failing checks')}>Fix CI</button>`.
+  `<Button onClick={() => lody.sendPrompt('Fix the failing checks')}>Fix CI</Button>`.
 
 ## Error shapes
 

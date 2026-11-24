@@ -27,9 +27,9 @@ theme already in place.
   through the tolerant partial compile: elements appear as their open tags
   close, children stream into open elements, and the truncated tail waits
   offscreen — only closed constructs ever land.
-- **Inline tags**: leaf catalog tags (`GENUI_INLINE_TAGS`, currently `icon`
-  and `badge`) may also appear directly in ordinary Markdown — inside a
-  sentence or a table cell — as `<icon ... />` or `<badge ...>text</badge>`.
+- **Inline tags**: leaf catalog tags (`GENUI_INLINE_TAGS`, currently `Icon`
+  and `Badge`) may also appear directly in ordinary Markdown — inside a
+  sentence or a table cell — as `<Icon ... />` or `<Badge ...>text</Badge>`.
   Literal props and plain-text children only; expressions, events, nested
   markup, or non-allowlist tags leave the markup as plain text. A remark
   pass (`remarkGenuiInline`) rewrites qualifying nodes to the same
@@ -47,7 +47,10 @@ theme already in place.
   `GENUI_CATALOG` to @lody/ui components. Only committed nodes reach the DOM:
   the uncommitted streaming tail is withheld, not shown as raw markup.
 - **The catalog**: the complete list of tags the model may use. Unknown tags
-  render as diagnostics, not DOM.
+  render as diagnostics, not DOM. An SVG family (`svg`, basic shapes,
+  `svg:text`) admits a fixed attribute whitelist — geometry and paint only;
+  resource references, scripts, embedded HTML, and events have no path to
+  the DOM.
 - **Catalog delivery**: the model learns the DSL through progressive
   disclosure — a compact index (every tag, one line each: purpose and key
   props) is always in context, while full prop tables and worked examples live
@@ -65,12 +68,12 @@ theme already in place.
 ```genui
 {@state const [value, setValue] = useState(65)}
 {@state const [enabled, setEnabled] = useState(true)}
-<card>
-  <heading level={4}>Progress</heading>
-  <slider value={value} min={0} max={100} disabled={!enabled} onChange={(n) => setValue(n)} />
-  <checkbox checked={enabled} onCheckedChange={setEnabled} />
-  <button onClick={() => setValue(65)}>Reset</button>
-</card>
+<Card>
+  <Heading level={4}>Progress</Heading>
+  <Slider value={value} min={0} max={100} disabled={!enabled} onChange={(n) => setValue(n)} />
+  <Checkbox checked={enabled} onCheckedChange={setEnabled} />
+  <Button onClick={() => setValue(65)}>Reset</Button>
+</Card>
 ```
 
 - `{@state}` bodies accept only `const [name, setName] = useState(init)`

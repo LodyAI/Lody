@@ -62,7 +62,7 @@ describe('evaluate', () => {
 describe('compileSurface', () => {
   it('splits {@state} directives from the view', () => {
     const program = compileSurface(
-      '{@state const [v, setV] = useState(65)}\n<card><text>{v}%</text></card>'
+      '{@state const [v, setV] = useState(65)}\n<Card><Text>{v}%</Text></Card>'
     );
     expect(program.diagnostics).toEqual([]);
     expect(program.declarations).toHaveLength(1);
@@ -72,7 +72,7 @@ describe('compileSurface', () => {
   });
 
   it('reports malformed markup instead of throwing', () => {
-    const program = compileSurface('<card><oops');
+    const program = compileSurface('<Card><oops');
     expect(program.diagnostics.length).toBeGreaterThan(0);
   });
 });
@@ -81,40 +81,40 @@ describe('compileSurfacePartial', () => {
   const kids = (node: UiElement) => node.children;
 
   it('compiles a complete source identically to compileSurface', () => {
-    const source = '{@state const [v, setV] = useState(65)}\n<card><text>{v}%</text></card>';
+    const source = '{@state const [v, setV] = useState(65)}\n<Card><Text>{v}%</Text></Card>';
     const partial = compileSurfacePartial(source);
     expect(partial.pending).toBe('');
     expect(partial.declarations).toHaveLength(1);
-    expect((kids(partial.view as UiElement)[0] as UiElement).tag).toBe('card');
+    expect((kids(partial.view as UiElement)[0] as UiElement).tag).toBe('Card');
   });
 
   it('mounts an element once its open tag closes and streams children in', () => {
-    const partial = compileSurfacePartial('<card><text>hello</text>');
+    const partial = compileSurfacePartial('<Card><Text>hello</Text>');
     expect(partial.pending).toBe('');
     const card = kids(partial.view as UiElement)[0] as UiElement;
-    expect(card.tag).toBe('card');
-    expect((card.children[0] as UiElement).tag).toBe('text');
+    expect(card.tag).toBe('Card');
+    expect((card.children[0] as UiElement).tag).toBe('Text');
   });
 
   it('holds a truncated open tag as pending instead of mounting it', () => {
-    const partial = compileSurfacePartial('<card>done</card><slider value={v');
+    const partial = compileSurfacePartial('<Card>done</Card><Slider value={v');
     const card = kids(partial.view as UiElement)[0] as UiElement;
-    expect(card.tag).toBe('card');
+    expect(card.tag).toBe('Card');
     expect(kids(partial.view as UiElement)).toHaveLength(1);
-    expect(partial.pending).toContain('<slider');
+    expect(partial.pending).toContain('<Slider');
   });
 
   it('holds an unterminated attribute string and an unclosed {@state} as pending', () => {
-    const attr = compileSurfacePartial('<text label="abc');
-    expect(attr.pending).toContain('<text');
-    const directive = compileSurfacePartial('<text>ok</text>{@state const [v, setV] = useState(');
+    const attr = compileSurfacePartial('<Text label="abc');
+    expect(attr.pending).toContain('<Text');
+    const directive = compileSurfacePartial('<Text>ok</Text>{@state const [v, setV] = useState(');
     expect(directive.pending).toContain('{@state');
     expect(directive.diagnostics).toEqual([]);
-    expect((kids(directive.view as UiElement)[0] as UiElement).tag).toBe('text');
+    expect((kids(directive.view as UiElement)[0] as UiElement).tag).toBe('Text');
   });
 
   it('holds a half-written {expr} hole but commits the closed ones', () => {
-    const partial = compileSurfacePartial('<text>{value * 2}</text>{valu');
+    const partial = compileSurfacePartial('<Text>{value * 2}</Text>{valu');
     expect(partial.pending).toBe('{valu');
     const text = kids(partial.view as UiElement)[0] as UiElement;
     const parts = (text.children[0] as UiText).parts;
@@ -123,7 +123,7 @@ describe('compileSurfacePartial', () => {
 
   it('holds a half-written close tag as pending, never as text', () => {
     for (const tail of ['</', '</b', '</bad']) {
-      const partial = compileSurfacePartial(`<badge>live${tail}`);
+      const partial = compileSurfacePartial(`<Badge>live${tail}`);
       expect(partial.pending).toBe(tail);
       const badge = kids(partial.view as UiElement)[0] as UiElement;
       expect((badge.children[0] as UiText).parts).toEqual(['live']);
@@ -131,15 +131,15 @@ describe('compileSurfacePartial', () => {
   });
 
   it('auto-closes inner elements when an outer close tag arrives', () => {
-    const partial = compileSurfacePartial('<card><text>hi</card>');
+    const partial = compileSurfacePartial('<Card><Text>hi</Card>');
     const card = kids(partial.view as UiElement)[0] as UiElement;
-    expect((card.children[0] as UiElement).tag).toBe('text');
+    expect((card.children[0] as UiElement).tag).toBe('Text');
   });
 
   it('parses expression props and event arrows inside braces', () => {
-    const partial = compileSurfacePartial('<slider value={v} onChange={(n) => setV(n + 1)} />');
+    const partial = compileSurfacePartial('<Slider value={v} onChange={(n) => setV(n + 1)} />');
     const slider = kids(partial.view as UiElement)[0] as UiElement;
-    expect(slider.tag).toBe('slider');
+    expect(slider.tag).toBe('Slider');
     expect(slider.props.map((p) => p.name)).toEqual(['value', 'onChange']);
     expect(slider.props[1].value).toMatchObject({ kind: 'expr' });
   });
@@ -147,7 +147,7 @@ describe('compileSurfacePartial', () => {
   it('keeps state already declared usable across partial recompiles', () => {
     const early = compileSurfacePartial('{@state const [v, setV] = useState(1)}\n<te');
     expect(early.declarations).toHaveLength(1);
-    const later = compileSurfacePartial('{@state const [v, setV] = useState(1)}\n<text>{v}</text>');
+    const later = compileSurfacePartial('{@state const [v, setV] = useState(1)}\n<Text>{v}</Text>');
     const surface = createSurface('s', later);
     expect(surfaceScope(surface).v).toBe(1);
   });
@@ -157,7 +157,7 @@ describe('createSurface', () => {
   const source =
     '{@state const [value, setValue] = useState(65)}\n' +
     '{@state const [enabled, setEnabled] = useState(true)}\n' +
-    '<card><slider value={value} disabled={!enabled} /><button onClick={() => setValue(65)}>reset</button></card>';
+    '<Card><Slider value={value} disabled={!enabled} /><Button onClick={() => setValue(65)}>reset</Button></Card>';
 
   it('installs state and setters, evaluates props live', () => {
     const surface = createSurface('test', compileSurface(source));
@@ -184,7 +184,7 @@ describe('createSurface', () => {
   });
 
   it('reaches host capabilities under lody, and absent members abort', () => {
-    const capSource = '<card><button onClick={() => lody.sendPrompt("go")}>send</button></card>';
+    const capSource = '<Card><Button onClick={() => lody.sendPrompt("go")}>send</Button></Card>';
     const surface = createSurface('test', compileSurface(capSource));
     const sent: string[] = [];
     const scope = surfaceScope(surface, {
