@@ -1,4 +1,4 @@
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { avatar as avatarTokens } from '@lody/ui/avatar/avatar.tokens.stylex';
 import { clsx } from 'clsx';
@@ -1254,14 +1254,10 @@ function NavButton({
   );
 }
 
-
 function NavShortcut({ binding, selected }: { binding: string; selected: boolean }) {
   const held = useAtomValue(sidebarShortcutOverlayActiveAtom);
   return (
-    <span
-      data-nav-shortcut=""
-      {...stylex.props(shortcutStyles.slot, held && shortcutStyles.held)}
-    >
+    <span data-nav-shortcut="" {...stylex.props(shortcutStyles.slot, held && shortcutStyles.held)}>
       <SidebarBindingPill binding={binding} selected={selected} />
     </span>
   );
@@ -2437,5 +2433,13 @@ const shortcutStyles = stylex.create({
       [stylex.when.ancestor(':focus-visible')]: 1,
     },
   },
-  held: { opacity: 1 },
+  held: {
+    opacity: 1,
+    transitionProperty: {
+      default: 'opacity',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+    transitionDuration: duration.slow,
+    transitionTimingFunction: 'cubic-bezier(0.42, 0, 1, 1)',
+  },
 });

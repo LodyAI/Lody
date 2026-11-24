@@ -10,7 +10,7 @@ import {
 export type UseSidebarShortcutHoldOptions = {
   /** Whether modifier-hold detection is enabled (e.g. disabled on mobile). */
   enabled: boolean;
-  /** Optional hold threshold before pills appear. Defaults to 150ms. */
+  /** Optional hold threshold before pills appear. Defaults to 750ms. */
   holdDelayMs?: number;
   /** Optional runtime guard checked on press and reveal (e.g. sidebar visible, no popup open). */
   canReveal?: () => boolean;
