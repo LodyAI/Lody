@@ -25,8 +25,8 @@ ephemeral body lease. Collecting that wrapper aborts the underlying request, so
 keeping only the raw `Response` can cancel an active presence SSE connection.
 The lease releases both together at EOF or confirmed cleanup.
 
-Presence WS defaults off; `LODY_LORO_STREAMS_WS_ENABLED=true` or `1` opts in,
-while explicit `webSocketEnabled` overrides the environment. The main gateway
+Presence WS defaults on; `LODY_LORO_STREAMS_WS_ENABLED=false` (or `0`, `off`, `no`)
+keeps it on HTTP, while explicit `webSocketEnabled` overrides the environment. The main gateway
 and workspace pool key are separate from the retained presence HTTP shard.
 `presence-legacy.ts:createPresenceWebSocketAuthLegacy` is the SDK callback
 execution boundary: `reauth` maps to `unauthorized`, other reasons to `request`,
@@ -36,5 +36,5 @@ absent token is an error, never an anonymous connection.
 
 The pinned `@loro-dev/streams-client` 0.14.0, `@loro-dev/streams-crdt` 0.22.1,
 and `loro-repo` 0.26.0 packages implement `webSocket.url` and Repo forwarding;
-enabling the flag remains a separate rollout step. Physical connection reuse
+the flag turning WS off is the rollback switch. Physical connection reuse
 still needs acceptance against a live WS gateway.

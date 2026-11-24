@@ -888,11 +888,18 @@ describe('presence WebSocket token bridge', () => {
   });
 });
 
-describe('CLI presence WebSocket opt-in composition', () => {
-  it.each([undefined, false, true])(
-    'uses the main WS gateway and preserves HTTP shards (%s)',
-    async (enabled) => {
-      vi.stubEnv('LODY_LORO_STREAMS_WS_ENABLED', 'false');
+describe('CLI presence WebSocket composition', () => {
+  // [explicit option, LODY_LORO_STREAMS_WS_ENABLED, expected]: on by default, off only
+  // when the environment or the option says so, and the option wins.
+  it.each([
+    [undefined, '', true],
+    [undefined, 'false', false],
+    [false, '', false],
+    [true, 'false', true],
+  ] as const)(
+    'uses the main WS gateway and preserves HTTP shards (option %s, env %j)',
+    async (option, environment, enabled) => {
+      vi.stubEnv('LODY_LORO_STREAMS_WS_ENABLED', environment);
       const store = new EphemeralStore(LODY_PRESENCE_TTL_MS);
       try {
         await Effect.runPromise(
@@ -905,7 +912,7 @@ describe('CLI presence WebSocket opt-in composition', () => {
                 {
                   streamsBaseUrl: 'https://api.streams.test',
                   shardHostSuffix: 'streams.test',
-                  webSocketEnabled: enabled,
+                  webSocketEnabled: option,
                   auth: (context) => Effect.succeed(JSON.stringify(context)),
                 },
                 1
