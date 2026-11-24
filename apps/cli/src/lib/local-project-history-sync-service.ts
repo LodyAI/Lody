@@ -973,7 +973,6 @@ export class LocalProjectHistorySyncService {
       createdAt: new Date(nowMs).toISOString(),
       userId: this.context.userId,
       status: SessionStatusFactory.idle(),
-      isArchived: false,
       origin: 'external-acp',
       cliType: this.provider.cliType,
       agentType: this.provider.agentType,

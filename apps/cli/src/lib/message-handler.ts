@@ -5033,8 +5033,9 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
-          const archived = (event.patch as Partial<SessionMeta>).isArchived;
-          if (typeof archived !== 'boolean') return;
+          const { isArchived: archived, createdAt } = event.patch as Partial<SessionMeta>;
+          const initialActiveMetadata = archived === false && createdAt !== undefined;
+          if (typeof archived !== 'boolean' || initialActiveMetadata) return;
           if (archived) {
             // Revoke media before unrelated ACP/Browser cleanup can fail.
             void this.iosSimulatorService.closeSession(sessionId);

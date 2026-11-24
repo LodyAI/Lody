@@ -60,6 +60,7 @@ type MessageHandlerInternals = {
   codeCollabV2DiffStore: { close: () => Promise<void> };
   diffBlobStoreReader: { close: () => Promise<void> };
   sessionActivePresence: SessionActivePresenceControllerLegacy;
+  setupSessionLifecycleWatchers: () => void;
   handleSessionArchiveChanged: (sessionId: SessionId) => Promise<void>;
   readWorktreeOwnerState: (sessionId: SessionId) => Promise<WorktreeOwnerState>;
   handleSessionDeleted: (sessionId: SessionId) => Promise<void>;
@@ -139,7 +140,9 @@ function createHarness(options?: {
     setLastMessageAt: vi.fn(async () => {}),
   });
   const repo = {
-    watch: vi.fn(() => ({ unsubscribe: vi.fn() })),
+    watch: vi.fn((..._args: Parameters<LoroDocumentManager['repo']['watch']>) => ({
+      unsubscribe: vi.fn(),
+    })),
     getDocMeta: vi.fn(async (roomId: string) => {
       const localSessionMeta = sessionMetas.get(roomId);
       if (localSessionMeta) {
@@ -272,6 +275,36 @@ function createHarness(options?: {
 }
 
 describe('MessageHandler terminal cleanup', () => {
+  it('keeps newly discovered imported history archived until an explicit restore', async () => {
+    const { repo, handler, sessionManager, sessionId } = createHarness();
+    let nativeArchived = true;
+    let transition: Promise<void> | undefined;
+    Object.assign(sessionManager, {
+      observeArchiveChange: (_id: SessionId, run: () => Promise<void>) => (transition = run()),
+      syncNativeSessionArchive: async (_id: SessionId, archived: boolean) => {
+        nativeArchived = archived;
+      },
+    });
+    const meta = { isArchived: false, createdAt: '2026-01-01', machineId: 'machine-1' };
+    repo.getDocMeta.mockResolvedValue({ meta });
+    handler.setupSessionLifecycleWatchers();
+    const watch = repo.watch.mock.calls.find(([, filter]) =>
+      filter?.metadataFields?.includes('isArchived')
+    )?.[0];
+    if (!watch) throw new Error('Archive subscription missing');
+    const event = {
+      kind: 'doc-metadata' as const,
+      by: 'live' as const,
+      docId: getSessionRoomId(sessionId),
+    };
+    watch({ ...event, patch: meta });
+    await transition;
+    expect(nativeArchived).toBe(true);
+    watch({ ...event, patch: { isArchived: false } });
+    await transition;
+    expect(nativeArchived).toBe(false);
+  });
+
   it('reads the completed assistant entry even after a newer reply exists', async () => {
     const history: SessionEntry[] = ['completed', 'newer'].map((id) => ({
       id,
