@@ -28,6 +28,7 @@ const target = { platform: process.platform, arch: process.arch };
 native.installEmbeddedSqliteBinding(target);
 native.installEmbeddedRoostBinding(target);
 native.installEmbeddedKeyringBinding(target);
+native.installEmbeddedEsbuildBinary(target);
 native.installEmbeddedNodePtyBinding(target);
 // Runtime JS dependencies in addition to the embedded desktop's native closure.
 const { createRequire } = await import('node:module');

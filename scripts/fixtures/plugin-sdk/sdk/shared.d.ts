@@ -225,10 +225,9 @@ export interface AttachmentSourceDescriptor<TMeta extends z.ZodType = z.ZodType>
 }
 
 /**
- * Verifiable reference to a human-signed user Turn stored in local `sessionData` on the
- * same machine. Maps 1:1 to E2EE `machineInput.derivedFrom` (`{ sessionId, userTurnId }`),
- * allowing `machine.events.on` and `machine.onStart` recovery to preserve human-signed
- * execution provenance across daemon restarts without bypassing E2EE signing gates.
+ * Identifies a signed human root on this machine. This is provenance, not permission:
+ * a plugin can write a new input on a shared member's behalf only while the driving
+ * turn is active. A restart does not renew that authority.
  */
 export interface SignedTurnOrigin {
   readonly session: SessionRef;

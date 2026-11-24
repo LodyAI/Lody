@@ -81,11 +81,10 @@ export interface MachineHostPort {
   readSnapshot(target: RawSnapshotTarget): Promise<RawDocumentSnapshot>;
   readonly sessions: {
     /**
-     * Symmetric with `LodyClient.sessions`. In E2EE workspaces, `create`, `send`, and
-     * `respondInteraction` verify `originTurn` (auto-populated in `ToolExecutionContext` and
-     * rooted `MachineEventContext`, or passed from `SessionTurnSummary.userTurnId` during
-     * `machine.onStart` recovery) against the stored human-signed user Turn in local `sessionData`
-     * (or a machine-owner signed workflow activation); un-rooted calls reject with `forbidden`.
+     * Encrypted execution rechecks the signed root and current project grants. Recovery
+     * may resume an already signed input, but a historical member turn cannot authorize
+     * a new input. After that turn ends, new workflow work requires independent owner
+     * authorization; otherwise the call rejects with `forbidden`.
      */
     create(target: MachineRef | ProjectRef, request: CreateSessionRequest): Promise<SessionRef>;
     send(

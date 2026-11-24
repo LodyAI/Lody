@@ -170,6 +170,7 @@ const defaultSandboxDeps = (): SessionSandboxDeps => ({
 
 const toNodeProcess = (deps: SessionSandboxDeps): NodeProcessApi => ({
   platform: deps.platform,
+  spawnIpcChild: nodeProcessLive.spawnIpcChild,
   spawn: deps.spawnProcess,
   spawnSync: nodeProcessLive.spawnSync,
   kill: (pid, signal) => deps.killPid(pid, signal),

@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
-import type { NodeProcessApi } from './process';
+import { spawnIpcChild, type NodeProcessApi } from './process';
 
 type FakeProcess = {
   pid: number;
@@ -40,6 +40,21 @@ export class FakeChildProcess extends EventEmitter {
     super();
     this.pid = pid;
     this.table = table;
+  }
+
+  connected = false;
+  disconnect() {
+    if (!this.connected) return;
+    this.connected = false;
+    this.emit('disconnect');
+  }
+
+  readonly sent: unknown[] = [];
+  send(message: unknown, done: (error: Error | null) => void) {
+    if (!this.connected || this.exitCode !== null || this.signalCode !== null)
+      return done(new Error('IPC closed'));
+    this.sent.push(message);
+    done(null);
   }
 
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
@@ -86,6 +101,7 @@ export class FakeProcessTable {
     this.platform = platform;
     this.api = {
       platform,
+      spawnIpcChild,
       spawn: (command, args, options) => this.spawn(command, args, options),
       spawnSync: () => {
         throw new Error('FakeProcessTable does not model synchronous spawns');
@@ -117,6 +133,7 @@ export class FakeProcessTable {
     }
     const pid = this.nextPid++;
     const child = new FakeChildProcess(pid, this);
+    child.connected = Array.isArray(options.stdio) && options.stdio.includes('ipc');
     this.processes.set(pid, {
       pid,
       // A Windows tree is rooted at its first process whether or not it is detached.
@@ -243,6 +260,7 @@ export class FakeProcessTable {
     child.exitCode = code;
     child.signalCode = signal;
     queueMicrotask(() => {
+      child.disconnect();
       child.stdout.end();
       child.stderr.end();
       child.emit('exit', code, signal);

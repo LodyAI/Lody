@@ -1,10 +1,10 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Cause, Effect, Exit, Option } from 'effect';
+import { Cause, Effect, Exit, Option, Stream } from 'effect';
 
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
-import { runCommand } from '../src/node/process';
+import { runCommand, spawnIpcChild } from '../src/node/process';
 import { signalChildTreeNowLegacy } from '../src/node/process';
 import { spawnProcess as acquireProcess, type SpawnSpec } from '../src/node/process';
 import { processLayer, isPidAliveSyncLegacy, terminatePidLegacy } from '../src/node/process';
@@ -172,4 +172,51 @@ describe('resolveWindowsCommand', () => {
       'C:\\Users\\me\\AppData\\Roaming\\npm\\claude.CMD'
     );
   });
+});
+
+it('exchanges IPC frames, drains final log fragments and reports real child exit', async () => {
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const child = yield* spawnIpcChild({
+          command: process.execPath,
+          args: [
+            '-e',
+            `process.once('message', m => { console.error('received'); process.stdout.write('done'); process.send(m, () => process.disconnect()); });`,
+          ],
+        });
+        yield* child.send({ value: 42 });
+        const messages = yield* Stream.runCollect(child.messages);
+        return { messages, exit: yield* child.exit, logs: yield* child.ringBuffer };
+      })
+    ).pipe(Effect.provide(processLayer({})))
+  );
+  expect(result.messages).toEqual([{ value: 42 }]);
+  expect(result.exit.code).toBe(0);
+  expect([...result.logs].sort()).toEqual(['done', 'received']);
+});
+
+it('retains bounded output and releases the IPC tree when the consumer scope closes', async () => {
+  const table = new FakeProcessTable();
+  const pid = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* table.api.spawnIpcChild({ command: 'worker', args: [] });
+        const child = table.childOf(handle.pid)!;
+        child.stdout.write('discard\n');
+        child.stderr.write(('x'.repeat(17000) + '\n').repeat(18));
+        const logs = yield* handle.ringBuffer;
+        expect(logs.length).toBe(16);
+        expect(logs.every((line) => line.length === 16384)).toBe(true);
+        yield* handle.send({ request: 1 });
+        expect(child.sent).toEqual([{ request: 1 }]);
+        child.disconnect();
+        expect(failureOf(yield* Effect.exit(handle.send({ request: 2 })))?._tag).toBe(
+          'ProcessIpcError'
+        );
+        return handle.pid;
+      })
+    ).pipe(Effect.provide(processLayer({ nodeProcess: table.api })))
+  );
+  expect(table.isAlive(pid)).toBe(false);
 });

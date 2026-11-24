@@ -56,6 +56,9 @@ function fakeNodeProcess(spawn: (...args: never[]) => unknown): NodeProcessApi {
   return {
     platform: 'linux',
     spawn: spawn as NodeProcessApi['spawn'],
+    spawnIpcChild: () => {
+      throw new Error('unexpected IPC child');
+    },
     spawnSync: () => {
       throw new Error('authentication never runs a synchronous spawn');
     },

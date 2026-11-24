@@ -814,3 +814,16 @@ lody session history <sessionId> --limit 20
 lody machine list --workspace my-team --online-only
 lody agent-config refresh-capabilities codex --workspace my-team
 ```
+
+## Local plugin development
+
+Create a new directory using the `ui`, `sound`, `renderer`, or `workflow` template. `doctor` checks the manifest and declared files without activating the plugin. Link development source only from an interactive owner terminal; the local daemon watches the linked directory until you disable the plugin.
+
+```sh
+lody plugin create demo --template workflow
+lody plugin doctor ./demo
+lody plugin link --dev ./demo
+lody plugin logs demo
+lody plugin reload demo
+lody plugin disable demo
+```

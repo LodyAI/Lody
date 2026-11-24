@@ -9,7 +9,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RepoId, SessionId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import type { NodeProcessApi } from '@lody/shared/node/process';
+import { spawnIpcChild, type NodeProcessApi } from '@lody/shared/node/process';
 import { SessionManager } from '../session-manager';
 import type { SessionConfig } from '../types';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -33,6 +33,7 @@ const spawnCalls: SpawnCall[] = [];
  * signals, so their process groups are proven gone like in production.
  */
 const nodeProcess: NodeProcessApi = {
+  spawnIpcChild,
   platform: process.platform,
   spawn: (command, args, options) => {
     spawnCalls.push({ command, args, options });

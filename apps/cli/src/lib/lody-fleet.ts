@@ -187,6 +187,7 @@ function keepsEncryptedMode(
 }
 
 export class LodyFleet {
+  private plugins?: import('../plugins/plugin-host-legacy').PluginDaemon;
   private readonly logger: Logger;
   private readonly builtinAgentConfigCliTypes: CliType[];
   private readonly supportRegistryAgentTypes: string[];
@@ -374,6 +375,10 @@ export class LodyFleet {
 
     this.runtimeStateReporter.setStartupStage('fleet-start');
     const localControlConfig: LocalSessionControlConfig = {
+      dispatchPlugin: async (raw) => {
+        if (!this.plugins) throw new Error('Plugin host unavailable');
+        return this.plugins.dispatch(raw);
+      },
       machineId: this.machineId,
       logger: this.logger,
       dispatchSession: async (message, options) =>
@@ -480,13 +485,35 @@ export class LodyFleet {
       // D-O14: the single implicit workspace is provisioned before bootstrap
       // so a first run and a restart take the same path.
       await traceAsync(this.logger, 'startup.local_workspace_provision', undefined, async () => {
-        await ensureImplicitLocalWorkspace({
+        const workspace = await ensureImplicitLocalWorkspace({
           catalog: this.localWorkspaceCatalog,
           identity: { userId: this.userId, createdAt: new Date(getServerNow()).toISOString() },
           machineId: this.machineId,
           machineName: this.machineName,
           logger: this.logger,
         });
+        if (workspace.role === 'owner') {
+          const pluginModule = await import('../plugins/plugin-host-legacy').catch(() => {
+            this.logger.warn('Plugin runtime unavailable');
+            return undefined;
+          });
+          if (!pluginModule) return;
+          const daemon = new pluginModule.PluginDaemon(
+            path.join(getLodyDataDir(), 'plugins', encodeURIComponent(workspace.id)),
+            workspace.id,
+            this.machineId,
+            (m) => this.logger.warn(m)
+          );
+          this.plugins = daemon;
+          void daemon
+            .start()
+            .catch(async () => {
+              if (this.plugins === daemon) this.plugins = undefined;
+              this.logger.warn('Plugin catalog unavailable');
+              await daemon.dispose();
+            })
+            .catch(() => this.logger.warn('Plugin cleanup failed'));
+        }
       });
     }
 
@@ -777,6 +804,7 @@ export class LodyFleet {
     // Host lease remains held until this shutdown barrier completes.
     const localServicesStopped = Promise.allSettled([
       stopLocalIpcSocketServers(),
+      this.plugins?.dispose(),
       stopLocalTerminalServer(),
       stopLocalLoroDataPlaneServer(),
       stopLodyMcpHttpServer(),

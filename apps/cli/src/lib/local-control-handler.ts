@@ -60,6 +60,7 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
+  dispatchPlugin?: (message: unknown) => Promise<Record<string, unknown>>;
   dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
   dispatchE2eeReset?: (message: LocalE2eeResetRequest) => Promise<LocalE2eeResetResponse>;
   dispatchE2eePairing?: (
@@ -361,6 +362,19 @@ export class LocalControlHandler {
     onSessionResponse?: (response: LocalSessionControlResponse) => void;
     signal?: AbortSignal;
   }): Promise<LocalControlHandlerResponse> {
+    if (request.path === '/plugin/control')
+      return (async () => {
+        if (!this.config.dispatchPlugin)
+          return handlerResponse(503, { ok: false, error: 'plugin_host_unavailable' });
+        try {
+          return handlerResponse(200, {
+            ok: true,
+            ...(await this.config.dispatchPlugin(JSON.parse(request.rawBody))),
+          });
+        } catch {
+          return handlerResponse(400, { ok: false, error: 'plugin_control_failed' });
+        }
+      })();
     if (request.path === AUTOMATION_CONTROL_PATH) {
       return (async () => {
         let raw: unknown;

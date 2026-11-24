@@ -61,6 +61,9 @@ function launch() {
         spawned.resolve(child);
         return child;
       },
+      spawnIpcChild: () => {
+        throw new Error('unexpected IPC child');
+      },
       spawnSync: () => {
         throw new Error('cloudflared is never run synchronously');
       },

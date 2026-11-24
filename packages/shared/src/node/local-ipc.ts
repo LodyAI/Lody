@@ -1344,3 +1344,15 @@ export function makeLocalControlClientAuto(
 ): LocalControlClientService {
   return makeLocalControlClientSocket(options);
 }
+
+export function requestLocalPluginControl(
+  body: unknown,
+  options: LocalControlClientSocketOptions = {}
+) {
+  return makeEndpointRunner(
+    options,
+    'controlSocketPath'
+  )(({ socketPath, token }) =>
+    postJsonOverSocket(socketPath, '/plugin/control', body, 60_000, token)
+  );
+}

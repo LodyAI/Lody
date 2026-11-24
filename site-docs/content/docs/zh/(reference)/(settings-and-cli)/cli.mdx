@@ -778,3 +778,16 @@ lody session history <sessionId> --limit 20
 lody machine list --workspace my-team --online-only
 lody agent-config refresh-capabilities codex --workspace my-team
 ```
+
+## 本机插件开发
+
+`create` 在新目录中生成 `ui`、`sound`、`renderer` 或 `workflow` 模板。`doctor` 检查清单和声明的文件，不会激活插件。请在机主的交互式终端中链接开发目录；本地守护进程会监听该目录，直到你停用插件。
+
+```sh
+lody plugin create demo --template workflow
+lody plugin doctor ./demo
+lody plugin link --dev ./demo
+lody plugin logs demo
+lody plugin reload demo
+lody plugin disable demo
+```
