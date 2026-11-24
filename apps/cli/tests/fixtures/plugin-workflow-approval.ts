@@ -11,6 +11,7 @@ import type { MachineId } from '@lody/shared';
 
 /** Fixed ledger with actual owner personal-device and machine signers; latest-history I/O is local. */
 export async function ownerApprovalFixture() {
+  let nextRequest = 0;
   const f = encryptedRpcFixture();
   const scope = Scope.makeUnsafe();
   const machineId = f.machineId as MachineId,
@@ -99,7 +100,10 @@ export async function ownerApprovalFixture() {
         params,
       };
       const orig = await Effect.runPromise(
-        f.sender.prepareFeature({ requestId: '11'.repeat(16), request })
+        f.sender.prepareFeature({
+          requestId: (++nextRequest).toString(16).padStart(32, '0'),
+          request,
+        })
       );
       const opened = await Effect.runPromise(f.receiver.openFeature(machineId, orig.frameHex));
       if (!opened || opened.input.request.method !== request.method)

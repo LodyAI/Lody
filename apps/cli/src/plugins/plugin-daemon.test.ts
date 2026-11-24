@@ -575,8 +575,22 @@ it('reopens the signed owner workflow receipt for the exact staged Sorbet projec
     const lease = await daemon.workflowLease(pluginId, instance);
     expect(lease?.isCurrent()).toBe(true);
     expect(await daemon.workflowLease(pluginId, instance + 1)).toBeUndefined();
-    await daemon.dispatch({ action: 'disable', pluginId });
+    const revoke = (id: string) =>
+      owner.issue(
+        daemon,
+        { ...approval, action: 'revoke', projectId: id, readOperations: undefined },
+        projectExists
+      );
+    await revoke('other-project');
+    expect(lease?.isCurrent()).toBe(true);
+    await revoke(projectId);
     expect(lease?.isCurrent()).toBe(false);
+    expect(await daemon.workflowLease(pluginId, instance)).toBeUndefined();
+    await owner.issue(daemon, approval, projectExists);
+    const renewed = await daemon.workflowLease(pluginId, instance);
+    expect(renewed?.isCurrent()).toBe(true);
+    await daemon.dispatch({ action: 'disable', pluginId });
+    expect(renewed?.isCurrent()).toBe(false);
     expect(await daemon.workflowLease(pluginId, instance)).toBeUndefined();
   } finally {
     await daemon.dispose();

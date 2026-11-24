@@ -4083,7 +4083,7 @@
   "settings.stats.loadingDescription": "正在准备用量统计。",
   "settings.tabs.plugins": "插件",
   "settings.plugins.workflowTitle": "创建验证 Session",
-  "settings.plugins.workflowScope": "机器 {{machine}} 上的插件 {{plugin}} 可在一小时内仅对所选项目使用 sessions.create。此授权不允许写入已有 Session。",
+  "settings.plugins.workflowScope": "机器 {{machine}} 上的插件 {{plugin}} 可在一小时内仅对所选项目使用 sessions.create。授权其他项目会替换原项目的授权。此授权不允许写入已有 Session。",
   "settings.plugins.workflowProject": "此机器上的项目",
   "settings.plugins.workflowSelect": "选择项目",
   "settings.plugins.workflowGrant": "允许在此项目中创建 Session 一小时",

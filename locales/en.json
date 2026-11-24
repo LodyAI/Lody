@@ -4083,7 +4083,7 @@
   "settings.stats.loadingDescription": "Preparing usage statistics.",
   "settings.tabs.plugins": "Plugins",
   "settings.plugins.workflowTitle": "Verifier Session creation",
-  "settings.plugins.workflowScope": "Plugin {{plugin}} on machine {{machine}} may use sessions.create only in the selected project for one hour. This does not authorize writes to existing Sessions.",
+  "settings.plugins.workflowScope": "Plugin {{plugin}} on machine {{machine}} may use sessions.create only in the selected project for one hour. Approving a different project replaces the previous approval. This does not authorize writes to existing Sessions.",
   "settings.plugins.workflowProject": "Project on this machine",
   "settings.plugins.workflowSelect": "Select a project",
   "settings.plugins.workflowGrant": "Allow creation in this project for one hour",
