@@ -1,3 +1,4 @@
+import { isPluginMachineRequest } from '@lody/shared/plugins/machine-rpc';
 import { daemonLossProbeEnabled } from './e2ee/client-loss-observer';
 import { isE2eeReadQuery } from '@lody/shared/e2ee-rpc';
 import type { EncryptedFeatureContext } from './e2ee/feature-rpc';
@@ -62,6 +63,27 @@ export class MachineRuntime {
       request.machineId !== config.machineId
     )
       throw new Error('e2ee_feature_scope');
+    if (request.method === 'plugin/control') throw Error('Local plugin control required');
+    if (isPluginMachineRequest(request)) {
+      if (
+        !context?.requester ||
+        !context.authority?.isCurrent() ||
+        context.authority.signal.aborted
+      )
+        return {
+          ok: false as const,
+          code: 'forbidden',
+          error: 'Verified plugin requester required',
+        };
+      return this.requireHandler().handlePluginMachineRpc(
+        request,
+        context.requester.accountId,
+        context.pluginMachineOwner === true,
+        AbortSignal.any([context.signal, context.authority.signal]),
+        context.pluginScope,
+        context.authority.isCurrent
+      );
+    }
     if (request.method === 'session/fork') {
       // Owners and shared members fork; the request must name its verified signer.
       const requester = context?.requester;
@@ -425,7 +447,9 @@ export class MachineRuntime {
   ): Promise<LocalMachineRpcResponse> {
     if (
       this.options.handlerConfig.encryptedWorkspace &&
-      (message.method === 'session/dispatch-turn' || message.method.startsWith('ios-simulator/'))
+      (isPluginMachineRequest(message) ||
+        message.method === 'session/dispatch-turn' ||
+        message.method.startsWith('ios-simulator/'))
     )
       throw new Error('e2ee_feature_unavailable');
     const handler = this.requireHandler();

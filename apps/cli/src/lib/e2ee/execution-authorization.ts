@@ -197,7 +197,8 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
         access: 'read' | 'execute' | 'owned-execute' | 'session-read',
         localProjectId?: string,
         sessionId?: string,
-        sessionOwnerUserId?: string
+        sessionOwnerUserId?: string,
+        requireFresh = false
       ): Effect.fn.Return<ExecutionAuthorization, unknown> {
         if (closed) return denied('closed');
         if (
@@ -265,7 +266,7 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
               ? OUTAGE_READ_WINDOW_MS
               : OUTAGE_EXECUTION_WINDOW_MS;
         const current = (at: Stamp) => {
-          if (!relaxed) return fresh(grantedFrom, at);
+          if (!relaxed || requireFresh) return fresh(grantedFrom, at);
           if (windowGeneration !== grantedInWindow) return false;
           return withinAuthorityLimit(grantedFrom, at, windowMs);
         };
@@ -379,10 +380,35 @@ export const makeCliE2eeExecutionAuthorization = Effect.fn('CliE2eeExecutionAuth
       )
     );
     return {
-      authorizeExecution: (workspaceId: string, requesterDevice: string, localProjectId?: string) =>
-        authorize(workspaceId, requesterDevice, 'execute', localProjectId),
-      authorizeOwnedExecution: (workspaceId: string, requesterDevice: string) =>
-        authorize(workspaceId, requesterDevice, 'owned-execute'),
+      authorizeExecution: (
+        workspaceId: string,
+        requesterDevice: string,
+        localProjectId?: string,
+        requireFresh = false
+      ) =>
+        authorize(
+          workspaceId,
+          requesterDevice,
+          'execute',
+          localProjectId,
+          undefined,
+          undefined,
+          requireFresh
+        ),
+      authorizeOwnedExecution: (
+        workspaceId: string,
+        requesterDevice: string,
+        requireFresh = false
+      ) =>
+        authorize(
+          workspaceId,
+          requesterDevice,
+          'owned-execute',
+          undefined,
+          undefined,
+          undefined,
+          requireFresh
+        ),
       refreshLedger: Effect.gen(function* () {
         const freshRef = yield* FreshAuthorizeLedgerAt;
         if (freshRef && !freshRef.used && !closed) {

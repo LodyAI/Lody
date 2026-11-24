@@ -1,3 +1,4 @@
+import { NativePluginRow } from '../plugins/shell-surfaces';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -1176,6 +1177,11 @@ const SessionGroupRow = memo(function SessionGroupRow({
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <div className={showMetaLine ? lineBoxClassName : 'contents'}>
+          <NativePluginRow
+            kind="trailing"
+            sessionId={session.sessionId}
+            active={showSelectedState}
+          />
           <SidebarRowEndSlot
             sessionId={session.sessionId}
             selected={showSelectedState}
@@ -1391,6 +1397,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
   // branch is copyable and the PR opens on click.
   const desktopRow = showInfoCard ? (
     <SessionInfoHoverCard
+      extraContent={
+        <NativePluginRow kind="hover" sessionId={session.sessionId} active={showSelectedState} />
+      }
       key={session.sessionId}
       kind={isChatSession ? 'chat' : 'github'}
       author={session.owner ?? undefined}

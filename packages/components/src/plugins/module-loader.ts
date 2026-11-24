@@ -1,3 +1,4 @@
+import { getIpcServices } from '../lib/electron-ipc-client';
 import { evaluateModule } from './module-runtime';
 import * as React from 'react';
 import * as jsx from 'react/jsx-runtime';
@@ -40,7 +41,48 @@ function external(name: string) {
 }
 export async function evaluateClientModule(
   source: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  local?: {
+    machineId: string;
+    workspaceId: string;
+    pluginId: string;
+    digest: string;
+    packed?: () => Uint8Array;
+  }
 ): Promise<client.ClientPluginDefinition> {
+  const ipc = getIpcServices();
+  if (ipc && local) {
+    const exports: Record<string, string[]> = {};
+    for (const [name, ns] of Object.entries(dependencies)) {
+      Object.defineProperty(globalThis, Symbol.for('lody.client.external.' + name), { value: ns });
+      exports[name] = Object.keys(ns).filter((k) => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k));
+    }
+    const url = local.packed
+      ? await ipc.e2ee.openRemotePluginModule(
+          local.workspaceId,
+          local.machineId,
+          local.pluginId,
+          local.digest,
+          local.packed(),
+          exports
+        )
+      : await ipc.machineRpc.openPluginModule(
+          local.machineId,
+          local.workspaceId,
+          local.pluginId,
+          local.digest,
+          exports
+        );
+    try {
+      signal.throwIfAborted();
+      const { default: plugin } = await import(/* @vite-ignore */ url);
+      signal.throwIfAborted();
+      if (plugin?.kind !== 'client-plugin' || typeof plugin.register !== 'function')
+        throw Error('Invalid client plugin definition');
+      return plugin;
+    } finally {
+      await ipc.machineRpc.releasePluginModule(url);
+    }
+  }
   return evaluateModule(source, signal, external, moduleURL, (url) => URL.revokeObjectURL(url));
 }

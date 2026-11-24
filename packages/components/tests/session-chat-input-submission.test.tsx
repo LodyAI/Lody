@@ -1,5 +1,6 @@
 import { ScheduleRepository } from '@lody/shared/schedule-repository';
 // @vitest-environment jsdom
+import { clientPluginEvents } from '../src/plugins/client-events';
 import { LoroDoc } from 'loro-crdt';
 import { type MachineMeta, type ScheduleRepositoryPort } from '@lody/shared';
 import { userAtom } from '../src/atoms';
@@ -421,6 +422,15 @@ describe('SessionChatInputArea submission feedback', () => {
     });
     const accept = deferredBoolean();
     const submitted: unknown[] = [];
+    const controller = new AbortController();
+    const notices: string[] = [];
+    clientPluginEvents
+      .subscribe('workspace-upload', controller.signal, (error) => {
+        throw error;
+      })
+      .on('ui.message.submitted', (event) => {
+        notices.push(event.session.sessionId);
+      });
     const textarea = await renderComposer({
       sessionId: 'suggestion-send',
       onSendMessage: (blocks) => {
@@ -443,7 +453,10 @@ describe('SessionChatInputArea submission feedback', () => {
       );
     });
     expect(submitted).toHaveLength(1);
+    expect(notices).toEqual([]);
     await act(async () => accept.resolve(true));
+    controller.abort();
+    expect(notices).toEqual(['suggestion-send']);
     // The previous turn is still running: the daemon has not replaced the suggestion yet.
     await act(async () => publish?.('Run the tests'));
     expect(textarea.value).toBe('');

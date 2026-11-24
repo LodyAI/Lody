@@ -1,3 +1,5 @@
+import { pluginLandingDraftAtom, pluginAttachmentFile } from '../../plugins/workspace-drafts';
+import { messageSubmitted } from '../../plugins/session-events';
 import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { isSessionInMyScope } from '@/lib/session-visibility';
@@ -3457,6 +3459,7 @@ function WorkspaceChatLanding({
         pendingHistoryEntry,
         attachments
       );
+      messageSubmitted(workspaceId, { id: sessionId, machineId: selectedAgent.machineId, project });
       mcpSelection.acceptSend(sessionId, withoutMcp);
       if (mobileNewChatOpen) {
         setMobileCreatedSessionId(sessionId);
@@ -4015,6 +4018,41 @@ function WorkspaceChatLanding({
   /* Creating a Role from the composer opens on the configuration already in
      front of the user — "save what I am about to run" is the whole reason the
      entry point is here rather than only in Settings. */
+  const [pluginDraft, setPluginDraft] = useAtom(pluginLandingDraftAtom);
+  useEffect(() => {
+    if (embedding || !pluginDraft || pluginDraft.target.workspaceId !== workspaceId) return;
+    const { target, draft } = pluginDraft;
+    setPluginDraft(null);
+    handleDesktopProjectChange(
+      'projectId' in target
+        ? {
+            kind: 'local',
+            machineId: target.machineId as MachineId,
+            localProjectId: target.projectId as LocalProjectId,
+          }
+        : { kind: 'none' }
+    );
+    setSelectedMachineId(target.machineId as MachineId);
+    const provider = executorConfigs.find(
+      (c) => c.machineId === target.machineId && c.id === draft.providerId
+    );
+    if (provider) setSelectedAgent({ agentId: provider.id, machineId: provider.machineId });
+    handleAgentRoleSelect((draft.roleId as AgentRoleId) ?? null);
+    if (draft.attachments?.length) addFileAttachments(draft.attachments.map(pluginAttachmentFile));
+    setPrompt(
+      [draft.prompt, ...(draft.skillIds ?? []).map((id) => `$${id}`)].filter(Boolean).join(' ')
+    );
+  }, [
+    embedding,
+    pluginDraft,
+    addFileAttachments,
+    setPluginDraft,
+    workspaceId,
+    executorConfigs,
+    handleDesktopProjectChange,
+    handleAgentRoleSelect,
+    setPrompt,
+  ]);
   const handleAgentRoleCreate = useCallback(() => {
     setAgentRoleEditor(
       openAgentRoleEditorForCreate(

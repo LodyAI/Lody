@@ -49,6 +49,9 @@ export const loadKeyboardShortcutsSetting = settingsCodeLoader(() =>
     default: module.KeyboardShortcutsSetting,
   }))
 );
+export const loadPluginsSettings = settingsCodeLoader(() =>
+  import('./plugin-inspector').then((module) => ({ default: module.PluginsSettings }))
+);
 export const loadAboutSettingsComponent = settingsCodeLoader(() =>
   import('./about-setting').then((module) => ({ default: module.AboutSettingsComponent }))
 );
@@ -94,6 +97,7 @@ const panels = {
   github: loadIntegrationsSettingsComponent,
   'keyboard-shortcuts': loadKeyboardShortcutsSetting,
   data: loadWorkspaceDataSetting,
+  plugins: loadPluginsSettings,
   about: loadAboutSettingsComponent,
 } satisfies Record<SettingsTabId, () => Promise<unknown>>;
 export const loadSettingsModal = settingsCodeLoader(() =>

@@ -2,7 +2,7 @@
 import json
 import os
 from pathlib import Path
-import pty
+import sys
 import shutil
 import subprocess
 import tempfile
@@ -12,20 +12,17 @@ CLI = [shutil.which('node'), str(Path(__file__).resolve().parents[1] / 'apps/cli
 
 
 def acceptance(root):
+    if not sys.stdin.isatty() or 'LODY_AGENT_SESSION_ID' in os.environ:
+        raise SystemExit('Run from an interactive machine-owner terminal.')
     data = root / 'data'
     env = dict(HOME=str(root), LODY_DATA_DIR=str(data), PATH=os.environ['PATH'])
     plugin = 'acceptance-plugin'
 
     def run(*args, owner=False, agent=False):
-        master, slave = pty.openpty()
-        try:
-            result = subprocess.run(CLI + ['plugin', *args], cwd=root,
-                                    env=env | ({'LODY_AGENT_SESSION_ID': 'synthetic'} if agent else {}),
-                                    stdin=slave if owner else subprocess.DEVNULL,
-                                    capture_output=True, text=True, timeout=75)
-        finally:
-            os.close(master)
-            os.close(slave)
+        result = subprocess.run(CLI + ['plugin', *args], cwd=root,
+                                env=env | ({'LODY_AGENT_SESSION_ID': 'synthetic'} if agent else {}),
+                                stdin=sys.stdin if owner else subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=75)
         if agent:
             assert result.returncode and 'owner terminal' in (result.stdout + result.stderr), (result.returncode, result.stdout, result.stderr)
             return

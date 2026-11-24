@@ -73,3 +73,30 @@ export async function receiveClientBundle(
   if ((await hashBundle(buffer)) !== digest) throw new Error('Client bundle digest mismatch');
   return buffer;
 }
+
+export function unpackClientBundle(bytes: Uint8Array): (path: string) => Uint8Array {
+  const header = new TextEncoder().encode('lody-client-bundle-v1\0');
+  if (!header.every((b, i) => bytes[i] === b)) throw new Error('Invalid plugin bundle');
+  const files = new Map<string, Uint8Array>();
+  let offset = header.length;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  function part() {
+    const length = view.getUint32(offset);
+    offset += 4;
+    if (length > bytes.length - offset) throw new Error('Truncated plugin bundle');
+    const data = bytes.subarray(offset, offset + length);
+    offset += length;
+    return data;
+  }
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  while (offset < bytes.length) {
+    const path = decoder.decode(part());
+    if (files.has(path)) throw new Error('Duplicate bundle path');
+    files.set(path, part());
+  }
+  return (path) => {
+    const file = files.get(path);
+    if (!file) throw new Error('Unknown bundle file');
+    return file.slice();
+  };
+}

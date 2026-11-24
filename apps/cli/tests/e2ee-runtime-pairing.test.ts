@@ -2033,6 +2033,11 @@ it('records an exact device revocation so the next offer uses a fresh identity o
   vi.stubEnv('LODY_DATA_DIR', join(directory, 'profile'));
   const { CloudE2eeDeviceRevoked } = await import('../src/lib/cloud-e2ee-errors');
   const accountId = 'revoked-account';
+  const { systemMachineConfigVault } = await import('../src/plugins/plugin-machine-config');
+  const credentials = new Set<string>();
+  const erase = vi
+    .spyOn(systemMachineConfigVault, 'remove')
+    .mockImplementation(async (key) => credentials.delete(key));
   const root = join(
     getLodyDataDir(),
     'e2ee',
@@ -2085,10 +2090,41 @@ it('records an exact device revocation so the next offer uses a fresh identity o
         },
       } as unknown as CloudE2eePort,
     });
+    const active = join(host.repositoryDirectory, 'plugins');
+    const otherRoots = [
+      join(root, 'content', 'ff'.repeat(32), key, 'plugins'),
+      join(root, 'content', binding.genesisHash, 'aa'.repeat(32), 'plugins'),
+      join(
+        getLodyDataDir(),
+        'e2ee',
+        createHash('sha256').update('other-account').digest('hex'),
+        'workspace',
+        'content',
+        binding.genesisHash,
+        key,
+        'plugins'
+      ),
+      join(getLodyDataDir(), 'plugins', 'workspace'),
+    ];
+    for (const owner of [active, ...otherRoots]) {
+      await fs.mkdir(owner, { recursive: true });
+      await fs.writeFile(join(owner, 'catalog.json'), '[]');
+    }
+    for (const owner of [active, ...otherRoots]) {
+      await fs.mkdir(join(owner, 'settings'));
+      credentials.add(JSON.stringify(['encrypted-plugin-config', owner]));
+    }
     await host.refresh();
     revoked = true;
     await host.refresh();
     await host.removalCleanup();
+    expect(credentials).toEqual(
+      new Set(otherRoots.map((owner) => JSON.stringify(['encrypted-plugin-config', owner])))
+    );
+    expect(host.pluginAuthoritySignal.aborted).toBe(true);
+    await expect(fs.access(active)).rejects.toMatchObject({ code: 'ENOENT' });
+    for (const owner of otherRoots)
+      expect(await fs.readFile(join(owner, 'catalog.json'), 'utf8')).toBe('[]');
     expect(removed).toEqual(['device-revoked']);
     // Membership and local data stay; only this identity is retired.
     await expect(fs.readFile(join(root, 'removed.json'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -2117,6 +2153,7 @@ it('records an exact device revocation so the next offer uses a fresh identity o
     ).toBeInstanceOf(Buffer);
   } finally {
     await host?.close().catch(() => undefined);
+    erase.mockRestore();
     vi.unstubAllEnvs();
     await rm(directory, { recursive: true, force: true });
   }

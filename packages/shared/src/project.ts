@@ -42,6 +42,7 @@ export function getWorktreeSetupScriptForShell(
 }
 
 export type LocalProjectWorkingTreeState = {
+  upstream?: { ahead: number; behind: number };
   clean: boolean;
   staged: boolean;
   unstaged: boolean;

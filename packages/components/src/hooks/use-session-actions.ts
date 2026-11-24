@@ -1,3 +1,6 @@
+import { lifecycleCommandInputs } from '@lody/shared/commands/host-commands';
+import { executeSessionLifecycle } from '../commands/session-lifecycle';
+import { userAtom } from '../atoms';
 import { lodyCommands, type WorkspaceRef } from '@lody/plugin-sdk';
 import { clientPluginEvents } from '../plugins/client-events';
 import { createWorkspaceCommandExecutor } from '../commands/workspace-command-executor';
@@ -239,7 +242,11 @@ export type SessionActions = {
     command: string,
     input: unknown,
     signal: AbortSignal
-  ) => Promise<void>;
+  ) => Promise<
+    | void
+    | import('@lody/plugin-sdk').SendSessionMessageReceipt
+    | import('@lody/plugin-sdk').SessionRef
+  >;
   createSession: (payload: SessionToCreate) => Promise<CreateSessionResult>;
   startSession: (
     payload: SessionToCreate,
@@ -1284,6 +1291,27 @@ export function useSessionActions(): SessionActions {
       signal.throwIfAborted();
       if (meta?.machineId !== machineId || store.get(activeWorkspaceRuntimeAtom) !== runtime)
         throw Object.assign(Error('Session outside installation'), { code: 'forbidden' });
+      if (Object.hasOwn(lifecycleCommandInputs, command)) {
+        await assertCanManageSessions([id]);
+        signal.throwIfAborted();
+        const actor = store.get(userAtom)?.id;
+        if (!actor || store.get(activeWorkspaceRuntimeAtom) !== runtime)
+          throw Object.assign(Error('Authenticated member required'), { code: 'forbidden' });
+        const result = await executeSessionLifecycle(
+          command as keyof typeof lifecycleCommandInputs,
+          input,
+          meta,
+          runtime,
+          actor,
+          { archiveSession, restoreSession, requestSessionCancel },
+          signal
+        );
+        clientPluginEvents.publish('ui.command.invoked', {
+          workspace: { workspaceId } as WorkspaceRef,
+          commandId: command,
+        });
+        return result;
+      }
       await execute(id, command, input);
     },
     createSession,

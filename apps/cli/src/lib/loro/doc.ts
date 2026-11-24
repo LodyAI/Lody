@@ -1,3 +1,10 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ActivePluginBusinessKey,
+  SessionCreateReceipts,
+  type CreateScope,
+} from '../../plugins/session-create-receipts';
 import { createHistoryWriter } from '@lody/shared/history-writer';
 import { createSessionControlPlaneMirror } from '@lody/shared/session-control-plane';
 import { Cause, Effect } from 'effect';
@@ -139,6 +146,7 @@ import type { RateLimit } from 'acp-extension-core';
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
 import {
   createCliSqliteRepoStore,
+  getLoroRepoStorageBaseDir,
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   type DocumentCursorScope,
@@ -1986,6 +1994,208 @@ export class LoroDocumentManager {
           );
         });
       });
+  }
+
+  async createClientPluginSession(
+    p: Extract<
+      import('@lody/shared/plugins/machine-rpc').PluginMachineRequest,
+      { method: 'plugin/session-create' }
+    >['params'],
+    userId: string,
+    machineId: MachineId,
+    admitWrite: () => void
+  ) {
+    const { planSessionPullRequestLink, canReadAgentRole, snapshotAgentRole } =
+      await import('@lody/shared');
+    const pr =
+      p.input.pullRequestUrl === undefined
+        ? undefined
+        : planSessionPullRequestLink(undefined, p.input.pullRequestUrl, 'user', Date.now());
+    if (pr && !pr.ok) throw Error('Unsupported pull request link');
+    const parent = p.input.parentSession
+      ? ((
+          await this.repo.getDocMeta(getSessionRoomId(p.input.parentSession.sessionId as SessionId))
+        )?.meta as SessionMeta | undefined)
+      : undefined;
+    let role: import('@lody/shared').AgentRole | undefined;
+    if (p.input.roleId) {
+      const { loadWorkspaceAgentRoleCatalog, selectAgentRoleTarget } =
+        await import('../agent-role-create');
+      const row = (await loadWorkspaceAgentRoleCatalog(this, this.workspaceId)).get(p.input.roleId);
+      if (!row || !canReadAgentRole(row, userId)) throw Error('Plugin role unavailable');
+      role = selectAgentRoleTarget([row], row.id, { machineId });
+    }
+    const providerId = role?.agentConfigId ?? p.input.providerId;
+    const configs = await listMergedAgentConfigs(this.repo, this.workspaceId, [machineId]);
+    const config = configs.find(
+      (c) => c.machineId === machineId && (!providerId || c.id === providerId)
+    );
+    if (!config) throw Error('No matching agent configuration');
+    admitWrite();
+    const id = await this.createReservedPluginSession(
+      {
+        callerUserId: userId,
+        pluginId: p.pluginId,
+        canonicalTargetKey: JSON.stringify([machineId, p.target.projectId ?? null]),
+      },
+      p.input.requestId,
+      p.input.businessKey ?? null,
+      p.input,
+      {
+        machineId,
+        ...(pr?.ok ? { [pr.field]: pr.value } : {}),
+        ...(role
+          ? {
+              agentRoleId: role.id,
+              agentRoleRevision: role.revision,
+            }
+          : {}),
+        ...(parent
+          ? {
+              openedBySessionId: parent.id,
+              ...(parent.parentSessionId ? { openedByRootSessionId: parent.parentSessionId } : {}),
+            }
+          : {}),
+        ...(p.input.originTurn
+          ? {
+              pluginOriginTurn: {
+                sessionId: p.input.originTurn.session.sessionId,
+                userTurnId: p.input.originTurn.userTurnId,
+              },
+            }
+          : {}),
+        createdAt: new Date().toISOString(),
+        agentConfigId: config.id,
+        cliType: config.cliType,
+        agentType: config.agentType,
+        historyBackend: this.encryptedWorkspace ? 'loro' : NEW_SESSION_HISTORY_BACKEND,
+        ...(p.target.projectId
+          ? {
+              project: {
+                kind: 'local',
+                localProjectId: p.target.projectId as import('@lody/shared').LocalProjectId,
+              },
+            }
+          : {}),
+      },
+      admitWrite,
+      role
+        ? { snapshot: snapshotAgentRole(role), prefix: role.promptPrefix, ...role.runConfig }
+        : undefined
+    );
+    admitWrite();
+    const record = await this.repo.getDocMeta(getSessionRoomId(id));
+    const meta = record?.meta as SessionMeta | undefined;
+    if (!meta || meta.userId !== userId || meta.machineId !== machineId)
+      throw Error('Session receipt mismatch');
+    const { pluginInitialRole } = await import('@lody/shared/plugins/machine-rpc');
+    const receipts = new SessionCreateReceipts(this.pluginReceiptsPath);
+    let frozenRole;
+    try {
+      frozenRole = pluginInitialRole.optional().parse(receipts.initialRole(id));
+    } finally {
+      receipts.close();
+    }
+    return {
+      type: 'plugin/session-create' as const,
+      sessionId: id,
+      userId,
+      createdAt: meta.createdAt,
+      cliType: meta.cliType,
+      agentType: meta.agentType,
+      role: frozenRole,
+      archived: !!record?.deleted || !!meta.isArchived,
+    };
+  }
+
+  private get pluginReceiptsPath(): string {
+    return join(
+      this.encryptedWorkspace?.repositoryDirectory ?? getLoroRepoStorageBaseDir(this.workspaceId),
+      'plugin-session-receipts.sqlite'
+    );
+  }
+
+  releaseArchivedPluginSession(sessionId: SessionId): void {
+    if (!existsSync(this.pluginReceiptsPath)) return;
+    const receipts = new SessionCreateReceipts(this.pluginReceiptsPath);
+    try {
+      receipts.releaseArchived(this.workspaceId, sessionId);
+    } finally {
+      receipts.close();
+    }
+  }
+
+  private readonly pendingReservedSessions = new Map<SessionId, Promise<SessionId>>();
+
+  async createReservedPluginSession(
+    scope: Omit<CreateScope, 'workspaceId'>,
+    requestId: string,
+    businessKey: string | null,
+    normalizedPayload: Parameters<SessionCreateReceipts['reserve']>[3],
+    meta: Omit<SessionMeta, 'id' | 'userId'>,
+    admitWrite: () => void,
+    initialRole?: object
+  ): Promise<SessionId> {
+    admitWrite();
+    const receipts = new SessionCreateReceipts(this.pluginReceiptsPath);
+    let id: SessionId;
+    try {
+      const reserve = () =>
+        receipts.reserve(
+          { ...scope, workspaceId: this.workspaceId },
+          requestId,
+          businessKey,
+          normalizedPayload,
+          initialRole
+        ) as SessionId;
+      try {
+        id = reserve();
+      } catch (error) {
+        if (!(error instanceof ActivePluginBusinessKey)) throw error;
+        // Archive can arrive while the machine is offline; the watcher is not durable.
+        const archived = await this.repo.getDocMeta(getSessionRoomId(error.sessionId as SessionId));
+        if ((archived?.meta as SessionMeta | undefined)?.isArchived !== true) throw error;
+        admitWrite();
+        receipts.releaseArchived(this.workspaceId, error.sessionId);
+        id = reserve();
+      }
+    } finally {
+      receipts.close();
+    }
+    const pending = this.pendingReservedSessions.get(id);
+    if (pending) return pending;
+    const room = getSessionRoomId(id);
+    const create = this.repo.getDocMeta(room).then(async (existing) => {
+      admitWrite();
+      const provenance = {
+        createdByPluginId: scope.pluginId,
+        ...(businessKey !== null ? { businessKey } : {}),
+      };
+      if (!existing) {
+        await this.repo.upsertDocMeta(room, {
+          ...meta,
+          id,
+          userId: scope.callerUserId,
+          ...provenance,
+        });
+      } else if (!existing.deleted) {
+        // Replay can encounter metadata created before receipts were projected to the catalog.
+        const saved = existing.meta as SessionMeta;
+        if (
+          !saved.createdByPluginId &&
+          saved.userId === scope.callerUserId &&
+          saved.machineId === meta.machineId
+        )
+          await this.repo.upsertDocMeta(room, provenance);
+      }
+      return id;
+    });
+    this.pendingReservedSessions.set(id, create);
+    try {
+      return await create;
+    } finally {
+      this.pendingReservedSessions.delete(id);
+    }
   }
 
   async createSession(

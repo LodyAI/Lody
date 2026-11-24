@@ -2834,6 +2834,12 @@ export const LocalProjectGitStateSchema = z.discriminatedUnion('git', [
       githubRepoFullName: z.string().nullable(),
       workingTree: z
         .object({
+          upstream: z
+            .object({
+              ahead: z.number().int().nonnegative(),
+              behind: z.number().int().nonnegative(),
+            })
+            .optional(),
           clean: z.boolean(),
           staged: z.boolean(),
           unstaged: z.boolean(),
@@ -3580,7 +3586,10 @@ export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z
-    .object({ kind: z.literal('hours'), every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX) })
+    .object({
+      kind: z.literal('hours'),
+      every: z.number().int().min(1).max(SCHEDULE_CUSTOM_HOURS_MAX),
+    })
     .strict(),
   z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
   z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),

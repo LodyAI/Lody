@@ -28,6 +28,44 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('never sends local plugin control or oversized UTF-8 invocations through encrypted transport', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      protectedContent: true,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw Error('plaintext unavailable');
+      },
+      requestEncryptedFeature: async (request) => {
+        if (request.method !== 'plugin/catalog') throw Error('Unexpected encrypted request');
+        return { ok: true, result: { type: 'plugin/catalog', installations: [] } };
+      },
+    });
+    expect(
+      await facade.requestPlugin(remoteMachineId, { method: 'plugin/catalog', params: {} })
+    ).toMatchObject({ transport: 'encrypted', installations: [] });
+    await expect(
+      facade.requestPlugin(remoteMachineId, {
+        method: 'plugin/control',
+        params: { pluginId: 'test', action: 'reload' },
+      })
+    ).rejects.toThrow(/local/i);
+    await expect(
+      facade.requestPlugin(remoteMachineId, {
+        method: 'plugin/query',
+        params: {
+          pluginId: 'test',
+          descriptorId: 'lookup',
+          scope: 'machine',
+          target: { workspaceId, machineId: remoteMachineId },
+          input: '界'.repeat(88_000),
+        },
+      })
+    ).rejects.toThrow('256 KiB');
+  });
   it('negotiates blob persistence while retaining writer-only encrypted diff authority', async () => {
     for (const [plane, protectedContent, supported, persist] of [
       ['local', false, true, false],
@@ -1431,9 +1469,7 @@ describe('encrypted file and preview routing', () => {
       expect.objectContaining({ operation: { action: 'revoke', stopProcess: true } }),
       'test-login-token'
     );
-    expect(rpcRevoke).toHaveBeenLastCalledWith(
-      expect.objectContaining({ stopProcess: true })
-    );
+    expect(rpcRevoke).toHaveBeenLastCalledWith(expect.objectContaining({ stopProcess: true }));
   });
 
   it('forks an encrypted session through the protected feature channel, never ordinary RPC', async () => {

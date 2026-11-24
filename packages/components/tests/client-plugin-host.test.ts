@@ -178,3 +178,270 @@ it('delivers declared audio and revokes only the disabled installation’s playb
     two.abort();
   }
 });
+
+it('binds catalog bytes and control to the routed machine and never offers control on the encrypted route', async () => {
+  const { readPluginCatalog } = await import('../src/plugins/workspace-catalog');
+  type Request = import('../src/plugins/workspace-catalog').RequestPlugin;
+  const machineId = 'machine-a' as import('@lody/shared').MachineId;
+  const content = Uint8Array.of(1, 2, 3),
+    digest = 'f'.repeat(64);
+  let transport: 'local' | 'encrypted' = 'local';
+  const request: Request = async (target, call, options) => {
+    expect(target).toBe(machineId);
+    if (call.method === 'plugin/catalog')
+      return {
+        transport,
+        type: call.method,
+        installations: [{ manifest, clientDigest: digest, enabled: true }],
+      };
+    if (call.method === 'plugin/bundle-chunk') {
+      expect(options?.requireLocal).toBe(true);
+      expect(call.params.clientDigest).toBe(digest);
+      return {
+        transport,
+        type: call.method,
+        base64: btoa(String.fromCharCode(...content)),
+        totalBytes: 3,
+      };
+    }
+    throw Error('Unexpected call');
+  };
+  const load = () =>
+    readPluginCatalog('w', { machineId, owner: false }, request, () => {
+      throw Error('unexpected registration');
+    });
+  const [local] = await load();
+  expect(local?.sourceKey).toBe('local');
+  expect((await local!.page(0, new AbortController().signal)).bytes).toEqual(content);
+  transport = 'encrypted';
+  const [remote] = await load();
+  expect(remote?.sourceKey).toBe('machine:machine-a');
+  expect(remote?.control).toBeUndefined();
+  expect(remote?.dev.owner).toBe(false);
+});
+
+it('reads the current workspace catalog and fences a retained installation binding', async () => {
+  const { WorkspacePluginReads } = await import('../src/plugins/workspace-client');
+  const { lodyQueries } = await import('@lody/plugin-sdk');
+  const store = new WorkspacePluginReads('w');
+  const lease = new AbortController();
+  const { read } = store.bindings(lease.signal);
+  const workspace = { workspaceId: 'w' } as import('@lody/plugin-sdk').WorkspaceRef;
+  store.publish({ projects: [], agentRoles: { synced: false, items: [] } });
+  expect((await read(workspace, lodyQueries.agentRoles)).synced).toBe(false);
+  store.publish({ projects: [], agentRoles: { synced: true, items: [] } });
+  expect((await read(workspace, lodyQueries.agentRoles)).synced).toBe(true);
+  lease.abort();
+  await expect(read(workspace, lodyQueries.agentRoles)).rejects.toThrow();
+});
+
+it('delivers submitted, waiting and completed cues to sound-effects without replaying mounted history', async () => {
+  const { default: sound } =
+    await import('../../../scripts/fixtures/plugin-sdk/examples/sound-effects/client');
+  const { messageSubmitted, PluginTurnTransitions } = await import('../src/plugins/session-events');
+  const { clientPluginEvents } = await import('../src/plugins/client-events');
+  const owner = new AbortController(),
+    played: string[] = [];
+  const Original = globalThis.Audio;
+  const session = {
+    id: 'session',
+    machineId: 'machine',
+  } as import('../src/plugins/session-events').SessionIdentity;
+  const audioCue = Promise.withResolvers<void>();
+  globalThis.Audio = class extends EventTarget {
+    constructor(readonly src: string) {
+      super();
+    }
+    async play() {
+      played.push(this.src);
+      if (played.length === 3) audioCue.resolve();
+    }
+    pause() {}
+  } as unknown as typeof Audio;
+  try {
+    const events = clientPluginEvents.subscribe('w', owner.signal, audioCue.reject);
+    sound.register({
+      signal: owner.signal,
+      events,
+      assets: { url: (p: string) => p },
+      config: { get: () => ({ pack: 'a', volume: 1, playOnSend: true }) },
+    } as never);
+    const transitions = new PluginTurnTransitions();
+    const turn = {
+      id: 't',
+      role: 'assistant',
+      timestamp: '2026-01-01T00:00:00Z',
+      fileDiff: [],
+    } as const;
+    const historical = { ...turn, id: 'h', finished: true, fileDiff: [] };
+    transitions.observe('w', session, [historical]);
+    messageSubmitted('other', session);
+    messageSubmitted('w', session);
+    const waiting = {
+      ...turn,
+      fileDiff: [],
+      items: [
+        {
+          type: 'tool_call' as const,
+          toolCallId: 'tool',
+          status: 'pending' as const,
+          permissionRequest: { requestId: 'r', options: [] },
+        },
+      ],
+    };
+    transitions.observe('w', session, [historical, waiting]);
+    transitions.observe('w', session, [historical, waiting]);
+    transitions.observe('w', session, [historical, { ...waiting, finished: true }]);
+    await audioCue.promise;
+    expect(played).toEqual([
+      './assets/a-send.mp3',
+      './assets/a-question.mp3',
+      './assets/a-complete.mp3',
+    ]);
+  } finally {
+    owner.abort();
+    globalThis.Audio = Original;
+  }
+});
+
+it('keeps the precise child opener in focus-sidebar queries and scopes before paging', async () => {
+  const { WorkspacePluginReads } = await import('../src/plugins/workspace-client');
+  const { summarizeSession } = await import('../src/plugins/workspace-sessions');
+  const { lodyQueries } = await import('@lody/plugin-sdk');
+  const meta = (id: string, machineId: string, parentSessionId?: string) =>
+    summarizeSession(
+      'ws',
+      {
+        id,
+        machineId,
+        parentSessionId,
+        userId: 'me',
+        title: id,
+        createdAt: '2026-01-01T00:00:00Z',
+        status: { type: 'running' },
+        cliType: 'builtin',
+        agentType: 'sorbet',
+      } as import('@lody/shared').SessionMeta,
+      'me',
+      true
+    );
+  const root = meta('root', 'a'),
+    tab = meta('tab', 'a', 'root'),
+    child = { ...meta('child', 'a'), openedBySessionId: 'tab', openedByRootSessionId: 'root' },
+    other = meta('elsewhere', 'b');
+  const store = new WorkspacePluginReads('ws');
+  store.publish({
+    projects: [],
+    agentRoles: { items: [], synced: true },
+    sessions: [other, child, root, tab],
+  });
+  const { read } = store.bindings(new AbortController().signal, 'focus');
+  const machine = { workspaceId: 'ws', machineId: 'a' } as import('@lody/plugin-sdk').MachineRef;
+  const made = summarizeSession(
+    'ws',
+    {
+      id: 'made',
+      machineId: 'a',
+      createdAt: '2026-01-02T00:00:00Z',
+      createdByPluginId: 'focus',
+      businessKey: 'task',
+    } as import('@lody/shared').SessionMeta,
+    'me',
+    true
+  );
+  const pluginStore = new WorkspacePluginReads('ws');
+  pluginStore.publish({
+    projects: [],
+    agentRoles: { items: [], synced: true },
+    sessions: [made, root],
+  });
+  const provenance = { businessKey: 'task', createdByPlugin: true };
+  expect(
+    (
+      await pluginStore
+        .bindings(new AbortController().signal, 'focus')
+        .read(machine, lodyQueries.sessions, provenance)
+    ).items.map((s) => s.session.sessionId)
+  ).toEqual(['made']);
+  expect(
+    (
+      await pluginStore
+        .bindings(new AbortController().signal, 'other')
+        .read(machine, lodyQueries.sessions, provenance)
+    ).items
+  ).toEqual([]);
+  const filter = {
+    rootSessionId: 'root',
+    createdByMe: true,
+    status: 'busy',
+    archived: false,
+    limit: 2,
+  } as const;
+  const first = await read(machine, lodyQueries.sessions, filter);
+  expect(first.items.map((s) => s.session.sessionId)).toEqual(['child', 'root']);
+  expect(first.items[0]?.openedBySessionId).toBe('tab');
+  expect(
+    (await read(machine, lodyQueries.sessions, { ...filter, cursor: first.nextCursor })).items.map(
+      (s) => s.session.sessionId
+    )
+  ).toEqual(['tab']);
+});
+
+it('appends plugin text and files to the same draft the session composer hydrates', async () => {
+  const {
+    appendUnmountedSessionDraft,
+    hydrateSessionDraft,
+    getSessionFileDrafts,
+    sessionDraftsCache,
+  } = await import('../src/lib/session-composer-drafts');
+  const sessionId = 'plugin-offscreen-draft' as import('@lody/shared').SessionId;
+  sessionDraftsCache.set(sessionId, 'Unsent: ');
+  appendUnmountedSessionDraft('workspace', sessionId, { kind: 'text', text: 'context' });
+  appendUnmountedSessionDraft('workspace', sessionId, {
+    kind: 'attachment',
+    snapshot: { title: 'issue', markdown: 'issue details' },
+  });
+  hydrateSessionDraft('workspace', sessionId);
+  expect(sessionDraftsCache.get(sessionId)).toBe('Unsent: context');
+  const files = getSessionFileDrafts(sessionId);
+  expect(files[0]?.file.name).toBe('issue.md');
+  expect(await files[0]?.file.text()).toBe('issue details');
+});
+
+it('hands navigation identity to the next admitted registry but fences failed replacement, revoked trust and disable', async () => {
+  const { ClientPluginHost } = await import('../src/plugins/client-host');
+  const { shellIdentity } = await import('../src/plugins/shell-generation');
+  const host = new ClientPluginHost();
+  const key = { workspaceId: 'w', sourceKey: 'local' as const, pluginId: manifest.id };
+  let latest!: AbortSignal;
+  async function replace(revision: number, admissionKey: string, fail = false) {
+    const file = async () => Uint8Array.of(revision);
+    const bytes = (await packClientBundle(manifest, file))!;
+    const digest = (await computeClientDigest(manifest, file))!;
+    await host.reconcile(key, {
+      ...key,
+      digest,
+      admissionKey,
+      page: async () => ({ bytes, totalBytes: bytes.length }),
+      registry: (_files, signal) => {
+        latest = shellIdentity(signal, 'view:tree');
+        if (fail) throw Error('registration failed');
+        return {} as never;
+      },
+    });
+    return latest;
+  }
+  const old = await replace(1, 'lease A');
+  expect(await replace(2, 'lease A')).toBe(old);
+  const renewed = await replace(2, 'lease B');
+  expect(old.aborted).toBe(true);
+  expect(renewed).not.toBe(old);
+  await expect(replace(3, 'lease B', true)).rejects.toThrow('registration failed');
+  expect(renewed.aborted).toBe(true);
+  const recovered = await replace(4, 'lease B');
+  const disabling = host.reconcile(key, null);
+  expect(recovered.aborted).toBe(true);
+  await disabling;
+  expect(await replace(4, 'lease B')).not.toBe(recovered);
+  await host.reconcile(key, null);
+});

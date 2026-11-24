@@ -1,3 +1,4 @@
+import { eraseIdentityPluginCustody } from '../../plugins/identity-plugin-vault';
 import { accountIdFromUserId } from '@lody/e2ee-core/protocol';
 import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
 import {
@@ -172,6 +173,9 @@ async function retireRevokedMachineIdentity(options: {
     ).pipe(Effect.catch(() => Effect.succeed(undefined)))
   );
   if (!revoked) return;
+  await eraseIdentityPluginCustody(
+    join(repositoryDirectory(directory, options.genesisHash, revoked), 'plugins')
+  );
   await rename(
     device,
     join(directory, 'custody', `${options.genesisHash}-${revoked}.machine-revoked.device`)
@@ -235,6 +239,12 @@ async function eraseRemovedWorkspace(
           }
           // The mutex and empty journal remain; user project/worktree directories are outside this scope.
           yield* Effect.promise(async () => {
+            await eraseIdentityPluginCustody(
+              join(
+                repositoryDirectory(directory, removal.genesisHash, removal.signingPublicKey),
+                'plugins'
+              )
+            );
             for (const name of ['custody', 'runtime', 'binding.json', 'activation.json'])
               await rm(join(directory, name), { recursive: true, force: true });
             clearCachedCliE2eeKeyring(join(directory, 'custody'));
@@ -1301,6 +1311,13 @@ async function openWorkspaceOwned(
       }
       if (failures.length === 1) throw failures[0];
       if (failures.length > 1) throw new AggregateError(failures, 'e2ee_removal_failed');
+      if (deviceRevoked)
+        await eraseIdentityPluginCustody(
+          join(
+            repositoryDirectory(directory, binding.genesisHash, opened.signingPublicKey),
+            'plugins'
+          )
+        );
       if (memberRemoved)
         await eraseRemovedWorkspace({
           ...options,
@@ -1661,6 +1678,7 @@ async function openWorkspaceOwned(
         : null,
     /** This machine's signing key: the only author of derived inputs. */
     signingPublicKey: opened.signingPublicKey,
+    pluginAuthoritySignal: opened.executionAuthorization.authoritySignal,
     repositoryDirectory: repositoryDirectory(
       directory,
       binding.genesisHash,

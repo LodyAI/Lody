@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Effect } from 'effect';
@@ -540,6 +540,124 @@ describe('Lody.registerAgent', () => {
 });
 
 describe('Lody workspace cloud-port composition', () => {
+  it('opens plugin custody before serving RPC and installs only into the selected encrypted identity', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'lody-plugin-custody-'));
+    const { nodeProcessLive, processLayer } = await import('@lody/shared/node/process');
+    const platform = vi
+      .spyOn(await import('../src/platform/process-options'), 'platformLayer')
+      .mockReturnValue(
+        processLayer({
+          nodeProcess: {
+            ...nodeProcessLive,
+            spawnIpcChild: (spec) =>
+              nodeProcessLive.spawnIpcChild({
+                ...spec,
+                args: [
+                  ...spec.args.slice(0, -1),
+                  '--import',
+                  import.meta.resolve('tsx'),
+                  new URL('../src/plugins/plugin-compiler-worker.ts', import.meta.url).pathname,
+                ],
+              }),
+          },
+        })
+      );
+    const controller = new AbortController();
+    const source = join(directory, 'source');
+    mkdirSync(source);
+    writeFileSync(
+      join(source, 'lody.plugin.json'),
+      JSON.stringify({
+        id: 'identity-demo',
+        version: '1.0.0',
+        title: 'Test',
+        sdk: '^1.0.0',
+        client: 'client.ts',
+      })
+    );
+    writeFileSync(join(source, 'client.ts'), 'export default 1');
+    const docs = vi.spyOn(LoroDocumentManager, 'create').mockResolvedValue({
+      sessions: new Map(),
+      ensureMachineFlockDocJoined: () => {},
+    } as unknown as LoroDocumentManager);
+    let repositoryDirectory = join(directory, 'identity-a', 'genesis-a', 'device-a');
+    const native = vi.spyOn(encryptedWorkspace, 'openCliE2eeWorkspaceLegacy').mockImplementation(
+      async () =>
+        ({
+          repositoryDirectory,
+          pluginAuthoritySignal: controller.signal,
+          startRpc: async () => {},
+          stopRpc: async () => {},
+          close: async () => {},
+        }) as never
+    );
+    try {
+      const { Lody } = await import('../src/lib/lody');
+      for (const [index, id] of ['identity-a', 'identity-b', 'identity-a'].entries()) {
+        repositoryDirectory = join(
+          directory,
+          id,
+          index === 1 ? 'genesis-b' : 'genesis-a',
+          'device-a'
+        );
+        const owner = await Lody.create({
+          logger: createSilentLogger(),
+          workspaceId: 'workspace',
+          contentMode: 'e2ee',
+          genesisHash: (index === 1 ? 'bb' : 'aa').repeat(32),
+          userId: id,
+          machineId: 'm',
+          machineName: 'Machine',
+          token: 'test',
+          cloudPort: createTestCloudPort({ kind: 'cloud', e2ee: {} as never }),
+          memoryPressure: {} as never,
+          localPlugin: () => {
+            throw Error('plaintext plugin owner consulted');
+          },
+          machineLifecycleCapability: {
+            launchMode: 'foreground',
+            canRemoteRestart: false,
+            canRemoteUpgrade: false,
+            reason: 'not_daemon',
+          },
+        });
+        try {
+          const rpc = (mocks.runtimeOptions.at(-1) as MachineRuntimeOptions).handlerConfig
+            .pluginRpc!;
+          const catalog = () =>
+            rpc(
+              { workspaceId: 'workspace', machineId: 'm', method: 'plugin/catalog', params: {} },
+              { machineOwner: true, userId: id }
+            );
+          await expect(catalog()).rejects.toThrow('unavailable');
+          await owner.start();
+          if (index === 0)
+            await owner.dispatchEncryptedPluginControl({
+              action: 'link',
+              path: source,
+              dev: false,
+            });
+          expect(await catalog()).toMatchObject({
+            installations: index === 1 ? [] : [{ manifest: { id: 'identity-demo' } }],
+          });
+          if (index === 2) {
+            controller.abort();
+            await expect(catalog()).rejects.toThrow('unavailable');
+            await expect(owner.dispatchEncryptedPluginControl({ action: 'list' })).rejects.toThrow(
+              'unavailable'
+            );
+          }
+        } finally {
+          await owner.cleanup();
+        }
+      }
+    } finally {
+      platform.mockRestore();
+      native.mockRestore();
+      docs.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it.each([undefined, 'plaintext', 'e2ee'] as const)(
     'uses host Git credentials only in encrypted workspaces (mode=%s)',
     async (contentMode) => {

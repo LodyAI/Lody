@@ -60,6 +60,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
+      // Repository dogfood plugins import the public SDK outside this package's pnpm scope.
+      {
+        find: '@lody/plugin-sdk/client',
+        replacement: fileURLToPath(new URL('../plugin-sdk/dist/client.js', import.meta.url)),
+      },
       // Must precede the general `@/` rule: Vite matches aliases in order
       // against the raw specifier. 324 icon SVGs no test asserts on; see the
       // stub's own comment for why they are worth aliasing away.

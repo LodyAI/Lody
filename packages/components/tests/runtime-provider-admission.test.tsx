@@ -12,6 +12,7 @@ import {
 import { resumeEncryptedWorkspaceCleanup } from '../src/lib/e2ee-member-removal';
 import { notifyE2eeLedgerChanged } from '../src/providers/e2ee-runtime-notifications';
 
+import { useWorkspaceClientPlugins } from '../src/plugins/client-host-provider';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -160,6 +161,7 @@ vi.mock('@/atoms/control-connection', () => ({
   browserOnlineAtom: atom(true),
 }));
 vi.mock('@/lib', () => ({ API_BASE_URL: '' }));
+vi.mock('../src/plugins/catalog-subscriber', () => ({ PluginCatalogSubscriber: () => null }));
 vi.mock('@/lib/local-storage-cache', () => ({
   getCachedWorkspaceId: () => environment.cachedWorkspaceId,
 }));
@@ -257,11 +259,21 @@ describe('RuntimeProvider warm workspace preparation', () => {
       typeof import('../src/providers/create-workspace-runtime')
     >('../src/providers/create-workspace-runtime');
   }, 0);
+  let pluginOwner: ReturnType<typeof useWorkspaceClientPlugins> = null;
+  function PluginOwnerProbe() {
+    const owner = useWorkspaceClientPlugins();
+    React.useLayoutEffect(() => {
+      pluginOwner = owner;
+    }, [owner]);
+    return null;
+  }
   const render = () =>
     act(async () => {
       root.render(
         <Provider store={store}>
-          <RuntimeProvider>{null}</RuntimeProvider>
+          <RuntimeProvider>
+            <PluginOwnerProbe />
+          </RuntimeProvider>
         </Provider>
       );
     });
@@ -573,6 +585,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
         Promise.withResolvers<Awaited<ReturnType<PlatformE2eeWorkspaces['describe']>>>();
       environment.e2eeWorkspaces!.describe = () => descriptor.promise;
       await render();
+      expect(pluginOwner).toBeNull();
       const gate = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].waitForContentAdmission!;
       const outcome = gate(new AbortController().signal).then(
         () => 'admitted',
@@ -595,6 +608,8 @@ describe('RuntimeProvider warm workspace preparation', () => {
         )
       );
       expect(await outcome).toBe(answer === 'plaintext' ? 'admitted' : 'cancelled');
+      if (answer === 'plaintext') expect(pluginOwner?.workspaceId).toBe('local:workspace');
+      else expect(pluginOwner).toBeNull();
       if (answer === 'plaintext') {
         expect(store.get(runtimeAtom)).toBe(prepared);
         expect(prepared.disposed).toBe(false);
@@ -607,6 +622,18 @@ describe('RuntimeProvider warm workspace preparation', () => {
     }
   );
 
+  it('drops the admitted plugin owner across a batched logout and login with identical workspace and user IDs', async () => {
+    ordinaryCloud();
+    await render();
+    const before = pluginOwner;
+    expect(before?.workspaceId).toBe('local:workspace');
+    await act(async () => {
+      environment.session.set({ status: 'unauthenticated' });
+      environment.session.set({ status: 'authenticated', user: { id: 'local:user' } });
+    });
+    expect(pluginOwner?.workspaceId).toBe('local:workspace');
+    expect(pluginOwner).not.toBe(before);
+  });
   it('opens local data but refuses outbound admission when cloud classification is unavailable', async () => {
     ordinaryCloud();
     environment.e2eeWorkspaces = undefined;

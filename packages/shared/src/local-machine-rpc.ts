@@ -1,4 +1,12 @@
 import {
+  pluginSessionCreateParams,
+  pluginCatalogParams,
+  pluginControlParams,
+  pluginBundleParams,
+  pluginInvocationParams,
+  pluginRpcResultSchema,
+} from './plugins/machine-rpc';
+import {
   CodeCollabOpenDiffManifestRequestSchema,
   CodeCollabOpenDiffManifestResponseSchema,
   CodeCollabReadBlobRequestSchema,
@@ -274,6 +282,38 @@ export const E2eeAcpInteractionResultSchema = z
   .strict();
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/session-create'),
+    params: pluginSessionCreateParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/control'),
+    params: pluginControlParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/catalog'),
+    params: pluginCatalogParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/bundle-chunk'),
+    params: pluginBundleParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/query'),
+    params: pluginInvocationParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/mutate'),
+    params: pluginInvocationParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/attachment-search'),
+    params: pluginInvocationParams,
+  }),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('plugin/attachment-resolve'),
+    params: pluginInvocationParams,
+  }),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/history-read'),
     params: z.object({ sessionId: SessionIdSchema, query: SessionHistoryReadQuerySchema }).strict(),
@@ -688,6 +728,7 @@ export const SessionLiveStatusResponseSchema = z.discriminatedUnion('success', [
 ]);
 
 export const LocalMachineRpcResultSchema = z.union([
+  pluginRpcResultSchema,
   SessionHistoryReadResponseSchema,
   E2eeAcpInteractionResultSchema,
   SorbetProvidersResultSchema,

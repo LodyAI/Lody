@@ -95,6 +95,9 @@ const WorkspaceNameAuthSettingsMemoryLazyRouteImport = createFileRoute(
 const WorkspaceNameAuthSettingsPeopleLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/settings/people'
 )();
+const WorkspaceNameAuthSettingsPluginsLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/plugins'
+)();
 const WorkspaceNameAuthSettingsPreferencesLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/settings/preferences'
 )();
@@ -409,6 +412,14 @@ const WorkspaceNameAuthSettingsPeopleLazyRoute =
   } as any).lazy(() =>
     import('./routes/$workspaceName/_auth/settings/people.lazy').then((d) => d.Route)
   );
+const WorkspaceNameAuthSettingsPluginsLazyRoute =
+  WorkspaceNameAuthSettingsPluginsLazyRouteImport.update({
+    id: '/plugins',
+    path: '/plugins',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/plugins.lazy').then((d) => d.Route)
+  );
 const WorkspaceNameAuthSettingsPreferencesLazyRoute =
   WorkspaceNameAuthSettingsPreferencesLazyRouteImport.update({
     id: '/preferences',
@@ -511,6 +522,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpLazyRoute;
   '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  '/$workspaceName/settings/plugins': typeof WorkspaceNameAuthSettingsPluginsLazyRoute;
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
   '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesLazyRoute;
@@ -567,6 +579,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/mcp': typeof WorkspaceNameAuthSettingsMcpLazyRoute;
   '/$workspaceName/settings/memory': typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
   '/$workspaceName/settings/people': typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  '/$workspaceName/settings/plugins': typeof WorkspaceNameAuthSettingsPluginsLazyRoute;
   '/$workspaceName/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
   '/$workspaceName/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesLazyRoute;
@@ -628,6 +641,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/mcp': typeof WorkspaceNameAuthSettingsMcpLazyRoute;
   '/$workspaceName/_auth/settings/memory': typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
   '/$workspaceName/_auth/settings/people': typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  '/$workspaceName/_auth/settings/plugins': typeof WorkspaceNameAuthSettingsPluginsLazyRoute;
   '/$workspaceName/_auth/settings/preferences': typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
   '/$workspaceName/_auth/settings/prompt-shortcuts': typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
   '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesLazyRoute;
@@ -689,6 +703,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/mcp'
     | '/$workspaceName/settings/memory'
     | '/$workspaceName/settings/people'
+    | '/$workspaceName/settings/plugins'
     | '/$workspaceName/settings/preferences'
     | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/shares'
@@ -745,6 +760,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/mcp'
     | '/$workspaceName/settings/memory'
     | '/$workspaceName/settings/people'
+    | '/$workspaceName/settings/plugins'
     | '/$workspaceName/settings/preferences'
     | '/$workspaceName/settings/prompt-shortcuts'
     | '/$workspaceName/settings/shares'
@@ -805,6 +821,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/mcp'
     | '/$workspaceName/_auth/settings/memory'
     | '/$workspaceName/_auth/settings/people'
+    | '/$workspaceName/_auth/settings/plugins'
     | '/$workspaceName/_auth/settings/preferences'
     | '/$workspaceName/_auth/settings/prompt-shortcuts'
     | '/$workspaceName/_auth/settings/shares'
@@ -1196,6 +1213,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSettingsPeopleLazyRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
     };
+    '/$workspaceName/_auth/settings/plugins': {
+      id: '/$workspaceName/_auth/settings/plugins';
+      path: '/plugins';
+      fullPath: '/$workspaceName/settings/plugins';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPluginsLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
     '/$workspaceName/_auth/settings/preferences': {
       id: '/$workspaceName/_auth/settings/preferences';
       path: '/preferences';
@@ -1281,6 +1305,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsMcpLazyRoute: typeof WorkspaceNameAuthSettingsMcpLazyRoute;
   WorkspaceNameAuthSettingsMemoryLazyRoute: typeof WorkspaceNameAuthSettingsMemoryLazyRoute;
   WorkspaceNameAuthSettingsPeopleLazyRoute: typeof WorkspaceNameAuthSettingsPeopleLazyRoute;
+  WorkspaceNameAuthSettingsPluginsLazyRoute: typeof WorkspaceNameAuthSettingsPluginsLazyRoute;
   WorkspaceNameAuthSettingsPreferencesLazyRoute: typeof WorkspaceNameAuthSettingsPreferencesLazyRoute;
   WorkspaceNameAuthSettingsPromptShortcutsLazyRoute: typeof WorkspaceNameAuthSettingsPromptShortcutsLazyRoute;
   WorkspaceNameAuthSettingsSharesLazyRoute: typeof WorkspaceNameAuthSettingsSharesLazyRoute;
@@ -1311,6 +1336,7 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
   WorkspaceNameAuthSettingsMcpLazyRoute: WorkspaceNameAuthSettingsMcpLazyRoute,
   WorkspaceNameAuthSettingsMemoryLazyRoute: WorkspaceNameAuthSettingsMemoryLazyRoute,
   WorkspaceNameAuthSettingsPeopleLazyRoute: WorkspaceNameAuthSettingsPeopleLazyRoute,
+  WorkspaceNameAuthSettingsPluginsLazyRoute: WorkspaceNameAuthSettingsPluginsLazyRoute,
   WorkspaceNameAuthSettingsPreferencesLazyRoute: WorkspaceNameAuthSettingsPreferencesLazyRoute,
   WorkspaceNameAuthSettingsPromptShortcutsLazyRoute:
     WorkspaceNameAuthSettingsPromptShortcutsLazyRoute,

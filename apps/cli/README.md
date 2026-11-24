@@ -48,6 +48,14 @@ the same Session, and configures native quota recovery, merge archive and idle
 compaction. See the [module guide](src/automations/README.md) for the API, execution
 authority and examples. Existing recurring Schedules retain their execution owner.
 
+## Installing plugins on this machine
+
+`lody plugin link ./my-plugin --dev` installs into the implicit local workspace. To install into a running encrypted workspace instead, use `lody plugin link ./my-plugin --dev --encrypted-workspace <id>` from an interactive owner terminal. Pass the same selector to `reload`, `disable`, or `logs`. An unavailable encrypted workspace is an error, not a fallback to the local installation.
+
+The encrypted runtime restores only its own account, workspace, genesis and signing device’s installations. A catalog request cannot start a host. Confirmed device revocation or membership removal fences the host and erases its plugin custody; the source checkout and other identities’ installations are untouched.
+
+Plaintext installations retain their existing per-field OS keychain entries. Encrypted installations never import or delete those entries: configure their secrets separately. Encrypted private settings are ciphertext in the verified identity directory, with one OS keychain wrapping key for that directory. Revocation deletes that key before removing the directory; a locked keychain leaves cleanup pending for retry.
+
 ## Encrypted remote execution authorization
 
 The encrypted workspace host exposes

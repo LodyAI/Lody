@@ -11,6 +11,7 @@ import {
   loadHarness,
   loadIntegrationsSettingsComponent,
   loadKeyboardShortcutsSetting,
+  loadPluginsSettings,
   loadAboutSettingsComponent,
   loadAgentRolesSetting,
   loadPromptShortcutsSetting,
@@ -72,6 +73,7 @@ const MachineAgentSettings = lazy(loadMachineAgentSettings);
 const Harness = lazy(loadHarness);
 const IntegrationsSettingsComponent = lazy(loadIntegrationsSettingsComponent);
 const KeyboardShortcutsSetting = lazy(loadKeyboardShortcutsSetting);
+const PluginsSettings = lazy(loadPluginsSettings);
 const AboutSettingsComponent = lazy(loadAboutSettingsComponent);
 const AgentRolesSetting = lazy(loadAgentRolesSetting);
 const PromptShortcutsSetting = lazy(loadPromptShortcutsSetting);
@@ -646,6 +648,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
       return <IntegrationsSettingsComponent />;
     case 'keyboard-shortcuts':
       return <KeyboardShortcutsSetting />;
+    case 'plugins':
+      return <PluginsSettings />;
     case 'about':
       return <AboutSettingsComponent />;
   }

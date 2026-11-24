@@ -932,6 +932,8 @@ function getLocalProjectWorkingTreeAtRootPathImpl(
     const statusResult = yield* runGitCommandImpl(rootPath, [
       'status',
       '--porcelain=v1',
+      '--branch',
+      '--ahead-behind',
       '--untracked-files=normal',
     ]);
     if (statusResult.status !== 0) {
@@ -940,6 +942,7 @@ function getLocalProjectWorkingTreeAtRootPathImpl(
         new LocalProjectGitError({ message: `Failed to inspect git status: ${reason}` })
       );
     }
+    let upstream: LocalProjectWorkingTreeState['upstream'];
     let staged = false;
     let unstaged = false;
     let untracked = false;
@@ -947,6 +950,14 @@ function getLocalProjectWorkingTreeAtRootPathImpl(
     for (const rawLine of statusResult.stdout.split('\n')) {
       const line = rawLine.trimEnd();
       if (!line) continue;
+      if (line.startsWith('## ')) {
+        if (line.includes('...') && !line.endsWith(' [gone]'))
+          upstream = {
+            ahead: Number(/\bahead (\d+)/.exec(line)?.[1] ?? 0),
+            behind: Number(/\bbehind (\d+)/.exec(line)?.[1] ?? 0),
+          };
+        continue;
+      }
       const x = line[0] ?? ' ';
       const y = line[1] ?? ' ';
       if (x === '?' && y === '?') {
@@ -967,6 +978,7 @@ function getLocalProjectWorkingTreeAtRootPathImpl(
       }
     }
     return {
+      ...(upstream ? { upstream } : {}),
       clean: !staged && !unstaged && !untracked && !conflicted,
       staged,
       unstaged,

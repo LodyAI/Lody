@@ -60,6 +60,18 @@ class CommandRegistry {
   private commandByCanonical = new Map<string, string>();
   private snapshot: Command[] = [];
   private listeners = new Set<() => void>();
+  private readonly invocations = new EventTarget();
+  onInvoked(listener: (id: string) => void, signal: AbortSignal): void {
+    this.invocations.addEventListener(
+      'invoked',
+      (event) => listener((event as CustomEvent<string>).detail),
+      { signal }
+    );
+  }
+  private invoke(command: Command) {
+    void command.run();
+    this.invocations.dispatchEvent(new CustomEvent('invoked', { detail: command.id }));
+  }
   private paused = false;
   // Innermost-last, like the command stacks: a scope registered later wins.
   private scopes: ScopeRegistration[] = [];
@@ -177,7 +189,7 @@ class CommandRegistry {
     if (!cmd) return false;
     if (cmd.when && !cmd.when()) return false;
     try {
-      void cmd.run();
+      this.invoke(cmd);
     } catch (error) {
       console.error(`[commands] failed to execute "${id}"`, error);
       return false;
@@ -397,7 +409,7 @@ class CommandRegistry {
       if (b.preventDefault) event.preventDefault();
       try {
         this.captureShortcutUsage(b);
-        void cmd.run();
+        this.invoke(cmd);
       } catch (error) {
         console.error(`[commands] failed to execute "${cmd.id}"`, error);
       }

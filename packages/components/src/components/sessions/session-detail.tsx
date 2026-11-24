@@ -1,3 +1,5 @@
+import { useWorkspaceClientPlugins } from '../../plugins/client-host-provider';
+import { usePluginSessionSwitch } from '../../plugins/use-session-events';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
@@ -1776,6 +1778,12 @@ const SessionDetail = ({
   );
   // A draft tab is not a session: mentioning the parent there is valid. Do not
   // fall back to `activeTabSession.id` — that resolves drafts to the parent.
+  const pluginWorkspace = useWorkspaceClientPlugins();
+  usePluginSessionSwitch(
+    pluginWorkspace,
+    currentWorkspaceId,
+    !activeDraftTab && activeTabSession?.id === activeTabSessionId ? activeTabSession : null
+  );
   const sessionMentionExcludeId = activeDraftTab ? null : activeTabSessionId;
   const activeCommentReferenceKeys =
     commentReferenceKeysBySession[activeTabSessionId] ?? EMPTY_COMMENT_REFERENCE_KEYS;

@@ -203,6 +203,29 @@ describe('local-project helpers', () => {
     });
   });
 
+  it('reports tracked branch divergence without inventing counts for an untracked branch', async () => {
+    tempDir = makeTempDir();
+    buildBaseGitProjectTemplate(tempDir);
+    const read = async () => {
+      const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(tempDir!);
+      if (!state.git) throw Error('Expected repository');
+      return state.workingTree;
+    };
+    expect((await read()).upstream).toBeUndefined();
+    runGit(tempDir, ['branch', 'baseline']);
+    runGit(tempDir, ['branch', '--set-upstream-to=baseline']);
+    runGit(tempDir, [
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.com',
+      'commit',
+      '--allow-empty',
+      '-m',
+      'ahead',
+    ]);
+    expect(await read()).toMatchObject({ clean: true, upstream: { ahead: 1, behind: 0 } });
+  });
   it(
     'reports an initialized repository with no commits as git with no branches',
     async () => {

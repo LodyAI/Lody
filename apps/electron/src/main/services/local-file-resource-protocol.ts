@@ -1,16 +1,14 @@
+import { respondPluginModule } from './plugin-module-store'
 import { protocol, session } from 'electron'
-import { LocalFileResources } from './local-file-resource'
-import {
-  HTML_PREVIEW_SCHEME,
-  isHtmlPreviewPermissionRequester,
-  LocalHtmlPreviewSites
-} from './local-html-preview'
-
-export const localFileResources = new LocalFileResources()
-export const localHtmlPreviewSites = new LocalHtmlPreviewSites()
+import { localFileResources, localHtmlPreviewSites } from './document-resource-owner'
+import { HTML_PREVIEW_SCHEME, isHtmlPreviewPermissionRequester } from './local-html-preview'
 
 export function registerLocalFileResourceScheme() {
   protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'lody-plugin',
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+    },
     {
       scheme: 'lody-resource',
       privileges: {
@@ -36,6 +34,7 @@ export function registerLocalFileResourceScheme() {
 }
 
 export function installLocalFileResourceProtocol() {
+  protocol.handle('lody-plugin', respondPluginModule)
   protocol.handle('lody-resource', (request) => localFileResources.respond(request))
   protocol.handle(HTML_PREVIEW_SCHEME, (request) => localHtmlPreviewSites.respond(request))
   denyHtmlPreviewPermissions()

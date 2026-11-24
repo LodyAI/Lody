@@ -620,6 +620,7 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
 }
 
 export interface FloatingPermissionRequestProps {
+  onResolved?: (requestId: string, kind: 'permission' | 'elicitation') => void;
   /** Mobile session drawers render outside the workspace keyboard padding. */
   liftAboveKeyboard?: boolean;
   sessionId: SessionId;
@@ -643,6 +644,7 @@ type SendError = { requestId: string; message: string } | null;
  * them, and answering one brings up the next in the same place.
  */
 export function FloatingPermissionRequest({
+  onResolved,
   liftAboveKeyboard = false,
   sessionId,
   sessionStatus,
@@ -689,6 +691,10 @@ export function FloatingPermissionRequest({
         await respondToPermission(sessionId, entry.permission.requestId, outcome, {
           turnId: entry.turnId,
         });
+        onResolved?.(
+          entry.permission.requestId,
+          entry.isAskUserQuestion ? 'elicitation' : 'permission'
+        );
       } catch (error) {
         console.error('Failed to respond to permission request:', error);
         setSendError({
@@ -702,7 +708,7 @@ export function FloatingPermissionRequest({
         setSending(null);
       }
     },
-    [isReady, respondToPermission, sending, sessionId, t]
+    [isReady, onResolved, respondToPermission, sending, sessionId, t]
   );
 
   if (!current) return null;

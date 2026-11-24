@@ -1,3 +1,4 @@
+import { isPluginMachineRequest, pluginMethods } from '@lody/shared/plugins/machine-rpc';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hex, unhex, equalJson } from './e2ee-client-bytes';
 import { Clock, Effect, Semaphore, type Scope } from 'effect';
@@ -32,6 +33,11 @@ import type { E2eeRpcStore } from './e2ee-store';
 
 // Pad signed deadlines for a slow sender; the admission upper bound also allows
 // a fast sender. Receiver work keeps the same signed deadline throughout.
+const supportsSharedExecution = (request: E2eeFeatureInput['request']) =>
+  request.method === 'session/fork' ||
+  (isPluginMachineRequest(request) &&
+    request.method !== 'plugin/control' &&
+    (!('scope' in request.params) || request.params.scope !== 'machine'));
 const CLOCK_SKEW_TOLERANCE_MS = 10 * 60_000;
 const featureTtl = (method: string) =>
   (isE2eeReadQuery(method, undefined) ? 60_000 : 900_000) + CLOCK_SKEW_TOLERANCE_MS;
@@ -133,7 +139,12 @@ export function makeE2eeFeatureRpcClient(options: {
         );
         const index = view.getUint32(0),
           count = view.getUint32(4);
-        if (!count || count > 128 || index >= count)
+        if (
+          !count ||
+          count > 128 ||
+          index >= count ||
+          (pluginMethods.has(body.method) && count !== 1)
+        )
           return yield* Effect.fail(new Error('e2ee_feature_part'));
         const bytes = yield* Effect.acquireRelease(
           Effect.sync(() => Uint8Array.from(body.params.subarray(8))),
@@ -275,7 +286,7 @@ export function makeE2eeFeatureRpcClient(options: {
     const machineId = args.request.machineId;
     // History reads and forks may target another member's machine; the receiver applies
     // that machine's sharing policy. Every other feature stays same-member.
-    const sharedExecution = args.request.method === 'session/fork';
+    const sharedExecution = supportsSharedExecution(args.request);
     const sharedTarget = args.request.method === 'session/history-read' || sharedExecution;
     const signer = yield* options.targetSigner(machineId, sharedTarget);
     if (
@@ -294,7 +305,10 @@ export function makeE2eeFeatureRpcClient(options: {
           const frames: Uint8Array[] = [];
           yield* Effect.addFinalizer(() => Effect.sync(() => bytes.fill(0)));
           try {
-            if (bytes.length > E2EE_FEATURE_MAX_REQUEST_BYTES)
+            if (
+              bytes.length > E2EE_FEATURE_MAX_REQUEST_BYTES ||
+              (isPluginMachineRequest(args.request) && bytes.length > chunkBytes)
+            )
               return yield* Effect.fail(new Error('e2ee_feature_size'));
             const count = Math.ceil(bytes.length / chunkBytes);
             const binding = yield* options.binding(e2eeRpcResource(machineId));
@@ -543,7 +557,10 @@ export function makeE2eeFeatureRpcClient(options: {
       !saved ||
       saved.target !== args.request.machineId ||
       saved.signer !==
-        (yield* options.targetSigner(saved.target, args.request.method === 'session/history-read'))
+        (yield* options.targetSigner(
+          saved.target,
+          args.request.method === 'session/history-read' || supportsSharedExecution(args.request)
+        ))
     )
       return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     const original = yield* openFrames(saved.target, unpackFrames(saved.frame));

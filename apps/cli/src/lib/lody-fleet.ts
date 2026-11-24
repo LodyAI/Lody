@@ -187,6 +187,7 @@ function keepsEncryptedMode(
 }
 
 export class LodyFleet {
+  private pluginWorkspaceId?: string;
   private plugins?: import('../plugins/plugin-host-legacy').PluginDaemon;
   private readonly logger: Logger;
   private readonly builtinAgentConfigCliTypes: CliType[];
@@ -376,6 +377,13 @@ export class LodyFleet {
     this.runtimeStateReporter.setStartupStage('fleet-start');
     const localControlConfig: LocalSessionControlConfig = {
       dispatchPlugin: async (raw) => {
+        if (raw && typeof raw === 'object' && 'encryptedWorkspaceId' in raw) {
+          if (typeof raw.encryptedWorkspaceId !== 'string' || !('command' in raw))
+            throw Error('Invalid encrypted plugin control');
+          const runtime = this.runtimes.get(raw.encryptedWorkspaceId);
+          if (!runtime) throw Error('Encrypted workspace not running');
+          return runtime.lody.dispatchEncryptedPluginControl(raw.command);
+        }
         if (!this.plugins) throw new Error('Plugin host unavailable');
         return this.plugins.dispatch(raw);
       },
@@ -492,7 +500,7 @@ export class LodyFleet {
           machineName: this.machineName,
           logger: this.logger,
         });
-        if (workspace.role === 'owner') {
+        if (workspace.role === 'owner' && process.env.LODY_PLUGIN_SAFE_MODE !== '1') {
           const pluginModule = await import('../plugins/plugin-host-legacy').catch(() => {
             this.logger.warn('Plugin runtime unavailable');
             return undefined;
@@ -504,6 +512,7 @@ export class LodyFleet {
             this.machineId,
             (m) => this.logger.warn(m)
           );
+          this.pluginWorkspaceId = workspace.id;
           this.plugins = daemon;
           void daemon
             .start()
@@ -1234,6 +1243,7 @@ export class LodyFleet {
       try {
         lody = await Lody.create({
           logger: workspaceLogger,
+          localPlugin: workspace.id === this.pluginWorkspaceId ? () => this.plugins : undefined,
           onEncryptedAuthorityConfirmed: (startedAt) =>
             this.confirmEncryptedAuthority(workspace.id, startedAt),
           onEncryptedWindowNotice: (active, window) => {

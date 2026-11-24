@@ -1,4 +1,8 @@
-import { MAX_PACKED_CLIENT_BUNDLE_BYTES, receiveClientBundle } from '@lody/shared/plugins/digest';
+import {
+  MAX_PACKED_CLIENT_BUNDLE_BYTES,
+  receiveClientBundle,
+  unpackClientBundle,
+} from '@lody/shared/plugins/digest';
 export type ReadBundlePage = (
   offset: number,
   signal: AbortSignal
@@ -7,6 +11,12 @@ interface Transfer {
   controller: AbortController;
   waiting: number;
   result: Promise<VerifiedBundle>;
+}
+const packed = new WeakMap<VerifiedBundle, Uint8Array>();
+export function verifiedPackedBytes(files: VerifiedBundle) {
+  const bytes = packed.get(files);
+  if (!bytes) throw Error('Unverified bundle');
+  return bytes.slice();
 }
 export type VerifiedBundle = (path: string) => Uint8Array;
 
@@ -39,7 +49,8 @@ export class VerifiedBundleCache {
       })
         .then((bytes) => {
           controller.signal.throwIfAborted();
-          const read = unpack(bytes);
+          const read = unpackClientBundle(bytes);
+          packed.set(read, bytes);
           this.cached.set(key, { read, size: bytes.length });
           this.bytes += bytes.length;
           // Eviction releases the cache reference, not assets held by a mounted installation.
@@ -77,30 +88,4 @@ export class VerifiedBundleCache {
       }
     }
   }
-}
-function unpack(bytes: Uint8Array): VerifiedBundle {
-  const header = new TextEncoder().encode('lody-client-bundle-v1\0');
-  if (!header.every((b, i) => bytes[i] === b)) throw new Error('Invalid plugin bundle');
-  const files = new Map<string, Uint8Array>();
-  let offset = header.length;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  function part() {
-    const length = view.getUint32(offset);
-    offset += 4;
-    if (length > bytes.length - offset) throw new Error('Truncated plugin bundle');
-    const data = bytes.subarray(offset, offset + length);
-    offset += length;
-    return data;
-  }
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  while (offset < bytes.length) {
-    const path = decoder.decode(part());
-    if (files.has(path)) throw new Error('Duplicate bundle path');
-    files.set(path, part());
-  }
-  return (path) => {
-    const file = files.get(path);
-    if (!file) throw new Error('Unknown bundle file');
-    return file.slice();
-  };
 }

@@ -145,6 +145,7 @@ async function load(relative, dependencies, console = globalThis.console, env = 
  * modules split out of `E2eeIpc` share its console, clock and mocked account runtime. */
 function loadSync(relative, dependencies, console = globalThis.console, env = {}, globals = {}) {
   const exports = {}
+  const requireFromSource = createRequire(new URL(relative, import.meta.url))
   getCompiledScript(relative, env).runInNewContext({
     exports,
     Error,
@@ -197,7 +198,7 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
                                       work
                                     ) => work()
                                   }
-                                : require(id)
+                                : requireFromSource(id)
   })
   return exports
 }

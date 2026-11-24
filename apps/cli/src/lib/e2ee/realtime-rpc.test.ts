@@ -1,6 +1,16 @@
+import { getSessionRoomId, type SessionId } from '@lody/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { Deferred, Effect, Fiber } from 'effect';
+import { build } from 'esbuild';
+import { writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { MachineRuntime } from '../machine-runtime';
+import { MessageHandler, type MessageHandlerConfig } from '../message-handler';
+import { Registry, registryLayer } from '../../plugins/workflow/plugin-registry';
+import { makePluginHostLayer } from '../../plugins/workflow/plugin-host';
+import { DevPluginCompiler } from '../../plugins/workflow/dev-plugin-compiler';
+import { platformLayer } from '../../platform/process-options';
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from 'effect';
 import { it as effectIt } from '@effect/vitest';
 import { TestClock } from 'effect/testing';
 import {
@@ -486,6 +496,179 @@ effectIt.effect(
       );
       expect(streams.writes.filter((write) => write.stream.includes(':res:'))).toEqual(replies);
       expect(JSON.stringify(streams.writes)).not.toContain('SYNTHETIC_ENCRYPTED_SAVE');
+    })
+);
+
+effectIt.effect(
+  'binds plugin session calls to the signer and refuses unshared secondary projects before invoking',
+  () =>
+    Effect.gen(function* () {
+      const { makeEncryptedFeatureReceiver, makeEncryptedFeatureAuthorization } =
+        yield* Effect.promise(() => import('./feature-rpc'));
+      const f = fixture(),
+        streams = memoryStreams(),
+        controller = new AbortController();
+      let secondShared = true;
+      const policy = makeEncryptedFeatureAuthorization({
+        executionAuthoritySignal: () => controller.signal,
+        resolveSessionExecutionScope: async () => ['a', 'b'],
+        requesterIdentity: () =>
+          Effect.succeed({ accountId: 'signer', executionUserId: 'e2ee-member:aa' }),
+        authorization: {
+          authoritySignal: controller.signal,
+          authorizeRead: () => Effect.die('read authority used'),
+          authorizeOwnedExecution: () => Effect.die('owner authority used'),
+          authorizeSessionRead: () => Effect.die('session read used'),
+          authorizeExecution: (_w, _d, p, fresh) =>
+            Effect.succeed(
+              fresh && (p === 'a' || (p === 'b' && secondShared))
+                ? {
+                    _tag: 'Authorized' as const,
+                    principal: 'member' as const,
+                    isCurrent: () => true,
+                  }
+                : { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' as const }
+            ),
+        },
+      });
+      const worker = join(f.directory, 'worker.mjs');
+      const machineEntry = join(f.directory, 'plugin.mjs');
+      yield* Effect.promise(async () => {
+        await build({
+          entryPoints: [
+            fileURLToPath(new URL('../../plugins/plugin-worker-entry.ts', import.meta.url)),
+          ],
+          outfile: worker,
+          platform: 'node',
+          format: 'esm',
+          bundle: true,
+        });
+        await writeFile(
+          machineEntry,
+          `export default {kind:'machine-plugin', register(m){const schema={safeParse:data=>({success:true,data})};m.query({id:'read',scope:'session',input:schema,output:schema},ctx=>ctx.target.sessionId)}}`
+        );
+        await writeFile(
+          join(f.directory, 'catalog.json'),
+          JSON.stringify([
+            {
+              current: {
+                directory: f.directory,
+                machineEntry,
+                manifest: {
+                  id: 'sample',
+                  sdk: '^1.0.0',
+                  version: '1.0.0',
+                  title: 'Sample',
+                  machine: 'plugin.mjs',
+                },
+              },
+              source: '/unused',
+              enabled: true,
+              dev: false,
+            },
+          ])
+        );
+      });
+      const runtime = ManagedRuntime.make(
+        registryLayer(f.directory, f.workspaceId, f.machineId, () => {}).pipe(
+          Layer.provide(Layer.merge(makePluginHostLayer(worker), DevPluginCompiler.layer)),
+          Layer.provide(platformLayer({}))
+        )
+      );
+      yield* Effect.addFinalizer(() => Effect.promise(() => runtime.dispose()));
+      yield* Effect.promise(() => runtime.runPromise(Effect.flatMap(Registry, (r) => r.start)));
+      const pluginRpc: NonNullable<MessageHandlerConfig['pluginRpc']> = (request, grant, signal) =>
+        runtime.runPromise(
+          Effect.flatMap(Registry, (r) => r.machineRpc(request, grant)),
+          { signal }
+        );
+      const config = {
+        encryptedWorkspace: true,
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        pluginRpc,
+      };
+      const machine = new MachineRuntime({ handlerConfig: config, logger: {} } as never);
+      const localHandler: MessageHandler = Object.assign(
+        Object.create(MessageHandler.prototype),
+        config,
+        {
+          userId: 'owner',
+          workspaceDocument: {
+            repo: {
+              getDocMeta: async (room: string) =>
+                room === getSessionRoomId(f.input.sessionId as SessionId)
+                  ? { meta: { machineId: f.machineId } }
+                  : undefined,
+            },
+          },
+          executionService: { encryptedSessionExecutionScope: async () => ['a', 'b'] },
+        }
+      );
+      Object.assign(machine, { handler: localHandler });
+      const receive = yield* makeEncryptedFeatureReceiver({
+        ...policy,
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        genesis: Buffer.from(f.ledger.context.genesis.toBytes()).toString('hex'),
+        native: f.nativeReceiver,
+        journal: () => f.receipts,
+        isOpen: () => true,
+        client: streams.client,
+        handle: (request, context) => machine.handleEncryptedFeatureRpc(request, context),
+      });
+      for (const [id, shared] of [
+        ['a4', true],
+        ['a5', false],
+      ] as const) {
+        secondShared = shared;
+        const input = {
+          requestId: id.repeat(16),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            method: 'plugin/query' as const,
+            params: {
+              pluginId: 'sample',
+              descriptorId: 'read',
+              scope: 'session' as const,
+              input: null,
+              target: {
+                workspaceId: f.workspaceId,
+                machineId: f.machineId,
+                sessionId: f.input.sessionId,
+                projectId: 'a',
+              },
+            },
+          },
+        };
+        if (shared) {
+          expect(
+            yield* Effect.promise(() => localHandler.handleLocalMachineRpc(input.request))
+          ).toMatchObject({ ok: true, result: { data: f.input.sessionId } });
+          expect(
+            yield* Effect.promise(() =>
+              localHandler.handleLocalMachineRpc({
+                ...input.request,
+                params: {
+                  ...input.request.params,
+                  target: { ...input.request.params.target, sessionId: 'absent' },
+                },
+              })
+            )
+          ).toMatchObject({ ok: false });
+        }
+        const original = yield* f.sender.prepareFeature(input);
+        yield* receive({ id: original.requestId, frame: original.frameHex });
+        yield* streams.waitResponse(original.requestId, 1);
+        const reply = streams.writes.filter((write) => write.stream.includes(':res:')).at(-1)
+          ?.value as { frame: string };
+        expect(yield* f.sender.acceptFeatureResponse(input, reply.frame)).toMatchObject(
+          shared
+            ? { ok: true, result: { data: f.input.sessionId } }
+            : { ok: false, code: 'e2ee_machine_not_shared' }
+        );
+      }
     })
 );
 

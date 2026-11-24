@@ -1,3 +1,7 @@
+import { unpackClientBundle } from '@lody/shared/plugins/digest'
+import { publishPluginModule, releasePluginGraph } from '../../services/plugin-module-store'
+import { receiveClientBundle } from '@lody/shared/plugins/digest'
+import { pluginRpcResultSchema } from '@lody/shared/plugins/machine-rpc'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { join } from 'node:path'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
@@ -8,11 +12,12 @@ import {
   readFileMachineId,
   type LocalFilePreviewRequest
 } from '../../services/local-file-preview'
-import type { WebContents } from 'electron'
 import {
+  getResourceOwner,
+  isCurrentResourceOwner,
   localFileResources,
   localHtmlPreviewSites
-} from '../../services/local-file-resource-protocol'
+} from '../../services/document-resource-owner'
 import {
   LocalHtmlPreviewRequestSchema,
   openLocalHtmlPreview,
@@ -46,10 +51,9 @@ export class MachineRpcIpc extends ProductWindowIpcService {
     const machineId = await readFileMachineId(
       join(getLodyDataDir(mainPlatformKind), 'credentials.json')
     )
-    if (owner.isDestroyed() || resourceOwners.get(owner.id) !== generation)
-      throw new Error('Preview window closed.')
+    if (!isCurrentResourceOwner(owner, generation)) throw new Error('Preview window closed.')
     const response = await previewLocalFile(localFileResources, generation, parsed, machineId)
-    if (owner.isDestroyed() || resourceOwners.get(owner.id) !== generation) {
+    if (!isCurrentResourceOwner(owner, generation)) {
       localFileResources.releaseOwner(generation)
       throw new Error('Preview window closed.')
     }
@@ -67,41 +71,69 @@ export class MachineRpcIpc extends ProductWindowIpcService {
     const machineId = await readFileMachineId(
       join(getLodyDataDir(mainPlatformKind), 'credentials.json')
     )
-    if (owner.isDestroyed() || resourceOwners.get(owner.id) !== generation)
-      throw new Error('Preview window closed.')
+    if (!isCurrentResourceOwner(owner, generation)) throw new Error('Preview window closed.')
     return openLocalHtmlPreview(localHtmlPreviewSites, generation, parsed, machineId)
+  }
+
+  @IpcMethod()
+  async openPluginModule(
+    machineId: string,
+    workspaceId: string,
+    pluginId: string,
+    digest: string,
+    names: Record<string, string[]>
+  ) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (
+      process.argv.includes('--safe-mode') ||
+      new URL(event.senderFrame!.url).searchParams.getAll('safeMode').includes('1')
+    )
+      throw Error('Plugins disabled in safe mode')
+    const owner = getResourceOwner(event.sender)
+    const cli = getIpcServiceDeps().cliService
+    const request = async (message: LocalMachineRpcRequest) => {
+      const reply = await cli.sendLocalMachineRpc(message)
+      if (!reply.ok) throw Error(reply.error)
+      return pluginRpcResultSchema.parse(reply.result)
+    }
+    const catalog = await request({ method: 'plugin/catalog', workspaceId, machineId, params: {} })
+    if (catalog.type !== 'plugin/catalog') throw Error('Plugin catalog unavailable')
+    const row = catalog.installations.find(
+      (i) => i.enabled && i.manifest.id === pluginId && i.clientDigest === digest
+    )
+    if (!row?.manifest.client) throw Error('No enabled plugin module')
+    const bundle = await receiveClientBundle(digest, async (offset) => {
+      const reply = await request({
+        method: 'plugin/bundle-chunk',
+        workspaceId,
+        machineId,
+        params: { pluginId, clientDigest: digest, offset }
+      })
+      if (reply.type !== 'plugin/bundle-chunk') throw Error('Plugin bundle unavailable')
+      return { bytes: Buffer.from(reply.base64, 'base64'), totalBytes: reply.totalBytes }
+    })
+    const file = unpackClientBundle(bundle)(row.manifest.client)
+    const url = await publishPluginModule(
+      owner,
+      new TextDecoder('utf-8', { fatal: true }).decode(file),
+      names
+    )
+    if (!isCurrentResourceOwner(event.sender, owner)) {
+      releasePluginGraph(owner, url)
+      throw Error('Plugin document closed')
+    }
+    return url
+  }
+  @IpcMethod()
+  async releasePluginModule(url: string) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    releasePluginGraph(getResourceOwner(event.sender), url)
   }
 
   @IpcMethod()
   async send(message: LocalMachineRpcRequest) {
     return await getIpcServiceDeps().cliService.sendLocalMachineRpc(message)
   }
-}
-
-// Each document gets a distinct owner, including reloads to the same URL. A late
-// response from the old document must never revoke a new document's resources.
-const resourceOwners = new Map<number, number>()
-let nextResourceOwner = 0
-function getResourceOwner(owner: WebContents): number {
-  const current = resourceOwners.get(owner.id)
-  if (current !== undefined) return current
-  const generation = ++nextResourceOwner
-  resourceOwners.set(owner.id, generation)
-  owner.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (!isMainFrame || isInPlace) return
-    const previous = resourceOwners.get(owner.id)
-    if (previous !== undefined) releaseResources(previous)
-    resourceOwners.set(owner.id, ++nextResourceOwner)
-  })
-  owner.once('destroyed', () => {
-    const previous = resourceOwners.get(owner.id)
-    if (previous !== undefined) releaseResources(previous)
-    resourceOwners.delete(owner.id)
-  })
-  return generation
-}
-
-function releaseResources(generation: number) {
-  localFileResources.releaseOwner(generation)
-  localHtmlPreviewSites.releaseOwner(generation)
 }
