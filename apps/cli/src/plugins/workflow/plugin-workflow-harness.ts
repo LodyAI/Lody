@@ -46,7 +46,6 @@ export async function readWorkflowContributions(directory: string, manifest: Plu
     (manifest.acpProviders ?? []).map(async (provider) => ({
       ...provider,
       id: qualify(provider.id),
-      entry: await file(provider.entry),
     }))
   );
   const roles = await indexed(
@@ -77,6 +76,7 @@ export const makePluginWorkflowHarness = Effect.fnUntraced(function* () {
     {
       rows: WorkflowContributions;
       scope: Scope.Closeable;
+      managed: Set<() => Promise<void>>;
       closing: boolean;
       leases: Set<ProcessReleaseFailed>;
       config: Readonly<Record<string, unknown>>;
@@ -86,6 +86,7 @@ export const makePluginWorkflowHarness = Effect.fnUntraced(function* () {
     const old = generations.get(pluginId);
     if (old) {
       old.closing = true;
+      for (const release of old.managed) yield* Effect.tryPromise(release);
       const result = yield* Effect.exit(Scope.close(old.scope, Exit.void));
       if (Exit.isFailure(result)) {
         for (const r of result.cause.reasons)
@@ -115,18 +116,15 @@ export const makePluginWorkflowHarness = Effect.fnUntraced(function* () {
     generations.set(pluginId, {
       rows,
       config,
+      managed: new Set(),
       closing: false,
       leases: new Set(),
       scope: yield* Scope.make(),
     });
   });
-  const start = Effect.fnUntraced(function* (
-    kind: 'acpProviders' | 'mcpServers',
-    id: string,
-    admit?: () => void
-  ) {
+  const start = Effect.fnUntraced(function* (id: string, admit?: () => void) {
     const gen = generations.get(id.split(':')[1] ?? '');
-    const server = gen?.rows[kind].get(id);
+    const server = gen?.rows.mcpServers.get(id);
     if (!gen || gen.closing || !server)
       return yield* Effect.fail(Error('Workflow runtime unavailable'));
     const env: NodeJS.ProcessEnv = Object.fromEntries(
@@ -205,6 +203,33 @@ export const makePluginWorkflowHarness = Effect.fnUntraced(function* () {
   return {
     remove,
     install,
+    provider: (id: string, agent: string) => {
+      const gen = generations.get(id.split(':')[1] ?? '');
+      if (!gen || gen.closing || gen.rows.acpProviders.get(id)?.managedAgent !== agent)
+        throw Error('Workflow provider unavailable');
+      return (
+        spawn: () => Promise<import('../../session/session-sandbox').SessionProcessHandle>
+      ) => {
+        if (gen.closing) throw Error('Workflow provider generation withdrawn');
+        const child = spawn();
+        const release = async () => {
+          const h = await child.catch(() => undefined);
+          await h?.terminate(false);
+          gen.managed.delete(release);
+        };
+        gen.managed.add(release);
+        return child.then(
+          (h) => {
+            h.onClose(() => gen.managed.delete(release));
+            return h;
+          },
+          (error) => {
+            gen.managed.delete(release);
+            throw error;
+          }
+        );
+      };
+    },
     catalog: () => [...generations.values()].filter((g) => !g.closing).map((g) => g.rows),
     start,
   };

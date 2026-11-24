@@ -1,3 +1,4 @@
+import { writePluginAnnotation } from '@lody/shared/plugins/annotations';
 import {
   getSessionRoomId,
   type MachineId,
@@ -174,6 +175,37 @@ export function bindDaemonCommands(ctx: {
         return { turnId: receipt.turnId, disposition: 'queued' };
       }
       throw Error('forbidden');
+    },
+    annotation: async (entity, input, check) => {
+      if ('session' in entity) {
+        check();
+        await ctx.manager.repo.upsertDocMeta(getSessionRoomId(entity.session.id), {
+          annotations: writePluginAnnotation(entity.session.annotations, ctx.pluginId, input),
+        });
+        return;
+      }
+      const sdk = await import('@lody/shared');
+      const { withMachineCatalogWriteLock } = await import('../../lib/local-project-meta');
+      await withMachineCatalogWriteLock(sdk.getMachineRoomId(ctx.machineId), async () => {
+        const handle = await ctx.manager.repo.openFlockDoc(
+          sdk.getMachineFlockDocId(ctx.workspaceId, ctx.machineId)
+        );
+        check();
+        const id = entity.projectId as import('@lody/shared').LocalProjectId;
+        const row = sdk.getMachineFlockLocalProjects(
+          sdk.readMachineFlockRowsFromFlock(handle.flock, { families: ['localProject'] })
+        )[id];
+        if (!row) throw Error('Project unavailable');
+        sdk.writeMachineFlockRowToFlock(handle.flock, {
+          key: sdk.machineFlockKeys.localProject(id),
+          value: {
+            ...row,
+            annotations: writePluginAnnotation(row.annotations, ctx.pluginId, input),
+          },
+        });
+        await ctx.manager.repo.flush();
+        await handle.syncOnce();
+      });
     },
     preference: async (id, meta, input, check) => {
       const sdk = await import('@lody/shared');

@@ -104,6 +104,18 @@ export class PluginStateStore {
       .prepare('UPDATE cursors SET seq=max(seq,?) WHERE plugin=? AND type=?')
       .run(seq, plugin, type);
   }
+  purge(plugin: string): void {
+    const db = this.db;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('DELETE FROM kv WHERE plugin=?').run(plugin);
+      db.prepare('DELETE FROM cursors WHERE plugin=?').run(plugin);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
   close() {
     this.connection?.close();
     this.connection = undefined;

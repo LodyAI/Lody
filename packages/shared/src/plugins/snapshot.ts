@@ -12,11 +12,12 @@ const fields = {
     'branchName',
     'createdByPluginId',
   ],
-  projects: ['id', 'name', 'machineId', 'createdAt', 'updatedAt', 'path'],
+  projects: ['id', 'name', 'machineId', 'createdAtMs', 'lastOpenedAtMs', 'rootPath'],
   machines: ['id', 'name', 'platform', 'version'],
   roles: ['id', 'name', 'description', 'machineId'],
   schedules: ['scheduleId', 'title', 'enabled', 'machineId', 'nextRunAt'],
-  rateLimits: ['used', 'remaining', 'limit', 'resetsAt'],
+  rateLimits: ['limitId', 'limitName', 'planName'],
+  windows: ['label', 'usedPercent', 'windowDurationSeconds', 'resetsAtEpochSeconds'],
   turns: [
     'id',
     'role',
@@ -47,7 +48,7 @@ export function copyPluginSnapshot(
     if (size > MAX_UNSTABLE_SNAPSHOT_BYTES) throw Error('Snapshot exceeds byte limit');
   };
   function row(x: unknown, collection: keyof typeof fields) {
-    const result: Record<string, string | number | boolean | null> = Object.create(null);
+    const result: Record<string, unknown> = Object.create(null);
     for (const k of [
       ...fields[collection],
       ...(collection === 'sessions' && own(x, 'createdByPluginId') === pluginId
@@ -65,12 +66,25 @@ export function copyPluginSnapshot(
         result[k] = value;
       }
     }
+    if (collection === 'rateLimits') {
+      const windows = own(x, 'windows');
+      if (Array.isArray(windows)) {
+        if (windows.length > 100) throw Error('Invalid rate-limit window count');
+        result.windows = Object.freeze(windows.map((w) => row(w, 'windows')));
+      }
+    }
     return Object.freeze(result);
   }
   let projected: unknown;
   if (kind === 'workspace-state') {
     const [collection, key, ...tail] = path;
-    if (!collection || !key || !Object.hasOwn(fields, collection) || collection === 'turns')
+    if (
+      !collection ||
+      !key ||
+      !Object.hasOwn(fields, collection) ||
+      collection === 'turns' ||
+      collection === 'windows'
+    )
       return deny();
     projected = row(own(own(raw, collection), key), collection as keyof typeof fields);
     path = tail;

@@ -135,6 +135,7 @@ export async function upsertMachineLocalProject(
   )[project.id];
   const canonicalProject = {
     ...project,
+    annotations: current?.annotations ?? project.annotations,
     rootPath,
     standaloneVisible:
       options.standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,

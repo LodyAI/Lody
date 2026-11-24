@@ -54,12 +54,7 @@ export class PluginDaemon {
   start() {
     return (this.ready ??= this.runtime.runPromise(Effect.flatMap(Registry, (r) => r.start)));
   }
-  async spawnWorkflow(
-    kind: 'acpProviders' | 'mcpServers',
-    id: string,
-    signal?: AbortSignal,
-    admit?: () => void
-  ) {
+  async spawnWorkflowMcp(id: string, signal?: AbortSignal, admit?: () => void) {
     const scope = Scope.makeUnsafe();
     const close = () => this.runtime.runPromise(Scope.close(scope, Exit.void));
     try {
@@ -67,7 +62,7 @@ export class PluginDaemon {
         processHandle: { child },
         socketPath,
       } = await this.runtime.runPromise(
-        Effect.flatMap(Registry, (r) => Scope.provide(r.workflow.start(kind, id, admit), scope)),
+        Effect.flatMap(Registry, (r) => Scope.provide(r.workflow.start(id, admit), scope)),
         { signal }
       );
       const onTermination = (
@@ -110,6 +105,15 @@ export class PluginDaemon {
       await close();
       throw e;
     }
+  }
+  managedProvider(id: string, agent: string) {
+    return this.runtime.runPromise(Effect.map(Registry, (r) => r.workflow.provider(id, agent)));
+  }
+  sessionTools() {
+    return this.runtime.runPromise(Effect.map(Registry, r => r.sessionTools()));
+  }
+  invokeSessionTool(name: string, input: Extract<HostToChildFrame, {type: 'invoke'}>['input'], turn: import('./workflow/plugin-registry').PluginToolTurn) {
+    return this.runtime.runPromise(Effect.flatMap(Registry, r => r.invokeSessionTool(name, input, turn)));
   }
   async workflowCatalog() {
     return this.runtime.runPromise(Effect.map(Registry, (r) => r.workflow.catalog()));

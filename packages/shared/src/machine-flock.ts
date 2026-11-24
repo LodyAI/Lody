@@ -1,3 +1,4 @@
+import { readPluginAnnotations } from './plugins/annotations';
 import { isMagpieGatewayUrl, normalizeMagpieGateway } from './magpie-import';
 import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
@@ -1825,6 +1826,7 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   const project: LocalProjectMeta = {
     id: value.id as LocalProjectId,
     name: value.name,
+    annotations: readPluginAnnotations(value.annotations),
     rootPath: value.rootPath,
     createdAtMs: value.createdAtMs,
   };

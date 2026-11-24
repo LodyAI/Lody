@@ -57,6 +57,7 @@ export type AuthorizeEncryptedExecution = (
   localProjectId?: string
 ) => Effect.Effect<ExecutionAuthorization, unknown>;
 export type VerifiedExecutionOriginal = {
+  humanMemberInput?: boolean;
   requesterDevice: string;
   /** Historical ledger actor, never the UI account ID. */
   requesterCryptoUserId: string;
@@ -78,7 +79,7 @@ export type EncryptedRefusalReason =
 export type RefusedExecutionOriginal = { state: 'refused'; reason: EncryptedRefusalReason };
 export type ResolveVerifiedExecutionOriginal = (
   intent: EncryptedExecutionIntent,
-  lookup?: { readonly origin?: boolean }
+  lookup?: { readonly origin?: boolean; readonly pluginTool?:boolean }
 ) => Effect.Effect<
   VerifiedExecutionOriginal | PendingExecutionOriginal | RefusedExecutionOriginal | undefined,
   unknown
@@ -548,6 +549,13 @@ export function makeEncryptedAgentExecution(options: {
     retire,
     classifyOrigin,
     resolveDerivationOrigin,
+    authorizePluginToolRoot: Effect.fnUntraced(function* (origin: DerivationOrigin, projects: readonly string[]) {
+      const root = yield* options.resolveVerifiedOriginal({workspaceId:options.workspaceId,sessionId:origin.sessionId,userTurnId:origin.userTurnId},{origin:true,pluginTool:true});
+      if (!root || 'state' in root || !root.humanMemberInput || root.derivedFrom || root.schedule || root.machineAuthored || !projects.length || !options.authorizeExecution) return undefined;
+      const grant = yield* authorizeAll(options.authorizeExecution,options.workspaceId,root.requesterDevice,projects);
+      if(grant._tag!=='Authorized'||!grant.isCurrent?.())return undefined;
+      return {device:root.requesterDevice,userId:grant.principal==='owner'?options.machineUserId:encryptedMemberRequester(root.requesterCryptoUserId),isCurrent:grant.isCurrent};
+    }),
     authorizeAgentControl,
     automationEvidence,
     resolveRequester,

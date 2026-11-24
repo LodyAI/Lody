@@ -74,6 +74,53 @@ const createSessionRequest = (): LocalSessionControlRequest => ({
 });
 
 describe('LocalControlHandler', () => {
+  it('does not promote possession of the local socket to plugin approval', async () => {
+    const applied: unknown[] = [];
+    const expected = { command: { action: 'reload', pluginId: 'demo' }, encryptedWorkspaceId: 'w' };
+    const handler = new LocalControlHandler({
+      machineId: 'm',
+      logger,
+      dispatchSession: vi.fn(),
+      dispatchProject: vi.fn(),
+      dispatchPlugin: async (command) => {
+        applied.push(command);
+        return {};
+      },
+      dispatchMachineRpc: async () => {
+        throw Error('unexpected dispatch');
+      },
+      approvePluginAction: async (request) =>
+        JSON.stringify(request) === JSON.stringify({ machineId: 'm', ...expected }),
+    });
+    const send = (path: string, body: unknown) =>
+      handler.handle({ path, rawBody: JSON.stringify(body), requestId: 1 });
+    expect((await send('/plugin/control', expected.command)).status).toBe(400);
+    expect((await send('/plugin/control', { ...expected, approved: true })).status).toBe(400);
+    expect(
+      (await send('/plugin/control', { ...expected, encryptedWorkspaceId: 'other' })).status
+    ).toBe(403);
+    expect(
+      (
+        await send('/plugin/control', {
+          ...expected,
+          command: { action: 'remove', pluginId: 'demo' },
+        })
+      ).status
+    ).toBe(403);
+    expect(
+      (
+        await send('/machine-rpc', {
+          machineId: 'm',
+          workspaceId: 'w',
+          method: 'plugin/control',
+          params: { action: 'enable', pluginId: 'demo' },
+        })
+      ).status
+    ).toBe(403);
+    expect(applied).toEqual([]);
+    expect((await send('/plugin/control', expected)).status).toBe(200);
+    expect(applied).toEqual([expected]);
+  });
   it('routes validated automation commands to their machine owner and rejects foreign or malformed requests', async () => {
     const accepted: unknown[] = [];
     const handler = new LocalControlHandler({

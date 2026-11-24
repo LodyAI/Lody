@@ -53,7 +53,10 @@ type ForkRuntimeConfig = Omit<SessionAcpRuntimeConfigSnapshot, 'acpSessionId' | 
  * (the machine owner's account or `e2ee-member:`), which every execution, credential
  * and access decision uses instead.
  */
-export type SessionForkInput = SessionForkSpec & { executionRequesterUserId?: string };
+export type SessionForkInput = SessionForkSpec & {
+  executionRequesterUserId?: string;
+  authorizeWorkflow?: () => Promise<void>;
+};
 const executionRequester = (spec: SessionForkInput) =>
   spec.executionRequesterUserId ?? spec.requestedByUserId;
 
@@ -861,9 +864,13 @@ export class SessionForkService {
       branchName: source.branchName,
       isWorktree: source.isWorktree,
       parentSessionId,
+      ...(spec.authorizeWorkflow
+        ? { agentRoleId: source.agentRoleId, agentRoleRevision: source.agentRoleRevision }
+        : {}),
       ...(spec.targetPlacement ? { childSessionPlacement: spec.targetPlacement } : {}),
     };
 
+    if (spec.authorizeWorkflow) await spec.authorizeWorkflow();
     let targetPrepared = false;
     try {
       await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, targetMeta);
@@ -874,6 +881,7 @@ export class SessionForkService {
       targetPrepared = true;
 
       try {
+        if (spec.authorizeWorkflow) await spec.authorizeWorkflow();
         await this.deps.sessionManager.createSession(
           {
             workspaceId: this.deps.workspaceId as never,
@@ -920,11 +928,13 @@ export class SessionForkService {
         );
       }
       try {
+        if (spec.authorizeWorkflow) await spec.authorizeWorkflow();
         await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
         const targetBackend = await createSessionBackend(targetDoc, targetMeta);
+        if (spec.authorizeWorkflow) await spec.authorizeWorkflow();
         await targetBackend.importForkHistory(sourceSnapshot, historyResult.history);
         if (sourceRuntimeConfig) {
           await targetBackend.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
@@ -932,6 +942,7 @@ export class SessionForkService {
             acpSessionId: targetSession.acpSessionId,
           });
         }
+        if (spec.authorizeWorkflow) await spec.authorizeWorkflow();
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
       } catch (error) {
         throw new SessionForkOperationError(

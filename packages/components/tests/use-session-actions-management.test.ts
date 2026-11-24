@@ -1779,6 +1779,21 @@ describe('useSessionActions', () => {
     }, tree.rootSession, runtime, 'synthetic-member', actions, new AbortController().signal)).rejects.toMatchObject({code:'forbidden'});
   });
 
+  it('persists a 4 KiB annotation under the invoking plugin id for offline readers', async () => {
+    const tree = createOpenedSubTree('plugin-annotation');
+    const meta = {...tree.rootSession,userId:'user-1', annotations:{other:{untouched:true}}};
+    tree.metaRepo.setMeta(getSessionRoomId(meta.id),meta);
+    const runtime = createRuntime({repo:tree.metaRepo.repo});
+    const actions = await renderActions(runtime);
+    const set = (value:string) => actions.executePluginSessionCommand(runtime.workspaceId,meta.machineId,meta.id,'sessionSetAnnotation',{value},new AbortController().signal,'reviewer');
+    const exact = 'é'.repeat(2047);
+    await set(exact);
+    await expect(set(exact+'x')).rejects.toThrow('4 KiB');
+    const {sessionSummaryFacts}=await import('@lody/shared/plugins/history');
+    const persisted=tree.metaRepo.getSession(meta.id)!;
+    expect(sessionSummaryFacts(persisted,'user-1',false,undefined).annotations).toEqual({other:{untouched:true},reviewer:exact});
+  });
+
   it('plugin pinning uses the session writer only for the installed machine', async () => {
     const tree = createOpenedSubTree('plugin-pin');
     const runtime = createRuntime({ repo: tree.metaRepo.repo });

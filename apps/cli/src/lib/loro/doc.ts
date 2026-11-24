@@ -551,8 +551,8 @@ export class LoroDocumentManager {
         machineId,
         name: p.title,
         description: p.description,
-        cliType: 'custom' as const,
-        agentType: p.id,
+        cliType: 'builtin' as const,
+        agentType: p.managedAgent,
         env: {},
       }))
     );
@@ -2246,6 +2246,10 @@ export class LoroDocumentManager {
       skillPrompt: frozenSkills,
       archived: !!record?.deleted || !!meta.isArchived,
     };
+  }
+
+  get pluginResultRepository(): string {
+    return this.encryptedWorkspace?.repositoryDirectory ?? getLoroRepoStorageBaseDir(this.workspaceId);
   }
 
   private get pluginReceiptsPath(): string {

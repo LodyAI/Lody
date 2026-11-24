@@ -568,6 +568,7 @@ export interface MachineHostEventMap {
     readonly userTurnId?: string;
   };
   readonly 'session.turn.completed': {
+    readonly agentRoleId?: string;
     readonly workspace: WorkspaceRef;
     readonly machine: MachineRef;
     readonly session: SessionRef;

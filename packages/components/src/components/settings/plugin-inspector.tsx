@@ -383,7 +383,16 @@ function WorkflowApproval({ entry }: { entry: ClientCatalogInstallation }) {
       <label>
         {t('settings.plugins.workflowOperation')}{' '}
         <select value={op} onChange={(e) => setOp(e.target.value as typeof op)}>
-          {(['sessions.create', 'sessions.send', 'sessions.respondInteraction'] as const)
+          {(
+            [
+              'sessions.create',
+              'sessions.send',
+              'sessions.respondInteraction',
+              'sessions.requestStop',
+              'sessions.requestArchive',
+              'sessionFork',
+            ] as const
+          )
             .filter((o) =>
               entry.dev.manifest.permissions?.includes(
                 o === 'sessions.respondInteraction' ? 'sessions.approve' : 'sessions.write'

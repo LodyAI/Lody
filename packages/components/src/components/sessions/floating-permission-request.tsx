@@ -620,7 +620,7 @@ function PositionControl({ position }: { position: PermissionPromptPosition }) {
 }
 
 export interface FloatingPermissionRequestProps {
-  onResolved?: (requestId: string, kind: 'permission' | 'elicitation') => void;
+  onResolved?: (requestId: string, kind: 'permission' | 'elicitation', outcome:Parameters<ReturnType<typeof usePermissionResponse>['respondToPermission']>[2],turnId?:string) => void;
   /** Mobile session drawers render outside the workspace keyboard padding. */
   liftAboveKeyboard?: boolean;
   sessionId: SessionId;
@@ -693,7 +693,7 @@ export function FloatingPermissionRequest({
         });
         onResolved?.(
           entry.permission.requestId,
-          entry.isAskUserQuestion ? 'elicitation' : 'permission'
+          entry.isAskUserQuestion ? 'elicitation' : 'permission',outcome,entry.turnId
         );
       } catch (error) {
         console.error('Failed to respond to permission request:', error);

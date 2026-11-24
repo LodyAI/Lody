@@ -42,6 +42,13 @@ export function resolveDeclaredWorkflow(options: {
   >;
   lease: (id: string, instance: number) => Promise<Lease | undefined>;
   projectExists: (id: string) => Promise<boolean>;
+  stopSession: (sid: SessionId, turnId: string) => Promise<void>;
+  forkSession: (
+    sid: SessionId,
+    turnId: string,
+    principal: string,
+    authorize: () => Promise<void>
+  ) => Promise<SessionId>;
   sessionScope: (id: SessionId) => Promise<readonly string[]>;
 }): ResolveStandalonePluginOperation {
   return async (call, signal) => {
@@ -53,12 +60,18 @@ export function resolveDeclaredWorkflow(options: {
             {
               sessionCreate: 'sessions.create',
               sessionSend: 'sessions.send',
+              sessionStop: 'sessions.requestStop',
+              sessionArchive: 'sessions.requestArchive',
+              sessionFork: 'sessionFork',
               sessionRespondInteraction: 'sessions.respondInteraction',
             } as const
           )[
             call.payload.descriptorId as
               | 'sessionCreate'
               | 'sessionSend'
+              | 'sessionStop'
+              | 'sessionArchive'
+              | 'sessionFork'
               | 'sessionRespondInteraction'
           ]
         : undefined;
@@ -204,7 +217,7 @@ export function resolveDeclaredWorkflow(options: {
         return JSON.parse(JSON.stringify(result));
       };
     }
-    if (op === 'sessions.send' || op === 'sessions.respondInteraction') {
+    if (op && op !== 'sessions.create') {
       if (
         !ref.success ||
         !ref.data.sessionId ||
@@ -238,7 +251,68 @@ export function resolveDeclaredWorkflow(options: {
       return async () => {
         const { lifecycleCommandInputs: inputs } =
           await import('@lody/shared/commands/host-commands');
+        await scope();
+        const authorize = async () => {
+          await scope();
+          check();
+        };
+        if (op === 'sessions.requestArchive') {
+          inputs.sessionArchive.parse(call.payload.input);
+          const { readSessionOperationTargets, SessionStatusFactory } =
+            await import('@lody/shared');
+          const targets = await readSessionOperationTargets(options.manager.repo, sid, 'archive');
+          if (targets.length !== 1 || targets[0].id !== sid)
+            throw Error('Archive affects additional sessions');
+          await authorize();
+          await options.manager.repo.upsertDocMeta(getSessionRoomId(sid), {
+            isArchived: true,
+            status: SessionStatusFactory.idle(),
+          });
+          await options.manager.repo.flush();
+          return null;
+        }
         const doc = await options.manager.getOrCreateSessionDoc(sid);
+        if (op === 'sessions.requestStop' || op === 'sessionFork') {
+          const source =
+            op === 'sessionFork'
+              ? inputs.sessionFork.parse(call.payload.input)?.fromTurnId
+              : inputs.sessionStop.parse(call.payload.input);
+          let turnId = source;
+          if (!turnId) {
+            const backend = await (
+              await import('../../session/session-backend')
+            ).createSessionBackend(doc);
+            const h = backend.history,
+              rows = await h.readDirectory(0, await h.count());
+            if (rows.some((r) => r.state !== 'ready' || !r.scalars))
+              throw Error('Session history unavailable');
+            turnId =
+              op === 'sessions.requestStop'
+                ? ((await import('@lody/shared')).resolveActiveAssistantTurnId(
+                    rows.map((r) => r.scalars)
+                  ) ?? undefined)
+                : [...rows]
+                    .reverse()
+                    .find(
+                      (r) =>
+                        r.scalars?.role === 'assistant' &&
+                        (r.scalars.finished || r.scalars.endedAt !== undefined)
+                    )?.turnId;
+          }
+          if (!turnId) throw Error('No eligible assistant turn');
+          await authorize();
+          if (op === 'sessions.requestStop') {
+            await options.stopSession(sid, turnId);
+            return null;
+          }
+          const id = await options.forkSession(
+            sid,
+            turnId,
+            `plugin-workflow:${call.pluginId}:${lease.installationId}`,
+            authorize
+          );
+          return { workspaceId: call.workspaceId, machineId: call.machineId, sessionId: id };
+        }
         if (op === 'sessions.respondInteraction') {
           const p = inputs.sessionRespondInteraction.parse(call.payload.input);
           const backend = await (

@@ -1,3 +1,4 @@
+import { makePluginApproval } from '../plugins/plugin-control-approval';
 import {
   composeMachineHostDispatch,
   type ResolveStandalonePluginOperation,
@@ -383,16 +384,15 @@ export class LodyFleet {
 
     this.runtimeStateReporter.setStartupStage('fleet-start');
     const localControlConfig: LocalSessionControlConfig = {
-      dispatchPlugin: async (raw) => {
-        if (raw && typeof raw === 'object' && 'encryptedWorkspaceId' in raw) {
-          if (typeof raw.encryptedWorkspaceId !== 'string' || !('command' in raw))
-            throw Error('Invalid encrypted plugin control');
-          const runtime = this.runtimes.get(raw.encryptedWorkspaceId);
+      approvePluginAction: makePluginApproval(),
+      dispatchPlugin: async ({ command, encryptedWorkspaceId }) => {
+        if (encryptedWorkspaceId !== undefined) {
+          const runtime = this.runtimes.get(encryptedWorkspaceId);
           if (!runtime) throw Error('Encrypted workspace not running');
-          return runtime.lody.dispatchEncryptedPluginControl(raw.command);
+          return runtime.lody.dispatchEncryptedPluginControl(command);
         }
         if (!this.plugins) throw new Error('Plugin host unavailable');
-        return this.plugins.dispatch(raw);
+        return this.plugins.dispatch(command);
       },
       machineId: this.machineId,
       logger: this.logger,
@@ -519,7 +519,10 @@ export class LodyFleet {
             this.machineId,
             (m) => this.logger.warn(m),
             undefined,
-            composeMachineHostDispatch(this.resolveStandalonePluginOperation)
+            composeMachineHostDispatch(this.resolveStandalonePluginOperation),
+            undefined,
+            async (frame) =>
+              (await this.runtimes.get(workspace.id)?.lody.admitPluginEvent(frame)) ?? false
           );
           this.pluginWorkspaceId = workspace.id;
           this.plugins = daemon;

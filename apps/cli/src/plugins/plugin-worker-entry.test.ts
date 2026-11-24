@@ -24,7 +24,7 @@ it('validates separately bundled attachment handlers and keeps serving after an 
         ...options,
         stdin: {
           resolveDir: process.cwd(),
-          contents: `import {z} from 'zod';export default {kind:'machine-plugin',register(m){m.events.on('failure',()=>{throw Error()});m.attachmentSource({id:'files',metadataSchema:z.number()}, {search:(_,q)=>[{id:q,title:q}],resolve:(_,id)=>({title:id,markdown:id,metadata:id})})}}`,
+          contents: `import {z} from 'zod';export default {kind:'machine-plugin',register(m){m.tool({id:'large',input:z.number(),output:z.string()},(_,n)=>'é'.repeat(n));m.events.on('failure',()=>{throw Error()});m.attachmentSource({id:'files',metadataSchema:z.number()}, {search:(_,q)=>[{id:q,title:q}],resolve:(_,id)=>({title:id,markdown:id,metadata:id})})}}`,
         },
         outfile: plugin,
       }),
@@ -46,7 +46,15 @@ it('validates separately bundled attachment handlers and keeps serving after an 
           config: {},
           permissions: [],
         })
-      ).toMatchObject({ type: 'ready' });
+      ).toMatchObject({
+        type: 'ready',
+        handlers: expect.arrayContaining([
+          expect.objectContaining({
+            descriptorId: 'large',
+            tool: { description: 'large', inputSchema: expect.objectContaining({ type: 'number' }) },
+          }),
+        ]),
+      });
       expect(await exchange({ type: 'start', contextId: 'startup' })).toMatchObject({ ok: true });
       expect(
         await exchange({
@@ -66,6 +74,12 @@ it('validates separately bundled attachment handlers and keeps serving after an 
         callId: 'call',
         input: 'hello',
       } as const;
+      expect(
+        await exchange({ ...base, kind: 'tool', descriptorId: 'large', input: 1048576 })
+      ).toMatchObject({
+        ok: false,
+        error: { code: 'validation_failed' },
+      });
       for (const frame of [
         { ...base, kind: 'attachment-search', input: 1 },
         { ...base, kind: 'attachment-resolve' },

@@ -2416,7 +2416,7 @@ export class SessionDispatchWatcher {
           ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
           // The author's signed intent covers this content without the `resume` added above.
           ...(this.deps.encryptedWorkspace && queuedItem.e2eeIntent
-            ? { e2eeIntent: queuedItem.e2eeIntent }
+            ? { e2eeIntent: queuedItem.e2eeIntent,...(queuedItem.derivedFrom?{derivedFrom:{sessionId:queuedItem.derivedFrom.sessionId,userTurnId:queuedItem.derivedFrom.userTurnId}}:{}) }
             : {}),
         }
       : null;

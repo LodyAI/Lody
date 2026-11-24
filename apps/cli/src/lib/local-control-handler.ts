@@ -1,4 +1,8 @@
 import {
+  pluginControlEnvelope,
+  type PluginControlEnvelope,
+} from '../plugins/plugin-control-approval';
+import {
   LOCAL_E2EE_PAIRING_PATH,
   LOCAL_E2EE_RESET_PATH,
   LocalE2eeResetRequestSchema,
@@ -60,7 +64,8 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
   LocalProjectControlRequestSchema.options.map((option) => option.shape.type.value);
 
 export interface LocalSessionControlConfig {
-  dispatchPlugin?: (message: unknown) => Promise<Record<string, unknown>>;
+  approvePluginAction?: (request: object, signal?: AbortSignal) => Promise<boolean>;
+  dispatchPlugin?: (message: PluginControlEnvelope) => Promise<Record<string, unknown>>;
   dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
   dispatchE2eeReset?: (message: LocalE2eeResetRequest) => Promise<LocalE2eeResetResponse>;
   dispatchE2eePairing?: (
@@ -309,6 +314,13 @@ async function handleMachineRpcRequest(
   }
 
   try {
+    if (
+      (message.method === 'plugin/control' && message.params.action !== 'inspect') ||
+      message.method === 'plugin/declared-workflow-grant'
+    ) {
+      if (!(await config.approvePluginAction?.(message, signal)) || signal?.aborted)
+        return handlerResponse(403, { ok: false, error: 'plugin_approval_required' });
+    }
     const response = await config.dispatchMachineRpc(message, signal);
     const validated = LocalMachineRpcResponseSchema.safeParse(response).success;
     if (!validated) {
@@ -367,9 +379,21 @@ export class LocalControlHandler {
         if (!this.config.dispatchPlugin)
           return handlerResponse(503, { ok: false, error: 'plugin_host_unavailable' });
         try {
+          const parsed = pluginControlEnvelope.safeParse(JSON.parse(request.rawBody));
+          if (!parsed.success) return handlerResponse(400, { ok: false, error: 'invalid_request' });
+          const body = parsed.data;
+          if (
+            body.command.action !== 'logs' &&
+            (!(await this.config.approvePluginAction?.(
+              { machineId: this.config.machineId, ...body },
+              request.signal
+            )) ||
+              request.signal?.aborted)
+          )
+            return handlerResponse(403, { ok: false, error: 'plugin_approval_required' });
           return handlerResponse(200, {
             ok: true,
-            ...(await this.config.dispatchPlugin(JSON.parse(request.rawBody))),
+            ...(await this.config.dispatchPlugin(body)),
           });
         } catch {
           return handlerResponse(400, { ok: false, error: 'plugin_control_failed' });

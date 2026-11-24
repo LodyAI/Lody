@@ -459,6 +459,12 @@ export class SessionEditAndResendService {
         agentClient.adoptPreparedSession(prepared);
         runtime.acpSessionId = preparedSessionId;
         committed = true;
+        try {
+          const { collectReplacedPluginResults } = await import('../plugins/tool-result-history');
+          await collectReplacedPluginResults(this.deps.workspaceDocument.pluginResultRepository,spec.sessionId,backend);
+        } catch(error) {
+          this.deps.logger.warn(`[${spec.sessionId}] Plugin artifact cleanup failed: ${formatErrorMessage(error)}`);
+        }
         await this.deps.executionService.acceptInboxHumanInput({
           sessionId: spec.sessionId,
           inputId: spec.replacementUserTurnId,

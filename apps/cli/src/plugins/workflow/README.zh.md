@@ -11,3 +11,5 @@ Node MCP 入口通过标准输入和标准输出交换消息时，使用 `transp
 在加密工作区中，机器所有者在个人设备上打开 **设置 → 插件**，选择操作、项目和 Role 后授权。`*` 表示该机器的所有项目或所有 Role。所有者可以单独撤销授权，不需要卸载插件。安装、链接插件或收到事件都不会产生授权。
 
 后台写入同时需要 manifest 中的 `workflow.autonomous` 和对应操作的 `sessions.write` 或 `sessions.approve`。daemon 在此安装所属的加密工作区内重新核验签名、当前所有者及实际目标的授权范围。已结束的回合只记录来源，不能授权新输入。禁用或替换安装后，原授权失效。
+
+Sorbet 根据 `session.turn.completed` 事件中的 `agentRoleId` 筛选架构师，以 `{ resumeFromCursor: true }` 订阅，无需原始快照权限，也不在 `onStart` 扫描历史。重放沿用同一验证请求 ID 和业务键，并保留父 Session 和事件提供的来源轮次。创建成功后，`ctx.storage` 保存该父 Session 的验证状态。加密工作区的后台交付需要机器所有者授权；仅有来源轮次不能授权执行。

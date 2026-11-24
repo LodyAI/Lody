@@ -76,7 +76,7 @@ export const hostToChildSchema = z.union([
 export const childToHostSchema = z.union([
   obj({
     type: literal('ready'),
-    handlers: obj({ kind, descriptorId, scope }).array(),
+    handlers: obj({ kind, descriptorId, scope, tool: obj({ description: z.string(), inputSchema: z.record(id, json) }).optional() }).array(),
     subscribedEvents: id.array(),
     resumeEvents: id.array(),
     hasService: z.boolean(),

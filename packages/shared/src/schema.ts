@@ -629,6 +629,7 @@ export function isScheduleImportFenced(
 }
 
 export type SessionMeta = SessionPullRequestRecordFields & {
+  annotations?: import('./plugins/annotations').PluginAnnotations;
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
@@ -926,13 +927,15 @@ export type NeedToDeleteSessionQueueItem =
       keptWorktreePath?: string;
     };
 
-export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'> & {
+export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'|'derivedFrom'> & {
+  derivedFrom?: {sessionId:string;userTurnId:string};
   project: ProjectRef | undefined;
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig' | 'paused'
+  'project' | 'acpSessionConfig' | 'paused'|'derivedFrom'
 > & {
+  derivedFrom?: {sessionId:string;userTurnId:string};
   project: ProjectRef | undefined;
   paused?: boolean;
   acpSessionConfig?: import('./ai').ACPSessionConfig &

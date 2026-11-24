@@ -7753,9 +7753,10 @@ export const SessionChatInterface = memo(
 
                       {/* The one place a pending permission request is answered; it stands in for the composer. */}
                       <FloatingPermissionRequest
-                        onResolved={(requestId, kind) => {
+                        onResolved={(requestId, kind,outcome,turnId) => {
                           if (workspaceId) {
                             const { workspace, session: ref } = eventRefs(workspaceId, session);
+                            clientPluginEvents.publish('session.interaction.resolved',{...eventRefs(workspaceId,session),requestId,kind,outcome,turnId});
                             clientPluginEvents.publish('ui.interaction.resolved', {
                               workspace,
                               session: ref,

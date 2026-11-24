@@ -138,15 +138,7 @@ test('sound-effects client plugin composes events, assets.url, signal, and stand
   }
 });
 
-test('sorbet-workflow reconciles both mid-call crashes and missed turn.completed events across daemon restart while preserving ProjectRef, parentSession, and E2EE originTurn', async (t) => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-sorbet-workflow-'));
-  t.after(() => fs.rm(dataDir, { recursive: true, force: true }));
-
-  const mockLodyQueries = {
-    sessions: { kind: 'lody-query', scope: 'machine', id: 'sessions' },
-    sessionTurns: { kind: 'lody-query', scope: 'session', id: 'sessionTurns' },
-  };
-
+test('Sorbet preserves parent and signed origin and stores verifier status for a completed architect turn', async () => {
   function mountWorkflowInstance() {
     let startHook = null;
     const eventHandlers = new Map();
@@ -168,13 +160,11 @@ test('sorbet-workflow reconciles both mid-call crashes and missed turn.completed
           if (id === 'zod') return requireShared('zod');
           if (id === '@lody/plugin-sdk') {
             return {
-              lodyQueries: mockLodyQueries,
               defineQuery: (scope, qid, sc) => ({ scope, id: qid, ...sc }),
             };
           }
           if (id === '@lody/plugin-sdk/machine') {
             return {
-              lodyQueries: mockLodyQueries,
               defineMachinePlugin: (register) => ({ register }),
             };
           }
@@ -200,7 +190,8 @@ test('sorbet-workflow reconciles both mid-call crashes and missed turn.completed
       tool() {},
       attachmentSource() {},
       events: {
-        on(type, fn) {
+        on(type, fn, options) {
+          assert.equal(options?.resumeFromCursor, true);
           eventHandlers.set(type, fn);
         },
       },
@@ -208,248 +199,45 @@ test('sorbet-workflow reconciles both mid-call crashes and missed turn.completed
     return { startHook, eventHandlers, queries };
   }
 
-  const machineRef = { workspaceId: 'ws_1', machineId: 'm_1' };
-  const projectRef = {
-    workspaceId: 'ws_1',
-    machineId: 'm_1',
-    projectId: 'proj_sorbet',
-  };
-  const sessionArch1 = {
-    workspaceId: 'ws_1',
-    machineId: 'm_1',
-    sessionId: 'sess_arch_1',
-    projectId: 'proj_sorbet',
-  };
-  const sessionArch2 = {
-    workspaceId: 'ws_1',
-    machineId: 'm_1',
-    sessionId: 'sess_arch_2',
-    projectId: 'proj_sorbet',
-  };
-
-  // Simulated durable Lody session + turn history on the daemon
-  const storedSessions = [
-    {
-      session: sessionArch1,
-      project: projectRef,
-      agentRoleId: 'plugin:sorbet-workflow:sorbet-architect',
-      updatedAt: 1_000,
-    },
-    {
-      session: sessionArch2,
-      project: projectRef,
-      agentRoleId: 'plugin:sorbet-workflow:sorbet-architect',
-      updatedAt: 2_000,
-    },
-  ];
-  const storedTurnsBySession = new Map([
-    [
-      'sess_arch_1',
-      [
-        {
-          turnId: 'turn_42',
-          role: 'assistant',
-          userTurnId: 'user_turn_7',
-          previewText: 'Plan A',
-          createdAt: 1_000,
-          finished: true,
-          stopReason: 'end_turn',
+  const session = { workspaceId: 'w', machineId: 'm', projectId: 'p', sessionId: 's' },
+    project = { workspaceId: 'w', machineId: 'm', projectId: 'p' };
+  const values = new Map(),
+    calls = [];
+  const ctx = {
+    config: {},
+    storage: values,
+    lody: {
+      sessions: {
+        create: async (t, r) => {
+          calls.push({ t, r });
+          return { ...session, sessionId: 'v' };
         },
-      ],
-    ],
-    [
-      'sess_arch_2',
-      [
-        // Completed while daemon was down -> session.turn.completed event was NEVER delivered!
-        {
-          turnId: 'turn_43',
-          role: 'assistant',
-          userTurnId: 'user_turn_9',
-          previewText: 'Plan B',
-          createdAt: 2_000,
-          finished: true,
-          stopReason: 'end_turn',
-        },
-        // Cancelled turn must NOT spawn a verifier
-        {
-          turnId: 'turn_44_cancelled',
-          role: 'assistant',
-          userTurnId: 'user_turn_10',
-          previewText: 'Aborted',
-          createdAt: 2_100,
-          finished: true,
-          stopReason: 'cancelled',
-        },
-      ],
-    ],
-  ]);
-
-  const receipts = new Map();
-  const createCalls = [];
-  let crashDuringFirstCreate = true;
-
-  const hostLody = {
-    async read(target, query, input = {}) {
-      if (query.id === 'sessions') {
-        let items = storedSessions;
-        if (input.sessionIds) {
-          const allow = new Set(input.sessionIds);
-          items = items.filter((it) => allow.has(it.session.sessionId));
-        }
-        if (input.agentRoleId) {
-          items = items.filter((it) => it.agentRoleId === input.agentRoleId);
-        }
-        if (typeof input.updatedAfter === 'number') {
-          items = items.filter((it) => it.updatedAt >= input.updatedAfter);
-        }
-        return { items };
-      }
-      if (query.id === 'sessionTurns') {
-        return { items: storedTurnsBySession.get(target.sessionId) ?? [] };
-      }
-      throw new Error(`Unexpected query: ${query.id}`);
-    },
-    unstable: {
-      async readSnapshot() {
-        return Object.freeze({
-          schemaVersion: 1,
-          revision: 'r1',
-          doc: Object.freeze({
-            agentRoleId: 'plugin:sorbet-workflow:sorbet-architect',
-          }),
-        });
       },
     },
-    sessions: {
-      async create(target, req) {
-        createCalls.push({ target, req });
-        if (!receipts.has(req.requestId)) {
-          receipts.set(req.requestId, {
-            target,
-            payloadJson: JSON.stringify(req),
-            ref: {
-              workspaceId: 'ws_1',
-              machineId: 'm_1',
-              projectId: target.projectId,
-              sessionId: `verifier_for_${req.requestId}`,
-            },
-          });
-        } else {
-          const prior = receipts.get(req.requestId);
-          assert.deepEqual(
-            target,
-            prior.target,
-            'Replay must target the exact original ProjectRef/MachineRef'
-          );
-          assert.equal(
-            JSON.stringify(req),
-            prior.payloadJson,
-            'Replay must preserve identical normalized payload (including parentSession & originTurn)'
-          );
-        }
-        if (crashDuringFirstCreate) {
-          crashDuringFirstCreate = false;
-          throw Object.assign(new Error('daemon_interrupted'), {
-            code: 'outcome_unknown',
-          });
-        }
-        return receipts.get(req.requestId).ref;
-      },
-    },
-  };
-
-  // Generation 1:
-  // - sess_arch_1 turn_42 fires live event, writes journal intent, then crashes mid-create (outcome_unknown)
-  // - sess_arch_2 turn_43 finishes right as daemon exits BEFORE any event reaches the plugin!
-  const gen1 = mountWorkflowInstance();
-  await assert.rejects(
-    gen1.eventHandlers.get('session.turn.completed')(
-      {
-        machine: machineRef,
-        dataDir,
-        config: { autoVerify: true },
-        invalidate() {},
-        lody: hostLody,
-      },
-      {
-        workspace: { workspaceId: 'ws_1' },
-        machine: machineRef,
-        session: sessionArch1,
-        project: projectRef,
-        turnId: 'turn_42',
-        userTurnId: 'user_turn_7',
-        stopReason: 'end_turn',
-      }
-    ),
-    { code: 'outcome_unknown' }
-  );
-
-  // Generation 2 (Daemon Restart):
-  // machine.onStart must recover turn_42 (with ProjectRef + parentSession + originTurn) AND discover missed turn_43!
-  const gen2 = mountWorkflowInstance();
-  await gen2.startHook({
-    workspace: { workspaceId: 'ws_1' },
-    machine: machineRef,
-    dataDir,
-    config: { autoVerify: true },
     invalidate() {},
-    lody: hostLody,
+  };
+  const plugin = mountWorkflowInstance();
+  const complete = plugin.eventHandlers.get('session.turn.completed');
+  const event = { session, project, stopReason: 'end_turn', turnId: 't', userTurnId: 'u' };
+  await complete(ctx, event);
+  assert.equal(calls.length, 0);
+  const architect = { ...event, agentRoleId: 'plugin:sorbet-workflow:sorbet-architect' };
+  await complete(ctx, architect);
+  await complete(ctx, architect);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].r, calls[1].r);
+  assert.equal(calls[0].r.requestId, 'verify-s-t');
+  assert.equal(calls[0].r.businessKey, 'verify/s/t');
+  assert.equal(calls[0].r.roleId, 'plugin:sorbet-workflow:sorbet-verifier');
+  assert.deepEqual(calls[0].r.skillIds, ['sorbet-verifier']);
+  assert.deepEqual(calls[0].r.originTurn, { session, userTurnId: 'u' });
+  assert.deepEqual(calls[0].r.parentSession, session);
+  assert.deepEqual(calls[0].t, project);
+  assert.deepEqual(await plugin.queries.get('workflow.status')({ ...ctx, target: session }), {
+    lastVerifiedTurnId: 't',
+    verifierSessionId: 'v',
   });
-
-  assert.equal(receipts.size, 2);
-  // Verify both recovered verifiers preserved exact ProjectRef, parentSession, verifier role, and E2EE originTurn
-  const turn42Replay = createCalls[1];
-  assert.deepEqual(turn42Replay.target, projectRef);
-  assert.deepEqual(turn42Replay.req.parentSession, sessionArch1);
-  assert.deepEqual(turn42Replay.req.originTurn, {
-    session: sessionArch1,
-    userTurnId: 'user_turn_7',
-  });
-  assert.equal(turn42Replay.req.roleId, 'plugin:sorbet-workflow:sorbet-verifier');
-
-  const turn43MissedRecovery = createCalls[2];
-  assert.deepEqual(turn43MissedRecovery.target, projectRef);
-  assert.deepEqual(turn43MissedRecovery.req.parentSession, sessionArch2);
-  assert.deepEqual(turn43MissedRecovery.req.originTurn, {
-    session: sessionArch2,
-    userTurnId: 'user_turn_9',
-  });
-
-  assert.deepEqual(
-    await gen2.queries.get('workflow.status')({
-      dataDir,
-      target: sessionArch1,
-    }),
-    {
-      lastVerifiedTurnId: 'turn_42',
-      verifierSessionId: 'verifier_for_verify-sess_arch_1-turn_42',
-    }
-  );
-  assert.deepEqual(
-    await gen2.queries.get('workflow.status')({
-      dataDir,
-      target: sessionArch2,
-    }),
-    {
-      lastVerifiedTurnId: 'turn_43',
-      verifierSessionId: 'verifier_for_verify-sess_arch_2-turn_43',
-    }
-  );
-
-  // Generation 3 (Subsequent Restart with no new turns): zero duplicate session creations
-  const countBeforeGen3 = createCalls.length;
-  const gen3 = mountWorkflowInstance();
-  await gen3.startHook({
-    workspace: { workspaceId: 'ws_1' },
-    machine: machineRef,
-    dataDir,
-    config: { autoVerify: true },
-    invalidate() {},
-    lody: hostLody,
-  });
-  assert.equal(createCalls.length, countBeforeGen3);
 });
-
 test('sorbet-workflow messages.renderBlock preserves interactive component state across incremental streaming updates under stable blockId', () => {
   const openedDrafts = [];
   // Minimal stateful hook harness keyed by stable blockId to verify Stateful Incremental Updates

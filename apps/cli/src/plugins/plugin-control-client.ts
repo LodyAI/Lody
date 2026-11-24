@@ -7,9 +7,7 @@ export async function requestPluginControl(
   encryptedWorkspaceId?: string
 ) {
   const { response, payload } = await Effect.runPromise(
-    requestLocalPluginControl(
-      encryptedWorkspaceId !== undefined ? { encryptedWorkspaceId, command } : command
-    )
+    requestLocalPluginControl({ encryptedWorkspaceId, command })
   );
   if (!response.ok) throw new Error(`Plugin ${command.action} failed (${response.status})`);
   return payload;

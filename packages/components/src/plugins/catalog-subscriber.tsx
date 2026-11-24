@@ -1,3 +1,4 @@
+import { getMachineFlockRateLimits } from '@lody/shared';
 import { useWorkspaceCatalog } from '../hooks/use-workspace-catalog';
 import { workspaceSnapshotSource } from './workspace-snapshot-source';
 import { PendingInteractionObserver } from './pending-interaction';
@@ -65,8 +66,8 @@ export function PluginCatalogSubscriber() {
           name: p.title,
           description: p.description,
           env: {},
-          cliType: 'custom' as const,
-          agentType: `plugin:${i.pluginId}:${p.id}`,
+          cliType: 'builtin' as const,
+          agentType: p.managedAgent,
         }))
       ),
       servers: entries.flatMap((i) =>
@@ -94,7 +95,7 @@ export function PluginCatalogSubscriber() {
   usePluginSessionMetaEvents(
     owner?.workspaceId,
     metaReady && !visible.isLoading && runtime?.workspaceId === owner?.workspaceId,
-    visible.allActiveSessions
+    useMemo(()=>[...visible.allActiveSessions,...archivedSessions],[visible.allActiveSessions,archivedSessions])
   );
   const reads = useMemo(() => new WorkspacePluginReads(owner?.workspaceId ?? ''), [owner]);
   const workspaceCatalog = useWorkspaceCatalog();
@@ -129,10 +130,16 @@ export function PluginCatalogSubscriber() {
         roles,
         schedule.rows,
         {
-          mcpServers: workspaceCatalog.servers,
-          workspaceProjects: workspaceCatalog.projects,
-          pinSections: workspaceCatalog.pinSections,
-          projectMcpDefaults: workspaceCatalog.projectMcpDefaults,
+          machines: visibleMachines,
+          rateLimits: (key: string) => {
+            for (const machine of visibleMachines.keys()) {
+              const prefix = machine + ':';
+              if (key.startsWith(prefix))
+                return getMachineFlockRateLimits(flock[owner.workspaceId]?.[machine] ?? {})[
+                  key.slice(prefix.length)
+                ];
+            }
+          },
         }
       ),
       plugins: owner.installations().map((i) => {
@@ -247,6 +254,7 @@ export function PluginCatalogSubscriber() {
       projects: [...projects.values()]
         .sort((a, b) => a.key.localeCompare(b.key))
         .map(({ machineId, project }) => ({
+          annotations: project.annotations,
           name: project.name || project.id,
           project: {
             workspaceId: owner.workspaceId,

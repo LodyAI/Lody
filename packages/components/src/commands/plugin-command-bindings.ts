@@ -1,3 +1,13 @@
+import { writePluginAnnotation } from '@lody/shared/plugins/annotations';
+import {
+  getMachineFlockDocId,
+  getMachineFlockLocalProjects,
+  readMachineFlockRowsFromFlock,
+  machineFlockKeys,
+  type MachineId,
+  type LocalProjectId,
+} from '@lody/shared';
+import { getMachineMetaMapAtom } from '../atoms/machines';
 import {
   bindClientSessionCreate,
   type ReserveClientSession,
@@ -18,7 +28,8 @@ export function usePluginCommandBindings(
   machineId: string,
   signal: AbortSignal,
   permissions: readonly string[],
-  reserveSession?: ReserveClientSession
+  reserveSession?: ReserveClientSession,
+  pluginId?: string
 ): Pick<LodyClient, 'execute'> & Pick<ClientHostBindings, 'useLodyCommand'> {
   const { executePluginSessionCommand } = useSessionActions();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom),
@@ -40,6 +51,50 @@ export function usePluginCommandBindings(
           : undefined;
     if (permission && !permissions.includes(permission))
       throw Object.assign(Error('Undeclared plugin permission'), { code: 'forbidden' });
+    if (command.id === 'projectSetAnnotation') {
+      const machine = machineId as MachineId;
+      const actor = store.get(userAtom)?.id;
+      const check = () => {
+        signal.throwIfAborted();
+        if (
+          !runtime ||
+          !actor ||
+          !pluginId ||
+          command.kind !== 'lody-command' ||
+          command.scope !== 'project' ||
+          target.workspaceId !== workspaceId ||
+          runtime.workspaceId !== workspaceId ||
+          !('machineId' in target) ||
+          target.machineId !== machine ||
+          store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+          store.get(userAtom)?.id !== actor ||
+          store.get(getMachineMetaMapAtom).get(machine)?.ownerUserId !== actor
+        )
+          throw Error('Project annotation forbidden');
+      };
+      check();
+      if (
+        !runtime ||
+        !pluginId ||
+        !('projectId' in target) ||
+        !target.projectId ||
+        'sessionId' in target
+      )
+        throw Error('Invalid project target');
+      await guard([]);
+      check();
+      const doc = getMachineFlockDocId(runtime.workspaceId, machine);
+      const handle = await runtime.repo.openFlockDoc(doc);
+      check();
+      const id = target.projectId as LocalProjectId;
+      const project = getMachineFlockLocalProjects(readMachineFlockRowsFromFlock(handle.flock))[id];
+      if (!project) throw Error('Project unavailable');
+      await runtime.writer.flockRowPut(doc, machineFlockKeys.localProject(id), {
+        ...project,
+        annotations: writePluginAnnotation(project.annotations, pluginId, args[0]),
+      });
+      return undefined as never;
+    }
     if (command.id === 'sessionCreate') {
       const userId = store.get(userAtom)?.id;
       const check = () => {
@@ -115,7 +170,8 @@ export function usePluginCommandBindings(
       target.sessionId as SessionId,
       command.id,
       args[0],
-      signal
+      signal,
+      pluginId
     );
     return result as never;
   };

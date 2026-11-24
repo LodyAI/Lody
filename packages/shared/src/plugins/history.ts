@@ -1,3 +1,4 @@
+import { readPluginAnnotations } from './annotations';
 import type { MessageContent } from '../ai';
 import type { SessionHistoryReader } from '../session-data/types';
 import { isAskUserQuestionPermissionMeta } from '../acp/ask-user-question';
@@ -180,6 +181,7 @@ export function sessionSummaryFacts<P>(
 ) {
   const createdAt = Date.parse(s.createdAt);
   return {
+    annotations: readPluginAnnotations(s.annotations),
     title: s.title ?? '',
     status: s.collaborationStopped
       ? 'stopped'

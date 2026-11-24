@@ -1350,6 +1350,7 @@ describe('host-only E2EE realtime journal', () => {
       requesterDevice: string;
       requesterCryptoUserId: string;
       expiresAt: number;
+      humanMemberInput?: boolean;
       machineAuthored?: true;
       derivedFrom?: { sessionId: string; userTurnId: string };
     };
@@ -1372,7 +1373,7 @@ describe('host-only E2EE realtime journal', () => {
             if (device === self || device === owner)
               return { _tag: 'Authorized' as const, principal: 'owner' as const };
             if (device === member && (project === undefined || project === 'shared-project'))
-              return { _tag: 'Authorized' as const, principal: 'member' as const };
+              return { _tag: 'Authorized' as const, principal: 'member' as const,isCurrent:()=>true };
             return { _tag: 'Denied' as const, reason: 'e2ee_machine_not_shared' };
           }),
       });
@@ -1388,6 +1389,15 @@ describe('host-only E2EE realtime journal', () => {
       originals.set('origin-session/origin-turn', signed(member));
     });
 
+    it('requires a direct verified member input and every project for a tool call',async()=>{
+      const lease=(projects:string[])=>Effect.runPromise(gate().authorizePluginToolRoot(origin,projects));
+      expect(await lease(['shared-project'])).toBeUndefined();
+      originals.set('origin-session/origin-turn',signed(member,{humanMemberInput:true}));
+      expect((await lease(['shared-project']))?.device).toBe(member);
+      expect(await lease(['shared-project','private-project'])).toBeUndefined();
+      originals.set('origin-session/origin-turn',signed(self,{machineAuthored:true,derivedFrom:origin}));
+      expect(await lease(['shared-project'])).toBeUndefined();
+    });
     it("runs a derived input with the member's own rights, never the machine owner's", async () => {
       originals.set('child-session/child-turn', signed(self, { derivedFrom: origin }));
       const execution = gate();

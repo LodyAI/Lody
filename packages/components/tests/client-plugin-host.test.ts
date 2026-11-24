@@ -561,3 +561,5 @@ it('keeps the Session reader leased until a plugin subagent lookup finishes', as
   await expect(lookup).resolves.toBeNull();
   expect(leased).toBe(false);
 });
+it('serializes competing preference CAS across plugin instances and fences a retired installation',async()=>{
+ await import('fake-indexeddb/auto');const {clientStorage}=await import('../src/plugins/client-storage');const life=new AbortController();const a=clientStorage('workspace-a','plugin',life.signal),b=clientStorage('workspace-a','plugin',life.signal);expect((await Promise.all([a.update('key',undefined,1),b.update('key',undefined,2)])).sort()).toEqual([false,true]);expect(await a.get('key')).toBe(await b.get('key'));expect(await clientStorage('workspace-b','plugin',life.signal).get('key')).toBeUndefined();life.abort();await expect(a.delete('key')).rejects.toThrow();});

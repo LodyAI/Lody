@@ -20,6 +20,8 @@ import { Logger } from '@/utils/logger';
 import {
   CliType,
   getScheduleRoomId,
+  getSessionRoomId,
+  type SessionMeta,
   type ScheduleAuthorizationRequest,
   getManagedBuiltinRuntimeByAgentType,
   type LocalProjectId,
@@ -491,6 +493,53 @@ export class Lody {
     });
   }
 
+  async admitPluginEvent(
+    frame: Parameters<import('../plugins/plugin-host-legacy').PluginDaemon['event']>[0]
+  ) {
+    const payload = frame.payload as {
+      session?: {
+        workspaceId?: string;
+        machineId?: string;
+        sessionId?: string;
+        projectId?: string;
+      };
+    };
+    const s = payload?.session;
+    if (
+      !s?.sessionId ||
+      s.workspaceId !== this.workspaceId ||
+      s.machineId !== this.machineId ||
+      this.cleanedUp ||
+      this.encryptedRevocation
+    )
+      return false;
+    const record = await this.documentManager.repo.getDocMeta(
+      getSessionRoomId(s.sessionId as SessionId)
+    );
+    const m = record?.meta as SessionMeta | undefined;
+    if (
+      record?.deleted ||
+      !m ||
+      m.id !== s.sessionId ||
+      m.machineId !== this.machineId ||
+      m.userId !== this.userId ||
+      !!m.isArchived !== (frame.eventType === 'session.archived') ||
+      (m.project?.kind === 'local' ? m.project.localProjectId : undefined) !== s.projectId
+    )
+      return false;
+    return (
+      !this.encryptedWorkspace ||
+      (!this.encryptedWorkspace.pluginAuthoritySignal.aborted &&
+        !m.parentSessionId &&
+        (await this.documentManager.authorizeEncryptedSessionRead({
+          machineId: m.machineId,
+          rootSessionId: m.id,
+          requesterUserId: this.userId,
+          sessionOwnerUserId: m.userId,
+          localProjectId: m.project?.kind === 'local' ? m.project.localProjectId : undefined,
+        })))
+    );
+  }
   async start(): Promise<void> {
     if (this.encryptedRevocation) throw new Error(this.encryptedRevocation);
     return (this.startReceipt = this.startRuntime());
@@ -526,6 +575,16 @@ export class Lody {
           manager: this.documentManager,
           lease: (id, instance) => host.workflowLease(id, instance),
           projectExists: (id) => this.runtime.workflowProjectExists(id),
+          stopSession: (sid, turn) => {
+            const h = this.runtime.getMessageHandler();
+            if (!h) throw Error('Runtime unavailable');
+            return h.stopDeclaredWorkflowSession(sid, turn);
+          },
+          forkSession: (sid, turn, principal, authorize) => {
+            const h = this.runtime.getMessageHandler();
+            if (!h) throw Error('Runtime unavailable');
+            return h.forkDeclaredWorkflowSession(sid, turn, principal, authorize);
+          },
           sessionScope: (id) => this.runtime.resolveSessionExecutionScope(id),
         });
         const host: PluginDaemon = new PluginDaemon(
@@ -534,7 +593,9 @@ export class Lody {
           this.machineId,
           (m) => this.logger.warn(m),
           identityPluginVault(root),
-          encryptedPluginDispatch(composeMachineHostDispatch(resolve))
+          encryptedPluginDispatch(composeMachineHostDispatch(resolve)),
+          undefined,
+          (frame) => this.admitPluginEvent(frame)
         );
         this.startingEncryptedHost = host;
         const stop = () => {

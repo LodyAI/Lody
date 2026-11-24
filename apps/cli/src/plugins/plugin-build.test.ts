@@ -122,7 +122,7 @@ test('a skill-only plugin stages its named SKILL.md without a process entry or c
   assert.equal(await readFile(join(stage, 'skills/review/SKILL.md'), 'utf8'), '# Review');
 });
 
-test('Sorbet contributions speak ACP and MCP over stdio from an external plugin directory', async (t) => {
+test('Sorbet binds managed Pi and speaks MCP over stdio from an external plugin directory', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'sorbet-reference-'));
   t.onTestFinished(() => rm(root, { recursive: true, force: true }));
   const sourceDir = join(root, 'source');
@@ -159,12 +159,18 @@ test('Sorbet contributions speak ACP and MCP over stdio from an external plugin 
     ['tools/call', { name: 'recall', arguments: { key: 'plan' } }],
   ]);
   assert.equal(mcp[2].result.content[0].text, 'Synthetic scope');
-  const acp = exchange(manifest.acpProviders![0]!.entry, [
-    ['initialize', { protocolVersion: 1 }],
-    ['session/new', { cwd: root, mcpServers: [] }],
-    ['session/prompt', { sessionId: 'unknown', prompt: [] }],
-  ]);
-  assert.equal(acp[0].result.protocolVersion, 1);
-  assert.ok(acp[1].result.sessionId);
-  assert.ok(acp[2].error);
+  assert.equal(manifest.acpProviders![0]!.managedAgent, 'pi');
+  const { pluginManifestSchema } = await import('@lody/shared/plugins/manifest-schema');
+  for (const invalid of [
+    { entry: 'runtime.mjs' },
+    { managedAgent: 'pi', entry: 'runtime.mjs' },
+    { managedAgent: 'unknown' },
+  ])
+    assert.equal(
+      pluginManifestSchema.safeParse({
+        ...manifest,
+        acpProviders: [{ id: 'sorbet', title: 'Sorbet', ...invalid }],
+      }).success,
+      false
+    );
 });
