@@ -1298,6 +1298,7 @@ export type LocalProjectControlRequest =
     }
   | {
       type: 'local-project/list-global-skills';
+      magpieGatewayUrl?: string;
       machineId: MachineId;
       workspaceId: WorkspaceId;
       knownFingerprint?: string;

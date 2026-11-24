@@ -1,4 +1,5 @@
 /** Public local-gateway token: a usage label, never a vendor credential. */
+export const MAGPIE_CODEX_SKILLS = ['magpie-skills', 'magpie-setup'] as const;
 export const MAGPIE_TOKEN = 'magpie-lody';
 export const MAGPIE_TARGETS = ['claude', 'codex', 'pi', 'dsh', 'kimi', 'grok', 'bub'] as const;
 export type MagpieTarget = (typeof MAGPIE_TARGETS)[number];

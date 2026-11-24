@@ -2408,6 +2408,7 @@ function WorkspaceChatLanding({
     () =>
       selectedConfig?.cliType && selectedConfig.agentType
         ? {
+            magpieGatewayUrl: selectedConfig.magpieGatewayUrl,
             cliType: selectedConfig.cliType,
             agentType: selectedConfig.agentType,
             // The selected agent's machine — lets the `$` menu surface that
@@ -2415,7 +2416,12 @@ function WorkspaceChatLanding({
             ...(selectedAgent?.machineId ? { machineId: selectedAgent.machineId } : {}),
           }
         : undefined,
-    [selectedConfig?.cliType, selectedConfig?.agentType, selectedAgent?.machineId]
+    [
+      selectedConfig?.magpieGatewayUrl,
+      selectedConfig?.cliType,
+      selectedConfig?.agentType,
+      selectedAgent?.machineId,
+    ]
   );
 
   // Keyboard cyclers shared with the in-session composer. The chat landing is also where

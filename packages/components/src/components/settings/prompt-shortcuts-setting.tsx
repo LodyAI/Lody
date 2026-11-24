@@ -695,6 +695,7 @@ function ShortcutEditor({
         skillAgent={
           config
             ? {
+                magpieGatewayUrl: config.magpieGatewayUrl,
                 cliType: config.cliType,
                 agentType: config.agentType,
                 machineId: editor.scope.machineId,

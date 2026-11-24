@@ -69,6 +69,8 @@ Provider 和准备任务复用原 ID；重新执行命令可以显式重试失�
   `model_catalog_url` 指向 Magpie 提供的 Codex 形状目录
   （`<gateway>/v1/codex/models`），能力投影由 Magpie 完成，不在本地重复生成，
   也不复用 ChatGPT 账号绑定。
+  启动时，独立配置目录会链接原生 Codex 已安装的 `magpie-skills` 和
+  `magpie-setup`，已有的同名入口优先。绑定此 Provider 的技能选择器在执行机器上解析这两个入口。
 - Pi 在 Lody 自有隔离配置中使用生成的 `models.json` 和 OpenAI Chat Completions，
   不导入原生全局配置中的扩展和设置。
 - Kimi Code 在隔离 `KIMI_CODE_HOME/config.toml` 中生成 Provider 和模型目录。

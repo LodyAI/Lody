@@ -884,9 +884,7 @@ export const CombinedMentionTextarea = React.forwardRef<
           ? Boolean(mentionSource.localProjectId)
           : Boolean(githubRepoFullName);
     const enableIssueMentions =
-      Boolean(githubRepoFullName) &&
-      issuePrAllowedBySource &&
-      issuePrData.status !== 'unavailable';
+      Boolean(githubRepoFullName) && issuePrAllowedBySource && issuePrData.status !== 'unavailable';
     // The machine the chat runs on (selected agent's machine). Lets the `$` menu
     // list that machine's global skills even when the chat has no local project
     // (GitHub / plain-agent chats) — see useMentionProjectSkills.
@@ -951,16 +949,13 @@ export const CombinedMentionTextarea = React.forwardRef<
     const { skillState, skillItems, knownSkillTokens } = useMentionProjectSkills(
       mentionSource,
       skillsActive,
-      skillGlobalMachineId
+      skillAgent
     );
     // Limit the `$` menu to the selected provider's project + global skill directories.
     // Null when no provider is selected.
-    const skillAgentCliType = skillAgent?.cliType;
-    const skillAgentAgentType = skillAgent?.agentType;
     const allowedSkillDirs = React.useMemo(
-      () =>
-        getAllowedSkillMentionDirs({ cliType: skillAgentCliType, agentType: skillAgentAgentType }),
-      [skillAgentAgentType, skillAgentCliType]
+      () => getAllowedSkillMentionDirs(skillAgent),
+      [skillAgent]
     );
 
     const [uncontrolledMentionValues, setUncontrolledMentionValues] = React.useState<string[]>([]);
