@@ -248,6 +248,11 @@ describe('Lody MCP tool catalog', () => {
               frontmatter: { name: 'lody-automations' },
               resources: expect.any(Array),
             },
+            {
+              uri: 'skill://genui/SKILL.md',
+              frontmatter: { name: 'genui' },
+              resources: expect.any(Array),
+            },
           ],
         },
       });
