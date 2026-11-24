@@ -2437,15 +2437,10 @@ export class MessageHandler {
 
     const tempPath = `${args.destPath}.${uuidV4()}.part`;
     const hash = crypto.createHash('sha256');
-    let source: fs.ReadStream;
-    try {
-      source = fs.createReadStream(blobPath);
-    } catch {
-      return false;
-    }
     const fileHandle = await fs.promises.open(tempPath, 'wx');
     try {
-      for await (const chunk of source) {
+      // Stream must open inside the awaited iteration so a post-handoff rename ENOENT lands in this catch, not as an uncaught 'error'.
+      for await (const chunk of fs.createReadStream(blobPath)) {
         const buf = chunk as Buffer;
         hash.update(buf);
         await fileHandle.write(buf);
