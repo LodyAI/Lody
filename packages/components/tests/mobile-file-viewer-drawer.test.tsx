@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MobileFileViewerDrawer } from '../src/components/mobile/mobile-file-viewer-drawer';
 
@@ -48,6 +48,10 @@ vi.mock('../src/components/mobile/mobile-session-menu-sheet', async () => {
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
   if (root) {
     act(() => root?.unmount());
@@ -55,6 +59,7 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   runtime.native = true;
   runtime.ios = false;
@@ -84,7 +89,7 @@ function renderDrawer(onCopyMarkdown?: () => void): HTMLElement {
 
 describe('MobileFileViewerDrawer', () => {
   it.each([true, false])(
-    'resizes with the visual viewport and restores on hide (native: %s)',
+    'insets content with the visual viewport via paddingBottom and restores on hide (native: %s)',
     (native) => {
       runtime.native = native;
       const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
@@ -101,8 +106,13 @@ describe('MobileFileViewerDrawer', () => {
         act(() => {
           viewport.height = height;
           viewport.dispatchEvent(new Event('resize'));
+          vi.advanceTimersToNextFrame();
         });
-        expect(drawer.style.bottom).toBe(`${800 - height}px`);
+        expect(drawer.style.bottom).toBe('');
+        expect(drawer.style.paddingBottom).toBe('var(--lody-drawer-viewport-bottom, 0px)');
+        expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe(
+          `${800 - height}px`
+        );
         expect(drawer.style.height).toBe('');
         expect(document.activeElement).toBe(editor);
         expect(editor.value).toBe('# Example');
@@ -111,7 +121,7 @@ describe('MobileFileViewerDrawer', () => {
     }
   );
 
-  it('uses the native iOS keyboard inset without Vaul writing a second height', () => {
+  it('uses the native iOS keyboard inset via paddingBottom without Vaul writing a second height', () => {
     runtime.ios = true;
     const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
     vi.stubGlobal('visualViewport', viewport);
@@ -126,8 +136,10 @@ describe('MobileFileViewerDrawer', () => {
       act(() => {
         viewport.height = height;
         viewport.dispatchEvent(new Event('resize'));
+        vi.advanceTimersToNextFrame();
       });
-      expect(drawer.style.bottom).toBe('var(--native-keyboard-height, 0px)');
+      expect(drawer.style.bottom).toBe('');
+      expect(drawer.style.paddingBottom).toBe('var(--native-keyboard-height, 0px)');
       expect(drawer.style.height).toBe('');
       expect(document.activeElement).toBe(editor);
       expect(editor.value).toBe('# Example');
