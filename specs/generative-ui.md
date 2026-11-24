@@ -42,7 +42,8 @@ theme already in place.
 - **The React adapter** (`components/ai-gui/genui/`): `GenuiSurface` compiles
   the source, holds per-surface state across remounts, re-evaluates
   expressions on each committed state write, and maps tags through
-  `GENUI_CATALOG` to @lody/ui components.
+  `GENUI_CATALOG` to @lody/ui components. Only committed nodes reach the DOM:
+  the uncommitted streaming tail is withheld, not shown as raw markup.
 - **The catalog**: the complete list of tags the model may use. Unknown tags
   render as diagnostics, not DOM.
 - **Catalog delivery**: the model learns the DSL through progressive

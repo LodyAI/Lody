@@ -120,6 +120,15 @@ describe('compileSurfacePartial', () => {
     expect(parts[0]).toMatchObject({ kind: 'expr' });
   });
 
+  it('holds a half-written close tag as pending, never as text', () => {
+    for (const tail of ['</', '</b', '</bad']) {
+      const partial = compileSurfacePartial(`<badge>live${tail}`);
+      expect(partial.pending).toBe(tail);
+      const badge = kids(partial.view as UiElement)[0] as UiElement;
+      expect((badge.children[0] as UiText).parts).toEqual(['live']);
+    }
+  });
+
   it('auto-closes inner elements when an outer close tag arrives', () => {
     const partial = compileSurfacePartial('<card><text>hi</card>');
     const card = kids(partial.view as UiElement)[0] as UiElement;

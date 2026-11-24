@@ -103,6 +103,7 @@ function scanTag(view: string, start: number): TagScan {
   if (i >= view.length) return { kind: 'pending' };
   if (view[i] === '/') {
     i += 1;
+    if (i >= view.length) return { kind: 'pending' };
     if (view[i] === '>') return { kind: 'close', name: '#fragment', end: i + 1 };
     const name = read(TAG_NAME, view, i);
     if (name === null) return null;

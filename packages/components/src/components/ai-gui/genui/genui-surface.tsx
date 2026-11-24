@@ -59,14 +59,6 @@ const styles = stylex.create({
     color: colors.tertiaryLabel,
     fontStyle: 'italic',
   },
-  pending: {
-    color: colors.tertiaryLabel,
-    fontFamily: 'monospace',
-    fontSize: '0.75em',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-all',
-    opacity: 0.6,
-  },
 });
 
 function GenuiErrorView({ diagnostics }: { diagnostics: GenuiDiagnostic[] }) {
@@ -209,8 +201,6 @@ export function GenuiSurface({
   };
   const body = renderUiNode(surface.program.view, ctx, 0);
   const diagnostics = [...surface.diagnostics, ...ctx.diagnostics, ...eventDiagnostics.current];
-  const pending =
-    'pending' in program && typeof program.pending === 'string' ? program.pending : '';
   const empty =
     (surface.program.view.kind === 'text' && (surface.program.view.parts?.length ?? 0) === 0) ||
     (surface.program.view.kind === 'element' && surface.program.view.children.length === 0);
@@ -218,7 +208,6 @@ export function GenuiSurface({
   return (
     <div {...stylex.props(styles.surface)}>
       {fatal ? (fallback ?? <GenuiErrorView diagnostics={diagnostics} />) : body}
-      {pending !== '' ? <div {...stylex.props(styles.pending)}>{pending}</div> : null}
       {!fatal && fallback === undefined && diagnostics.length > 0 ? (
         <GenuiErrorView diagnostics={diagnostics.slice(0, 3)} />
       ) : null}
