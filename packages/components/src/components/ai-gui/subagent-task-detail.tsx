@@ -360,7 +360,6 @@ export function SubagentTaskDetail({
 
         <TaskActivity task={task} renderHistory={renderHistory} onHistoryReady={followEnd} />
 
-        {/* A legacy task has no steps; the one line the row shows is all it has. */}
         {!task.run && latest ? (
           <Section label={t('sessions.subagentTasks.latestAction', 'Latest')}>
             <p {...stylex.props(styles.sectionText)}>{latest}</p>

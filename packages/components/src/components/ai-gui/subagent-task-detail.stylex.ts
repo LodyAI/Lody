@@ -28,7 +28,6 @@ export const styles = stylex.create({
     margin: 0,
     paddingBlock: space[2],
     paddingInlineStart: space[3],
-    // Room for the copy button in the corner.
     paddingInlineEnd: '36px',
     backgroundColor: REGION,
     borderRadius: radius.medium,
