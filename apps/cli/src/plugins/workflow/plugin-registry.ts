@@ -32,6 +32,7 @@ const installation = z.object({
   dev: z.boolean(),
   enabled: z.boolean(),
   workflowReceipt: workflowApprovalReceipt.optional(),
+  workflowProjectId: z.string().min(1).optional(),
   pendingConfiguration: z.boolean().optional(),
   preferences: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
 });
@@ -300,6 +301,7 @@ export function registryLayer(
             item = {
               ...old!,
               workflowReceipt: undefined,
+              workflowProjectId: undefined,
               enabled: false,
               pendingConfiguration: false,
             };
@@ -461,7 +463,12 @@ export function registryLayer(
       return Registry.of({
         workflowLease: (id, instance) => {
           const item = items.get(id);
-          if (!item?.enabled || !item.workflowReceipt || !item.current.machineDigest)
+          if (
+            !item?.enabled ||
+            !item.workflowReceipt ||
+            !item.workflowProjectId ||
+            !item.current.machineDigest
+          )
             return undefined;
           const live = () => {
             const running = host.inspect(id);
@@ -550,11 +557,14 @@ export function registryLayer(
                   actor.targetDevice !== a.targetDevice
                 )
                   throw Error('Workflow approval forbidden');
+                if (a.action === 'revoke' && current.workflowProjectId !== a.projectId)
+                  return { type: r.method, active: false };
                 yield* commit(
                   id,
                   {
                     ...current,
                     workflowReceipt: a.action === 'grant' ? actor.workflowReceipt : undefined,
+                    workflowProjectId: a.action === 'grant' ? a.projectId : undefined,
                   },
                   () => {
                     if (
