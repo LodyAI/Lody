@@ -538,16 +538,20 @@ export class AutomationLedger {
   wait(id: string): AutomationWait | undefined {
     return this.read('waits', id);
   }
-  waits(userId: string | undefined, sessionId?: string): AutomationWait[] {
+  waits(userId: string | undefined, sessionId?: string, limit?: number): AutomationWait[] {
     const filters = [
       ...(userId === undefined ? [] : ['owner_user_id=?']),
       ...(sessionId === undefined ? [] : ['session_id=?']),
     ];
-    const args = [userId, sessionId].filter((value): value is string => value !== undefined);
+    const args: Array<string | number> = [userId, sessionId].filter(
+      (value): value is string => value !== undefined
+    );
+    const hasLimit = typeof limit === 'number' && Number.isSafeInteger(limit) && limit > 0;
+    if (hasLimit) args.push(limit);
     return (
       this.connection.raw
         .prepare(
-          `SELECT payload FROM waits ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''} ORDER BY created_at DESC,id`
+          `SELECT payload FROM waits ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''} ORDER BY created_at DESC,id${hasLimit ? ' LIMIT ?' : ''}`
         )
         .all(...args) as JsonRow[]
     ).map((row) => JSON.parse(row.payload) as AutomationWait);

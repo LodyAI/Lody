@@ -25,6 +25,10 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import {
+  isLocalSessionControlRequest,
+  isLocalSessionControlResponse,
+} from '@lody/shared/node/local-session-control';
 import type { SessionHistoryReader, SessionTurn } from '@lody/shared/session-data';
 import {
   extractChildDirectTailSummary,
@@ -1759,11 +1763,132 @@ describe('coordinator read cursors and <project_facts_delta>', () => {
         ],
       });
       expect(parsedResponse.success).toBe(true);
+      expect(
+        isLocalSessionControlRequest({
+          type: 'session/coordinator-diagnostics',
+          machineId: 'machine-1',
+          workspaceId,
+          sessionId: coordinatorId,
+        })
+      ).toBe(true);
+      expect(
+        isLocalSessionControlResponse({
+          type: 'session/coordinator-diagnostics_response',
+          sessionId: coordinatorId,
+          observedAt: 20_000,
+          cursors: storeDiag.cursors,
+          lastTurnDelta: storeDiag.lastTurnDelta,
+          operations: storeDiag.operations,
+          waits: [],
+        })
+      ).toBe(true);
 
       store2.deleteRequesterSession(coordinatorId);
       expect(store2.readCoordinatorCursors(coordinatorId).size).toBe(0);
       expect(store2.readCoordinatorTurnDelta(coordinatorId, 'coord-user-turn-3')).toBeUndefined();
       store2.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads long [from, to) child histories, aligns T<n> with standalone proposals, and only advances cursors for delivered updates', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'lody-coord-delta-budget-'));
+    const dbPath = path.join(dir, 'operations.sqlite3');
+    const workspaceId = 'ws-budget' as WorkspaceId;
+    const coordinatorId = 'coord-budget' as SessionId;
+    try {
+      const longTurns: SessionTurn[] = Array.from({ length: 20 }, (_, i) => ({
+        id: `turn-${i}`,
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        timestamp: new Date(1_000 + i * 100).toISOString(),
+        items: [{ type: 'text', text: i === 18 ? 'Latest direct tweak on turn 18' : `msg-${i}` }],
+        author:
+          i % 2 === 0
+            ? i === 18
+              ? { kind: 'human', userId: 'user-owner' }
+              : { kind: 'agent', sessionId: coordinatorId }
+            : undefined,
+      })) as unknown as SessionTurn[];
+      const longReader = {
+        count: () => longTurns.length,
+        readDirectory: (from: number, to: number) =>
+          longTurns.slice(from, to).map((t) => ({ turnId: t.id, scalars: { id: t.id } })),
+        readTurn: (turnId: string) => {
+          const turn = longTurns.find((t) => t.id === turnId);
+          return turn ? { state: 'ready' as const, turn } : { state: 'missing' as const };
+        },
+      } as unknown as SessionHistoryReader;
+
+      const tail = await extractChildDirectTailSummary({
+        history: longReader,
+        coordinatorSessionId: coordinatorId,
+        previousLatestUserMsgId: 'turn-16',
+      });
+      expect(tail.hasNonCoordinatorUserTurn).toBe(true);
+      expect(tail.directExchanges[0]?.userText).toContain('Latest direct tweak on turn 18');
+
+      const childMetas: SessionMeta[] = Array.from({ length: 7 }, (_, i) => ({
+        id: `child-b-${i + 1}` as SessionId,
+        machineId: 'machine-1' as MachineId,
+        userId: 'user-owner',
+        openedBySessionId: coordinatorId,
+        title: `Child ${i + 1}`,
+        createdAt: new Date(5_000 + i * 1_000).toISOString(),
+        cliType: 'builtin',
+        agentType: 'claude',
+        lastMessageAt: 20_000 + i * 100,
+        latestUserMsgId: `child-turn-${i + 1}`,
+      }));
+
+      const workItems = {
+        'wi-proposal-first': {
+          id: 'wi-proposal-first',
+          title: 'Earlier standalone proposal',
+          stage: 'proposed' as const,
+          createdAt: 1_000,
+          updatedAt: 1_000,
+        },
+      };
+
+      const store = new LodyOperationStore(dbPath, () => 30_000);
+      const readTail = async (sid: SessionId) => ({
+        hasNonCoordinatorUserTurn: true,
+        directExchanges: [{ userText: `Direct edit in ${sid}`, assistantText: `Done ${sid}` }],
+      });
+
+      const turn1 = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'budget-turn-1',
+        allSessionMetas: childMetas,
+        rawWorkItems: workItems,
+        cursorStore: store,
+        readChildTail: readTail,
+      });
+      expect(turn1).toContain('task="T8"');
+      expect(turn1).toContain('task="T3"');
+      expect(turn1).not.toContain('task="T1"');
+      expect(turn1).not.toContain('task="T2"');
+      expect(turn1).toContain('child-b-7');
+      expect(turn1).not.toContain('child-b-1');
+      expect(store.readCoordinatorCursors(coordinatorId).has('child-b-1')).toBe(false);
+
+      const turn2 = await resolveCoordinatorProjectFactsDelta({
+        workspaceId,
+        coordinatorSessionId: coordinatorId,
+        coordinatorUserId: 'user-owner',
+        userTurnId: 'budget-turn-2',
+        allSessionMetas: childMetas,
+        rawWorkItems: workItems,
+        cursorStore: store,
+        readChildTail: readTail,
+      });
+      expect(turn2).toContain('child-b-1');
+      expect(turn2).toContain('task="T2"');
+      expect(store.readCoordinatorCursors(coordinatorId).has('child-b-1')).toBe(true);
+      store.close();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

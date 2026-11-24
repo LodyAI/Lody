@@ -3,7 +3,6 @@ import {
   LODY_PRESENCE_TTL_MS,
   extractActionLinkedSessionIds,
   extractLinkedSessionIdsFromText,
-  findFreshSessionPresenceState,
   isCoordinatorCardStaleFromChildActivity,
   normalizeCoordinatorActionResolutions,
   normalizeCoordinatorActionSpecs,
@@ -119,7 +118,8 @@ export type CoordinatorObservabilityCursorStatus =
   | 'synced'
   | 'pending_turn_delta'
   | 'pending_pr_delta'
-  | 'unseeded';
+  | 'unseeded'
+  | 'unknown';
 
 export type CoordinatorObservabilityCursorAudit = {
   readonly sessionId: string;
@@ -364,6 +364,18 @@ export function buildCoordinatorObservabilitySnapshot(args: {
     }
   }
 
+  const freshStatusBySessionId = new Map<string, string>();
+  const freshStatusUpdatedAt = new Map<string, number>();
+  for (const entry of Object.values(presence)) {
+    if (entry.kind === 'session' && nowMs - entry.updatedAt <= LODY_PRESENCE_TTL_MS) {
+      const prev = freshStatusUpdatedAt.get(entry.sessionId);
+      if (prev === undefined || entry.updatedAt > prev) {
+        freshStatusUpdatedAt.set(entry.sessionId, entry.updatedAt);
+        freshStatusBySessionId.set(entry.sessionId, entry.status.type);
+      }
+    }
+  }
+
   let activeWorkerCount = 0;
   let pullRequestCount = 0;
   let shortestChildQuietMs: number | null = null;
@@ -398,8 +410,8 @@ export function buildCoordinatorObservabilitySnapshot(args: {
           : [];
 
     const members = rawMembers.map((m) => {
-      const live = findFreshSessionPresenceState(presence, m.session.id, nowMs);
-      const liveStatus = live?.status.type ?? (m.isWorking ? 'running' : null);
+      const liveStatus =
+        freshStatusBySessionId.get(m.session.id) ?? (m.isWorking ? 'running' : null);
       if (liveStatus === 'running') activeWorkerCount += 1;
       const lastMsg =
         typeof m.session.lastMessageAt === 'number' && m.session.lastMessageAt > 0
@@ -453,8 +465,10 @@ export function buildCoordinatorObservabilitySnapshot(args: {
       const livePrSig = buildPrDigestSignature(memberPrs);
 
       let status: CoordinatorObservabilityCursorStatus = 'synced';
-      if (!storedCursor) {
-        status = args.diagnostics ? 'unseeded' : 'synced';
+      if (!args.diagnostics) {
+        status = 'unknown';
+      } else if (!storedCursor) {
+        status = 'unseeded';
       } else if (
         member.latestUserMsgId &&
         member.latestUserMsgId !== (storedCursor.latestUserMsgId ?? null)

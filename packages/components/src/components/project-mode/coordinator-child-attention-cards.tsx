@@ -733,15 +733,17 @@ function PermissionCardContent({
 }
 
 function LiveChildAttentionCard({
-  row,
+  session,
+  taskNumber,
   onOpenTask,
 }: {
-  row: ProjectBoardRow & { session: NonNullable<ProjectBoardRow['session']> };
+  session: NonNullable<ProjectBoardRow['session']>;
+  taskNumber: number | null;
   onOpenTask: (sessionId: string) => void;
 }) {
   const { t } = useTranslation();
   const currentUser = useAtomValue(userAtom);
-  const childSessionId = row.session.id;
+  const childSessionId = session.id;
   const { history, addHistory } = useSessionDoc(childSessionId);
   const { availableTurns } = useConversationTail(history, { extendToLastUserTurn: true });
   const { respondToPermission, isReady } = usePermissionResponse();
@@ -758,34 +760,34 @@ function LiveChildAttentionCard({
   const activePermission = pendingPermissions[0] ?? null;
   const awaitingTextExcerpt = useMemo(
     () =>
-      !activePermission && typeof row.session.awaitingUserSince === 'number'
+      !activePermission && typeof session.awaitingUserSince === 'number'
         ? findLatestChildAssistantQuestion(availableTurns)
         : null,
-    [activePermission, availableTurns, row.session.awaitingUserSince]
+    [activePermission, availableTurns, session.awaitingUserSince]
   );
   const activeAttentionKey = activePermission
     ? `perm:${activePermission.turnId}:${activePermission.permission.requestId}`
     : awaitingTextExcerpt
-      ? `await:${String(row.session.awaitingUserSince)}`
+      ? `await:${String(session.awaitingUserSince)}`
       : null;
 
   if (activeAttentionKey && dismissedKey === activeAttentionKey) {
     return null;
   }
 
-  const taskTitle = row.session.title?.trim() || t('sessions.untitled', 'Untitled session');
-  const taskTag = formatTaskNumber(row.taskNumber);
+  const taskTitle = session.title?.trim() || t('sessions.untitled', 'Untitled session');
+  const taskTag = formatTaskNumber(taskNumber);
 
   const dispatchMessageToChild = async (prompt: string) => {
     const trimmed = prompt.trim();
-    const userId = currentUser?.id ?? row.session.userId;
+    const userId = currentUser?.id ?? session.userId;
     if (!trimmed || !userId) return;
     const inputConfig = buildSessionTurnInputConfig({
       prompt: trimmed,
       inputBlocks: [{ type: 'text', text: trimmed }],
-      cliType: row.session.cliType,
-      agentType: row.session.agentType,
-      ...(row.session.acpSessionId ? { resume: row.session.acpSessionId } : {}),
+      cliType: session.cliType,
+      agentType: session.agentType,
+      ...(session.acpSessionId ? { resume: session.acpSessionId } : {}),
     });
     await addHistory(
       {
@@ -910,7 +912,7 @@ function LiveChildAttentionCard({
   if (activePermission) {
     return (
       <PermissionCardContent
-        taskNumber={row.taskNumber}
+        taskNumber={taskNumber}
         taskTitle={taskTitle}
         toolCall={activePermission.toolCall}
         permission={activePermission.permission}
@@ -1041,14 +1043,33 @@ function LiveChildAttentionCard({
  */
 export function CoordinatorChildAttentionCards() {
   const coordinator = useCoordinatorConversation();
-  const needsYouRows = useMemo(() => {
+  const needsYouTargets = useMemo(() => {
     if (!coordinator) return [];
-    const list: Array<ProjectBoardRow & { session: NonNullable<ProjectBoardRow['session']> }> = [];
+    const list: Array<{
+      session: NonNullable<ProjectBoardRow['session']>;
+      taskNumber: number | null;
+      latestMessageAt: number;
+    }> = [];
     const seen = new Set<string>();
     for (const row of coordinator.tasks.values()) {
-      if (row.bucket === 'needsYou' && row.session && !seen.has(row.session.id)) {
+      const blockedMembers = row.members.filter((m) => m.bucket === 'needsYou');
+      if (blockedMembers.length > 0) {
+        for (const member of blockedMembers) {
+          if (seen.has(member.session.id)) continue;
+          seen.add(member.session.id);
+          list.push({
+            session: member.session,
+            taskNumber: row.taskNumber,
+            latestMessageAt: member.latestMessageAt,
+          });
+        }
+      } else if (row.bucket === 'needsYou' && row.session && !seen.has(row.session.id)) {
         seen.add(row.session.id);
-        list.push(row as ProjectBoardRow & { session: NonNullable<ProjectBoardRow['session']> });
+        list.push({
+          session: row.session,
+          taskNumber: row.taskNumber,
+          latestMessageAt: row.latestMessageAt,
+        });
       }
     }
     list.sort((a, b) => b.latestMessageAt - a.latestMessageAt);
@@ -1056,7 +1077,10 @@ export function CoordinatorChildAttentionCards() {
   }, [coordinator]);
 
   const previewItems = coordinator?.previewChildAttention;
-  if (!coordinator || (needsYouRows.length === 0 && (!previewItems || previewItems.length === 0))) {
+  if (
+    !coordinator ||
+    (needsYouTargets.length === 0 && (!previewItems || previewItems.length === 0))
+  ) {
     return null;
   }
 
@@ -1080,10 +1104,11 @@ export function CoordinatorChildAttentionCards() {
             }}
           />
         ))}
-        {needsYouRows.map((row) => (
+        {needsYouTargets.map((target) => (
           <LiveChildAttentionCard
-            key={row.session.id}
-            row={row}
+            key={target.session.id}
+            session={target.session}
+            taskNumber={target.taskNumber}
             onOpenTask={coordinator.openTask}
           />
         ))}

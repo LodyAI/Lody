@@ -7781,7 +7781,6 @@ export const SessionChatInterface = memo(
           machineId={session.machineId}
           history={sessionHistory}
           conversationView={conversationView ?? null}
-          conversationVersion={conversationVersion}
         />
       ) : null;
 

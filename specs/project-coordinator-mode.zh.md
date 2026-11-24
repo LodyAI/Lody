@@ -62,8 +62,13 @@ flowchart TB
 
 `WorkItem` 是介于 `Project` 与 `Session` 之间的一等任务单元：
 
-- **成员编组（`1..N` 个子对话）**：普通单对话任务无需额外工具调用，自动以自身 `sessionId` 构成隐式单成员 `WorkItem`，界面保持单行极简展示；当多个子对话围绕同一目标协作（如 `implement` + `review` 流水线，或多仓库并行修改）时，协调者通过 `workItemId` 将它们归入同一任务组，并可标记各自的 `workItemRole`。将既有单对话任务升级为多对话任务组时，直接复用原主对话的 `sessionId` 作为 `workItemId`，其 `T<n>` 编号保持不变。
-- **状态与多产物聚合**：`WorkItem` 汇总组内所有成员的运行态计算分桶（`needsYou`、`working`、`review`、`accepted`），对所有成员关联的跨仓库 PR 取去重并集（`pullRequests[]`），并支持挂载通用的 `externalRefs[]`（如外部 Issue、预览链接等）。验收（Accept）一个任务组会一并标记并归档组内全部成员对话。
+- **成员编组（`0..N` 个子对话）**：`WorkItem` 支持以 `0` 个子对话起步作为独立黑板任务卡（如 `stage: "proposed"` 等待用户确认，或协调者直接跟进事项），也可由单对话任务隐式构成，或通过 `lody_coordinator_work_item` 将 `2..N` 个协作子对话（含同用户手动创建并显式绑定的成员）编入同一 `workItemId` 并标注 `workItemRole`。看板、`<project_facts_delta>` 与 CodeMode 守望共用 `@lody/shared` 的统一成员资格与 `T<n>` 编号内核，确认提案或扩编小队时沿用原 `workItemId` 即可保持编号一致。
+- **统一状态优先级与多产物聚合**：看板分桶（`needsYou`、`working`、`review`、`accepted`）与卡片阶段（`proposed`、`working`、`blocked`、`review`、`done`）由同一状态机派生：
+  1. `needsYou` 优先级最高：任一成员待用户介入、协调者显式标为 `blocked`（即便同组其他成员仍在运行）或 `proposed` 待确认时，均进入 `needsYou`。
+  2. `working`：任一成员正在运行（或独立卡处于 `working`）。
+  3. `accepted`：含成员的任务组仅在全部成员已归档/验收或 `acceptedAt >= latestMessageAt` 时处于 `accepted`；验收后产生的新活动会自动使验收失效并回到 `review`。独立任务卡以 `stage: "done"` 或 `acceptedAt` 判定完成。
+  4. `review`：其余默认待审阅状态。
+  任务卡汇总跨仓库 PR 去重并集（以多人头像式半重叠 PR 堆叠展示），承载可选 `summary`、`progressNote`、`pendingAction` 与 `externalRefs[]`，整组验收会一并归档组内全部成员对话。
 - **协作模式（`delegated` | `direct`）**：
   - `delegated`（托管模式）：协调者负责派发简报、回收回执并生成下一步预测卡片。
   - `direct`（直连共创模式）：面对高歧义方案共创、复杂交互打磨或多轮高频微调时，协调者先为子对话注入背景，主动建议用户在右侧面板与子对话直接沟通，自身退居后台守望，避免中间传话损耗。
@@ -90,7 +95,7 @@ flowchart TB
 
 路由内核不包含任何硬编码的业务状态枚举（例如不把 GitHub PR 状态写死在内核中）：
 
-- **按需懒摘要（`diff(cursor..head)`）**：用户在子会话内的日常多轮直连交流不唤醒协调者。当协调者下一次开启回合时，宿主机先在纯内存中对比 `SessionMeta` 与本地 `cursor` 筛出变动的子会话，仅对最近活跃的 Top-K 会话做有界并发（`<= 4`）的尾部瞬时读取生成紧凑增量摘要，并推进 `cursor`。
+- **按需懒摘要（`diff(cursor..head)`）**：用户在子会话内的日常多轮直连交流不唤醒协调者。当协调者下一次开启回合时，宿主机先在纯内存中对比 `SessionMeta` 与本地 `cursor` 筛出变动的子会话，仅对最近活跃的 Top-K 会话做有界并发（`<= 4`）的尾部瞬时读取生成紧凑增量摘要；**仅对已确认无变更或已实际写入本轮 `deltaText` 的子会话推进 `cursor`**，因单轮配额、尾读失败或字符预算截断而未送达的更新保留旧游标留待下一轮补读。
 - **可编程守望探针（`CodeMode`）**：“什么算有进展”由运行在 `lody_automation` 沙箱中的轻量 JS 谓词按任务目标决定（可读取 `ctx.read` / `ctx.exec` / `ctx.fetch` 暴露的 PR、文件、测试结果或外部插件资源），命中时返回通用唤醒信号，未命中返回 `false`。
 - **物理注意力闸门**：协调者自派 `Operation` 结束、子会话无人值守卡死/报错、以及守望探针命中统一经过物理注意力过滤——若用户此刻正聚焦在该子会话面板上则抑制唤醒，并在短防抖窗口内合并同批唤醒；若窗口期内用户已亲手在子会话发消息接管，则自动抵消挂起的唤醒。
 

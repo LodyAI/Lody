@@ -547,7 +547,7 @@ describe('project board', () => {
           updatedAt: nowMs - 1_000,
         },
         runner: {
-          kind: 'session-status',
+          kind: 'session',
           sessionId: 'delegated-worker' as SessionId,
           status: { type: 'running' },
           updatedAt: nowMs - 500,
@@ -690,5 +690,103 @@ describe('project board', () => {
       draft: 0,
       open: 2,
     });
+  });
+
+  it('keeps blocked tasks in needsYou while siblings run, invalidates acceptance on new activity, includes manually grouped members, and marks disconnected cursors unknown', () => {
+    const impl = session('impl-1', {
+      openedBySessionId: coordinator.id as SessionId,
+      workItemId: 'wi-squad',
+      workItemRole: 'implement',
+      createdAt: '2026-11-12T00:01:00.000Z',
+      lastMessageAt: 500,
+    });
+    const manualReviewer = session('manual-review-1', {
+      workItemId: 'wi-squad',
+      workItemRole: 'review',
+      createdAt: '2026-11-12T00:02:00.000Z',
+      lastMessageAt: 600,
+      pullRequests: [
+        {
+          url: 'https://github.com/LodyAI/lody/pull/3400',
+          repoFullName: 'LodyAI/lody',
+          number: 3400,
+          status: 'open',
+        },
+      ],
+    });
+    const reactivated = session('reactivated-1', {
+      openedBySessionId: coordinator.id as SessionId,
+      workItemId: 'reactivated-1',
+      createdAt: '2026-11-12T00:03:00.000Z',
+      lastMessageAt: 900,
+      coordinatorTaskAcceptedAt: 400,
+    });
+
+    const allSessions = [coordinator, impl, manualReviewer, reactivated];
+    const workItems = {
+      'wi-squad': {
+        id: 'wi-squad',
+        title: 'Squad blocked on decision',
+        stage: 'blocked' as const,
+        createdAt: Date.parse('2026-11-12T00:01:00.000Z'),
+        updatedAt: 600,
+      },
+      'reactivated-1': {
+        id: 'reactivated-1',
+        title: 'Previously done then re-activated',
+        stage: 'done' as const,
+        acceptedAt: 400,
+        createdAt: Date.parse('2026-11-12T00:03:00.000Z'),
+        updatedAt: 400,
+      },
+    };
+
+    const result = buildProjectBoard({
+      sessions: allSessions,
+      childSessionsByParent: buildChildSessionsByParent(allSessions),
+      project,
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      liveSessionStatuses: new Map([['impl-1', { type: 'running' }]]),
+      sendStates: {},
+      workItems,
+    });
+
+    expect(result.needsYou).toHaveLength(1);
+    expect(result.needsYou[0]).toMatchObject({
+      workItemId: 'wi-squad',
+      bucket: 'needsYou',
+      stage: 'blocked',
+    });
+    expect(result.needsYou[0]!.members.map((m) => m.session.id)).toEqual([
+      'impl-1',
+      'manual-review-1',
+    ]);
+    expect(result.needsYou[0]!.pullRequests.map((p) => p.number)).toEqual([3400]);
+
+    expect(result.accepted).toHaveLength(0);
+    expect(result.review).toHaveLength(1);
+    expect(result.review[0]).toMatchObject({
+      workItemId: 'reactivated-1',
+      bucket: 'review',
+      stage: 'review',
+    });
+
+    const tasksById = new Map<string, (typeof result.needsYou)[number]>();
+    for (const row of Object.values(result).flat()) {
+      tasksById.set(row.workItemId, row);
+      for (const m of row.members) tasksById.set(m.session.id, row);
+    }
+    const disconnectedSnapshot = buildCoordinatorObservabilitySnapshot({
+      coordinatorSessionId: coordinator.id,
+      currentUserId: 'user-1',
+      history: [],
+      tasksById,
+      rawWorkItems: workItems,
+      diagnostics: null,
+      nowMs: 1_000,
+    });
+    expect(disconnectedSnapshot.diagnosticsConnected).toBe(false);
+    expect(disconnectedSnapshot.cursorAudits.every((c) => c.status === 'unknown')).toBe(true);
   });
 });

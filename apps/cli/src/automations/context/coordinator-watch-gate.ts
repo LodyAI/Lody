@@ -1,13 +1,14 @@
 import {
   deriveSessionPullRequestReadiness,
-  findFreshSessionPresenceState,
+  isSessionOwnedByCoordinatorWorkItems,
   LODY_PRESENCE_TTL_MS,
   normalizeCoordinatorWorkItemsMap,
+  resolveCoordinatorWorkItemNumbers,
+  resolveEffectiveWorkItemId,
   resolveSessionPullRequests,
   type CoordinatorExternalRef,
   type CoordinatorWorkItemDoc,
   type LodyPresenceStateMap,
-  type SessionId,
   type SessionMeta,
 } from '@lody/shared';
 import type {
@@ -114,20 +115,30 @@ export async function readCoordinatorWorkItemsSnapshot(args: {
 
   const managedMetas = aliveRows
     .map((row) => row.meta)
-    .filter((child) => {
-      if (!child || child.id === coordinatorMeta.id || child.parentSessionId) return false;
-      if (child.userId !== ownerUserId) return false;
-      if (child.openedBySessionId === coordinatorMeta.id) return true;
-      const wid = child.workItemId?.trim();
-      return Boolean(wid && workItems[wid]);
-    });
+    .filter(
+      (child): child is SessionMeta =>
+        Boolean(child) &&
+        child.userId === ownerUserId &&
+        isSessionOwnedByCoordinatorWorkItems(child, coordinatorMeta.id, workItems)
+    );
 
   const presenceStates = manager.getPresenceStates() ?? {};
   const viewedByOwner = collectOwnerViewedSessionIds(presenceStates, ownerUserId, now);
+  const freshStatusBySessionId = new Map<string, string>();
+  for (const state of Object.values(presenceStates)) {
+    if (state.kind === 'session' && now - state.updatedAt <= LODY_PRESENCE_TTL_MS) {
+      freshStatusBySessionId.set(state.sessionId, state.status.type);
+    }
+  }
 
+  const taskNumbers = resolveCoordinatorWorkItemNumbers(
+    managedMetas,
+    coordinatorMeta.id,
+    workItems
+  );
   const grouped = new Map<string, { earliestMs: number; members: SessionMeta[] }>();
   for (const child of managedMetas) {
-    const wid = resolveWorkItemId(child);
+    const wid = resolveEffectiveWorkItemId(child);
     const ts = createdEpochMs(child);
     const existing = grouped.get(wid);
     if (existing) {
@@ -144,6 +155,12 @@ export async function readCoordinatorWorkItemsSnapshot(args: {
     }
   }
 
+  for (const [wid, doc] of Object.entries(workItems)) {
+    if (grouped.has(wid)) continue;
+    if (typeof doc.archivedAt === 'number') continue;
+    grouped.set(wid, { earliestMs: doc.createdAt || 0, members: [] });
+  }
+
   const orderedGroups = [...grouped.entries()].sort(
     ([idA, a], [idB, b]) => a.earliestMs - b.earliestMs || idA.localeCompare(idB)
   );
@@ -152,12 +169,7 @@ export async function readCoordinatorWorkItemsSnapshot(args: {
   orderedGroups.forEach(([workItemId, group], index) => {
     if (out.length >= MAX_OBSERVED_WORK_ITEMS) return;
     const doc: CoordinatorWorkItemDoc | undefined = workItems[workItemId];
-    const taskNumber =
-      typeof doc?.taskNumber === 'number' &&
-      Number.isSafeInteger(doc.taskNumber) &&
-      doc.taskNumber > 0
-        ? doc.taskNumber
-        : index + 1;
+    const taskNumber = taskNumbers.get(workItemId) ?? index + 1;
 
     if (parameters.workItemId && parameters.workItemId !== workItemId) {
       const matchesMember = group.members.some((m) => m.id === parameters.workItemId);
@@ -190,7 +202,7 @@ export async function readCoordinatorWorkItemsSnapshot(args: {
           child.coordinatorTaskAcceptedAt >= latestAt);
       if (!memberAccepted) allAccepted = false;
 
-      const livePresence = findFreshSessionPresenceState(presenceStates, child.id, now);
+      const liveStatus = freshStatusBySessionId.get(child.id) ?? null;
       const memberPrs: ObservedCoordinatorPullRequest[] = resolveSessionPullRequests(child).map(
         (pr) => {
           const state = child.pullRequestState?.[pr.url] ?? null;
@@ -215,7 +227,7 @@ export async function readCoordinatorWorkItemsSnapshot(args: {
         sessionId: child.id,
         role: child.workItemRole?.trim() || null,
         title: child.title?.trim() || null,
-        status: livePresence?.status.type ?? null,
+        status: liveStatus,
         userViewing: viewedByOwner.has(child.id),
         latestInputId: child.latestUserMsgId ?? null,
         lastHandledInputId: child.lastHandledUserMsgId ?? null,

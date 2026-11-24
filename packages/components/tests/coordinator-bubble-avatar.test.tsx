@@ -446,6 +446,8 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
       adjustBtn!.click();
     });
     expect(sentPrompts[0]).toContain('T1 拆分认证中间件重构');
+    expect(sentPrompts[0]).toContain('[workItemId=wi-prop-1]');
     expect(prefilledPrompts[0]).toContain('T1 拆分认证中间件重构');
+    expect(prefilledPrompts[0]).toContain('[workItemId=wi-prop-1]');
   });
 });

@@ -1,8 +1,11 @@
 import {
   deriveSessionPullRequestReadiness,
+  isSessionOwnedByCoordinatorWorkItems,
   normalizeCoordinatorWorkItemsMap,
   normalizeSessionTurnInputConfig,
   readMessageAuthor,
+  resolveCoordinatorWorkItemNumbers,
+  resolveEffectiveWorkItemId,
   type CoordinatorWorkItemDoc,
   type SessionId,
   type SessionMeta,
@@ -174,7 +177,7 @@ export async function extractChildDirectTailSummary(args: {
   }
   const windowSize = Math.min(total, MAX_TAIL_DIRECTORY_TURNS);
   const start = Math.max(0, total - windowSize);
-  const directory = await args.history.readDirectory(start, windowSize);
+  const directory = await args.history.readDirectory(start, total);
 
   let startIdx = 0;
   if (args.previousLatestUserMsgId) {
@@ -253,45 +256,11 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function buildCoordinatorWorkItemNumbers(
-  childMetas: readonly SessionMeta[],
-  workItems: Readonly<Record<string, CoordinatorWorkItemDoc>>
-): Map<string, number> {
-  const groups = new Map<string, number>();
-  for (const meta of childMetas) {
-    const wid = resolveWorkItemId(meta);
-    const ts = createdEpochMs(meta);
-    const prev = groups.get(wid);
-    if (prev === undefined) {
-      const docCreated = workItems[wid]?.createdAt;
-      groups.set(
-        wid,
-        ts > 0 ? ts : typeof docCreated === 'number' && docCreated > 0 ? docCreated : 0
-      );
-    } else if (ts > 0 && (prev === 0 || ts < prev)) {
-      groups.set(wid, ts);
-    }
-  }
-  const ordered = [...groups.entries()].sort(
-    ([idA, tsA], [idB, tsB]) => tsA - tsB || idA.localeCompare(idB)
-  );
-  const numbers = new Map<string, number>();
-  ordered.forEach(([wid], index) => {
-    const explicit = workItems[wid]?.taskNumber;
-    numbers.set(
-      wid,
-      typeof explicit === 'number' && Number.isSafeInteger(explicit) && explicit > 0
-        ? explicit
-        : index + 1
-    );
-  });
-  return numbers;
-}
-
 /**
  * Computes a bounded, factual `<project_facts_delta>` block from changes across
  * coordinator-managed child conversations since the coordinator's local SQLite
- * read cursor, and atomically advances the cursor for `userTurnId`.
+ * read cursor, and atomically advances cursors ONLY for facts that were either
+ * confirmed no-op or actually delivered in `deltaText`.
  *
  * Re-evaluating the same `(coordinatorSessionId, userTurnId)` returns the cached
  * delta so turn startup retries never drop unseen facts.
@@ -320,13 +289,12 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
   if (!args.coordinatorUserId) return undefined;
   const workItems = normalizeCoordinatorWorkItemsMap(args.rawWorkItems);
 
-  const managedMetas = args.allSessionMetas.filter((meta) => {
-    if (!meta || meta.id === args.coordinatorSessionId || meta.parentSessionId) return false;
-    if (meta.userId !== args.coordinatorUserId) return false;
-    if (meta.openedBySessionId === args.coordinatorSessionId) return true;
-    const explicitWid = meta.workItemId?.trim();
-    return Boolean(explicitWid && workItems[explicitWid]);
-  });
+  const managedMetas = args.allSessionMetas.filter(
+    (meta) =>
+      Boolean(meta) &&
+      meta.userId === args.coordinatorUserId &&
+      isSessionOwnedByCoordinatorWorkItems(meta, args.coordinatorSessionId, workItems)
+  );
 
   const priorCursors = args.cursorStore.readCoordinatorCursors(args.coordinatorSessionId);
   const aliveIds = new Set(managedMetas.map((m) => m.id));
@@ -343,7 +311,11 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
     return undefined;
   }
 
-  const taskNumbers = buildCoordinatorWorkItemNumbers(managedMetas, workItems);
+  const taskNumbers = resolveCoordinatorWorkItemNumbers(
+    managedMetas,
+    args.coordinatorSessionId,
+    workItems
+  );
 
   type CandidateSession = {
     meta: SessionMeta;
@@ -359,10 +331,10 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
   };
 
   const candidates: CandidateSession[] = [];
-  const nextCursors: CoordinatorReadCursorInput[] = [];
+  const committedCursorsById = new Map<string, CoordinatorReadCursorInput>();
 
   for (const meta of managedMetas) {
-    const workItemId = resolveWorkItemId(meta);
+    const workItemId = resolveEffectiveWorkItemId(meta);
     const workItemDoc = workItems[workItemId];
     const statusSignature = buildStatusSignature(meta, workItemDoc);
     const prSignature = buildPrSignature(meta);
@@ -374,7 +346,6 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
       statusSignature,
       prSignature,
     };
-    nextCursors.push(nextCursor);
 
     const prior = priorCursors.get(meta.id);
     const msgChanged = Boolean(
@@ -404,14 +375,16 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
         statusChanged,
         activityAt,
       });
+    } else {
+      committedCursorsById.set(meta.id, nextCursor);
     }
   }
 
   candidates.sort((a, b) => b.activityAt - a.activityAt);
 
-  const tailTargets = args.readChildTail
-    ? candidates.filter((c) => c.msgChanged).slice(0, MAX_DELTA_TAIL_READ_SESSIONS)
-    : [];
+  const tailEligible = args.readChildTail ? candidates.filter((c) => c.msgChanged) : [];
+  const tailTargets = tailEligible.slice(0, MAX_DELTA_TAIL_READ_SESSIONS);
+  const tailTargetIds = new Set(tailTargets.map((c) => c.meta.id));
   const tailSummaries = new Map<string, ChildDirectTailSummary>();
 
   if (tailTargets.length > 0 && args.readChildTail) {
@@ -437,11 +410,22 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
     }
   }
 
-  const lines: string[] = [];
+  const candidateBlocks: Array<{
+    candidate: CandidateSession;
+    block: string;
+    tailDeferred: boolean;
+  }> = [];
   for (const candidate of candidates) {
+    const needsTailRead = Boolean(args.readChildTail && candidate.msgChanged);
+    const tailDeferred =
+      needsTailRead &&
+      (!tailTargetIds.has(candidate.meta.id) || !tailSummaries.has(candidate.meta.id));
     const tail = tailSummaries.get(candidate.meta.id);
     const hasDirectTurn = Boolean(tail?.hasNonCoordinatorUserTurn);
     if (!hasDirectTurn && !candidate.prChanged && !candidate.statusChanged) {
+      if (!tailDeferred) {
+        committedCursorsById.set(candidate.meta.id, candidate.nextCursor);
+      }
       continue;
     }
 
@@ -488,17 +472,27 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
         ? `<session_update ${attrs.join(' ')}>\n${detailLines.join('\n')}\n</session_update>`
         : `<session_update ${attrs.join(' ')} />`;
 
-    lines.push(entryBlock);
+    candidateBlocks.push({ candidate, block: entryBlock, tailDeferred });
   }
 
   let deltaText = '';
-  if (lines.length > 0) {
+  if (candidateBlocks.length > 0) {
     const assembled: string[] = ['<project_facts_delta>'];
     let currentLen = assembled[0]!.length + '\n</project_facts_delta>'.length;
-    for (const block of lines) {
+    for (const { candidate, block, tailDeferred } of candidateBlocks) {
       if (currentLen + block.length + 1 > MAX_DELTA_BLOCK_CHARS) break;
       assembled.push(block);
       currentLen += block.length + 1;
+      if (tailDeferred) {
+        committedCursorsById.set(candidate.meta.id, {
+          ...candidate.nextCursor,
+          ...(candidate.priorCursor?.latestUserMsgId
+            ? { latestUserMsgId: candidate.priorCursor.latestUserMsgId }
+            : { latestUserMsgId: undefined }),
+        });
+      } else {
+        committedCursorsById.set(candidate.meta.id, candidate.nextCursor);
+      }
     }
     if (assembled.length > 1) {
       assembled.push('</project_facts_delta>');
@@ -510,7 +504,7 @@ export async function resolveCoordinatorProjectFactsDelta(args: {
     coordinatorSessionId: args.coordinatorSessionId,
     userTurnId: args.userTurnId,
     deltaText,
-    cursors: nextCursors,
+    cursors: [...committedCursorsById.values()],
     removedTargetIds,
   });
 

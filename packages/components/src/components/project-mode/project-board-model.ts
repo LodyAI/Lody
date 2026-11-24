@@ -1,6 +1,10 @@
 import {
+  deriveCoordinatorWorkItemState,
   isCoordinatorSession,
+  isSessionOwnedByCoordinatorWorkItems,
   normalizeCoordinatorWorkItemsMap,
+  resolveCoordinatorWorkItemNumbers,
+  resolveEffectiveWorkItemId,
   resolveSessionPrimaryPullRequest,
   resolveSessionPullRequestViews,
   type CoordinatorCollaborationMode,
@@ -79,12 +83,7 @@ export function findProjectCoordinatorSession(
 
 const createdTime = (session: SessionMeta): number => Date.parse(session.createdAt) || 0;
 
-export function resolveEffectiveWorkItemId(
-  session: Pick<SessionMeta, 'id' | 'workItemId'>
-): string {
-  const explicit = session.workItemId?.trim();
-  return explicit && explicit.length > 0 ? explicit : session.id;
-}
+export { resolveEffectiveWorkItemId };
 
 /**
  * Ordered pull requests associated with one conversation: primary PR first,
@@ -227,65 +226,17 @@ export function summarizeProjectBoardPullRequests(
 
 export type ProjectBoard = Record<ProjectBoardBucket, ProjectBoardRow[]>;
 
-const isOpenedBy = (session: SessionMeta, coordinatorSessionId: string | null): boolean =>
-  coordinatorSessionId !== null &&
-  (session.openedBySessionId === coordinatorSessionId ||
-    session.openedByRootSessionId === coordinatorSessionId);
-
 /**
- * Stable task numbers: every `WorkItem` (implicit solo session or multi-session
- * group) the coordinator opened, archived ones included, numbered by earliest
- * creation time so adding a reviewer or collaborator session to an existing
- * work item never shifts `T<n>` numbers.
- *
- * Indexes both `workItemId -> number` and `memberSessionId -> number`.
+ * Stable task numbers: delegates to the shared `@lody/shared` WorkItem numbering
+ * kernel so the Project Board, `<project_facts_delta>`, and CodeMode watches
+ * always assign identical `T1..Tn` numbers across all `0..N`-member WorkItems.
  */
 export function buildCoordinatorTaskNumbers(
   sessions: readonly SessionMeta[],
   coordinatorSessionId: string | null,
   workItems?: Readonly<Record<string, CoordinatorWorkItemDoc>>
 ): Map<string, number> {
-  const groups = new Map<string, { earliestMs: number; memberIds: string[] }>();
-  for (const session of sessions) {
-    if (session.parentSessionId || !isOpenedBy(session, coordinatorSessionId)) continue;
-    const workItemId = resolveEffectiveWorkItemId(session);
-    const ts = createdTime(session);
-    const existing = groups.get(workItemId);
-    if (existing) {
-      if (ts > 0 && (existing.earliestMs === 0 || ts < existing.earliestMs)) {
-        existing.earliestMs = ts;
-      }
-      existing.memberIds.push(session.id);
-    } else {
-      const docCreated = workItems?.[workItemId]?.createdAt;
-      const initialEarliest =
-        ts > 0 ? ts : typeof docCreated === 'number' && docCreated > 0 ? docCreated : 0;
-      groups.set(workItemId, { earliestMs: initialEarliest, memberIds: [session.id] });
-    }
-  }
-
-  for (const [workItemId, doc] of Object.entries(workItems ?? {})) {
-    if (groups.has(workItemId)) continue;
-    const docCreated = typeof doc?.createdAt === 'number' && doc.createdAt > 0 ? doc.createdAt : 0;
-    groups.set(workItemId, { earliestMs: docCreated, memberIds: [] });
-  }
-
-  const ordered = [...groups.entries()].sort(
-    ([idA, a], [idB, b]) => a.earliestMs - b.earliestMs || idA.localeCompare(idB)
-  );
-  const result = new Map<string, number>();
-  ordered.forEach(([workItemId, group], index) => {
-    const explicitNum = workItems?.[workItemId]?.taskNumber;
-    const num =
-      typeof explicitNum === 'number' && Number.isSafeInteger(explicitNum) && explicitNum > 0
-        ? explicitNum
-        : index + 1;
-    result.set(workItemId, num);
-    for (const memberId of group.memberIds) {
-      result.set(memberId, num);
-    }
-  });
-  return result;
+  return resolveCoordinatorWorkItemNumbers(sessions, coordinatorSessionId, workItems);
 }
 
 /** Accepted only while nothing happened in the task after the user accepted it. */
@@ -344,11 +295,10 @@ export function buildProjectBoard(options: {
   const membersByWorkItem = new Map<string, ProjectBoardSessionMember[]>();
 
   for (const session of options.sessions) {
-    if (session.parentSessionId) continue;
-    if (session.id === coordinatorSessionId) continue;
     if (!isSessionInMyScope(session, options.currentUserId)) continue;
-    if (isCoordinatorSession(session)) continue;
-    if (!isOpenedBy(session, coordinatorSessionId)) continue;
+    if (!isSessionOwnedByCoordinatorWorkItems(session, coordinatorSessionId, normalizedWorkItems)) {
+      continue;
+    }
     const workItemId = resolveEffectiveWorkItemId(session);
     const workItemDoc = normalizedWorkItems[workItemId];
     const isAcceptedArchive =
@@ -408,29 +358,11 @@ export function buildProjectBoard(options: {
         ? 'sending'
         : (lead.sendState ?? null);
 
-    const groupAcceptedByTimestamp =
-      typeof workItemDoc?.acceptedAt === 'number' && workItemDoc.acceptedAt >= latestMessageAt;
-    const explicitStage = workItemDoc?.stage;
-    const hasChildNeedsYou = members.some((m) => m.bucket === 'needsYou');
-    const hasChildWorking = members.some((m) => m.bucket === 'working');
-    const allChildAccepted = members.every((m) => m.bucket === 'accepted');
-    const bucket: ProjectBoardBucket = hasChildNeedsYou
-      ? 'needsYou'
-      : hasChildWorking
-        ? 'working'
-        : explicitStage === 'proposed' || explicitStage === 'blocked'
-          ? 'needsYou'
-          : groupAcceptedByTimestamp || allChildAccepted || explicitStage === 'done'
-            ? 'accepted'
-            : 'review';
-    const stage: CoordinatorWorkItemStage =
-      bucket === 'accepted'
-        ? 'done'
-        : hasChildWorking
-          ? 'working'
-          : hasChildNeedsYou
-            ? 'blocked'
-            : (explicitStage ?? (bucket === 'review' ? 'review' : 'working'));
+    const { bucket, stage } = deriveCoordinatorWorkItemState({
+      workItemDoc,
+      memberBuckets: members.map((m) => m.bucket),
+      latestMessageAt,
+    });
 
     const pullRequests: SessionPullRequestView[] = [];
     const seenPrUrls = new Set<string>();
@@ -477,18 +409,12 @@ export function buildProjectBoard(options: {
   for (const [workItemId, workItemDoc] of Object.entries(normalizedWorkItems)) {
     if (membersByWorkItem.has(workItemId)) continue;
     if (typeof workItemDoc.archivedAt === 'number' && !options.includeArchived) continue;
-    const isDone = workItemDoc.stage === 'done' || typeof workItemDoc.acceptedAt === 'number';
-    const stage: CoordinatorWorkItemStage = isDone
-      ? 'done'
-      : (workItemDoc.stage ?? (workItemDoc.pendingAction ? 'proposed' : 'review'));
-    const bucket: ProjectBoardBucket = isDone
-      ? 'accepted'
-      : stage === 'proposed' || stage === 'blocked'
-        ? 'needsYou'
-        : stage === 'working'
-          ? 'working'
-          : 'review';
     const latestMessageAt = Math.max(workItemDoc.updatedAt || 0, workItemDoc.createdAt || 0);
+    const { bucket, stage } = deriveCoordinatorWorkItemState({
+      workItemDoc,
+      memberBuckets: [],
+      latestMessageAt,
+    });
     board[bucket].push({
       workItemId,
       workItemTitle: workItemDoc.title?.trim() || null,

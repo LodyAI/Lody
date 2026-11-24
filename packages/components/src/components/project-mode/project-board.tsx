@@ -5,8 +5,8 @@ import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { toast } from '@/lib/toast';
 import {
-  findFreshSessionPresenceState,
   getServerNow,
+  LODY_PRESENCE_TTL_MS,
   type SessionId,
   type SessionPullRequestView,
   type SessionStatus,
@@ -510,12 +510,19 @@ function useProjectBoardDataInternal(
 
   const liveStatuses = useMemo(() => {
     const map = new Map<string, SessionStatus>();
-    for (const session of allActiveSessions) {
-      const live = findFreshSessionPresenceState(presenceStates, session.id, presenceNowMs);
-      if (live) map.set(session.id, live.status);
+    const bestUpdatedAt = new Map<string, number>();
+    for (const entry of Object.values(presenceStates)) {
+      if (entry.kind !== 'session' || presenceNowMs - entry.updatedAt > LODY_PRESENCE_TTL_MS) {
+        continue;
+      }
+      const prev = bestUpdatedAt.get(entry.sessionId);
+      if (prev === undefined || entry.updatedAt > prev) {
+        bestUpdatedAt.set(entry.sessionId, entry.updatedAt);
+        map.set(entry.sessionId, entry.status);
+      }
     }
     return map;
-  }, [allActiveSessions, presenceNowMs, presenceStates]);
+  }, [presenceNowMs, presenceStates]);
 
   const acceptedChildSessions = useMemo(
     () =>
@@ -852,10 +859,12 @@ const ProjectTaskCard = memo(function ProjectTaskCard({
   const isProposed = row.stage === 'proposed';
   const primarySessionId = row.session?.id ?? null;
 
+  const taskRefLabel = `${taskLabel} [workItemId=${row.workItemId}]`;
+
   const handleConfirmStart = () => {
     onSendCoordinatorPrompt?.(
       t('projectMode.board.confirmStartPrompt', 'Confirm and start {{task}}.', {
-        task: taskLabel,
+        task: taskRefLabel,
       })
     );
   };
@@ -863,7 +872,7 @@ const ProjectTaskCard = memo(function ProjectTaskCard({
   const handleAdjust = () => {
     onPrefillCoordinatorPrompt?.(
       t('projectMode.board.adjustPromptPrefix', 'About {{task}}: ', {
-        task: taskLabel,
+        task: taskRefLabel,
       })
     );
   };
@@ -871,7 +880,7 @@ const ProjectTaskCard = memo(function ProjectTaskCard({
   const handleCompleteStandalone = () => {
     onSendCoordinatorPrompt?.(
       t('projectMode.board.completeStandalonePrompt', 'Mark {{task}} as done.', {
-        task: taskLabel,
+        task: taskRefLabel,
       })
     );
   };

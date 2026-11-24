@@ -1287,9 +1287,6 @@ const SessionDetail = ({
     insideWorkspaceFrame: true,
     includeDesktopWeb: true,
   });
-  // Publish ephemeral "viewing this session" presence (drives the owning
-  // machine's PR poller priority); actively cleared on switch/hide/unmount.
-  usePublishSessionViewing(sessionId);
   const [desktopToolbarContainer, setDesktopToolbarContainer] = useState<HTMLElement | null>(null);
   const chatRefsMap = useRef<
     Map<string, SessionChatInterfaceHandle | DraftSessionChatInterfaceHandle | null>
@@ -1332,6 +1329,9 @@ const SessionDetail = ({
   );
   const [activeSideSessionId, setActiveSideSessionId] = useState<SessionId | null>(
     () => initialTabState.sidePanel.sideSessionId
+  );
+  usePublishSessionViewing(
+    isSidebarVisible && activeSideSessionId ? activeSideSessionId : sessionId
   );
   const [openedSidebarTabs, setOpenedSidebarTabs] = useState<SidebarTab[]>(
     () => initialTabState.sidePanel.tabs

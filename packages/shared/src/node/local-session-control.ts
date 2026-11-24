@@ -542,6 +542,14 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
     );
   }
 
+  if (value.type === 'session/coordinator-diagnostics') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.machineId === 'string' &&
+      typeof value.workspaceId === 'string'
+    );
+  }
+
   if (value.type === 'machine/dsh-providers') {
     return (
       typeof value.machineId === 'string' &&
@@ -899,6 +907,16 @@ export function isLocalSessionControlResponse(
       typeof value.sessionId === 'string' &&
       typeof value.success === 'boolean' &&
       isOptionalString(value.error)
+    );
+  }
+
+  if (value.type === 'session/coordinator-diagnostics_response') {
+    return (
+      typeof value.sessionId === 'string' &&
+      typeof value.observedAt === 'number' &&
+      Array.isArray(value.cursors) &&
+      Array.isArray(value.operations) &&
+      Array.isArray(value.waits)
     );
   }
 

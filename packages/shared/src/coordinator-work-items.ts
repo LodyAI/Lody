@@ -255,3 +255,164 @@ export function isCoordinatorCardStaleFromChildActivity(args: {
   }
   return false;
 }
+
+export type CoordinatorWorkItemBucket = 'needsYou' | 'working' | 'review' | 'accepted';
+
+export type CoordinatorWorkItemSessionRef = {
+  readonly id: string;
+  readonly parentSessionId?: string;
+  readonly openedBySessionId?: string;
+  readonly openedByRootSessionId?: string;
+  readonly workItemId?: string;
+  readonly createdAt?: string;
+  readonly coordinator?: unknown;
+};
+
+export function resolveEffectiveWorkItemId(
+  session: Pick<CoordinatorWorkItemSessionRef, 'id' | 'workItemId'>
+): string {
+  const explicit = session.workItemId?.trim();
+  return explicit && explicit.length > 0 ? explicit : session.id;
+}
+
+/**
+ * Unified membership rule shared across the Project Board, `<project_facts_delta>`,
+ * `coordinator.workItems` watch adapter, and group acceptance.
+ *
+ * A conversation belongs to a coordinator's WorkItem set iff it is a top-level
+ * non-coordinator conversation that was either opened by that coordinator OR
+ * explicitly bound to one of that coordinator's Blackboard `workItems`.
+ */
+export function isSessionOwnedByCoordinatorWorkItems(
+  session: CoordinatorWorkItemSessionRef,
+  coordinatorSessionId: string | null,
+  workItems?: Readonly<Record<string, CoordinatorWorkItemDoc>> | null
+): boolean {
+  if (!coordinatorSessionId) return false;
+  if (session.parentSessionId) return false;
+  if (session.id === coordinatorSessionId) return false;
+  if (session.coordinator) return false;
+  if (
+    session.openedBySessionId === coordinatorSessionId ||
+    session.openedByRootSessionId === coordinatorSessionId
+  ) {
+    return true;
+  }
+  const explicitWorkItemId = session.workItemId?.trim();
+  return Boolean(explicitWorkItemId && workItems && workItems[explicitWorkItemId]);
+}
+
+function workItemSessionCreatedMs(createdAt: string | undefined): number {
+  if (!createdAt) return 0;
+  const parsed = Date.parse(createdAt);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/**
+ * Single source of truth for stable `T1..Tn` numbering across all `0..N`-member
+ * WorkItems (session-backed groups AND standalone Blackboard task cards).
+ *
+ * Indexes both `workItemId -> number` and `memberSessionId -> number`.
+ */
+export function resolveCoordinatorWorkItemNumbers(
+  sessions: readonly CoordinatorWorkItemSessionRef[],
+  coordinatorSessionId: string | null,
+  workItems?: Readonly<Record<string, CoordinatorWorkItemDoc>> | null
+): Map<string, number> {
+  const groups = new Map<string, { earliestMs: number; memberIds: string[] }>();
+
+  for (const session of sessions) {
+    if (!isSessionOwnedByCoordinatorWorkItems(session, coordinatorSessionId, workItems)) continue;
+    const workItemId = resolveEffectiveWorkItemId(session);
+    const ts = workItemSessionCreatedMs(session.createdAt);
+    const existing = groups.get(workItemId);
+    if (existing) {
+      if (ts > 0 && (existing.earliestMs === 0 || ts < existing.earliestMs)) {
+        existing.earliestMs = ts;
+      }
+      existing.memberIds.push(session.id);
+    } else {
+      const docCreated = workItems?.[workItemId]?.createdAt;
+      const initialEarliest =
+        ts > 0 ? ts : typeof docCreated === 'number' && docCreated > 0 ? docCreated : 0;
+      groups.set(workItemId, { earliestMs: initialEarliest, memberIds: [session.id] });
+    }
+  }
+
+  for (const [workItemId, doc] of Object.entries(workItems ?? {})) {
+    if (groups.has(workItemId)) continue;
+    const docCreated = typeof doc?.createdAt === 'number' && doc.createdAt > 0 ? doc.createdAt : 0;
+    groups.set(workItemId, { earliestMs: docCreated, memberIds: [] });
+  }
+
+  const ordered = [...groups.entries()].sort(
+    ([idA, a], [idB, b]) => a.earliestMs - b.earliestMs || idA.localeCompare(idB)
+  );
+  const result = new Map<string, number>();
+  ordered.forEach(([workItemId, group], index) => {
+    const explicitNum = workItems?.[workItemId]?.taskNumber;
+    const num =
+      typeof explicitNum === 'number' && Number.isSafeInteger(explicitNum) && explicitNum > 0
+        ? explicitNum
+        : index + 1;
+    result.set(workItemId, num);
+    for (const memberId of group.memberIds) {
+      result.set(memberId, num);
+    }
+  });
+  return result;
+}
+
+/**
+ * Canonical WorkItem state machine deriving both `bucket` and `stage` from a
+ * single precedence order so UI badges and board columns never disagree:
+ *
+ * 1. Needs user (`needsYou`): any member waiting on user, OR coordinator marked
+ *    `blocked` (even while sibling squad members keep running), OR `proposed`
+ *    awaiting confirmation.
+ * 2. Working (`working`): any member actively working, OR standalone `working`.
+ * 3. Accepted (`accepted`): for child-backed items, all members accepted/archived
+ *    OR `workItemDoc.acceptedAt >= latestMessageAt` (new activity after acceptance
+ *    invalidates `accepted` and returns the item to `review`); for standalone items,
+ *    `stage === 'done'` or `acceptedAt` present.
+ * 4. Review (`review`): default ready-for-review state.
+ */
+export function deriveCoordinatorWorkItemState(args: {
+  workItemDoc?: CoordinatorWorkItemDoc;
+  memberBuckets: readonly CoordinatorWorkItemBucket[];
+  latestMessageAt: number;
+}): { bucket: CoordinatorWorkItemBucket; stage: CoordinatorWorkItemStage } {
+  const { workItemDoc, memberBuckets, latestMessageAt } = args;
+  const explicitStage = workItemDoc?.stage;
+
+  if (memberBuckets.length === 0) {
+    const isDone = explicitStage === 'done' || typeof workItemDoc?.acceptedAt === 'number';
+    if (isDone) return { bucket: 'accepted', stage: 'done' };
+    if (explicitStage === 'blocked') return { bucket: 'needsYou', stage: 'blocked' };
+    if (explicitStage === 'proposed' || workItemDoc?.pendingAction) {
+      return { bucket: 'needsYou', stage: 'proposed' };
+    }
+    if (explicitStage === 'working') return { bucket: 'working', stage: 'working' };
+    return { bucket: 'review', stage: 'review' };
+  }
+
+  const hasChildNeedsYou = memberBuckets.some((b) => b === 'needsYou');
+  const hasChildWorking = memberBuckets.some((b) => b === 'working');
+  const allChildAccepted = memberBuckets.every((b) => b === 'accepted');
+  const acceptedByTimestamp =
+    typeof workItemDoc?.acceptedAt === 'number' && workItemDoc.acceptedAt >= latestMessageAt;
+
+  if (hasChildNeedsYou || explicitStage === 'blocked') {
+    return { bucket: 'needsYou', stage: 'blocked' };
+  }
+  if (explicitStage === 'proposed' && !hasChildWorking) {
+    return { bucket: 'needsYou', stage: 'proposed' };
+  }
+  if (hasChildWorking) {
+    return { bucket: 'working', stage: 'working' };
+  }
+  if (allChildAccepted || acceptedByTimestamp) {
+    return { bucket: 'accepted', stage: 'done' };
+  }
+  return { bucket: 'review', stage: 'review' };
+}

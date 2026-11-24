@@ -2041,8 +2041,8 @@ export class LodyFleet {
     if (message.type === 'session/coordinator-diagnostics') {
       const storeDiag = runtime.lody.readCoordinatorStoreDiagnostics(message.sessionId);
       const ledger = runtime.automations?.ledger;
-      const rawWaits = ledger ? ledger.waits(undefined, message.sessionId) : [];
-      const waits = rawWaits.slice(0, 24).map((wait) => {
+      const rawWaits = ledger ? ledger.waits(undefined, message.sessionId, 24) : [];
+      const waits = rawWaits.map((wait) => {
         const receipt = wait.invocationId && ledger ? ledger.receipt(wait.invocationId) : undefined;
         return {
           id: wait.id,

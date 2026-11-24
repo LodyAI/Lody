@@ -943,7 +943,6 @@ export function CoordinatorObservabilityDialog({
   machineId,
   history,
   conversationView,
-  conversationVersion,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -951,7 +950,6 @@ export function CoordinatorObservabilityDialog({
   machineId?: string;
   history: readonly (SessionHistory | SessionHistoryParsed)[];
   conversationView?: ConversationView | null;
-  conversationVersion?: number;
 }) {
   const { t } = useTranslation();
   const coordinator = useCoordinatorConversation();
@@ -973,6 +971,8 @@ export function CoordinatorObservabilityDialog({
   const [isReplaying, setIsReplaying] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
 
+  const structureVersion = conversationView?.structureVersion ?? 0;
+
   useEffect(() => {
     if (!open || !conversationView) {
       setFullHistory(null);
@@ -988,7 +988,7 @@ export function CoordinatorObservabilityDialog({
     return () => {
       cancelled = true;
     };
-  }, [conversationVersion, conversationView, open]);
+  }, [conversationView, open, structureVersion]);
 
   const effectiveHistory = fullHistory ?? history;
 
@@ -1773,13 +1773,11 @@ export function CoordinatorObservabilityHeaderButton({
   machineId,
   history,
   conversationView,
-  conversationVersion,
 }: {
   coordinatorSessionId: string;
   machineId?: string;
   history: readonly (SessionHistory | SessionHistoryParsed)[];
   conversationView?: ConversationView | null;
-  conversationVersion?: number;
 }) {
   const { t } = useTranslation();
   const coordinator = useCoordinatorConversation();
@@ -1846,7 +1844,6 @@ export function CoordinatorObservabilityHeaderButton({
           machineId={machineId}
           history={history}
           conversationView={conversationView}
-          conversationVersion={conversationVersion}
         />
       ) : null}
     </>

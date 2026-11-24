@@ -215,7 +215,7 @@ async function resolveImplicitRelatedCardHeader(args: {
   if (total === 0) return undefined;
   const windowSize = Math.min(total, MAX_RECENT_CARD_SCAN_TURNS + 4);
   const start = Math.max(0, total - windowSize);
-  const directory = await args.history.readDirectory(start, windowSize);
+  const directory = await args.history.readDirectory(start, total);
 
   let targetIdx = directory.findIndex(
     (row) => (row?.turnId ?? row?.scalars?.id) === args.userTurnId
