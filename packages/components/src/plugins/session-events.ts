@@ -1,6 +1,7 @@
+import { toolFact } from '@lody/shared/plugins/history';
+export { toolFact };
 import {
   isAskUserQuestionPermissionMeta,
-  type MessageContent,
   type SessionHistory,
   type SessionMeta,
 } from '@lody/shared';
@@ -38,26 +39,6 @@ export function eventRefs(workspaceId: string, s: SessionIdentity) {
 export function messageSubmitted(workspaceId: string, s: SessionIdentity) {
   const { workspace, session, project } = eventRefs(workspaceId, s);
   clientPluginEvents.publish('ui.message.submitted', { workspace, session, project });
-}
-export function toolFact(item: Extract<MessageContent, { type: 'tool_call' }>): ObservedToolCall {
-  const kind = item.kind;
-  return {
-    toolCallId: item.toolCallId,
-    toolName: (item.toolName ?? item.title ?? '').slice(0, 256),
-    title: (item.title ?? '').slice(0, 256),
-    status: item.status === 'completed' || item.status === 'failed' ? item.status : 'running',
-    acpKind:
-      kind === 'bash'
-        ? 'execute'
-        : kind === 'write'
-          ? 'edit'
-          : kind === 'computer' || kind === 'mcp'
-            ? 'other'
-            : (kind ?? 'other'),
-    locations: (item.locations ?? [])
-      .slice(0, 8)
-      .map((l) => ({ path: l.path.slice(0, 512), line: l.line ?? undefined })),
-  };
 }
 interface SeenTurn {
   source: SessionHistory;

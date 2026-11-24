@@ -1,3 +1,4 @@
+import { snapshotBindings, type SnapshotSource } from './raw-snapshots';
 import { querySessions } from './workspace-sessions';
 import { useSyncExternalStore, useEffect, useState } from 'react';
 import type {
@@ -18,6 +19,7 @@ import type { ClientHostBindings, LodyClient } from '@lody/plugin-sdk/client';
 
 const resources = new Set(['skills', 'pullRequests', 'filePreview', 'sessionDiff', 'automations']);
 type Catalog = {
+  snapshots?: SnapshotSource;
   resource?: (
     target: ScopeTarget<PluginScope>,
     id: string,
@@ -79,7 +81,13 @@ export class WorkspacePluginReads {
             target.machineId === s.session.machineId
         );
         if (!s || !this.catalog?.history) throw Error('Session unavailable');
-        return this.catalog.history(s, id, input, requestSignal);
+        const { businessKey, ...rest } = s;
+        return this.catalog.history(
+          s.createdByPluginId === pluginId ? s : rest,
+          id,
+          input,
+          requestSignal
+        );
       }
       if (id === 'gitState' && this.catalog?.git)
         return this.catalog.git(target).then((x) => {
@@ -237,6 +245,16 @@ export class WorkspacePluginReads {
         refresh,
       };
     };
-    return { read, useLodyQuery };
+    return {
+      read,
+      useLodyQuery,
+      ...snapshotBindings(
+        this.workspaceId,
+        pluginId,
+        signal,
+        () => this.catalog?.snapshots,
+        subscribe
+      ),
+    };
   }
 }

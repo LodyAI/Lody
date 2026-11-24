@@ -1,3 +1,5 @@
+import { useWorkspaceCatalog } from '../hooks/use-workspace-catalog';
+import { workspaceSnapshotSource } from './workspace-snapshot-source';
 import { PendingInteractionObserver } from './pending-interaction';
 import { useState, useCallback, useSyncExternalStore } from 'react';
 import type { PendingInteractionSummary, InstalledPluginSummary } from '@lody/plugin-sdk';
@@ -63,6 +65,7 @@ export function PluginCatalogSubscriber() {
     visible.allActiveSessions
   );
   const reads = useMemo(() => new WorkspacePluginReads(owner?.workspaceId ?? ''), [owner]);
+  const workspaceCatalog = useWorkspaceCatalog();
   const { roles, synced } = useWorkspaceAgentRoles();
   const { projects } = useVisibleLocalProjects();
   const { members } = useWorkspaceMembers();
@@ -85,6 +88,21 @@ export function PluginCatalogSubscriber() {
     }));
     const detach = publishPluginSidebarRows(owner.workspaceId, summaries);
     reads.publish({
+      snapshots: workspaceSnapshotSource(
+        runtime,
+        account,
+        visible.allActiveSessions,
+        archivedSessions,
+        projects,
+        roles,
+        schedule.rows,
+        {
+          mcpServers: workspaceCatalog.servers,
+          workspaceProjects: workspaceCatalog.projects,
+          pinSections: workspaceCatalog.pinSections,
+          projectMcpDefaults: workspaceCatalog.projectMcpDefaults,
+        }
+      ),
       plugins: owner.installations().map((i) => {
         const lifecycle = i.inspection?.lifecycle.toLowerCase();
         const state: InstalledPluginSummary['state'] = !i.enabled
@@ -235,6 +253,7 @@ export function PluginCatalogSubscriber() {
     local,
     revision,
     pending,
+    workspaceCatalog,
     schedule.rows,
     schedule.runtimes,
     flock,

@@ -59,7 +59,7 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         />
       </SidebarHoverCard>
     ),
-    useLodySnapshot: () => ({ status: 'unavailable', reason: 'unknown', refresh: () => {} }),
+    useLodySnapshot: hooks.useLodySnapshot,
     usePluginConfig: () => ({
       values: Object.fromEntries(
         Object.entries(entry.dev.manifest.config ?? {})
@@ -96,7 +96,7 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         read: hooks.read,
         execute,
         assets,
-        readSnapshot: unavailable,
+        readSnapshot: hooks.readSnapshot,
         sessions: {
           open: nav.openSession,
           create: (target, r) => execute(target, lodyCommands.sessionCreate, r),
@@ -152,7 +152,8 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     bindings,
     signal,
     entry.dev.machineId,
-    (stack) => clientDiagnostics.report(entry, 'surface_render_crashed', stack)
+    (stack) => clientDiagnostics.report(entry, 'surface_render_crashed', stack),
+    entry.pluginId
   );
   return {
     ...createTranscriptSurfaces(entry, signal, bindings),
