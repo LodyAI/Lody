@@ -19,7 +19,7 @@ runtime 的 `protocol/proposals.ts` 把 `agent_role_proposal` 与 `schedule_prop
 
 ## 影响
 
-Android 内置 runtime 快照已更新以包含新投影和命令，并通过桥接暴露 `decideProposal`。iOS 上已创建任务的卡片可打开定时任务页；Android 只显示回执。iOS 上 Agent 文件像附件一样可打开；Android 显示名称、类型和大小。
+Android 内置 runtime 快照已更新以包含新投影和命令，并通过桥接暴露 `decideProposal`。两端已创建或已更新任务的回执、以及修改提议的应用按钮旁都有“打开”，直接进入该任务的现有编辑页；原生端没有定时任务订阅，因此修改卡片会在对话回到前台时重新读取任务。iOS 上 Agent 文件像附件一样可打开；Android 显示名称、类型和大小。
 
 ## 验证
 

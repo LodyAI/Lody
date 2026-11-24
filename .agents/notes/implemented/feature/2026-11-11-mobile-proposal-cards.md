@@ -50,8 +50,10 @@ hidden as on web instead of reading as a generic event.
 ## Consequences
 
 The Android vendored runtime is re-snapshotted for the new projection and command and
-exposes `decideProposal` through its bridge. A created schedule's card opens the
-Schedules page on iOS; Android shows the receipt only. Agent files open on iOS like
+exposes `decideProposal` through its bridge. Open on a created or
+updated schedule, and beside Apply on an edit, opens that schedule's existing editor
+on both clients. There is no schedule subscription, so an edit card reads its schedule
+again when the conversation returns to the screen. Agent files open on iOS like
 attachments; Android shows name, type and size.
 
 ## Verification
