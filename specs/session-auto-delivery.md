@@ -20,19 +20,22 @@ mid-conversation, never at Session creation, from three places that share one
 setting: the Info Bar's Auto delivery action, the Session menu's automation
 settings, and the agent itself through `lody_automation configure` when the user
 asks for it in conversation. Turning it on chooses which steps Lody may request:
-fix CI, resolve conflicts, and merge after CI passes. Merge is off unless chosen.
-The setting covers the Session's current open or draft pull request and turns
-itself off when that pull request is merged. A pull request merged or closed before
+fix CI, resolve conflicts, and merge after CI passes (all three on by default),
+with an optional merge method (`auto`, `squash`, `merge`, or `rebase`).
+The setting covers the Session's current open or draft pull/merge requests (or a
+user-chosen subset when several are open), delivering them sequentially and turning
+itself off once all tracked pull requests are merged. A pull request merged or closed before
 it was turned on belongs to earlier work, so Lody requests a new one instead. A one-line status stays in the conversation until the
 user turns delivery off or, after the merge, dismisses it; either clears it for
 every device.
 
-The local Host decides each step from the PR poller's observations of the current
-pull request. It sends the agent the same request the matching Info Bar button
+The local Host decides each step from provider-neutral PR/MR observations (GitHub
+via the PR poller, or other Git backends through the same normalized checkpoint
+contract). It sends the agent the same request the matching Info Bar button
 sends, after an origin line, through the ordinary automation queue and Session
 admission. A request waits until the Session group is idle and is dropped if the
-pull request has moved on. The agent performs every GitHub change, including the
-merge, with its own `gh` access; the daemon only observes.
+pull request has moved on. The agent performs every provider change, including the
+merge, with its own CLI/auth access; the daemon only observes.
 
 ## Guarantees
 

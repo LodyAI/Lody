@@ -716,10 +716,12 @@ export class AutomationSessionActionsLegacy {
 
 const deliveryValues = z
   .object({
+    provider: z.enum(['github', 'gitlab', 'other']).optional(),
     repoFullName: z.string().min(1).optional(),
     prNumber: z.number().int().positive().optional(),
     prUrl: z.string().url().optional(),
     headSha: z.string().min(1).optional(),
+    mergeMethod: z.enum(['auto', 'squash', 'merge', 'rebase']).optional(),
     projectGroup: z.boolean().optional(),
   })
   .passthrough();
@@ -731,9 +733,15 @@ const deliveryValues = z
 export function deliveryRequest(step: string, values: unknown): string | undefined {
   const parsed = deliveryValues.safeParse(values);
   if (!parsed.success) return undefined;
-  const { repoFullName, prNumber, prUrl, headSha } = parsed.data;
-  const target =
-    repoFullName && prUrl ? { repoFullName, prNumber: prNumber ?? null, prUrl } : undefined;
+  const { provider, repoFullName, prNumber, prUrl, headSha, mergeMethod } = parsed.data;
+  const target = prUrl
+    ? {
+        ...(provider ? { provider } : {}),
+        repoFullName: repoFullName ?? null,
+        prNumber: prNumber ?? null,
+        prUrl,
+      }
+    : undefined;
   const request =
     step === 'create_pr'
       ? withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT)
@@ -742,7 +750,7 @@ export function deliveryRequest(step: string, values: unknown): string | undefin
         : step === 'resolve_conflicts' && target
           ? buildResolveConflictsRequest(target)
           : step === 'merge' && target && headSha
-            ? buildMergePrRequest({ ...target, headSha })
+            ? buildMergePrRequest({ ...target, headSha, ...(mergeMethod ? { mergeMethod } : {}) })
             : undefined;
   if (!request) return undefined;
   return withQuickActionOrigin(

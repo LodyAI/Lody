@@ -425,7 +425,16 @@ export async function createAutomationWorkspaceLegacy(options: {
       )
     );
   const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
-    status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
+    status
+      ? JSON.stringify([
+          status.state,
+          status.attempt,
+          status.reason,
+          status.prUrl,
+          status.prIndex,
+          status.prTotal,
+        ])
+      : '';
   /** Auto delivery reads observations already in this ledger and the Session metadata. */
   const advanceDeliveries = async (now: number) => {
     for (const rule of ledger.rules()) {
@@ -459,10 +468,11 @@ export async function createAutomationWorkspaceLegacy(options: {
             step: decision.step?.step,
             ...(pr
               ? {
+                  provider: pr.provider,
                   head: pr.headSha,
                   status: pr.status,
-                  ci: pr.ciState,
-                  merge: pr.mergeState,
+                  checks: pr.checks,
+                  mergeability: pr.mergeability,
                   observedAt: pr.observedAt,
                 }
               : {}),
@@ -739,7 +749,11 @@ export async function createAutomationWorkspaceLegacy(options: {
             for (const receipt of lastStep
               ? ledger.eventReceipts(DELIVERY_EVENT_SOURCE, lastStep.eventId)
               : [])
-              if (['accepted', 'waiting', 'resolved', 'blocked'].includes(receipt.state))
+              if (
+                ['accepted', 'waiting', 'resolved', 'blocked', 'submitting', 'queued'].includes(
+                  receipt.state
+                )
+              )
                 await runtime.runPromise(service.cancel(receipt.id));
           }
           await runtime.runPromise(service.wake);
@@ -831,6 +845,20 @@ export async function createAutomationWorkspaceLegacy(options: {
         ),
       workflowObservationOwners: () =>
         ledger.wantsReadSessions('github.workflowRuns') as Set<SessionId>,
+      deliveryObservationOwners: () => {
+        const owners = new Set<SessionId>();
+        for (const rule of ledger.rules()) {
+          if (
+            rule.enabled &&
+            rule.scope.sessionId &&
+            rule.handler.kind === 'policy' &&
+            rule.handler.policy === 'auto-deliver' &&
+            rule.ownerMachineId === auth.machineId
+          )
+            owners.add(rule.scope.sessionId as SessionId);
+        }
+        return owners;
+      },
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         observe(async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);
