@@ -74,6 +74,35 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
 | Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
+## Session access room
+
+`useSessionAccess` is only a React projection of the shared session-access room.
+`acquireSessionAccessStore` owns one ref-counted room per platform port, account and
+workspace; the room owns its live port subscription, browser resume/online listeners
+and refresh single-flight. Consumers subscribe to its snapshot, so mounting another
+sidebar or history surface does not add another resume request. A notification that
+arrives during a read queues one follow-up rather than starting overlapping reads.
+The room preserves snapshot identity when grants are unchanged, so a successful
+resume read does not force a React render. Keep browser lifecycle listeners and
+refresh ownership in the room, not in session-access consumers.
+
+## Auth and session supervisors
+
+`getStableSessionSupervisor` and `acquireStableSessionSupervisor` share one
+ref-counted Better Auth supervisor per auth client. The supervisor owns the session
+atom and stable-session policy: retry/grace state, current-credential 401
+verification, boot-failure publication, browser resume and keepalive refreshes.
+`StableSessionProvider` only borrows/releases that room and projects its external
+snapshot, so another auth consumer does not add listeners or retry budgets.
+Convex's auth mismatch recovery is a separate ref-counted room from
+`getAuthRecoverySupervisor`/`acquireAuthRecoverySupervisor`; it owns the per-session
+attempt budget, deadlines, visibility/network pause, pending Convex reset and
+automatic-command fence. `AuthenticatedConvexProvider` only bridges the SDK auth
+snapshot, borrows/releases the room, projects its snapshot and renders the existing
+nonmodal recovery notice. The Convex adapter may still observe SDK auth state because
+`ConvexProviderWithAuth` is a React API, but it does not own session reads, retry
+budgets or browser lifecycle work.
+
 ## MCP default readiness
 
 `use-session-mcp-selection.ts` allows default-derived sends after the local catalog

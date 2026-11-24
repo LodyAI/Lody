@@ -1,4 +1,9 @@
-import { createSessionAccessStore } from '../src/lib/session-access-store';
+// @vitest-environment jsdom
+
+import {
+  acquireSessionAccessStore,
+  createSessionAccessStore,
+} from '../src/lib/session-access-store';
 import type { SessionAccessPort, SessionAccessView } from '@lody/platform';
 import { describe, expect, it } from 'vitest';
 import type { LocalProjectId, MachineId } from '@lody/shared';
@@ -211,6 +216,110 @@ describe('live authoritative session access', () => {
     notify();
     expect(store.getSnapshot().views.get(machineId)?.readSharedSessionIds).toEqual([]);
   });
+});
+
+it('does not notify UI subscribers when a refresh keeps the same grants', async () => {
+  const row = { machineId, canManage: false, readSharedSessionIds: ['root'] };
+  let notifications = 0;
+  const port: SessionAccessPort = {
+    list: async () => [{ ...row, readSharedSessionIds: [...row.readSharedSessionIds] }],
+    read: async () => row,
+    set: async () => ({ status: 'saved' }),
+    subscribe: () => () => {},
+  };
+  const store = createSessionAccessStore(port, 'workspace');
+  const unsubscribe = store.subscribe(() => {
+    notifications += 1;
+  });
+  await store.refresh();
+  const snapshot = store.getSnapshot();
+  expect(notifications).toBe(1);
+
+  await store.refresh();
+  expect(store.getSnapshot()).toBe(snapshot);
+  expect(notifications).toBe(1);
+
+  unsubscribe();
+  store.dispose();
+});
+
+it('coalesces refresh requests and retains one follow-up invalidation', async () => {
+  let calls = 0;
+  let finishRefresh!: (views: SessionAccessView[]) => void;
+  const refreshed = { machineId, canManage: false, readSharedSessionIds: ['new-root'] };
+  const port: SessionAccessPort = {
+    list: () => {
+      calls += 1;
+      if (calls < 3) return Promise.resolve([]);
+      if (calls === 3)
+        return new Promise((resolve) => {
+          finishRefresh = resolve;
+        });
+      return Promise.resolve([refreshed]);
+    },
+    read: async () => refreshed,
+    set: async () => ({ status: 'saved' }),
+    subscribe: () => () => {},
+  };
+  const store = createSessionAccessStore(port, 'workspace');
+  await store.refresh();
+  expect(calls).toBe(2);
+
+  const first = store.refresh();
+  const second = store.refresh();
+  expect(first).toBe(second);
+  expect(calls).toBe(3);
+
+  finishRefresh([]);
+  await first;
+  expect(calls).toBe(4);
+  expect(store.getSnapshot().views.get(machineId)).toEqual(refreshed);
+
+  store.dispose();
+});
+
+it('owns resume refreshes for the shared room instead of each consumer', async () => {
+  let calls = 0;
+  let finishResume!: (views: SessionAccessView[]) => void;
+  const port: SessionAccessPort = {
+    list: () => {
+      calls += 1;
+      if (calls < 3) return Promise.resolve([]);
+      if (calls === 3)
+        return new Promise((resolve) => {
+          finishResume = resolve;
+        });
+      return Promise.resolve([]);
+    },
+    read: async () => ({ machineId, canManage: false, readSharedSessionIds: [] }),
+    set: async () => ({ status: 'saved' }),
+    subscribe: () => () => {},
+  };
+  const first = acquireSessionAccessStore(port, 'account', 'workspace');
+  const second = acquireSessionAccessStore(port, 'account', 'workspace');
+  expect(first.store).toBe(second.store);
+  await first.store.refresh();
+  expect(calls).toBe(2);
+
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: 'visible',
+  });
+  document.dispatchEvent(new Event('visibilitychange'));
+  const resume = first.store.refresh();
+  window.dispatchEvent(new Event('online'));
+  expect(calls).toBe(3);
+
+  finishResume([]);
+  await resume;
+  expect(calls).toBe(4);
+
+  first.release();
+  second.release();
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event('online'));
+  await Promise.resolve();
+  expect(calls).toBe(4);
 });
 
 it('keeps unrelated revocations when a deep-link read finishes during a workspace refresh', async () => {

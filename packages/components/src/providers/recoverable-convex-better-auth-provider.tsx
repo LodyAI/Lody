@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { ConvexProviderWithAuth, type ConvexReactClient } from 'convex/react';
 import { getAuthSessionIntentGeneration, type LodyAuthClient } from '../lib/auth';
+import { acquireAuthSessionStore } from '../lib/auth-session-store';
 import { activateConvexJwtAuthKey, requestConvexJwt } from '../lib/convex-jwt';
 
 type RecoverableConvexBetterAuthProviderProps = {
@@ -66,7 +75,13 @@ function useRecoverableBetterAuth(authClient: LodyAuthClient, generation: number
   return useMemo(
     () =>
       function useAuthFromBetterAuth() {
-        const { data: session, isPending: isSessionPending } = authClient.useSession();
+        const [authSessionStore] = useState(() => acquireAuthSessionStore(authClient));
+        const authSession = useSyncExternalStore(
+          authSessionStore.subscribe,
+          authSessionStore.getSnapshot,
+          authSessionStore.getSnapshot
+        );
+        const { data: session, isPending: isSessionPending } = authSession;
         const sessionId = session?.session?.id;
         const hasSession = Boolean(session?.session);
         const authIntentGeneration = getAuthSessionIntentGeneration(authClient);
@@ -90,6 +105,11 @@ function useRecoverableBetterAuth(authClient: LodyAuthClient, generation: number
           () => activateConvexJwtAuthKey(authClient, authKey, jwtIdentity),
           [authKey, jwtIdentity]
         );
+
+        useEffect(() => {
+          authSessionStore.start();
+          return authSessionStore.stop;
+        }, [authSessionStore]);
 
         useEffect(() => {
           mountedRef.current = true;

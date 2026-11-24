@@ -31,23 +31,15 @@ export function useSessionAccess(options: WorkspaceScopeOptions = {}) {
       })
     | null
   >(null);
+  // The shared room owns browser lifecycle and refreshes; this effect only borrows
+  // its snapshot owner for the current account/workspace projection.
   useEffect(() => {
     if (!enabled || !port || !accountId || !scope.workspaceId) return;
     const acquired = acquireSessionAccessStore(port, accountId, scope.workspaceId);
     setLease({ ...acquired, accountId, workspaceId: scope.workspaceId, runtime, port });
-    const refresh = () => {
-      void acquired.store.refresh();
-    };
-    const visible = () => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', visible);
     return () => {
       setLease(null);
       acquired.release();
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', visible);
     };
   }, [enabled, port, accountId, scope.workspaceId, runtime]);
   // Scope is checked during render too, so old-account grants never survive one effect turn.

@@ -1,13 +1,11 @@
 /** @vitest-environment jsdom */
-
-/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  localToken: 'stored-session-token' as string | null,
-  session: {
+const mocks = vi.hoisted(() => {
+  const listeners = new Set<(value: unknown) => void>();
+  const session = {
     data: {
       session: { id: 'stale-session' },
       user: { id: 'user-1' },
@@ -16,12 +14,41 @@ const mocks = vi.hoisted(() => ({
     isPending: false,
     isRefetching: false,
     refetch: vi.fn(),
-  },
-  getSession: vi.fn(),
+  };
+  const getSession = vi.fn();
+  const createAuthClient = () => ({
+    $store: {
+      atoms: {
+        session: {
+          get: () => session,
+          listen: (listener: (value: unknown) => void) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        },
+      },
+    },
+    getSession,
+  });
+  return {
+    localToken: 'stored-session-token' as string | null,
+    session,
+    getSession,
+    authClient: createAuthClient(),
+    createAuthClient,
+    listeners,
+    publishSession: () => {
+      for (const listener of [...listeners]) listener({ ...session });
+    },
+  };
+});
+
+vi.mock('../src/lib/auth', () => ({
+  subscribeLocalAuthStateCleared: () => () => {},
 }));
 
 vi.mock('../src/providers/convex-provider', () => ({
-  useAuthClient: () => ({ useSession: () => mocks.session, getSession: mocks.getSession }),
+  useAuthClient: () => mocks.authClient,
 }));
 
 vi.mock('../src/lib/auth-bootstrap', () => ({
@@ -51,10 +78,12 @@ describe('useStableSessionInternal', () => {
     mocks.session.error = null;
     mocks.session.isPending = false;
     mocks.session.isRefetching = false;
+    mocks.authClient = mocks.createAuthClient();
     mocks.session.refetch.mockReset();
     mocks.session.refetch.mockResolvedValue(undefined);
     mocks.getSession.mockReset();
     mocks.getSession.mockResolvedValue({ error: { status: 401 } });
+    mocks.listeners.clear();
     current = null;
     resetBootRequestFailuresForTests();
     container = document.createElement('div');
@@ -123,7 +152,10 @@ describe('useStableSessionInternal', () => {
 
     mocks.session.data = { session: { id: 'current-session' }, user: { id: 'user-1' } };
     mocks.session.isRefetching = false;
-    await act(async () => root.render(<Consumer />));
+    await act(async () => {
+      mocks.publishSession();
+      root.render(<Consumer />);
+    });
 
     expect(current?.confirmedUnauthenticated).toBe(false);
     expect(current?.data).toEqual(mocks.session.data);
@@ -156,7 +188,10 @@ describe('useStableSessionInternal', () => {
     const unauthorized = Object.assign(new Error('Unauthorized'), { status: 401 });
     mocks.session.error = unauthorized;
     mocks.getSession.mockRejectedValue(new Error('Client disconnected'));
-    await act(async () => root.render(<Consumer />));
+    await act(async () => {
+      mocks.publishSession();
+      root.render(<Consumer />);
+    });
 
     expect(current?.confirmedUnauthenticated).toBe(false);
     expect(current?.isRetrying).toBe(false);
@@ -174,7 +209,10 @@ describe('useStableSessionInternal', () => {
     expect(current?.isRetrying).toBe(true);
 
     mocks.session.error = Object.assign(new Error('Unauthorized'), { status: 401 });
-    await act(async () => root.render(<Consumer />));
+    await act(async () => {
+      mocks.publishSession();
+      root.render(<Consumer />);
+    });
 
     expect(current?.confirmedUnauthenticated).toBe(true);
     expect(current?.isRetrying).toBe(false);
