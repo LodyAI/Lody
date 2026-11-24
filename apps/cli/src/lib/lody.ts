@@ -55,13 +55,16 @@ import { assertRetainedE2eeModeAllowsOpen } from '@/lib/e2ee/retained-binding';
 import { encryptedRuntimeCloudPort } from '@/lib/e2ee/runtime-cloud-port';
 import type { DaemonWorkspaceAccess } from '@/lib/session-command-environment';
 
+import { Effect } from 'effect';
+import type { PluginRuntime } from '../plugins/plugin-runtime';
+import type { HostToChildFrame } from '@lody/shared/plugins/ipc-protocol';
+
 const BUILTIN_AGENT_CONFIG_INITIAL_RETRY_DELAY_MS = 10_000;
 const BUILTIN_AGENT_CONFIG_MAX_RETRY_DELAY_MS = 5 * 60_000;
 
-type PluginDaemon = import('../plugins/plugin-host-legacy').PluginDaemon;
 interface LodyOptions {
   resolveStandalonePluginOperation?: ResolveStandalonePluginOperation;
-  localPlugin?: () => PluginDaemon | undefined;
+  localPlugin?: () => PluginRuntime | undefined;
   /** A successful authenticated ledger read of this encrypted workspace; see Fleet. */
   onEncryptedAuthorityConfirmed?: (startedAt: AuthorityStamp) => void;
   /** True while execution relies on an outage window, with that window's ends. */
@@ -138,8 +141,8 @@ export class Lody {
   private runtime: MachineRuntime;
   private supportRegistryAgentTypes: string[];
   private cleanedUp = false;
-  private startingEncryptedHost?: PluginDaemon;
-  private encryptedPlugin?: Promise<PluginDaemon>;
+  private startingEncryptedHost?: PluginRuntime;
+  private encryptedPlugin?: Promise<PluginRuntime>;
   private stopPluginSync?: () => void;
   private encryptedWorkspace?: CliE2eeWorkspaceLegacy;
   private encryptedRevocation: 'e2ee_member_removed' | 'e2ee_device_revoked' | undefined;
@@ -240,7 +243,6 @@ export class Lody {
     if (e2ee) {
       if (!options.genesisHash) throw new Error('e2ee_workspace_unavailable');
       const { join } = await import('node:path');
-      const { Effect } = await import('effect');
       const { makeEncryptedAgentExecution, lazyExecutionJournal } =
         await import('./e2ee/agent-execution');
       encryptedExecution = makeEncryptedAgentExecution({
@@ -386,9 +388,10 @@ export class Lody {
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
     documentManager.workflowSessionAuthority = async (id, installation, project, role) => {
       const identity = this.encryptedWorkspace,
-        daemon = await this.encryptedPlugin;
+        daemon = this.startingEncryptedHost ?? (await this.encryptedPlugin);
       if (!identity || !daemon) throw Error('Workflow authorization unavailable');
-      const lease = await daemon.activeWorkflowLease(id);
+      const { Registry } = await import('../plugins/workflow/plugin-registry');
+      const lease = await daemon.runPromise(Effect.map(Registry, (r) => r.workflowLease(id)));
       if (!lease || lease.installationId !== installation)
         throw Error('Workflow installation changed');
       const proof = await identity.verifyDeclaredWorkflowGrant(lease.signature, this.machineId);
@@ -409,7 +412,7 @@ export class Lody {
       };
     };
     documentManager.workflowMachineId = this.machineId;
-    documentManager.pluginDaemon = async () => {
+    documentManager.pluginRuntime = async () => {
       if (
         this.cleanedUp ||
         this.encryptedRevocation ||
@@ -446,6 +449,7 @@ export class Lody {
             this.encryptedWorkspace?.pluginAuthoritySignal.aborted
           )
             throw new Error('Plugin host unavailable');
+          const { Registry } = await import('../plugins/workflow/plugin-registry');
           signal?.throwIfAborted();
           if (request.method === 'plugin/control' && request.params.action === 'resolve-proposal') {
             const decision = request.params.decision;
@@ -505,7 +509,11 @@ export class Lody {
                 });
                 await documentManager.repo.flush();
               },
-              activate: (meta, path) => daemon.activateProposal(meta, path, signal),
+              activate: (meta, path) =>
+                daemon.runPromise(
+                  Effect.flatMap(Registry, (r) => r.activateProposal(meta, path)),
+                  { signal }
+                ),
             });
           }
           const identity = this.encryptedWorkspace;
@@ -520,10 +528,11 @@ export class Lody {
               machineId: this.machineId,
               projectExists: (id) => this.runtime.workflowProjectExists(id),
             });
-          return daemon.dispatchMachineRpc(
-            request,
-            { ...actor, targetDevice: identity?.signingPublicKey },
-            signal
+          return daemon.runPromise(
+            Effect.flatMap(Registry, (r) =>
+              r.machineRpc(request, { ...actor, targetDevice: identity?.signingPublicKey })
+            ),
+            { signal }
           );
         },
         sorbetCredentials: createSorbetCredentialsHandler(documentManager, this.machineId),
@@ -561,9 +570,7 @@ export class Lody {
     });
   }
 
-  async admitPluginEvent(
-    frame: Parameters<import('../plugins/plugin-host-legacy').PluginDaemon['event']>[0]
-  ) {
+  async admitPluginEvent(frame: Omit<Extract<HostToChildFrame, { type: 'event' }>, 'contextId'>) {
     const payload = frame.payload as {
       session?: {
         workspaceId?: string;
@@ -625,8 +632,8 @@ export class Lody {
     if (this.encryptedWorkspace && process.env.LODY_PLUGIN_SAFE_MODE !== '1') {
       const identity = this.encryptedWorkspace;
       this.encryptedPlugin ??= (async () => {
-        const [{ PluginDaemon }, { identityPluginVault }, { join }] = await Promise.all([
-          import('../plugins/plugin-host-legacy'),
+        const [{ makePluginRuntime, Registry }, { identityPluginVault }, { join }] = await Promise.all([
+          import('../plugins/plugin-runtime'),
           import('../plugins/identity-plugin-vault'),
           import('node:path'),
         ]);
@@ -638,7 +645,8 @@ export class Lody {
           machineId: this.machineId,
           identity,
           manager: this.documentManager,
-          lease: (id, instance) => host.workflowLease(id, instance),
+          lease: (id, instance) =>
+            host.runPromise(Effect.map(Registry, (r) => r.workflowLease(id, instance))),
           projectExists: (id) => this.runtime.workflowProjectExists(id),
           stopSession: (sid, turn) => {
             const h = this.runtime.getMessageHandler();
@@ -652,7 +660,7 @@ export class Lody {
           },
           sessionScope: (id) => this.runtime.resolveSessionExecutionScope(id),
         });
-        const host: PluginDaemon = new PluginDaemon(
+        const host: PluginRuntime = makePluginRuntime(
           root,
           this.workspaceId,
           this.machineId,
@@ -669,18 +677,27 @@ export class Lody {
         };
         identity.pluginAuthoritySignal.addEventListener('abort', stop, { once: true });
         try {
-          await host.start();
+          await host.runPromise(
+            Effect.flatMap(Registry, (r) => r.start),
+            { signal: identity.pluginAuthoritySignal }
+          );
+          identity.pluginAuthoritySignal.throwIfAborted();
+          if (this.cleanedUp || this.encryptedRevocation) throw Error('Plugin identity closed');
           void this.watchOwnerPins(host, identity).catch(() =>
             this.logger.warn('Workspace plugin sync unavailable')
           );
           return host;
         } catch (error) {
-          this.startingEncryptedHost = undefined;
+          identity.pluginAuthoritySignal.removeEventListener('abort', stop);
           await host.dispose();
           throw error;
+        } finally {
+          this.startingEncryptedHost = undefined;
         }
       })();
       await this.encryptedPlugin.catch(() => this.logger.warn('Encrypted plugin host unavailable'));
+      identity.pluginAuthoritySignal.throwIfAborted();
+      if (this.encryptedRevocation || this.cleanedUp) throw Error('Plugin identity closed');
     }
     await this.encryptedWorkspace?.startRpc(
       this.machineId,
@@ -693,10 +710,8 @@ export class Lody {
     this.documentManager.ensureMachineFlockDocJoined(this.machineId, { reason: 'lody-start' });
   }
 
-  private async watchOwnerPins(
-    host: import('../plugins/plugin-host-legacy').PluginDaemon,
-    identity: CliE2eeWorkspaceLegacy
-  ) {
+  private async watchOwnerPins(host: PluginRuntime, identity: CliE2eeWorkspaceLegacy) {
+    const { Registry } = await import('../plugins/workflow/plugin-registry');
     const room = await this.documentManager.repo.openFlockDoc(
       getWorkspaceFlockDocId(this.workspaceId)
     );
@@ -708,9 +723,15 @@ export class Lody {
       verify: identity.verifyOwnerPin,
       installed: async (id) =>
         (
-          (await host.dispatch({ action: 'list' })) as { plugins: { pluginId: string }[] }
+          (await host.runPromise(
+            Effect.flatMap(Registry, (r) => r.dispatch({ action: 'list' }))
+          )) as { plugins: { pluginId: string }[] }
         ).plugins.some((p) => p.pluginId === id),
-      install: (pin, signal, verify) => host.reconcileOwnerPin(pin, this.userId, signal, verify),
+      install: (pin, signal, verify) =>
+        host.runPromise(
+          Effect.flatMap(Registry, (r) => r.reconcileOwnerPin(pin, this.userId, signal, verify)),
+          { signal }
+        ),
       flush: () => this.documentManager.repo.flush(),
       warn: () => this.logger.warn('Owner plugin sync deferred'),
     });
@@ -930,6 +951,7 @@ export class Lody {
       identity.pluginAuthoritySignal.aborted
     )
       throw Error('Encrypted plugin owner unavailable');
+    const { Registry } = await import('../plugins/workflow/plugin-registry');
     if (command.action === 'install-npm') {
       const current = await identity.authorizeWorkspacePluginInstall();
       const { inspectPinnedNpmPackage } = await import('../plugins/plugin-package');
@@ -945,9 +967,14 @@ export class Lody {
       const handle = await this.documentManager.repo.openFlockDoc(docId);
       identity.pluginAuthoritySignal.throwIfAborted();
       if (!current()) throw Error('Workspace plugin installation forbidden');
-      const result = await host.installOwnerNpm(entry, identity.pluginAuthoritySignal, () => {
-        if (!current()) throw Error('Workspace plugin installation forbidden');
-      });
+      const result = await host.runPromise(
+        Effect.flatMap(Registry, (r) =>
+          r.installOwnerNpm(entry, identity.pluginAuthoritySignal, () => {
+            if (!current()) throw Error('Workspace plugin installation forbidden');
+          })
+        ),
+        { signal: identity.pluginAuthoritySignal }
+      );
       identity.pluginAuthoritySignal.throwIfAborted();
       if (!current() || this.cleanedUp || this.encryptedRevocation)
         throw Error('Encrypted plugin owner unavailable');
@@ -955,7 +982,7 @@ export class Lody {
       await this.documentManager.repo.flush();
       return result;
     }
-    return host.dispatch(command);
+    return host.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(command)));
   }
   async dispatchLocalControl(
     message: LocalSessionControlRequest,

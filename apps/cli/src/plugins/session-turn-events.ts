@@ -1,11 +1,19 @@
+import { Effect } from 'effect';
 import { z } from 'zod';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { HostToChildFrame } from '@lody/shared/plugins/ipc-protocol';
 
 type TurnEvent =
- | {type:'session.archived';turnId?:never;userTurnId?:never}
- | {type:'session.interaction.resolved';requestId:string;kind:'permission'|'elicitation';outcome:{outcome:'selected';optionId:string}|{outcome:'cancelled'};turnId?:string;userTurnId?:never}
+  | { type: 'session.archived'; turnId?: never; userTurnId?: never }
+  | {
+      type: 'session.interaction.resolved';
+      requestId: string;
+      kind: 'permission' | 'elicitation';
+      outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' };
+      turnId?: string;
+      userTurnId?: never;
+    }
   | { type: 'session.turn.started'; turnId: string; userTurnId?: string }
   | {
       type: 'session.turn.completed';
@@ -36,22 +44,18 @@ export class PluginTurnEvents {
     meta: () => Promise<SessionMeta | undefined>,
     fact: () => Promise<TurnEvent | undefined>
   ) {
-    if (this.closed || !this.docs.pluginDaemon) return;
+    if (this.closed || !this.docs.pluginRuntime) return;
     const next = (this.tails.get(sessionId) ?? Promise.resolve())
       .then(async () => {
         const m = await meta();
-        if (
-          !m ||
-          m.id !== sessionId ||
-          m.machineId !== this.machineId ||
-          m.userId !== this.userId
-        )
+        if (!m || m.id !== sessionId || m.machineId !== this.machineId || m.userId !== this.userId)
           return;
         const projectId = m.project?.kind === 'local' ? m.project.localProjectId : undefined;
-        const daemon = await this.docs.pluginDaemon?.();
-        if (!daemon) return;
+        const runtime = await this.docs.pluginRuntime?.();
+        if (!runtime) return;
+        const { PluginHost } = await import('./workflow/plugin-host');
         const event = await fact();
-        if (!event || !!m.isArchived !== (event.type==='session.archived')) return;
+        if (!event || !!m.isArchived !== (event.type === 'session.archived')) return;
         const workspace = { workspaceId: this.workspaceId };
         const machine = { ...workspace, machineId: this.machineId };
         const project = projectId ? { ...machine, projectId } : undefined;
@@ -63,53 +67,67 @@ export class PluginTurnEvents {
             event.type,
             sessionId,
             event.turnId,
-            event.type === 'session.turn.completed' ? event.endedAt :event.type==='session.interaction.resolved'?event.requestId:null,
+            event.type === 'session.turn.completed'
+              ? event.endedAt
+              : event.type === 'session.interaction.resolved'
+                ? event.requestId
+                : null,
           ]),
           payload: {
             workspace,
             machine,
             session,
             ...(project ? { project } : {}),
-            ...(event.turnId?{turnId:event.turnId}:{}),
-            ...(event.type==='session.interaction.resolved'?{requestId:event.requestId,kind:event.kind,outcome:z.json().parse(event.outcome)}:{}),
+            ...(event.turnId ? { turnId: event.turnId } : {}),
+            ...(event.type === 'session.interaction.resolved'
+              ? {
+                  requestId: event.requestId,
+                  kind: event.kind,
+                  outcome: z.json().parse(event.outcome),
+                }
+              : {}),
             ...(event.userTurnId ? { userTurnId: event.userTurnId } : {}),
             ...(event.type === 'session.turn.completed'
               ? {
                   stopReason: event.stopReason,
-                  ...(m.agentRoleId ? {agentRoleId:m.agentRoleId} : {}),
+                  ...(m.agentRoleId ? { agentRoleId: m.agentRoleId } : {}),
                   ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
                 }
               : {}),
           },
         };
         // A completed input is provenance in the payload, not a live signing principal.
-        await daemon.event(frame, async () => {
-          const current = await meta();
-          if (
-            !current ||
-            current.id !== m.id ||
-            current.machineId !== m.machineId ||
-            current.userId !== m.userId ||
-            !!current.isArchived !== !!m.isArchived ||
-            current.parentSessionId !== m.parentSessionId ||
-            (current.project?.kind === 'local' ? current.project.localProjectId : undefined) !==
-              projectId
+        await runtime.runPromise(
+          Effect.flatMap(PluginHost, (host) =>
+            host.broadcast(frame, async () => {
+              const current = await meta();
+              if (
+                !current ||
+                current.id !== m.id ||
+                current.machineId !== m.machineId ||
+                current.userId !== m.userId ||
+                !!current.isArchived !== !!m.isArchived ||
+                current.parentSessionId !== m.parentSessionId ||
+                (current.project?.kind === 'local' ? current.project.localProjectId : undefined) !==
+                  projectId
+              )
+                return false;
+              if (
+                this.docs.isEncryptedWorkspace() &&
+                (current.parentSessionId ||
+                  !(await this.docs.authorizeEncryptedSessionRead({
+                    machineId: m.machineId,
+                    rootSessionId: m.id,
+                    requesterUserId: this.userId,
+                    sessionOwnerUserId: m.userId,
+                    localProjectId: projectId,
+                  })))
+              )
+                return false;
+              return !this.closed && (await this.docs.pluginRuntime?.()) === runtime;
+            })
           )
-            return false;
-          if (
-            this.docs.isEncryptedWorkspace() &&
-            (current.parentSessionId ||
-              !(await this.docs.authorizeEncryptedSessionRead({
-                machineId: m.machineId,
-                rootSessionId: m.id,
-                requesterUserId: this.userId,
-                sessionOwnerUserId: m.userId,
-                localProjectId: projectId,
-              })))
-          )
-            return false;
-          return !this.closed && (await this.docs.pluginDaemon?.()) === daemon;
-        });
+        );
       })
       .catch(() => this.warn(sessionId));
     this.tails.set(sessionId, next);

@@ -1,21 +1,23 @@
+import { Effect, Layer, ManagedRuntime } from 'effect';
+import { Registry, type PluginRuntime } from '../plugin-runtime';
 import { expect, it } from 'vitest';
 import { bindPluginToolMcp } from './plugin-tool-mcp';
 
 it('only lists registered tools to the launched MCP client while its captured turn is active', async () => {
   let active = true;
-  const binding = await bindPluginToolMcp(
-    {
-      sessionTools: async () => [
-        {
-          name: 'plugin__test__echo',
-          description: 'Echo',
-          inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
-        },
-      ],
-      invokeSessionTool: async () => {
-        throw Error('unexpected call');
+  const registry = {
+    sessionTools: () => [
+      {
+        name: 'plugin__test__echo',
+        description: 'Echo',
+        inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
       },
-    },
+    ],
+    invokeSessionTool: () => Effect.die('unexpected call'),
+  } satisfies Pick<typeof Registry.Service, 'sessionTools' | 'invokeSessionTool'>;
+  const runtime = ManagedRuntime.make(Layer.succeed(Registry, registry as typeof Registry.Service));
+  const binding = await bindPluginToolMcp(
+    runtime as unknown as PluginRuntime,
     {
       sessionId: 'session',
       userId: 'user',
@@ -50,6 +52,7 @@ it('only lists registered tools to the launched MCP client while its captured tu
     expect((await list(token)).status).toBe(403);
   } finally {
     await binding.release();
+    await runtime.dispose();
   }
 });
 
@@ -59,11 +62,10 @@ it('dispatches a shared turn through MCP and the machine worker without lending 
     { tmpdir } = await import('node:os'),
     { fileURLToPath } = await import('node:url'),
     { build } = await import('esbuild');
-  const { PluginDaemon } = await import('../plugin-host-legacy'),
+  const { makePluginRuntime } = await import('../plugin-runtime'),
     { encryptedPluginDispatch } = await import('../machine-host-port'),
     { composeMachineHostDispatch } = await import('./daemon-command-executor');
-  const { MessageHandler } = await import('../../lib/message-handler'),
-    { Effect } = await import('effect');
+  const { MessageHandler } = await import('../../lib/message-handler');
   const root = await mkdtemp(join(tmpdir(), 'lody-tool-dispatch-')),
     worker = join(root, 'worker.mjs'),
     directory = join(root, 'generations', crypto.randomUUID()),
@@ -73,7 +75,7 @@ it('dispatches a shared turn through MCP and the machine worker without lending 
     sessionId = 'session',
     projectId = 'project',
     userId = 'e2ee-member:fixture';
-  const daemon = new PluginDaemon(
+  const daemon = makePluginRuntime(
     root,
     workspaceId,
     machineId,
@@ -228,7 +230,7 @@ it('dispatches a shared turn through MCP and the machine worker without lending 
         },
       ])
     );
-    await daemon.start();
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
     const first = await mount('first');
     expect(await first()).toBe('ok');
     expect(queued[0]).toMatchObject({ derivedFrom: { sessionId, userTurnId: 'first' }, userId });

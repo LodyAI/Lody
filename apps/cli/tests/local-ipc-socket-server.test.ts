@@ -1,3 +1,4 @@
+import { Registry } from '../src/plugins/workflow/plugin-registry';
 import {
   getLocalIpcServerCredentials,
   LOCAL_IPC_TOKEN_HEADER,
@@ -180,21 +181,22 @@ describe('local IPC socket server', () => {
     expect(reply.payload).toEqual({ ok: true, received: { command } });
   });
   it('updates and rolls back verified releases over authenticated owner IPC without replacing installation data', async () => {
-    const { PluginDaemon } = await import('../src/plugins/plugin-host-legacy');
+    const { makePluginRuntime } = await import('../src/plugins/plugin-runtime');
     const { packPlugin } = await import('../src/plugins/plugin-package');
     const root = makeTempDir(),
       source = makeTempDir(),
       paths = makePaths(),
       config = makeServerConfig(paths);
-    const daemon = new PluginDaemon(root, 'workspace', 'machine', () => {});
+    const daemon = makePluginRuntime(root, 'workspace', 'machine', () => {});
     try {
-      await daemon.start();
+      await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
       await startLocalIpcSocketServers({
         ...config,
         control: {
           ...config.control,
           approvePluginAction: async () => true,
-          dispatchPlugin: (raw) => daemon.dispatch(raw.command),
+          dispatchPlugin: (raw) =>
+            daemon.runPromise(Effect.flatMap(Registry, (r) => r.dispatch(raw.command))),
         },
       });
       const send = async (command: unknown) => {

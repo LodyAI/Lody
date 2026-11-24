@@ -1,4 +1,6 @@
-import { PluginDaemon } from '../src/plugins/plugin-host-legacy';
+import { Effect } from 'effect';
+import { Registry } from '../src/plugins/workflow/plugin-registry';
+import { makePluginRuntime } from '../src/plugins/plugin-runtime';
 import { dispatchMachineHostCall } from '../src/plugins/workflow/daemon-command-executor';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -70,7 +72,10 @@ type MessageHandlerHost = {
   ): Promise<void>;
 };
 
-const createHandlerHarness = async (sessionId: SessionId, daemon?: PluginDaemon) => {
+const createHandlerHarness = async (
+  sessionId: SessionId,
+  daemon?: ReturnType<typeof makePluginRuntime>
+) => {
   const logger = createSilentLogger();
   const repo = await LoroRepo.create({});
   const doc = new SessionDocument(repo, sessionId);
@@ -78,7 +83,7 @@ const createHandlerHarness = async (sessionId: SessionId, daemon?: PluginDaemon)
 
   const workspaceDocument = {
     isEncryptedWorkspace: () => false,
-    ...(daemon ? { pluginDaemon: async () => daemon } : {}),
+    ...(daemon ? { pluginRuntime: async () => daemon } : {}),
     isTransportConnected: vi.fn(() => true),
     markMachineFlockDocDirty: vi.fn(),
     registerMachine: vi.fn(),
@@ -667,7 +672,7 @@ it('delivers the committed assistant turn to the installed machine workflow with
   const root = await mkdtemp(join(tmpdir(), 'durable-plugin-event-'));
   const worker = join(root, 'worker.mjs'),
     machineEntry = join(root, 'workflow.mjs');
-  const daemon = new PluginDaemon(
+  const daemon = makePluginRuntime(
     root,
     'ws-1',
     'm-1',
@@ -714,8 +719,12 @@ it('delivers the committed assistant turn to the installed machine workflow with
         },
       ])
     );
-    await daemon.start();
-    expect((await daemon.workflowCatalog()).map((r) => r.pluginId)).toContain('observer');
+    await daemon.runPromise(Effect.flatMap(Registry, (r) => r.start));
+    expect(
+      (await daemon.runPromise(Effect.map(Registry, (r) => r.workflow.catalog()))).map(
+        (r) => r.pluginId
+      )
+    ).toContain('observer');
     await repo.upsertDocMeta(getSessionRoomId(sessionId), {
       id: sessionId,
       machineId: 'm-1',

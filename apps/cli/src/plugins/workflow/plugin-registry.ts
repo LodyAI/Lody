@@ -124,7 +124,7 @@ export class Registry extends Context.Service<
     ) => Effect.Effect<unknown, unknown>;
     workflowLease: (
       id: string,
-      instance: number
+      instance?: number
     ) =>
       | {
           signature: DeclaredGrantSignature;
@@ -543,61 +543,63 @@ export function registryLayer(
           };
         });
       }
-      const start = Effect.gen(function* () {
-        const raw = yield* io(() => readFile(catalog, 'utf8')).pipe(
-          Effect.catch((e) =>
-            (e as NodeJS.ErrnoException).code === 'ENOENT' ? Effect.succeed('[]') : Effect.fail(e)
-          )
-        );
-        for (const item of installation.array().parse(JSON.parse(raw))) {
-          if (
-            vault &&
-            [item.current, item.previous].some(
-              (g) =>
-                g &&
-                (dirname(g.directory) !== generations ||
-                  !/^[a-f0-9-]{36}$/.test(basename(g.directory)) ||
-                  (g.machineEntry !== undefined &&
-                    (!g.manifest.machine ||
-                      g.machineEntry !== join(g.directory, g.manifest.machine))))
+      const start = yield* Effect.cached(
+        Effect.gen(function* () {
+          const raw = yield* io(() => readFile(catalog, 'utf8')).pipe(
+            Effect.catch((e) =>
+              (e as NodeJS.ErrnoException).code === 'ENOENT' ? Effect.succeed('[]') : Effect.fail(e)
             )
-          )
-            return yield* Effect.fail(new Error('Plugin generation outside identity custody'));
-          items.set(item.current.manifest.id, item);
-        }
-        for (const entry of yield* io(() => readdir(generations)).pipe(
-          Effect.catch(() => Effect.succeed([] as string[]))
-        ))
-          if (/^\.stage-[a-zA-Z0-9]{6}$/.test(entry))
-            yield* io(() => rm(join(generations, entry), { recursive: true, force: true })).pipe(
-              Effect.catch(() => Effect.sync(() => warn('Plugin stage cleanup failed')))
-            );
-          else yield* clean(join(generations, entry));
-        yield* Effect.forEach(
-          items,
-          ([id, item]) =>
-            serialize(
-              id,
-              Effect.gen(function* () {
-                if (!item.enabled) return;
-                yield* launch(item);
-                item.pendingConfiguration = false;
-                if (item.dev) sessions.set(id, randomBytes(16).toString('hex'));
-                yield* watch(id, item);
-              })
-            ).pipe(
-              Effect.catchCause((c) =>
-                Effect.sync(() => {
-                  if (Cause.squash(c) instanceof MissingPluginConfiguration)
-                    item.pendingConfiguration = true;
-                  diagnostics.set(id, 'Generation failed to start');
-                  warn(`Plugin ${id} failed to start`);
-                })
+          );
+          for (const item of installation.array().parse(JSON.parse(raw))) {
+            if (
+              vault &&
+              [item.current, item.previous].some(
+                (g) =>
+                  g &&
+                  (dirname(g.directory) !== generations ||
+                    !/^[a-f0-9-]{36}$/.test(basename(g.directory)) ||
+                    (g.machineEntry !== undefined &&
+                      (!g.manifest.machine ||
+                        g.machineEntry !== join(g.directory, g.manifest.machine))))
               )
-            ),
-          { concurrency: 'unbounded', discard: true }
-        );
-      });
+            )
+              return yield* Effect.fail(new Error('Plugin generation outside identity custody'));
+            items.set(item.current.manifest.id, item);
+          }
+          for (const entry of yield* io(() => readdir(generations)).pipe(
+            Effect.catch(() => Effect.succeed([] as string[]))
+          ))
+            if (/^\.stage-[a-zA-Z0-9]{6}$/.test(entry))
+              yield* io(() => rm(join(generations, entry), { recursive: true, force: true })).pipe(
+                Effect.catch(() => Effect.sync(() => warn('Plugin stage cleanup failed')))
+              );
+            else yield* clean(join(generations, entry));
+          yield* Effect.forEach(
+            items,
+            ([id, item]) =>
+              serialize(
+                id,
+                Effect.gen(function* () {
+                  if (!item.enabled) return;
+                  yield* launch(item);
+                  item.pendingConfiguration = false;
+                  if (item.dev) sessions.set(id, randomBytes(16).toString('hex'));
+                  yield* watch(id, item);
+                })
+              ).pipe(
+                Effect.catchCause((c) =>
+                  Effect.sync(() => {
+                    if (Cause.squash(c) instanceof MissingPluginConfiguration)
+                      item.pendingConfiguration = true;
+                    diagnostics.set(id, 'Generation failed to start');
+                    warn(`Plugin ${id} failed to start`);
+                  })
+                )
+              ),
+            { concurrency: 'unbounded', discard: true }
+          );
+        })
+      );
       const availableTools = () =>
         [...items].flatMap(([pluginId, item]) =>
           item.enabled &&
@@ -697,7 +699,8 @@ export function registryLayer(
             turn.onDispatch
           );
         }),
-        workflowLease: (id, instance) => {
+        workflowLease: (id, instance = host.inspect(id).instanceId) => {
+          if (!instance) return undefined;
           const item = items.get(id);
           if (!item?.enabled || !item.declaredGrant || !item.current.machineDigest)
             return undefined;
@@ -721,36 +724,40 @@ export function registryLayer(
         },
         workflow,
         activateProposal: (meta, path) =>
-          serialize(
-            meta.artifact.pluginId,
-            Effect.gen(function* () {
-              const id = meta.artifact.pluginId,
-                old = items.get(id),
-                action = meta.command.action;
-              if (
-                meta.workspaceId !== workspaceId ||
-                meta.machineId !== machineId ||
-                (action === 'propose_install'
-                  ? !!old
-                  : !old ||
-                    old.dev ||
-                    (action === 'propose_reload' && !old.enabled) ||
-                    old.current.packageSha256 !== meta.artifact.sha256)
+          start.pipe(
+            Effect.andThen(() =>
+              serialize(
+                meta.artifact.pluginId,
+                Effect.gen(function* () {
+                  const id = meta.artifact.pluginId,
+                    old = items.get(id),
+                    action = meta.command.action;
+                  if (
+                    meta.workspaceId !== workspaceId ||
+                    meta.machineId !== machineId ||
+                    (action === 'propose_install'
+                      ? !!old
+                      : !old ||
+                        old.dev ||
+                        (action === 'propose_reload' && !old.enabled) ||
+                        old.current.packageSha256 !== meta.artifact.sha256)
+                  )
+                    return yield* Effect.fail(Error('Plugin generation not eligible'));
+                  const artifact = yield* io(() =>
+                    installPackage(path, generations, meta.artifact.sha256)
+                  );
+                  if (artifact.manifest.id !== id) {
+                    yield* clean(artifact.directory);
+                    return yield* Effect.fail(Error('Plugin identity changed'));
+                  }
+                  return yield* change({ action: 'link', path, dev: false }, id, {
+                    ...artifact,
+                    provenance: old?.current.provenance ?? { kind: 'local', origin: 'archive' },
+                    packageSha256: meta.artifact.sha256,
+                  });
+                })
               )
-                return yield* Effect.fail(Error('Plugin generation not eligible'));
-              const artifact = yield* io(() =>
-                installPackage(path, generations, meta.artifact.sha256)
-              );
-              if (artifact.manifest.id !== id) {
-                yield* clean(artifact.directory);
-                return yield* Effect.fail(Error('Plugin identity changed'));
-              }
-              return yield* change({ action: 'link', path, dev: false }, id, {
-                ...artifact,
-                provenance: old?.current.provenance ?? { kind: 'local', origin: 'archive' },
-                packageSha256: meta.artifact.sha256,
-              });
-            })
+            )
           ),
         start,
         machineRpc: Effect.fnUntraced(function* (r, actor): Effect.fn.Return<
@@ -759,6 +766,7 @@ export function registryLayer(
         > {
           if (!actor.userId || r.workspaceId !== workspaceId || r.machineId !== machineId)
             return yield* Effect.fail(new Error('Invalid plugin target'));
+          yield* start;
           if (r.method === 'plugin/control' && r.params.action === 'resolve-proposal')
             return yield* Effect.fail(Error('Host proposal ledger required'));
           if (r.method === 'plugin/catalog') {
@@ -1035,6 +1043,7 @@ export function registryLayer(
         }),
         dispatch: Effect.fnUntraced(function* (raw: unknown) {
           const r = request.parse(raw);
+          yield* start;
           if (r.action === 'list')
             return {
               plugins: [...items].map(([pluginId, i]) => ({
