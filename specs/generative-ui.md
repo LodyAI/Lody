@@ -1,7 +1,9 @@
 # Generative UI
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](generative-ui.zh.md)
 
 Agents answer with declarative, stateful UI embedded in Markdown, beyond what
 `html render` offers: the components are Lody's own, the state belongs to the
