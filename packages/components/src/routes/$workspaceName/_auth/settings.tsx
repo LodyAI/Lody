@@ -4,6 +4,7 @@ import { Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/rea
 import { useTranslation } from 'react-i18next';
 import { useSetAtom } from 'jotai';
 import {
+  settingsPluginTargetAtom,
   settingsActiveTabAtom,
   settingsDialogOpenAtom,
   settingsSelectedMachineIdAtom,
@@ -28,6 +29,7 @@ import { MobileSettingsLayout } from '@/components/mobile/mobile-settings-layout
 import type { MobileWorkspaceTab } from '@/components/mobile/mobile-workspace-tabbar';
 
 type SettingsSearch = {
+  page?: string;
   from?: string;
   github_install_error?: string;
 };
@@ -35,6 +37,7 @@ type SettingsSearch = {
 export const Route = createFileRoute('/$workspaceName/_auth/settings')({
   component: SettingsLayoutComponent,
   validateSearch: (search: Record<string, unknown>): SettingsSearch => ({
+    page: typeof search.page === 'string' ? search.page : undefined,
     from: typeof search.from === 'string' ? search.from : undefined,
     github_install_error:
       typeof search.github_install_error === 'string' ? search.github_install_error : undefined,
@@ -125,11 +128,21 @@ export function SettingsLayoutComponent() {
   // URL's tab and redirect the URL back to where settings was opened from (or chat) so
   // the workspace stays visible behind the dialog instead of a blank settings page.
   const setSettingsModalOpen = useSetAtom(settingsDialogOpenAtom);
+  const setPluginTarget = useSetAtom(settingsPluginTargetAtom);
   const setSettingsModalTab = useSetAtom(settingsActiveTabAtom);
   const setSettingsMachineTarget = useSetAtom(settingsSelectedMachineIdAtom);
   const setSettingsProjectTarget = useSetAtom(settingsSelectedProjectKeyAtom);
   useEffect(() => {
     if (isMobile || !isSettingsPath(location.pathname, workspaceName)) return;
+    const plugin = location.pathname.match(/\/settings\/plugins\/([^/]+)\/?$/)?.[1];
+    setPluginTarget(
+      plugin
+        ? {
+            pluginId: decodeURIComponent(plugin),
+            page: new URLSearchParams(location.searchStr).get('page') ?? undefined,
+          }
+        : null
+    );
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
     setSettingsMachineTarget(
       typeof locationSearch.machine === 'string' ? (locationSearch.machine as MachineId) : null
@@ -148,6 +161,7 @@ export function SettingsLayoutComponent() {
     const search = (prev: Record<string, unknown>) => {
       const safe = { ...prev };
       delete safe.state;
+      delete safe.page;
       delete safe['github-install-retry'];
       delete safe.github_install_retry;
       return { ...safe, github_install_error: githubInstallError };
@@ -170,6 +184,7 @@ export function SettingsLayoutComponent() {
     settingsFrom,
     navigate,
     workspaceName,
+    setPluginTarget,
     setSettingsModalOpen,
     setSettingsModalTab,
     setSettingsMachineTarget,

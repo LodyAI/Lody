@@ -79,7 +79,6 @@ import {
   useWorkspaceAgentRoles,
 } from '@/hooks/use-workspace-agent-roles';
 import type { SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
-import { buildAgentPrompt } from '@/lib';
 
 const areConfigOptionValuesEqual = (
   left?: Record<string, AcpConfigOptionValue>,
@@ -506,13 +505,10 @@ export const DraftSessionChatInterface = memo(
         (
           inputBlocks: SessionInputBlock[],
           preservedInputText?: string,
+          effectivePrompt?: string,
           mcpServerIds: readonly McpServerId[] = mcpSelection.selectedIds
         ): DraftSessionSendPayload => {
           const prompt = extractPromptPreviewFromInputBlocks(inputBlocks);
-          // A Role is a new-Session preset even inside a parent Session's blank
-          // tab. Its instruction belongs before this child Session's first
-          // task, while the parent Agent Config's prompt remains excluded.
-          const promptPayload = buildAgentPrompt(prompt, activeAgentRole?.promptPrefix ?? '');
           return {
             draftId: draft.id,
             sessionId: draft.sessionId,
@@ -530,13 +526,9 @@ export const DraftSessionChatInterface = memo(
             customAcp: sessionAgentConfig?.customAcp,
             runtimeOverrides: sessionAgentConfig?.runtimeOverrides,
             configOptionSelectors,
-            // Unlike Chat Landing's first turn, this deliberately has no
-            // Agent Config prompt prefix: a child tab continues the parent's
-            // workspace context. A selected Role's own first-turn instruction
-            // is already included in `promptPayload` above.
             inputConfig: buildSessionTurnInputConfig({
               inputBlocks,
-              prompt: promptPayload,
+              prompt: effectivePrompt ?? prompt,
               cliType: draft.cliType,
               agentType: draft.agentType,
               modeId: selectedModeId,
@@ -583,7 +575,12 @@ export const DraftSessionChatInterface = memo(
           options?: SessionSendMessageOptions
         ) => {
           return await onSendDraft({
-            ...buildSendPayload(inputBlocks, undefined, options?.mcpServerIds),
+            ...buildSendPayload(
+              inputBlocks,
+              undefined,
+              options?.effectivePrompt,
+              options?.mcpServerIds
+            ),
             attachments: options?.attachments,
             onAccepted: () => acceptMcpSend(draft.sessionId, options?.skipMcpOnce),
           });
@@ -634,6 +631,7 @@ export const DraftSessionChatInterface = memo(
           </div>
           <SessionChatInputArea
             ref={inputAreaRef}
+            firstTurnPromptPrefix={activeAgentRole?.promptPrefix}
             session={transientSession}
             sessionLocalProjectRootPath={sessionLocalProjectRootPath}
             isMachineRemoved={!sessionMachine && docMetaCacheReady}

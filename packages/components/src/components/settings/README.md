@@ -32,11 +32,9 @@ keeps the main renderer's image policy unchanged. [Decision](../../../../../.age
 
 ## Plugins
 
-Settings → Plugins shows installations reported by the workspace’s online machines.
-Approve a remote client bundle by digest, or grant a machine owner’s development session
-permission to hot-reload in this tab. The host’s **Dev HMR Trusted · Revoke** indicator
-revokes that lease without opening settings. Lifecycle and configuration changes use
-local control on the owning machine, not the encrypted plugin invocation channel.
+Settings → Plugins lists workspace pins and machine installations. Open a plugin to see its workspace page without an online machine, or select an installation for its machine page. Machine detail also hosts machine pages; Project Settings hosts project pages. `useLody().settings.open()` opens the caller's detail; pass `pageId` or `pluginId:pageId` to select a custom page.
+
+Custom pages can embed `PluginConfigForm` for declarative fields or `PluginSecretField` to open the host's password editor. Only the host handles the submitted value; the callback receives configured status after `plugin/control` saves to the selected machine. Approving a remote digest and granting a machine owner's development session permission to hot-reload are separate actions. **Dev HMR Trusted · Revoke** revokes the development lease without opening Settings.
 The setup dialog keeps existing credentials masked; leaving a configured field untouched
 preserves its stored value. Web startup with `?safeMode=1` and desktop startup with
 `--safe-mode` bypass client bundles, themes and styles.

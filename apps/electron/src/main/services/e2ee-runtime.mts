@@ -1,3 +1,4 @@
+import { pluginOwnerSyncSubject } from '@lody/shared/plugins/workspace-entry'
 import {
   makeLazyMachineSharingHost,
   MachineSharingError,
@@ -2352,6 +2353,29 @@ export const makeDesktopE2eeRuntimeHost = Effect.fn('DesktopE2eeRuntimeHost.open
             change,
             withSharingHistory(entry, workspaceId, remote, readHistory)
           )
+        ).pipe(boundary),
+      signPluginOwnerSync: (
+        workspaceId: string,
+        pin: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry
+      ) =>
+        Effect.flatMap(run(openWorkspace(workspaceId)), (entry) =>
+          Effect.gen(function* () {
+            const subject = yield* Effect.try({
+              try: () => pluginOwnerSyncSubject(pin),
+              catch: () => fail('invalid-input')
+            })
+            const signature = yield* entry.signIntent({
+              ...subject,
+              workspaceId,
+              contentDigest: Uint8Array.from(Buffer.from(subject.contentDigest, 'hex'))
+            })
+            const status = yield* entry.status()
+            return encodeE2eeIntentRecord({
+              kind: subject.kind,
+              signer: Uint8Array.from(Buffer.from(status.signingPublicKey ?? '', 'hex')),
+              signature
+            })
+          })
         ).pipe(boundary),
       /** Sign one schedule declaration. The host computes the definition fingerprint
        * from the document itself; the renderer never supplies a digest or signer. */

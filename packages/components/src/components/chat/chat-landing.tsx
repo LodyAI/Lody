@@ -1,3 +1,4 @@
+import { prepareFirstComposerInput } from '../../plugins/composer-before-send';
 import { pluginLandingDraftAtom, pluginAttachmentFile } from '../../plugins/workspace-drafts';
 import { messageSubmitted } from '../../plugins/session-events';
 import { buildDaemonInstallCommands } from '@/lib/daemon-installation';
@@ -126,7 +127,6 @@ import {
   lodyPresenceStatesAtom,
   lodyPresenceSyncStateAtom,
 } from '@/atoms/presence';
-import { buildAgentPrompt } from '@/lib';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
@@ -1267,6 +1267,8 @@ function WorkspaceChatLanding({
   const projectGroupPinnedMachineIdRef = useRef(projectGroupPinnedMachineId);
   projectGroupPinnedMachineIdRef.current = projectGroupPinnedMachineId;
   const [selectedAgent, setSelectedAgent] = useState<AgentSelection | null>(null);
+  const preparingPrompt = useRef<AbortController | null>(null);
+  useLayoutEffect(() => () => preparingPrompt.current?.abort(), [workspaceId]);
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
     embeddingRef.current?.onPendingChange?.(submitting);
@@ -3192,7 +3194,7 @@ function WorkspaceChatLanding({
   );
 
   const handleSubmit = async (withoutMcp = false) => {
-    if (submitting) return;
+    if (submitting || preparingPrompt.current) return;
     const submitStartedAtMs = getPerformanceNowMs();
     if (hasBlockingImages || hasBlockingFiles) {
       captureSessionInputBlocked('image_upload_in_progress');
@@ -3208,12 +3210,12 @@ function WorkspaceChatLanding({
       mentions: persistedMentionRanges ?? [],
       pastedTextDrafts,
     });
-    const inputBlocks = normalizeSessionInputBlocks(
+    let inputBlocks = normalizeSessionInputBlocks(
       buildInputBlocks(expandedPrompt.text, buildFileInputBlocks(), expandedPrompt.spans),
       ''
     );
     const attachments = [...imageDraftAttachments, ...fileDraftAttachments];
-    const promptText = extractPromptPreviewFromInputBlocks(inputBlocks);
+    let promptText = extractPromptPreviewFromInputBlocks(inputBlocks);
     if (inputBlocks.length === 0 && attachments.length === 0) {
       captureSessionInputBlocked('empty_input');
       setComposerError(t('chat.validation.missingPrompt'));
@@ -3381,13 +3383,31 @@ function WorkspaceChatLanding({
       }
 
       const draftTitle = deriveDraftSessionTitle(promptText);
-      /* Agent config prompt, then the Role's instruction, then the task — the
-         Role speaks for how this agent is being used, so it sits between the
-         two. A Role only reaches here while it is still what will run. */
-      const promptPayload = buildAgentPrompt(
-        promptText,
-        buildAgentPrompt(activeAgentRole?.promptPrefix ?? '', selectedConfig.prompt ?? '')
-      );
+      const controller = new AbortController();
+      preparingPrompt.current = controller;
+      let promptPayload: string;
+      try {
+        const result = await prepareFirstComposerInput({
+          workspace: workspaceId,
+          inputBlocks,
+          configPrompt: selectedConfig.prompt ?? undefined,
+          rolePrompt: activeAgentRole?.promptPrefix,
+          signal: controller.signal,
+          isCurrent: () =>
+            !promptTextareaRef.current || getComposerText(promptTextareaRef.current) === prompt,
+        });
+        if (!result || controller.signal.aborted) return;
+        promptPayload = result.prompt;
+        inputBlocks = result.inputBlocks;
+        promptText = extractPromptPreviewFromInputBlocks(inputBlocks);
+        if (!inputBlocks.length && !attachments.length) return;
+      } catch (error) {
+        if (!controller.signal.aborted)
+          setComposerError(error instanceof Error ? error.message : 'Plugin action failed');
+        return;
+      } finally {
+        preparingPrompt.current = null;
+      }
       const issuePRMentions = extractIssuePRMentionsFromText(
         promptText,
         knownIssuePrItems,

@@ -12,7 +12,7 @@ import {
 import {
   pluginSessionCreateParams,
   type DeclaredGrantSignature,
-  type PluginMachineRequest,
+  type WorkflowGrantRequest,
 } from '@lody/shared/plugins/machine-rpc';
 import type { CliE2eeWorkspaceLegacy } from '../../lib/e2ee/workspace-legacy';
 import type { LoroDocumentManager } from '../../lib/loro/doc';
@@ -90,7 +90,6 @@ export function resolveDeclaredWorkflow(options: {
       approval.workspace_id !== call.workspaceId ||
       approval.machine_id !== call.machineId ||
       approval.plugin_id !== call.pluginId ||
-      approval.installationId !== lease.installationId ||
       approval.machineDigest !== lease.machineDigest ||
       approval.targetDevice !== options.identity.signingPublicKey
     )
@@ -503,13 +502,13 @@ export function resolveDeclaredWorkflow(options: {
 
 /** Only retained encrypted ingress can mint the actor proof consumed by Registry. */
 export async function bindDeclaredGrantActor({
-  request,
+  params,
   actor,
   identity,
   machineId,
   projectExists,
 }: {
-  request: Extract<PluginMachineRequest, { method: 'plugin/declared-workflow-grant' }>;
+  params: WorkflowGrantRequest;
   actor: import('./plugin-registry').VerifiedPluginGrant;
   identity?: Pick<CliE2eeWorkspaceLegacy, 'verifyDeclaredWorkflowGrant' | 'signingPublicKey'>;
   machineId: MachineId;
@@ -519,11 +518,11 @@ export async function bindDeclaredGrantActor({
     throw Error('Owner approval required');
   const proof = await identity.verifyDeclaredWorkflowGrant(actor.declaredGrantSignature, machineId);
   if (
-    JSON.stringify(proof.approval) !== JSON.stringify(request.params) ||
+    JSON.stringify(proof.approval) !== JSON.stringify(params) ||
     !proof.isCurrent() ||
-    (request.params.action === 'grant' &&
-      request.params.allowed_project_ids !== '*' &&
-      !(await Promise.all(request.params.allowed_project_ids.map(projectExists))).every(Boolean))
+    (params.action === 'grant' &&
+      params.allowed_project_ids !== '*' &&
+      !(await Promise.all(params.allowed_project_ids.map(projectExists))).every(Boolean))
   )
     throw Error('Workflow approval forbidden');
   return { ...actor, workflowCurrent: proof.isCurrent, targetDevice: identity.signingPublicKey };

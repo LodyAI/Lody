@@ -1234,6 +1234,8 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
       ),
     // Declarations need only this admitted device, not RPC transport: an encrypted
     // schedule saved from any host carries its setter's signature.
+    signPluginOwnerSync: (id, pin) =>
+      run(withSession(id, (session) => session.signPluginOwnerSync(pin))),
     signScheduleDeclaration: (id, document, manualRunKey) =>
       run(withSession(id, (session) => session.signScheduleDeclaration(document, manualRunKey))),
     /** Owner only, as on desktop: hands ownership to an existing non-guest member and

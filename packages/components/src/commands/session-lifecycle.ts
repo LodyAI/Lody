@@ -1,3 +1,4 @@
+import { prepareInteractivePrompt } from '../plugins/composer-before-send';
 import { steerUserTurn } from '../lib/session-send-delivery';
 import { lifecycleCommandInputs as inputs } from '@lody/shared/commands/host-commands';
 import {
@@ -97,11 +98,14 @@ export async function executeSessionLifecycle(
       return runtime.writer.respondSessionPermission(sessionId, requestId, outcome, { turnId });
     }
     case 'sessionSend': {
-      const { prompt, delivery } = inputs[id].parse(input);
+      const { prompt: original, delivery } = inputs[id].parse(input);
       if (meta.isArchived || !meta.agentType || !meta.cliType || meta.collaborationStopped)
         throw Error('Session is unavailable for input');
       const timestamp = new Date(getServerNow()).toISOString(),
         turnId = crypto.randomUUID();
+      const prepared = await prepareInteractivePrompt(runtime.workspaceId, original, signal);
+      if (!prepared?.text) throw new Error('Session send cancelled');
+      const prompt = prepared.text;
       const inputBlocks = [{ type: 'text' as const, text: prompt }],
         inputConfig = { prompt, inputBlocks, agentType: meta.agentType, cliType: meta.cliType };
       const expected = delivery === 'steer' ? await activeTurn(runtime, sessionId) : undefined;

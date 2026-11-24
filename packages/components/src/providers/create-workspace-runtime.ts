@@ -271,6 +271,9 @@ export type WorkspaceE2eeTransport = {
     machineId: string,
     args: import('@lody/shared/e2ee-rpc').E2eeDispatchInput
   ) => Promise<import('@lody/shared/e2ee-rpc').E2eePreparedDispatch>;
+  signPluginOwnerSync?: (
+    pin: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry
+  ) => Promise<string>;
   signScheduleDeclaration?: (
     document: Pick<import('@lody/shared').ScheduleDocument, 'definition' | 'prompt' | 'message'>,
     manualRunKey?: string
@@ -6445,6 +6448,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     cloudStreamsEnabled: cloudPlaneEnabled && !protectedContent,
     ...(cloudPlaneEnabled && !protectedContent ? { getWorkspaceStreamsGrant } : {}),
     ...(prepareEncryptedDispatch ? { prepareEncryptedDispatch } : {}),
+    ...(protectedContent && deps.e2ee?.signPluginOwnerSync
+      ? { signPluginOwnerSync: deps.e2ee.signPluginOwnerSync }
+      : {}),
     ...(protectedContent && deps.e2ee?.signScheduleDeclaration
       ? { signScheduleDeclaration: deps.e2ee.signScheduleDeclaration }
       : {}),

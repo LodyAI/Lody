@@ -1,4 +1,11 @@
-import { getMachineFlockRateLimits } from '@lody/shared';
+import { usePlatform } from '@lody/platform/react';
+import { useStore } from 'jotai';
+import { userAtom } from '../atoms';
+import { getMachineMetaMapAtom } from '../atoms/machines';
+import { writeProjectConfig } from './project-config-write';
+import { type MachineId } from '@lody/shared';
+import { subscribePluginOwnerSync, uploadWorkspaceCatalog } from '../lib/workspace-catalog-write';
+import { getWorkspaceFlockDocId, getMachineFlockRateLimits } from '@lody/shared';
 import { useWorkspaceCatalog } from '../hooks/use-workspace-catalog';
 import { workspaceSnapshotSource } from './workspace-snapshot-source';
 import { PendingInteractionObserver } from './pending-interaction';
@@ -42,6 +49,8 @@ import { useWorkspaceClientPlugins } from './client-host-provider';
 import { createWorkspacePluginRegistry } from './workspace-plugin-registry';
 
 export function PluginCatalogSubscriber() {
+  const store = useStore(),
+    sharing = usePlatform().e2eeWorkspaces?.runtime;
   const owner = useWorkspaceClientPlugins(),
     runtime = useAtomValue(activeWorkspaceRuntimeAtom),
     account = useWorkspaceLocalAccountId(),
@@ -101,7 +110,83 @@ export function PluginCatalogSubscriber() {
     )
   );
   const reads = useMemo(() => new WorkspacePluginReads(owner?.workspaceId ?? ''), [owner]);
+  useEffect(() => {
+    if (!owner || !runtime || owner.workspaceId !== runtime.workspaceId) return;
+    let active = true;
+    owner.projectWriter = async (entry, machine, project, changes) => {
+      const encrypted = runtime.contentMode === 'e2ee';
+      const check = () => {
+        if (
+          !active ||
+          !account ||
+          !project ||
+          !owner
+            .installations()
+            .some(
+              (i) =>
+                i.sourceKey === entry.sourceKey &&
+                i.pluginId === entry.pluginId &&
+                i.digest === entry.digest &&
+                (i.sourceKey !== 'workspace' || !!owner.trustState(i))
+            ) ||
+          store.get(activeWorkspaceRuntimeAtom) !== runtime ||
+          (encrypted
+            ? runtime.accountId !== account || runtime.protectedCodeCollabRole?.get() !== 'write'
+            : store.get(userAtom)?.id !== account ||
+              store.get(getMachineMetaMapAtom).get(machine as MachineId)?.ownerUserId !== account)
+        )
+          throw Error('Project configuration forbidden');
+      };
+      await writeProjectConfig({
+        workspaceId: runtime.workspaceId,
+        machine,
+        project,
+        manifest: entry.dev.manifest,
+        changes,
+        writer: runtime.writer,
+        check,
+        readSharing: encrypted
+          ? async () => sharing?.readMachineSharing?.(runtime.workspaceId, machine)
+          : undefined,
+      });
+      void uploadWorkspaceCatalog(runtime);
+    };
+    let stop: (() => void) | undefined;
+    void runtime.repo
+      .openFlockDoc(getWorkspaceFlockDocId(runtime.workspaceId))
+      .then(({ flock }) => {
+        if (!active) return;
+        const refresh = () =>
+          void owner
+            .setProjectRows(Array.from(flock.scan({ prefix: ['projectPluginConfig'] })))
+            .catch((e) => console.error('Project configuration unavailable', e));
+        refresh();
+        stop = flock.subscribe((batch) => {
+          if (batch.events.some((e) => e.key[0] === 'projectPluginConfig')) refresh();
+        });
+      })
+      .catch((e) => console.error('Project configuration unavailable', e));
+    return () => {
+      active = false;
+      stop?.();
+      owner.projectWriter = undefined;
+    };
+  }, [owner, runtime, account, sharing, store]);
   const workspaceCatalog = useWorkspaceCatalog();
+  useEffect(() => {
+    if (!owner || !runtime || runtime.workspaceId !== owner.workspaceId) return;
+    return subscribePluginOwnerSync(
+      runtime,
+      owner.ownerSync,
+      () => store.get(activeWorkspaceRuntimeAtom) === runtime
+    );
+  }, [runtime, owner, store]);
+  useEffect(() => {
+    if (owner && runtime?.workspaceId === owner.workspaceId)
+      void owner
+        .setWorkspacePlugins(workspaceCatalog.plugins)
+        .catch((e) => console.error('Workspace plugin disclosure failed', e));
+  }, [owner, runtime, workspaceCatalog.plugins]);
   const { roles, synced } = useWorkspaceAgentRoles();
   const { projects } = useVisibleLocalProjects();
   const { members } = useWorkspaceMembers();
@@ -318,6 +403,7 @@ export function PluginCatalogSubscriber() {
   const targets = useMemo(() => JSON.parse(identity) as CatalogMachine[], [identity]);
   useEffect(() => {
     if (!owner || !runtime || runtime.workspaceId !== owner.workspaceId) return;
+    owner.setOnlineMachines(targets.map((t) => t.machineId));
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const snapshots = new Map<string, Awaited<ReturnType<typeof readPluginCatalog>>>();
@@ -339,11 +425,14 @@ export function PluginCatalogSubscriber() {
               runtime!.workspaceId,
               target,
               runtime!.requestPlugin,
-              (entry, port) =>
-                createWorkspacePluginRegistry(entry, port, reads, owner!.storageNamespace)
+              (entry) => createWorkspacePluginRegistry(entry, reads, owner!),
+              (await runtime!.repo.openFlockDoc(getWorkspaceFlockDocId(runtime!.workspaceId))).flock
             );
             if (!active) return;
             snapshots.set(target.machineId, entries);
+            void owner!
+              .rememberCatalog(target.machineId, entries)
+              .catch((e) => console.error('Plugin source cache unavailable', e));
           } catch {
             // A failed poll cannot prove the installation disappeared; keep serving its last catalog.
             if (!active) return;
@@ -353,24 +442,16 @@ export function PluginCatalogSubscriber() {
             .catch((e) => console.error('Plugin reconciliation failed', e));
         })
       );
-      if (active) timer = setTimeout(() => void refresh(), 2000);
+      if (active) {
+        owner!.finishCatalogPoll();
+        timer = setTimeout(() => void refresh(), 2000);
+      }
     }
     void owner
       .update([...snapshots.values()].flat())
       .catch((e) => console.error('Plugin cleanup failed', e));
     void owner
-      .restore((entry) =>
-        createWorkspacePluginRegistry(
-          entry,
-          {
-            call: async () => {
-              throw Error('Workspace plugin has no machine port');
-            },
-          },
-          reads,
-          owner.storageNamespace
-        )
-      )
+      .restore((entry) => createWorkspacePluginRegistry(entry, reads, owner))
       .catch((e) => {
         if (active) console.error('Workspace plugin restore failed', e);
       })

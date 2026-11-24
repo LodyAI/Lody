@@ -195,6 +195,7 @@ export const settingsActiveTabAtom = atom<SettingsTabId>(SETTINGS_DEFAULT_TAB);
 // Optional resource targets used by Account shortcuts. Routes keep the same
 // values in search params on mobile; the desktop modal keeps them here while
 // switching between its Account, Agents, Projects, and machine-detail views.
+export const settingsPluginTargetAtom = atom<{ pluginId: string; page?: string } | null>(null);
 export const settingsSelectedMachineIdAtom = atom<MachineId | null>(null);
 export const settingsSelectedProjectKeyAtom = atom<string | null>(null);
 

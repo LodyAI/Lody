@@ -1,4 +1,9 @@
-import type { MachineId } from '@lody/shared';
+import {
+  projectPluginValues,
+  projectConfigPrefix,
+  type WorkspaceFlockReadableFlock,
+  type MachineId,
+} from '@lody/shared';
 import type { createWorkspaceMachineRpcFacade } from '../providers/workspace-machine-rpc-facade';
 import type { ClientCatalogInstallation } from './client-host-provider';
 import type { PluginCallPort } from './query-bindings';
@@ -13,16 +18,26 @@ export async function readPluginCatalog(
   workspaceId: string,
   machine: CatalogMachine,
   request: RequestPlugin,
-  makeRegistry: (
-    entry: ClientCatalogInstallation,
-    port: PluginCallPort
-  ) => ClientCatalogInstallation['registry']
+  makeRegistry: (entry: ClientCatalogInstallation) => ClientCatalogInstallation['registry'],
+  configFlock?: WorkspaceFlockReadableFlock
 ): Promise<ClientCatalogInstallation[]> {
   const target = machine.machineId;
   const response = await request(target, { method: 'plugin/catalog', params: {} });
   if (response.type !== 'plugin/catalog') throw new Error('Unexpected plugin catalog');
   return response.installations.map((row) => {
     const pluginId = row.manifest.id;
+    const projectValues = Object.fromEntries(
+      Array.from(
+        configFlock?.scan({ prefix: projectConfigPrefix(target, pluginId) }) ?? []
+      ).flatMap((rowValue) => {
+        if (rowValue.key.length !== 4 || typeof rowValue.key[3] !== 'string') return [];
+        try {
+          return [[rowValue.key[3], projectPluginValues(row.manifest, rowValue.value)]];
+        } catch {
+          return [];
+        }
+      })
+    );
     const port: PluginCallPort = {
       async call(method, descriptorId, ref, input, signal) {
         signal.throwIfAborted();
@@ -50,6 +65,8 @@ export async function readPluginCatalog(
       },
     };
     const entry: ClientCatalogInstallation = {
+      machinePort: port,
+      source: row.source,
       packageSha256: row.packageSha256,
       ...(row.enabled &&
       row.manifest.permissions?.includes('workflow.autonomous') &&
@@ -75,32 +92,38 @@ export async function readPluginCatalog(
               roleIds: string[] | '*',
               operations: import('@lody/shared/plugins/machine-rpc').DeclaredWorkflowGrant['allowed_ops']
             ) => {
-              const { issuer, activeGrant, ...binding } = row.workflowInstallation!;
+              const { issuer, activeGrant, machineDigest, targetDevice } =
+                row.workflowInstallation!;
               if (action === 'revoke' && !activeGrant) throw Error('No active grant');
               const now = Date.now();
               const result = await request(target, {
-                method: 'plugin/declared-workflow-grant',
+                method: 'plugin/control',
                 params: {
-                  ...binding,
-                  issued_by_user_id: issuer,
-                  grant_id: action === 'revoke' ? activeGrant!.grant_id : crypto.randomUUID(),
-                  issued_at_ms: now,
-                  workspace_id: workspaceId,
-                  machine_id: target,
-                  plugin_id: pluginId,
-                  allowed_project_ids:
-                    action === 'revoke'
-                      ? activeGrant!.allowed_project_ids
-                      : projectId === '*'
-                        ? '*'
-                        : [projectId],
-                  allowed_role_ids: action === 'revoke' ? activeGrant!.allowed_role_ids : roleIds,
-                  allowed_ops: action === 'revoke' ? activeGrant!.allowed_ops : operations,
-                  action,
+                  action: 'manage-workflow-grant',
+                  grant: {
+                    machineDigest,
+                    targetDevice,
+                    issued_by_user_id: issuer,
+                    grant_id: action === 'revoke' ? activeGrant!.grant_id : crypto.randomUUID(),
+                    issued_at_ms: now,
+                    workspace_id: workspaceId,
+                    machine_id: target,
+                    plugin_id: pluginId,
+                    allowed_project_ids:
+                      action === 'revoke'
+                        ? activeGrant!.allowed_project_ids
+                        : projectId === '*'
+                          ? '*'
+                          : [projectId],
+                    allowed_role_ids: action === 'revoke' ? activeGrant!.allowed_role_ids : roleIds,
+                    allowed_ops: action === 'revoke' ? activeGrant!.allowed_ops : operations,
+                    action,
+                  },
                 },
               });
               if (
-                result.type !== 'plugin/declared-workflow-grant' ||
+                result.type !== 'plugin/control' ||
+                !('active' in result) ||
                 result.active !== (action === 'grant')
               )
                 throw Error('Workflow approval not confirmed');
@@ -130,15 +153,12 @@ export async function readPluginCatalog(
         return result;
       },
       inspection: row.inspection,
+      projectValues,
       workspaceId,
       pluginId,
       machineId: target,
       sourceKey: response.transport === 'local' ? 'local' : `machine:${target}`,
-      configurationKey: JSON.stringify([
-        row.manifest,
-        row.inspection?.preferences,
-        row.inspection?.projectPreferences,
-      ]),
+      configurationKey: JSON.stringify([row.manifest, row.inspection?.preferences, projectValues]),
       digest: row.clientDigest ?? '',
       invalidations: row.invalidations ?? 0,
       client: row.manifest.client,
@@ -169,8 +189,26 @@ export async function readPluginCatalog(
           totalBytes: reply.totalBytes,
         };
       },
-      ...(response.transport === 'local'
+      ...(machine.owner
         ? {
+            setSecret: async (fieldKey, value) => {
+              const reply = await request(
+                target,
+                {
+                  method: 'plugin/control',
+                  params: {
+                    action: 'set-secret',
+                    pluginId,
+                    clientDigest: row.clientDigest,
+                    fieldKey,
+                    value,
+                  },
+                },
+                { requireLocal: response.transport === 'local' }
+              );
+              if (reply.type !== 'plugin/control' || !('inspection' in reply))
+                throw Error('Unexpected secret response');
+            },
             inspect: async () => {
               const result = await request(
                 target,
@@ -178,9 +216,10 @@ export async function readPluginCatalog(
                   method: 'plugin/control',
                   params: { pluginId, clientDigest: row.clientDigest, action: 'inspect' },
                 },
-                { requireLocal: true }
+                { requireLocal: response.transport === 'local' }
               );
-              if (result.type !== 'plugin/control') throw Error('Unexpected inspection response');
+              if (result.type !== 'plugin/control' || !('inspection' in result))
+                throw Error('Unexpected inspection response');
               return result.inspection;
             },
             control: async (action, changes, projectId) => {
@@ -196,15 +235,15 @@ export async function readPluginCatalog(
                     projectId,
                   },
                 },
-                { requireLocal: true }
+                { requireLocal: response.transport === 'local' }
               );
-              if (result.type !== 'plugin/control')
+              if (result.type !== 'plugin/control' || !('inspection' in result))
                 throw Error('Unexpected plugin control response');
               return result.inspection;
             },
           }
         : {}),
-      registry: (...args) => makeRegistry(entry, port)(...args),
+      registry: (...args) => makeRegistry(entry)(...args),
     };
     return entry;
   });

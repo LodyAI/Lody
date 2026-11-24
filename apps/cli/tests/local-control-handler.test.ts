@@ -129,12 +129,15 @@ describe('LocalControlHandler', () => {
         await send('/machine-rpc', {
           machineId: 'm',
           workspaceId: 'w',
-          method: 'plugin/proposal-decision',
+          method: 'plugin/control',
           params: {
-            sessionId: 's',
-            requestId: '98a0dc46-f012-4c6a-a331-b1348465aa21',
-            sha256: 'a'.repeat(64),
-            decision: 'approve',
+            action: 'resolve-proposal',
+            decision: {
+              sessionId: 's',
+              requestId: '98a0dc46-f012-4c6a-a331-b1348465aa21',
+              sha256: 'a'.repeat(64),
+              decision: 'approve',
+            },
           },
         })
       ).status

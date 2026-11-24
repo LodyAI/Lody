@@ -66,11 +66,17 @@ test('registered CLI creates and checks source but rejects activation in an agen
   const releasePreview = join(cwd, 'release.html');
   await invoke('preview', archive, '--no-open', '--output', releasePreview);
   expect(await readFile(releasePreview, 'utf8')).toContain('sandbox="allow-scripts"');
-  await expect(invoke('install', archive)).rejects.toThrow('interactive owner terminal');
-  await expect(invoke('rollback', 'renderer')).rejects.toThrow('interactive owner terminal');
+  await expect(invoke('install', archive)).rejects.toThrow(
+    'Agent sessions must propose plugin activation'
+  );
+  await expect(invoke('rollback', 'renderer')).rejects.toThrow(
+    'Agent sessions must propose plugin activation'
+  );
   await writeFile(archive, 'LODYPKG1\n');
   const invalid = join(cwd, 'invalid.html');
   await expect(invoke('preview', archive, '--no-open', '--output', invalid)).rejects.toThrow();
   await expect(readFile(invalid)).rejects.toMatchObject({ code: 'ENOENT' });
-  await expect(invoke('link', '--dev', path)).rejects.toThrow('interactive owner terminal');
+  await expect(invoke('link', '--dev', path)).rejects.toThrow(
+    'Agent sessions must propose plugin activation'
+  );
 });

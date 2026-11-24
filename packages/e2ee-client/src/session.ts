@@ -1,3 +1,7 @@
+import {
+  pluginOwnerSyncSubject,
+  type WorkspacePluginEntry,
+} from '@lody/shared/plugins/workspace-entry';
 import { makePersonalKeyMaintenance, type PersonalKeyRoundMode } from './maintenance';
 import {
   Cause,
@@ -1481,6 +1485,28 @@ export const openPersonalSession = Effect.fnUntraced(function* (
       ) => run(Effect.flatMap(rpcOwner(), (r) => r.prepareDispatch(...args))),
       /** Sign one schedule declaration with this admitted device. The host computes the
        * definition fingerprint from the document; callers never supply a digest. */
+      signPluginOwnerSync: (pin: WorkspacePluginEntry) =>
+        run(
+          Effect.gen(function* () {
+            yield* admitted();
+            const subject = yield* Effect.try({
+              try: () => pluginOwnerSyncSubject(pin),
+              catch: () => fail('invalid-input'),
+            });
+            const signature = yield* signExecutionIntent({
+              ...subject,
+              genesis: prepared.binding.genesis,
+              workspaceId: prepared.binding.workspaceId,
+              contentDigest: fromHex(subject.contentDigest),
+              signer: device,
+            });
+            return encodeE2eeIntentRecord({
+              kind: subject.kind,
+              signer: device.publicKey.toBytes(),
+              signature: signature.toBytes(),
+            });
+          })
+        ),
       signScheduleDeclaration: (
         document: Pick<ScheduleDocument, 'definition' | 'prompt' | 'message'>,
         manualRunKey?: string

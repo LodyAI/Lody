@@ -31,11 +31,11 @@ function targetKey(target: Target) {
 export function createPluginQueryBindings(
   registry: PluginQueryRegistry,
   port: PluginCallPort,
-  owner: { workspaceId: string; machineId: string; signal: AbortSignal }
+  owner: { workspaceId: string; signal: AbortSignal }
 ): Pick<ClientHostBindings, 'useQuery' | 'useMutation'> {
   function check(target: Target) {
     owner.signal.throwIfAborted();
-    if (target.workspaceId !== owner.workspaceId || target.machineId !== owner.machineId)
+    if (target.workspaceId !== owner.workspaceId)
       throw Object.assign(Error('Target outside plugin installation'), { code: 'forbidden' });
   }
   return {

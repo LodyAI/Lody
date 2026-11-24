@@ -3387,10 +3387,13 @@ export class MessageHandler {
   ) {
     this.sessionManager = sessionManager;
     this.pluginRpc = config.pluginRpc;
-    sessionManager.capturePluginToolTurn = sid => {
-      const turn=this.cleanedUp?undefined:this.executionService?.capturePluginToolTurn(sid);
-      if(!turn)return undefined;
-      return {...turn,executeHostCall:(call,signal)=>this.executeLivePluginTool(sid,turn,call,signal)};
+    sessionManager.capturePluginToolTurn = (sid) => {
+      const turn = this.cleanedUp ? undefined : this.executionService?.capturePluginToolTurn(sid);
+      if (!turn) return undefined;
+      return {
+        ...turn,
+        executeHostCall: (call, signal) => this.executeLivePluginTool(sid, turn, call, signal),
+      };
     };
     this.sorbetCredentials = config.sorbetCredentials;
     this.encryptedAttachments = config.encryptedWorkspace === true;
@@ -7991,18 +7994,35 @@ export class MessageHandler {
     call: Parameters<import('../plugins/machine-host-port').DispatchMachineHostCall>[0],
     signal: AbortSignal
   ) {
-    const deny = (): never => { throw Object.assign(Error('Plugin tool forbidden'), { code: 'forbidden' }); };
+    const deny = (): never => {
+      throw Object.assign(Error('Plugin tool forbidden'), { code: 'forbidden' });
+    };
     const gate = this.encryptedExecution;
-    if (!gate || call.origin.type !== 'invoke' || call.origin.frame.kind !== 'tool' ||
-        call.origin.frame.actorUserId !== turn.userId || call.op !== 'lody.execute' ||
-        call.workspaceId !== this.workspaceId || call.machineId !== this.machineId) return deny();
-    const { pluginInvocationParams, pluginSessionCreateParams } = await import('@lody/shared/plugins/machine-rpc');
+    if (
+      !gate ||
+      call.origin.type !== 'invoke' ||
+      call.origin.frame.kind !== 'tool' ||
+      call.origin.frame.actorUserId !== turn.userId ||
+      call.op !== 'lody.execute' ||
+      call.workspaceId !== this.workspaceId ||
+      call.machineId !== this.machineId
+    )
+      return deny();
+    const { pluginInvocationParams, pluginSessionCreateParams } =
+      await import('@lody/shared/plugins/machine-rpc');
     const source = pluginInvocationParams.shape.target.parse(call.origin.frame.target);
     const target = pluginInvocationParams.shape.target.parse(call.payload.target);
     const project = source.projectId;
-    if (!project || source.sessionId !== sid || source.workspaceId !== this.workspaceId ||
-        source.machineId !== this.machineId || target.workspaceId !== this.workspaceId ||
-        target.machineId !== this.machineId || target.projectId !== project) return deny();
+    if (
+      !project ||
+      source.sessionId !== sid ||
+      source.workspaceId !== this.workspaceId ||
+      source.machineId !== this.machineId ||
+      target.workspaceId !== this.workspaceId ||
+      target.machineId !== this.machineId ||
+      target.projectId !== project
+    )
+      return deny();
     const root = { sessionId: sid, userTurnId: turn.sourceTurnId };
     let fence = () => false;
     const check = () => {
@@ -8013,14 +8033,29 @@ export class MessageHandler {
       if (!turn.isCurrent()) deny();
       const row = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sid));
       const meta = row?.meta as SessionMeta | undefined;
-      if (!row || row.deleted || !meta || meta.machineId !== this.machineId || meta.isArchived ||
-          meta.collaborationStopped || meta.project?.kind !== 'local' || meta.project.localProjectId !== project) return deny();
+      if (
+        !row ||
+        row.deleted ||
+        !meta ||
+        meta.machineId !== this.machineId ||
+        meta.isArchived ||
+        meta.collaborationStopped ||
+        meta.project?.kind !== 'local' ||
+        meta.project.localProjectId !== project
+      )
+        return deny();
       const scope = await this.resolveSessionExecutionScope(sid);
-      if (!scope.length || scope.some(id => id !== project)) return deny();
+      if (!scope.length || scope.some((id) => id !== project)) return deny();
       const proof = await Effect.runPromise(gate.authorizePluginToolRoot(root, [project]));
       const live = this.executionService.getEncryptedControlPrincipal(sid);
-      if (!proof || proof.userId !== turn.userId || !live || (live.kind === 'member' &&
-          (live.requesterDevice !== proof.device || !live.localProjectIds.includes(project)))) return deny();
+      if (
+        !proof ||
+        proof.userId !== turn.userId ||
+        !live ||
+        (live.kind === 'member' &&
+          (live.requesterDevice !== proof.device || !live.localProjectIds.includes(project)))
+      )
+        return deny();
       fence = proof.isCurrent;
       check();
     };
@@ -8030,10 +8065,18 @@ export class MessageHandler {
       if (!this.executionService.reserveEncryptedDerivation(sid, root.userTurnId, key)) deny();
     };
     let creationKey: string | undefined;
-    const sign = async (input: {sessionId: SessionId; userTurnId: string; inputConfig: SessionHistoryInput['inputConfig']}) => {
+    const sign = async (input: {
+      sessionId: SessionId;
+      userTurnId: string;
+      inputConfig: SessionHistoryInput['inputConfig'];
+    }) => {
       await authorize();
       reserve(creationKey ?? JSON.stringify([input.sessionId, input.userTurnId]));
-      const e2eeIntent = await this.workspaceDocument.signMachineInput({...input, targetMachineId: this.machineId, derivedFrom: root});
+      const e2eeIntent = await this.workspaceDocument.signMachineInput({
+        ...input,
+        targetMachineId: this.machineId,
+        derivedFrom: root,
+      });
       check();
       if (!e2eeIntent) return deny();
       return { e2eeIntent, derivedFrom: root };
@@ -8041,52 +8084,116 @@ export class MessageHandler {
     const id = call.payload.descriptorId;
     if (id === 'sessionCreate') {
       const input = pluginSessionCreateParams.shape.input.parse(call.payload.input);
-      const same = (r: typeof source) => r.workspaceId === source.workspaceId && r.machineId === source.machineId &&
-        r.projectId === project && r.sessionId === sid;
-      if (target.sessionId || (input.originTurn && (input.originTurn.userTurnId !== root.userTurnId ||
-          !same(input.originTurn.session))) || (input.parentSession && !same(input.parentSession)) ||
-          input.pullRequestUrl || input.skillIds?.length) return deny();
-      const params = {pluginId: call.pluginId, scope: 'project' as const, target,
-        input: {...input, originTurn: {session: {...source, sessionId: sid}, userTurnId: root.userTurnId}}};
+      const same = (r: typeof source) =>
+        r.workspaceId === source.workspaceId &&
+        r.machineId === source.machineId &&
+        r.projectId === project &&
+        r.sessionId === sid;
+      if (
+        target.sessionId ||
+        (input.originTurn &&
+          (input.originTurn.userTurnId !== root.userTurnId || !same(input.originTurn.session))) ||
+        (input.parentSession && !same(input.parentSession)) ||
+        input.pullRequestUrl ||
+        input.skillIds?.length
+      )
+        return deny();
+      const params = {
+        pluginId: call.pluginId,
+        scope: 'project' as const,
+        target,
+        input: {
+          ...input,
+          originTurn: { session: { ...source, sessionId: sid }, userTurnId: root.userTurnId },
+        },
+      };
       creationKey = JSON.stringify(['plugin-create', call.pluginId, project, input.requestId]);
       reserve(creationKey);
-      const { acceptVerifiedPluginCreation } = await import('../plugins/workflow/daemon-command-runtime');
-      const receipt = await acceptVerifiedPluginCreation(this.workspaceDocument, turn.userId, params, async () => {
-        await authorize();
-        check();
-        return this.workspaceDocument.createClientPluginSession(params, turn.userId, this.machineId, check);
-      }, check, sign);
-      return {...target, sessionId: receipt.sessionId};
+      const { acceptVerifiedPluginCreation } =
+        await import('../plugins/workflow/daemon-command-runtime');
+      const receipt = await acceptVerifiedPluginCreation(
+        this.workspaceDocument,
+        turn.userId,
+        params,
+        async () => {
+          await authorize();
+          check();
+          return this.workspaceDocument.createClientPluginSession(
+            params,
+            turn.userId,
+            this.machineId,
+            check
+          );
+        },
+        check,
+        sign
+      );
+      return { ...target, sessionId: receipt.sessionId };
     }
-    if (target.sessionId !== sid || (id !== 'sessionSend' && id !== 'sessionRespondInteraction')) return deny();
+    if (target.sessionId !== sid || (id !== 'sessionSend' && id !== 'sessionRespondInteraction'))
+      return deny();
     const { lifecycleCommandInputs } = await import('@lody/shared/commands/host-commands');
     const doc = await this.workspaceDocument.getOrCreateSessionDoc(sid);
     const meta = await doc.getMetaState();
-    if (!meta || meta.machineId !== this.machineId || meta.project?.kind !== 'local' ||
-        meta.project.localProjectId !== project || meta.isArchived || meta.collaborationStopped) return deny();
+    if (
+      !meta ||
+      meta.machineId !== this.machineId ||
+      meta.project?.kind !== 'local' ||
+      meta.project.localProjectId !== project ||
+      meta.isArchived ||
+      meta.collaborationStopped
+    )
+      return deny();
     if (id === 'sessionRespondInteraction') {
       const input = lifecycleCommandInputs.sessionRespondInteraction.parse(call.payload.input);
       if (input.turnId && input.turnId !== turn.turnId) return deny();
       await authorize();
       check();
-      if (!await doc.sessionData.commands.respondPermission(input.requestId, input.outcome, {turnId: turn.turnId})) return deny();
+      if (
+        !(await doc.sessionData.commands.respondPermission(input.requestId, input.outcome, {
+          turnId: turn.turnId,
+        }))
+      )
+        return deny();
       return null;
     }
     const input = lifecycleCommandInputs.sessionSend.parse(call.payload.input);
     if (input.delivery === 'steer' || !meta.cliType || !meta.agentType) return deny();
     const userTurnId = crypto.randomUUID();
-    const inputConfig = {prompt: input.prompt, inputBlocks: [{type:'text' as const,text:input.prompt}], cliType:meta.cliType, agentType:meta.agentType};
-    const signed = await sign({sessionId: sid, userTurnId, inputConfig});
+    const inputConfig = {
+      prompt: input.prompt,
+      inputBlocks: [{ type: 'text' as const, text: input.prompt }],
+      cliType: meta.cliType,
+      agentType: meta.agentType,
+    };
+    const signed = await sign({ sessionId: sid, userTurnId, inputConfig });
     check();
-    await doc.pushMessageQueue({...signed, userTurnId, operationId:'queue:'+userTurnId, userId:turn.userId,
-      task:input.prompt, timestamp:new Date().toISOString(), isEditing:false, editingStartedAt:undefined, project:meta.project, acpSessionConfig:inputConfig});
+    await doc.pushMessageQueue({
+      ...signed,
+      userTurnId,
+      operationId: 'queue:' + userTurnId,
+      userId: turn.userId,
+      task: input.prompt,
+      timestamp: new Date().toISOString(),
+      isEditing: false,
+      editingStartedAt: undefined,
+      project: meta.project,
+      acpSessionConfig: inputConfig,
+    });
     const current = await doc.getMetaState();
     if (!doc.handle) return deny();
     const frontiers = doc.handle.doc.frontiers();
-    const updatedAt = Math.max(Date.now(),(current?.messageQueueUpdatedAt ?? 0)+1,(current?.messageQueueCheckedAt ?? 0)+1);
+    const updatedAt = Math.max(
+      Date.now(),
+      (current?.messageQueueUpdatedAt ?? 0) + 1,
+      (current?.messageQueueCheckedAt ?? 0) + 1
+    );
     check();
-    await this.workspaceDocument.repo.upsertDocMeta(doc.roomId, {messageQueueUpdatedAt:updatedAt,messageQueueUpdateVersion:{updatedAt,frontiers}});
-    return {turnId:userTurnId, disposition:'queued'};
+    await this.workspaceDocument.repo.upsertDocMeta(doc.roomId, {
+      messageQueueUpdatedAt: updatedAt,
+      messageQueueUpdateVersion: { updatedAt, frontiers },
+    });
+    return { turnId: userTurnId, disposition: 'queued' };
   }
 
   async handlePluginMachineRpc(
@@ -8230,6 +8337,7 @@ export class MessageHandler {
         request,
         {
           ...scopeGrant,
+          checkProjectWrite: check,
           userId,
           machineOwner,
           ...(request.method === 'plugin/session-create'
@@ -9443,12 +9551,23 @@ export class MessageHandler {
       }
       await this.reconcileLocalImageReceipts(sessionId, sessionDoc);
       await backend.flushLocalWrites();
-      if (operation === 'replace' || operation === 'apply_action' || operation === 'replace_editable_tail' || operation === 'apply_import') {
+      if (
+        operation === 'replace' ||
+        operation === 'apply_action' ||
+        operation === 'replace_editable_tail' ||
+        operation === 'apply_import'
+      ) {
         try {
           const { collectReplacedPluginResults } = await import('../plugins/tool-result-history');
-          await collectReplacedPluginResults(this.workspaceDocument.pluginResultRepository,sessionId,backend);
+          await collectReplacedPluginResults(
+            this.workspaceDocument.pluginResultRepository,
+            sessionId,
+            backend
+          );
         } catch (error) {
-          this.logger.warn(`[${sessionId}] Plugin artifact cleanup failed: ${formatErrorMessage(error)}`);
+          this.logger.warn(
+            `[${sessionId}] Plugin artifact cleanup failed: ${formatErrorMessage(error)}`
+          );
         }
       }
       if (!backend.history.getPublication)

@@ -1,3 +1,4 @@
+import { prepareInteractivePrompt } from './composer-before-send';
 import type { LodyClient } from '@lody/plugin-sdk/client';
 import type { SessionRef } from '@lody/plugin-sdk';
 import { buildInitialHistoryEntry, type SessionId } from '@lody/shared';
@@ -44,23 +45,34 @@ export function bindClientSessionCreate(
       if (existing) await existing;
       else {
         const write = (async () => {
+          const turnId = `plugin-create:${sessionId}`;
+          const found = await runtime.sendResources.withSessionStore(sessionId, async (store) =>
+            store.sessionData.history.readTurn(turnId)
+          );
+          check();
+          if (found.state === 'ready') return;
+          if (found.state !== 'missing') throw Error('Initial turn unavailable');
+          const effective = [
+            r.role?.prefix?.trim(),
+            r.skillPrompt,
+            [
+              input.prompt.trim(),
+              ...(input.skillIds ?? [])
+                .filter((id) => !id.startsWith('plugin:'))
+                .map((id) => `$${id}`),
+            ].join(' '),
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+          const prepared = await prepareInteractivePrompt(workspaceId, effective, signal);
+          check();
+          if (!prepared?.text) throw Error('Session create cancelled');
           const entry = buildInitialHistoryEntry({
             userId,
             timestamp: r.createdAt,
             cliType: r.cliType,
             agentType: r.agentType,
-            prompt: [
-              r.role?.prefix?.trim(),
-              r.skillPrompt,
-              [
-                input.prompt.trim(),
-                ...(input.skillIds ?? [])
-                  .filter((id) => !id.startsWith('plugin:'))
-                  .map((id) => `$${id}`),
-              ].join(' '),
-            ]
-              .filter(Boolean)
-              .join('\n\n'),
+            prompt: prepared.text,
             modeId: r.role?.modeId,
             modelId: r.role?.modelId,
             configOptionValues: r.role?.configOptionValues,
@@ -75,20 +87,12 @@ export function bindClientSessionCreate(
               ...(r.role.mcpServerIds ? { mcpServerIds: r.role.mcpServerIds } : {}),
               ...(r.role.memory ? { memory: r.role.memory } : {}),
             });
-          const turnId = `plugin-create:${sessionId}`;
-          const found = await runtime.sendResources.withSessionStore(sessionId, async (store) =>
-            store.sessionData.history.readTurn(turnId)
+          await acceptSessionUserTurn(
+            runtime,
+            sessionId,
+            { ...entry, id: turnId },
+            { kind: 'dispatch' }
           );
-          check();
-          if (found.state !== 'ready' && found.state !== 'missing')
-            throw Error('Initial turn unavailable');
-          if (found.state === 'missing')
-            await acceptSessionUserTurn(
-              runtime,
-              sessionId,
-              { ...entry, id: turnId },
-              { kind: 'dispatch' }
-            );
         })();
         pending.set(key, write);
         try {

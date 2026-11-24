@@ -124,3 +124,42 @@ pluginCommand
       }
     })
   );
+
+pluginCommand
+  .command('install-npm <name> <version>')
+  .requiredOption('--integrity <sha512>', 'Pinned npm archive integrity')
+  .requiredOption(
+    '--encrypted-workspace <id>',
+    'Install and publish the verified pin to this workspace'
+  )
+  .action((name, version, opts) =>
+    run(async () => {
+      rejectCooperativeAgentActivation();
+      const { workspacePluginEntrySchema } = await import('@lody/shared/plugins/workspace-entry');
+      const source = workspacePluginEntrySchema.shape.source.parse({
+        kind: 'npm',
+        package_name: name,
+        exact_version: version,
+        integrity: opts.integrity,
+      });
+      const { fetchPinnedNpmBytes, inspectPinnedNpmPackage } =
+        await import('../plugins/plugin-package');
+      const bytes = await fetchPinnedNpmBytes(source, AbortSignal.timeout(60_000));
+      const temp = await mkdtemp(join(tmpdir(), 'lody-install-npm-'));
+      try {
+        const path = join(temp, 'release.tgz');
+        await (
+          await import('node:fs/promises')
+        ).writeFile(path, bytes, { flag: 'wx', mode: 0o600 });
+        const { entry } = await inspectPinnedNpmPackage(path, source);
+        return await (
+          await import('../plugins/plugin-control-client')
+        ).requestPluginControl(
+          { action: 'install-npm', path, source, permissions: entry.permissions },
+          opts.encryptedWorkspace
+        );
+      } finally {
+        await rm(temp, { recursive: true, force: true });
+      }
+    })
+  );

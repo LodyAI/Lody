@@ -1,9 +1,16 @@
+import { workspacePluginEntrySchema } from '@lody/shared/plugins/workspace-entry';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { runCommandTextLegacy } from '@lody/shared/node/process';
 import { z } from 'zod';
 
 const command = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('install-npm'),
+    path: z.string().min(1),
+    source: workspacePluginEntrySchema.shape.source,
+    permissions: workspacePluginEntrySchema.shape.permissions,
+  }),
   z.strictObject({
     action: z.literal('install'),
     path: z.string().min(1),
@@ -34,7 +41,8 @@ export function makePluginApproval() {
     if (pending || signal?.aborted) return false;
     const summary = JSON.stringify(
       request,
-      (key, value) => (key === 'changes' && value ? Object.keys(value) : value),
+      (key, value) =>
+        key === 'value' ? undefined : key === 'changes' && value ? Object.keys(value) : value,
       2
     );
     if (summary.length > 4096 || /[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(summary))

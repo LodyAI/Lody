@@ -2235,14 +2235,9 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       throw new Error('Plugin request exceeds 256 KiB');
     await deps.waitForContentAdmission?.();
     const local = !deps.protectedContent && (await canUseLocalMachineRpc(machineId));
-    if (local && call.method === 'plugin/declared-workflow-grant') throw Error('Signed machine-owner approval required');
-    if (
-      !local &&
-      (options?.requireLocal ||
-        call.method === 'plugin/control' ||
-        call.method === 'plugin/proposal-decision')
-    )
-      throw Error('Local plugin route unavailable');
+    if (local && call.method === 'plugin/control' && call.params.action === 'manage-workflow-grant')
+      throw Error('Signed owner grant required');
+    if (!local && options?.requireLocal) throw Error('Local plugin route unavailable');
     options?.signal?.throwIfAborted();
     const send = local ? getLocalMachineRpcSender() : deps.requestEncryptedFeature;
     if (!send) throw new Error('Plugin transport unavailable');

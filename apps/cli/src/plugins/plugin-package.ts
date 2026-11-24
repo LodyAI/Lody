@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { constants } from 'node:fs';
 import { open, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -8,6 +9,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { create, Parser, Header } from 'tar';
 import { pluginCapabilities } from '@lody/shared/plugins/capabilities';
 import { pluginManifestSchema, type PluginManifest } from '@lody/shared/plugins/manifest-schema';
+import { workspacePluginEntrySchema } from '@lody/shared/plugins/workspace-entry';
 import { computeClientDigest } from '@lody/shared/plugins/digest';
 import type { PluginBuild } from './workflow/dev-plugin-compiler';
 
@@ -132,7 +134,7 @@ async function verify(bytes: Buffer) {
     !expected.every((p) => files.has(p)) ||
     !z
       .strictObject({
-        name: z.literal(manifest.id),
+        name: workspacePluginEntrySchema.shape.source.shape.package_name,
         version: z.literal(manifest.version),
         type: z.literal('module'),
       })
@@ -148,9 +150,16 @@ export async function packPlugin(sourceDir: string, destination: string) {
   try {
     const { compilePlugin } = await import('./plugin-build');
     const { manifest } = await compilePlugin({ sourceDir, stage });
+    let name = manifest.id;
+    try {
+      const source = json(await bounded(join(sourceDir, 'package.json'), 1024 * 1024));
+      name = workspacePluginEntrySchema.shape.source.shape.package_name.parse(source.name);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
     await writeFile(
       join(stage, 'package.json'),
-      JSON.stringify({ name: manifest.id, version: manifest.version, type: 'module' })
+      JSON.stringify({ name, version: manifest.version, type: 'module' })
     );
     const entries = [];
     let total = 0;
@@ -167,9 +176,24 @@ export async function packPlugin(sourceDir: string, destination: string) {
       integrity,
     ]);
     const archive = gzipSync(await stream.concat());
-    await verify(archive);
+    const verified = await verify(archive);
+    const workspaceEntry = workspacePluginEntrySchema.parse({
+      plugin_id: manifest.id,
+      source: {
+        kind: 'npm',
+        package_name: name,
+        exact_version: manifest.version,
+        integrity: 'sha512-' + createHash('sha512').update(archive).digest('base64'),
+      },
+      client_digest: await computeClientDigest(manifest, async (p) => verified.files.get(p)!),
+      manifest_summary: manifest,
+      permissions: manifest.permissions ?? [],
+      config_schema: manifest.config ?? {},
+      enabled: true,
+      machine_sync: 'manual',
+    });
     await writeFile(destination, archive, { flag: 'wx', mode: 0o600 });
-    return { path: destination, sha256: hash(archive) };
+    return { path: destination, sha256: hash(archive), workspaceEntry };
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
@@ -183,6 +207,45 @@ export async function installPackage(
   if (expectedSha256 !== undefined && hash(bytes) !== expectedSha256)
     throw Error('Plugin package changed');
   const { manifest, files } = await verify(bytes);
+  return publishGeneration(root, manifest, files);
+}
+
+/** Download only after the caller has authenticated the owner's workspace-scoped intent. */
+export async function installWorkspacePin(
+  raw: unknown,
+  root: string,
+  signal: AbortSignal,
+  transport: typeof fetch = fetch
+) {
+  const entry = workspacePluginEntrySchema.parse(raw);
+  const { package_name: name, exact_version: version } = entry.source;
+  const bytes = await fetchPinnedNpmBytes(
+    entry.source,
+    AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+    transport
+  );
+  const { manifest, files } = await verify(bytes);
+  if (
+    json(files.get('package.json')!).name !== name ||
+    manifest.id !== entry.plugin_id ||
+    manifest.version !== version ||
+    !isDeepStrictEqual(manifest, entry.manifest_summary) ||
+    (await computeClientDigest(manifest, async (p) => files.get(p)!)) !== entry.client_digest
+  )
+    throw Error('Pinned npm release differs from approved disclosure');
+  signal.throwIfAborted();
+  return {
+    ...(await publishGeneration(root, manifest, files)),
+    packageSha256: hash(bytes),
+    provenance: entry.source,
+  };
+}
+
+async function publishGeneration(
+  root: string,
+  manifest: PluginManifest,
+  files: Map<string, Buffer>
+): Promise<PluginBuild> {
   const clientDigest = await computeClientDigest(manifest, async (p) => files.get(p)!);
   await mkdir(root, { recursive: true });
   const stage = await mkdtemp(join(root, '.stage-'));
@@ -216,4 +279,69 @@ export async function inspectProposalPackage(path: string) {
     sha256: hash(bytes),
     requestedCapabilities: pluginCapabilities(m),
   };
+}
+
+/** Derive disclosure from the exact registry bytes, not an accompanying metadata file. */
+export async function inspectPinnedNpmPackage(
+  path: string,
+  source: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry['source']
+) {
+  const pin = workspacePluginEntrySchema.shape.source.parse(source);
+  const bytes = await bounded(path, limit);
+  if ('sha512-' + createHash('sha512').update(bytes).digest('base64') !== pin.integrity)
+    throw Error('npm package integrity mismatch');
+  const { manifest, files } = await verify(bytes);
+  if (
+    json(files.get('package.json')!).name !== pin.package_name ||
+    manifest.version !== pin.exact_version
+  )
+    throw Error('npm package identity mismatch');
+  return {
+    sha256: hash(bytes),
+    entry: workspacePluginEntrySchema.parse({
+      plugin_id: manifest.id,
+      source: pin,
+      client_digest: await computeClientDigest(manifest, async (p) => files.get(p)!),
+      manifest_summary: manifest,
+      permissions: manifest.permissions ?? [],
+      config_schema: manifest.config ?? {},
+      enabled: true,
+      machine_sync: 'manual',
+    }),
+  };
+}
+
+export async function fetchPinnedNpmBytes(
+  source: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry['source'],
+  signal: AbortSignal,
+  transport: typeof fetch = fetch
+) {
+  const {
+    package_name: name,
+    exact_version: version,
+    integrity: sri,
+  } = workspacePluginEntrySchema.shape.source.parse(source);
+  const response = await transport(
+    `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${version}.tgz`,
+    { signal, credentials: 'omit', redirect: 'error' }
+  );
+  if (!response.ok || !response.body) throw Error('Pinned npm release unavailable');
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) throw Error('Pinned npm release too large');
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    await reader.cancel();
+  }
+  const bytes = Buffer.concat(chunks);
+  if ('sha512-' + createHash('sha512').update(bytes).digest('base64') !== sri)
+    throw Error('Pinned npm integrity mismatch');
+  return bytes;
 }

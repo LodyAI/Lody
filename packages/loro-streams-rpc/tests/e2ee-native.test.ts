@@ -488,21 +488,23 @@ describe('trusted-host encrypted dispatch originals', () => {
       request: {
         workspaceId: f.workspaceId,
         machineId: f.machineId,
-        method: 'plugin/declared-workflow-grant',
+        method: 'plugin/control',
         params: {
-          plugin_id: 'architect',
-          grant_id: '00000000-0000-4000-8000-000000000002',
-          workspace_id: f.workspaceId,
-          machine_id: f.machineId,
-          issued_by_user_id: signer,
-          issued_at_ms: Date.now(),
-          allowed_project_ids: ['selected'],
-          allowed_role_ids: '*',
-          allowed_ops: ['sessions.create'],
-          installationId: '00000000-0000-4000-8000-000000000001',
-          machineDigest: 'aa'.repeat(32),
-          targetDevice,
-          action: 'grant',
+          action: 'manage-workflow-grant',
+          grant: {
+            plugin_id: 'architect',
+            grant_id: '00000000-0000-4000-8000-000000000002',
+            workspace_id: f.workspaceId,
+            machine_id: f.machineId,
+            issued_by_user_id: signer,
+            issued_at_ms: Date.now(),
+            allowed_project_ids: ['selected'],
+            allowed_role_ids: '*',
+            allowed_ops: ['sessions.create'],
+            machineDigest: 'aa'.repeat(32),
+            targetDevice,
+            action: 'grant',
+          },
         },
       },
     });
@@ -569,16 +571,17 @@ describe('trusted-host encrypted dispatch originals', () => {
     await expect(Effect.runPromise(codec.prepareFeature(ownerCall))).rejects.toThrow(
       'e2ee_machine_not_owned'
     );
-    expect(
-      E2eeFeatureInputSchema.safeParse({
-        ...input,
-        request: {
-          ...base,
-          method: 'plugin/control',
-          params: { pluginId: 'sample', action: 'reload' },
-        },
-      }).success
-    ).toBe(false);
+    const control = E2eeFeatureInputSchema.parse({
+      ...input,
+      request: {
+        ...base,
+        method: 'plugin/control',
+        params: { pluginId: 'sample', action: 'reload' },
+      },
+    });
+    await expect(Effect.runPromise(codec.prepareFeature(control))).rejects.toThrow(
+      'e2ee_machine_not_owned'
+    );
   });
 
   it("signs another member's dispatch on a host with no sharing policy reader", async () => {
@@ -617,6 +620,94 @@ describe('trusted-host encrypted dispatch originals', () => {
     expect(await Effect.runPromise(reopened.prepareDispatch(f.machineId, f.input))).toEqual(first);
   });
 
+  it('signs exactly the final composer transformation approved after Role and mention expansion', async () => {
+    const { prepareFirstComposerInput, registerComposerTransform } =
+      await import('../../components/src/plugins/composer-before-send');
+    const f = fixture();
+    const lifetime = new AbortController();
+    const displayed: string[] = [];
+    const expanded = 'Review as maintainer\n\nInspect /project/docs/file.md';
+    registerComposerTransform(f.workspaceId, lifetime.signal, ({ text }) =>
+      text.replace('/project', '/public')
+    );
+    registerComposerTransform(
+      f.workspaceId,
+      lifetime.signal,
+      ({ text }) => `  ${text}\nInclude findings  `
+    );
+    try {
+      const submit = async (approve: boolean) => {
+        const controls = Object.assign(new EventTarget(), {
+          confirm: (message: string) => {
+            displayed.push(message);
+            return approve;
+          },
+        });
+        vi.stubGlobal('window', controls);
+        const input = await prepareFirstComposerInput({
+          workspace: f.workspaceId,
+          inputBlocks: [{ type: 'text', text: 'Inspect /project/docs/file.md' }],
+          rolePrompt: 'Review as maintainer',
+          signal: lifetime.signal,
+          isCurrent: () => true,
+        });
+        if (!input) return;
+        const inputConfig = buildSessionTurnInputConfig({
+          ...input,
+          cliType: 'builtin',
+          agentType: 'codex',
+        });
+        return Effect.runPromise(
+          f.sender.prepareDispatch(f.machineId, { ...f.input, inputConfig })
+        );
+      };
+      expect(await submit(false)).toBeUndefined();
+      const signed = await submit(true);
+      expect(displayed).toEqual(
+        Array(2).fill(
+          'Send this plugin-modified message?\n\nReview as maintainer\n\nInspect /public/docs/file.md\nInclude findings'
+        )
+      );
+      const confirmed = displayed[1]!.split('message?\n\n')[1]!;
+      const received = await Effect.runPromise(
+        f.receiver.openDispatch(f.machineId, signed!.frameHex)
+      );
+      const record = decodeE2eeIntentRecord(received.e2eeIntent)!;
+      expect(received.args.inputConfig).toMatchObject({
+        prompt: confirmed,
+        inputBlocks: [{ type: 'text', text: confirmed }],
+      });
+      const verifies = (prompt: string) =>
+        Result.isSuccess(
+          verifyExecutionIntent(
+            {
+              genesis: f.ledger.context.genesis,
+              workspaceId: f.workspaceId,
+              targetMachineId: f.machineId,
+              kind: E2EE_INTENT_KIND.memberInput,
+              scope: f.input.sessionId,
+              messageId: f.input.userTurnId,
+              contentDigest: Buffer.from(
+                turnExecutionDigest({
+                  inputConfig: {
+                    ...(received.args.inputConfig as Record<string, unknown>),
+                    prompt,
+                  },
+                })!,
+                'hex'
+              ),
+            },
+            record.signer,
+            record.signature
+          )
+        );
+      expect(verifies(confirmed!)).toBe(true);
+      expect(verifies(expanded)).toBe(false);
+    } finally {
+      lifetime.abort();
+      vi.unstubAllGlobals();
+    }
+  });
   it('signs one execution intent that the receiver gets back and a retry reuses', async () => {
     const f = fixture();
     const original = await Effect.runPromise(f.sender.prepareDispatch(f.machineId, f.input));

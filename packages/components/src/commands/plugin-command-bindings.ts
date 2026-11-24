@@ -8,10 +8,7 @@ import {
   type LocalProjectId,
 } from '@lody/shared';
 import { getMachineMetaMapAtom } from '../atoms/machines';
-import {
-  bindClientSessionCreate,
-  type ReserveClientSession,
-} from '../plugins/client-session-create';
+import { bindClientSessionCreate } from '../plugins/client-session-create';
 import type { CreateSessionRequest } from '@lody/plugin-sdk';
 import { useAtomValue, useStore } from 'jotai';
 import { userAtom } from '../atoms';
@@ -25,10 +22,12 @@ import { useSessionActions } from '../hooks/use-session-actions';
 
 export function usePluginCommandBindings(
   workspaceId: string,
-  machineId: string,
+  originMachineId: string,
   signal: AbortSignal,
   permissions: readonly string[],
-  reserveSession?: ReserveClientSession,
+  resolveMachine: (
+    machineId: string
+  ) => import('../plugins/client-host-provider').ClientCatalogInstallation,
   pluginId?: string
 ): Pick<LodyClient, 'execute'> & Pick<ClientHostBindings, 'useLodyCommand'> {
   const { executePluginSessionCommand } = useSessionActions();
@@ -36,6 +35,16 @@ export function usePluginCommandBindings(
     store = useStore(),
     guard = useSessionManagementGuard(runtime);
   const execute: LodyClient['execute'] = async (target, command, ...args) => {
+    signal.throwIfAborted();
+    if (target.workspaceId !== workspaceId)
+      throw Object.assign(Error('Workspace mismatch'), { code: 'forbidden' });
+    const machineId = 'machineId' in target ? target.machineId : originMachineId;
+    const destination = resolveMachine(machineId);
+    const stillCurrent = () => {
+      signal.throwIfAborted();
+      if (resolveMachine(machineId).digest !== destination.digest)
+        throw Error('Target plugin changed');
+    };
     const permission =
       command.id === 'sessionRespondInteraction'
         ? 'sessions.approve'
@@ -49,13 +58,17 @@ export function usePluginCommandBindings(
             ].includes(command.id)
           ? 'sessions.write'
           : undefined;
-    if (permission && !permissions.includes(permission))
+    if (
+      permission &&
+      (!permissions.includes(permission) ||
+        !destination.dev.manifest.permissions?.includes(permission))
+    )
       throw Object.assign(Error('Undeclared plugin permission'), { code: 'forbidden' });
     if (command.id === 'projectSetAnnotation') {
       const machine = machineId as MachineId;
       const actor = store.get(userAtom)?.id;
       const check = () => {
-        signal.throwIfAborted();
+        stillCurrent();
         if (
           !runtime ||
           !actor ||
@@ -98,7 +111,7 @@ export function usePluginCommandBindings(
     if (command.id === 'sessionCreate') {
       const userId = store.get(userAtom)?.id;
       const check = () => {
-        signal.throwIfAborted();
+        stillCurrent();
         if (
           !userId ||
           !runtime ||
@@ -118,14 +131,14 @@ export function usePluginCommandBindings(
         workspaceId,
         machineId,
         signal,
-        reserveSession,
+        destination.reserveSession,
         check
       )(target, args[0] as CreateSessionRequest)) as never;
     }
     if (command.id === 'scheduleSetEnabled' || command.id === 'scheduleRunNow') {
       const actor = store.get(userAtom)?.id;
       const check = () => {
-        signal.throwIfAborted();
+        stillCurrent();
         if (
           !runtime ||
           !actor ||

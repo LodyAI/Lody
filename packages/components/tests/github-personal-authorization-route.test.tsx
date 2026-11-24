@@ -35,6 +35,7 @@ vi.mock('jotai', async (original) => ({
   },
 }));
 vi.mock('../src/atoms', () => ({
+  settingsPluginTargetAtom: 'plugin',
   settingsActiveTabAtom: 'tab',
   settingsDialogOpenAtom: 'open',
   settingsSelectedMachineIdAtom: 'machine',

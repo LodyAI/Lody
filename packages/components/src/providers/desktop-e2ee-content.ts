@@ -430,6 +430,13 @@ export function createE2eeContent(input: {
           input.runtime.prepareDispatch!(input.workspaceId, machineId, args)
         );
       },
+      ...(input.runtime.signPluginOwnerSync
+        ? {
+            signPluginOwnerSync: (
+              pin: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry
+            ) => withinContent(() => input.runtime.signPluginOwnerSync!(input.workspaceId, pin)),
+          }
+        : {}),
       signScheduleDeclaration: (
         document: Pick<
           import('@lody/shared').ScheduleDocument,

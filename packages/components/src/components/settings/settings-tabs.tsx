@@ -308,5 +308,6 @@ export function getActiveSettingsTabId(pathname: string): SettingsTabId | null {
     ['/settings/plugins', 'plugins'],
     ['/settings/about', 'about'],
   ];
+  if (/\/settings\/plugins\/[^/]+\/?$/.test(pathname)) return 'plugins';
   return suffixes.find(([suffix]) => pathname.endsWith(suffix))?.[1] ?? null;
 }

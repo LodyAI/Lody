@@ -731,6 +731,7 @@ export function personalEntry(options: PersonalEntryOptions) {
       ledgerView: (id) => call(id, 'ledgerView', [id]),
       prepareDispatch: (id, ...args) => call(id, 'prepareDispatch', [id, ...args]),
       // Encrypted schedules saved from this host carry its own signed declaration.
+      signPluginOwnerSync: (id, ...args) => call(id, 'signPluginOwnerSync', [id, ...args]),
       signScheduleDeclaration: (id, ...args) => call(id, 'signScheduleDeclaration', [id, ...args]),
       acceptDispatchResponse: (id, ...args) => call(id, 'acceptDispatchResponse', [id, ...args]),
       prepareFeatureRpc: (id, ...args) => call(id, 'prepareFeatureRpc', [id, ...args]),

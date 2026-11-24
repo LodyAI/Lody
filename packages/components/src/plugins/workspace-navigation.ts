@@ -41,13 +41,23 @@ export function useWorkspaceNavigation(
     signal.throwIfAborted();
     if (
       workspaceId !== ref.workspaceId ||
-      machineId !== ref.machineId ||
       store.get(currentWorkspaceIdAtom) !== workspaceId ||
-      !visible.current.some((s) => s.id === ref.sessionId && s.machineId === machineId)
+      !visible.current.some((s) => s.id === ref.sessionId && s.machineId === ref.machineId)
     )
       throw Error('Session target unavailable');
   }
   return {
+    openSettings(pluginId: string, page?: string) {
+      signal.throwIfAborted();
+      const workspaceName = store.get(currentWorkspaceSlugAtom);
+      if (!workspaceName || store.get(currentWorkspaceIdAtom) !== workspaceId)
+        throw Error('Workspace unavailable');
+      void router.navigate({
+        to: '/$workspaceName/settings/plugins/$pluginId',
+        params: { workspaceName, pluginId },
+        search: { page },
+      });
+    },
     openSession(ref: SessionRef) {
       check(ref);
       const slug = store.get(currentWorkspaceSlugAtom);

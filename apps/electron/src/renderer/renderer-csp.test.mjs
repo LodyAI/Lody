@@ -70,7 +70,9 @@ void test('remote executable module bytes must match the authenticated catalog o
     doc = {}
   const catalog = (enabled) => ({
     type: 'plugin/catalog',
-    installations: [{ manifest, enabled, clientDigest: digest }]
+    installations: [
+      { manifest, enabled, clientDigest: digest, source: { kind: 'local', origin: 'dir' } }
+    ]
   })
   observePluginCatalog(reader, doc, 'a', catalog(true))
   const open = (r, d, m, data) => openAuthenticatedPluginSource(r, d, m, 'example', digest, data)
@@ -91,19 +93,65 @@ void test('an approved workspace release opens offline, only for the approved ma
   const root = await mkdtemp(join(tmpdir(), 'workspace-proof-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const dir = join(root, 'identity-a')
-  const manifest = { id:'report', title:'Report', version:'1.0.0', sdk:'^1.0.0', client:'client.js' }
+  const manifest = {
+    id: 'report',
+    title: 'Report',
+    version: '1.0.0',
+    sdk: '^1.0.0',
+    client: 'client.js'
+  }
   const load = async () => new TextEncoder().encode('export default 42')
-  const bytes = await packClientBundle(manifest, load), digest = await computeClientDigest(manifest, load)
-  const current = () => true, unavailable = async () => { throw Error('daemon offline') }
-  const open = (directory, m, body) => workspaceModuleProof(directory, m, digest, {action:'open',bytes:body,names:{}}, unavailable, current)
-  await assert.rejects(open(dir,manifest,bytes))
-  await assert.rejects(workspaceModuleProof(dir,manifest,digest,{action:'approve'},async()=>({manifest,digest,dev:true}),current))
-  await workspaceModuleProof(dir,manifest,digest,{action:'approve'},async()=>({manifest,digest,dev:false}),current)
-  assert.equal(await open(dir,manifest,bytes),'export default 42')
-  await assert.rejects(open(join(root,'identity-b'),manifest,bytes))
-  await assert.rejects(open(dir,{...manifest,permissions:['sessions.write']},bytes))
-  const corrupt=bytes.slice();corrupt[corrupt.length-1]^=1
-  await assert.rejects(open(dir,manifest,corrupt))
-  await workspaceModuleProof(dir,manifest,digest,{action:'forget'},unavailable,current)
-  await assert.rejects(open(dir,manifest,bytes))
+  const bytes = await packClientBundle(manifest, load),
+    digest = await computeClientDigest(manifest, load)
+  const current = () => true,
+    unavailable = async () => {
+      throw Error('daemon offline')
+    }
+  const open = (directory, m, body) =>
+    workspaceModuleProof(
+      directory,
+      m,
+      digest,
+      { action: 'open', bytes: body, names: {} },
+      unavailable,
+      current
+    )
+  await assert.rejects(open(dir, manifest, bytes))
+  await assert.rejects(
+    workspaceModuleProof(
+      dir,
+      manifest,
+      digest,
+      { action: 'approve' },
+      async () => ({ manifest, digest, dev: true }),
+      current
+    )
+  )
+  await assert.rejects(
+    workspaceModuleProof(
+      dir,
+      manifest,
+      digest,
+      { action: 'approve', npm: {} },
+      async () => ({ manifest, digest, dev: false }),
+      current
+    )
+  )
+  await assert.rejects(open(dir, manifest, bytes))
+  await workspaceModuleProof(
+    dir,
+    manifest,
+    digest,
+    { action: 'approve' },
+    async () => ({ manifest, digest, dev: false }),
+    current
+  )
+  assert.equal(await open(dir, manifest, bytes), 'export default 42')
+  await assert.rejects(open(join(root, 'identity-b'), manifest, bytes))
+  await assert.rejects(open(dir, { ...manifest, permissions: ['sessions.write'] }, bytes))
+  const corrupt = bytes.slice()
+  corrupt[corrupt.length - 1] ^= 1
+  await assert.rejects(open(dir, manifest, corrupt))
+  await workspaceModuleProof(dir, manifest, digest, { action: 'forget' }, unavailable, current)
+  await assert.rejects(open(dir, manifest, bytes))
 })

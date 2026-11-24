@@ -40,7 +40,6 @@ export async function publishPluginProposal(
     meta.command.action === command.action &&
     meta.command.packagePath === command.packagePath &&
     meta.command.requestId === command.requestId;
-  // The ledger is canonical, so a crash after it was written resumes the same proposal.
   const persisted = await ledger?.read();
   if (persisted && !matches(persisted.meta)) throw Error('Idempotency key conflict');
   const prior = await backend.readTurn(id);

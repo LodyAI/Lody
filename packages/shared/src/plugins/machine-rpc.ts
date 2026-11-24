@@ -1,4 +1,5 @@
-import { pluginDecisionResult } from './proposal';
+import { pluginInstallationSource } from './workspace-entry';
+import { pluginDecisionParams, pluginDecisionResult } from './proposal';
 import { AgentRoleSnapshotSchema } from '../message-author';
 import { MemoryBindingSchema } from '../memory-provider';
 import { z } from 'zod';
@@ -6,7 +7,7 @@ import { descriptorIdSchema, pluginIdSchema, pluginManifestSchema } from './mani
 
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const configValues = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
-export const pluginControlParams = z.strictObject({
+const lifecycleControlParams = z.strictObject({
   pluginId: pluginIdSchema,
   action: z.enum(['inspect', 'configure-many', 'enable', 'disable', 'reload']),
   changes: configValues.optional(),
@@ -20,13 +21,11 @@ export const pluginInspectionSchema = z.object({
   diagnostics: z.array(z.string()),
   logs: z.array(z.string()).max(500),
   preferences: configValues,
-  projectPreferences: z.record(z.string(), configValues).optional(),
   configured: z.array(z.string()),
 });
 const grantScope = z.union([z.literal('*'), z.array(z.string().min(1)).min(1).max(256)]);
 export const workflowGrantRequest = z.strictObject({
   plugin_id: pluginIdSchema,
-  installationId: z.string().uuid(),
   machineDigest: digest,
   targetDevice: digest,
   grant_id: z.string().uuid(),
@@ -51,6 +50,18 @@ export const workflowGrantRequest = z.strictObject({
   allowed_role_ids: grantScope,
   action: z.enum(['grant', 'revoke']),
 });
+export const pluginControlParams = z.discriminatedUnion('action', [
+  lifecycleControlParams,
+  z.strictObject({
+    action: z.literal('set-secret'),
+    pluginId: pluginIdSchema,
+    clientDigest: digest.optional(),
+    fieldKey: z.string().min(1),
+    value: z.string(),
+  }),
+  z.strictObject({ action: z.literal('resolve-proposal'), decision: pluginDecisionParams }),
+  z.strictObject({ action: z.literal('manage-workflow-grant'), grant: workflowGrantRequest }),
+]);
 export type WorkflowGrantRequest = z.infer<typeof workflowGrantRequest>;
 export const declaredGrantSignature = z
   .string()
@@ -111,7 +122,7 @@ export const pluginSessionCreateParams = z.strictObject({
     pullRequestUrl: z.string().max(4096).optional(),
   }),
 });
-export const pluginRpcResultSchema = z.discriminatedUnion('type', [
+export const pluginRpcResultSchema = z.union([
   pluginDecisionResult,
   z.strictObject({
     type: z.literal('plugin/session-create'),
@@ -124,17 +135,22 @@ export const pluginRpcResultSchema = z.discriminatedUnion('type', [
     cliType: z.enum(['builtin', 'custom', 'registry']),
     agentType: z.string(),
   }),
-  z.strictObject({ type: z.literal('plugin/declared-workflow-grant'), active: z.boolean() }),
+  z.strictObject({
+    type: z.literal('plugin/control'),
+    action: z.literal('manage-workflow-grant'),
+    active: z.boolean(),
+  }),
   z.strictObject({ type: z.literal('plugin/control'), inspection: pluginInspectionSchema }),
   z.strictObject({
     type: z.literal('plugin/catalog'),
     installations: z.array(
       z.strictObject({
+        source: pluginInstallationSource,
         manifest: pluginManifestSchema,
         enabled: z.boolean(),
         inspection: pluginInspectionSchema.optional(),
         workflowPrompts: z.record(descriptorIdSchema, z.string()).optional(),
-        packageSha256:digest.optional(),
+        packageSha256: digest.optional(),
         workflowInstallation: z
           .strictObject({
             installationId: z.string().uuid(),
@@ -176,9 +192,7 @@ export function isPluginMachineRequest(
   return pluginMethods.has(request.method);
 }
 export const pluginMethods: ReadonlySet<string> = new Set([
-  'plugin/proposal-decision',
   'plugin/control',
-  'plugin/declared-workflow-grant',
   'plugin/catalog',
   'plugin/session-create',
   'plugin/bundle-chunk',

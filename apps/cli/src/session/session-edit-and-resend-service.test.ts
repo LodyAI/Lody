@@ -1,4 +1,5 @@
 import { mkdtemp, writeFile, rm, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { withHistoryPort } from '../../tests/history-port-fixture';
@@ -215,9 +216,10 @@ function createHarness(
       events.push('wait-release');
     }),
   };
-  const logger = { error: vi.fn(), debug: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
   const service = new SessionEditAndResendService({
     workspaceDocument: {
+      pluginResultRepository: path.join(tmpdir(), `resend-artifacts-${randomUUID()}`),
       repo,
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       isEncryptedWorkspace: () => options.signMachineInput !== undefined,

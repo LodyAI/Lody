@@ -676,7 +676,8 @@ describe('SessionExecutionService', () => {
       expect(deps.turnFinalization.finalizeACPState).toHaveBeenNthCalledWith(
         3,
         sessionId,
-        'assistant:user-c'
+        'assistant:user-c',
+        'unknown'
       );
       expect(deps.turnFinalization.flushSessionUsage).toHaveBeenCalledTimes(3);
       expect(history).toEqual(
@@ -852,7 +853,8 @@ describe('SessionExecutionService', () => {
         expect(deps.turnFinalization.finalizeACPState).toHaveBeenNthCalledWith(
           2,
           sessionId,
-          'assistant:user-b'
+          'assistant:user-b',
+          'end_turn'
         );
         expect(history).toEqual(
           expect.arrayContaining([

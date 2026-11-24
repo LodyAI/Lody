@@ -1,3 +1,5 @@
+import { usePluginNavigation } from './routed-navigation';
+import { settingsFields } from './settings-fields';
 import { pluginUi } from './plugin-ui';
 import { clientDiagnostics } from './client-diagnostics';
 import { composerContributions } from './composer-contributions';
@@ -10,7 +12,7 @@ import { NavButton } from '../components/loro-sidebar';
 import { useIsMobile, useIsCompactDesktop } from '../hooks/use-mobile';
 import type { ClientHostBindings, WorkspaceRef } from '@lody/plugin-sdk/client';
 import { getIpcServices } from '../lib/electron-ipc-client';
-import { scopedSlots, PluginRowDecorations, openPluginScreen } from './shell-surfaces';
+import { scopedSlots, PluginRowDecorations } from './shell-surfaces';
 import type { SurfaceFactory } from './workspace-plugin-registry';
 import { activatePluginTheme } from './appearance';
 import { createTranscriptSurfaces } from './transcript-surfaces';
@@ -24,6 +26,7 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
 
   const bindings: ClientHostBindings = {
     ...hooks,
+    ...settingsFields(entry, signal, hooks.resolveMachine),
     SidebarRow: ({ icon, label, trailing, onClick, selected }) => (
       <NavButton
         isMobile={useIsMobile()}
@@ -66,7 +69,8 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     usePluginConfig: (project) => {
       if (
         project &&
-        (project.workspaceId !== entry.workspaceId || project.machineId !== entry.dev.machineId)
+        (project.workspaceId !== entry.workspaceId ||
+          (!entry.readProject && project.machineId !== entry.dev.machineId))
       )
         throw Error('Invalid project configuration target');
       return {
@@ -79,12 +83,22 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
             .map(([k, f]) => [
               k,
               (f.scope === 'project'
-                ? entry.inspection?.projectPreferences?.[project!.projectId]?.[k]
+                ? (entry.readProject?.(project!.machineId, project!.projectId) ??
+                    entry.projectValues?.[project!.projectId])?.[k]
                 : entry.inspection?.preferences[k]) ?? ('default' in f ? f.default : undefined),
             ])
         ) as never,
         set: async (k, v) => {
           signal.throwIfAborted();
+          if (entry.dev.manifest.config?.[String(k)]?.scope === 'project') {
+            if (!project || v === null) throw Error('Project configuration target required');
+            const destination = entry;
+            if (!destination.configureProject) throw Error('Project configuration unavailable');
+            await destination.configureProject(project.machineId, project.projectId, {
+              [String(k)]: v as string | number | boolean,
+            });
+            return;
+          }
           if (entry.configureClient) {
             if (typeof k !== 'string' || v === null) unavailable();
             await entry.configureClient({ [String(k)]: v as string | number | boolean });
@@ -97,15 +111,10 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
             !field ||
             field.type === 'secret' ||
             field.scope === 'machine' ||
-            (field.scope === 'project' && !project) ||
             v === null
           )
             unavailable();
-          await entry.control!(
-            'configure',
-            { [k]: v as string | number | boolean },
-            field?.scope === 'project' ? project?.projectId : undefined
-          );
+          await entry.control!('configure', { [k]: v as string | number | boolean });
         },
       };
     },
@@ -125,8 +134,19 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     },
     useLody() {
       const nav = hooks.useNavigation();
+      const route = usePluginNavigation();
       const execute = hooks.useExecute();
       return {
+        settings: {
+          open(target) {
+            signal.throwIfAborted();
+            const [plugin, page] = target?.includes(':')
+              ? target.split(':')
+              : [entry.pluginId, target];
+            if (!plugin || (target && !page)) throw Error('Invalid settings target');
+            nav.openSettings(plugin, page);
+          },
+        },
         ui: pluginUi(entry.dev.manifest.title, signal),
         storage: hooks.storage,
         read: hooks.read,
@@ -146,31 +166,28 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         panels: {
           openSession: (session, id, params) => {
             signal.throwIfAborted();
-            if (
-              session.workspaceId !== entry.workspaceId ||
-              session.machineId !== entry.dev.machineId
-            )
-              unavailable();
-            nav.openSession(session);
-            openPluginScreen(entry.workspaceId, source, id, params, 'panel', { session });
+            if (session.workspaceId !== entry.workspaceId) unavailable();
+            if (entry.sourceKey !== 'workspace') hooks.resolveMachine(session.machineId);
+            route(entry.pluginId, id, 'panel', params, session);
           },
         },
         screens: {
+          setParams(next, options) {
+            signal.throwIfAborted();
+            route.setParams(entry.pluginId, next, options?.replace);
+          },
           open: (w, id, params) => {
             signal.throwIfAborted();
             if (w.workspaceId !== entry.workspaceId) unavailable();
-            openPluginScreen(w.workspaceId, source, id, params);
+            route(entry.pluginId, id, 'screen', params);
           },
         },
         pages: {
           openProject: (project, id, params) => {
             signal.throwIfAborted();
-            if (
-              project.workspaceId !== entry.workspaceId ||
-              project.machineId !== entry.dev.machineId
-            )
-              unavailable();
-            openPluginScreen(entry.workspaceId, source, id, params, 'project', { project });
+            if (project.workspaceId !== entry.workspaceId) unavailable();
+            if (entry.sourceKey !== 'workspace') hooks.resolveMachine(project.machineId);
+            route(entry.pluginId, id, 'project', params, project);
           },
         },
         themes: {
@@ -187,15 +204,30 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
     source,
     bindings,
     signal,
-    entry.dev.machineId,
+    entry.sourceKey === 'workspace' ? undefined : entry.dev.machineId,
     (stack) => clientDiagnostics.report(entry, 'surface_render_crashed', stack),
-    entry.pluginId
+    entry.pluginId,
+    entry.dev.manifest.version
   );
   const transcript = createTranscriptSurfaces(entry, signal, bindings);
   return {
     ...transcript,
-    messages: {...transcript.messages, actions: {add: s=>add('messageAction',s.id,s.Component)}},
-    statusBar: {items: {add: s=>isNativeAppShell() ? clientDiagnostics.report(entry,'capability_unavailable_on_platform','statusBar.items:'+s.id) : add('statusItem',s.id,s.Component)}},
+    messages: {
+      ...transcript.messages,
+      actions: { add: (s) => add('messageAction', s.id, s.Component) },
+    },
+    statusBar: {
+      items: {
+        add: (s) =>
+          isNativeAppShell()
+            ? clientDiagnostics.report(
+                entry,
+                'capability_unavailable_on_platform',
+                'statusBar.items:' + s.id
+              )
+            : add('statusItem', s.id, s.Component),
+      },
+    },
     sidebar: {
       headerItems: { add: (s) => add('header', s.id, s.Component) },
       footerItems: { add: (s) => add('footer', s.id, s.Component) },
@@ -216,14 +248,22 @@ export const createProductionSurfaces: SurfaceFactory = (entry, signal, hooks, a
         },
       },
     },
-    screens: { add: (s) => add('screen', s.id, s.Component, s.title) },
+    screens: {
+      add: (s) =>
+        add('screen', s.id, s.Component, s.title, s.nav === 'sidebar' ? (s.order ?? 0) : undefined),
+    },
     project: { pages: { add: (s) => add('project', s.id, s.Component, s.title) } },
-    session: {headerActions: {add: s=>add('sessionHeader',s.id,s.Component)}, panels: { add: (s) => add('panel', s.id, s.Component, s.title) } },
+    session: {
+      headerActions: { add: (s) => add('sessionHeader', s.id, s.Component) },
+      panels: { add: (s) => add('panel', s.id, s.Component, s.title) },
+    },
     settings: {
       pages: {
         add: (s) => {
           if (s.binding === 'project') add('projectSettings', s.id, s.Component, s.title);
-          else add('settings', s.id, s.Component, s.title);
+          else if (s.binding === 'workspace') add('workspaceSettings', s.id, s.Component, s.title);
+          else if (s.binding === 'machine') add('settings', s.id, s.Component, s.title);
+          else throw Error('Unknown plugin settings binding');
         },
       },
     },

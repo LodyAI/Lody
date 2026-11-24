@@ -511,11 +511,16 @@ effectIt.effect(
         streams = memoryStreams(),
         controller = new AbortController();
       let secondShared = true;
+      let personalDevice = true;
       const policy = makeEncryptedFeatureAuthorization({
         executionAuthoritySignal: () => controller.signal,
         resolveSessionExecutionScope: async () => ['a', 'b'],
         requesterIdentity: () =>
-          Effect.succeed({ accountId: 'signer', executionUserId: 'e2ee-member:aa' }),
+          Effect.succeed({
+            accountId: 'signer',
+            executionUserId: 'e2ee-member:aa',
+            personalDevice,
+          }),
         authorization: {
           authoritySignal: controller.signal,
           authorizeRead: () => Effect.die('read authority used'),
@@ -555,6 +560,7 @@ effectIt.effect(
           JSON.stringify([
             {
               current: {
+                provenance: { kind: 'local', origin: 'dir' },
                 directory: f.directory,
                 machineEntry,
                 manifest: {
@@ -592,6 +598,7 @@ effectIt.effect(
           { signal }
         );
       const config = {
+        userId: 'signer',
         encryptedWorkspace: true,
         workspaceId: f.workspaceId,
         machineId: f.machineId,
@@ -701,6 +708,32 @@ effectIt.effect(
           shared
             ? { ok: true, result: { data: f.input.sessionId } }
             : { ok: false, code: 'e2ee_machine_not_shared' }
+        );
+      }
+      for (const [id, personal] of [
+        ['b1', false],
+        ['b2', true],
+      ] as const) {
+        personalDevice = personal;
+        const control = {
+          requestId: id.repeat(16),
+          request: {
+            workspaceId: f.workspaceId,
+            machineId: f.machineId,
+            method: 'plugin/control' as const,
+            params: { pluginId: 'sample', action: 'disable' as const },
+          },
+        };
+        const frame = yield* f.sender.prepareFeature(control);
+        yield* receive({ id: frame.requestId, frame: frame.frameHex });
+        yield* streams.waitResponse(control.requestId, 1);
+        const response = streams.writes.filter((w) => w.stream.includes(':res:')).at(-1)?.value as {
+          frame: string;
+        };
+        expect(yield* f.sender.acceptFeatureResponse(control, response.frame)).toMatchObject(
+          personal
+            ? { ok: true, result: { inspection: { lifecycle: 'Disabled' } } }
+            : { ok: false, code: 'forbidden' }
         );
       }
     })

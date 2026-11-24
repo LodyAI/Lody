@@ -72,14 +72,14 @@ export async function ownerApprovalFixture() {
     const grant = await Effect.runPromise(auth.authorizeOwnedExecution(workspaceId, signer, true));
     if (
       !req ||
-      req.params.targetDevice !== signingPublicKey ||
+      req.params.grant.targetDevice !== signingPublicKey ||
       grant._tag !== 'Authorized' ||
       grant.principal !== 'owner' ||
       !grant.isCurrent?.() ||
       f.ledger.view().inspectState().devices.get(signer)?.kind !== 'personal'
     )
       throw Error('Owner approval denied');
-    return { approval: req.params, isCurrent: grant.isCurrent };
+    return { approval: req.params.grant, isCurrent: grant.isCurrent };
   };
   const identity = {
     pluginAuthoritySignal: auth.authoritySignal,
@@ -94,26 +94,30 @@ export async function ownerApprovalFixture() {
       params: WorkflowGrantRequest,
       projectExists: (id: string) => Promise<boolean>
     ) {
-      const request = {
-        workspaceId,
-        machineId,
-        method: 'plugin/declared-workflow-grant' as const,
-        params,
-      };
       const orig = await Effect.runPromise(
         f.sender.prepareFeature({
           requestId: (++nextRequest).toString(16).padStart(32, '0'),
-          request,
+          request: {
+            workspaceId,
+            machineId,
+            method: 'plugin/control',
+            params: { action: 'manage-workflow-grant', grant: params },
+          },
         })
       );
       const opened = await Effect.runPromise(f.receiver.openFeature(machineId, orig.frameHex));
-      if (!opened || opened.input.request.method !== request.method)
+      if (
+        !opened ||
+        opened.input.request.method !== 'plugin/control' ||
+        opened.input.request.params.action !== 'manage-workflow-grant'
+      )
         throw Error('Invalid approval envelope');
       await Effect.runPromise(f.receiver.retainFeatureRequest(machineId, opened));
       const receipt = Buffer.from(opened.frame).toString('hex');
       const proof = await verifyDeclaredWorkflowGrant(receipt, machineId);
+      const verifiedRequest = opened.input.request;
       const actor = await bindDeclaredGrantActor({
-        request: opened.input.request,
+        params: opened.input.request.params.grant,
         machineId,
         identity,
         projectExists,
@@ -123,7 +127,7 @@ export async function ownerApprovalFixture() {
           declaredGrantSignature: receipt,
         },
       });
-      return host.dispatchMachineRpc(opened.input.request, actor);
+      return host.dispatchMachineRpc(verifiedRequest, actor);
     },
     async close() {
       await Effect.runPromise(Scope.close(scope, Exit.void));

@@ -43,6 +43,7 @@ export const pluginDecisionParams = z.strictObject({
   decision: z.enum(['approve', 'deny']),
 });
 export const pluginDecisionResult = z.strictObject({
-  type: z.literal('plugin/proposal-decision'),
+  type: z.literal('plugin/control'),
+  action: z.literal('resolve-proposal'),
   status: z.enum(['approved', 'rejected', 'expired', 'superseded']),
 });

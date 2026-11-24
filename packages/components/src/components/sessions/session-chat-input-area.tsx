@@ -1,4 +1,10 @@
 import {
+  hasComposerTransforms,
+  prepareComposerText,
+  confirmPluginPrompt,
+} from '../../plugins/composer-before-send';
+import { buildAgentPrompt } from '@/lib';
+import {
   hydrateSessionDraft,
   sessionDraftsCache,
   type PendingFile,
@@ -13,7 +19,7 @@ import {
 } from '../../lib/session-composer-drafts';
 import { pluginAttachmentFile } from '../../plugins/workspace-drafts';
 import type { DraftItem } from '@lody/plugin-sdk/client';
-import { slashContributions, hasComposerTransforms, transformComposerText, confirmComposerTransform } from '../../plugins/composer-contributions';
+import { slashContributions } from '../../plugins/composer-contributions';
 import { PluginComposerActions } from '../../plugins/shell-surfaces';
 import { eventRefs } from '../../plugins/session-events';
 import { messageSubmitted } from '../../plugins/session-events';
@@ -464,6 +470,7 @@ export interface SessionChatInputAreaProps {
    * which may stack the queue directly on the composer), so skip the spacer.
    */
   hideTopSpacer?: boolean;
+  firstTurnPromptPrefix?: string;
   onModeChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
@@ -504,6 +511,7 @@ export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
 
 export type SessionSendMessageOptions = {
   attachments?: SessionAttachmentDraft[];
+  effectivePrompt?: string;
   /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
   invertSubmitBehavior?: boolean;
   /**
@@ -579,6 +587,7 @@ export const SessionChatInputArea = memo(
       availableCommands,
       commandsEnabled = true,
       hideTopSpacer = false,
+      firstTurnPromptPrefix,
       freeTurnLimitNotice,
       mcp,
       onModeChange,
@@ -1896,26 +1905,45 @@ export const SessionChatInputArea = memo(
           trimmedPrompt,
           expandedPrompt.spans
         );
+        let effectivePrompt = buildAgentPrompt(trimmedPrompt, firstTurnPromptPrefix);
         if (preparing.current) return;
         const match = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(currentValue);
-        const command = workspaceId && match ? slashContributions(workspaceId).find(c => c.name === match[1]) : undefined;
-        if (workspaceId && (command || hasComposerTransforms(workspaceId))) {
+        const command =
+          workspaceId && match
+            ? slashContributions(workspaceId).find((c) => c.name === match[1])
+            : undefined;
+        // A schedule signs its declaration; it is not an interactive memberInput.
+        if (workspaceId && (command || (!scheduled.at && hasComposerTransforms(workspaceId)))) {
           const controller = new AbortController();
           preparing.current = controller;
-          const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') controller.abort(); };
+          const cancel = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') controller.abort();
+          };
           window.addEventListener('keydown', cancel);
           try {
-            const result = command ? await command.run(match?.[2] ?? '') : await transformComposerText(workspaceId, trimmedPrompt, controller.signal);
-            if (controller.signal.aborted || (textareaRef.current && getComposerText(textareaRef.current) !== currentValue)) return;
-            if (command) { setUserInput(result ?? ''); return; }
-            if (typeof result === 'string' && result !== trimmedPrompt) {
-              const confirmed = confirmComposerTransform(trimmedPrompt, result, text => window.confirm(`Send this plugin-modified message?\n\n${text}`));
-              if (confirmed === undefined) return;
-              trimmedPrompt = confirmed;
+            const isCurrent = () =>
+              !controller.signal.aborted &&
+              (!textareaRef.current || getComposerText(textareaRef.current) === currentValue);
+            if (command) {
+              const result = await command.run(match?.[2] ?? '');
+              if (isCurrent()) setUserInput(result ?? '');
+              return;
+            }
+            const result = await prepareComposerText(
+              workspaceId,
+              effectivePrompt,
+              controller.signal,
+              isCurrent,
+              confirmPluginPrompt
+            );
+            if (!result) return;
+            if (result.changed) {
+              effectivePrompt = trimmedPrompt = result.text;
               trimmedSpans = undefined;
             }
           } catch (error) {
-            if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : 'Plugin action failed');
+            if (!controller.signal.aborted)
+              toast.error(error instanceof Error ? error.message : 'Plugin action failed');
             return;
           } finally {
             window.removeEventListener('keydown', cancel);
@@ -2023,6 +2051,7 @@ export const SessionChatInputArea = memo(
               })
             : await onSendMessage(inputBlocks, role, {
                 ...options,
+                effectivePrompt,
                 attachments,
                 ...(mcpServerIds ? { mcpServerIds } : {}),
               });
@@ -2081,6 +2110,7 @@ export const SessionChatInputArea = memo(
         durableAgentRoleReady,
         mcp,
         mcpSelectionReady,
+        firstTurnPromptPrefix,
         scheduled.at,
         scheduledSaveRef,
         selectedModeId,

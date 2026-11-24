@@ -872,6 +872,7 @@ describe('execution intent v1', () => {
   it('rejects any other kind, scope, message, target, workspace, genesis or content', () => {
     for (const altered of [
       { ...intent, kind: 2 },
+      { ...intent, kind: 4 },
       { ...intent, scope: 'other-session' },
       { ...intent, messageId: 'other-turn' },
       { ...intent, targetMachineId: 'other-machine' },
@@ -885,7 +886,7 @@ describe('execution intent v1', () => {
         Result.isFailure(verifyExecutionIntent(altered, publicKey.toBytes(), hex(signatureHex)))
       ).toBe(true);
     for (const malformed of [
-      { ...intent, kind: 4 },
+      { ...intent, kind: 5 },
       { ...intent, contentDigest: new Uint8Array(31) },
       { ...intent, messageId: 'x'.repeat(1025) },
     ])

@@ -1,7 +1,11 @@
 import { pluginCapabilities } from '@lody/shared/plugins/capabilities';
 import type { DispatchMachineHostCall } from '../machine-host-port';
 import type { PluginProposalMeta } from '@lody/shared/plugins/proposal';
-import { installPackage } from '../plugin-package';
+import {
+  pluginInstallationSource,
+  type WorkspacePluginEntry,
+} from '@lody/shared/plugins/workspace-entry';
+import { installWorkspacePin, installPackage } from '../plugin-package';
 import { packClientBundle, PLUGIN_BUNDLE_CHUNK_BYTES } from '@lody/shared/plugins/digest';
 import {
   declaredGrantSignature,
@@ -29,6 +33,7 @@ import {
 const build = z.object({
   manifest: pluginManifestSchema,
   directory: z.string(),
+  provenance: pluginInstallationSource,
   packageSha256: z.string().optional(),
   machineEntry: z.string().optional(),
   machineDigest: z.string().optional(),
@@ -42,12 +47,9 @@ const installation = z.object({
   source: z.string(),
   dev: z.boolean(),
   enabled: z.boolean(),
-  declaredGrant: declaredWorkflowGrant.optional(),
+  declaredGrant: declaredWorkflowGrant.optional().catch(undefined),
   usedGrantIds: z.array(z.string().uuid()).optional(),
   pendingConfiguration: z.boolean().optional(),
-  projectPreferences: z
-    .record(z.string(), z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])))
-    .optional(),
   preferences: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
 });
 const request = z.discriminatedUnion('action', [
@@ -90,6 +92,7 @@ const io = <T>(fn: () => Promise<T>) => Effect.tryPromise({ try: fn, catch: (e) 
 export interface VerifiedPluginGrant {
   targetDevice?: string;
   declaredGrantSignature?: DeclaredGrantSignature;
+  checkProjectWrite?: () => void;
   workflowCurrent?: () => boolean;
   executeHostCall?: DispatchMachineHostCall;
   createSession?: () => Promise<Extract<PluginMachineResult, { type: 'plugin/session-create' }>>;
@@ -131,6 +134,17 @@ export class Registry extends Context.Service<
         }
       | undefined;
     workflow: Effect.Success<ReturnType<typeof makePluginWorkflowHarness>>;
+    installOwnerNpm: (
+      entry: WorkspacePluginEntry,
+      signal: AbortSignal,
+      admit: () => void
+    ) => Effect.Effect<Record<string, unknown>, unknown>;
+    reconcileOwnerPin: (
+      entry: WorkspacePluginEntry,
+      owner: string,
+      signal: AbortSignal,
+      verifyOwner: () => Promise<() => void>
+    ) => Effect.Effect<void, unknown>;
     activateProposal: (meta: PluginProposalMeta, path: string) => Effect.Effect<unknown, unknown>;
     start: Effect.Effect<void, unknown>;
     machineRpc: (
@@ -146,7 +160,8 @@ export function registryLayer(
   machineId: string,
   warn: (m: string) => void,
   vault?: import('../plugin-machine-config').MachineConfigVault,
-  state?: Pick<import('../plugin-state-store').PluginStateStore, 'purge'>
+  state?: Pick<import('../plugin-state-store').PluginStateStore, 'purge'>,
+  projectStore?: ReturnType<typeof import('../project-config-store').projectConfigStore>
 ) {
   return Layer.effect(
     Registry,
@@ -269,7 +284,16 @@ export function registryLayer(
         watches.delete(id);
         if (w) yield* Effect.forkIn(Fiber.interrupt(w), scope);
       });
-      const build = (source: string) => compiler.build(source, generations);
+      const build = (source: string, dev: boolean) =>
+        compiler.build(source, generations).pipe(
+          Effect.map((b) => ({
+            ...b,
+            provenance: {
+              kind: 'local' as const,
+              origin: dev ? ('dev' as const) : ('dir' as const),
+            },
+          }))
+        );
       function watch(id: string, item: Item): Effect.Effect<void> {
         return Effect.gen(function* () {
           if (!item.enabled || !item.dev || item.pendingConfiguration) return;
@@ -297,7 +321,8 @@ export function registryLayer(
         r: Exclude<Request, { action: 'list' }>,
         id: string,
         built?: Item['current'],
-        watched = false
+        watched = false,
+        checkProjectWrite?: () => void
       ): Effect.Effect<Record<string, unknown>, unknown> {
         return Effect.gen(function* () {
           const old = items.get(id);
@@ -323,7 +348,6 @@ export function registryLayer(
               manifest,
               clientDigest: item.current.clientDigest,
               preferences,
-              projectPreferences: item.projectPreferences,
               configured: yield* io(() =>
                 machineConfig(manifest, workspaceId, machineId, vault).configured(preferences)
               ),
@@ -395,24 +419,24 @@ export function registryLayer(
                 yield* io(() =>
                   machineConfig(manifest, workspaceId, machineId, vault).set(key, value)
                 );
-              else if (field.scope === 'project' && 'projectId' in r && r.projectId) {
-                const id = r.projectId;
-                item.projectPreferences = {
-                  ...item.projectPreferences,
-                  [id]: {
-                    ...(Object.hasOwn(item.projectPreferences ?? {}, id)
-                      ? item.projectPreferences?.[id]
-                      : {}),
-                    [key]: value,
-                  },
-                };
-              } else item.preferences = { ...item.preferences, [key]: value };
+              else if (field.scope === 'project') continue;
+              else item.preferences = { ...item.preferences, [key]: value };
             }
-            if (
-              ('projectId' in r && r.projectId) ||
-              !item.enabled ||
-              (r.action === 'configure' && !item.pendingConfiguration)
-            ) {
+            if ('projectId' in r && r.projectId) {
+              if (!projectStore)
+                return yield* Effect.fail(Error('Project configuration unavailable'));
+              const project = r.projectId;
+              yield* io(() =>
+                projectStore(
+                  manifest,
+                  project,
+                  Object.fromEntries(validated.map((x) => [x.key, x.value])),
+                  checkProjectWrite
+                )
+              );
+              return { pluginId: id };
+            }
+            if (!item.enabled || (r.action === 'configure' && !item.pendingConfiguration)) {
               yield* commit(id, item);
               return { pluginId: id };
             }
@@ -421,7 +445,9 @@ export function registryLayer(
               r.action === 'rollback'
                 ? old?.previous
                 : (built ??
-                  (old!.current.packageSha256 ? old!.current : yield* build(old!.source)));
+                  (old!.current.packageSha256
+                    ? old!.current
+                    : yield* build(old!.source, old!.dev)));
             if (!current || current.manifest.id !== id) {
               yield* clean(current?.directory);
               return yield* Effect.fail(new Error('No matching plugin generation'));
@@ -452,16 +478,6 @@ export function registryLayer(
                   : r.action === 'rollback'
                     ? (old!.previousDev ?? old!.dev)
                     : old!.dev,
-              projectPreferences: Object.fromEntries(
-                Object.entries(old?.projectPreferences ?? {}).map(([id, vs]) => [
-                  id,
-                  Object.fromEntries(
-                    Object.entries(vs).filter(
-                      ([k]) => current.manifest.config?.[k]?.scope === 'project'
-                    )
-                  ),
-                ])
-              ),
               preferences: Object.fromEntries(
                 Object.entries(old?.preferences ?? {}).filter(([k]) => {
                   const field = current.manifest.config?.[k];
@@ -591,6 +607,54 @@ export function registryLayer(
             : []
         );
       return Registry.of({
+        installOwnerNpm: (entry, signal, admit) =>
+          serialize(
+            entry.plugin_id,
+            Effect.gen(function* () {
+              const current = yield* io(() => installWorkspacePin(entry, generations, signal));
+              yield* Effect.try(() => {
+                signal.throwIfAborted();
+                admit();
+              }).pipe(Effect.onError(() => clean(current.directory)));
+              return yield* change(
+                { action: 'link', dev: false, path: current.directory },
+                entry.plugin_id,
+                current
+              );
+            })
+          ),
+        reconcileOwnerPin: (entry, owner, signal, verifyOwner) =>
+          serialize(
+            entry.plugin_id,
+            Effect.gen(function* () {
+              if (
+                !entry.enabled ||
+                entry.machine_sync !== 'owner_machines' ||
+                !owner ||
+                entry.sync_owner_user_id !== owner ||
+                !entry.sync_signature ||
+                items.has(entry.plugin_id)
+              )
+                return;
+              const requireCurrent = yield* io(verifyOwner);
+              const admit = () => {
+                signal.throwIfAborted();
+                requireCurrent();
+              };
+              yield* Effect.try(admit);
+              const current = yield* io(() => installWorkspacePin(entry, generations, signal));
+              yield* commit(
+                entry.plugin_id,
+                {
+                  current,
+                  enabled: false,
+                  dev: false,
+                  source: entry.source.package_name,
+                },
+                admit
+              ).pipe(Effect.onError(() => clean(current.directory)));
+            })
+          ),
         sessionTools: () => availableTools().map((entry) => entry.tool),
         invokeSessionTool: Effect.fnUntraced(function* (name, input, turn) {
           const matches = availableTools().filter((entry) => entry.tool.name === name);
@@ -618,7 +682,9 @@ export function registryLayer(
                 ? {
                     projectConfig: resolveProjectConfig(
                       item.current.manifest,
-                      item.projectPreferences?.[projectId]
+                      projectStore
+                        ? yield* io(() => projectStore(item.current.manifest, projectId))
+                        : undefined
                     ),
                   }
                 : {}),
@@ -681,6 +747,7 @@ export function registryLayer(
               }
               return yield* change({ action: 'link', path, dev: false }, id, {
                 ...artifact,
+                provenance: old?.current.provenance ?? { kind: 'local', origin: 'archive' },
                 packageSha256: meta.artifact.sha256,
               });
             })
@@ -692,7 +759,7 @@ export function registryLayer(
         > {
           if (!actor.userId || r.workspaceId !== workspaceId || r.machineId !== machineId)
             return yield* Effect.fail(new Error('Invalid plugin target'));
-          if (r.method === 'plugin/proposal-decision')
+          if (r.method === 'plugin/control' && r.params.action === 'resolve-proposal')
             return yield* Effect.fail(Error('Host proposal ledger required'));
           if (r.method === 'plugin/catalog') {
             const installations = [];
@@ -707,6 +774,7 @@ export function registryLayer(
                 ? workflow.catalog().find((g) => g.pluginId === id)
                 : undefined;
               installations.push({
+                source: item.current.provenance,
                 packageSha256: item.current.packageSha256,
                 workflowPrompts: contributions
                   ? Object.fromEntries(
@@ -749,23 +817,25 @@ export function registryLayer(
             }
             return { type: r.method, installations };
           }
-          const id =
-            r.method === 'plugin/declared-workflow-grant' ? r.params.plugin_id : r.params.pluginId;
+          const grant =
+            r.method === 'plugin/control' && r.params.action === 'manage-workflow-grant'
+              ? r.params.grant
+              : undefined;
+          const id = grant ? grant.plugin_id : 'pluginId' in r.params ? r.params.pluginId : '';
           const item = items.get(id);
           if (!item) return yield* Effect.fail(new Error('Plugin unavailable'));
-          if (r.method === 'plugin/declared-workflow-grant')
+          if (grant)
             return yield* serialize(
               id,
               Effect.gen(function* () {
                 const current = items.get(id),
-                  a = r.params;
+                  a = grant;
                 if (
                   !actor.machineOwner ||
                   !actor.declaredGrantSignature ||
                   !actor.workflowCurrent?.() ||
                   !current?.enabled ||
                   current.pendingConfiguration ||
-                  basename(current.current.directory) !== a.installationId ||
                   current.current.machineDigest !== a.machineDigest ||
                   a.workspace_id !== workspaceId ||
                   a.machine_id !== machineId ||
@@ -786,7 +856,11 @@ export function registryLayer(
                 if (a.action === 'grant' && current.usedGrantIds?.includes(a.grant_id))
                   throw Error('Grant already used');
                 if (a.action === 'revoke' && current.declaredGrant?.grant_id !== a.grant_id)
-                  return { type: r.method, active: false };
+                  return {
+                    type: 'plugin/control' as const,
+                    action: 'manage-workflow-grant' as const,
+                    active: false,
+                  };
                 yield* commit(
                   id,
                   {
@@ -809,28 +883,45 @@ export function registryLayer(
                     if (!actor.workflowCurrent?.()) throw Error('Workflow approval withdrawn');
                   }
                 );
-                return { type: r.method, active: a.action === 'grant' };
+                return {
+                  type: 'plugin/control' as const,
+                  action: 'manage-workflow-grant' as const,
+                  active: a.action === 'grant',
+                };
               })
             );
           if (r.method === 'plugin/control') {
-            if (!actor.machineOwner) return yield* Effect.fail(new Error('Owner required'));
             const t = r.params;
+            if (!actor.machineOwner) return yield* Effect.fail(new Error('Owner required'));
+            if (!('pluginId' in t)) throw Error('Invalid lifecycle request');
             return yield* serialize(
               id,
               Effect.gen(function* () {
                 if (items.get(id)?.current.clientDigest !== t.clientDigest)
                   return yield* Effect.fail(new Error('Plugin generation changed'));
                 if (t.action !== 'inspect') {
+                  if (
+                    t.action === 'set-secret' &&
+                    items.get(id)?.current.manifest.config?.[t.fieldKey]?.type !== 'secret'
+                  )
+                    return yield* Effect.fail(Error('Not a secret field'));
                   const cmd =
-                    t.action === 'enable' || t.action === 'configure-many'
+                    t.action === 'set-secret'
                       ? {
-                          action: t.action,
+                          action: 'configure' as const,
                           pluginId: id,
-                          changes: t.changes ?? {},
-                          projectId: t.projectId,
+                          key: t.fieldKey,
+                          value: t.value,
                         }
-                      : { action: t.action, pluginId: id };
-                  yield* change(cmd, id);
+                      : t.action === 'enable' || t.action === 'configure-many'
+                        ? {
+                            action: t.action,
+                            pluginId: id,
+                            changes: t.changes ?? {},
+                            projectId: t.projectId,
+                          }
+                        : { action: t.action, pluginId: id };
+                  yield* change(cmd, id, undefined, false, actor.checkProjectWrite);
                 }
                 return {
                   type: 'plugin/control' as const,
@@ -927,12 +1018,10 @@ export function registryLayer(
               target: boundTarget,
               ...(target.projectId
                 ? {
-                    projectConfig: yield* Effect.try(() =>
+                    projectConfig: yield* io(async () =>
                       resolveProjectConfig(
                         item.current.manifest,
-                        Object.hasOwn(item.projectPreferences ?? {}, target.projectId!)
-                          ? item.projectPreferences?.[target.projectId!]
-                          : undefined
+                        await projectStore?.(item.current.manifest, target.projectId!)
                       )
                     ),
                   }
@@ -967,10 +1056,11 @@ export function registryLayer(
               change({ action: 'link', path: resolve(r.path), dev: false }, id, {
                 ...artifact,
                 packageSha256: r.sha256,
+                provenance: { kind: 'local', origin: 'archive' },
               })
             );
           }
-          const built = r.action === 'link' ? yield* build(resolve(r.path)) : undefined,
+          const built = r.action === 'link' ? yield* build(resolve(r.path), r.dev) : undefined,
             id = r.action === 'link' ? built!.manifest.id : r.pluginId;
           if (r.action === 'reload' && items.get(id)?.dev) {
             const pending = reloads.get(id);

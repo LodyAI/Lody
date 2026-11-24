@@ -1,3 +1,4 @@
+import { MachinePluginSettings } from './plugin-inspector';
 import type { ManagedDaemonUpdateStatus } from '@lody/shared';
 import { MachineIdentityRestore } from './machine-identity-restore';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
@@ -1044,6 +1045,7 @@ function SupportedMachineDetailPane(props: MachineDetailPaneProps) {
         )}
       </div>
 
+      <MachinePluginSettings machineId={machine.id} />
       {mode === 'devices' && isOwn && !readOnly && props.onRestoreIdentity ? (
         <MachineIdentityRestore
           key={machine.id}

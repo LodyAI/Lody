@@ -5,7 +5,7 @@ import {
   endShellGeneration,
   finishShellGeneration,
 } from '../src/plugins/shell-generation';
-import { PluginScreenOutlet, openPluginScreen } from '../src/plugins/shell-surfaces';
+import { RoutedSurface } from '../src/plugins/shell-surfaces';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionRow, type SessionSummary } from '@lody/plugin-sdk/client';
 import { createProductionSurfaces } from '../src/plugins/surface-factory';
@@ -185,7 +185,13 @@ describe('LoroSidebar pinned section', () => {
         root!.render(
           <>
             <LoroSidebar {...baseProps} />
-            <PluginScreenOutlet workspaceId="workspace" />
+            <RoutedSurface
+              workspaceId="workspace"
+              pluginId="sample"
+              kind="screen"
+              id="detail"
+              params={{ item: 'chosen' }}
+            />
           </>
         )
       );
@@ -193,9 +199,6 @@ describe('LoroSidebar pinned section', () => {
         Array.from(container!.querySelectorAll('button'))
           .find((b) => b.textContent === 'Agent Tree')!
           .click();
-        openPluginScreen('workspace', JSON.stringify(['sample', 'local', 'one']), 'detail', {
-          item: 'chosen',
-        });
       });
       expect(pressed('Agent Tree')).toBe('true');
       let b!: AbortController;
@@ -213,7 +216,7 @@ describe('LoroSidebar pinned section', () => {
       });
       expect(pressed('Default')).toBe('true');
       expect(pressed('Agent Tree')).toBe('false');
-      expect(document.body.textContent).not.toContain('screen:three');
+      expect(document.body.textContent).toContain('screen:three:chosen');
     } finally {
       controllers.forEach((c) => {
         endShellGeneration(c.signal);

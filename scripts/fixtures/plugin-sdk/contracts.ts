@@ -14,6 +14,8 @@ import {
   type WorkspaceRef,
 } from '@lody/plugin-sdk';
 import {
+  PluginSecretField,
+  PluginConfigForm,
   defineClientPlugin,
   useLody,
   useLodyCommand,
@@ -171,10 +173,31 @@ export const minimalShellPlugin = defineClientPlugin((lody) => {
   lody.settings.pages.add({
     id: 'tracker-installation-settings',
     title: 'Tracker Connection',
+    // @ts-expect-error The machine scope replaces the old installation binding.
     binding: 'installation',
     Component: () => null,
   });
 
+  lody.settings.pages.add({
+    id: 'preferences',
+    title: 'Preferences',
+    binding: 'workspace',
+    Component: ({ workspace }) => PluginConfigForm({ scope: 'workspace', target: workspace }),
+  });
+  lody.settings.pages.add({
+    id: 'credentials',
+    title: 'Credentials',
+    binding: 'machine',
+    Component: ({ machine }) =>
+      PluginSecretField({
+        target: machine,
+        fieldKey: 'token',
+        onSaved(state) {
+          // @ts-expect-error The host never returns the submitted password.
+          void state.value;
+        },
+      }),
+  });
   return async () => {};
 });
 

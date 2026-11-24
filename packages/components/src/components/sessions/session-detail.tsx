@@ -52,7 +52,9 @@ import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { useRouter } from '@tanstack/react-router';
+import { PluginRoute } from '../../plugins/plugin-route';
+import { MobilePluginContainer } from '../../plugins/mobile-container';
+import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useComposerNavigationFocus } from '../chat/submission/use-composer-navigation-focus';
 import { usePostHog } from '@/lib/posthog-context';
 import {
@@ -1180,6 +1182,7 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const panelSearch = useRouterState({ select: (s) => s.location.searchStr });
   const preparingWindow = useAtomValue(windowPreparationAtom);
   const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
@@ -6190,6 +6193,24 @@ const SessionDetail = ({
     );
 
   // Mobile layout
+  const panelParams = new URLSearchParams(panelSearch);
+  const panelKey = panelParams.get('panel');
+  const [pluginId, panelId] = panelKey?.split(':') ?? [];
+  panelParams.delete('panel');
+  const closePanel = () =>
+    void router.navigate({ href: router.state.location.pathname + '?' + panelParams });
+  const pluginPanel =
+    workspaceSlug && currentWorkspaceId && pluginId && panelId ? (
+      <PluginRoute
+        workspaceName={workspaceSlug}
+        pluginId={pluginId}
+        id={panelId}
+        kind="panel"
+        machineId={activeSession.machineId}
+        params={Object.fromEntries(panelParams)}
+        target={{ session: eventRefs(currentWorkspaceId, activeSession).session }}
+      />
+    ) : null;
   if (isMobile) {
     const handleMobileSessionBack = () => {
       if (onMobileBack) {
@@ -6487,7 +6508,20 @@ const SessionDetail = ({
         )}
       >
         <AdaptiveMobileSessionHeader
-          pluginActions={currentWorkspaceId && <PluginSessionActions session={eventRefs(currentWorkspaceId,activeSession).session} />}
+          pluginActions={
+            <>
+              {currentWorkspaceId && (
+                <PluginSessionActions
+                  session={eventRefs(currentWorkspaceId, activeSession).session}
+                />
+              )}
+              {pluginPanel && (
+                <MobilePluginContainer close={closePanel} title={panelId}>
+                  {pluginPanel}
+                </MobilePluginContainer>
+              )}
+            </>
+          }
           inset={mobileHeaderInset}
           onBack={handleMobileSessionBack}
           onTabs={() => setMobileTabSheetOpen(true)}
@@ -7268,7 +7302,14 @@ const SessionDetail = ({
     <SidebarHistoryControls onToggleSidebar={() => showNavigationSidebar()} />
   ) : null;
 
-  const desktopHeaderToolbar = <><div ref={setDesktopToolbarContainer} />{currentWorkspaceId && <PluginSessionActions session={eventRefs(currentWorkspaceId,activeSession).session}/>}</>;
+  const desktopHeaderToolbar = (
+    <>
+      <div ref={setDesktopToolbarContainer} />
+      {currentWorkspaceId && (
+        <PluginSessionActions session={eventRefs(currentWorkspaceId, activeSession).session} />
+      )}
+    </>
+  );
 
   /* Single-row desktop top bar: [sidebar expand] [session tabs …] [toolbar].
      Replaces the old two-row header (repo title row + tab bar) — repo identity
@@ -7595,8 +7636,17 @@ const SessionDetail = ({
         topBar={tabBar}
         chatSurfaces={desktopChatSurfaces}
         terminalDock={<TerminalDockHost />}
-        secondaryPanel={desktopSecondaryPanel}
-        sidebarOpen={isSidebarVisible}
+        secondaryPanel={
+          pluginPanel ? (
+            <>
+              <button onClick={closePanel}>{t('common.close')}</button>
+              {pluginPanel}
+            </>
+          ) : (
+            desktopSecondaryPanel
+          )
+        }
+        sidebarOpen={!!pluginPanel || isSidebarVisible}
         onSidebarCollapse={handleToggleSidebar}
         deleteConfirmDialog={deleteConfirmDialog}
         sidebarMinWidthRequest={sidebarWidthRequest}

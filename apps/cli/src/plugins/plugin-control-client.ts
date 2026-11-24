@@ -1,11 +1,7 @@
 import { Effect } from 'effect';
 import { requestLocalPluginControl } from '@lody/shared/node/local-ipc';
 export async function requestPluginControl(
-  command:
-    | { action: 'install'; path: string; sha256: string }
-    | { action: 'link'; path: string; dev: true }
-    | { action: 'remove'; pluginId: string; purgeData?: true }
-    | { action: 'logs' | 'reload' | 'disable' | 'rollback'; pluginId: string },
+  command: import('./plugin-control-approval').PluginControlEnvelope['command'],
   encryptedWorkspaceId?: string
 ) {
   const { response, payload } = await Effect.runPromise(

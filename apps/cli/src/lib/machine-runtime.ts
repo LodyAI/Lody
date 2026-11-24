@@ -63,9 +63,19 @@ export class MachineRuntime {
       request.machineId !== config.machineId
     )
       throw new Error('e2ee_feature_scope');
-    if (request.method === 'plugin/control' || request.method === 'plugin/proposal-decision')
-      throw Error('Local plugin control required');
-    if (request.method === 'plugin/declared-workflow-grant') {
+    if (
+      request.method === 'plugin/control' &&
+      (!context?.pluginMachineOwner ||
+        !context.requester ||
+        (request.params.action !== 'inspect' && !context.requester.personalDevice) ||
+        request.ownerSessionId ||
+        context.signal.aborted ||
+        context.requester.accountId !== config.userId ||
+        !context.authority?.isCurrent() ||
+        context.authority.signal.aborted)
+    )
+      return { ok: false as const, code: 'forbidden', error: 'Verified machine owner required' };
+    if (request.method === 'plugin/control' && request.params.action === 'manage-workflow-grant') {
       if (
         !context?.pluginMachineOwner ||
         !context.grantSignature ||
@@ -83,7 +93,7 @@ export class MachineRuntime {
             machineOwner: true,
             declaredGrantSignature: context.grantSignature,
           },
-          context.signal
+          AbortSignal.any([context.signal, context.authority.signal])
         ),
       };
     }
@@ -170,10 +180,7 @@ export class MachineRuntime {
   private initialized = false;
   private remoteBridgeAttached = false;
   private remoteServicesActivated = false;
-  // Single-writer queue for remote-bridge state transitions (mirrors
-  // `runRemoteTransportOp` in loro/doc.ts): attach/detach/revoke bodies never
-  // interleave. Attach bodies are short (no meta catch-up wait), so a queued
-  // detach/revoke stays prompt without any preemption machinery.
+  // Serialize attach, detach and revoke. Attach must not wait for meta sync and delay revocation.
   private bridgeTransitionQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly options: MachineRuntimeOptions) {

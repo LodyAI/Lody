@@ -262,3 +262,143 @@ describe('project default MCP writes', () => {
     expect(deps.writer.flockRowPut).not.toHaveBeenCalled();
   });
 });
+
+it('answers new machine nonces outside Settings only from the approving device’s persistent decision', async ({
+  onTestFinished,
+}) => {
+  const queues = new Map<string, Promise<unknown>>();
+  vi.stubGlobal('navigator', {
+    locks: {
+      request(key: string, _options: unknown, work: () => Promise<unknown>) {
+        const next = (queues.get(key) ?? Promise.resolve()).then(work);
+        queues.set(
+          key,
+          next.catch(() => {})
+        );
+        return next;
+      },
+    },
+  });
+  onTestFinished(() => vi.unstubAllGlobals());
+  await import('fake-indexeddb/auto');
+  const { ownerSyncCustody } = await import('../src/plugins/owner-sync-custody');
+  const { setPluginOwnerSync, answerPluginOwnerChallenges, subscribePluginOwnerSync } =
+    await import('../src/lib/workspace-catalog-write');
+  const { workspacePluginEntrySchema, pluginOwnerSyncSubject, syncChallengeSchema } =
+    await import('@lody/shared/plugins/workspace-entry');
+  const flock = new Flock('owner-sync-client');
+  const ready = Promise.withResolvers<void>();
+  const repo = {
+    openFlockDoc: async () => ({
+      flock,
+      syncOnce: async () => {},
+      joinRoom: async () => {
+        ready.resolve();
+        return { unsubscribe: () => {}, firstSyncedWithRemote: Promise.resolve() };
+      },
+    }),
+  };
+  const runtime = {
+    workspaceId,
+    accountId: 'alice',
+    contentMode: 'e2ee',
+    protectedCodeCollabRole: { get: () => 'write' },
+    repo,
+    writer: createDirectWorkspaceWriter({ repo } as never),
+    signPluginOwnerSync: async (pin: Parameters<typeof pluginOwnerSyncSubject>[0]) =>
+      pluginOwnerSyncSubject(pin).contentDigest,
+  } as unknown as WorkspaceRuntime;
+  const pin = workspacePluginEntrySchema.parse({
+    plugin_id: 'demo',
+    manifest_summary: {
+      id: 'demo',
+      title: 'Demo',
+      client: 'client.js',
+      version: '1.0.0',
+      sdk: '^1.0.0',
+    },
+    source: {
+      kind: 'npm',
+      package_name: 'demo',
+      exact_version: '1.0.0',
+      integrity: 'sha512-' + 'A'.repeat(86) + '==',
+    },
+    permissions: [],
+    config_schema: {},
+    enabled: true,
+    machine_sync: 'manual',
+  });
+  const namespace = crypto.randomUUID();
+  const custody = (ns = namespace) => ownerSyncCustody(ns, new AbortController().signal);
+  const key = workspaceFlockKeys.pluginOwnerSync('alice', 'demo');
+  const ck = workspaceFlockKeys.pluginSyncChallenge('alice', 'machine', 'demo');
+  const decision = () => workspacePluginEntrySchema.parse(flock.get(key));
+  const current = () => true;
+  await setPluginOwnerSync(runtime, pin, true, custody(), current);
+  const approved = decision();
+  const challenge = () => {
+    const q = {
+      owner: 'alice',
+      plugin: 'demo',
+      machine: 'machine',
+      decision: approved.sync_signature!,
+      nonce: crypto.randomUUID(),
+    };
+    flock.set(ck, q);
+    flock.commit();
+    return q;
+  };
+  const service = (device = namespace) =>
+    answerPluginOwnerChallenges(
+      runtime,
+      custody(device),
+      [decision()],
+      [syncChallengeSchema.parse(flock.get(ck))],
+      current
+    );
+  const n = challenge();
+  await service('different-device');
+  expect(flock.get(ck)).toEqual(n);
+  const confirmed = Promise.withResolvers<void>();
+  const off = flock.subscribe(() => {
+    if (syncChallengeSchema.safeParse(flock.get(ck)).data?.confirmation) confirmed.resolve();
+  });
+  flock.delete(ck);
+  flock.commit();
+  const stop = subscribePluginOwnerSync(runtime, custody(), current);
+  try {
+    await ready.promise;
+    const live = challenge();
+    await confirmed.promise;
+    expect(flock.get(ck)).toMatchObject({ nonce: live.nonce, confirmation: expect.any(String) });
+  } finally {
+    stop();
+    off();
+  }
+
+  const changed = {
+    ...approved,
+    source: { ...approved.source, integrity: 'sha512-' + 'B'.repeat(86) + '==' },
+  };
+  flock.set(key, changed);
+  flock.commit();
+  const replay = challenge();
+  await service();
+  expect(flock.get(ck)).toEqual(replay);
+  await setPluginOwnerSync(runtime, pin, false, custody('different-device'), current);
+  await service();
+  flock.set(key, approved);
+  flock.commit();
+  const after = challenge();
+  await service();
+  expect(flock.get(ck)).toEqual(after);
+  await setPluginOwnerSync(runtime, pin, true, custody(), current);
+  const next = decision();
+  expect(next.sync_decision_id).not.toBe(approved.sync_decision_id);
+  await setPluginOwnerSync(runtime, pin, false, custody(), current);
+  flock.set(key, next);
+  flock.set(ck, { ...after, decision: next.sync_signature });
+  flock.commit();
+  await service();
+  expect(flock.get(ck)).not.toHaveProperty('confirmation');
+});

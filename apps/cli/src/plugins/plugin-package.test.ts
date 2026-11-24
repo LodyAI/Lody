@@ -1,9 +1,15 @@
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import { mkdtemp, writeFile, mkdir, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { packPlugin, inspectProposalPackage, installPackage } from './plugin-package';
+import {
+  inspectPinnedNpmPackage,
+  installWorkspacePin,
+  packPlugin,
+  inspectProposalPackage,
+  installPackage,
+} from './plugin-package';
 
 test('deterministic releases include only declared files; integrity and approval failures publish no generation', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'package-release-'));
@@ -23,11 +29,163 @@ test('deterministic releases include only declared files; integrity and approval
     })
   );
   await writeFile(join(source, 'main.ts'), 'export default 123');
+  await writeFile(
+    join(source, 'package.json'),
+    JSON.stringify({ name: '@example/demo', scripts: { install: 'MUST_NOT_SHIP' } })
+  );
   const a = await packPlugin(source, join(root, 'a'));
   await writeFile(join(source, '.env'), 'MUST_NOT_SHIP');
   const b = await packPlugin(source, join(root, 'b'));
   expect(b.sha256).toBe(a.sha256);
   const bytes = await readFile(a.path);
+  expect(a.workspaceEntry.source).toEqual({
+    kind: 'npm',
+    package_name: '@example/demo',
+    exact_version: '1.0.0',
+    integrity:
+      'sha512-' + (await import('node:crypto')).createHash('sha512').update(bytes).digest('base64'),
+  });
+  expect(await inspectPinnedNpmPackage(a.path, a.workspaceEntry.source)).toEqual({
+    sha256: a.sha256,
+    entry: a.workspaceEntry,
+  });
+  await expect(
+    inspectPinnedNpmPackage(a.path, { ...a.workspaceEntry.source, package_name: 'another' })
+  ).rejects.toThrow('identity mismatch');
+  await expect(
+    inspectPinnedNpmPackage(a.path, {
+      ...a.workspaceEntry.source,
+      integrity: 'sha512-' + 'A'.repeat(86) + '==',
+    })
+  ).rejects.toThrow('integrity mismatch');
+  const { Lody } = await import('../lib/lody');
+  const { LoroRepo } = await import('loro-repo');
+  const { getWorkspaceFlockDocId, readWorkspaceFlockRowsFromFlock, listWorkspacePlugins } =
+    await import('@lody/shared');
+  const workspaceId = 'workspace' as import('@lody/shared').WorkspaceId;
+  const repo = await LoroRepo.create({});
+  try {
+    const handle = await repo.openFlockDoc(getWorkspaceFlockDocId(workspaceId));
+    const host = {
+      installOwnerNpm: (entry: typeof a.workspaceEntry, signal: AbortSignal) =>
+        installWorkspacePin(
+          entry,
+          join(root, 'workspace-machine'),
+          signal,
+          async () => new Response(bytes)
+        ),
+    };
+    const runtime = Object.assign(Object.create(Lody.prototype), {
+      workspaceId,
+      encryptedWorkspace: {
+        pluginAuthoritySignal: new AbortController().signal,
+        authorizeWorkspacePluginInstall: async () => () => true,
+      },
+      encryptedPlugin: Promise.resolve(host),
+      documentManager: { repo, syncFlockDocOrThrow: async () => {} },
+    }) as InstanceType<typeof Lody>;
+    const cmd = {
+      action: 'install-npm' as const,
+      path: a.path,
+      source: a.workspaceEntry.source,
+      permissions: a.workspaceEntry.permissions,
+    };
+    await expect(
+      runtime.dispatchEncryptedPluginControl({ ...cmd, permissions: [] })
+    ).rejects.toThrow('disclosure changed');
+    expect(listWorkspacePlugins(readWorkspaceFlockRowsFromFlock(handle.flock))).toEqual([]);
+    await runtime.dispatchEncryptedPluginControl(cmd);
+    expect(listWorkspacePlugins(readWorkspaceFlockRowsFromFlock(handle.flock))).toEqual([
+      a.workspaceEntry,
+    ]);
+    const { watchPluginOwnerDecisions } = await import('./owner-pin-reconciler');
+    const { pluginOwnerSyncSubject, syncChallengeSchema } =
+      await import('@lody/shared/plugins/workspace-entry');
+    const { workspaceFlockKeys } = await import('@lody/shared');
+    const { generateKeyPairSync, sign, verify } = await import('node:crypto');
+    const keys = generateKeyPairSync('ed25519');
+    type Pin = typeof a.workspaceEntry;
+    const subject = (pin: Pin) => Buffer.from(JSON.stringify(pluginOwnerSyncSubject(pin)));
+    const signed = (pin: Pin): Pin => ({
+      ...pin,
+      sync_signature: sign(null, subject(pin), keys.privateKey).toString('hex'),
+    });
+    const decision = signed({
+      ...a.workspaceEntry,
+      machine_sync: 'owner_machines',
+      sync_decision_id: crypto.randomUUID(),
+      sync_owner_user_id: 'alice',
+    });
+    const manual = signed({
+      ...decision,
+      machine_sync: 'manual',
+      sync_decision_id: crypto.randomUUID(),
+    });
+    const decisionKey = workspaceFlockKeys.pluginOwnerSync('alice', decision.plugin_id),
+      key = workspaceFlockKeys.pluginSyncChallenge('alice', 'target', decision.plugin_id);
+    let installed = false;
+    const observe = () =>
+      watchPluginOwnerDecisions({
+        flock: handle.flock,
+        owner: 'alice',
+        machine: 'target',
+        signal: new AbortController().signal,
+        verify: async (pin) => {
+          if (!verify(null, subject(pin), keys.publicKey, Buffer.from(pin.sync_signature!, 'hex')))
+            throw Error('Invalid signature');
+          return () => {};
+        },
+        installed: async () => installed,
+        install: async (_pin, _signal, admit) => {
+          (await admit())();
+          installed = true;
+        },
+        flush: () => repo.flush(),
+        warn: () => {},
+      });
+    const set = (k: typeof decisionKey | typeof key, v: unknown) => {
+      handle.flock.set(k, v);
+      handle.flock.commit();
+    };
+    const readChallenge = () =>
+      syncChallengeSchema.parse([...handle.flock.scan({ prefix: key })][0]?.value);
+    const reply = (challenge: ReturnType<typeof readChallenge>) => {
+      const { confirmation: _, confirmedAt: _time, ...bound } = challenge;
+      const confirmedAt = Date.now();
+      return {
+        ...bound,
+        confirmedAt,
+        confirmation: signed({ ...decision, sync_confirmed_at: confirmedAt, sync_challenge: bound })
+          .sync_signature,
+      };
+    };
+    let watcher = observe();
+    try {
+      set(decisionKey, decision);
+      await watcher.refresh();
+      const old = reply(readChallenge());
+      set(decisionKey, manual);
+      await watcher.refresh();
+      set(key, old);
+      set(decisionKey, decision);
+      await watcher.refresh();
+      expect(installed).toBe(false);
+      expect(readChallenge().nonce).not.toBe(old.nonce);
+      watcher.stop();
+      set(key, old);
+      watcher = observe();
+      await watcher.refresh();
+      expect(installed).toBe(false);
+      expect(readChallenge().nonce).not.toBe(old.nonce);
+      set(key, reply(readChallenge()));
+      await watcher.refresh();
+      expect(installed).toBe(true);
+    } finally {
+      watcher.stop();
+    }
+  } finally {
+    await repo.destroy();
+  }
   const tar = gunzipSync(bytes);
   expect(tar.includes('package/lody.integrity.json')).toBe(true);
   expect(tar.includes('MUST_NOT_SHIP')).toBe(false);
@@ -36,8 +194,110 @@ test('deterministic releases include only declared files; integrity and approval
     expect.arrayContaining(['client', 'sessions.approve', 'unstable.rawState'])
   );
   const current = await installPackage(a.path, generations, info.sha256);
+  expect(current.clientDigest).toBe(a.workspaceEntry.client_digest);
   expect(await readFile(join(current.directory, 'client.js'), 'utf8')).toContain('123');
   await expect(installPackage(b.path, generations, '0'.repeat(64))).rejects.toThrow(/changed/);
+  const registry = async () => new Response(bytes);
+  const signal = new AbortController().signal;
+  const syncRoot = join(root, 'synced');
+  await expect(
+    installWorkspacePin(
+      {
+        ...a.workspaceEntry,
+        source: {
+          ...a.workspaceEntry.source,
+          package_name: 'different-package',
+        },
+      },
+      syncRoot,
+      signal,
+      registry
+    )
+  ).rejects.toThrow(/disclosure/);
+  await expect(
+    installWorkspacePin(
+      a.workspaceEntry,
+      syncRoot,
+      signal,
+      async () => new Response('other archive')
+    )
+  ).rejects.toThrow(/integrity/);
+  const synced = await installWorkspacePin(a.workspaceEntry, syncRoot, signal, registry);
+  expect(synced.clientDigest).toBe(current.clientDigest);
+  expect(await readdir(syncRoot)).toHaveLength(1);
+  const { PluginDaemon } = await import('./plugin-host-legacy');
+  const daemon = new PluginDaemon(join(root, 'owned-machine'), 'workspace', 'target', () => {});
+  const pin = {
+    ...a.workspaceEntry,
+    machine_sync: 'owner_machines' as const,
+    sync_decision_id: crypto.randomUUID(),
+    sync_owner_user_id: 'alice',
+    sync_signature: 'owner-proof',
+  };
+  try {
+    await daemon.start();
+    vi.stubGlobal('fetch', registry);
+    const reconcile = (
+      owner: string,
+      verify: () => Promise<() => void>,
+      row = pin as typeof a.workspaceEntry
+    ) => daemon.reconcileOwnerPin(row, owner, signal, verify);
+    const admit = async () => () => {};
+    await reconcile('bob', admit);
+    await reconcile('alice', admit, a.workspaceEntry);
+    await expect(
+      reconcile('alice', async () => {
+        throw Error('invalid signature');
+      })
+    ).rejects.toThrow();
+    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({ plugins: [] });
+    await reconcile('alice', admit);
+    expect(await daemon.dispatch({ action: 'list' })).toMatchObject({
+      plugins: [{ pluginId: 'demo', enabled: false }],
+    });
+    const catalog = JSON.parse(await readFile(join(root, 'owned-machine', 'catalog.json'), 'utf8'));
+    expect(catalog[0]).not.toHaveProperty('declaredGrant');
+    expect(catalog[0]).not.toHaveProperty('preferences');
+    const installed = async () =>
+      await daemon.dispatchMachineRpc(
+        { workspaceId: 'workspace', machineId: 'target', method: 'plugin/catalog', params: {} },
+        { userId: 'member', machineOwner: false }
+      );
+    expect(await installed()).toMatchObject({
+      installations: [{ source: a.workspaceEntry.source }],
+    });
+    await daemon.dispatch({ action: 'install', path: a.path, sha256: a.sha256 });
+    expect(await installed()).toMatchObject({
+      installations: [{ source: { kind: 'local', origin: 'archive' } }],
+    });
+    await daemon.dispatch({ action: 'rollback', pluginId: 'demo' });
+    expect(await installed()).toMatchObject({
+      installations: [{ source: a.workspaceEntry.source }],
+    });
+
+    const nextManifest = {
+      ...a.workspaceEntry.manifest_summary,
+      version: '1.2.0',
+      client: 'main.ts',
+    };
+    await writeFile(join(source, 'lody.plugin.json'), JSON.stringify(nextManifest));
+    const next = await packPlugin(source, join(root, 'upgrade'));
+    const archive = await readFile(next.path);
+    vi.stubGlobal('fetch', async () => new Response(archive));
+    await daemon.installOwnerNpm(next.workspaceEntry, signal, () => {});
+    expect(await installed()).toMatchObject({
+      installations: [{ source: next.workspaceEntry.source }],
+    });
+    await daemon.dispatch({ action: 'rollback', pluginId: 'demo' });
+    expect(await installed()).toMatchObject({
+      installations: [{ source: a.workspaceEntry.source }],
+    });
+    await reconcile('alice', admit);
+    expect(await readdir(join(root, 'owned-machine', 'generations'))).toHaveLength(2);
+  } finally {
+    vi.unstubAllGlobals();
+    await daemon.dispose();
+  }
   for (const malformed of [
     Buffer.concat([bytes, Buffer.from('x')]),
     bytes.subarray(0, -1),

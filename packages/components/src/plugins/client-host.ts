@@ -21,7 +21,7 @@ export interface InstallationKey {
 export interface ClientInstallation extends InstallationKey {
   digest: string;
   /** Machine-side nonce bumped by `ctx.invalidate`; a change refreshes this plugin's queries. */
-  invalidations?: number;
+  invalidations?: number | string;
   machineId?: string;
   localModule?: boolean;
   workspaceManifest?: import('@lody/shared/plugins/manifest-schema').PluginManifest;
@@ -42,7 +42,7 @@ interface Slot {
   configurationKey?: string;
   controller: AbortController;
   digest: string;
-  invalidations?: number;
+  invalidations?: number | string;
   queries?: PluginQueryRegistry;
   ready: Promise<void>;
   cleanup?: ClientPluginCleanup;

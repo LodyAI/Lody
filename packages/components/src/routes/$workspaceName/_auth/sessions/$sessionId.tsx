@@ -12,6 +12,7 @@ import { readStoredLastActiveTabState } from '@/lib/session-draft-tabs';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 
 export type SessionDetailSearch = {
+  panel?: string;
   tab?: string;
   /** When set, opens the PR sidebar tab (desktop) or full-screen PR view (mobile). */
   pr?: number;
@@ -50,11 +51,11 @@ const SessionDetailRoute = () => {
     <AppThemeShell>
       <Suspense fallback={null}>
         <SessionDetail
-        sessionId={sessionId as SessionId}
-        urlTab={search.tab}
-        urlPrNumber={search.pr}
-        urlBrowser={search.browser}
-        urlSimulator={search.simulator}
+          sessionId={sessionId as SessionId}
+          urlTab={search.tab}
+          urlPrNumber={search.pr}
+          urlBrowser={search.browser}
+          urlSimulator={search.simulator}
         />
       </Suspense>
     </AppThemeShell>
@@ -83,6 +84,8 @@ const parseBrowserFlag = (value: unknown): boolean | undefined => {
 
 export const Route = createFileRoute('/$workspaceName/_auth/sessions/$sessionId')({
   validateSearch: (search: Record<string, unknown>): SessionDetailSearch => ({
+    ...search,
+    panel: typeof search.panel === 'string' ? search.panel : undefined,
     tab: typeof search.tab === 'string' ? search.tab : undefined,
     pr: parsePrNumber(search.pr),
     browser: parseBrowserFlag(search.browser),

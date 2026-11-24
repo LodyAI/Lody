@@ -209,28 +209,150 @@ it('rejects over-budget UTF-8 projections and leaves unexpected future host fiel
     snapshotDocument({ sessions: { a: source } }, [], 'example', '1', 'workspace-state')
   ).toThrow();
 });
-it('opens a Capacitor plugin screen in-app and removes it when its installation retires', async () => {
-  const { scopedSlots, openPluginScreen, PluginScreenOutlet } =
-    await import('../src/plugins/shell-surfaces');
-  const { vi } = await import('vitest');
-  vi.stubGlobal('__LODY_NATIVE__', true);
-  const root = createRoot(document.createElement('div'));
+it('unmounts routed content when its installation retires', async () => {
+  const { scopedSlots, RoutedSurface } = await import('../src/plugins/shell-surfaces');
+  const el = document.createElement('div');
+  const root = createRoot(el);
   const scope = new AbortController();
+  scopedSlots(
+    'workspace',
+    'source',
+    {} as never,
+    scope.signal,
+    undefined,
+    undefined,
+    'example'
+  )('screen', 'report', () => <article>Report</article>);
   try {
-    const add = scopedSlots('workspace', 'source', {} as never, scope.signal);
-    add('screen', 'report', () => <article>Report contents</article>, 'Report');
-    await act(async () => {
-      openPluginScreen('workspace', 'source', 'report');
-      root.render(<PluginScreenOutlet workspaceId="workspace" />);
-    });
-    expect(document.querySelector('[data-slot="drawer-content"] article')?.textContent).toBe(
-      'Report contents'
+    await act(async () =>
+      root.render(
+        <RoutedSurface
+          workspaceId="workspace"
+          pluginId="example"
+          kind="screen"
+          id="report"
+          params={{}}
+        />
+      )
     );
+    expect(el.textContent).toBe('Report');
     await act(async () => scope.abort());
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(el.textContent).toBe('');
   } finally {
-    scope.abort();
     await act(async () => root.unmount());
-    vi.unstubAllGlobals();
+  }
+});
+it('keeps the remote Keychain editor outside plugin event ancestry and returns only configured state', async () => {
+  const { settingsFields, PluginSecretEditorProvider } =
+    await import('../src/plugins/settings-fields');
+  const signal = new AbortController();
+  const entry = {
+    workspaceId: 'ws',
+    dev: { manifest: { config: { token: { type: 'secret', label: 'Token' } } } },
+  };
+  const writes: unknown[] = [];
+  const observed: unknown[] = [];
+  const { PluginSecretField } = settingsFields(
+    entry as never,
+    signal.signal,
+    (id) =>
+      ({
+        ...entry,
+        setSecret: async (key: string, value: string) => {
+          writes.push({ id, key, value });
+        },
+      }) as never
+  );
+  const container = document.body.appendChild(document.createElement('div'));
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <PluginSecretEditorProvider>
+          <div
+            onInputCapture={() => observed.push('input')}
+            onSubmitCapture={() => observed.push('submit')}
+          >
+            <PluginSecretField
+              fieldKey="token"
+              target={{ workspaceId: 'ws', machineId: 'remote' } as never}
+              onSaved={(state) => observed.push(state)}
+            />
+          </div>
+        </PluginSecretEditorProvider>
+      )
+    );
+    await act(async () => container.querySelector('button')!.click());
+    const input = document.querySelector<HTMLInputElement>('input[type=password]')!;
+    input.value = 'synthetic';
+    await act(async () => {
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(writes).toEqual([{ id: 'remote', key: 'token', value: 'synthetic' }]);
+    expect(observed).toEqual([{ configured: true }]);
+    expect(document.querySelector('input[type=password]')).toBeNull();
+  } finally {
+    signal.abort();
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it('mounts workspace settings without a machine and restricts machine and project settings to their targets', async () => {
+  const { scopedSlots, PluginInstallationSettings, ProjectPluginSettings } =
+    await import('../src/plugins/shell-surfaces');
+  const scope = new AbortController();
+  const source = (key: string) => JSON.stringify(['example', key, 'v1']);
+  const add = (key: string, machine: string) =>
+    scopedSlots('ws', source(key), {} as never, scope.signal, machine, undefined, 'example', '1.0');
+  add('workspace', 'workspace')(
+    'workspaceSettings',
+    'preferences',
+    (props: { workspace: { workspaceId: string } }) => (
+      <output>{props.workspace.workspaceId}</output>
+    )
+  );
+  const machine = add('machine:b', 'b');
+  machine('settings', 'connection', (props: { machine: { machineId: string } }) => (
+    <output>{props.machine.machineId}</output>
+  ));
+  machine('projectSettings', 'rules', (props: { project: { projectId: string } }) => (
+    <output>{props.project.projectId}</output>
+  ));
+  const el = document.createElement('div');
+  const root = createRoot(el);
+  const entry = (key: string, id: string) =>
+    ({
+      sourceKey: key,
+      dev: { machineId: id, manifest: { version: '1.0' } },
+      workspaceId: 'ws',
+      pluginId: 'example',
+      digest: 'v1',
+    }) as never;
+  try {
+    await act(async () =>
+      root.render(<PluginInstallationSettings entry={entry('workspace', 'workspace')} />)
+    );
+    expect(el.textContent).toBe('ws');
+    await act(async () =>
+      root.render(
+        <>
+          <PluginInstallationSettings entry={entry('machine:b', 'b')} />
+          <ProjectPluginSettings workspaceId="ws" machineId="a" projectId="wrong" />
+          <ProjectPluginSettings workspaceId="ws" machineId="b" projectId="right" />
+        </>
+      )
+    );
+    expect([...el.querySelectorAll('output')].map((n) => n.textContent).sort()).toEqual([
+      'b',
+      'right',
+      'ws',
+    ]);
+    await act(async () => scope.abort());
+    expect(el.textContent).toBe('');
+  } finally {
+    await act(async () => root.unmount());
+    scope.abort();
   }
 });

@@ -37,7 +37,6 @@ const supportsSharedExecution = (request: E2eeFeatureInput['request']) =>
   request.method === 'session/fork' ||
   (isPluginMachineRequest(request) &&
     request.method !== 'plugin/control' &&
-    request.method !== 'plugin/declared-workflow-grant' &&
     (!('scope' in request.params) || request.params.scope !== 'machine'));
 const CLOCK_SKEW_TOLERANCE_MS = 10 * 60_000;
 const featureTtl = (method: string) =>
@@ -584,9 +583,16 @@ export function makeE2eeFeatureRpcClient(options: {
             return unhex(signature);
           });
           const verified = yield* openFrames(machineId, unpackFrames(bytes));
-          if (verified.input.request.method !== 'plugin/declared-workflow-grant')
-            throw Error('Not a declared workflow grant');
-          return { request: verified.input.request, signer: verified.requesterDevice };
+          const control = verified.input.request;
+          if (
+            control.method === 'plugin/control' &&
+            control.params.action === 'manage-workflow-grant'
+          )
+            return {
+              request: { ...control, params: control.params },
+              signer: verified.requesterDevice,
+            };
+          throw Error('Not a declared workflow grant');
         })
       ),
     verifyFeatureRequest: (request: Opened) =>

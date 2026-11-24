@@ -6,7 +6,7 @@ import { signVerified, type DeviceSigner } from './signing';
 
 const domain = new TextEncoder().encode('lody-e2ee/execution-intent/v1\0');
 const MAX_FIELD_BYTES = 1024;
-const kinds = new Set([1, 2, 3]);
+const kinds = new Set([1, 2, 3, 4]);
 
 /**
  * What one execution intent signature binds (owner decision 2026-11-10). Only the

@@ -1,6 +1,6 @@
 import { usePluginTurnEvents } from '../../plugins/use-session-events';
 import { clientPluginEvents } from '../../plugins/client-events';
-import { eventRefs } from '../../plugins/session-events';
+import { eventRefs, pluginInteractionOutcome } from '../../plugins/session-events';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
@@ -7753,10 +7753,16 @@ export const SessionChatInterface = memo(
 
                       {/* The one place a pending permission request is answered; it stands in for the composer. */}
                       <FloatingPermissionRequest
-                        onResolved={(requestId, kind,outcome,turnId) => {
+                        onResolved={(requestId, kind, outcome, turnId) => {
                           if (workspaceId) {
                             const { workspace, session: ref } = eventRefs(workspaceId, session);
-                            clientPluginEvents.publish('session.interaction.resolved',{...eventRefs(workspaceId,session),requestId,kind,outcome,turnId});
+                            clientPluginEvents.publish('session.interaction.resolved', {
+                              ...eventRefs(workspaceId, session),
+                              requestId,
+                              kind,
+                              outcome: pluginInteractionOutcome(outcome),
+                              turnId,
+                            });
                             clientPluginEvents.publish('ui.interaction.resolved', {
                               workspace,
                               session: ref,

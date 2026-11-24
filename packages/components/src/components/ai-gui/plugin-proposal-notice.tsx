@@ -1,6 +1,5 @@
 import { pluginCapabilities } from '@lody/shared/plugins/capabilities';
 import { WorkflowApproval } from '../settings/plugin-inspector';
-import { localProbeResultAtom } from '@/atoms/local-probe';
 import { useContext, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
 import type { MachineId, SessionId } from '@lody/shared';
@@ -47,7 +46,6 @@ export function PluginProposalNotice({
 }
 function LiveProposal({ review, meta }: { review: PluginReview; meta: PluginProposalMeta }) {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const probe = useAtomValue(localProbeResultAtom);
   const account = useWorkspaceLocalAccountId();
   const machines = useOnlineMachines();
   const owner = useWorkspaceClientPlugins();
@@ -62,9 +60,6 @@ function LiveProposal({ review, meta }: { review: PluginReview; meta: PluginProp
   const previous = m ? pluginCapabilities(m) : undefined;
   const allowed =
     runtime?.workspaceId === meta.workspaceId &&
-    probe?.ok &&
-    probe.machineId === meta.machineId &&
-    (!probe.workspaceId || probe.workspaceId === meta.workspaceId) &&
     !!account &&
     machines.some((m) => m.id === meta.machineId && m.ownerUserId === account);
 
@@ -79,20 +74,19 @@ function LiveProposal({ review, meta }: { review: PluginReview; meta: PluginProp
         decide={
           allowed
             ? async (decision) => {
-                const result = await runtime.requestPlugin(
-                  meta.machineId as MachineId,
-                  {
-                    method: 'plugin/proposal-decision',
-                    params: {
+                const result = await runtime.requestPlugin(meta.machineId as MachineId, {
+                  method: 'plugin/control',
+                  params: {
+                    action: 'resolve-proposal',
+                    decision: {
                       sessionId: meta.sessionId,
                       requestId: meta.command.requestId,
                       sha256: meta.artifact.sha256,
                       decision: decision === 'approved' ? 'approve' : 'deny',
                     },
                   },
-                  { requireLocal: true }
-                );
-                if (result.type !== 'plugin/proposal-decision')
+                });
+                if (result.type !== 'plugin/control' || !('status' in result))
                   throw Error('Unexpected proposal response');
                 return result.status;
               }

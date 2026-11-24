@@ -1,3 +1,4 @@
+import { ProjectPluginSettings } from '../../plugins/shell-surfaces';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -1814,6 +1815,13 @@ function ProjectWindow({
             />
           ) : (
             <div {...withClassName(stylex.props(win.pageBody), SCROLLBAR_CLASS)}>
+              {page === 'general' && workspaceId && localRow && (
+                <ProjectPluginSettings
+                  workspaceId={workspaceId}
+                  machineId={localRow.machineId}
+                  projectId={localRow.project.id}
+                />
+              )}
               {page === 'general' && localRow ? (
                 <>
                   {offlineNote}

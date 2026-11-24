@@ -144,7 +144,7 @@ it('binds the system turn to its session and forwards only its frozen artifact t
       version: '1',
       title: 'Sample',
       sha256: r.digest,
-      requestedCapabilities: ['machine','sessions.approve'],
+      requestedCapabilities: ['machine', 'sessions.approve'],
     },
   };
   const render = (entryId: string) =>
@@ -162,16 +162,19 @@ it('binds the system turn to its session and forwards only its frozen artifact t
   await render('plugin-proposal-req');
   expect(node.textContent).toContain('sessions.approve');
   expect(host.requestPlugin).not.toHaveBeenCalled();
-  host.requestPlugin.mockResolvedValue({ type: 'plugin/proposal-decision', status: 'superseded' });
+  host.requestPlugin.mockResolvedValue({
+    type: 'plugin/control',
+    action: 'resolve-proposal',
+    status: 'superseded',
+  });
   await act(() => node.querySelector('button')!.click());
-  expect(host.requestPlugin).toHaveBeenCalledWith(
-    r.machineId,
-    {
-      method: 'plugin/proposal-decision',
-      params: { sessionId: 's', requestId: 'req', sha256: r.digest, decision: 'approve' },
+  expect(host.requestPlugin).toHaveBeenCalledWith(r.machineId, {
+    method: 'plugin/control',
+    params: {
+      action: 'resolve-proposal',
+      decision: { sessionId: 's', requestId: 'req', sha256: r.digest, decision: 'approve' },
     },
-    { requireLocal: true }
-  );
+  });
   expect(node.textContent).toContain('Superseded');
   expect(node.querySelector('button')).toBeNull();
 });

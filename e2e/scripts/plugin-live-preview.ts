@@ -80,7 +80,7 @@ try {
   await assert.rejects(
     run(linkArgs.slice(1), { ...ownerEnv, LODY_AGENT_SESSION_ID: 'synthetic' }),
     (error: Error & { stdout?: string; stderr?: string }) =>
-      /owner terminal/.test(`${error.stdout} ${error.stderr}`)
+      /propose plugin activation for human approval/.test(`${error.stdout} ${error.stderr}`)
   );
   await new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...linkArgs], {

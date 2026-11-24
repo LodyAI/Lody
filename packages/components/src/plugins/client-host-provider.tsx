@@ -1,15 +1,21 @@
+import { ownerSyncCustody } from './owner-sync-custody';
+import { getIpcServices } from '../lib/electron-ipc-client';
+import { isLocalAppPlatform } from '../lib/app-platform';
+import { projectPluginValues, type WorkspaceFlockScanRow } from '@lody/shared';
+import { PluginSecretEditorProvider } from './settings-fields';
+import type { WorkspacePluginEntry } from '@lody/shared/plugins/workspace-entry';
 import {
-  workspaceOnly,
+  fetchWorkspaceNpmRelease,
+  NpmTransportUnavailable,
+} from '@lody/shared/plugins/workspace-npm';
+import {
   workspacePage,
   workspaceReleaseStore,
-  captureRelease,
-  clientPreferenceChanges,
+  fetchPinnedMachineBundle,
   type WorkspaceRelease,
 } from './workspace-installations';
 import { comparePluginVersions } from '@lody/shared/plugins/manifest-schema';
-import { getIpcServices } from '../lib/electron-ipc-client';
 import { clientDiagnostics } from './client-diagnostics';
-import { PluginScreenOutlet } from './shell-surfaces';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { commands } from '../lib/commands/registry';
@@ -31,8 +37,21 @@ import { TrustedDevSessionStore, type DevInstallation } from './trust';
 import type { PluginInspection, InspectorAction } from '../components/settings/plugin-inspector';
 
 export interface ClientCatalogInstallation extends ClientInstallation {
+  readProject?: (
+    machine: string,
+    project: string
+  ) => Record<string, string | number | boolean> | undefined;
+  projectValues?: PluginInspection['projectValues'];
+  npm?: WorkspacePluginEntry;
   invalidations?: number;
+  machinePort?: import('./query-bindings').PluginCallPort;
+  source?: import('@lody/shared/plugins/workspace-entry').PluginInstallationSource;
   packageSha256?: string;
+  configureProject?: (
+    machineId: string,
+    projectId: string,
+    changes: Record<string, string | number | boolean>
+  ) => Promise<void>;
   configureClient?: (changes: Record<string, string | number | boolean>) => Promise<void>;
   workflowPrompts?: Readonly<Record<string, string>>;
   declaredGrant?: Omit<
@@ -50,6 +69,7 @@ export interface ClientCatalogInstallation extends ClientInstallation {
   dev: DevInstallation;
   enabled: boolean;
   inspection?: Omit<PluginInspection, 'manifest' | 'clientDigest' | 'trusted' | 'devSessionNonce'>;
+  setSecret?: (fieldKey: string, value: string) => Promise<void>;
   control?: (
     action: Exclude<InspectorAction, 'approve-dev' | 'approve-release' | 'revoke'>,
     changes?: Record<string, string | number | boolean>,
@@ -66,15 +86,54 @@ export class WorkspaceClientPlugins {
   private lifetime = new AbortController();
   private records = new Map<string, WorkspaceRelease>();
   private store?: ReturnType<typeof workspaceReleaseStore>;
+  projectWriter?: (
+    entry: ClientCatalogInstallation,
+    machine: string,
+    project: string,
+    changes: Record<string, string | number | boolean>
+  ) => Promise<void>;
+  private projectRows: WorkspaceFlockScanRow[] = [];
+  setProjectRows(rows: WorkspaceFlockScanRow[]) {
+    this.projectRows = rows;
+    return this.update(this.catalog);
+  }
+  private npmRows: readonly WorkspacePluginEntry[] = [];
+  setWorkspacePlugins(rows: readonly WorkspacePluginEntry[]) {
+    this.npmRows = rows;
+    return this.update(this.catalog);
+  }
+  private currentNpm(row: WorkspacePluginEntry) {
+    return this.npmRows.some((r) => r.enabled && JSON.stringify(r) === JSON.stringify(row));
+  }
+  private approvedNpm(row: WorkspacePluginEntry) {
+    const cached = this.records.get(row.plugin_id);
+    return (
+      cached?.npm &&
+      cached.digest === row.client_digest &&
+      JSON.stringify(cached.manifest) === JSON.stringify(row.manifest_summary) &&
+      JSON.stringify(cached.npm) === JSON.stringify(row)
+    );
+  }
   private database() {
-    return (this.store ??= workspaceReleaseStore(this.storageNamespace, this.lifetime.signal));
+    return (this.store ??= workspaceReleaseStore(
+      this.storageNamespace,
+      this.lifetime.signal,
+      () => {
+        if (this.makeRegistry)
+          void this.restore(this.makeRegistry).catch((e) => {
+            if (!this.disposed) console.error('Plugin cache refresh failed', e);
+          });
+      }
+    ));
   }
   private makeRegistry?: (entry: ClientCatalogInstallation) => ClientInstallation['registry'];
   async restore(make: (entry: ClientCatalogInstallation) => ClientInstallation['registry']) {
     this.makeRegistry = make;
-    const rows = await (await this.database()).list();
+    const db = await this.database();
+    const [rows, sources] = await Promise.all([db.list(), db.catalogSources()]);
+    this.sources = new Map(sources.map((s) => [s.machine, s.plugins]));
     this.lifetime.signal.throwIfAborted();
-    this.records = new Map(rows.map((r) => [r.manifest.id, r]));
+    this.records = new Map(rows.filter((r) => r.npm).map((r) => [r.manifest.id, r]));
     await this.update(this.catalog);
   }
   private workspaceEntry(row: WorkspaceRelease): ClientCatalogInstallation {
@@ -86,7 +145,27 @@ export class WorkspaceClientPlugins {
       logs: [],
       diagnostics: [],
     };
+    const projectRows = this.projectRows.filter(
+      (r) => r.key[2] === row.manifest.id && r.key.length === 4
+    );
+    const projects = new Map(
+      projectRows.flatMap((r) => {
+        try {
+          return [
+            [
+              JSON.stringify([r.key[1], r.key[3]]),
+              projectPluginValues(row.manifest, r.value),
+            ] as const,
+          ];
+        } catch {
+          return [];
+        }
+      })
+    );
     const entry: ClientCatalogInstallation = {
+      readProject: (machine, project) => projects.get(JSON.stringify([machine, project])),
+      npm: row.npm,
+      source: row.npm?.source,
       workspaceId: this.workspaceId,
       sourceKey: 'workspace',
       machineId: row.origin,
@@ -104,23 +183,14 @@ export class WorkspaceClientPlugins {
         manifest: row.manifest,
       },
       inspection,
-      configurationKey: JSON.stringify(row.preferences),
+      configurationKey: JSON.stringify([row.preferences, ...projects]),
       page: workspacePage(row),
       registry: (...args) => this.makeRegistry!(entry)(...args),
       configureClient: async (changes) => {
         if (this.records.get(entry.pluginId) !== row || pluginSafeMode())
           throw Error('Stale installation');
-        const next = {
-          ...row,
-          preferences: { ...row.preferences, ...clientPreferenceChanges(row.manifest, changes) },
-        };
+        const next = await (await this.database()).configure(row, changes);
         this.records.set(entry.pluginId, next);
-        try {
-          await (await this.database()).put(next);
-        } catch (e) {
-          if (this.records.get(entry.pluginId) === next) this.records.set(entry.pluginId, row);
-          throw e;
-        }
         await this.update(this.catalog);
       },
     };
@@ -138,8 +208,80 @@ export class WorkspaceClientPlugins {
   installations() {
     return [...this.known.values()];
   }
+  routeInstallation(plugin: string, machine?: string) {
+    const candidates = this.installations().filter(
+      (i) =>
+        i.pluginId === plugin &&
+        (!machine || i.sourceKey === 'workspace' || i.dev.machineId === machine)
+    );
+    const admitted = candidates.filter(
+      (i) =>
+        i.enabled &&
+        (i.sourceKey === 'workspace' || this.machineOnline(i.dev.machineId)) &&
+        (i.sourceKey === 'local' || this.trustState(i))
+    );
+    return (
+      admitted.sort(
+        (a, b) =>
+          comparePluginVersions(b.dev.manifest.version, a.dev.manifest.version) ||
+          (a.sourceKey < b.sourceKey ? -1 : 1)
+      )[0] ??
+      candidates.find((i) => i.sourceKey === 'workspace') ??
+      candidates[0]
+    );
+  }
+  private sources = new Map<string, string[]>();
+  private catalogReady = false;
+  finishCatalogPoll() {
+    if (!this.catalogReady) {
+      this.catalogReady = true;
+      this.revision++;
+      this.listeners.forEach((fn) => fn());
+    }
+  }
+  missingRouteState(plugin: string, machine?: string) {
+    if (!this.catalogReady) return 'resolving';
+    for (const [id, plugins] of this.sources)
+      if ((!machine || machine === id) && !this.online.has(id) && plugins.includes(plugin))
+        return 'source_offline';
+    return 'not_installed';
+  }
+  async rememberCatalog(machine: string, entries: readonly ClientCatalogInstallation[]) {
+    const plugins = entries
+      .filter((e) => e.source?.kind === 'local')
+      .map((e) => e.pluginId)
+      .sort();
+    if (JSON.stringify(this.sources.get(machine) ?? []) === JSON.stringify(plugins)) return;
+    this.sources.set(machine, plugins);
+    await (await this.database()).saveCatalogSources(machine, plugins);
+  }
+  private online = new Set<string>();
+  setOnlineMachines(ids: readonly string[]) {
+    this.online = new Set(ids);
+  }
+  machineOnline(id: string) {
+    return this.online.has(id);
+  }
+  resolveMachine(pluginId: string, machineId: string) {
+    if (this.disposed || pluginSafeMode())
+      throw Object.assign(Error('Plugin disabled'), { code: 'forbidden' });
+    if (!this.online.has(machineId))
+      throw Object.assign(Error('Machine offline'), { code: 'machine_offline' });
+    const target = this.catalog.find(
+      (i) =>
+        i.workspaceId === this.workspaceId &&
+        i.pluginId === pluginId &&
+        i.dev.machineId === machineId &&
+        i.enabled
+    );
+    if (!target)
+      throw Object.assign(Error('Plugin not enabled on target machine'), { code: 'not_found' });
+    if (target.sourceKey !== 'local' && !this.trustState(target))
+      throw Object.assign(Error('Target installation is untrusted'), { code: 'forbidden' });
+    return target;
+  }
   trustState(i: ClientCatalogInstallation) {
-    if (i.sourceKey === 'workspace') return 'release';
+    if (i.sourceKey === 'workspace') return i.npm && this.approvedNpm(i.npm) ? 'release' : false;
     return this.leases.allows(i.dev)
       ? 'dev'
       : this.releases.has(this.release(i))
@@ -149,7 +291,8 @@ export class WorkspaceClientPlugins {
   async revoke(i: ClientCatalogInstallation) {
     if (i.sourceKey === 'workspace') {
       if (this.records.get(i.pluginId)?.digest !== i.digest) throw Error('Stale installation');
-      await this.nativeProof(i, 'forget');
+      const cached = this.records.get(i.pluginId)!;
+      await this.nativeProof(cached, { action: 'forget' });
       await (await this.database()).remove(i.pluginId);
       this.records.delete(i.pluginId);
       return this.update(this.catalog);
@@ -160,21 +303,27 @@ export class WorkspaceClientPlugins {
   constructor(
     readonly workspaceId: string,
     readonly storageNamespace: string
-  ) {}
-  private async nativeProof(i: ClientCatalogInstallation, action: 'approve' | 'forget') {
+  ) {
+    this.ownerSync = ownerSyncCustody(storageNamespace, this.lifetime.signal);
+  }
+  readonly ownerSync: ReturnType<typeof ownerSyncCustody>;
+  private async nativeProof(
+    row: WorkspaceRelease,
+    op: { action: 'forget' } | { action: 'approve'; npm?: WorkspacePluginEntry }
+  ) {
     const ipc = getIpcServices();
-    if (!ipc || !i.dev.manifest.client) return;
-    const service = i.sourceKey === 'local' || i.localModule ? ipc.machineRpc : ipc.e2ee;
-    await service.workspacePluginModule(
+    if (!ipc || !row.manifest.client) return;
+    await (row.local ? ipc.machineRpc : ipc.e2ee).workspacePluginModule(
       this.workspaceId,
-      i.dev.machineId,
-      i.dev.manifest,
-      i.digest,
-      { action }
+      row.origin,
+      row.manifest,
+      row.digest,
+      op
     );
   }
-  private release(i: ClientInstallation) {
-    return JSON.stringify([i.workspaceId, i.sourceKey, i.pluginId, i.digest]);
+  registry = 'https://registry.npmjs.org/';
+  private release(i: ClientCatalogInstallation) {
+    return JSON.stringify([i.workspaceId, i.sourceKey, i.pluginId, i.digest, i.dev.manifest]);
   }
   async update(entries: readonly ClientCatalogInstallation[]) {
     if (this.disposed) return;
@@ -189,21 +338,34 @@ export class WorkspaceClientPlugins {
           i.workspaceId === this.workspaceId &&
           i.dev.workspaceId === this.workspaceId &&
           i.dev.manifest.id === i.pluginId &&
-          (i.sourceKey === 'local' || i.sourceKey === `machine:${i.dev.machineId}`) &&
-          !(
-            workspaceOnly(i.dev.manifest) &&
-            !i.dev.devMode &&
-            this.records.get(i.pluginId)?.digest === i.digest
-          )
+          (i.sourceKey === 'local' || i.sourceKey === `machine:${i.dev.machineId}`)
       ),
-      ...Array.from(this.records.values(), (r) => this.workspaceEntry(r)),
+      ...this.npmRows
+        .filter((n) => !!n.client_digest)
+        .map((n) => {
+          const approved = this.approvedNpm(n);
+          const row = approved
+            ? this.records.get(n.plugin_id)!
+            : {
+                manifest: n.manifest_summary,
+                digest: n.client_digest!,
+                bytes: new Uint8Array(),
+                local: false,
+                origin: 'workspace',
+                preferences: {},
+                npm: n,
+              };
+          const e = this.workspaceEntry(row);
+          e.enabled = n.enabled;
+          if (!approved) delete e.configureClient;
+          return e;
+        }),
     ];
     const eligible = (i: ClientCatalogInstallation) =>
       i.enabled &&
       i.digest &&
-      (i.sourceKey === 'workspace' ||
-        ((!workspaceOnly(i.dev.manifest) || i.dev.devMode) &&
-          (i.sourceKey === 'local' || !!this.trustState(i))));
+      ((i.sourceKey === 'workspace' && !!this.trustState(i)) ||
+        (i.sourceKey !== 'workspace' && (i.sourceKey === 'local' || !!this.trustState(i))));
     const winners = new Map<string, ClientCatalogInstallation>();
     for (const i of candidates.filter(eligible)) {
       const prev = winners.get(i.pluginId);
@@ -215,6 +377,13 @@ export class WorkspaceClientPlugins {
       )
         winners.set(i.pluginId, i);
     }
+    const targetRevisions = new Map<string, string[]>();
+    for (const target of entries) {
+      if (!eligible(target) || target.workspaceId !== this.workspaceId) continue;
+      const group = targetRevisions.get(target.pluginId) ?? [];
+      group.push(JSON.stringify([target.sourceKey, target.digest, target.invalidations ?? 0]));
+      targetRevisions.set(target.pluginId, group);
+    }
     for (const i of candidates) {
       if (
         i.workspaceId !== this.workspaceId ||
@@ -225,6 +394,19 @@ export class WorkspaceClientPlugins {
           i.sourceKey !== `machine:${i.dev.machineId}`)
       )
         continue;
+      i.configureProject = async (machine, project, changes) => {
+        if (
+          !this.projectWriter ||
+          this.disposed ||
+          pluginSafeMode() ||
+          this.known.get(JSON.stringify([i.sourceKey, i.pluginId]))?.digest !== i.digest ||
+          (i.sourceKey === 'workspace'
+            ? !i.npm || !this.approvedNpm(i.npm)
+            : machine !== i.machineId)
+        )
+          throw Error('Project configuration unavailable');
+        await this.projectWriter(i, machine, project, changes);
+      };
       const key = JSON.stringify([i.sourceKey, i.pluginId]);
       stale.delete(key);
       this.known.set(key, i);
@@ -237,6 +419,9 @@ export class WorkspaceClientPlugins {
             ? {
                 ...i,
                 primary,
+                invalidations: primary
+                  ? JSON.stringify(targetRevisions.get(i.pluginId)?.sort() ?? [])
+                  : i.invalidations,
                 admissionKey: JSON.stringify([
                   primary,
                   i.dev.machineId,
@@ -261,27 +446,67 @@ export class WorkspaceClientPlugins {
     await Promise.all(tasks);
   }
   async trustRelease(i: ClientCatalogInstallation) {
-    if (!this.catalog.includes(i)) throw Error('Stale installation');
-    if (pluginSafeMode()) throw Error('Plugins disabled in safe mode');
-    if (workspaceOnly(i.dev.manifest) && !i.dev.devMode) {
-      const r = await captureRelease(i, this.lifetime.signal);
-      if (
-        !this.catalog.some(
+    if (i.npm) {
+      const n = i.npm;
+      if (!this.currentNpm(n) || !n.client_digest || pluginSafeMode())
+        throw Error('Stale or disabled workspace release');
+      let r: WorkspaceRelease;
+      let fallback: ClientCatalogInstallation | undefined;
+      try {
+        r = await fetchWorkspaceNpmRelease(n, this.lifetime.signal, this.registry);
+      } catch (error) {
+        if (!(error instanceof NpmTransportUnavailable)) throw error;
+        const fallbacks = this.catalog.filter(
           (c) =>
-            c.pluginId === i.pluginId &&
-            c.sourceKey === i.sourceKey &&
             c.enabled &&
-            JSON.stringify(c.dev) === JSON.stringify(i.dev) &&
-            c.digest === i.digest
-        )
+            !c.dev.devMode &&
+            c.pluginId === n.plugin_id &&
+            c.digest === n.client_digest &&
+            JSON.stringify(c.dev.manifest) === JSON.stringify(n.manifest_summary)
+        );
+        let recovered: WorkspaceRelease | undefined;
+        let last: unknown = error;
+        for (const candidate of fallbacks) {
+          if (!this.currentNpm(n) || pluginSafeMode()) throw Error('Approval no longer current');
+          this.lifetime.signal.throwIfAborted();
+          try {
+            recovered = await fetchPinnedMachineBundle(n, candidate, this.lifetime.signal);
+            fallback = candidate;
+            break;
+          } catch (e) {
+            last = e;
+          }
+        }
+        if (!recovered) throw last;
+        r = recovered;
+      }
+      if (
+        r.digest !== n.client_digest ||
+        JSON.stringify(r.manifest) !== JSON.stringify(n.manifest_summary) ||
+        !this.currentNpm(n) ||
+        pluginSafeMode()
       )
-        throw Error('Stale installation');
-      await this.nativeProof(i, 'approve');
-      this.lifetime.signal.throwIfAborted();
-      await (await this.database()).put(r);
-      this.records.set(i.pluginId, r);
+        throw Error('Workspace release no longer matches approval');
+      const ipc = getIpcServices();
+      const local = fallback ? fallback.sourceKey === 'local' : !!ipc && isLocalAppPlatform();
+      const origin = fallback?.dev.machineId ?? 'workspace';
+      r = { ...r, npm: n, origin, local, preferences: {} };
+      await this.nativeProof(r, fallback ? { action: 'approve' } : { action: 'approve', npm: n });
+      if (!this.currentNpm(n) || pluginSafeMode() || this.lifetime.signal.aborted) {
+        await this.nativeProof(r, { action: 'forget' });
+        throw Error('Approval no longer current');
+      }
+      try {
+        await (await this.database()).put(r);
+      } catch (error) {
+        await this.nativeProof(r, { action: 'forget' });
+        throw error;
+      }
+      this.records.set(n.plugin_id, r);
       return this.update(this.catalog);
     }
+    if (!this.catalog.includes(i)) throw Error('Stale installation');
+    if (pluginSafeMode()) throw Error('Plugins disabled in safe mode');
     this.releases.add(this.release(i));
     return this.update(this.catalog);
   }
@@ -386,14 +611,15 @@ export function ClientPluginHostProvider({
     binding && binding.admission === admission && !admission.signal.aborted ? binding.owner : null;
   return (
     <Context.Provider value={owner}>
-      {owner && (
-        <>
-          <TrustedDevIndicator owner={owner} />
-          <PluginCatalogSubscriber />
-          <PluginScreenOutlet workspaceId={owner.workspaceId} />
-        </>
-      )}
-      {children}
+      <PluginSecretEditorProvider>
+        {owner && (
+          <>
+            <TrustedDevIndicator owner={owner} />
+            <PluginCatalogSubscriber />
+          </>
+        )}
+        {children}
+      </PluginSecretEditorProvider>
     </Context.Provider>
   );
 }

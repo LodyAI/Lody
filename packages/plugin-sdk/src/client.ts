@@ -133,7 +133,7 @@ export {
   type WorktreeEntry,
 };
 
-export type AvailabilityReason = 'machine_offline' | 'unknown' | 'forbidden';
+export type AvailabilityReason = 'not_found' | 'machine_offline' | 'unknown' | 'forbidden';
 
 export type QueryResult<T> =
   | { readonly status: 'loading' }
@@ -254,7 +254,7 @@ export interface ProjectPageProps {
   readonly params: Readonly<Record<string, string>>;
 }
 
-export interface InstallationSettingsProps {
+export interface MachineSettingsProps {
   readonly workspace: WorkspaceRef;
   readonly machine: MachineRef;
   readonly pluginId: string;
@@ -351,9 +351,21 @@ export interface ClientPluginRegistry {
       readonly Component: ComponentType<MatchedToolRenderProps>;
     }): void;
   };
-  readonly statusBar: { readonly items: { add(spec: {readonly id: string; readonly Component: ComponentType<{workspace: WorkspaceRef}>}): void } };
+  readonly statusBar: {
+    readonly items: {
+      add(spec: {
+        readonly id: string;
+        readonly Component: ComponentType<{ workspace: WorkspaceRef }>;
+      }): void;
+    };
+  };
   readonly messages: {
-    readonly actions: { add(spec: {readonly id:string; readonly Component: ComponentType<{session: SessionRef; turnId:string}>}): void };
+    readonly actions: {
+      add(spec: {
+        readonly id: string;
+        readonly Component: ComponentType<{ session: SessionRef; turnId: string }>;
+      }): void;
+    };
     /**
      * Renders structured assistant fenced code blocks / custom artifacts inline with stable
      * `blockId` mount identity across streaming updates, paired with a host-owned
@@ -367,13 +379,29 @@ export interface ClientPluginRegistry {
     }): void;
   };
   readonly commands: {
-    register(action: { readonly id: string; readonly title: string; readonly shortcut?: string; readonly when?: () => boolean; readonly run: () => void | Promise<void> }): void;
+    register(action: {
+      readonly id: string;
+      readonly title: string;
+      readonly shortcut?: string;
+      readonly when?: () => boolean;
+      readonly run: () => void | Promise<void>;
+    }): void;
   };
   readonly composer: {
     readonly slashCommands: {
-      add(command: { readonly name: string; readonly description: string; readonly run: (args: string) => void | string | Promise<void | string> }): void;
+      add(command: {
+        readonly name: string;
+        readonly description: string;
+        readonly run: (args: string) => void | string | Promise<void | string>;
+      }): void;
     };
-    beforeSend(handler: (draft: { readonly text: string; readonly signal: AbortSignal }) => void | string | Promise<void | string>): void;
+    /** Receives effective text before member-input signing. Return a replacement for user confirmation; abort and timeout cancel the send. */
+    beforeSend(
+      handler: (draft: {
+        readonly text: string;
+        readonly signal: AbortSignal;
+      }) => void | string | Promise<void | string>
+    ): void;
     readonly attachments: {
       add<TMeta extends z.ZodType>(
         source: AttachmentSourceDescriptor<TMeta>,
@@ -389,7 +417,12 @@ export interface ClientPluginRegistry {
     };
   };
   readonly session: {
-    readonly headerActions: {add(spec: {readonly id:string; readonly Component: ComponentType<{session:SessionRef}>}):void};
+    readonly headerActions: {
+      add(spec: {
+        readonly id: string;
+        readonly Component: ComponentType<{ session: SessionRef }>;
+      }): void;
+    };
     readonly panels: {
       add(spec: {
         readonly id: string;
@@ -402,6 +435,9 @@ export interface ClientPluginRegistry {
     add(spec: {
       readonly id: string;
       readonly title: string;
+      readonly nav?: 'sidebar' | 'command-only';
+      readonly order?: number;
+      readonly icon?: string;
       readonly Component: ComponentType<ScreenProps>;
     }): void;
   };
@@ -443,14 +479,20 @@ export interface ClientPluginRegistry {
           | {
               readonly id: string;
               readonly title: string;
+              readonly binding: 'workspace';
+              readonly Component: ComponentType<Omit<MachineSettingsProps, 'machine'>>;
+            }
+          | {
+              readonly id: string;
+              readonly title: string;
               readonly binding: 'project';
               readonly Component: ComponentType<ProjectPageProps>;
             }
           | {
               readonly id: string;
               readonly title: string;
-              readonly binding: 'installation';
-              readonly Component: ComponentType<InstallationSettingsProps>;
+              readonly binding: 'machine';
+              readonly Component: ComponentType<MachineSettingsProps>;
             }
       ): void;
     };
@@ -470,6 +512,7 @@ export interface ClientPluginRegistry {
 }
 
 export interface LodyClient {
+  readonly settings: { open(target?: string): void };
   readonly ui: {
     toast(message: string): void;
     confirm(message: string): Promise<boolean>;
@@ -536,6 +579,7 @@ export interface LodyClient {
     ): void;
   };
   readonly screens: {
+    setParams(next: Readonly<Record<string, string>>, options?: { replace?: boolean }): void;
     open(
       workspace: WorkspaceRef,
       screenId: string,
@@ -633,7 +677,23 @@ export function defineClientPlugin(
   return { kind: 'client-plugin', register };
 }
 
+export interface PluginSecretFieldProps {
+  fieldKey: string;
+  target: MachineRef;
+  onSaved?: (state: { configured: boolean }) => void;
+}
+export type PluginConfigFormProps = { readonly fields?: readonly string[] } & (
+  | { scope: 'workspace'; target: WorkspaceRef }
+  | { scope: 'machine'; target: MachineRef }
+  | { scope: 'project'; target: ProjectRef }
+);
+export const PluginSecretField = (props: PluginSecretFieldProps) =>
+  createElement(useBindings().PluginSecretField, props);
+export const PluginConfigForm = (props: PluginConfigFormProps) =>
+  createElement(useBindings().PluginConfigForm, props);
 export interface ClientHostBindings {
+  PluginSecretField: ComponentType<PluginSecretFieldProps>;
+  PluginConfigForm: ComponentType<PluginConfigFormProps>;
   SidebarRow: ComponentType<SidebarRowProps>;
   SessionRow: ComponentType<SessionRowProps>;
   useLodyQuery: typeof useLodyQuery;

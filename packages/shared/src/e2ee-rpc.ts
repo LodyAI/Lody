@@ -34,9 +34,7 @@ import { LocalMachineRpcRequestSchema, type LocalMachineRpcRequest } from './loc
 
 /** Network access stays restricted to the existing feature surfaces and owner credentials. */
 export const isE2eeFeatureMethod = (method: string): boolean =>
-  (method !== 'plugin/control' &&
-    method !== 'plugin/proposal-decision' &&
-    pluginMethods.has(method)) ||
+  pluginMethods.has(method) ||
   method === 'machine/acp-interaction' ||
   method.startsWith('code-collab/') ||
   method === 'sorbet/credentials-list' ||

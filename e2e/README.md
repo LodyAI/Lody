@@ -12,6 +12,18 @@ signal cannot make the merge gate untrustworthy.
 | Scout soak       | Repeated lifecycle and resource recovery analysis  | Nightly or manual           | Initially informational |
 | Acceptance       | Immutable before/after evidence for a delivery     | Explicit local run          | Human reviewer          |
 
+## Plugin release verification
+
+[Plugin integration CI](../.github/workflows/plugin-integration.yml) runs on pull requests and `main`; both release workflows call it. The checks have distinct boundaries:
+
+| Target | What the check exercises |
+| --- | --- |
+| Chromium and WebKit | Two same-custody tabs, a CLI-packed release served by a separate HTTPS origin, failed SRI, IndexedDB restoration, and evaluation of the verified module. The fixture calls the production delivery APIs; it does not sign in or render the full workspace. |
+| Electron | The built local app imports a pin in Settings and reopens its unapproved disclosure through a plugin-specific deep link after reload. A separate run checks main-process safe-mode denial. |
+| Capacitor | The Android debug APK loads a test-only registry through the installed WebView, verifies a release, and reopens its cache after reload. The iOS job checks the production renderer assets are copied into the app, not that a simulator ran them. |
+
+These checks do not establish paired Desktop/Web dev-mode HMR, authenticated remote secret saves or workflow approval, or the full reference-plugin scenarios in §16.8.
+
 ## Plugin live preview (owner acceptance)
 
 `pnpm --dir e2e exec tsx scripts/plugin-live-preview.ts` compares the built desktop with Chromium after each of 20 edits to the same Focus Sidebar source. Both windows must show the revised header and retain their selected Agent Tree view. Run it from the machine owner's interactive terminal after building the desktop and syncing its CLI.

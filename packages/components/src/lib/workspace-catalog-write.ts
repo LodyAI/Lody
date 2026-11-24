@@ -1,3 +1,9 @@
+import { acquireWorkspaceCatalog, type WorkspaceCatalogSnapshot } from './workspace-catalog-room';
+import type { OwnerSyncCustody } from '../plugins/owner-sync-custody';
+import type {
+  WorkspacePluginEntry,
+  PluginSyncChallenge,
+} from '@lody/shared/plugins/workspace-entry';
 import {
   getProjectMcpKey,
   getWorkspaceFlockDocId,
@@ -209,3 +215,168 @@ export const putProjectMcpDefault = async (
   if (!value) throw new ProjectMcpDefaultWriteError('invalid_selection');
   await putRow(deps, workspaceFlockKeys.projectMcpDefault(management.projectKey), value);
 };
+
+export const putWorkspacePlugin = (
+  deps: WorkspaceCatalogWriteDeps,
+  entry: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry
+) => putRow(deps, workspaceFlockKeys.plugin(entry.plugin_id), entry);
+
+export async function setPluginOwnerSync(
+  runtime: WorkspaceRuntime,
+  entry: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry,
+  enable: boolean,
+  custody: OwnerSyncCustody,
+  current: () => boolean
+) {
+  const owner = runtime.accountId;
+  const check = () => {
+    if (
+      !owner ||
+      !current() ||
+      runtime.contentMode !== 'e2ee' ||
+      runtime.protectedCodeCollabRole?.get() !== 'write'
+    )
+      throw Error('Workspace write access required');
+  };
+  check();
+  const key = workspaceFlockKeys.pluginOwnerSync(owner!, entry.plugin_id);
+
+  const pin = {
+    ...entry,
+    machine_sync: enable ? ('owner_machines' as const) : ('manual' as const),
+    sync_decision_id: crypto.randomUUID(),
+    sync_challenge: undefined,
+    sync_owner_user_id: owner!,
+    sync_signature: undefined,
+  };
+  if (!runtime.signPluginOwnerSync) throw Error('Owner signing unavailable');
+  const sign = runtime.signPluginOwnerSync;
+  await custody.locked(entry.plugin_id, async () => {
+    check();
+    const decision = { ...pin, sync_signature: await sign(pin) };
+    check();
+    await custody.remember(decision);
+    check();
+    await putRow(runtime, key, decision);
+  });
+}
+
+async function confirmPluginOwnerSync(
+  runtime: WorkspaceRuntime,
+  pin: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry,
+  challenge: import('@lody/shared/plugins/workspace-entry').PluginSyncChallenge,
+  current: () => boolean
+) {
+  const check = () => {
+    if (
+      !current() ||
+      runtime.contentMode !== 'e2ee' ||
+      runtime.protectedCodeCollabRole?.get() !== 'write' ||
+      runtime.accountId !== challenge.owner ||
+      pin.sync_owner_user_id !== challenge.owner ||
+      pin.plugin_id !== challenge.plugin ||
+      pin.sync_signature !== challenge.decision ||
+      pin.machine_sync !== 'owner_machines'
+    )
+      throw Error('Owner decision changed');
+  };
+  const { flock } = await runtime.repo.openFlockDoc(getWorkspaceFlockDocId(runtime.workspaceId));
+  const currentRequest = () => {
+    check();
+    const read = (key: string[]) =>
+      Array.from(flock.scan({ prefix: key })).find((row) => row.key.length === key.length)
+        ?.value as Record<string, unknown> | undefined;
+    const decision = read(workspaceFlockKeys.pluginOwnerSync(challenge.owner, challenge.plugin));
+    const request = read(
+      workspaceFlockKeys.pluginSyncChallenge(challenge.owner, challenge.machine, challenge.plugin)
+    );
+    if (request?.confirmation) return false;
+    if (
+      decision?.machine_sync !== 'owner_machines' ||
+      decision.sync_signature !== challenge.decision ||
+      request?.nonce !== challenge.nonce ||
+      request.decision !== challenge.decision
+    )
+      throw Error('Owner decision changed');
+    return true;
+  };
+  if (!currentRequest()) return;
+  if (!runtime.signPluginOwnerSync) throw Error('Owner signer unavailable');
+  const { confirmation: _, confirmedAt: _time, ...bound } = challenge;
+  const confirmedAt = Date.now();
+  const confirmation = await runtime.signPluginOwnerSync({
+    ...pin,
+    sync_signature: undefined,
+    sync_confirmed_at: confirmedAt,
+    sync_challenge: bound,
+  });
+  if (!currentRequest()) return;
+  await putRow(
+    runtime,
+    workspaceFlockKeys.pluginSyncChallenge(challenge.owner, challenge.machine, challenge.plugin),
+    { ...bound, confirmation, confirmedAt }
+  );
+}
+
+/** Workspace-level subscriber. Shared data may suspend authority, never establish it. */
+export async function answerPluginOwnerChallenges(
+  runtime: WorkspaceRuntime,
+  custody: OwnerSyncCustody,
+  pins: readonly WorkspacePluginEntry[],
+  challenges: readonly PluginSyncChallenge[],
+  current: () => boolean
+) {
+  if (!runtime.signPluginOwnerSync || runtime.contentMode !== 'e2ee') return;
+  await Promise.all(
+    pins
+      .filter((pin) => pin.sync_owner_user_id === runtime.accountId)
+      .map((pin) =>
+        custody.locked(pin.plugin_id, async () => {
+          if (!current()) return;
+          if (pin.machine_sync === 'manual') {
+            // Never let an immediately replayed enabled row erase an observed opt-out.
+            await custody.suspend(pin);
+            return;
+          }
+          if (!(await custody.allows(pin))) return;
+          for (const challenge of challenges) {
+            if (!current()) return;
+            if (
+              !challenge.confirmation &&
+              challenge.owner === runtime.accountId &&
+              challenge.plugin === pin.plugin_id &&
+              challenge.decision === pin.sync_signature
+            )
+              await confirmPluginOwnerSync(runtime, pin, challenge, current);
+          }
+        })
+      )
+  );
+}
+
+export function subscribePluginOwnerSync(
+  runtime: WorkspaceRuntime,
+  custody: OwnerSyncCustody,
+  current: () => boolean
+) {
+  let active = true;
+  const admitted = () => active && current();
+  const refresh = (snapshot: WorkspaceCatalogSnapshot) => {
+    if (!admitted() || !snapshot.loaded) return;
+    void answerPluginOwnerChallenges(
+      runtime,
+      custody,
+      snapshot.ownerPins,
+      snapshot.synced ? snapshot.challenges : [],
+      admitted
+    ).catch((error) => {
+      if (admitted()) console.warn('Plugin owner sync deferred', error);
+    });
+  };
+  const room = acquireWorkspaceCatalog(runtime, refresh);
+  refresh(room.snapshot);
+  return () => {
+    active = false;
+    room.release();
+  };
+}

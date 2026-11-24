@@ -927,15 +927,18 @@ export type NeedToDeleteSessionQueueItem =
       keptWorktreePath?: string;
     };
 
-export type MessageQueueItem = Omit<InferType<typeof messageQueueItemSchema>, 'project'|'derivedFrom'> & {
-  derivedFrom?: {sessionId:string;userTurnId:string};
+export type MessageQueueItem = Omit<
+  InferType<typeof messageQueueItemSchema>,
+  'project' | 'derivedFrom'
+> & {
+  derivedFrom?: { sessionId: string; userTurnId: string };
   project: ProjectRef | undefined;
 };
 export type MessageQueueItemInput = Omit<
   InferInputType<typeof messageQueueItemSchema>,
-  'project' | 'acpSessionConfig' | 'paused'|'derivedFrom'
+  'project' | 'acpSessionConfig' | 'paused' | 'derivedFrom'
 > & {
-  derivedFrom?: {sessionId:string;userTurnId:string};
+  derivedFrom?: { sessionId: string; userTurnId: string };
   project: ProjectRef | undefined;
   paused?: boolean;
   acpSessionConfig?: import('./ai').ACPSessionConfig &
@@ -1031,7 +1034,7 @@ export const getMachineHostType = (meta: Pick<MachineMeta, 'hostType'>): Machine
   meta.hostType ?? 'user';
 
 export type SessionDoc = InferInputType<typeof sessionDocSchema>;
-export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
+export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history' | 'mq'> & {
   session: { id: SessionId };
   history: SessionHistory[];
   mq?: MessageQueueItem[];

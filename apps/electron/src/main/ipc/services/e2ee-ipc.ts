@@ -1,5 +1,6 @@
 import {
-  nativeReleaseEvidence, observePluginCatalog,
+  nativeReleaseEvidence,
+  observePluginCatalog,
   openAuthenticatedPluginSource
 } from '../../services/plugin-catalog-evidence'
 import { publishPluginModule, releasePluginGraph } from '../../services/plugin-module-store'
@@ -16,7 +17,11 @@ import { randomUUID } from 'node:crypto'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { open as openFile, readFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
-import { workspaceModuleProof, scopeHash, type WorkspaceModuleOperation } from '../../services/workspace-plugin-proof'
+import {
+  workspaceModuleProof,
+  scopeHash,
+  type WorkspaceModuleOperation
+} from '../../services/workspace-plugin-proof'
 import type { PluginManifest } from '@lody/shared/plugins/manifest-schema'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -2147,6 +2152,23 @@ export class E2eeIpc extends ProductWindowIpcService {
       )
     )
   }
+  @IpcMethod()
+  async signPluginOwnerSync(
+    workspaceId: string,
+    pin: import('@lody/shared/plugins/workspace-entry').WorkspacePluginEntry
+  ) {
+    const id = sender()
+    return observeClientLossOperation('seal', workspaceId, id, () =>
+      withDesktopE2eeAccount(
+        (owner) =>
+          owner.readers.get(workspaceId)?.has(id)
+            ? owner.host.signPluginOwnerSync(workspaceId, pin)
+            : refuseUnopened(owner, workspaceId),
+        workspaceId,
+        false
+      )
+    )
+  }
   /** Sign a schedule declaration this window is writing; the host derives the digest. */
   @IpcMethod()
   async signScheduleDeclaration(
@@ -2302,15 +2324,59 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
   }
   @IpcMethod()
-  async workspacePluginModule(workspaceId:string,machine:string,manifest:PluginManifest,digest:string,op:WorkspaceModuleOperation){
-    const id=sender(), contents=getIpcContext().event.sender, doc=readerLifetimes.get(contents)!, generation=getResourceOwner(contents)
-    if(process.argv.includes('--safe-mode')||new URL(contents.getURL()).searchParams.getAll('safeMode').includes('1'))throw Error('Plugins disabled in safe mode')
-    return withDesktopE2eeAccount(owner=>Effect.gen(function*(){
-      const readers=owner.readers.get(workspaceId);if(!readers?.has(id))return yield* Effect.fail(new Error('Workspace reader closed'))
-      const status=yield* owner.host.status(workspaceId);if(!status.hasCurrentKey||!status.signingPublicKey)return yield* Effect.fail(new Error('Workspace key unavailable'))
-      const directory=join(owner.directory,'workspaces',workspaceId,'plugins',scopeHash([status.genesisHash,status.signingPublicKey]))
-      return yield* Effect.tryPromise(async()=>{const current=()=>readerLifetimes.get(contents)===doc&&readers.has(id);const source=await workspaceModuleProof(directory,manifest,digest,op,async()=>nativeReleaseEvidence(readers,doc,machine,manifest.id),current);if(source===null||op.action!=='open')return null;const url=await publishPluginModule(generation,source,op.names);if(!current()){releasePluginGraph(generation,url);throw Error('Plugin reader closed')}return url})
-    }),workspaceId,false)
+  async workspacePluginModule(
+    workspaceId: string,
+    machine: string,
+    manifest: PluginManifest,
+    digest: string,
+    op: WorkspaceModuleOperation
+  ) {
+    const id = sender(),
+      contents = getIpcContext().event.sender,
+      doc = readerLifetimes.get(contents)!,
+      generation = getResourceOwner(contents)
+    if (
+      process.argv.includes('--safe-mode') ||
+      new URL(contents.getURL()).searchParams.getAll('safeMode').includes('1')
+    )
+      throw Error('Plugins disabled in safe mode')
+    return withDesktopE2eeAccount(
+      (owner) =>
+        Effect.gen(function* () {
+          const readers = owner.readers.get(workspaceId)
+          if (!readers?.has(id)) return yield* Effect.fail(new Error('Workspace reader closed'))
+          const status = yield* owner.host.status(workspaceId)
+          if (!status.hasCurrentKey || !status.signingPublicKey)
+            return yield* Effect.fail(new Error('Workspace key unavailable'))
+          const directory = join(
+            owner.directory,
+            'workspaces',
+            workspaceId,
+            'plugins',
+            scopeHash([status.genesisHash, status.signingPublicKey])
+          )
+          return yield* Effect.tryPromise(async () => {
+            const current = () => readerLifetimes.get(contents) === doc && readers.has(id)
+            const source = await workspaceModuleProof(
+              directory,
+              manifest,
+              digest,
+              op,
+              async () => nativeReleaseEvidence(readers, doc, machine, manifest.id),
+              current
+            )
+            if (source === null || op.action !== 'open') return null
+            const url = await publishPluginModule(generation, source, op.names)
+            if (!current()) {
+              releasePluginGraph(generation, url)
+              throw Error('Plugin reader closed')
+            }
+            return url
+          })
+        }),
+      workspaceId,
+      false
+    )
   }
   @IpcMethod()
   async openRemotePluginModule(

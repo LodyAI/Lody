@@ -44,6 +44,7 @@ import { useAtom, useSetAtom } from 'jotai';
 import {
   bugReportDialogOpenAtom,
   settingsActiveTabAtom,
+  settingsPluginTargetAtom,
   settingsDialogOpenAtom,
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
@@ -254,6 +255,7 @@ const styles = stylex.create({
  */
 export function DesktopSettingsModal() {
   const isMobile = useIsMobile();
+  const resetTarget = useSetAtom(settingsPluginTargetAtom);
   const [open, setOpen] = useAtom(settingsDialogOpenAtom);
 
   // Never mount the modal tree on mobile — that path uses the route-based page.
@@ -265,7 +267,10 @@ export function DesktopSettingsModal() {
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (!next) setOpen(false);
+        if (!next) {
+          resetTarget(null);
+          setOpen(false);
+        }
       }}
     >
       <Dialog.Content noAnimation closeButton={false} style={PANEL_STYLE}>
@@ -280,6 +285,7 @@ function SettingsModalBody() {
   const navigationScopeId = useId();
   const contentScopeId = useId();
   const [activeTab, setActiveTab] = useAtom(settingsActiveTabAtom);
+  const resetPlugin = useSetAtom(settingsPluginTargetAtom);
   const setSelectedMachineId = useSetAtom(settingsSelectedMachineIdAtom);
   const setSelectedProjectKey = useSetAtom(settingsSelectedProjectKeyAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
@@ -305,11 +311,12 @@ function SettingsModalBody() {
   const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;
   const selectTab = useCallback(
     (tabId: SettingsTabId) => {
+      resetPlugin(null);
       setSelectedMachineId(null);
       setSelectedProjectKey(null);
       setActiveTab(tabId);
     },
-    [setActiveTab, setSelectedMachineId, setSelectedProjectKey]
+    [resetPlugin, setActiveTab, setSelectedMachineId, setSelectedProjectKey]
   );
   const handleNavigationItemFocus = useCallback(
     (item: HTMLElement) => {

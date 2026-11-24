@@ -6,6 +6,9 @@ import {
   listWorkspaceMcpServers,
   listWorkspacePinSections,
   listWorkspaceProjects,
+  listWorkspacePlugins,
+  listPluginOwnerPins,
+  listPluginChallenges,
   readWorkspaceFlockRowsFromFlock,
   type AgentRole,
   type PinSection,
@@ -26,6 +29,9 @@ import type { WorkspaceRuntime } from '@/atoms/runtime';
  * second copy of the same row map for a list of a few dozen entries.
  */
 export type WorkspaceCatalogSnapshot = {
+  challenges: ReturnType<typeof listPluginChallenges>;
+  ownerPins: ReturnType<typeof listPluginOwnerPins>;
+  plugins: ReturnType<typeof listWorkspacePlugins>;
   servers: WorkspaceMcpServerMeta[];
   roles: AgentRole[];
   /** Multi-repository Project groups, sorted by name. */
@@ -50,6 +56,9 @@ type WorkspaceCatalogListener = (snapshot: WorkspaceCatalogSnapshot) => void;
 const EMPTY_ROWS = Object.freeze({}) as WorkspaceFlockRowMap;
 
 export const EMPTY_WORKSPACE_CATALOG: WorkspaceCatalogSnapshot = Object.freeze({
+  challenges: [],
+  ownerPins: [],
+  plugins: [],
   servers: Object.freeze([]) as unknown as WorkspaceMcpServerMeta[],
   roles: Object.freeze([]) as unknown as AgentRole[],
   projects: Object.freeze([]) as unknown as WorkspaceProject[],
@@ -118,6 +127,9 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
   if (room.rows === rows && previous.loaded && previous.synced === synced) return;
   room.rows = rows;
   const servers = reuseUnchanged(previous.servers, listWorkspaceMcpServers(rows));
+  const challenges = reuseUnchanged(previous.challenges, listPluginChallenges(rows));
+  const ownerPins = reuseUnchanged(previous.ownerPins, listPluginOwnerPins(rows));
+  const plugins = reuseUnchanged(previous.plugins, listWorkspacePlugins(rows));
   const roles = reuseUnchanged(previous.roles, listWorkspaceAgentRoles(rows));
   const projects = reuseUnchanged(previous.projects, listWorkspaceProjects(rows));
   const pinSections = reuseUnchanged(previous.pinSections, listWorkspacePinSections(rows));
@@ -126,6 +138,9 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
     getProjectMcpDefaults(rows)
   );
   if (
+    challenges === previous.challenges &&
+    ownerPins === previous.ownerPins &&
+    plugins === previous.plugins &&
     servers === previous.servers &&
     roles === previous.roles &&
     projects === previous.projects &&
@@ -137,6 +152,9 @@ function publish(room: SharedCatalogRoom, rows: WorkspaceFlockRowMap, synced: bo
     return;
   }
   emit(room, {
+    challenges,
+    ownerPins,
+    plugins,
     servers,
     roles,
     projects,

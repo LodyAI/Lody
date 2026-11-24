@@ -1,4 +1,3 @@
-// Exercise the shipped CLI and its offline package consumer; no daemon, pairing, or grant required.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';

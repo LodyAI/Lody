@@ -175,9 +175,9 @@ describe('local IPC socket server', () => {
     });
     const command = { action: 'logs', pluginId: 'demo' };
     const reply = await Effect.runPromise(
-      requestLocalPluginControl(command, { runFilePath: paths.runFilePath })
+      requestLocalPluginControl({ command }, { runFilePath: paths.runFilePath })
     );
-    expect(reply.payload).toEqual({ ok: true, received: command });
+    expect(reply.payload).toEqual({ ok: true, received: { command } });
   });
   it('updates and rolls back verified releases over authenticated owner IPC without replacing installation data', async () => {
     const { PluginDaemon } = await import('../src/plugins/plugin-host-legacy');
@@ -191,11 +191,15 @@ describe('local IPC socket server', () => {
       await daemon.start();
       await startLocalIpcSocketServers({
         ...config,
-        control: { ...config.control, dispatchPlugin: (raw) => daemon.dispatch(raw) },
+        control: {
+          ...config.control,
+          approvePluginAction: async () => true,
+          dispatchPlugin: (raw) => daemon.dispatch(raw.command),
+        },
       });
       const send = async (command: unknown) => {
         const response = await Effect.runPromise(
-          requestLocalPluginControl(command, { runFilePath: paths.runFilePath })
+          requestLocalPluginControl({ command }, { runFilePath: paths.runFilePath })
         );
         expect(response.response.status).toBe(200);
         return response.payload;
@@ -210,7 +214,7 @@ describe('local IPC socket server', () => {
           `export default ${JSON.stringify(version)}`
         );
         const pkg = await packPlugin(source, path.join(root, version + '.lodypkg'));
-        return { action: 'install', ...pkg };
+        return { action: 'install', path: pkg.path, sha256: pkg.sha256 };
       };
       const first = await release('1.0.0');
       const denied = await Effect.runPromise(

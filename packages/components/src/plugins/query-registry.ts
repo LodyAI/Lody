@@ -69,7 +69,7 @@ export class PluginQueryRegistry {
           (error) => {
             if (controller.signal.aborted) return;
             const code = error?.code;
-            if (code === 'forbidden' || code === 'machine_offline')
+            if (code === 'forbidden' || code === 'machine_offline' || code === 'not_found')
               update({ status: 'unavailable', reason: code, refresh });
             else update({ status: 'error', message: String(error), refresh });
           }

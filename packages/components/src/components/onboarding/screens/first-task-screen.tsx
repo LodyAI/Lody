@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { prepareInteractivePrompt } from '../../../plugins/composer-before-send';
+import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
@@ -97,6 +98,8 @@ export function FirstTaskScreen({
     [t]
   );
   const [prompt, setPrompt] = useState(seedPrompts[0] ?? '');
+  const preparing = useRef<AbortController | null>(null);
+  useEffect(() => () => preparing.current?.abort(), [runtime]);
   const [startRequested, setStartRequested] = useState(false);
   const canStartFirstTask =
     project.kind === 'local' &&
@@ -113,7 +116,15 @@ export function FirstTaskScreen({
   });
 
   const handleSubmit = useCallback(() => {
-    if (!canCreateSession || startRequested || project.kind !== 'local' || !config || !user) {
+    if (
+      !runtime ||
+      preparing.current ||
+      !canCreateSession ||
+      startRequested ||
+      project.kind !== 'local' ||
+      !config ||
+      !user
+    ) {
       return;
     }
     const machineId = project.machineId;
@@ -121,6 +132,28 @@ export function FirstTaskScreen({
     setStartRequested(true);
 
     void (async () => {
+      const controller = new AbortController();
+      preparing.current = controller;
+      let effective: string;
+      try {
+        const result = await prepareInteractivePrompt(
+          runtime.workspaceId,
+          buildAgentPrompt(trimmedPrompt, config.prompt ?? ''),
+          controller.signal
+        );
+        if (!result?.text || controller.signal.aborted) {
+          setStartRequested(false);
+          return;
+        }
+        effective = result.text;
+      } catch (error) {
+        if (!controller.signal.aborted)
+          toast.error(error instanceof Error ? error.message : 'Plugin action failed');
+        setStartRequested(false);
+        return;
+      } finally {
+        preparing.current = null;
+      }
       // Entering the product is the primary transaction. Start the optional
       // Session only after navigation succeeds, never as a prerequisite for it.
       const entered = await onContinue();
@@ -143,7 +176,7 @@ export function FirstTaskScreen({
           timestamp: new Date(getServerNow()).toISOString(),
           cliType: config.cliType,
           agentType: config.agentType,
-          prompt: buildAgentPrompt(trimmedPrompt, config.prompt ?? ''),
+          prompt: effective,
           inputBlocks: undefined,
         });
         if (!entry) throw new Error('Could not build the first turn');
@@ -218,6 +251,7 @@ export function FirstTaskScreen({
     project,
     prompt,
     requestSessionDispatch,
+    runtime,
     startSession,
     startRequested,
     t,

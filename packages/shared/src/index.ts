@@ -231,3 +231,4 @@ export {
   getWorkspaceShortcutBodyStreamId,
   getWorkspaceShortcutIndexStreamId,
 } from './prompt-shortcuts/access';
+export * from './plugins/project-config';

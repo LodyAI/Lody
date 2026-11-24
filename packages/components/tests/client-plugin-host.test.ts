@@ -184,7 +184,7 @@ it('delivers declared audio and revokes only the disabled installation’s playb
   }
 });
 
-it('binds catalog bytes and control to the routed machine and never offers control on the encrypted route', async () => {
+it('binds bundle reads to the catalog machine and withholds controls from non-owners', async () => {
   const { readPluginCatalog } = await import('../src/plugins/workspace-catalog');
   type Request = import('../src/plugins/workspace-catalog').RequestPlugin;
   const machineId = 'machine-a' as import('@lody/shared').MachineId;
@@ -197,7 +197,14 @@ it('binds catalog bytes and control to the routed machine and never offers contr
       return {
         transport,
         type: call.method,
-        installations: [{ manifest, clientDigest: digest, enabled: true }],
+        installations: [
+          {
+            manifest,
+            clientDigest: digest,
+            enabled: true,
+            source: { kind: 'local', origin: 'dir' },
+          },
+        ],
       };
     if (call.method === 'plugin/bundle-chunk') {
       expect(options?.requireLocal).toBe(true);
@@ -223,6 +230,95 @@ it('binds catalog bytes and control to the routed machine and never offers contr
   expect(remote?.sourceKey).toBe('machine:machine-a');
   expect(remote?.control).toBeUndefined();
   expect(remote?.dev.owner).toBe(false);
+});
+
+it('calls the target catalog generation rather than the primary machine and fences late replies', async () => {
+  const { readPluginCatalog } = await import('../src/plugins/workspace-catalog');
+  const { routedPluginPort } = await import('../src/plugins/workspace-plugin-registry');
+  const { WorkspaceClientPlugins } = await import('../src/plugins/client-host-provider');
+  const owner = new WorkspaceClientPlugins('w', 'routing');
+  const a = 'alpha' as import('@lody/shared').MachineId,
+    b = 'beta' as typeof a;
+  const m = { ...manifest, client: undefined, machine: 'machine.js', styles: ['styles.css'] };
+  const fixture = async (style: string) => {
+    const read = async () => new TextEncoder().encode(style);
+    return {
+      bytes: (await packClientBundle(m, read))!,
+      digest: (await computeClientDigest(m, read))!,
+    };
+  };
+  const bundles = { [a]: await fixture('.a{}'), [b]: await fixture('.b{}') };
+  const dispatched = Promise.withResolvers<void>(),
+    reply = Promise.withResolvers<void>();
+  const request: import('../src/plugins/workspace-catalog').RequestPlugin = async (
+    machine,
+    req
+  ) => {
+    if (req.method === 'plugin/catalog')
+      return {
+        transport: 'encrypted',
+        type: req.method,
+        installations: [{ manifest: m, enabled: true, clientDigest: bundles[machine]!.digest }],
+      };
+    if (req.method === 'plugin/bundle-chunk') {
+      const { bytes } = bundles[machine]!;
+      return {
+        transport: 'encrypted',
+        type: req.method,
+        base64: btoa(String.fromCharCode(...bytes)),
+        totalBytes: bytes.length,
+      };
+    }
+    if (req.method !== 'plugin/query') throw Error('Unexpected call');
+    expect(req.params.clientDigest).toBe(bundles[machine]!.digest);
+    if (machine === b) {
+      dispatched.resolve();
+      await reply.promise;
+    }
+    return { transport: 'encrypted', type: req.method, data: machine };
+  };
+  try {
+    const entries = (
+      await Promise.all(
+        [a, b].map((machineId) =>
+          readPluginCatalog('w', { machineId, owner: true }, request, () => () => ({}) as never)
+        )
+      )
+    ).flat();
+    owner.setOnlineMachines([a, b]);
+    await owner.update(entries);
+    for (const entry of entries) await owner.trustRelease(entry);
+    const port = routedPluginPort('w', (id) => owner.resolveMachine(manifest.id, id));
+    const call = (id: typeof a) =>
+      port.call(
+        'plugin/query',
+        'where',
+        { workspaceId: 'w', machineId: id } as import('@lody/plugin-sdk').MachineRef,
+        null,
+        new AbortController().signal
+      );
+    expect(await call(a)).toBe(a);
+    const withAdditionalPermission = entries.map((i) =>
+      i.dev.machineId === a
+        ? {
+            ...i,
+            dev: {
+              ...i.dev,
+              manifest: { ...i.dev.manifest, permissions: ['sessions.approve' as const] },
+            },
+          }
+        : i
+    );
+    await owner.update(withAdditionalPermission);
+    await expect(call(a)).rejects.toMatchObject({ code: 'forbidden' });
+    const pending = call(b);
+    await dispatched.promise;
+    owner.setOnlineMachines([a]);
+    reply.resolve();
+    await expect(pending).rejects.toMatchObject({ code: 'machine_offline' });
+  } finally {
+    await owner.close();
+  }
 });
 
 it('reads the current workspace catalog and fences a retained installation binding', async () => {
@@ -659,9 +755,19 @@ it('elects one SemVer primary while keeping the other companion registrations al
     b = await make('b', '2.0.0-beta.10'),
     c = await make('c', '2.0.0-beta.10');
   try {
+    owner.setOnlineMachines(['a', 'b', 'c', 'empty']);
     await owner.update([c, b, a]);
+    expect(() => owner.resolveMachine('companion', 'a')).toThrow(
+      expect.objectContaining({ code: 'forbidden' })
+    );
     for (const entry of [c, b, a]) await owner.trustRelease(entry);
     expect(Object.fromEntries(active)).toEqual({ a: false, b: true, c: false });
+    const route = (id: string) => owner.resolveMachine('companion', id);
+    expect(route('a').digest).toBe(a.digest);
+    expect(route('c').sourceKey).toBe(c.sourceKey);
+    expect(() => route('empty')).toThrow(expect.objectContaining({ code: 'not_found' }));
+    owner.setOnlineMachines(['a', 'c', 'empty']);
+    expect(() => route('b')).toThrow(expect.objectContaining({ code: 'machine_offline' }));
     await owner.update([a, c]);
     expect(Object.fromEntries(active)).toEqual({ a: false, c: true });
   } finally {
@@ -670,57 +776,324 @@ it('elects one SemVer primary while keeping the other companion registrations al
   expect(active.size).toBe(0);
 });
 
-it('restores an approved workspace release and its client preferences without a machine catalog', async () => {
+it.each(['registry', 'machine'])(
+  'restores a %s-approved workspace release and its client preferences without a machine catalog',
+  async (transport) => {
+    const { IDBFactory } = await import('fake-indexeddb');
+    const { vi } = await import('vitest');
+    const { WorkspaceClientPlugins } = await import('../src/plugins/client-host-provider');
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    const manifest = pluginManifestSchema.parse({
+      id: 'offline',
+      sdk: '^1.0.0',
+      version: '1.0.0',
+      title: 'Offline',
+      client: 'client.js',
+      styles: ['style.css'],
+      config: {
+        topic: { type: 'string', scope: 'project', label: 'Topic' },
+        enabled: { type: 'boolean', scope: 'client', label: 'Enabled' },
+      },
+    });
+    const read = async (path: string) =>
+      new TextEncoder().encode(
+        path === 'client.js' ? "export default {kind:'client-plugin',register(){}}" : 'article{}'
+      );
+    const bytes = (await packClientBundle(manifest, read))!;
+    const digest = (await computeClientDigest(manifest, read))!;
+    const entry = {
+      workspaceId: 'w',
+      sourceKey: 'machine:m',
+      pluginId: 'offline',
+      enabled: true,
+      digest,
+      dev: { workspaceId: 'w', machineId: 'm', owner: true, devMode: false, manifest },
+      page: async () => ({ bytes, totalBytes: bytes.length }),
+      registry: () => ({}) as never,
+    } as const;
+    const owner = new WorkspaceClientPlugins('w', 'identity');
+    const reopened = new WorkspaceClientPlugins('w', 'identity');
+    let loaded = '';
+    const factory = () => (files: (path: string) => Uint8Array) => {
+      loaded = new TextDecoder().decode(files('style.css'));
+      return {} as never;
+    };
+    const pin = {
+      plugin_id: manifest.id,
+      manifest_summary: manifest,
+      client_digest: digest,
+      source: {
+        kind: 'npm' as const,
+        package_name: manifest.id,
+        exact_version: manifest.version,
+        integrity: 'sha512-' + 'A'.repeat(86) + '==',
+      },
+      permissions: [],
+      config_schema: manifest.config!,
+      enabled: true,
+      machine_sync: 'manual' as const,
+    };
+    const { workspaceModuleProof } =
+      await import('../../../apps/electron/src/main/services/workspace-plugin-proof');
+    const { mkdtemp, rm, readdir } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const directory = await mkdtemp(join(tmpdir(), 'renderer-workspace-proof-'));
+    vi.stubGlobal('window', {
+      ipc: {
+        async invoke(
+          channel: string,
+          workspace: string,
+          machine: string,
+          m: typeof manifest,
+          d: string,
+          op: Parameters<typeof workspaceModuleProof>[3]
+        ) {
+          if (channel === 'machineRpc.releasePluginModule') return;
+          expect(channel).toBe(
+            transport === 'machine'
+              ? 'e2ee.workspacePluginModule'
+              : (await import('../src/lib/app-platform')).isLocalAppPlatform()
+                ? 'machineRpc.workspacePluginModule'
+                : 'e2ee.workspacePluginModule'
+          );
+          expect(workspace).toBe('w');
+          const source = await workspaceModuleProof(
+            directory,
+            m,
+            d,
+            op,
+            async () => {
+              expect(machine).toBe('m');
+              return { manifest, digest, dev: false };
+            },
+            () => true,
+            async () => approve
+          );
+          return source === null ? null : 'data:text/javascript,' + encodeURIComponent(source);
+        },
+      },
+    });
+    const { gzipSync } = await import('node:zlib');
+    const { createHash } = await import('node:crypto');
+    const parts: Buffer[] = [];
+    for (const [path, bytes] of Object.entries({
+      'package.json': Buffer.from(JSON.stringify({ name: manifest.id, version: manifest.version })),
+      'lody.plugin.json': Buffer.from(JSON.stringify(manifest)),
+      'client.js': await read('client.js'),
+      'style.css': await read('style.css'),
+    })) {
+      const header = Buffer.alloc(512);
+      header.write('package/' + path);
+      header.write(bytes.length.toString(8), 124);
+      parts.push(header, Buffer.from(bytes), Buffer.alloc((512 - (bytes.length % 512)) % 512));
+    }
+    const archive = gzipSync(Buffer.concat([...parts, Buffer.alloc(512)]));
+    pin.source.integrity = 'sha512-' + createHash('sha512').update(archive).digest('base64');
+    let approve = false;
+    let transfers = 0;
+    vi.stubGlobal('fetch', async () => {
+      transfers++;
+      if (transport === 'machine') throw TypeError('registry offline');
+      return new Response(new Uint8Array(archive));
+    });
+    try {
+      await owner.restore(factory);
+      await owner.update(transport === 'machine' ? [entry] : []);
+      await owner.setWorkspacePlugins([pin]);
+      const workspaceEntry = () => owner.installations().find((i) => i.sourceKey === 'workspace')!;
+      expect(transfers).toBe(0);
+      expect(loaded).toBe('');
+      if (transport === 'registry') {
+        await expect(owner.trustRelease(workspaceEntry())).rejects.toThrow('cancelled');
+        expect(owner.trustState(workspaceEntry())).toBe(false);
+        expect(await readdir(directory)).toEqual([]);
+        approve = true;
+      }
+      await owner.trustRelease(workspaceEntry());
+      expect(transfers).toBe(transport === 'machine' ? 1 : 3);
+      await workspaceEntry().configureClient!({ enabled: false });
+      await owner.close();
+      loaded = '';
+      await reopened.restore(factory);
+      expect(loaded).toBe('');
+      await reopened.setWorkspacePlugins([pin]);
+      expect(loaded).toBe('article{}');
+      expect(transfers).toBe(transport === 'machine' ? 1 : 3);
+      expect(reopened.installations()).toMatchObject([
+        { sourceKey: 'workspace', inspection: { preferences: { enabled: false } } },
+      ]);
+      const { writeProjectConfig } = await import('../src/plugins/project-config-write');
+      const { Flock } = await import('@loro-dev/flock-wasm');
+      const flock = new Flock('workspace-project-config');
+      let shared = true;
+      reopened.projectWriter = async (i, machine, project, changes) => {
+        await writeProjectConfig({
+          workspaceId: 'w' as import('@lody/shared').WorkspaceId,
+          machine,
+          project,
+          manifest: i.dev.manifest,
+          changes,
+          check: () => {},
+          readSharing: async () =>
+            ({
+              machineId: machine,
+              canManage: false,
+              sharedWithTeam: true,
+              projects: shared ? [project] : [],
+            }) as never,
+          writer: {
+            async flockRowUpdate(_, key, update) {
+              flock.set([...key], update(flock.get([...key])) as never);
+              flock.commit();
+              return true;
+            },
+          },
+        });
+        await reopened.setProjectRows(Array.from(flock.scan({ prefix: ['projectPluginConfig'] })));
+      };
+      await reopened.installations()[0]!.configureProject!('offline-machine', 'p', {
+        topic: 'cached',
+      });
+      expect(reopened.installations()[0]!.readProject!('offline-machine', 'p')).toEqual({
+        topic: 'cached',
+      });
+      shared = false;
+      await expect(
+        reopened.installations()[0]!.configureProject!('offline-machine', 'p', {
+          topic: 'forbidden',
+        })
+      ).rejects.toThrow('forbidden');
+      expect(reopened.installations()[0]!.readProject!('offline-machine', 'p')).toEqual({
+        topic: 'cached',
+      });
+      await reopened.revoke(reopened.installations()[0]!);
+      expect(await readdir(directory)).toEqual([]);
+      expect(reopened.trustState(reopened.installations()[0]!)).toBe(false);
+    } finally {
+      await reopened.close();
+      await owner.close();
+      await rm(directory, { recursive: true, force: true });
+      vi.unstubAllGlobals();
+    }
+  }
+);
+
+it('restores offline local-source route hints without restoring execution authority', async () => {
   const { IDBFactory } = await import('fake-indexeddb');
   const { vi } = await import('vitest');
   const { WorkspaceClientPlugins } = await import('../src/plugins/client-host-provider');
   vi.stubGlobal('indexedDB', new IDBFactory());
-  const manifest = pluginManifestSchema.parse({
-    id: 'offline',
-    sdk: '^1.0.0',
-    version: '1.0.0',
-    title: 'Offline',
-    styles: ['style.css'],
-    config: { enabled: { type: 'boolean', scope: 'client', label: 'Enabled' } },
-  });
-  const read = async () => new TextEncoder().encode('article{}');
-  const bytes = (await packClientBundle(manifest, read))!;
-  const digest = (await computeClientDigest(manifest, read))!;
-  const entry = {
-    workspaceId: 'w',
-    sourceKey: 'machine:m',
-    pluginId: 'offline',
-    enabled: true,
-    digest,
-    dev: { workspaceId: 'w', machineId: 'm', owner: true, devMode: false, manifest },
-    page: async () => ({ bytes, totalBytes: bytes.length }),
-    registry: () => ({}) as never,
-  } as const;
-  const owner = new WorkspaceClientPlugins('w', 'identity');
-  const reopened = new WorkspaceClientPlugins('w', 'identity');
-  let loaded = '';
-  const factory = () => (files: (path: string) => Uint8Array) => {
-    loaded = new TextDecoder().decode(files('style.css'));
-    return {} as never;
-  };
+  const readers = Array.from(
+    { length: 4 },
+    (_, i) => new WorkspaceClientPlugins('w', i === 2 ? 'other' : 'owner')
+  );
+  const [online, cold, other, afterRemoval] = readers;
   try {
-    await owner.restore(factory);
-    await owner.update([entry]);
-    await owner.trustRelease(entry);
-    await owner.installations()[0]!.configureClient!({ enabled: false });
-    await owner.close();
-    loaded = '';
-    await reopened.restore(factory);
-    await reopened.update([]);
-    expect(loaded).toBe('article{}');
-    expect(reopened.installations()).toMatchObject([
-      { sourceKey: 'workspace', inspection: { preferences: { enabled: false } } },
+    await online!.rememberCatalog('host', [
+      { source: { kind: 'local', origin: 'dir' }, pluginId: 'clock' } as never,
     ]);
-    await reopened.revoke(reopened.installations()[0]!);
-    expect(reopened.installations()).toEqual([]);
+    for (const client of [cold!, other!]) {
+      await client.restore(() => () => ({}) as never);
+      expect(client.missingRouteState('clock')).toBe('resolving');
+      client.finishCatalogPoll();
+    }
+    expect(cold!.missingRouteState('clock')).toBe('source_offline');
+    expect(cold!.installations()).toHaveLength(0);
+    expect(other!.missingRouteState('clock')).toBe('not_installed');
+    await online!.rememberCatalog('host', []);
+    await afterRemoval!.restore(() => () => ({}) as never);
+    afterRemoval!.finishCatalogPoll();
+    expect(afterRemoval!.missingRouteState('clock')).toBe('not_installed');
   } finally {
-    await reopened.close();
-    await owner.close();
+    await Promise.all(readers.map((r) => r.close()));
     vi.unstubAllGlobals();
+  }
+});
+
+it('propagates approved releases to another tab and refuses stale config writes after revocation', async () => {
+  const { workspaceReleaseStore } = await import('../src/plugins/workspace-installations');
+  const { IDBFactory } = await import('fake-indexeddb');
+  const { vi } = await import('vitest');
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const signal = new AbortController(),
+    notice = Promise.withResolvers<void>();
+  try {
+    const first = await workspaceReleaseStore('account/workspace/genesis/key', signal.signal);
+    const second = await workspaceReleaseStore(
+      'account/workspace/genesis/key',
+      signal.signal,
+      notice.resolve
+    );
+    const row = {
+      manifest,
+      digest: 'a'.repeat(64),
+      origin: 'workspace',
+      local: false,
+      bytes: new Uint8Array([1]),
+      preferences: {},
+      npm: {
+        manifest_summary: manifest,
+        plugin_id: manifest.id,
+        client_digest: 'a'.repeat(64),
+        source: {
+          kind: 'npm' as const,
+          exact_version: manifest.version,
+          package_name: manifest.id,
+          integrity: 'sha512-' + 'A'.repeat(86) + '==',
+        },
+        enabled: true,
+        machine_sync: 'manual' as const,
+        permissions: [],
+        config_schema: {},
+      },
+    };
+    await first.put(row);
+    await notice.promise;
+    expect((await second.list())[0]?.digest).toBe(row.digest);
+    await first.remove(manifest.id);
+    await expect(second.configure(row, {})).rejects.toThrow('Stale');
+    expect(await second.list()).toEqual([]);
+  } finally {
+    signal.abort();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('discards a pending beforeSend result after the draft changes or its installation unloads', async () => {
+  const { prepareComposerText, registerComposerTransform } =
+    await import('../src/plugins/composer-before-send');
+  for (const unload of [false, true]) {
+    const life = new AbortController(),
+      entered = Promise.withResolvers<void>(),
+      release = Promise.withResolvers<string>();
+    let current = true;
+    try {
+      registerComposerTransform('workspace', life.signal, () => {
+        entered.resolve();
+        return release.promise;
+      });
+      const send = prepareComposerText(
+        'workspace',
+        'first',
+        new AbortController().signal,
+        () => current,
+        () => {
+          throw Error('Unexpected confirmation');
+        }
+      );
+      await entered.promise;
+      if (unload) {
+        life.abort();
+        await expect(send).rejects.toMatchObject({ name: 'AbortError' });
+      } else {
+        current = false;
+        release.resolve('late change');
+        expect(await send).toBeUndefined();
+      }
+    } finally {
+      release.resolve('cleanup');
+      life.abort();
+    }
   }
 });

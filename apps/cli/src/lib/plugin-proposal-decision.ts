@@ -110,7 +110,7 @@ export async function decidePluginProposal(input: {
   const terminal = z.enum(['approved', 'rejected', 'superseded']);
   const result = async (status: z.infer<typeof terminal>) => {
     await input.updateCard({ ...meta, status });
-    return { type: 'plugin/proposal-decision' as const, status };
+    return { type: 'plugin/control' as const, action: 'resolve-proposal' as const, status };
   };
   try {
     const text = await readFile(key + '.result', 'utf8');
@@ -120,7 +120,11 @@ export async function decidePluginProposal(input: {
   }
   if (card.status !== 'pending') throw Error('Unverified proposal decision');
   if (now() >= meta.expiresAt)
-    return { type: 'plugin/proposal-decision' as const, status: 'expired' as const };
+    return {
+      type: 'plugin/control' as const,
+      action: 'resolve-proposal' as const,
+      status: 'expired' as const,
+    };
   let status: 'approved' | 'rejected' | 'superseded' =
     p.decision === 'deny' ? 'rejected' : 'approved';
   if (status === 'approved') {
@@ -129,7 +133,11 @@ export async function decidePluginProposal(input: {
   }
   signal?.throwIfAborted();
   if (pluginProposalState(meta, now()) === 'expired')
-    return { type: 'plugin/proposal-decision' as const, status: 'expired' as const };
+    return {
+      type: 'plugin/control' as const,
+      action: 'resolve-proposal' as const,
+      status: 'expired' as const,
+    };
   // Claim before any side effect. An interrupted activation is outcome-unknown, never retried.
   if (!(await writeOnce(key + '.claim', { decision: p.decision, by: actor.userId, at: now() })))
     throw Error('Decision already in progress or outcome unknown');

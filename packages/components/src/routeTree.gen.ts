@@ -47,6 +47,8 @@ import { Route as WorkspaceNameAuthSettingsMachinesRouteImport } from './routes/
 import { Route as WorkspaceNameAuthSettingsMyMachinesRouteImport } from './routes/$workspaceName/_auth/settings/my-machines';
 import { Route as WorkspaceNameAuthSettingsProjectsRouteImport } from './routes/$workspaceName/_auth/settings/projects';
 import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId';
+import { Route as WorkspaceNameAuthPPluginIdScreenIdRouteImport } from './routes/$workspaceName/_auth/p.$pluginId.$screenId';
+import { Route as WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRouteImport } from './routes/$workspaceName/_auth/projects.$machineId.$projectId.p.$pluginId.$pageId';
 
 const DeviceLazyRouteImport = createFileRoute('/device')();
 const EmailVerifiedLazyRouteImport = createFileRoute('/email-verified')();
@@ -112,6 +114,9 @@ const WorkspaceNameAuthSettingsStatsLazyRouteImport = createFileRoute(
 )();
 const WorkspaceNameAuthSettingsWorkspaceLazyRouteImport = createFileRoute(
   '/$workspaceName/_auth/settings/workspace'
+)();
+const WorkspaceNameAuthSettingsPluginsPluginIdLazyRouteImport = createFileRoute(
+  '/$workspaceName/_auth/settings/plugins_/$pluginId'
 )();
 
 const IndexRoute = IndexRouteImport.update({
@@ -471,6 +476,26 @@ const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
     path: '/local/$machineId/$localProjectId',
     getParentRoute: () => WorkspaceNameAuthRoute,
   } as any);
+const WorkspaceNameAuthPPluginIdScreenIdRoute =
+  WorkspaceNameAuthPPluginIdScreenIdRouteImport.update({
+    id: '/p/$pluginId/$screenId',
+    path: '/p/$pluginId/$screenId',
+    getParentRoute: () => WorkspaceNameAuthRoute,
+  } as any);
+const WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute =
+  WorkspaceNameAuthSettingsPluginsPluginIdLazyRouteImport.update({
+    id: '/plugins_/$pluginId',
+    path: '/plugins/$pluginId',
+    getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+  } as any).lazy(() =>
+    import('./routes/$workspaceName/_auth/settings/plugins_.$pluginId.lazy').then((d) => d.Route)
+  );
+const WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute =
+  WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRouteImport.update({
+    id: '/projects/$machineId/$projectId/p/$pluginId/$pageId',
+    path: '/projects/$machineId/$projectId/p/$pluginId/$pageId',
+    getParentRoute: () => WorkspaceNameAuthRoute,
+  } as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute;
@@ -531,6 +556,9 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/schedules/': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
+  '/$workspaceName/p/$pluginId/$screenId': typeof WorkspaceNameAuthPPluginIdScreenIdRoute;
+  '/$workspaceName/settings/plugins/$pluginId': typeof WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute;
+  '/$workspaceName/projects/$machineId/$projectId/p/$pluginId/$pageId': typeof WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute;
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute;
@@ -588,6 +616,9 @@ export interface FileRoutesByTo {
   '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
+  '/$workspaceName/p/$pluginId/$screenId': typeof WorkspaceNameAuthPPluginIdScreenIdRoute;
+  '/$workspaceName/settings/plugins/$pluginId': typeof WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute;
+  '/$workspaceName/projects/$machineId/$projectId/p/$pluginId/$pageId': typeof WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
@@ -650,6 +681,9 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/schedules/': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/_auth/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/_auth/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
+  '/$workspaceName/_auth/p/$pluginId/$screenId': typeof WorkspaceNameAuthPPluginIdScreenIdRoute;
+  '/$workspaceName/_auth/settings/plugins_/$pluginId': typeof WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute;
+  '/$workspaceName/_auth/projects/$machineId/$projectId/p/$pluginId/$pageId': typeof WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -711,7 +745,10 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/workspace'
     | '/$workspaceName/schedules/'
     | '/$workspaceName/settings/'
-    | '/$workspaceName/local/$machineId/$localProjectId';
+    | '/$workspaceName/local/$machineId/$localProjectId'
+    | '/$workspaceName/p/$pluginId/$screenId'
+    | '/$workspaceName/settings/plugins/$pluginId'
+    | '/$workspaceName/projects/$machineId/$projectId/p/$pluginId/$pageId';
   fileRoutesByTo: FileRoutesByTo;
   to:
     | '/'
@@ -768,7 +805,10 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/workspace'
     | '/$workspaceName/schedules'
     | '/$workspaceName/settings'
-    | '/$workspaceName/local/$machineId/$localProjectId';
+    | '/$workspaceName/local/$machineId/$localProjectId'
+    | '/$workspaceName/p/$pluginId/$screenId'
+    | '/$workspaceName/settings/plugins/$pluginId'
+    | '/$workspaceName/projects/$machineId/$projectId/p/$pluginId/$pageId';
   id:
     | '__root__'
     | '/'
@@ -829,7 +869,10 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/workspace'
     | '/$workspaceName/_auth/schedules/'
     | '/$workspaceName/_auth/settings/'
-    | '/$workspaceName/_auth/local/$machineId/$localProjectId';
+    | '/$workspaceName/_auth/local/$machineId/$localProjectId'
+    | '/$workspaceName/_auth/p/$pluginId/$screenId'
+    | '/$workspaceName/_auth/settings/plugins_/$pluginId'
+    | '/$workspaceName/_auth/projects/$machineId/$projectId/p/$pluginId/$pageId';
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
@@ -1269,6 +1312,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
+    '/$workspaceName/_auth/p/$pluginId/$screenId': {
+      id: '/$workspaceName/_auth/p/$pluginId/$screenId';
+      path: '/p/$pluginId/$screenId';
+      fullPath: '/$workspaceName/p/$pluginId/$screenId';
+      preLoaderRoute: typeof WorkspaceNameAuthPPluginIdScreenIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
+    '/$workspaceName/_auth/settings/plugins_/$pluginId': {
+      id: '/$workspaceName/_auth/settings/plugins_/$pluginId';
+      path: '/plugins/$pluginId';
+      fullPath: '/$workspaceName/settings/plugins/$pluginId';
+      preLoaderRoute: typeof WorkspaceNameAuthSettingsPluginsPluginIdLazyRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/projects/$machineId/$projectId/p/$pluginId/$pageId': {
+      id: '/$workspaceName/_auth/projects/$machineId/$projectId/p/$pluginId/$pageId';
+      path: '/projects/$machineId/$projectId/p/$pluginId/$pageId';
+      fullPath: '/$workspaceName/projects/$machineId/$projectId/p/$pluginId/$pageId';
+      preLoaderRoute: typeof WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
   }
 }
 
@@ -1312,6 +1376,7 @@ interface WorkspaceNameAuthSettingsRouteChildren {
   WorkspaceNameAuthSettingsStatsLazyRoute: typeof WorkspaceNameAuthSettingsStatsLazyRoute;
   WorkspaceNameAuthSettingsWorkspaceLazyRoute: typeof WorkspaceNameAuthSettingsWorkspaceLazyRoute;
   WorkspaceNameAuthSettingsIndexRoute: typeof WorkspaceNameAuthSettingsIndexRoute;
+  WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute: typeof WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute;
 }
 
 const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChildren = {
@@ -1344,6 +1409,8 @@ const WorkspaceNameAuthSettingsRouteChildren: WorkspaceNameAuthSettingsRouteChil
   WorkspaceNameAuthSettingsStatsLazyRoute: WorkspaceNameAuthSettingsStatsLazyRoute,
   WorkspaceNameAuthSettingsWorkspaceLazyRoute: WorkspaceNameAuthSettingsWorkspaceLazyRoute,
   WorkspaceNameAuthSettingsIndexRoute: WorkspaceNameAuthSettingsIndexRoute,
+  WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute:
+    WorkspaceNameAuthSettingsPluginsPluginIdLazyRoute,
 };
 
 const WorkspaceNameAuthSettingsRouteWithChildren = WorkspaceNameAuthSettingsRoute._addFileChildren(
@@ -1371,6 +1438,8 @@ interface WorkspaceNameAuthRouteChildren {
   WorkspaceNameAuthTodayRoute: typeof WorkspaceNameAuthTodayRoute;
   WorkspaceNameAuthSchedulesLazyRoute: typeof WorkspaceNameAuthSchedulesLazyRouteWithChildren;
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
+  WorkspaceNameAuthPPluginIdScreenIdRoute: typeof WorkspaceNameAuthPPluginIdScreenIdRoute;
+  WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute: typeof WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute;
 }
 
 const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
@@ -1382,6 +1451,9 @@ const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
   WorkspaceNameAuthSchedulesLazyRoute: WorkspaceNameAuthSchedulesLazyRouteWithChildren,
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute:
     WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute,
+  WorkspaceNameAuthPPluginIdScreenIdRoute: WorkspaceNameAuthPPluginIdScreenIdRoute,
+  WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute:
+    WorkspaceNameAuthProjectsMachineIdProjectIdPPluginIdPageIdRoute,
 };
 
 const WorkspaceNameAuthRouteWithChildren = WorkspaceNameAuthRoute._addFileChildren(

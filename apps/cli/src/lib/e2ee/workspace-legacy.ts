@@ -1,3 +1,9 @@
+import {
+  pluginOwnerSyncSubject,
+  type WorkspacePluginEntry,
+} from '@lody/shared/plugins/workspace-entry';
+import { decodeE2eeIntentRecord } from '@lody/shared';
+import { verifyExecutionIntent } from '@lody/e2ee-core/protocol';
 import { eraseIdentityPluginCustody } from '../../plugins/identity-plugin-vault';
 import { accountIdFromUserId } from '@lody/e2ee-core/protocol';
 import { withE2eeTestClock } from '@lody/shared/node/e2ee-clock';
@@ -1678,6 +1684,54 @@ async function openWorkspaceOwned(
         : null,
     /** This machine's signing key: the only author of derived inputs. */
     signingPublicKey: opened.signingPublicKey,
+    verifyOwnerPin: (entry: WorkspacePluginEntry) =>
+      run(
+        Effect.gen(function* () {
+          const record = decodeE2eeIntentRecord(entry.sync_signature);
+          const subject = pluginOwnerSyncSubject(entry);
+          if (
+            closed ||
+            entry.sync_owner_user_id !== options.accountId ||
+            !record ||
+            record.kind !== subject.kind ||
+            Result.isFailure(
+              verifyExecutionIntent(
+                {
+                  ...subject,
+                  workspaceId: options.workspaceId,
+                  genesis: intentGenesis,
+                  contentDigest: bytes(subject.contentDigest),
+                },
+                record.signer,
+                record.signature
+              )
+            )
+          )
+            throw Error('Invalid owner sync signature');
+          const signer = hex(record.signer);
+          const auth = yield* opened.executionAuthorization.authorizeOwnedExecution(
+            options.workspaceId,
+            signer,
+            true
+          );
+          const state = (yield* opened.runtime.executionLedger()).inspectState();
+          const self = state.devices.get(opened.signingPublicKey),
+            personal = state.devices.get(signer);
+          if (
+            self?.kind !== 'machine' ||
+            self.machineId !== options.machineId ||
+            personal?.kind !== 'personal' ||
+            !personal.membershipId.equals(self.membershipId) ||
+            auth._tag !== 'Authorized' ||
+            auth.principal !== 'owner' ||
+            !auth.isCurrent?.()
+          )
+            throw Error('Machine owner required');
+          return () => {
+            if (closed || !auth.isCurrent?.()) throw Error('Owner authority withdrawn');
+          };
+        })
+      ),
     verifyDeclaredWorkflowGrant: (
       signature: import('@lody/shared/plugins/machine-rpc').DeclaredGrantSignature,
       machineId: string
@@ -1690,7 +1744,7 @@ async function openWorkspaceOwned(
           );
           if (
             !original ||
-            original.params.targetDevice !== opened.signingPublicKey ||
+            original.params.grant.targetDevice !== opened.signingPublicKey ||
             original.workspaceId !== options.workspaceId ||
             closed
           )
@@ -1705,7 +1759,20 @@ async function openWorkspaceOwned(
             auth._tag === 'Authorized' && auth.principal === 'owner' && auth.isCurrent;
           if (!current || !current() || state.devices.get(signer)?.kind !== 'personal')
             throw Error('Workflow approval forbidden');
-          return { approval: original.params, isCurrent: () => !closed && current() };
+          return { approval: original.params.grant, isCurrent: () => !closed && current() };
+        })
+      ),
+    authorizeWorkspacePluginInstall: () =>
+      run(
+        Effect.gen(function* () {
+          const grant = yield* opened.executionAuthorization.authorizeOwnedExecution(
+            options.workspaceId,
+            opened.signingPublicKey,
+            true
+          );
+          if (grant._tag !== 'Authorized' || grant.principal !== 'owner' || !grant.isCurrent?.())
+            throw Error('Workspace plugin installation forbidden');
+          return grant.isCurrent;
         })
       ),
     pluginAuthoritySignal: opened.executionAuthorization.authoritySignal,
@@ -1840,7 +1907,11 @@ async function openWorkspaceOwned(
                   if (!own || !signer || signer.kind === 'recovery') return undefined;
                   // This machine's own membership is its owner: the owner's account.
                   if (own.membershipId.equals(signer.membershipId))
-                    return { accountId: options.accountId, executionUserId: options.accountId };
+                    return {
+                      accountId: options.accountId,
+                      executionUserId: options.accountId,
+                      personalDevice: signer.kind === 'personal',
+                    };
                   const member = state.members.get(hex(signer.membershipId.toBytes()));
                   const account = member && accountIdFromUserId(member.userId);
                   if (!member || !account || !Result.isSuccess(account)) return undefined;

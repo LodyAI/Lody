@@ -130,6 +130,7 @@ it('preserves the real session metadata on replay after archive and manager rest
         dev: false,
         enabled: true,
         current: {
+          provenance: { kind: 'local', origin: 'dir' },
           directory: dir,
           machineEntry,
           clientDigest: digest,

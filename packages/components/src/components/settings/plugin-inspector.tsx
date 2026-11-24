@@ -1,4 +1,9 @@
-import {pluginCapabilities} from '@lody/shared/plugins/capabilities';
+import { Link } from '@tanstack/react-router';
+import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
+import { WorkspacePluginImport } from './workspace-plugin-import';
+import { useAtomValue } from 'jotai';
+import { settingsPluginTargetAtom } from '@/atoms/settings';
+import { pluginCapabilities } from '@lody/shared/plugins/capabilities';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import type { WorkspaceId } from '@lody/shared';
 import type { ClientCatalogInstallation } from '../../plugins/client-host-provider';
@@ -26,7 +31,7 @@ export interface PluginInspection {
   logs: readonly string[];
   /** Never include machine secrets; configured contains their names only. */
   preferences: Readonly<Record<string, Value>>;
-  projectPreferences?: Readonly<Record<string, Readonly<Record<string, Value>>>>;
+  projectValues?: Readonly<Record<string, Readonly<Record<string, Value>>>>;
   configured: readonly string[];
 }
 export type InspectorAction =
@@ -83,11 +88,12 @@ function Inspection({
   const [busy, setBusy] = useState(false);
   const [projectId, setProjectId] = useState('');
   const activeProject = form === 'configure' ? projectId : '';
-  const preferences = activeProject ? (p.projectPreferences?.[activeProject] ?? {}) : p.preferences;
+  const preferences = activeProject ? (p.projectValues?.[activeProject] ?? {}) : p.preferences;
   const configured = activeProject ? Object.keys(preferences) : p.configured;
   const fields = Object.entries(p.manifest.config ?? {}).filter(
     ([, f]) =>
-      (!clientConfig || f.scope === 'client') && (f.scope === 'project') === Boolean(activeProject)
+      (canControl || (clientConfig && f.scope === 'client') || f.scope === 'project') &&
+      (f.scope === 'project') === Boolean(activeProject)
   );
   const shown = fields.filter(
     ([k, f]) =>
@@ -142,10 +148,20 @@ function Inspection({
       </p>
       <p>
         {t('settings.plugins.caps')}{' '}
-        {pluginCapabilities(p.manifest).map(cap=>{
-          const label=({client:'client',machine:'machine',mcpServers:'mcp',acpProviders:'acp',secrets:'secrets'} as Record<string,string>)[cap];
-          return label?t(`settings.plugins.${label}`):cap;
-        }).join(', ') || t('settings.plugins.declarative')}
+        {pluginCapabilities(p.manifest)
+          .map((cap) => {
+            const label = (
+              {
+                client: 'client',
+                machine: 'machine',
+                mcpServers: 'mcp',
+                acpProviders: 'acp',
+                secrets: 'secrets',
+              } as Record<string, string>
+            )[cap];
+            return label ? t(`settings.plugins.${label}`) : cap;
+          })
+          .join(', ') || t('settings.plugins.declarative')}
       </p>
       <fieldset disabled={busy || pluginSafeMode()}>
         {chooseTheme &&
@@ -222,12 +238,12 @@ function Inspection({
             </dl>
           </>
         )}
-        {clientConfig && fields.length > 0 && (
+        {!canControl && ((clientConfig && fields.length > 0) || !!projects?.length) && (
           <Button variant="secondary" onClick={() => setForm('configure')}>
             {t('settings.plugins.configure')}
           </Button>
         )}
-        {(canControl || clientConfig) && form && (
+        {(canControl || clientConfig || !!projects?.length) && form && (
           <Dialog.Root
             open
             onOpenChange={(open) => {
@@ -474,7 +490,15 @@ export function WorkflowApproval({ entry }: { entry: ClientCatalogInstallation }
 }
 const noopSubscribe = () => () => {};
 const zero = () => 0;
-export function PluginsSettings() {
+export function PluginsSettings({
+  pluginId: routeId,
+  page: routePage,
+}: { pluginId?: string; page?: string } = {}) {
+  const workspaceName = useAtomValue(currentWorkspaceSlugAtom);
+  const modalId = useAtomValue(settingsPluginTargetAtom);
+  const pluginId = routeId ?? modalId?.pluginId;
+  const page = routeId ? routePage : modalId?.page;
+  const [machines, selectMachine] = useState<Record<string, string>>({});
   const { t } = useTranslation();
   const owner = useWorkspaceClientPlugins();
   useSyncExternalStore(owner?.subscribe ?? noopSubscribe, owner?.snapshot ?? zero, zero);
@@ -483,22 +507,52 @@ export function PluginsSettings() {
     clientDiagnostics.snapshot,
     clientDiagnostics.snapshot
   );
-  const entries = owner?.installations() ?? [];
+  const all = (owner?.installations() ?? []).filter((i) => !pluginId || i.pluginId === pluginId);
+  const groups = new Map<string, ClientCatalogInstallation[]>();
+  for (const i of all) {
+    const group = groups.get(i.pluginId);
+    if (group) group.push(i);
+    else groups.set(i.pluginId, [i]);
+  }
+  const entries = [...groups.values()].map(
+    (group) => group.find((i) => i.dev.machineId === machines[group[0]!.pluginId]) ?? group[0]!
+  );
   const { projects } = useVisibleLocalProjects({
     workspaceId: entries[0]?.workspaceId as WorkspaceId | undefined,
     enabled: entries.some(
       (i) =>
-        !!i.control && Object.values(i.dev.manifest.config ?? {}).some((f) => f.scope === 'project')
+        !!i.configureProject &&
+        Object.values(i.dev.manifest.config ?? {}).some((f) => f.scope === 'project')
     ),
   });
   return (
     <section aria-label={t('settings.tabs.plugins')}>
       <h2>{t('settings.tabs.plugins')}</h2>
+      {owner && !pluginId && <WorkspacePluginImport />}
       {pluginSafeMode() && <p>{t('settings.plugins.safe')}</p>}
       {!entries.length && <p>{t('settings.plugins.empty')}</p>}
       {owner &&
         entries.map((i) => (
           <section key={JSON.stringify([i.workspaceId, i.sourceKey, i.pluginId])}>
+            {!pluginId && workspaceName && (
+              <Link
+                to="/$workspaceName/settings/plugins/$pluginId"
+                params={{ workspaceName, pluginId: i.pluginId }}
+              >
+                {i.dev.manifest.title}
+              </Link>
+            )}
+            {groups.get(i.pluginId)!.length > 1 && (
+              <select
+                aria-label={t('settings.tabs.machines')}
+                value={i.dev.machineId}
+                onChange={(e) => selectMachine({ ...machines, [i.pluginId]: e.target.value })}
+              >
+                {groups.get(i.pluginId)!.map((j) => (
+                  <option key={j.dev.machineId}>{j.dev.machineId}</option>
+                ))}
+              </select>
+            )}
             <PluginInspector
               chooseTheme={
                 i.enabled &&
@@ -517,8 +571,15 @@ export function PluginsSettings() {
                   : undefined
               }
               projects={[...projects.values()]
-                .filter((p) => p.machine.id === i.machineId)
-                .map((p) => p.project)}
+                .filter(
+                  (p) =>
+                    Object.values(i.dev.manifest.config ?? {}).some((f) => f.scope === 'project') &&
+                    (i.sourceKey === 'workspace' || p.machine.id === i.machineId)
+                )
+                .map((p) => ({
+                  name: p.project.name,
+                  id: JSON.stringify([p.machine.id, p.project.id]),
+                }))}
               clientConfig={!!i.configureClient}
               canControl={!!i.control}
               inspection={{
@@ -528,6 +589,14 @@ export function PluginsSettings() {
                 configured: [],
                 preferences: {},
                 ...i.inspection,
+                projectValues: Object.fromEntries(
+                  [...projects.values()].map((p) => [
+                    JSON.stringify([p.machine.id, p.project.id]),
+                    i.readProject?.(p.machine.id, p.project.id) ??
+                      i.projectValues?.[p.project.id] ??
+                      {},
+                  ])
+                ),
                 diagnostics: [...(i.inspection?.diagnostics ?? []), ...clientDiagnostics.read(i)],
                 manifest: i.dev.manifest,
                 clientDigest: i.digest,
@@ -538,18 +607,38 @@ export function PluginsSettings() {
                 if (action === 'approve-dev') return owner.trustDev(i);
                 if (action === 'approve-release') return owner.trustRelease(i);
                 if (action === 'revoke') return owner.revoke(i);
+                if (action === 'configure' && projectId) {
+                  if (!i.configureProject) throw Error('Project configuration unavailable');
+                  const [machine, id] = JSON.parse(projectId);
+                  return i.configureProject(machine, id, changes ?? {});
+                }
                 if (action === 'configure' && i.configureClient)
                   return i.configureClient(changes ?? {});
                 if (!i.control) throw new Error('Plugin control unavailable on this machine');
-                await i.control(action, changes, projectId);
+                await i.control(action, changes);
               }}
             />
             {i.workflowBinding && i.workflowApproval && (
               <WorkflowApproval key={i.workflowBinding} entry={i} />
             )}
-            <PluginInstallationSettings entry={i} />
+            {pluginId && <PluginInstallationSettings entry={i} page={page} />}
           </section>
         ))}
     </section>
   );
+}
+
+export function MachinePluginSettings({ machineId }: { machineId: string }) {
+  const owner = useWorkspaceClientPlugins();
+  useSyncExternalStore(owner?.subscribe ?? noopSubscribe, owner?.snapshot ?? zero, zero);
+  return owner
+    ?.installations()
+    .filter((i) => i.dev.machineId === machineId)
+    .map((i) => (
+      <PluginInstallationSettings
+        key={i.sourceKey + ':' + i.pluginId}
+        entry={i}
+        workspacePages={false}
+      />
+    ));
 }
