@@ -14,6 +14,7 @@ import {
   type SidebarUpdatedItem,
 } from '../src/components/sidebar-updated-session-list';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { initI18n } from '../src/i18n';
 
 function makeItem(overrides: Partial<SidebarUpdatedItem> & { id: string }): SidebarUpdatedItem {
@@ -129,10 +130,16 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
 
   function render(
     items: SidebarUpdatedItem[],
-    options: { collapsed?: Record<string, boolean>; selectedItemId?: string } = {}
+    options: {
+      collapsed?: Record<string, boolean>;
+      selectedItemId?: string;
+      showBranchNames?: boolean;
+      showProjectContext?: boolean;
+    } = {}
   ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, options.collapsed ?? {});
+    store.set(sidebarShowBranchNamesAtom, options.showBranchNames ?? false);
     const onSelectItem = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -147,13 +154,21 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
             items,
             now: new Date('2026-04-22T12:00:00.000Z'),
             selectedItemId: options.selectedItemId ?? null,
+            showProjectContext: options.showProjectContext,
             onSelectItem,
           })
         )
       );
     });
 
-    return { onSelectItem };
+    return { onSelectItem, store };
+  }
+
+  function trunkVariantOf(id: string): string | null | undefined {
+    const row = container?.querySelector(`[data-sidebar-updated-id="${id}"]`);
+    return row
+      ?.querySelector('[data-session-tree-connector="trunk"]')
+      ?.getAttribute('data-session-tree-connector-variant');
   }
 
   function depthOf(id: string): string | null | undefined {
@@ -254,6 +269,31 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     });
 
     expect(onSelectItem).toHaveBeenCalledWith('root', 'child-tab');
+  });
+
+  it("sizes the first child's connector to the opener's rendered height under Show Branch", () => {
+    // Show Branch is on, but the chat opener renders no second line: the
+    // trunk must start at the row boundary, not climb a meta line that isn't
+    // drawn. The worktree opener's branch does draw a second line, so its
+    // first child still climbs it.
+    render(
+      [
+        makeItem({ id: 'worktree-opener', kind: 'github', branchName: 'feat/tall' }),
+        makeItem({ id: 'opened-tall', openedBySessionId: 'worktree-opener' }),
+        makeItem({ id: 'chat-opener' }),
+        makeItem({ id: 'opened-short', openedBySessionId: 'chat-opener' }),
+      ],
+      { showBranchNames: true }
+    );
+    expect(trunkVariantOf('opened-tall')).toBe('tall-opener');
+    expect(trunkVariantOf('opened-short')).toBe('row');
+  });
+
+  it('climbs the second line when the opener renders a project line', () => {
+    render([makeItem({ id: 'opener' }), makeItem({ id: 'opened', openedBySessionId: 'opener' })], {
+      showProjectContext: true,
+    });
+    expect(trunkVariantOf('opened')).toBe('tall-opener');
   });
 
   it('renders an orphan opened session as a top-level row with no gutter', () => {
