@@ -452,6 +452,21 @@ const listModels = (
   return (capability?.models ?? []).map((model) => ({ id: model.modelId, name: model.name }));
 };
 
+export const findAcpCapabilityModelName = (
+  capability: RunConfigCapabilitySource | undefined,
+  modelId: string | undefined
+): string | undefined => {
+  const target = modelId?.trim();
+  if (!target || !capability) return undefined;
+  const modelOption = findConfigOption(
+    capability,
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  const optionName = modelOption?.options.find((value) => value.value === target)?.name?.trim();
+  if (optionName) return optionName;
+  return capability.models?.find((model) => model.modelId === target)?.name?.trim() || undefined;
+};
+
 /**
  * Summarizes the run-config choices an agent offers. Used by discovery surfaces
  * (MCP `lody_session_create_options`) so callers can pick valid values instead

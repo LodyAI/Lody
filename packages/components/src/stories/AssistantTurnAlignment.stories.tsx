@@ -27,7 +27,7 @@ import {
 } from '@/components/ai-gui/view';
 import { runtimeAtom } from '@/atoms';
 import { conversationColumnStyles } from '@/lib/conversation-layout';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { conversation } from '../components/ai-gui/conversation.tokens.stylex';
@@ -1255,7 +1255,7 @@ const planModeItems: ChatStreamItem[] = [
 const RailGuide = () => (
   <div aria-hidden {...stylex.props(storyLayout.overlay)}>
     <div
-      className={clsx(
+      className={cn(
         stylex.props(
           conversationColumnStyles.base,
           conversationColumnStyles.capped,

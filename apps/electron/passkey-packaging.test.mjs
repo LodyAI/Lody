@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { passkeyPackagingPlan, applyPasskeyPackaging } from './passkey-packaging.mjs'
+import {
+  parseBuildArgs,
+  resolveElectronVersion,
+  resolveNodeGypBin
+} from './scripts/build-passkey-addons.mjs'
 
 const selection = {
   enabled: '1',
@@ -107,3 +112,19 @@ for (const arch of ['arm64', 'x64'])
       }
     }
   )
+test('build-passkey-addons resolves the pinned Electron version and local node-gyp binary without network installs', () => {
+  const pkg = JSON.parse(
+    readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')
+  )
+  assert.equal(resolveElectronVersion(), pkg.devDependencies.electron)
+  const gypBin = resolveNodeGypBin()
+  assert.equal(existsSync(gypBin), true, `Missing resolved node-gyp binary: ${gypBin}`)
+
+  const parsed = parseBuildArgs(['--out', '/tmp/passkey-out', '--arches', 'arm64,x64'])
+  assert.equal(parsed.outDir, path.resolve('/tmp/passkey-out'))
+  assert.deepEqual(parsed.arches, ['arm64', 'x64'])
+
+  assert.throws(() => parseBuildArgs([]))
+  assert.throws(() => parseBuildArgs(['--out', '/tmp/passkey-out', '--arches', 'universal']))
+  assert.throws(() => parseBuildArgs(['--out', '/tmp/passkey-out', '--arches', 'arm64,arm64']))
+})

@@ -32,6 +32,7 @@ import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   AgentConfigDialog,
+  buildCreateFormFromLinkTarget,
   type AgentConfigDialogMode,
   type AgentConfigSubmitPayload,
   listAddableProviders,
@@ -843,6 +844,44 @@ describe('AgentConfigDialog', () => {
     expect(
       listAddableProviders(i18next.t).some((provider) => provider.agentType === 'sorbet')
     ).toBe(false);
+  });
+
+  it('pre-selects deep-linked builtin, preset, and custom targets while rejecting unknown registry ids', async () => {
+    const codexForm = buildCreateFormFromLinkTarget(
+      { kind: 'builtin', agentType: 'codex' },
+      i18next.t
+    );
+    expect(codexForm).toMatchObject({ cliType: 'builtin', agentType: 'codex', name: 'Codex' });
+    await renderDialog(
+      { kind: 'create', initialForm: codexForm ?? undefined },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    expect(getSelectedOption()?.textContent).toContain('Codex');
+
+    const glmForm = buildCreateFormFromLinkTarget(
+      { kind: 'preset', presetId: 'glm-over-claude-code' },
+      i18next.t
+    );
+    await renderDialog(
+      { kind: 'create', initialForm: glmForm ?? undefined },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    expect(getSelectedOption()?.textContent).toContain('GLM over Claude Code');
+
+    const customForm = buildCreateFormFromLinkTarget({ kind: 'custom' }, i18next.t);
+    await renderDialog(
+      { kind: 'create', initialForm: customForm ?? undefined },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION })
+    );
+    expect(getSelectedOption()?.textContent).toContain('Custom command');
+    expect(document.body.querySelector('#custom-acp-command')).not.toBeNull();
+
+    expect(
+      buildCreateFormFromLinkTarget(
+        { kind: 'registry', agentType: 'nonexistent-registry-agent' },
+        i18next.t
+      )
+    ).toBeNull();
   });
 
   it('queues Lody Agent creation and requires provider setup support', async () => {

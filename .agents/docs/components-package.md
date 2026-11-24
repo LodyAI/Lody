@@ -463,7 +463,7 @@ makes disabled state legible at all.
 Every host (Electron, browser and the native mobile shells) renders text as
 unselectable by default, so dragging or double-clicking across navigation,
 toolbars, menus, tabs and titles never paints a highlight. The base rule in
-`src/tailwind/index.css` re-enables selection inside text fields, editable
+`src/style/index.css` re-enables selection inside text fields, editable
 `contenteditable` regions and any subtree marked `data-text-selectable`.
 Buttons and `[role='button']` elements inside a marked subtree stay
 unselectable so a drag across prose does not pick up control labels.

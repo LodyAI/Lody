@@ -44,7 +44,7 @@ running count keeps a muted static grid, without the active accent colour.
 segments and their typed View Transition; [`home/home-dashboard-host.tsx`](home/home-dashboard-host.tsx)
 supplies the live models and device-local preference. The landing stage in
 [`web-chat-landing-screen.tsx`](web-chat-landing-screen.tsx) re-centres when board height changes.
-The transition rules in [`../../tailwind/index.css`](../../tailwind/index.css) move the
+The transition rules in [`../../style/index.css`](../../style/index.css) move the
 segments, labels, fold control and pill with that same stage change. Snapshot stacking
 is explicit: pill below segments, persistent labels above both. Changing summaries
 cross-fade at natural size inside the segments' animated bounds, so their text never

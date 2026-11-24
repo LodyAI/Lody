@@ -91,6 +91,10 @@ export type SessionAutoDelivery = {
   attempt?: number;
   reason?: SessionAutoDeliveryStallReason;
   prUrl?: string;
+  /** 1-based position of `prUrl` when delivering multiple PRs sequentially. */
+  prIndex?: number;
+  /** Total PRs tracked by the current Auto delivery enablement when > 1. */
+  prTotal?: number;
   updatedAt: number;
 };
 

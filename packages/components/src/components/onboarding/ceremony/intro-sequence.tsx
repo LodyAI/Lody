@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import queueCurrent from '@/assets/onboarding/intro/queue-current.png';
 import quietWork from '@/assets/onboarding/intro/quiet-work.png';
 import continuousScroll from '@/assets/onboarding/intro/continuous-scroll.png';
@@ -184,7 +184,7 @@ function PolaroidCard({
   return (
     <figure
       aria-hidden={!front}
-      className={clsx(card.className, 'lody-intro-motion')}
+      className={cn(card.className, 'lody-intro-motion')}
       style={
         {
           '--tilt': `${spot.tilt}deg`,
@@ -359,7 +359,7 @@ export function IntroSequence({
 
   return (
     <div
-      className={clsx(stage.className, 'lody-intro-stage')}
+      className={cn(stage.className, 'lody-intro-stage')}
       style={{
         opacity: departing ? 0 : 1,
         transform: departing ? 'scale(0.985)' : 'scale(1)',
@@ -372,7 +372,7 @@ export function IntroSequence({
 
       {/* Words and pile, adjacent and centred as one block. Nothing is pinned
           to the window edges, so the composition can never spread apart. */}
-      <div className={clsx(row.className, 'lody-intro-row')}>
+      <div className={cn(row.className, 'lody-intro-row')}>
         <div className={copyColumn.className} style={{ width: 'var(--copy-w)' }}>
           {/* Fixed slot, vertically centred: the sentence's optical centre
               stays locked to the pile's centre however many lines it runs to,
@@ -382,11 +382,7 @@ export function IntroSequence({
               <div
                 key={`out-${outgoing}`}
                 aria-hidden
-                className={clsx(
-                  copyLayer.className,
-                  'lody-intro-motion',
-                  'lody-intro-copy-leaving'
-                )}
+                className={cn(copyLayer.className, 'lody-intro-motion', 'lody-intro-copy-leaving')}
                 style={{ animation: 'lody-intro-copy-out 320ms ease both' }}
               >
                 <IntroCopy chinese={chinese} {...copyFor(outgoing)} />
@@ -395,7 +391,7 @@ export function IntroSequence({
             <div
               key={`in-${current}`}
               aria-live="polite"
-              className={clsx(copyLayer.className, 'lody-intro-motion')}
+              className={cn(copyLayer.className, 'lody-intro-motion')}
               style={{ animation: `lody-intro-copy-in 700ms ${INTRO_EASE} 130ms both` }}
             >
               <IntroCopy chinese={chinese} {...copyFor(current)} />
@@ -425,7 +421,7 @@ export function IntroSequence({
                   setCurrent(LAST);
                 }}
                 {...skip}
-                className={clsx(skip.className, WINDOW_DRAG_EXEMPT_CLASS)}
+                className={cn(skip.className, WINDOW_DRAG_EXEMPT_CLASS)}
               >
                 {t('onboarding.intro.skip', 'Skip intro')}
               </button>

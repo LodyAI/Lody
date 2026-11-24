@@ -149,6 +149,7 @@ export function WebArchiveScreen({
   ]
     .filter(Boolean)
     .join(' ');
+  const dragExemptClassName = windowDragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
 
   return (
     <Tooltip.Provider>
@@ -165,10 +166,7 @@ export function WebArchiveScreen({
           {isLeftSidebarHidden ? (
             <SidebarHistoryControls
               onToggleSidebar={() => showNavigationSidebar()}
-              className={cn(
-                stylex.props(styles.sidebarToggle).className,
-                windowDragClass && WINDOW_DRAG_EXEMPT_CLASS
-              )}
+              className={cn(stylex.props(styles.sidebarToggle).className, dragExemptClassName)}
             />
           ) : null}
           {isMultiSelectMode ? (
@@ -178,6 +176,7 @@ export function WebArchiveScreen({
                 size="small"
                 icon
                 aria-label={t('archive.multiSelect.exit', 'Exit selection')}
+                className={dragExemptClassName}
                 onClick={onExitMultiSelect}
               >
                 <X {...stylex.props(styles.glyph)} />
@@ -193,6 +192,7 @@ export function WebArchiveScreen({
                 size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy || bulkRestoreDisabled}
                 title={bulkRestoreDisabled ? bulkRestoreDisabledReason : undefined}
+                className={dragExemptClassName}
                 onClick={onBulkRestore}
               >
                 <Undo2 {...stylex.props(styles.glyphSmall)} />
@@ -202,6 +202,7 @@ export function WebArchiveScreen({
                 variant="destructive"
                 size="small"
                 disabled={selectedCount === 0 || isBulkActionBusy}
+                className={dragExemptClassName}
                 onClick={onRequestBulkDelete}
               >
                 <Trash2 {...stylex.props(styles.glyphSmall)} />
@@ -218,7 +219,12 @@ export function WebArchiveScreen({
                 <Menu.Root>
                   <Menu.Trigger
                     render={
-                      <Button type="button" variant="ghost" size="small">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="small"
+                        className={dragExemptClassName}
+                      >
                         <span {...stylex.props(styles.scopeLabel)}>{scopeLabel}</span>
                         <ChevronDown {...stylex.props(styles.chevron)} />
                       </Button>

@@ -2,7 +2,7 @@ import { Children, isValidElement, type ReactNode } from 'react';
 import { CircleDot, GitPullRequest } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { visuallyHidden } from './surface';
 import { themeFontWeight } from '../../style/theme-scale.stylex';
 
@@ -92,7 +92,7 @@ export function markdownLinkText(children: ReactNode): string {
  * The icon names the kind (pull request or issue); the kind is also spoken to
  * screen readers. The caller keeps the `<a>` (and its in-app PR interception)
  * and styles it as a link-blue chip (`markdown-reference-chip` in
- * `tailwind/index.css`); this only replaces the link text.
+ * `style/index.css`); this only replaces the link text.
  */
 export function GitHubReferenceChip({
   reference,
@@ -110,7 +110,7 @@ export function GitHubReferenceChip({
   return (
     <span
       data-github-reference={reference.kind}
-      className={clsx(stylex.props(styles.chip).className, className)}
+      className={cn(stylex.props(styles.chip).className, className)}
     >
       {/* Keep the icon out of baseline alignment so the text supplies the inline baseline. */}
       <KindIcon {...stylex.props(styles.glyph)} aria-hidden="true" />

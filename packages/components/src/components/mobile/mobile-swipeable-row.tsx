@@ -32,8 +32,7 @@ import { withClassName } from '@/lib/stylex';
  *    irreversible, so it always goes through the caller's confirmation
  *    (the chip just fires `onDelete`), never an accidental long-drag.
  *
- * Konsta doesn't ship a swipe-action primitive — this is custom but
- * tries to feel native:
+ * A custom swipe-action implementation that tries to feel native:
  *  - Drag tracks the finger 1:1 (no rubber-banding on the negative
  *    direction; rightward drag past the snap-closed position is
  *    clamped so the row never reveals on the wrong side).

@@ -2,6 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectBrowserLanguage } from '../src/i18n';
 
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
 type GlobalWindow = typeof window & {
   __LODY_ELECTRON__?: true;
   __LODY_PLATFORM__?: {
@@ -74,5 +78,53 @@ describe('detectBrowserLanguage', () => {
     electronWindow.__LODY_PLATFORM__ = { os: 'linux', homeDir: '/home/test' };
 
     expect(detectBrowserLanguage()).toBeNull();
+  });
+});
+
+describe('i18n synchronous bootstrap', () => {
+  it('registers react-i18next before async locale loading so components mounted immediately survive re-render', async () => {
+    setLanguages(['zh-CN'], 'zh-CN');
+    vi.resetModules();
+
+    const [
+      { act: freshAct, createElement: h, useState: freshUseState },
+      { createRoot: freshRoot },
+    ] = await Promise.all([import('react'), import('react-dom/client')]);
+    const { getI18n, useTranslation } = await import('react-i18next');
+    const { initI18n } = await import('../src/i18n');
+
+    // Immediately after importing ../src/i18n — before awaiting initI18n or
+    // zh_CN.json — react-i18next must already have an initialized instance.
+    expect(getI18n()).toBeDefined();
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = freshRoot(container);
+
+    function Probe({ tick }: { tick: number }) {
+      const { t } = useTranslation();
+      const [items] = freshUseState<string[]>([]);
+      return h('span', null, `${tick}:${items.length}:${t('common.close')}`);
+    }
+
+    try {
+      freshAct(() => {
+        root.render(h(Probe, { tick: 1 }));
+      });
+      expect(container.textContent).toBe('1:0:Close');
+
+      await freshAct(async () => {
+        await initI18n('zh_CN');
+        root.render(h(Probe, { tick: 2 }));
+      });
+
+      expect(container.textContent).toContain('2:0:');
+      expect(container.textContent).not.toBe('2:0:Close');
+    } finally {
+      freshAct(() => {
+        root.unmount();
+      });
+      container.remove();
+    }
   });
 });

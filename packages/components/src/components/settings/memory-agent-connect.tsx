@@ -59,6 +59,7 @@ export function MemoryAgentConnectList({
   state,
   disabled,
   notice,
+  secondaryAction,
 }: {
   /** Passed in rather than resolved here, so this file stays a leaf module. */
   logo?: ReactNode;
@@ -72,6 +73,8 @@ export function MemoryAgentConnectList({
   disabled: boolean;
   /** What is wrong with the provider right now, said under its own name. */
   notice?: ReactNode;
+  /** Sits beside the heading's own action, e.g. uninstalling the provider. */
+  secondaryAction?: ReactNode;
 }) {
   const { t, i18n } = useTranslation();
   const [pending, setPending] = useState<readonly string[]>([]);
@@ -148,6 +151,7 @@ export function MemoryAgentConnectList({
         logo={logo}
         name={name}
         providerKey={providerKey}
+        secondaryAction={secondaryAction}
         action={
           // Gone rather than disabled once everything is connected: a button
           // with nothing left to do is furniture, and the dots already say so.

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 
-import { clsx } from 'clsx';
+import { cn } from '../cn';
 
 const styles = stylex.create({
   glyphs: {
@@ -111,7 +111,7 @@ function Alert({
       data-slot="alert"
       role="alert"
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -128,7 +128,7 @@ function AlertTitle({
     <div
       data-slot="alert-title"
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -145,7 +145,7 @@ function AlertDescription({
     <div
       data-slot="alert-description"
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />

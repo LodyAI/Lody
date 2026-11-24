@@ -463,6 +463,12 @@ jobs:
           SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: node apps/electron/sparkle-signing.mjs key-pair
+      - name: Prepare macOS Passkey credentials and native addons
+        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        env:
+          MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 }}
+        shell: bash
+        run: bash .github/scripts/prepare-macos-passkey.sh
       - name: Build Electron package (${{ matrix.target }})
         env:
           CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
@@ -480,6 +486,10 @@ jobs:
           else
             corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
           fi
+      - name: Verify signed macOS Passkey archives (production)
+        if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
+        shell: bash
+        run: bash .github/scripts/verify-macos-passkey-archive.sh
       - name: Generate signed Sparkle appcast and deltas (staging)
         if: matrix.target == 'mac' && needs.release.outputs.target_environment != 'production'
         uses: ./.github/actions/generate-sparkle-appcast
@@ -592,7 +602,11 @@ jobs:
           APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
         if: always() && matrix.target == 'mac'
         shell: bash
-        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8" \
+            "${RUNNER_TEMP}/macos-passkey.provisionprofile" \
+            "${RUNNER_TEMP}/macos-passkey.provisionprofile.plist"
   upload-electron-to-r2:
     needs:
       - release
@@ -1328,11 +1342,20 @@ jobs:
             local encoded_profile="$2"
             local profile_path="$3"
             local env_key="$4"
+            local require_associated_domains="${5:-false}"
             local plist_path="${profile_path}.plist"
             decode_base64_secret "${secret_name}" "${encoded_profile}" "${profile_path}"
             if ! security cms -D -i "${profile_path}" > "${plist_path}"; then
               echo "${secret_name} decoded but is not a valid provisioning profile"
               exit 1
+            fi
+            if [[ "${require_associated_domains}" == "true" ]]; then
+              local associated_domains
+              associated_domains="$(/usr/libexec/PlistBuddy -c 'Print Entitlements:com.apple.developer.associated-domains' "${plist_path}" 2>/dev/null || true)"
+              if [[ -z "${associated_domains}" ]]; then
+                echo "${secret_name} is missing Entitlements:com.apple.developer.associated-domains (required for Passkey webcredentials:lody.ai)"
+                exit 1
+              fi
             fi
             local uuid name
             uuid="$(/usr/libexec/PlistBuddy -c 'Print UUID' "${plist_path}")"
@@ -1347,7 +1370,8 @@ jobs:
             "IOS_APP_PROVISIONING_PROFILE_BASE64" \
             "${IOS_APP_PROVISIONING_PROFILE_BASE64}" \
             "${RUNNER_TEMP}/app.mobileprovision" \
-            "IOS_APP_PROFILE_NAME"
+            "IOS_APP_PROFILE_NAME" \
+            "true"
           install_profile \
             "IOS_EXTENSION_PROVISIONING_PROFILE_BASE64" \
             "${IOS_EXTENSION_PROVISIONING_PROFILE_BASE64}" \
@@ -1389,6 +1413,10 @@ jobs:
               settings['CODE_SIGN_IDENTITY[sdk=iphoneos*]'] = 'Apple Distribution'
               settings['PROVISIONING_PROFILE_SPECIFIER'] = profile_name
               settings['DEVELOPMENT_TEAM'] = team
+              if target_name == 'App'
+                settings['LODY_PASSKEY_ENABLED'] = 'YES'
+                settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.passkey.entitlements'
+              end
             end
           end
 
@@ -1408,6 +1436,9 @@ jobs:
             CURRENT_PROJECT_VERSION="${MOBILE_BUILD_NUMBER}" \
             CODE_SIGN_STYLE=Manual \
             archive
+      - name: Verify iOS Passkey archive configuration
+        shell: bash
+        run: bash .github/scripts/verify-ios-passkey-archive.sh "${RUNNER_TEMP}/Lody.xcarchive"
       - name: Export iOS IPA
         shell: bash
         run: |

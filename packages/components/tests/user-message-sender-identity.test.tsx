@@ -157,6 +157,100 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).not.toContain('Model: model-b');
   });
 
+  it('shows human-readable model names for new snapshots and safely formats legacy, custom, and gateway model IDs', async () => {
+    const onNavigateSession = vi.fn();
+    const providerModelId = '550e8400-e29b-41d4-a716-446655440000/codex%2Fgpt-6.2-sol';
+    let caseIndex = 0;
+    const renderAuthor = async (model: {
+      id: string;
+      name?: string;
+      source: 'configured' | 'runtime';
+    }) => {
+      const key = `case-${++caseIndex}`;
+      const delegated = {
+        ...message,
+        id: key,
+        author: {
+          v: 1 as const,
+          kind: 'agent' as const,
+          sessionId: 'source-session',
+          turnId: `source-turn-${caseIndex}`,
+          cliType: 'builtin' as const,
+          agentType: 'sorbet',
+          name: 'Lody Agent',
+          model,
+          reasoningEffort: 'medium',
+        },
+      } as unknown as SessionHistoryParsed;
+      await act(async () =>
+        root?.render(
+          createElement(
+            JotaiProvider,
+            { key },
+            createElement(
+              ForceDesktopLayoutProvider,
+              null,
+              createElement(MessageRowView, {
+                message: delegated,
+                sessionId,
+                user,
+                showSenderIdentity: false,
+                onNavigateSession,
+              })
+            )
+          )
+        )
+      );
+      const trigger = container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="View sender: Lody Agent"]'
+      );
+      expect(trigger).toBeTruthy();
+      await click(trigger!);
+    };
+
+    await renderAuthor({
+      id: providerModelId,
+      name: 'GPT-6.2 Sol',
+      source: 'runtime',
+    });
+    expect(document.body.textContent).toContain('Model: GPT-6.2 Sol');
+    expect(document.body.textContent).toContain('Reasoning: medium');
+    expect(document.body.textContent).not.toContain('550e8400-e29b-41d4-a716-446655440000');
+    expect(document.body.textContent).not.toContain('%2F');
+    const modelSpan = Array.from(document.body.querySelectorAll('span')).find((el) =>
+      el.textContent?.includes('Model: GPT-6.2 Sol')
+    );
+    expect(modelSpan?.getAttribute('title')).toBe(providerModelId);
+    const openSourceButton = Array.from(document.body.querySelectorAll('button')).find(
+      (btn) => btn.textContent === 'Open source conversation'
+    );
+    expect(openSourceButton).toBeTruthy();
+    await click(openSourceButton!);
+    expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: 'source-session' });
+
+    await renderAuthor({
+      id: providerModelId,
+      source: 'configured',
+    });
+    expect(document.body.textContent).toContain('Configured model: codex/gpt-6.2-sol');
+    expect(document.body.textContent).not.toContain('550e8400-e29b-41d4-a716-446655440000');
+    expect(document.body.textContent).not.toContain('%2F');
+
+    await renderAuthor({
+      id: 'openrouter/anthropic/claude-sonnet-4',
+      source: 'configured',
+    });
+    expect(document.body.textContent).toContain(
+      'Configured model: openrouter/anthropic/claude-sonnet-4'
+    );
+
+    await renderAuthor({
+      id: 'my-custom-model-100%',
+      source: 'configured',
+    });
+    expect(document.body.textContent).toContain('Configured model: my-custom-model-100%');
+  });
+
   it('renders an inline source conversation link in the metadata row and navigates back to the source session', async () => {
     const onNavigateSession = vi.fn();
     const store = createStore();

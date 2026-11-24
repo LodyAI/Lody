@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { SidebarRowEndSlot } from '@/components/sidebar-row-shared';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { WorkingGrid, type WorkingGridProps } from '@/ui/working-grid';
 import { WorkingStatusMark } from '@/ui/working-status-mark';
 
@@ -319,7 +319,7 @@ export const SidebarSimulation: Story = {
             {group.rows.map(([title, status], index) => (
               <div
                 key={title}
-                className={clsx(
+                className={cn(
                   'group',
                   stylex.props(
                     hoverStyles.row,

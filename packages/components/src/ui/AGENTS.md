@@ -8,6 +8,8 @@ feature directory.
 
 - Native iOS side drawers stay CSS-sized. Non-chat panels opt into
   `nativeKeyboardInset`; chat composers own their lift.
+- Side-drawer keyboard insets use `paddingBottom`, never `bottom`, so `DrawerContent`
+  stays full-viewport and never exposes `DrawerOverlay` or the screen underneath.
 - `DrawerContent` keeps popup/modal hosts state-backed, no-drag, inside the
   modal and outside scrollers. Body portals inherit pointer lock and pass clicks through.
 
@@ -109,7 +111,7 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
 
 - Use `@lody/ui/scroll-area` (Base UI). Its `viewportRef` is the scrolling node;
   never query vendor attributes from the root. Native controls share its tokens
-  through `nativeScrollbar`; `../tailwind/scrollbars.css` covers product containers.
+  through `nativeScrollbar`; `../style/scrollbars.css` covers product containers.
   Hidden bars, compact tracks and conversation gutters stay local.
 - Sidebar keeps `visibility="scroll"` (visible while scrolling), never `hover`.
 
@@ -117,7 +119,7 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
 
 - `ui/slider.tsx` is the native range input, not a library: the platform supplies
   keyboard stepping, Home/End, the ARIA role and value, and an OS-correct touch
-  target. Two global rules in `tailwind/index.css` must be worked around, and both
+  target. Two global rules in `style/index.css` must be worked around, and both
   are why this is a primitive rather than an inline `<input type="range">`.
   The "Pro focus style" paints an inset `box-shadow` on any focused input through
   a zero-specificity `:where(…)`, which on a range input outlines the whole

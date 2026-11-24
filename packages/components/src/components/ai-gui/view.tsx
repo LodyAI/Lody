@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { SessionFileImagePreview } from '../sessions/session-file-image-preview';
 import { collectFileDownload } from '@/lib/file-download';
 import { saveBytesAsFile } from '@/lib/download-file';
@@ -289,6 +289,7 @@ import type {
   MachineId,
   MessageTextSpan,
   SessionFilePayload,
+  ScheduleEditProposalMeta,
   ScheduleProposalMeta,
 } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
@@ -299,7 +300,10 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
-import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import {
+  ScheduleEditProposalNotice,
+  ScheduleProposalNotice,
+} from '@/components/schedules/schedule-proposal-notice';
 import { SessionLimitContinueAction } from '@/components/schedules/quota-continue-action';
 import { isClaudeSessionLimitMessage } from '@/components/schedules/quota-continue';
 import { isOperationSurfaceItem, shouldRenderSystemRowItem } from './message-content-guards';
@@ -502,7 +506,6 @@ const viewStyles = stylex.create({
   turnConfigTooltip: { [tooltip.maxWidth]: '20rem' },
   forkFooterSpacing: { marginRight: 'calc(var(--spacing) * 2)' },
   planCopySpacing: { marginRight: 'calc(var(--spacing) * -1)' },
-  /* ── The live status row ──────────────────────────────────────────────── */
   agentActivityRow: {
     paddingBottom: {
       default: themeSpace[2],
@@ -537,7 +540,6 @@ const viewStyles = stylex.create({
     fontWeight: themeFontWeight.normal,
   },
 
-  /* ── The empty conversation ───────────────────────────────────────────── */
   emptyState: {
     display: 'flex',
     justifyContent: 'center',
@@ -554,7 +556,6 @@ const viewStyles = stylex.create({
     color: themeColors.mutedForeground,
   },
 
-  /* ── The stream's shell ───────────────────────────────────────────────── */
   streamRoot: {
     position: 'relative',
     backgroundColor: themeColors.background,
@@ -619,7 +620,6 @@ const viewStyles = stylex.create({
   },
   justifyEnd: { display: 'flex', justifyContent: 'flex-end' },
 
-  /* ── Operation status ─────────────────────────────────────────────────── */
   columnGap2: { display: 'flex', flexDirection: 'column', gap: themeSpace[2] },
   columnGap1_5: { display: 'flex', flexDirection: 'column', gap: themeSpace[1.5] },
   columnGap1: { display: 'flex', flexDirection: 'column', gap: themeSpace[1] },
@@ -676,7 +676,6 @@ const viewStyles = stylex.create({
     opacity: 0.6,
   },
 
-  /* ── The agent notice banner ──────────────────────────────────────────── */
   noticeFrame: {
     width: '100%',
     overflow: 'hidden',
@@ -733,7 +732,6 @@ const viewStyles = stylex.create({
     },
   },
 
-  /* ── The capacity retry control ───────────────────────────────────────── */
   retryButton: {
     position: 'relative',
     isolation: 'isolate',
@@ -794,7 +792,6 @@ const viewStyles = stylex.create({
   },
   relativeZ10: { position: 'relative', zIndex: 10 },
 
-  /* ── The system notice rows ───────────────────────────────────────────── */
   noticeStack: { paddingBlock: themeSpace[1] },
   /** A notice that sits on its own row is indented to sit apart from the
    *  conversation; inside a turn that same indent is a broken left edge. */
@@ -803,7 +800,6 @@ const viewStyles = stylex.create({
     '@container (min-width: 640px)': { paddingLeft: themeSpace[3] },
   },
 
-  /* ── The worktree script notice ───────────────────────────────────────── */
   iconSmFlexNone: {
     height: themeSpace[3.5],
     width: themeSpace[3.5],
@@ -817,7 +813,6 @@ const viewStyles = stylex.create({
     fontWeight: themeFontWeight.medium,
   },
 
-  /* ── The user's message row ───────────────────────────────────────────── */
   userName: {
     maxWidth: 'calc(var(--spacing) * 40)',
     overflow: 'hidden',
@@ -1203,16 +1198,13 @@ const viewStyles = stylex.create({
     objectFit: 'contain',
   },
 
-  /* ── The file group ───────────────────────────────────────────────────── */
   fileOverflow: {
     paddingInline: themeSpace[1],
     color: themeColors.mutedForeground,
   },
 
-  /* ── The tool verb ────────────────────────────────────────────────────── */
   toolVerb: { color: 'color-mix(in oklab, hsl(var(--foreground) / 1) 90%, transparent)' },
 
-  /* ── The plan ─────────────────────────────────────────────────────────── */
   planCard: {
     borderRadius: themeRadius.lg,
     borderWidth: '1px',
@@ -1989,11 +1981,10 @@ const AgentActivityStatus = ({
 type ModelProvider = 'anthropic' | 'openai' | 'unknown';
 
 const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): ModelProvider => {
-  if (!modelInfo) return 'anthropic'; // Default to Anthropic
+  if (!modelInfo) return 'anthropic';
   const modelId = modelInfo.modelId?.toLowerCase() ?? '';
   const name = modelInfo.name?.toLowerCase() ?? '';
 
-  // Check for OpenAI/GPT models
   if (
     modelId.includes('gpt') ||
     modelId.includes('codex') ||
@@ -2003,7 +1994,6 @@ const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): Mode
     return 'openai';
   }
 
-  // Check for Anthropic/Claude models
   if (
     modelId.includes('claude') ||
     modelId.includes('sonnet') ||
@@ -2017,7 +2007,6 @@ const getModelProvider = (modelInfo?: { modelId?: string; name?: string }): Mode
     return 'anthropic';
   }
 
-  // Default to Anthropic for unknown models
   return 'anthropic';
 };
 
@@ -3839,7 +3828,7 @@ export const SessionChatStreamView = forwardRef<
                   // branch) pads the scroll content so the first message clears the
                   // header at rest while later content scrolls under it and blurs.
                   // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
-                  viewportClassName={clsx(
+                  viewportClassName={cn(
                     'chat-scrollbar',
                     stylex.props(viewStyles.conversationViewport).className
                   )}
@@ -4055,6 +4044,14 @@ const SystemMessageRowView = ({
           <ScheduleProposalNotice
             key={`schedule-proposal-${itemIndex}`}
             meta={item.meta as ScheduleProposalMeta}
+            sessionId={sessionId}
+            entryId={message.id}
+            itemIndex={itemIndex}
+          />
+        ) : item.type === 'system_notice' && item.name === 'schedule_edit_proposal' && item.meta ? (
+          <ScheduleEditProposalNotice
+            key={`schedule-edit-proposal-${itemIndex}`}
+            meta={item.meta as ScheduleEditProposalMeta}
             sessionId={sessionId}
             entryId={message.id}
             itemIndex={itemIndex}
@@ -6194,17 +6191,17 @@ const activityTypography = stylex.create({
   footnote: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
   caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
 });
-const ACTIVITY_PROCESS_TEXT_CLASS = clsx(stylex.props(conversationSurface.processText).className);
-const ACTIVITY_STEP_BODY_CLASS = clsx(stylex.props(conversationSurface.processText).className);
+const ACTIVITY_PROCESS_TEXT_CLASS = cn(stylex.props(conversationSurface.processText).className);
+const ACTIVITY_STEP_BODY_CLASS = cn(stylex.props(conversationSurface.processText).className);
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
 /** A one-line process status ("Context compacted"): the group header's box and type. */
 const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
-  clsx(
+  cn(
     stylex.props(conversationSurface.processLine).className,
     isMobile
-      ? clsx(stylex.props(viewStyles.processLineMobile).className, ACTIVITY_PROCESS_TEXT_CLASS)
+      ? cn(stylex.props(viewStyles.processLineMobile).className, ACTIVITY_PROCESS_TEXT_CLASS)
       : stylex.props(activityTypography.body).className
   );
 
@@ -6283,7 +6280,7 @@ function ProcessDisclosureButton({
           conversationSurface.disclosure,
           isMobile && conversationSurface.mobileDisclosure
         ),
-        clsx('group', isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined)
+        cn('group', isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined)
       )}
       onClick={() => {
         const next = !expanded;
@@ -6413,7 +6410,7 @@ function ActivityProcessStep({
     <div
       {...withClassName(
         stylex.props(conversationSurface.processStep, flush && conversationSurface.thoughtStep),
-        clsx(ACTIVITY_PROCESS_TEXT_CLASS, className)
+        cn(ACTIVITY_PROCESS_TEXT_CLASS, className)
       )}
     >
       {icon ? <span {...stylex.props(viewStyles.activityStepIcon)}>{icon}</span> : null}
@@ -9040,7 +9037,7 @@ const CollapsibleCard = ({
       {...containerProps}
       {...withClassName(
         stylex.props(viewStyles.collapsibleContainer, containerStyles),
-        clsx(containerClassName, containerProps?.className)
+        cn(containerClassName, containerProps?.className)
       )}
     >
       <button
@@ -9055,7 +9052,7 @@ const CollapsibleCard = ({
               ? viewStyles.collapsibleCursorPointer
               : viewStyles.collapsibleCursorDefault
           ),
-          clsx('group', buttonClassName)
+          cn('group', buttonClassName)
         )}
         onClick={canToggle ? () => setExpanded(!isExpanded) : onActivate}
         aria-expanded={canToggle ? isExpanded : undefined}
@@ -9115,7 +9112,7 @@ const ThoughtCard = ({
       isCollapsible
       expanded={searchState.hasActive ? true : expanded}
       onExpandedChange={onExpandedChange}
-      containerClassName={clsx(
+      containerClassName={cn(
         searchState.hasMatched && SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
         searchState.hasActive && SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME
       )}

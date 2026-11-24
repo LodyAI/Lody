@@ -4,7 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
-import { getAgentRoleEmoji, type AgentMessageAuthor, type SessionId } from '@lody/shared';
+import {
+  formatAgentAuthorModelDisplayName,
+  getAgentRoleEmoji,
+  type AgentMessageAuthor,
+  type SessionId,
+} from '@lody/shared';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Popover } from '@/ui/armed-overlays';
 import { AgentIcon, AGENT_BRAND_ICONS } from '@/components/icons/agent-icon';
@@ -44,6 +49,9 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
   const contextNavigate = useSessionLinkNavigator();
   const navigate = onNavigateSession ?? contextNavigate;
   const name = author.role?.name ?? author.name;
+  const modelDisplayName = author.model
+    ? formatAgentAuthorModelDisplayName(author.model)
+    : undefined;
   const BrandIcon = author.brandId ? AGENT_BRAND_ICONS[author.brandId] : undefined;
   const unknownIcon = <span>{Array.from(author.name)[0] ?? '?'}</span>;
   const icon = author.role ? (
@@ -80,8 +88,8 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
         <div {...stylex.props(styles.details)}>
           <strong {...stylex.props(styles.title)}>{name}</strong>
           {author.role ? <span {...stylex.props(styles.muted)}>{author.name}</span> : null}
-          {author.model ? (
-            <span>
+          {author.model && modelDisplayName ? (
+            <span title={modelDisplayName !== author.model.id ? author.model.id : undefined}>
               {t(
                 author.model.source === 'runtime'
                   ? 'sessions.messageAuthor.model'
@@ -89,7 +97,7 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
                 author.model.source === 'runtime'
                   ? 'Model: {{model}}'
                   : 'Configured model: {{model}}',
-                { model: author.model.name ?? author.model.id }
+                { model: modelDisplayName }
               )}
             </span>
           ) : null}

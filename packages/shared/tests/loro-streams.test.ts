@@ -6,6 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 
+import { createStreamsCrdt } from '../src/streams-crdt-factory';
+import {
+  getStreamsHttpFallbackCounts,
+  resetStreamsHttpFallbackCounts,
+} from '../src/streams-transport-diagnostics';
 import {
   DEFAULT_LORO_STREAMS_BASE_URL,
   DEFAULT_LORO_STREAMS_PRESENCE_BASE_URL,
@@ -245,4 +250,39 @@ describe('Streams bootstrap with the Lody snapshot codec', () => {
       }
     }
   );
+});
+
+describe('createStreamsCrdt factory and HTTP fallback diagnostics', () => {
+  it('records no-ws fallback when webSocket is disabled and stays clean when enabled', async () => {
+    resetStreamsHttpFallbackCounts();
+    const docA = new LoroDoc();
+    const disabledTransport = createStreamsCrdt({
+      streamUrl: 'https://streams.example.com/v1/streams/disabled-ws',
+      adapter: createLoroDocAdapter(docA),
+      webSocket: 'disabled',
+      shardUrls: 'disabled',
+    });
+    expect(getStreamsHttpFallbackCounts()['no-ws']).toBe(1);
+
+    const docB = new LoroDoc();
+    const enabledTransport = createStreamsCrdt({
+      streamUrl: 'https://streams.example.com/v1/streams/enabled-ws',
+      adapter: createLoroDocAdapter(docB),
+      webSocket: {
+        enabled: true,
+        url: 'wss://streams.example.com/ds/ws',
+        auth: async () => 'token',
+      },
+      shardUrls: 'disabled',
+    });
+    expect(getStreamsHttpFallbackCounts()['no-ws']).toBe(1);
+
+    resetStreamsHttpFallbackCounts();
+    expect(getStreamsHttpFallbackCounts()['no-ws']).toBe(0);
+
+    await disabledTransport.close();
+    await enabledTransport.close();
+    docA.free();
+    docB.free();
+  });
 });

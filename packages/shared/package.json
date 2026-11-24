@@ -16,6 +16,8 @@
     "./node/e2ee-identity": "./src/node/e2ee-identity.ts",
     "./e2ee-local-pairing": "./src/e2ee-local-pairing.ts",
     "./workspace-streams-persistence": "./src/workspace-streams-persistence.ts",
+    "./streams-crdt-factory": "./src/streams-crdt-factory.ts",
+    "./streams-transport-diagnostics": "./src/streams-transport-diagnostics.ts",
     "./workspace-streams-content": "./src/workspace-streams-content.ts",
     "./notifications": {
       "types": "./src/notifications/index.ts",

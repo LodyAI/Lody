@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -225,7 +225,7 @@ function LayoutHarness({
           secondaryPanel={
             <div
               data-lody-action-scope="side-panel"
-              className={clsx(stylex.props(storyLayout.stack2).className, 'group/close-scope')}
+              className={cn(stylex.props(storyLayout.stack2).className, 'group/close-scope')}
             >
               <div {...stylex.props(sceneStyles.secondaryHeader)}>Panel tabs</div>
               <WidthReadout label={empty ? 'Empty sidebar' : 'PR panel'} />

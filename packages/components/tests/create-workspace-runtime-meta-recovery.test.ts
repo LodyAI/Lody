@@ -1,3 +1,4 @@
+import { createLoroStreamsJsonStreamClient } from '@lody/loro-streams-rpc';
 import { ScheduleRepository } from '@lody/shared/schedule-repository';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -5,7 +6,8 @@ import {
   getSessionRoomId,
   type MachineId,
   type SessionId,
-  type WorkspaceId} from '@lody/shared';
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { createE2eeContent } from '../src/providers/desktop-e2ee-content';
@@ -14,7 +16,7 @@ const mocks = vi.hoisted(() => {
   const setTransportAdapter = vi.fn(async () => {});
   // Mirrors loro-repo: addTransport connects the adapter before resolving, so
   // the in-flight-attach dispose test can gate on the adapter's connect().
-  const addTransport = vi.fn(async (_id: string, adapter?: { connect?: () => Promise<void> }) => {
+  const addTransport = vi.fn(async (_id: string, adapter?: { connect?: () => Promise<void> }, _options?: unknown) => {
     await adapter?.connect?.();
   });
   const removeTransport = vi.fn(async () => {});
@@ -214,6 +216,17 @@ vi.mock('loro-repo/transport/streams', () => ({
     });
   },
 }));
+
+vi.mock('@loro-dev/streams-crdt', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-crdt')>();
+  return {
+    ...actual,
+    StreamsCrdt: class StreamsCrdt {
+      createStream = vi.fn(async () => ({ ok: true }));
+      close = vi.fn(async () => {});
+    },
+  };
+});
 
 vi.mock('@loro-dev/streams-crdt/loro', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@loro-dev/streams-crdt/loro')>();
@@ -1584,6 +1597,80 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await flushPromises();
 
     expect(candidates).toEqual(['visible']);
+    await runtime.dispose();
+  });
+
+  it('registers cloud transport with 15s local forwarding delay in dual mode', async () => {
+    enableElectronLocalDataPlane();
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-dual-delay' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    await runtime.setAuthToken('auth-token');
+    await flushPromises();
+
+    const cloudAdd = mocks.addTransport.mock.calls.find(([id]) => id === 'cloud');
+    expect(cloudAdd?.[2]).toEqual({
+      ephemeral: true,
+      forwardingPolicy: {
+        delayFromTransports: {
+          local: 15_000,
+        },
+      },
+    });
+
+    await runtime.dispose();
+  });
+
+  it('aligns WS authPoolKey and base URL across StreamsCrdt and RPC StreamsClient', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+
+    const runtime = await createWorkspaceRuntime({
+      content: { mode: 'plaintext' },
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-ws-pool' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      streamsWebSocketEnabled: true,
+    });
+
+    await flushPromises();
+
+    const crdtOpts = mocks.streamsTransportConstructors.mock.calls[0]?.[0] as {
+      webSocket?: { enabled: true; url: string; authPoolKey: string };
+    };
+    const rpcOpts = vi.mocked(createLoroStreamsJsonStreamClient).mock.calls[0]?.[0] as {
+      webSocket?: {
+        enabled: true;
+        url: string;
+        authPoolKey: string;
+        auth?: (context: { reason: 'connect' | 'initial' | 'reauth' | 'renew'; previousToken?: string }) => Promise<string>;
+      };
+    };
+
+    expect(crdtOpts.webSocket).toEqual({
+      enabled: true,
+      url: expect.any(String),
+      authPoolKey: 'workspace-ws-pool',
+    });
+    expect(rpcOpts.webSocket).toEqual({
+      enabled: true,
+      url: crdtOpts.webSocket?.url,
+      authPoolKey: 'workspace-ws-pool',
+      auth: expect.any(Function),
+    });
+
+    await rpcOpts.webSocket!.auth!({ reason: 'reauth', previousToken: 'stale-token' });
+    expect(mocks.authInvocations.at(-1)?.context).toEqual({
+      reason: 'unauthorized',
+      previousToken: 'stale-token',
+    });
+
     await runtime.dispose();
   });
 });

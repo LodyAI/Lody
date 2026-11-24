@@ -59,6 +59,89 @@ export type AgentMessageAuthor = z.infer<typeof AgentMessageAuthorSchema>;
 const short = (value: string | undefined): string | undefined =>
   value?.trim().slice(0, 256) || undefined;
 
+const UUID_PREFIX_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;
+
+const decodePercentSegment = (value: string): string => {
+  if (!value.includes('%')) return value;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+export function formatAgentModelIdFallback(modelId: string): string {
+  const trimmed = modelId.trim();
+  if (!trimmed) return modelId;
+  const withoutUuidPrefix = UUID_PREFIX_RE.test(trimmed)
+    ? trimmed.slice(trimmed.indexOf('/') + 1)
+    : trimmed;
+  const decoded = decodePercentSegment(withoutUuidPrefix).trim();
+  return decoded || trimmed;
+}
+
+export function formatAgentAuthorModelDisplayName(
+  model: Pick<NonNullable<AgentMessageAuthor['model']>, 'id' | 'name'>
+): string {
+  const rawName = model.name?.trim();
+  const candidate =
+    rawName && rawName !== model.id.trim() ? rawName : formatAgentModelIdFallback(model.id);
+  return candidate.replace(/\s*\(recommended\)/gi, '').trim() || model.id;
+}
+
+export function enrichAgentMessageAuthorModel(
+  author: AgentMessageAuthor,
+  modelInfo?: Pick<ModelInfo, 'modelId' | 'name'>,
+  fallbackModelName?: string
+): AgentMessageAuthor {
+  const runtimeId = short(modelInfo?.modelId);
+  const resolvedFallback = short(fallbackModelName);
+  if (runtimeId) {
+    const runtimeName = short(modelInfo?.name);
+    const existingSameModelName =
+      author.model?.id === runtimeId &&
+      author.model.name &&
+      author.model.name !== author.model.id
+        ? author.model.name
+        : undefined;
+    const resolvedName =
+      runtimeName && runtimeName !== runtimeId
+        ? runtimeName
+        : (resolvedFallback ?? existingSameModelName ?? runtimeName);
+    const shouldUpgrade =
+      !author.model ||
+      author.model.source === 'configured' ||
+      (author.model.id === runtimeId &&
+        Boolean(resolvedName) &&
+        (!author.model.name || author.model.name === author.model.id) &&
+        resolvedName !== author.model.name);
+    if (!shouldUpgrade) return author;
+    return AgentMessageAuthorSchema.parse({
+      ...author,
+      model: {
+        id: runtimeId,
+        ...(resolvedName ? { name: resolvedName } : {}),
+        source: 'runtime',
+      },
+    });
+  }
+  if (
+    author.model &&
+    resolvedFallback &&
+    (!author.model.name || author.model.name === author.model.id) &&
+    resolvedFallback !== author.model.name
+  ) {
+    return AgentMessageAuthorSchema.parse({
+      ...author,
+      model: {
+        ...author.model,
+        name: resolvedFallback,
+      },
+    });
+  }
+  return author;
+}
+
 /** Explicit allowlist: never spread launch config, option dictionaries or model _meta. */
 export function buildAgentMessageAuthor(input: {
   sessionId: string;
@@ -70,6 +153,7 @@ export function buildAgentMessageAuthor(input: {
   brandId?: AgentBrandId;
   inputConfig?: SessionTurnInputConfig;
   modelInfo?: Pick<ModelInfo, 'modelId' | 'name'>;
+  modelName?: string;
   role?: AgentRoleSnapshot;
 }): AgentMessageAuthor {
   const config = input.inputConfig;
@@ -83,7 +167,14 @@ export function buildAgentMessageAuthor(input: {
         v === ACP_CONFIG_OPTION_ON_VALUE ? true : v === ACP_CONFIG_OPTION_OFF_VALUE ? false : v
       )
       .find((v): v is boolean => typeof v === 'boolean');
-  const modelId = short(input.modelInfo?.modelId ?? config?.modelId ?? stringOption('model'));
+  const runtimeModelId = short(input.modelInfo?.modelId);
+  const modelId = runtimeModelId ?? short(config?.modelId ?? stringOption('model'));
+  const runtimeModelName = short(input.modelInfo?.name);
+  const fallbackModelName = short(input.modelName);
+  const modelName =
+    runtimeModelName && runtimeModelName !== modelId
+      ? runtimeModelName
+      : (fallbackModelName ?? runtimeModelName);
   const reasoningEffort = short(
     stringOption('reasoning_effort', 'reasoning', 'effort', 'thought_level')
   );
@@ -119,8 +210,8 @@ export function buildAgentMessageAuthor(input: {
       ? {
           model: {
             id: modelId,
-            ...(short(input.modelInfo?.name) ? { name: short(input.modelInfo?.name) } : {}),
-            source: input.modelInfo?.modelId ? 'runtime' : 'configured',
+            ...(modelName ? { name: modelName } : {}),
+            source: runtimeModelId ? 'runtime' : 'configured',
           },
         }
       : {}),

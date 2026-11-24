@@ -1,5 +1,5 @@
 import { useGithubWorkspaceQuery, useGithubWorkspaceStatus } from '@/hooks/use-github-workspace';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useMySessionScope } from '@/hooks/use-visible-session-metas';
 import { useSessionOwnerAccess } from '@/hooks/use-session-owner-access';
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
@@ -7380,7 +7380,7 @@ const SessionDetail = ({
       onMentionSession={handleInsertDroppedSessionMention}
       leftSlot={leftSidebarExpandButton}
       rightSlot={desktopHeaderToolbar}
-      className={clsx(
+      className={cn(
         stylex.props(
           detailStyles.topBarHeight,
           detailStyles.parentActiveScope,
@@ -7593,7 +7593,7 @@ const SessionDetail = ({
     <div
       data-lody-session-tab-region="side-panel"
       data-lody-action-scope="side-panel"
-      className={clsx(
+      className={cn(
         'group/close-scope',
         stylex.props(stylex.defaultMarker(), detailStyles.desktopPanelShell).className
       )}
@@ -7619,7 +7619,7 @@ const SessionDetail = ({
           />
         }
         endSlot={sidebarToggleButton}
-        className={clsx(
+        className={cn(
           stylex.props(detailStyles.sideTabBar).className,
           // Right panel is never under the macOS traffic lights (top-left) —
           // it must not reserve the titlebar inset the left sidebar needs. It

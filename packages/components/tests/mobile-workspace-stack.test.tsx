@@ -13,6 +13,11 @@ import { Provider, createStore } from 'jotai';
 import { initI18n } from '../src/i18n';
 import { getSessionCreationNavigation } from '../src/components/chat/submission/use-composer-navigation-focus';
 import { MobileWorkspaceStack } from '../src/components/mobile/mobile-workspace-stack';
+import {
+  consumeMobileBackNavigation,
+  dispatchMobileBack,
+  markMobileBackNavigation,
+} from '../src/lib/mobile-back-navigation';
 
 // Keep the actual router and Vaul stack. Session data and the persistent home
 // are leaves here; their business behavior is covered by their owning suites.
@@ -55,6 +60,7 @@ describe('mobile new-chat presentation', () => {
   let container: HTMLDivElement;
   beforeEach(async () => {
     await initI18n('en');
+    consumeMobileBackNavigation();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -71,12 +77,13 @@ describe('mobile new-chat presentation', () => {
       root.unmount();
       await vi.runOnlyPendingTimersAsync();
     });
+    consumeMobileBackNavigation();
     vi.useRealTimers();
     container.remove();
     frames.length = 0;
     vi.unstubAllGlobals();
   });
-  async function mount() {
+  async function mount(initialPath = '/workspace/chat') {
     const rootRoute = createRootRoute();
     const workspace = createRoute({ getParentRoute: () => rootRoute, path: '$workspaceName' });
     const auth = createRoute({
@@ -95,7 +102,7 @@ describe('mobile new-chat presentation', () => {
       routeTree: rootRoute.addChildren([
         workspace.addChildren([auth.addChildren([chat, sessions.addChildren([session])])]),
       ]),
-      history: createMemoryHistory({ initialEntries: ['/workspace/chat'] }),
+      history: createMemoryHistory({ initialEntries: [initialPath] }),
     });
     await act(async () => {
       await router.load();
@@ -161,5 +168,30 @@ describe('mobile new-chat presentation', () => {
     });
     expect(drawer()?.getAttribute('data-vaul-animate')).toBe('true');
     expect(document.querySelector('[data-session="existing"]')).not.toBeNull();
+  });
+
+  it('closes the open session drawer via system back and suppresses replay when returning to an open session', async () => {
+    markMobileBackNavigation();
+    const router = await mount('/workspace/sessions/existing');
+    expect(document.querySelector('[data-session="existing"]')).not.toBeNull();
+    expect(drawer()?.getAttribute('data-vaul-animate')).toBe('false');
+    await act(async () => frames.splice(0).forEach((frame) => frame(0)));
+
+    let handled = false;
+    await act(async () => {
+      handled = dispatchMobileBack();
+    });
+    expect(handled).toBe(true);
+    expect(router.state.location.pathname).toBe('/workspace/chat');
+    expect(drawer()?.getAttribute('data-state')).toBe('closed');
+
+    await act(async () => {
+      await router.navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: 'workspace', sessionId: 'existing' },
+      });
+    });
+    expect(drawer()?.getAttribute('data-state')).toBe('open');
+    expect(drawer()?.getAttribute('data-vaul-animate')).toBe('true');
   });
 });

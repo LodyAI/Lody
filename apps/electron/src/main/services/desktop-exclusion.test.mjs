@@ -173,6 +173,20 @@ void test('a lease never accepts cloud callbacks or unsupported routes', async (
     true
   )
   assert.equal(received, 'lody://chat/new?machine=machine-1&project=project-1')
+
+  assert.equal(
+    await handOffDesktopDeepLink(
+      'ai.lody.nightly://settings/agents?create=codex&machine=machine-1',
+      endpoint
+    ),
+    true
+  )
+  assert.equal(received, 'lody://settings/agents?create=codex&machine=machine-1')
+
+  assert.equal(
+    await handOffDesktopDeepLink('lody://settings/agents?create=custom&command=sh', endpoint),
+    false
+  )
 })
 
 void test('concurrent pending handoffs are delivered in arrival order after ready', async () => {

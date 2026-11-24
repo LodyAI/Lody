@@ -80,7 +80,15 @@ export interface HarnessState {
   credentials: Record<string, Credential>;
   customs: CustomProvider[];
   models: SorbetModel[];
+  /**
+   * Sorbet's machine-wide Host settings, read with `sorbet/host-settings-get`.
+   * Machine-scoped, so it does not follow the profile/device split the drawn
+   * toggles pretend to have; `null` until the machine answers.
+   */
+  hostSettings: import('@lody/shared/local-machine-rpc').SorbetHostSettings | null;
   status: 'loading' | 'ready' | 'error' | 'unsupported' | 'no-agent' | 'no-runtime';
+  /** Whether the machine spoke `sorbet/host-settings-*` on the last probe. */
+  hostSettingsSupported: boolean;
   profile: HarnessConfig;
   /**
    * Profile keys someone set through "Profile · all devices". Only these mark
@@ -115,6 +123,8 @@ const initial = (): HarnessState => ({
   credentials: {},
   customs: [],
   models: [],
+  hostSettings: null,
+  hostSettingsSupported: false,
   status: 'loading',
   profile: DEFAULT_PROFILE,
   overrides: {},
@@ -142,6 +152,8 @@ function hydrate() {
         credentials: {},
         customs: [],
         models: [],
+        hostSettings: null,
+        hostSettingsSupported: false,
         status: 'loading',
       };
   } catch {}
@@ -155,6 +167,8 @@ function commit(next: HarnessState) {
       credentials: _credentials,
       customs: _customs,
       models: _models,
+      hostSettings: _hostSettings,
+      hostSettingsSupported: _hostSettingsSupported,
       status: _status,
       ...persisted
     } = next;
@@ -232,6 +246,14 @@ export const harness = {
    */
   applyRemote(patch: Pick<HarnessState, 'credentials' | 'customs' | 'models' | 'status'>) {
     commit(reconcileModels({ ...state, ...patch }));
+  },
+
+  /**
+   * The machine's Host settings, applied separately from the credentials
+   * read: it depends on the host-settings capability, not the providers one.
+   */
+  applyHostSettings(hostSettings: HarnessState['hostSettings'], supported: boolean) {
+    commit({ ...state, hostSettings, hostSettingsSupported: supported });
   },
 
   select(device: string) {

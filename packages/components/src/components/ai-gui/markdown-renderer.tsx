@@ -42,7 +42,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkMath from 'remark-math';
-import { Check, Copy, MessagesSquare } from 'lucide-react';
+import { CalendarClock, Check, Copy, MessagesSquare, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
@@ -60,7 +60,7 @@ import {
   normalizeTexMathDelimiters,
   remarkSingleDollarTextMath,
 } from '@/lib/markdown-single-dollar-math';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -71,8 +71,18 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 import { usePrLinkInterceptor } from './pr-link-context';
-import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
-import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  parseAppActionLinkHref,
+  parseSessionLinkHref,
+  useAppActionLinkNavigator,
+  useSessionLinkNavigator,
+} from './session-link-context';
+import {
+  buildAppActionLink,
+  parseSessionLink,
+  type AppActionLink,
+  type SessionLink,
+} from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
@@ -82,6 +92,9 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { MarkdownFencedCodeBlock } from './markdown-code-block';
+import { GenuiSurface } from './genui/genui-surface';
+import { GENUI_CATALOG } from './genui/genui-catalog';
+import { remarkGenuiInline } from './genui/remark-genui-inline';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { MarkdownMermaidBlock } from './markdown-mermaid-block';
 import {
@@ -198,15 +211,15 @@ const markdownStyles = stylex.create({
   compactParagraph: { marginBottom: { default: space[1], ':last-child': 0 } },
   list: {
     marginBlock: { default: space[2], ':is(li > ul, li > ol)': space[1] },
-    paddingLeft: { default: 0, ':is(.contains-task-list)': space[3] },
-    listStyleType: { default: 'none', ':is(.contains-task-list)': 'disc' },
+    paddingLeft: 0,
+    listStyleType: 'none',
   },
   listItem: {
     position: 'relative',
     marginTop: { default: 0, ':not(:first-child)': conversation.listItemGap },
     marginBottom: 0,
     paddingBlock: 0,
-    paddingLeft: { default: space[6], ':is(.task-list-item)': 0 },
+    paddingLeft: space[6],
     '::before': {
       position: 'absolute',
       content: "''",
@@ -234,6 +247,13 @@ const markdownStyles = stylex.create({
   },
   compactListItem: { marginTop: { default: 0, ':not(:first-child)': `calc(${space[1]} / 2)` } },
   taskItem: { '::before': { content: 'none' } },
+  taskCheckbox: {
+    position: 'absolute',
+    left: conversation.railInset,
+    top: '0.5lh',
+    transform: 'translateY(-50%)',
+    margin: 0,
+  },
   quote: {
     marginTop: conversation.paragraphGap,
     marginBottom: { default: conversation.paragraphGap, ':last-child': 0 },
@@ -434,8 +454,13 @@ export interface MarkdownPartStyles {
   referenceChip?: stylex.StyleXStyles;
 }
 
-const MarkdownListKindContext = createContext<'unordered' | 'ordered' | 'task'>('unordered');
+const MarkdownListKindContext = createContext<'unordered' | 'ordered'>('unordered');
+const MarkdownTaskItemContext = createContext(false);
 const MarkdownCompactContext = createContext(false);
+
+function hasClassNameToken(className: string | undefined, token: string): boolean {
+  return className?.split(/\s+/).includes(token) ?? false;
+}
 
 function MarkdownListItem({
   node: _node,
@@ -444,20 +469,42 @@ function MarkdownListItem({
 }: ComponentPropsWithoutRef<'li'> & ExtraProps) {
   const kind = useContext(MarkdownListKindContext);
   const compact = useContext(MarkdownCompactContext);
+  const isTaskItem = hasClassNameToken(className, 'task-list-item');
   return (
-    <li
-      {...props}
-      {...withClassName(
-        stylex.props(
-          markdownStyles.listItem,
-          compact && markdownStyles.compactListItem,
-          kind === 'ordered' && markdownStyles.orderedItem,
-          kind === 'task' && markdownStyles.taskItem
-        ),
-        className
-      )}
-    />
+    <MarkdownTaskItemContext.Provider value={isTaskItem}>
+      <li
+        {...props}
+        {...withClassName(
+          stylex.props(
+            markdownStyles.listItem,
+            compact && markdownStyles.compactListItem,
+            !isTaskItem && kind === 'ordered' && markdownStyles.orderedItem,
+            isTaskItem && markdownStyles.taskItem
+          ),
+          className
+        )}
+      />
+    </MarkdownTaskItemContext.Provider>
   );
+}
+
+function MarkdownInput({
+  node: _node,
+  className,
+  type,
+  ...props
+}: ComponentPropsWithoutRef<'input'> & ExtraProps) {
+  const isTaskItem = useContext(MarkdownTaskItemContext);
+  if (isTaskItem && type === 'checkbox') {
+    return (
+      <input
+        {...props}
+        type={type}
+        {...withClassName(stylex.props(markdownStyles.taskCheckbox), className)}
+      />
+    );
+  }
+  return <input {...props} type={type} className={className} />;
 }
 
 const markdownDescendants = stylex.create({
@@ -651,7 +698,7 @@ function MarkdownSessionLink({
         data-session-link={sessionId}
         style={stylex.props(xstyle).style}
         title={title}
-        className={clsx(
+        className={cn(
           SESSION_LINK_CHIP_CLASS_NAME,
           stylex.props(markdownStyles.sessionChip, xstyle).className
         )}
@@ -666,7 +713,7 @@ function MarkdownSessionLink({
       data-session-link={sessionId}
       style={stylex.props(xstyle).style}
       title={title}
-      className={clsx(
+      className={cn(
         SESSION_LINK_CHIP_CLASS_NAME,
         stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive, xstyle)
           .className
@@ -678,6 +725,55 @@ function MarkdownSessionLink({
           tabSessionId: target.tabSessionId as SessionId | undefined,
         })
       }
+    >
+      {body}
+    </button>
+  );
+}
+
+function MarkdownActionLink({
+  target,
+  children,
+  inert,
+}: {
+  target: AppActionLink;
+  children: ReactNode;
+  inert: boolean;
+}) {
+  const navigate = useAppActionLinkNavigator();
+  const canonicalHref = buildAppActionLink(target);
+  const title = markdownLinkText(children).trim() || canonicalHref;
+  const Icon = target.kind === 'schedules' ? CalendarClock : SlidersHorizontal;
+  const body = (
+    <>
+      <Icon {...stylex.props(markdownStyles.emLinkGlyph)} aria-hidden="true" />
+      <span {...stylex.props(markdownStyles.emText)}>{title}</span>
+    </>
+  );
+  if (!navigate || inert) {
+    return (
+      <span
+        data-action-link={canonicalHref}
+        title={title}
+        className={cn(
+          SESSION_LINK_CHIP_CLASS_NAME,
+          stylex.props(markdownStyles.sessionChip).className
+        )}
+      >
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-action-link={canonicalHref}
+      title={title}
+      className={cn(
+        SESSION_LINK_CHIP_CLASS_NAME,
+        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
+      )}
+      onClick={() => navigate(target)}
     >
       {body}
     </button>
@@ -1101,6 +1197,7 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkLinkifyFilePaths,
   remarkMarkUnclosedFences,
   [remarkMath, { singleDollarTextMath: false }],
+  remarkGenuiInline,
 ] satisfies StreamdownProps['remarkPlugins'];
 const INLINE_MATH_REMARK_PLUGINS = [
   ...MARKDOWN_REMARK_PLUGINS,
@@ -1165,7 +1262,9 @@ const StreamingMarkdown = lazy<ComponentType<StreamdownProps>>(() =>
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
 const markdownUrlTransform: UrlTransform = (value) =>
-  isMarkdownAgentFileHref(value) || parseSessionLinkHref(value)
+  isMarkdownAgentFileHref(value) ||
+  parseSessionLinkHref(value) ||
+  parseAppActionLinkHref(value) !== null
     ? value
     : defaultUrlTransform(value);
 
@@ -1195,6 +1294,17 @@ function MarkdownPre({ node, ...props }: ComponentPropsWithoutRef<'pre'> & Extra
     return <MarkdownMermaidBlock code={block.code} />;
   }
   if (block.language === 'diff') return <MarkdownDiffBlock {...block} />;
+  if (block.language === 'genui') {
+    const offset = node?.position?.start.offset;
+    return (
+      <GenuiSurface
+        code={block.code}
+        streaming={block.isIncomplete}
+        surfaceId={offset === undefined ? undefined : `genui@${offset}`}
+        fallback={<MarkdownFencedCodeBlock {...block} />}
+      />
+    );
+  }
   return <MarkdownFencedCodeBlock {...block} />;
 }
 
@@ -1463,18 +1573,21 @@ const createMarkdownComponents = ({
     </p>
   ),
   ul: ({ node: _node, className, ...props }) => (
-    <MarkdownListKindContext.Provider
-      value={className?.split(' ').includes('contains-task-list') ? 'task' : 'unordered'}
-    >
-      <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+    <MarkdownListKindContext.Provider value="unordered">
+      <MarkdownTaskItemContext.Provider value={false}>
+        <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+      </MarkdownTaskItemContext.Provider>
     </MarkdownListKindContext.Provider>
   ),
   ol: ({ node: _node, className, ...props }) => (
     <MarkdownListKindContext.Provider value="ordered">
-      <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+      <MarkdownTaskItemContext.Provider value={false}>
+        <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+      </MarkdownTaskItemContext.Provider>
     </MarkdownListKindContext.Provider>
   ),
   li: MarkdownListItem,
+  input: MarkdownInput,
   blockquote: ({ node: _node, className, ...props }) => (
     <blockquote {...props} {...withClassName(stylex.props(markdownStyles.quote), className)} />
   ),
@@ -1601,6 +1714,14 @@ const createMarkdownComponents = ({
         </MarkdownSessionLink>
       );
     }
+    const linkedAction = parseAppActionLinkHref(href);
+    if (linkedAction) {
+      return (
+        <MarkdownActionLink target={linkedAction} inert={readonly}>
+          {children}
+        </MarkdownActionLink>
+      );
+    }
     // Workspace resource links are display-only in a publication, not a second
     // download API. Ordinary article/GitHub links remain explicit external navigation.
     if (readonly && href && isWorkspaceResourceHref(href)) {
@@ -1641,7 +1762,7 @@ const createMarkdownComponents = ({
           rel={rel}
           {...rest}
           style={{ ...stylex.props(partStyles?.referenceChip).style, ...rest.style }}
-          className={clsx(
+          className={cn(
             rest.className,
             'markdown-reference-chip',
             stylex.props(
@@ -1667,6 +1788,24 @@ const createMarkdownComponents = ({
   // <source> is suppressed since it's only meaningful inside a real browser <picture>.
   source: () => null,
   picture: (props: MarkdownPictureProps) => <>{props.children}</>,
+  ...({
+    'genui-inline': ({ node: hastNode }: { node?: { properties?: Record<string, unknown> } }) => {
+      const tag = hastNode?.properties?.['dataGenuiTag'];
+      const raw = hastNode?.properties?.['dataGenuiProps'];
+      const renderer = typeof tag === 'string' ? GENUI_CATALOG[tag] : undefined;
+      let props: Record<string, unknown> | undefined;
+      try {
+        const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+        if (typeof parsed === 'object' && parsed !== null) {
+          props = parsed as Record<string, unknown>;
+        }
+      } catch {
+        props = undefined;
+      }
+      if (!renderer || !props) return null;
+      return <>{renderer(props)}</>;
+    },
+  } as Components),
 });
 
 function ConversationMarkdownImage(props: MarkdownImageProps) {
@@ -1753,7 +1892,7 @@ function SizedMarkdownImage(props: MarkdownImageProps) {
       // With `height: auto`, these reserve the image's aspect ratio before it loads.
       width={outcome?.width ?? rest.width}
       height={outcome?.height ?? rest.height}
-      className={clsx(stylex.props(markdownStyles.image).className, rest.className)}
+      className={cn(stylex.props(markdownStyles.image).className, rest.className)}
       onLoad={(event) => {
         const image = event.currentTarget;
         if (key !== undefined && image.naturalWidth > 0) {
@@ -2058,7 +2197,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         if (match.resultId) {
           mark.dataset.searchResultId = match.resultId;
         }
-        mark.className = clsx(
+        mark.className = cn(
           SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
           match.isActive && SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME
         );
@@ -2096,7 +2235,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             markdownDescendants.content,
             (compact || muted) && markdownStyles.muted
           ),
-          clsx('markdown-renderer', className)
+          cn('markdown-renderer', className)
         )}
         style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}

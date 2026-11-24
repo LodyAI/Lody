@@ -41,5 +41,5 @@ enabled when `!isMobile`; touch is untouched. Window-capture `keydown`:
   option to blur + clear `[data-qs-active]`.
 
 The focused option carries `data-qs-active`; the highlight is an inset primary
-ring rule in `../../tailwind/index.css` so overflow-hidden rows and global
+ring rule in `../../style/index.css` so overflow-hidden rows and global
 focus outline suppression cannot hide it.

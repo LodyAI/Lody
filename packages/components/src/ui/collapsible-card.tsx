@@ -2,7 +2,7 @@
 
 import React, { useLayoutEffect, useRef } from 'react';
 import { Fade } from '@/ui/blur-fade/blur-fade';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 
 import { ChevronDown } from 'lucide-react';
 import * as Collapsible from '@radix-ui/react-collapsible';
@@ -137,7 +137,7 @@ const CollapsibleCard = ({
   return (
     <Collapsible.Root
       {...props}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...props.style } : props.style}
     >
       {children}
@@ -166,7 +166,7 @@ const CollapsibleCardHeader: React.FC<CollapsibleCardHeaderProps> = ({
     <Collapsible.Trigger asChild>
       <div
         {...props}
-        className={clsx(sx.className, className)}
+        className={cn(sx.className, className)}
         style={sx.style ? { ...sx.style, ...props.style } : props.style}
       >
         <Button variant="ghost" aria-label="Toggle section" size="mini" icon>
@@ -183,7 +183,7 @@ const CollapsibleCardTitle: React.FC<
 > = ({ className, title, children, ...p }) => {
   return (
     <div {...stylex.props(styles.titleRow)} data-collapsible-title-row>
-      <p {...p} className={clsx(stylex.props(styles.title).className, className)}>
+      <p {...p} className={cn(stylex.props(styles.title).className, className)}>
         {children}
       </p>
       {title && <CopyButton value={title} xstyle={styles.copy} />}
@@ -235,7 +235,7 @@ const CollapsibleCardContent: React.FC<CollapsibleCardContentProps> = ({
       <div
         {...props}
         ref={contentRef}
-        className={clsx(bodyStyles.className, className)}
+        className={cn(bodyStyles.className, className)}
         style={xstyle ? { ...bodyStyles.style, ...props.style } : props.style}
         onScroll={noInternalScroll ? undefined : onScroll}
       />

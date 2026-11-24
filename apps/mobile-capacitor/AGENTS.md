@@ -30,7 +30,7 @@ Root `AGENTS.md` also applies.
   WebView height. `LodyBridgeViewController` publishes the current window's keyboard
   layout guide as `--native-keyboard-height`; `src/native-keyboard.ts` handles older
   shells without its document-start marker.
-- Android: `resizeOnFullScreen` resizes WebView; CSS offset stays `0px`.
+- Android: Capacitor 8 `SystemBars` resizes WebView (omit legacy `resizeOnFullScreen`); CSS offset stays `0px`.
 - Web: browser resizes the viewport; CSS offset stays `0px`.
 
 Shared `workspace-layout-utils.ts` applies the root offset. Child surfaces use

@@ -5,6 +5,7 @@ import type {
   MemoryAgentNotice,
   MemoryInstallFailure,
   MemoryProviderResponse,
+  MemoryUninstall,
 } from '@lody/shared';
 import type { MemoryAgentsSnapshot, MemoryProvider } from './memory-providers';
 import { ensureEverMeNode } from './everme-node';
@@ -182,8 +183,15 @@ export function createEverMeMemoryProvider(
         failure?: MemoryInstallFailure;
       }
     | undefined;
-  /** A click that has decided to install but not yet started one. */
-  let claiming = false;
+  /**
+   * A click that has decided to install or uninstall but not yet started the
+   * job. Both run npm over the same global package, so one claim covers both.
+   */
+  let claiming: 'install' | 'uninstall' | undefined;
+  let uninstallJob:
+    | { running: boolean; failed: boolean; failure?: MemoryInstallFailure }
+    | undefined;
+  const uninstalling = () => claiming === 'uninstall' || uninstallJob?.running === true;
   /** Last account the probe saw, so reading it costs no extra EverCLI call. */
   let account: string | undefined;
   /**
@@ -280,7 +288,10 @@ export function createEverMeMemoryProvider(
   /** Reads EverCLI's own cached login state; no network call of its own. */
   const probe = async (): Promise<MemoryProviderResponse['status']> => {
     const result = await run(['auth', 'status', '--no-prompt', '--format', 'json']);
-    if (result.code === 'ENOENT') return 'not_installed';
+    if (result.code === 'ENOENT') {
+      account = undefined;
+      return 'not_installed';
+    }
     try {
       const parsed = z
         .object({
@@ -314,6 +325,7 @@ export function createEverMeMemoryProvider(
     // A second click while a batch runs rejoins it. EverCLI rewrites one
     // shared config per agent, so two batches at once would race over it.
     if (agentJob?.running) return agentsSnapshot();
+    if (uninstalling()) throw new Error('EverMe is being uninstalled on this machine.');
     const started: NonNullable<typeof agentJob> = { running: true, failed: false };
     agentJob = started;
     void apply(targets, mode)
@@ -421,12 +433,13 @@ export function createEverMeMemoryProvider(
       // A second click while one is running rejoins it. Two global installs
       // of the same package at once would race over the same bin directory.
       if (job?.running) return { status: 'running', step: job.step };
-      if (claiming) return { status: 'running' };
+      if (claiming === 'install') return { status: 'running' };
+      if (uninstalling()) throw new Error('EverMe is being uninstalled on this machine.');
       // Claimed before anything is awaited, so two clicks cannot both find the
       // slot empty and each spawn a global install over one bin directory. It
       // is kept apart from `job` because an empty `job` means "this install
       // failed", which a click that has not started one yet has not done.
-      claiming = true;
+      claiming = 'install';
       try {
         // An EverCLI that answers is left alone: a machine that has one has
         // connected agents behind it, and this click never asked to disturb
@@ -435,7 +448,7 @@ export function createEverMeMemoryProvider(
         const before = await probe();
         if (before !== 'not_installed' && before !== 'error') return { status: 'done' };
       } finally {
-        claiming = false;
+        claiming = undefined;
       }
       // No await between dropping the claim and taking the slot, so nothing
       // can slip in and start a second install.
@@ -477,11 +490,56 @@ export function createEverMeMemoryProvider(
       // Nothing started here, so there is nothing to report as still going.
       // Claimed but not started yet: the click that claimed it is still
       // deciding, and calling that a failure would strand a second window.
-      if (claiming) return { status: 'running' };
+      if (claiming === 'install') return { status: 'running' };
       if (!job) return { status: 'failed' };
       if (job.running) return { status: 'running', step: job.step };
       if (!job.failed) return { status: 'done' };
       return job.failure ? { status: 'failed', failure: job.failure } : { status: 'failed' };
+    },
+    /** Removes only the global package, through the npm and prefix the install used. */
+    async uninstall(): Promise<MemoryUninstall> {
+      if (uninstallJob?.running || claiming === 'uninstall') return { status: 'running' };
+      if (claiming || job?.running || agentJob?.running)
+        throw new Error('EverMe is busy on this machine. Wait for it to finish, then retry.');
+      claiming = 'uninstall';
+      try {
+        if ((await probe()) === 'not_installed') return { status: 'done' };
+      } finally {
+        claiming = undefined;
+      }
+      const started: NonNullable<typeof uninstallJob> = { running: true, failed: false };
+      uninstallJob = started;
+      void (async () => {
+        const result = await runInstall(['uninstall', '--global', EVERME_PACKAGE]);
+        if (result.code !== undefined) {
+          started.failed = true;
+          started.failure = installFailure(result);
+          return;
+        }
+        // npm also succeeds for a package that was never in its prefix, so
+        // only EverCLI no longer answering proves it is gone.
+        started.failed = (await probe()) !== 'not_installed';
+        if (!started.failed) {
+          flow = undefined;
+          lastAgents = undefined;
+        }
+      })()
+        .catch(() => {
+          started.failed = true;
+        })
+        .finally(() => {
+          started.running = false;
+        });
+      return { status: 'running' };
+    },
+    async uninstallPoll(): Promise<MemoryUninstall> {
+      if (claiming === 'uninstall') return { status: 'running' };
+      if (!uninstallJob) return { status: 'failed' };
+      if (uninstallJob.running) return { status: 'running' };
+      if (!uninstallJob.failed) return { status: 'done' };
+      return uninstallJob.failure
+        ? { status: 'failed', failure: uninstallJob.failure }
+        : { status: 'failed' };
     },
     /** Credentials stay in EverMe's own per-machine config; nothing is injected. */
     environment: () => ({}),

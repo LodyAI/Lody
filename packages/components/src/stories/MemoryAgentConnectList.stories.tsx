@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import type { MemoryAgent } from '@lody/shared';
 import { MemoryAgentConnectList } from '@/components/settings/memory-agent-connect';
 import { MemoryProviderLogo } from '@/components/settings/memory-setting';
+import { useMemoryUninstall } from '@/components/settings/memory-uninstall';
 import { memoryProviderStoryState, memoryReply } from './memory-provider-story-state';
 
 const configs = [
@@ -83,3 +84,36 @@ export const Checking: Story = {
   },
 };
 export const NoAgentsConfigured: Story = { args: { configs: [], state: listed(agents) } };
+
+function WithUninstall({ outcome }: { outcome: 'running' | 'permission' }) {
+  const reported = connected.slice(0, 2);
+  const state = memoryProviderStoryState(memoryReply({ agents: reported }), {
+    uninstall: async () =>
+      memoryReply({
+        agents: reported,
+        uninstall:
+          outcome === 'running'
+            ? { status: 'running' }
+            : { status: 'failed', failure: 'permission' },
+      }),
+    uninstallPoll: () => new Promise(() => {}),
+  });
+  const uninstall = useMemoryUninstall({ name: 'EverMe', providerKey: 'everme', state });
+  return (
+    <MemoryAgentConnectList
+      logo={<MemoryProviderLogo providerId="everme" brandColor decorative />}
+      name="EverMe"
+      providerKey="everme"
+      configs={configs}
+      agents={reported}
+      state={state}
+      disabled={uninstall.busy}
+      notice={uninstall.message}
+      secondaryAction={uninstall.action(false)}
+    />
+  );
+}
+/** Installed: the heading offers to remove EverCLI after a confirmation. */
+export const Uninstall: Story = { render: () => <WithUninstall outcome="running" /> };
+/** The machine refused the uninstall; the button stays available to retry. */
+export const UninstallFailed: Story = { render: () => <WithUninstall outcome="permission" /> };

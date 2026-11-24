@@ -303,4 +303,60 @@ describe('LoroStreamsLiveModePolicy', () => {
 
     expect(policy.getDiagnostics()).toMatchObject({ transport: 'sse', transportSwitches: 0 });
   });
+
+  it('accepts ws events without triggering SSE backoff or long-poll downgrade', () => {
+    const policy = new LoroStreamsLiveModePolicy({
+      sseReadFailureLimit: 2,
+      sseResponseTimeoutLimit: 2,
+      now: createClock().now,
+    });
+
+    expect(policy.selectRequestMode()).toBe('auto');
+    policy.noteObservedTransport('ws');
+    policy.noteResponseTimeout();
+    policy.noteResponseTimeout();
+    policy.recoverPendingWrite();
+    policy.noteReadOutcome({
+      requestedMode: 'auto',
+      observedTransport: 'ws',
+      deliveredBatch: false,
+      error: new Error('ws transient disconnect'),
+    });
+    policy.noteReadOutcome({
+      requestedMode: 'auto',
+      observedTransport: 'ws',
+      deliveredBatch: false,
+      error: new Error('ws transient disconnect 2'),
+    });
+
+    expect(policy.selectRequestMode()).toBe('auto');
+    expect(policy.getDiagnostics()).toMatchObject({
+      transport: 'sse',
+      observedTransport: 'ws',
+      transportSwitches: 0,
+      consecutiveSseReadFailures: 0,
+      sseResponseTimeouts: 0,
+    });
+  });
+
+  it('resumes SSE failure counting if a subsequent read falls back to sse', () => {
+    const policy = new LoroStreamsLiveModePolicy({
+      sseReadFailureLimit: 2,
+      now: createClock().now,
+    });
+
+    policy.selectRequestMode();
+    policy.noteObservedTransport('ws');
+    policy.noteObservedTransport('sse');
+    policy.noteReadOutcome(failedSseRead);
+    expect(policy.selectRequestMode()).toBe('auto');
+
+    policy.noteReadOutcome(failedSseRead);
+    expect(policy.selectRequestMode()).toBe('long-poll');
+    expect(policy.getDiagnostics()).toMatchObject({
+      transport: 'long-poll',
+      observedTransport: 'sse',
+      reason: 'sse-read-failures',
+    });
+  });
 });

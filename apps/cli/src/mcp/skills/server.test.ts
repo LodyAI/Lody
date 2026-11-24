@@ -72,7 +72,7 @@ describe('Lody Skills MCP server contract', () => {
     );
     expect(client.getServerCapabilities()?.resources).toBeDefined();
     const listed = await client.request({ method: 'skills/list', params: {} }, listingSchema);
-    expect(listed.skills).toHaveLength(1);
+    expect(listed.skills).toHaveLength(2);
     const entry = skillEntrySchema.parse(listed.skills[0]);
     const fetched = await client.request(
       { method: 'skills/get', params: { uri: entry.uri } },

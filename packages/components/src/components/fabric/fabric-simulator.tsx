@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 
 import { deriveFabricUniforms, type FabricRecipe } from './fabric-recipe';
@@ -561,7 +561,7 @@ export function FabricSimulator({
       ref={canvasRef}
       aria-hidden
       {...canvasProps}
-      className={clsx(canvasProps.className, className)}
+      className={cn(canvasProps.className, className)}
     />
   );
 }

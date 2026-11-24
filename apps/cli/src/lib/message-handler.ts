@@ -31,6 +31,8 @@ import type {
   SorbetCustomProvider,
   SorbetCustomProviderEdit,
   SorbetCustomProviderInput,
+  SorbetHostSettings,
+  SorbetHostSettingsUpdate,
 } from '@lody/shared/local-machine-rpc';
 import { AndroidEmulatorService } from '@/android-emulator/service';
 import { readLatestUserId, summarizeHistoryQuery } from '@lody/shared/session-data';
@@ -185,6 +187,8 @@ import {
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
   SORBET_PROVIDERS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
   type LocalMachineRpcRequestValidated,
@@ -714,6 +718,12 @@ export interface MessageHandlerConfig {
     ) => Promise<
       Array<{ selector: string; providerId: string; modelId: string; displayName: string }>
     >;
+    /** Machine-wide Sorbet Host settings; not bound to a config. */
+    getHostSettings: (signal?: AbortSignal) => Promise<SorbetHostSettings>;
+    updateHostSettings: (
+      patch: SorbetHostSettingsUpdate,
+      signal?: AbortSignal
+    ) => Promise<SorbetHostSettings>;
   };
   remoteAutomation?: {
     handshake: () => Promise<import('@lody/shared/automations').RemoteAutomationHandshake>;
@@ -886,10 +896,9 @@ export class MessageHandler {
   private readonly cancelledHistorySubscriptions = new Map<string, number>();
   private sessionActivePresence!: SessionActivePresenceControllerLegacy;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
-  // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
+  // Note: titleGenerationInFlight is self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
-  private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
   /**
    * Latest output time and running tool title per Session, for on-demand live
@@ -2428,15 +2437,10 @@ export class MessageHandler {
 
     const tempPath = `${args.destPath}.${uuidV4()}.part`;
     const hash = crypto.createHash('sha256');
-    let source: fs.ReadStream;
-    try {
-      source = fs.createReadStream(blobPath);
-    } catch {
-      return false;
-    }
     const fileHandle = await fs.promises.open(tempPath, 'wx');
     try {
-      for await (const chunk of source) {
+      // Stream must open inside the awaited iteration so a post-handoff rename ENOENT lands in this catch, not as an uncaught 'error'.
+      for await (const chunk of fs.createReadStream(blobPath)) {
         const buf = chunk as Buffer;
         hash.update(buf);
         await fileHandle.write(buf);
@@ -3821,7 +3825,11 @@ export class MessageHandler {
           { noticeId: `session-stop-failure-${turnId}-${failure.phase}` }
         ),
       recordNativeWorkInterrupted: async (sessionId, turnId) => {
-        if (this.deletedSessionIds.has(sessionId) || this.archiveInFlight.has(sessionId)) return;
+        if (
+          this.deletedSessionIds.has(sessionId) ||
+          this.sessionManager.isArchiveInFlight(sessionId)
+        )
+          return;
         await this.recordAgentWarning(
           sessionId,
           {
@@ -3897,7 +3905,8 @@ export class MessageHandler {
         this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
       readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
       isRuntimeActive: (sessionId) =>
-        this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
+        this.sessionManager.isArchiveInFlight(sessionId) ||
+        this.sessionManager.hasSession(sessionId),
       runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
       archiveProjectGroup: (input) =>
         archiveProjectGroup({
@@ -4656,10 +4665,12 @@ export class MessageHandler {
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
                 sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                sorbetHostSettings: SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
                   ? {
                       sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
                       sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                      sorbetHostSettingsRemote: SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
                     }
                   : {}),
               }
@@ -5029,11 +5040,17 @@ export class MessageHandler {
           if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
-          if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
-          // Revoke media before unrelated ACP/Browser cleanup can fail.
-          void this.iosSimulatorService.closeSession(sessionId);
-          void this.androidEmulatorService.closeSession(sessionId);
-          void this.handleSessionArchived(sessionId);
+          const { isArchived: archived, createdAt } = event.patch as Partial<SessionMeta>;
+          const initialActiveMetadata = archived === false && createdAt !== undefined;
+          if (typeof archived !== 'boolean' || initialActiveMetadata) return;
+          if (archived) {
+            // Revoke media before unrelated ACP/Browser cleanup can fail.
+            void this.iosSimulatorService.closeSession(sessionId);
+            void this.androidEmulatorService.closeSession(sessionId);
+          }
+          void this.sessionManager.observeArchiveChange(sessionId, () =>
+            this.handleSessionArchiveChanged(sessionId)
+          );
         },
         { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
       ),
@@ -5162,22 +5179,24 @@ export class MessageHandler {
     return (snapshot?.meta as SessionMeta | undefined)?.machineId === this.machineId;
   }
 
-  private async handleSessionArchived(sessionId: SessionId): Promise<void> {
-    if (this.archiveInFlight.has(sessionId)) {
-      return;
-    }
-    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
-      return;
-    }
-    this.archiveInFlight.add(sessionId);
+  private async handleSessionArchiveChanged(sessionId: SessionId): Promise<void> {
     try {
-      await this.releaseArchivedSessionRuntime(sessionId);
+      if (!(await this.isSessionOwnedByThisMachine(sessionId))) return;
+      const current = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+      if (!current?.meta || isLoroRepoDocDeleted(current)) return;
+      if ((current.meta as SessionMeta).isArchived === true) {
+        await this.releaseArchivedSessionRuntime(sessionId);
+      } else {
+        try {
+          await this.sessionManager.syncNativeSessionArchive(sessionId, false);
+        } catch (error) {
+          this.sessionManager.reportNativeArchiveFailure(sessionId, error);
+        }
+      }
     } catch (error) {
       this.logger.error(
-        `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
+        `[${sessionId}] Archive state reconciliation failed: ${formatErrorMessage(error)}`
       );
-    } finally {
-      this.archiveInFlight.delete(sessionId);
     }
     void this.worktreeGc.schedule();
   }
@@ -5206,9 +5225,10 @@ export class MessageHandler {
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
 
+    let releaseFailure: string | undefined;
     if (this.sessionManager.hasSession(sessionId)) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.terminateSessionForRelease(sessionId);
+      releaseFailure = await this.terminateSessionForRelease(sessionId);
       if (options.writeIdleStatus !== false) {
         await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
           status: SessionStatusFactory.idle(),
@@ -5216,7 +5236,10 @@ export class MessageHandler {
       }
     }
 
-    await this.sessionManager.archiveSession(sessionId);
+    await this.sessionManager.archiveSession(sessionId, {
+      releaseFailure,
+      recordWarning: (warning) => this.recordAgentWarning(sessionId, warning),
+    });
     this.store.get(sessionId).logger = null;
     this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }
@@ -5525,14 +5548,16 @@ export class MessageHandler {
    * could be proven gone: the Session is not reused, so a survivor is an
    * orphan to report, not a reason to leave the archive half done.
    */
-  private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+  private async terminateSessionForRelease(sessionId: SessionId): Promise<string | undefined> {
     this.executionService.withdrawNativeWorkCompletion(sessionId);
     try {
       await this.sessionManager.terminateSession(sessionId, true);
+      return undefined;
     } catch (error) {
       this.logger.warn(
         `[${sessionId}] Releasing the session although its processes could not all be terminated: ${formatErrorMessage(error)}`
       );
+      return `Session processes could not all be terminated: ${formatErrorMessage(error)}`;
     }
   }
 
@@ -5663,14 +5688,15 @@ export class MessageHandler {
       );
       return;
     }
+    const isVisible = this.isVisibleACPUpdate(update.update);
     if (target.source === 'finalized_turn') {
-      // Output inside a turn never touches the session: the turn keeps it from
-      // GC. Output after the turn means the model was woken by a finished
-      // background task, a ScheduleWakeup or a cron, so the idle timer restarts
-      // from it. Only agents that report `sessionActivity` get this; the others
-      // keep the old rule that only user actions and turn ends count.
-      if (this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity()) {
+      const reportsSessionActivity =
+        this.sessionManager.getSession(sessionId)?.agentClient?.reportsSessionActivity() ?? false;
+      if (reportsSessionActivity || isVisible) {
         this.touchSession(sessionId);
+      }
+      if (!reportsSessionActivity && isVisible) {
+        this.sessionActivePresence.native.noteLateActivity(sessionId);
       }
       this.captureACPUpdateInvariant(
         'late_acp_update_routed_to_finalized_turn',
@@ -5683,7 +5709,7 @@ export class MessageHandler {
       );
     }
     const state = this.store.get(sessionId);
-    this.recordTurnEvent(sessionId, target.turnEpoch, this.isVisibleACPUpdate(update.update));
+    this.recordTurnEvent(sessionId, target.turnEpoch, isVisible);
     state.acpUpdateBuffer.push({
       operationId: uuidV4(),
       notification: update,
@@ -6943,6 +6969,7 @@ export class MessageHandler {
 
   private clearSessionActivePresence(sessionId: SessionId): void {
     this.sessionActivePresence.clearUnleased(sessionId);
+    this.sessionActivePresence.native.clearLateActivity(sessionId);
   }
 
   private createRuntimeDispatchContext(): MessageDispatchContext {
@@ -7170,10 +7197,12 @@ export class MessageHandler {
             ? {
                 sorbetCredentials: SORBET_CREDENTIALS_PROTOCOL_VERSION,
                 sorbetProviders: SORBET_PROVIDERS_PROTOCOL_VERSION,
+                sorbetHostSettings: SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
                 ...(this.encryptedAttachments
                   ? {
                       sorbetCredentialsRemote: SORBET_CREDENTIALS_REMOTE_PROTOCOL_VERSION,
                       sorbetProvidersRemote: SORBET_PROVIDERS_REMOTE_PROTOCOL_VERSION,
+                      sorbetHostSettingsRemote: SORBET_HOST_SETTINGS_REMOTE_PROTOCOL_VERSION,
                     }
                   : {}),
               }
@@ -8303,13 +8332,41 @@ export class MessageHandler {
       case 'sorbet/providers-update':
       case 'sorbet/providers-delete':
       case 'sorbet/providers-refresh':
-      case 'sorbet/models-list': {
+      case 'sorbet/models-list':
+      case 'sorbet/host-settings-get':
+      case 'sorbet/host-settings-update': {
         if (
           request.workspaceId !== this.workspaceId ||
           request.machineId !== this.machineId ||
           request.ownerSessionId
         )
           throw new Error('Sorbet credentials scope mismatch');
+        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
+        // Host settings are machine-wide; the rest resolve a builtin Sorbet config first.
+        const isHostSettings =
+          request.method === 'sorbet/host-settings-get' ||
+          request.method === 'sorbet/host-settings-update';
+        if (isHostSettings) {
+          try {
+            const { SorbetHostSettingsResultSchema } =
+              await import('@lody/shared/local-machine-rpc');
+            if (request.method === 'sorbet/host-settings-get') {
+              return SorbetHostSettingsResultSchema.parse({
+                type: 'sorbet/host-settings-get',
+                settings: await this.sorbetCredentials.getHostSettings(signal),
+              });
+            }
+            return SorbetHostSettingsResultSchema.parse({
+              type: 'sorbet/host-settings-update',
+              settings: await this.sorbetCredentials.updateHostSettings(
+                request.params.patch,
+                signal
+              ),
+            });
+          } catch {
+            throw new Error('Sorbet host settings operation failed');
+          }
+        }
         const configId = request.params.configId as AgentConfigId;
         const config = await this.workspaceDocument.getAgentConfigForMachineLaunch(
           configId,
@@ -8322,7 +8379,6 @@ export class MessageHandler {
           config.agentType !== 'sorbet'
         )
           throw new Error('Sorbet credentials configuration unavailable');
-        if (!this.sorbetCredentials) throw new Error('Sorbet credentials unsupported');
         try {
           const { SorbetCredentialsResultSchema, SorbetProvidersResultSchema } =
             await import('@lody/shared/local-machine-rpc');
@@ -12373,6 +12429,7 @@ export class MessageHandler {
         ok: true,
         type: 'local-project/list-global-skills',
         result: await this.localProjectControlService.listGlobalSkills({
+          magpieGatewayUrl: request.magpieGatewayUrl,
           knownFingerprint: request.knownFingerprint,
         }),
       };
@@ -12922,7 +12979,7 @@ export class MessageHandler {
    * Check if a session is currently being archived.
    */
   isArchiveInFlight(sessionId: SessionId): boolean {
-    return this.archiveInFlight.has(sessionId);
+    return this.sessionManager.isArchiveInFlight(sessionId);
   }
 
   /**
@@ -12932,7 +12989,10 @@ export class MessageHandler {
   getNativeWork(sessionId: SessionId): NativeAgentWork {
     const session = this.sessionManager.getSession(sessionId);
     if (!session || session.hasLiveAgentProcess?.() === false) return null;
-    return session.agentClient?.getNativeWork() ?? null;
+    return (
+      session.agentClient?.getNativeWork() ??
+      (this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null)
+    );
   }
 
   /**

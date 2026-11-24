@@ -10,7 +10,7 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
 
     const themes = await page.evaluate(async () => {
       // Use the real stylesheet and resolver served by Storybook's Vite server.
-      const stylesheet = '/src/tailwind/index.css';
+      const stylesheet = '/src/style/index.css';
       const modulePath = '/src/components/terminal/terminal-theme.ts';
       await import(stylesheet);
       const { buildTerminalTheme } = await import(modulePath);

@@ -1,12 +1,16 @@
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
-import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { clsx } from 'clsx';
+import {
+  corner as uiCorner,
+  radius as uiRadius,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import * as stylex from '@stylexjs/stylex';
 import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
 import { parseDiffFromFile } from '@pierre/diffs';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
+import { cn } from '@/lib/utils';
 const storyLayoutStyles = stylex.create({
   row: {
     display: 'flex',
@@ -168,7 +172,7 @@ const meta = {
   },
   decorators: [
     (Story) => (
-      <div className={clsx(stylex.props(storyLayout.frame).className, 'scrollbar-pro')}>
+      <div className={cn(stylex.props(storyLayout.frame).className, 'scrollbar-pro')}>
         <Story />
       </div>
     ),
@@ -219,7 +223,7 @@ export function ProjectList({ projects }: { projects: Project[] }) {
 `;
 
 const newText = `import { useMemo } from 'react';
-import { cn } from '../lib/cn';
+import { cn } from '../lib/utils';
 
 const STATUS_LABELS = {
   active: 'Running',
@@ -287,7 +291,7 @@ export const ComplexExample: Story = {
     newText,
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -301,7 +305,7 @@ export const WithFileHeaderActions: Story = {
     onOpenFile: fn(),
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -315,7 +319,7 @@ export const SplitView: Story = {
     diffStyle: 'split',
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -329,7 +333,7 @@ export const WithoutHeader: Story = {
     showHeader: false,
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -374,7 +378,7 @@ export const SparseChanges: Story = {
     newText: sparseNewText,
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -388,7 +392,7 @@ export const SparseChangesSplit: Story = {
     diffStyle: 'split',
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -410,7 +414,7 @@ export const NewFile: Story = {
     newText: newFileText,
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -423,7 +427,7 @@ export const DeletedFile: Story = {
     newText: '',
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -455,7 +459,7 @@ export const ProviderSidePreparsedLargeDiff: Story = {
     commentsEnabled: true,
   },
   render: (args) => (
-    <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
       <DiffViewer {...args} />
     </div>
   ),
@@ -522,7 +526,7 @@ function MultiFileDiffListComponent() {
   );
 
   return (
-    <div className={clsx(stylex.props(storyLayout.frame2).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.frame2).className, 'scrollbar-pro')}>
       <div {...stylex.props(multiFileStyles.toolbar)}>
         <span {...stylex.props(storyLayoutStyles.label2)}>Diff Style:</span>
         <button
@@ -588,15 +592,50 @@ const themeStyles = stylex.create({
   layout: { display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 4)' },
   row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   copy: { fontSize: uiText.headlineSize, lineHeight: uiText.headlineLeading, fontWeight: 600 },
-  hint: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
-  row2: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBlock: 'calc(var(--spacing) * 3)' },
+  hint: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
+  row2: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
   layout2: { display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 1)' },
-  copy2: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
-  hint2: { borderRadius: uiRadius.medium, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: 'calc(var(--spacing) * 6)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  copy2: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 500,
+  },
+  hint2: {
+    borderRadius: uiRadius.medium,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    padding: 'calc(var(--spacing) * 6)',
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    color: uiColors.secondaryLabel,
+  },
 });
 
 const previewStyles = stylex.create({
-  copy: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.accent, textDecorationLine: { ':hover': 'underline' } },
+  copy: {
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.accent,
+    textDecorationLine: { ':hover': 'underline' },
+  },
 });
 
-const projectSceneStyles = stylex.create({ row: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBlock: 'calc(var(--spacing) * 3)' }, error: { color: uiColors.warning } });
+const projectSceneStyles = stylex.create({
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBlock: 'calc(var(--spacing) * 3)',
+  },
+  error: { color: uiColors.warning },
+});

@@ -17,6 +17,7 @@ import {
 import { sheetSurface } from './sheet-surface';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { useFoldAwareSheetHeight } from './use-vertical-division';
 import type { MultiSelectPill } from './mobile-filter-pill-bar';
 
@@ -652,6 +653,7 @@ function DimensionPage({
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
+  useMobileBackHandler(onBack, { layer: 'drawer' });
   /* Fuzzy search kicks in for longer option lists (repo / project
      filters can run into 20+ entries in big workspaces). Threshold
      of 8 matches the new-chat picker — anything shorter is faster

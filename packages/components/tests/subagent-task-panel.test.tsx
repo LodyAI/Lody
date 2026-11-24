@@ -100,6 +100,31 @@ describe('SubagentTaskPanel', () => {
   const rowNamed = (name: string) =>
     container.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
+  it('shows each child’s reported configuration in the row and in the open dialog', async () => {
+    const subject = task({ status: 'in_progress', run: run('running') });
+    const legacy = task({
+      taskId: 'legacy',
+      status: 'in_progress',
+      actor: 'Legacy worker',
+      modelId: 'legacy-model',
+    });
+    render([subject, legacy]);
+    const row = rowNamed('Claude task · find skills');
+    expect(row?.textContent).not.toContain('Effort:');
+    expect(container.textContent).toContain('Model: legacy-model');
+    await act(async () => row?.click());
+    expect(peek()?.textContent).not.toContain('Model:');
+
+    const configuration = { modelId: 'worker-model', reasoningEffort: 'high' };
+    render([{ ...subject, run: run('running', [], configuration) }, legacy]);
+    expect(row?.textContent).toContain('Model: worker-model · Effort: high');
+    expect(peek()?.textContent).toContain('Running · Model: worker-model · Effort: high');
+    expect(peek()?.textContent).not.toContain('legacy-model');
+
+    render([{ ...subject, status: 'completed', run: run('completed', [], configuration) }, legacy]);
+    expect(peek()?.textContent).toContain('Completed · Model: worker-model · Effort: high');
+  });
+
   it('loads only the opened child and ignores a late result after switching tasks', async () => {
     const first = Promise.withResolvers<Run>();
     const second = Promise.withResolvers<Run>();

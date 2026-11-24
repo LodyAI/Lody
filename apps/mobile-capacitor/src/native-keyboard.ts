@@ -21,8 +21,8 @@ declare global {
  * `interactive-widget=overlaps-content`, so the WebView is not resized by the
  * OS. Instead, we manually offset the input area using this CSS variable.
  *
- * Android does not support the Keyboard `resize` mode; `resizeOnFullScreen`
- * explicitly makes the WebView resize there. Keep the CSS variable at 0 on
+ * Android does not support the Keyboard `resize` mode; Capacitor 8's SystemBars
+ * plugin resizes the WebView with IME insets. Keep the CSS variable at 0 on
  * Android so the native resize and our layout padding do not both move inputs.
  */
 export function initNativeKeyboard(): void {

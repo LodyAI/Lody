@@ -46,6 +46,18 @@ any `pointerdown` unless the target carries `data-vaul-no-drag`. Without
 dismissal. The same component marks content no-drag and mounts the single
 drag-start zone, which is why nothing else may mount one.
 
+On Android Capacitor, both the system edge-swipe gesture and the hardware/3-button
+Back key arrive through `OnBackPressedDispatcher` as `@capacitor/app`'s
+`backButton` event. Without a listener, Capacitor falls back to
+`webView.goBack()`, bypassing exit slides, Vaul drawer closes, and
+`markMobileBackNavigation()` so the destination mounts as a forward right-to-left
+push. `apps/mobile-capacitor/src/native-back.ts` therefore intercepts
+`backButton` on Android and dispatches it through the layered
+`mobile-back-navigation` stack (`modal > drawer > page`, with nested
+`MobileBackDepthProvider` depth breaking simultaneous-mount ties) before
+falling back to `markMobileBackNavigation()` + `router.history.back()` on
+non-root routes or `App.minimizeApp()` on root screens.
+
 ## Stacking
 
 The session is already a body-portal Vaul drawer at `z-50`. A second body-level

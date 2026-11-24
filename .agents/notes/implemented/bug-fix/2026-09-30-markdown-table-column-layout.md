@@ -61,7 +61,7 @@ splits on whitespace *and* on wide characters.
 - The `<table>` carries `data-one-line-columns`, `data-break-anywhere-columns`
   and `data-wide-columns` token lists plus a `<colgroup>` whose `<col>` widths
   are the content estimates capped at 30em. Static `:nth-child` selectors in
-  `src/tailwind/index.css` (columns 1–24) turn the flags into
+  `src/style/index.css` (columns 1–24) turn the flags into
   `white-space: nowrap` (min-width 0), `overflow-wrap: anywhere` +
   `max-width: 20em`, and a wider `min-width` floor (9em; 15em above 640px
   viewport). All cells get a `min-width` floor — 5em, or 8em on wider

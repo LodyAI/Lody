@@ -8,6 +8,8 @@ import { ScheduledMessageEditor } from './scheduled-message-editor';
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
+import { markMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -263,6 +265,13 @@ function SupportedSchedulesWorkspace({
         : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
     );
   };
+  useMobileBackHandler(
+    () => {
+      markMobileBackNavigation();
+      open();
+    },
+    { enabled: Boolean(mobile && scheduleId), layer: 'page' }
+  );
   if (createScheduleRef) createScheduleRef.current = () => open('new');
   useEffect(() => {
     if (!createScheduleRef) return undefined;
@@ -977,6 +986,7 @@ function ScheduleEditor({
       skillAgent={
         selected?.cliType && selected.agentType
           ? {
+              magpieGatewayUrl: selected.magpieGatewayUrl,
               cliType: selected.cliType,
               agentType: selected.agentType,
               machineId: selected.machineId,

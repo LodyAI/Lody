@@ -8,6 +8,8 @@ import { toast } from '@/lib/toast';
 import { CalendarClock } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import {
+  applyScheduleEditProposal,
+  scheduleEditProposalActivityId,
   applyScheduleRecurrence,
   defaultScheduleRecurrence,
   getServerNow,
@@ -16,10 +18,13 @@ import {
   type ScheduleRecurrence,
   type ScheduleTrigger,
   getDeviceTimeZone,
+  scheduleContentRevision,
   scheduleProposalRuleToRecurrence,
   scheduleProposalRuleToTrigger,
   getSessionRoomId,
   type AgentConfigMeta,
+  type MachineId,
+  type ScheduleEditProposalMeta,
   type ScheduleProposalMeta,
   type SessionId,
 } from '@lody/shared';
@@ -28,6 +33,7 @@ import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
+import { useScheduleDocument, useSchedules } from '@/hooks/use-schedules';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
@@ -36,8 +42,10 @@ import { Input } from '@lody/ui/input';
 import { Tabs } from '@lody/ui/tabs';
 import { Textarea } from '@lody/ui/textarea';
 import { settingsCard } from '@/components/settings/compact-layout';
+import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
-import { describeDestination, describeRecurrence } from './schedule-format';
+import { describeDestination, describeRecurrence, describeTrigger } from './schedule-format';
+import { diffPromptLines } from './schedule-prompt-diff';
 import {
   resolveScheduleProposalTarget,
   type ProposalConversation,
@@ -172,7 +180,83 @@ const styles = stylex.create({
     gap: 'calc(var(--spacing) * 2)',
   },
   icon: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+  was: {
+    marginInlineEnd: 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    textDecorationLine: 'line-through',
+  },
+  now: { textDecorationLine: 'none' },
+  diffLine: {
+    display: 'block',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    fontSize: '0.9em',
+    textDecorationLine: 'none',
+  },
+  add: { backgroundColor: 'hsl(var(--status-success) / 0.16)' },
+  del: {
+    backgroundColor: 'hsl(var(--status-danger) / 0.16)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    textDecorationLine: 'line-through',
+  },
+  gap: { color: 'hsl(var(--muted-foreground) / 1)', textAlign: 'center' },
 });
+
+/** What both proposal cards share: the runtime on screen, the outcome write and navigation. */
+function useProposalCard<Meta>({
+  sessionId,
+  entryId,
+  itemIndex,
+}: Pick<ScheduleProposalNoticeProps, 'sessionId' | 'entryId' | 'itemIndex'>) {
+  const navigate = useNavigate();
+  const slug = useAtomValue(currentWorkspaceSlugAtom);
+  const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const scope = useResolvedWorkspaceScope();
+  const runtime =
+    scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
+  const readOutcome = useCallback(async () => {
+    if (!runtime) return undefined;
+    const read = await runtime.withSessionStore(sessionId, (store) =>
+      store.sessionData.history.readTurn(entryId)
+    );
+    if (read.state !== 'ready') throw new Error('The proposal could not be read.');
+    const item = Array.isArray(read.turn.items) ? read.turn.items[itemIndex] : undefined;
+    if (!item || typeof item !== 'object') throw new Error('The proposal could not be read.');
+    return (item as { meta?: { outcome?: string } }).meta?.outcome;
+  }, [entryId, itemIndex, runtime, sessionId]);
+  const writeOutcome = useCallback(
+    async (next: Meta) => {
+      if (!runtime) return;
+      const read = await runtime.withSessionStore(sessionId, (store) =>
+        store.sessionData.history.readTurn(entryId)
+      );
+      // Never return quietly: the schedule may already exist, and a card that
+      // does not change reads as a Create button that does nothing.
+      if (read.state !== 'ready') throw new Error('The proposal could not be read.');
+      const entry = read.turn;
+      const items = Array.isArray(entry.items) ? [...(entry.items as unknown[])] : [];
+      const item = items[itemIndex];
+      if (!item || typeof item !== 'object') throw new Error('The proposal could not be read.');
+      items[itemIndex] = { ...(item as Record<string, unknown>), meta: next };
+      const nextEntry = { ...entry, items } as unknown as Parameters<
+        typeof runtime.writer.updateSessionHistory
+      >[2];
+      await runtime.writer.updateSessionHistory(sessionId, entryId, nextEntry);
+    },
+    [entryId, itemIndex, runtime, sessionId]
+  );
+  const openSchedule = useCallback(
+    (scheduleId: string) => {
+      if (slug)
+        void navigate({
+          to: '/$workspaceName/schedules/$scheduleId',
+          params: { workspaceName: slug, scheduleId },
+        });
+    },
+    [navigate, slug]
+  );
+  return { runtime, readOutcome, writeOutcome, openSchedule };
+}
 
 export type ScheduleProposalNoticeProps = {
   meta: ScheduleProposalMeta;
@@ -203,13 +287,12 @@ export function ScheduleProposalNotice({
   itemIndex,
 }: ScheduleProposalNoticeProps) {
   const { t, i18n } = useTranslation();
-  const navigate = useNavigate();
-  const slug = useAtomValue(currentWorkspaceSlugAtom);
   const user = useAtomValue(userAtom);
-  const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const scope = useResolvedWorkspaceScope();
-  const runtime =
-    scope.enabled && scope.workspaceId === activeRuntime?.workspaceId ? activeRuntime : null;
+  const { runtime, writeOutcome, openSchedule } = useProposalCard<ScheduleProposalMeta>({
+    sessionId,
+    entryId,
+    itemIndex,
+  });
   const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
   const { roles } = useWorkspaceAgentRoles();
@@ -333,39 +416,6 @@ export function ScheduleProposalNotice({
       )
     : [];
   const problem: ProposalTargetProblem | null = resolved.ok ? null : resolved.problem;
-
-  const writeOutcome = useCallback(
-    async (next: ScheduleProposalMeta) => {
-      if (!runtime) return;
-      const read = await runtime.withSessionStore(sessionId, (store) =>
-        store.sessionData.history.readTurn(entryId)
-      );
-      // Never return quietly: the schedule may already exist, and a card that
-      // does not change reads as a Create button that does nothing.
-      if (read.state !== 'ready') throw new Error('The proposal could not be read.');
-      const entry = read.turn;
-      const items = Array.isArray(entry.items) ? [...(entry.items as unknown[])] : [];
-      const item = items[itemIndex];
-      if (!item || typeof item !== 'object') throw new Error('The proposal could not be read.');
-      items[itemIndex] = { ...(item as Record<string, unknown>), meta: next };
-      const nextEntry = { ...entry, items } as unknown as Parameters<
-        typeof runtime.writer.updateSessionHistory
-      >[2];
-      await runtime.writer.updateSessionHistory(sessionId, entryId, nextEntry);
-    },
-    [entryId, itemIndex, runtime, sessionId]
-  );
-
-  const openSchedule = useCallback(
-    (scheduleId: string) => {
-      if (slug)
-        void navigate({
-          to: '/$workspaceName/schedules/$scheduleId',
-          params: { workspaceName: slug, scheduleId },
-        });
-    },
-    [navigate, slug]
-  );
 
   const create = useCallback(() => {
     void (async () => {
@@ -650,6 +700,247 @@ export function ScheduleProposalNotice({
           onClick={create}
         >
           {t('schedules.proposal.create', 'Create')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * An agent's proposal to change an existing schedule. The card follows the live
+ * schedule: it shows each current value beside the proposed one, and Apply saves
+ * through the editor's repository path unless the schedule was edited since.
+ */
+export function ScheduleEditProposalNotice({
+  meta,
+  ...notice
+}: Omit<ScheduleProposalNoticeProps, 'meta'> & { meta: ScheduleEditProposalMeta }) {
+  const { t, i18n } = useTranslation();
+  const user = useAtomValue(userAtom);
+  const { runtime, readOutcome, writeOutcome, openSchedule } =
+    useProposalCard<ScheduleEditProposalMeta>(notice);
+  const agents = useAtomValue(getAllAgentConfigAtom) as AgentConfigMeta[];
+  const { machines } = useVisibleMachineMetas({ includeMachineFlock: true });
+  const local = useVisibleLocalProjects({ includeMachineFlock: true });
+  const { document, ready } = useScheduleDocument(meta.outcome ? undefined : meta.scheduleId);
+  const registry = useSchedules();
+  const [busy, setBusy] = useState(false);
+  const { patch } = meta;
+  const activityId = scheduleEditProposalActivityId(notice.sessionId, meta.proposalId);
+  const diff = useMemo(
+    () =>
+      document && patch.prompt !== undefined
+        ? diffPromptLines(document.prompt, patch.prompt)
+        : null,
+    [document?.prompt, patch.prompt]
+  );
+  const stale = t(
+    'schedules.editProposal.stale',
+    'This scheduled task was edited after the proposal. Ask the Agent for a new one.'
+  );
+  const ownerId =
+    document?.definition.ownerId ??
+    registry.rows.find((row) => row.scheduleId === meta.scheduleId)?.ownerId;
+  const notOwner = !!ownerId && ownerId !== user?.id;
+
+  const decide = (outcome: 'applied' | 'dismissed') => {
+    void (async () => {
+      if (!runtime || !user) return;
+      setBusy(true);
+      try {
+        if (await readOutcome()) return;
+        if (outcome === 'applied') {
+          const { ScheduleRepository } = await import('@lody/shared/schedule-repository');
+          await runtime.withScheduleStore(meta.scheduleId, async () => {
+            const repository = new ScheduleRepository(runtime.repo, runtime.workspaceId, {
+              protectedContent: runtime.contentMode === 'e2ee',
+              signDeclaration: runtime.signScheduleDeclaration,
+            });
+            const latest = await repository.read(meta.scheduleId);
+            if (!latest)
+              throw new Error(t('schedules.notFound', 'This schedule is unavailable or deleted.'));
+            const now = getServerNow();
+            const draft = applyScheduleEditProposal(
+              meta,
+              latest,
+              now,
+              machines.get(latest.definition.machineId as MachineId)?.timeZone ??
+                getDeviceTimeZone(),
+              activityId
+            );
+            if (!draft) throw new Error(stale);
+            await repository.save({
+              scheduleId: meta.scheduleId,
+              draft,
+              actorId: user.id,
+              now,
+              activationId: uuid(),
+              activityId,
+            });
+          });
+        } else if (notOwner) {
+          throw new Error(t('schedules.ownerOnly', 'Only the schedule owner can save changes.'));
+        }
+        await writeOutcome({ ...meta, outcome });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
+
+  if (meta.outcome) {
+    const applied = meta.outcome === 'applied';
+    return (
+      <div
+        {...(applied ? { 'data-settings-surface': '' } : {})}
+        {...stylex.props(applied ? styles.receipt : styles.dismissed)}
+      >
+        <CalendarClock {...stylex.props(styles.icon)} />
+        <span>
+          {applied
+            ? t('schedules.editProposal.applied', 'Scheduled task updated')
+            : t('schedules.proposal.dismissed', 'Proposal ignored')}
+        </span>
+        <span {...stylex.props(applied ? styles.receiptTitle : styles.dismissedTitle)}>
+          {applied ? (patch.title ?? meta.title) : meta.title}
+        </span>
+        {applied ? (
+          <Button size="small" variant="ghost" onClick={() => openSchedule(meta.scheduleId)}>
+            {t('schedules.proposal.open', 'Open')}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
+  const definition = document?.definition;
+  const machine = definition ? machines.get(definition.machineId as MachineId) : undefined;
+  const machineTimeZone = machine?.timeZone ?? getDeviceTimeZone();
+  // A deleted schedule keeps its document; only the registry row goes.
+  const listed = !registry.ready || registry.rows.some((row) => row.scheduleId === meta.scheduleId);
+  const reasons = !ready
+    ? []
+    : !document || !definition || !listed
+      ? [t('schedules.notFound', 'This schedule is unavailable or deleted.')]
+      : scheduleContentRevision(document) !== meta.baseActivityId &&
+          !document.timeline.some((entry) => entry.id === activityId)
+        ? [stale]
+        : collectScheduleSaveBlockers(
+            {
+              disabledReason:
+                definition.ownerId === user?.id
+                  ? undefined
+                  : t('schedules.ownerOnly', 'Only the schedule owner can save changes.'),
+              workspaceReady: !!runtime,
+              userId: user?.id,
+              agent: definition.agent as AgentRunRef,
+              agentConfig: agents.find((config) => config.id === definition.agent.agentConfigId),
+              machine,
+              project: definition.project ?? null,
+              machineLocalProjectIds: new Set(
+                [...local.projects.values()]
+                  .filter((entry) => entry.machineId === definition.machineId)
+                  .map((entry) => entry.project.id as string)
+              ),
+              destination: definition.destination,
+            },
+            t
+          );
+  const proposedRecurrence = patch.rule
+    ? scheduleProposalRuleToRecurrence(patch.rule, machineTimeZone)
+    : null;
+  const rows: [label: string, current: string | undefined, proposed: string][] = [];
+  if (patch.title !== undefined)
+    rows.push([t('schedules.name', 'Name'), definition?.title ?? meta.title, patch.title]);
+  if (patch.rule)
+    rows.push([
+      t('schedules.trigger.label', 'Trigger'),
+      definition && describeTrigger(definition.trigger, t, i18n.language),
+      proposedRecurrence
+        ? describeRecurrence(proposedRecurrence, t, i18n.language, machineTimeZone)
+        : t('schedules.trigger.manual', 'Manual'),
+    ]);
+
+  return (
+    <div data-settings-surface="" {...stylex.props(settingsCard, styles.proposalCard)}>
+      <div {...stylex.props(styles.proposalHeading)}>
+        <CalendarClock {...stylex.props(styles.icon)} />
+        <span>{t('schedules.editProposal.title', 'Update this scheduled task?')}</span>
+        {meta.proposedBy?.name ? (
+          <span {...stylex.props(styles.proposedBy)}>
+            {t('schedules.proposal.by', 'Proposed by {{name}}', { name: meta.proposedBy.name })}
+          </span>
+        ) : null}
+      </div>
+      <p {...stylex.props(styles.proposalTitle)}>{definition?.title ?? meta.title}</p>
+      {rows.length ? (
+        <dl {...stylex.props(styles.proposalRows)}>
+          {rows.map(([label, before, after]) => (
+            <div key={label} {...stylex.props(styles.contents)}>
+              <dt {...stylex.props(styles.proposalLabel)}>{label}</dt>
+              <dd {...stylex.props(styles.proposalValue)}>
+                {before && before !== after ? (
+                  <del {...stylex.props(styles.was)}>{before}</del>
+                ) : null}
+                <ins {...stylex.props(styles.now)}>{after}</ins>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {patch.prompt === undefined ? null : (
+        <div
+          role="group"
+          aria-label={t('schedules.prompt', 'What should the Agent do?')}
+          {...stylex.props(styles.promptPreview)}
+        >
+          {diff ? (
+            diff.map((line, index) => {
+              const Line = line.kind === 'add' ? 'ins' : line.kind === 'del' ? 'del' : 'div';
+              return (
+                <Line
+                  key={index}
+                  {...stylex.props(styles.diffLine, line.kind !== 'same' && styles[line.kind])}
+                >
+                  {line.kind === 'gap' ? '⋯' : line.text || ' '}
+                </Line>
+              );
+            })
+          ) : (
+            <MarkdownRenderer text={patch.prompt} size="sm" />
+          )}
+        </div>
+      )}
+      {reasons.length ? (
+        <ul {...stylex.props(styles.reasons)} aria-live="polite">
+          {reasons.map((reason) => (
+            <li key={reason} {...stylex.props(styles.reason)}>
+              {reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div {...stylex.props(styles.actions)}>
+        <Button
+          size="small"
+          variant="ghost"
+          disabled={busy || !runtime || notOwner}
+          onClick={() => decide('dismissed')}
+        >
+          {t('schedules.proposal.dismiss', 'Ignore')}
+        </Button>
+        <Button size="small" variant="secondary" onClick={() => openSchedule(meta.scheduleId)}>
+          {t('schedules.proposal.open', 'Open')}
+        </Button>
+        <Button
+          size="small"
+          variant="primary"
+          disabled={busy || !ready || !runtime || reasons.length > 0}
+          onClick={() => decide('applied')}
+        >
+          {t('schedules.editProposal.apply', 'Apply')}
         </Button>
       </div>
     </div>

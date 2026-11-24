@@ -139,7 +139,7 @@ export function takePinnedDragOrigin(sessionId: string): PinnedDragOrigin | null
 // Hover is held off from the drop until the pointer next moves: the landed row
 // sits under a still pointer, and lighting it up then is the jump to avoid.
 
-// The rules live in `tailwind/index.css`, keyed by these body attributes.
+// The rules live in `style/index.css`, keyed by these body attributes.
 const HOVER_ATTR = 'data-pin-hover-suppressed';
 const DRAGGING_ATTR = 'data-pin-dragging';
 

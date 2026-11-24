@@ -1,7 +1,7 @@
 import { Loader2, type LucideIcon } from 'lucide-react';
 import type { ComponentPropsWithoutRef } from 'react';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 
 const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
@@ -57,7 +57,7 @@ export function Spinner({
     <span
       data-slot="icon-spinner"
       data-spinning={spinning}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       {...props}
       style={sx.style ? { ...sx.style, ...style } : style}
     >

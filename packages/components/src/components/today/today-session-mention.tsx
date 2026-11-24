@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
+import { useRef } from 'react';
 import type React from 'react';
 import { Hand } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +9,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { sessionMetaAtomFamily, sessionMetaCacheSettledAtomFamily } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
+import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import { useTodayEditor } from './editor/today-editor-context';
 import {
   todaySessionDisplay,
@@ -215,6 +217,8 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
  * editor's decorators render this same component so metrics match; its root
  * carries `data-today-mention`, which caret geometry counts as one character.
  * Pointer presses never reach the row, so they never activate the editor.
+ * A resolved conversation drags out like a sidebar row (onto a conversation or
+ * the new-chat page); a press on the status icon never starts that drag.
  * Behavior: specs/today-outline.md (Conversation mentions).
  */
 export function TodayMention(props: { mention: TodayMentionTarget; selected?: boolean }) {
@@ -284,11 +288,15 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   const controller = useTodayEditor();
   const sessionId = props.sessionId as SessionId;
   const display = useTodaySessionDisplay(sessionId);
+  const pressedStatus = useRef(false);
   const rootProps = {
     'data-today-mention': '',
     'data-today-session': sessionId,
     contentEditable: false,
-    onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+    onPointerDown: (event: React.PointerEvent) => {
+      pressedStatus.current = false;
+      event.stopPropagation();
+    },
   } as const;
   if (display.state !== 'ok') {
     return (
@@ -316,6 +324,15 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
       {...stylex.props(styles.mention, props.selected && styles.selected)}
       {...rootProps}
       data-today-status={display.status}
+      draggable
+      onDragStart={(event) => {
+        if (pressedStatus.current) {
+          event.preventDefault();
+          return;
+        }
+        event.stopPropagation();
+        startSessionMentionDrag(event, { sessionId, title, source: 'today' });
+      }}
     >
       <button
         type="button"
@@ -327,6 +344,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         })}
         tabIndex={-1}
         onPointerDown={(event) => {
+          pressedStatus.current = true;
           // Keep the editor's focus and selection where they are.
           event.preventDefault();
           event.stopPropagation();

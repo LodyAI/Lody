@@ -3,7 +3,7 @@ import { prefersReducedMotion } from './tiles';
 
 /*
  * Switching boards is one quiet View Transition, typed `home-board` so its rules in
- * `tailwind/index.css` touch nothing else: the rest of the page does not cross-fade (that read
+ * `style/index.css` touch nothing else: the rest of the page does not cross-fade (that read
  * as a flash), only three things move. The board's area eases to its new height while the two
  * boards cross-fade in full overlap, never scaled; the segments, their labels and the fold
  * control follow the same geometry change as the pill and heading. Labels have their own

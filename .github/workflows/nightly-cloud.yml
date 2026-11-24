@@ -519,7 +519,7 @@ jobs:
       - prepare
       - validate
     if: needs.prepare.outputs.publish == 'true'
-    uses: ./.github/workflows/publish-ios.yml
+    uses: ./.github/workflows/publish-ios-native.yml
     secrets: inherit
     with:
       source-sha: ${{ needs.candidate.outputs.private-sha }}
