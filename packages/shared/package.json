@@ -8,6 +8,7 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./commands/host-commands": "./src/commands/host-commands.ts",
     "./plugins/*": "./src/plugins/*.ts",
     "./automations": {
       "types": "./src/automations/index.ts",

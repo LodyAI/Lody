@@ -1725,6 +1725,19 @@ describe('useSessionActions', () => {
     expect(tree.metaRepo.getSession(root.id)?.lastReadAt).toBeGreaterThanOrEqual(wokeAt);
   });
 
+  it('plugin pinning uses the session writer only for the installed machine', async () => {
+    const tree = createOpenedSubTree('plugin-pin');
+    const runtime = createRuntime({ repo: tree.metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const pin = (machine: string) => actions.executePluginSessionCommand(
+      runtime.workspaceId, machine, tree.rootSession.id, 'sessionSetPinned', { pinned: true }, new AbortController().signal
+    );
+    await expect(pin('wrong-machine')).rejects.toMatchObject({ code: 'forbidden' });
+    expect(tree.metaRepo.getSession(tree.rootSession.id)?.isPinned).not.toBe(true);
+    await pin(tree.rootSession.machineId!);
+    expect(tree.metaRepo.getSession(tree.rootSession.id)?.isPinned).toBe(true);
+  });
+
   it('status actions on an opened tree leave archived sub-conversations alone', async () => {
     const tree = createOpenedSubTree('tree-archived');
     const until = Date.now() + 60 * 60_000;
