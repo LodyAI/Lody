@@ -3,15 +3,20 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { JsonObject, RemoteCursor } from '@loro-dev/streams-crdt';
+import { Effect } from 'effect';
+import { TestClock } from 'effect/testing';
 import {
   createLoroStreamUrl,
   DEFAULT_LORO_STREAMS_BASE_URL,
   getCodeCollabFileIndexFlockDocId,
   getLoroStreamIdForDocId,
+  getMachineRoomId,
   getSessionRoomId,
+  getWorkspaceFlockDocId,
   isLoroRepoDocDeleted,
   LEGACY_LORO_STREAMS_BASE_URL,
   LORO_STREAMS_BUCKET_ID,
+  type MachineId,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -29,9 +34,9 @@ import { getLogger } from '@/utils/logger';
 import {
   AliasedRemoteCursorStore,
   createCliSqliteRepoStore,
-  getSqliteRepoDatabase,
+  createSqliteRepoMaintenanceStore,
 } from './sqlite-repo-store';
-import { SqliteRepoMaintenance } from './sqlite-repo-maintenance';
+import { makeSqliteRepoMaintenance, SqliteRepoMaintenanceLegacy } from './sqlite-repo-maintenance';
 
 const createdPaths = new Set<string>();
 const openStores = new Set<SqliteRepoStore>();
@@ -205,21 +210,11 @@ describe('SQLite Loro repo store', () => {
     expect(await cursorStore.load(currentUrl)).toBeNull();
   });
 
-  it('initializes new SQLite repo stores with incremental auto_vacuum', async () => {
-    const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-sqlite-autovac-'));
-    createdPaths.add(baseDir);
-
-    const store = await createCliSqliteRepoStore('ws-autovac' as WorkspaceId, undefined, baseDir);
-    openStores.add(store.sqliteStore);
-
-    const db = getSqliteRepoDatabase(store);
-    expect(Number(db.pragma('auto_vacuum', { simple: true }))).toBe(2);
-  });
-
-  it('purges deleted doc bodies, deleted session Flocks, compacts doc_updates, and reclaims freelist pages', async () => {
+  it('purges deleted doc bodies, legacy cursors, and deleted session Flocks while protecting active/machine/workspace data and compacting doc_updates', async () => {
     const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-sqlite-maint-'));
     createdPaths.add(baseDir);
     const workspaceId = 'ws-maint' as WorkspaceId;
+    const otherWorkspaceId = 'ws-other' as WorkspaceId;
     const deletedSessionId = 'sess-deleted' as SessionId;
     const activeDeletedSessionId = 'sess-active-deleted' as SessionId;
     const liveSessionId = 'sess-live' as SessionId;
@@ -236,6 +231,7 @@ describe('SQLite Loro repo store', () => {
       const deletedRoomId = getSessionRoomId(deletedSessionId);
       const activeDeletedRoomId = getSessionRoomId(activeDeletedSessionId);
       const liveRoomId = getSessionRoomId(liveSessionId);
+      const machineRoomId = getMachineRoomId('machine-1' as MachineId);
 
       const deletedHandle = await repo.openPersistedDoc(deletedRoomId);
       deletedHandle.doc.getText('payload').insert(0, 'x'.repeat(256 * 1024));
@@ -247,7 +243,6 @@ describe('SQLite Loro repo store', () => {
         streamId: getLoroStreamIdForDocId(workspaceId, deletedRoomId),
       });
       await store.sharedDocumentRemoteCursorStore.save(createCursor(deletedCursorUrl));
-      await store.storageAdapter.docCursorIndex?.add(deletedRoomId, deletedCursorUrl);
 
       const deletedFlockId = getCodeCollabFileIndexFlockDocId(workspaceId, deletedSessionId);
       const deletedFlockHandle = await repo.openFlockDoc(deletedFlockId);
@@ -256,6 +251,21 @@ describe('SQLite Loro repo store', () => {
       await repo.flush();
       await repo.unloadFlockDoc(deletedFlockId);
 
+      const workspaceFlockId = getWorkspaceFlockDocId(workspaceId);
+      const workspaceFlockHandle = await repo.openFlockDoc(workspaceFlockId);
+      workspaceFlockHandle.flock.set(['project', 'p1'], 'keep');
+      workspaceFlockHandle.flock.commit();
+      const otherWsFlockId = getCodeCollabFileIndexFlockDocId(otherWorkspaceId, deletedSessionId);
+      const otherWsFlockHandle = await repo.openFlockDoc(otherWsFlockId);
+      otherWsFlockHandle.flock.set(['file', 'b.ts'], 'keep');
+      otherWsFlockHandle.flock.commit();
+      await repo.flush();
+      await repo.unloadFlockDoc(workspaceFlockId);
+      await repo.unloadFlockDoc(otherWsFlockId);
+
+      const machineHandle = await repo.openPersistedDoc(machineRoomId);
+      machineHandle.doc.getText('m').insert(0, 'keep-machine');
+      machineHandle.doc.commit();
       const activeDeletedHandle = await repo.openPersistedDoc(activeDeletedRoomId);
       activeDeletedHandle.doc.getText('payload').insert(0, 'keep-while-active');
       activeDeletedHandle.doc.commit();
@@ -270,9 +280,10 @@ describe('SQLite Loro repo store', () => {
 
       await repo.deleteDoc(deletedRoomId);
       await repo.deleteDoc(activeDeletedRoomId);
+      await repo.deleteDoc(machineRoomId);
       await repo.flush();
 
-      const db = getSqliteRepoDatabase(store);
+      const db = Reflect.get(store.sqliteStore, 'db') as Database.Database;
       expect(
         (
           db.prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?').get(liveRoomId) as {
@@ -281,13 +292,11 @@ describe('SQLite Loro repo store', () => {
         ).n
       ).toBeGreaterThanOrEqual(32);
 
-      const maintenance = new SqliteRepoMaintenance({
+      const maintenance = new SqliteRepoMaintenanceLegacy({
         repo,
-        store,
-        workspaceId,
+        store: createSqliteRepoMaintenanceStore(store, 'shared-durable'),
         logger: getLogger(),
         isDocActive: (docId) => docId === activeDeletedRoomId,
-        minCompactUpdateCount: 32,
       });
 
       const report = await maintenance.runOnce();
@@ -308,8 +317,17 @@ describe('SQLite Loro repo store', () => {
       const deletedMeta = await repo.getDocMeta(deletedRoomId);
       expect(deletedMeta && isLoroRepoDocDeleted(deletedMeta)).toBe(true);
 
+      expect(
+        db.prepare('SELECT 1 FROM flock_doc_updates WHERE flock_doc_id = ?').get(workspaceFlockId)
+      ).toBeDefined();
+      expect(
+        db.prepare('SELECT 1 FROM flock_doc_updates WHERE flock_doc_id = ?').get(otherWsFlockId)
+      ).toBeDefined();
+
       const activeReloaded = await store.storageAdapter.loadDoc(activeDeletedRoomId);
       expect(activeReloaded?.getText('payload').toString()).toBe('keep-while-active');
+      const machineReloaded = await store.storageAdapter.loadDoc(machineRoomId);
+      expect(machineReloaded?.getText('m').toString()).toBe('keep-machine');
 
       expect(
         (
@@ -322,7 +340,7 @@ describe('SQLite Loro repo store', () => {
       expect(reloaded).toBeInstanceOf(LoroDoc);
       expect(reloaded?.getText('stream').toString()).toContain('msg39');
 
-      await maintenance.stop();
+      await maintenance.close();
     } finally {
       await repo.destroy();
     }
@@ -334,17 +352,12 @@ describe('SQLite Loro repo store', () => {
     const dbPath = path.join(baseDir, 'repo.sqlite3');
     const workspaceId = 'ws-legacy' as WorkspaceId;
 
-    const sqliteStore = new SqliteRepoStore({ path: dbPath });
-    openStores.add(sqliteStore);
-    const store = {
-      workspaceId,
-      sqliteStore,
-      storageAdapter: sqliteStore.storage,
-      sharedDocumentRemoteCursorStore: new AliasedRemoteCursorStore(sqliteStore.cursorStore),
-      dbPath,
-      baseDir,
-    };
-    const db = getSqliteRepoDatabase(store);
+    const legacyInit = new SqliteRepoStore({ path: dbPath });
+    legacyInit.close();
+
+    const store = await createCliSqliteRepoStore(workspaceId, undefined, baseDir);
+    openStores.add(store.sqliteStore);
+    const db = Reflect.get(store.sqliteStore, 'db') as Database.Database;
     expect(Number(db.pragma('auto_vacuum', { simple: true }))).toBe(0);
 
     const repo = await LoroRepo.create({
@@ -362,32 +375,31 @@ describe('SQLite Loro repo store', () => {
       await repo.deleteDoc(deadRoomId);
       await repo.flush();
 
-      const lowDiskMaintenance = new SqliteRepoMaintenance({
-        repo,
-        store,
-        workspaceId,
-        logger: getLogger(),
-        isDocActive: () => false,
+      const policy = {
         vacuumMinFreelistBytes: 64 * 1024,
         vacuumMinFreelistRatio: 0.1,
         vacuumHeadroomBytes: 1024 * 1024,
+      };
+      const lowDiskMaintenance = new SqliteRepoMaintenanceLegacy({
+        repo,
+        store: createSqliteRepoMaintenanceStore(store, 'shared-durable'),
+        logger: getLogger(),
+        isDocActive: () => false,
+        policy,
         getFreeDiskBytes: async () => 1024,
       });
       const lowDiskReport = await lowDiskMaintenance.runOnce();
       expect(lowDiskReport.deletedDocsPurged).toBe(1);
       expect(lowDiskReport.ranFullVacuum).toBe(false);
       expect(Number(db.pragma('auto_vacuum', { simple: true }))).toBe(0);
-      await lowDiskMaintenance.stop();
+      await lowDiskMaintenance.close();
 
-      const okDiskMaintenance = new SqliteRepoMaintenance({
+      const okDiskMaintenance = new SqliteRepoMaintenanceLegacy({
         repo,
-        store,
-        workspaceId,
+        store: createSqliteRepoMaintenanceStore(store, 'shared-durable'),
         logger: getLogger(),
         isDocActive: () => false,
-        vacuumMinFreelistBytes: 64 * 1024,
-        vacuumMinFreelistRatio: 0.1,
-        vacuumHeadroomBytes: 1024 * 1024,
+        policy,
         getFreeDiskBytes: async () => 10 * 1024 * 1024 * 1024,
       });
       const okDiskReport = await okDiskMaintenance.runOnce();
@@ -404,13 +416,13 @@ describe('SQLite Loro repo store', () => {
       const loaded = await store.storageAdapter.loadDoc(nextRoomId);
       expect(loaded?.getText('ok').toString()).toBe('alive');
 
-      await okDiskMaintenance.stop();
+      await okDiskMaintenance.close();
     } finally {
       await repo.destroy();
     }
   });
 
-  it('compacts stale doc_updates older than the idle threshold even with few small rows', async () => {
+  it('compacts stale doc_updates on schedule with TestClock and coalesces concurrent passes', async () => {
     const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-sqlite-stale-'));
     createdPaths.add(baseDir);
     const workspaceId = 'ws-stale' as WorkspaceId;
@@ -437,45 +449,69 @@ describe('SQLite Loro repo store', () => {
       freshHandle.doc.commit();
       await repo.flush();
 
-      const db = getSqliteRepoDatabase(store);
-      const nowMs = Date.now();
-      const fortyDaysAgoMs = nowMs - 40 * 24 * 60 * 60 * 1_000;
+      const db = Reflect.get(store.sqliteStore, 'db') as Database.Database;
+      const baseNowMs = 1_800_000_000_000;
+      const staleAgeMs = 10_000;
       db.prepare('UPDATE doc_updates SET created_at = ? WHERE doc_id = ?').run(
-        fortyDaysAgoMs,
+        baseNowMs - staleAgeMs - 1_000,
         staleRoomId
       );
+      db.prepare('UPDATE doc_updates SET created_at = ? WHERE doc_id = ?').run(
+        baseNowMs,
+        freshRoomId
+      );
 
-      const maintenance = new SqliteRepoMaintenance({
-        repo,
-        store,
-        workspaceId,
-        logger: getLogger(),
-        isDocActive: () => false,
-        now: () => nowMs,
-      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* TestClock.setTime(baseNowMs);
+            const maintenance = yield* makeSqliteRepoMaintenance({
+              repo,
+              store: createSqliteRepoMaintenanceStore(store, 'shared-durable'),
+              logger: getLogger(),
+              isDocActive: () => false,
+              policy: {
+                initialDelayMs: staleAgeMs + 5_000,
+                intervalMs: 60_000,
+                staleUpdateAgeMs: staleAgeMs,
+              },
+            });
 
-      const report = await maintenance.runOnce();
-      expect(report.docsCompacted).toBe(1);
+            const [first, second] = yield* Effect.all([maintenance.runOnce, maintenance.runOnce], {
+              concurrency: 2,
+            });
+            expect(first.docsCompacted).toBe(1);
+            expect(second).toEqual(first);
 
-      expect(
-        (
-          db.prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?').get(staleRoomId) as {
-            n: number;
-          }
-        ).n
-      ).toBe(0);
-      expect(
-        (
-          db.prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?').get(freshRoomId) as {
-            n: number;
-          }
-        ).n
-      ).toBeGreaterThan(0);
+            expect(
+              (
+                db
+                  .prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?')
+                  .get(staleRoomId) as { n: number }
+              ).n
+            ).toBe(0);
+            expect(
+              (
+                db
+                  .prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?')
+                  .get(freshRoomId) as { n: number }
+              ).n
+            ).toBeGreaterThan(0);
+
+            yield* TestClock.adjust(staleAgeMs + 5_000);
+            expect(
+              (
+                db
+                  .prepare('SELECT COUNT(*) AS n FROM doc_updates WHERE doc_id = ?')
+                  .get(freshRoomId) as { n: number }
+              ).n
+            ).toBe(0);
+          })
+        ).pipe(Effect.provide(TestClock.layer()))
+      );
 
       const reloaded = await store.storageAdapter.loadDoc(staleRoomId);
       expect(reloaded?.getText('msg').toString()).toBe('old-message');
-
-      await maintenance.stop();
     } finally {
       await repo.destroy();
     }

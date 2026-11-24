@@ -121,10 +121,10 @@ export type CliSqliteRepoStore = {
   baseDir: string;
 };
 
-export const getSqliteRepoDatabase = (store: CliSqliteRepoStore): Database.Database =>
+const getSqliteRepoDatabase = (store: CliSqliteRepoStore): Database.Database =>
   (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
 
-export const findDocumentRemoteCursorUrls = (
+const findDocumentRemoteCursorUrls = (
   database: Database.Database,
   workspaceId: WorkspaceId,
   docId: string,
@@ -264,6 +264,141 @@ export class ProcessDocumentRemoteCursorStore implements RemoteCursorStore {
     }
   }
 }
+
+export type SqliteRepoSpaceStats = {
+  readonly pageSize: number;
+  readonly pageCount: number;
+  readonly freelistCount: number;
+  readonly autoVacuum: 'none' | 'full' | 'incremental';
+};
+
+export type SqliteRepoMaintenanceStore = {
+  readonly workspaceId: WorkspaceId;
+  readonly dbPath: string;
+  isOpen(): boolean;
+  listStoredDocIds(): string[];
+  listStoredFlockDocIds(): string[];
+  listCompactionCandidates(
+    minUpdateCount: number,
+    minUpdateBytes: number,
+    staleCutoffMs: number,
+    limit: number
+  ): string[];
+  purgeStoredDoc(docId: string): Promise<void>;
+  compactStoredDoc(docId: string): Promise<void>;
+  readSpaceStats(): SqliteRepoSpaceStats;
+  upgradeToIncrementalAndVacuum(): number;
+  runIncrementalVacuumStep(pages: number): number;
+  runWalCheckpoint(): void;
+};
+
+const decodeAutoVacuum = (value: number): SqliteRepoSpaceStats['autoVacuum'] =>
+  value === 2 ? 'incremental' : value === 1 ? 'full' : 'none';
+
+export const createSqliteRepoMaintenanceStore = (
+  store: CliSqliteRepoStore,
+  _scope: 'shared-durable',
+  bucketId = LORO_STREAMS_BUCKET_ID
+): SqliteRepoMaintenanceStore => {
+  const openDb = (): Database.Database | null => {
+    const db = getSqliteRepoDatabase(store);
+    return db.open ? db : null;
+  };
+
+  const readSpaceStats = (): SqliteRepoSpaceStats => {
+    const db = openDb();
+    if (!db) return { pageSize: 4096, pageCount: 0, freelistCount: 0, autoVacuum: 'none' };
+    return {
+      pageSize: Number(db.pragma('page_size', { simple: true }) ?? 4096),
+      pageCount: Number(db.pragma('page_count', { simple: true }) ?? 0),
+      freelistCount: Number(db.pragma('freelist_count', { simple: true }) ?? 0),
+      autoVacuum: decodeAutoVacuum(Number(db.pragma('auto_vacuum', { simple: true }) ?? 0)),
+    };
+  };
+
+  return {
+    workspaceId: store.workspaceId,
+    dbPath: store.dbPath,
+    isOpen: () => openDb() !== null,
+    listStoredDocIds: () => {
+      const db = openDb();
+      if (!db) return [];
+      const rows = db
+        .prepare('SELECT doc_id FROM docs UNION SELECT doc_id FROM doc_updates')
+        .all() as Array<{ doc_id: string }>;
+      return rows.map((row) => row.doc_id);
+    },
+    listStoredFlockDocIds: () => {
+      const db = openDb();
+      if (!db) return [];
+      const rows = db
+        .prepare(
+          'SELECT flock_doc_id FROM flock_docs UNION SELECT flock_doc_id FROM flock_doc_updates'
+        )
+        .all() as Array<{ flock_doc_id: string }>;
+      return rows.map((row) => row.flock_doc_id);
+    },
+    listCompactionCandidates: (minUpdateCount, minUpdateBytes, staleCutoffMs, limit) => {
+      const db = openDb();
+      if (!db) return [];
+      const rows = db
+        .prepare(
+          `SELECT doc_id, COUNT(*) AS update_count, COALESCE(SUM(LENGTH(update_data)), 0) AS total_bytes
+           FROM doc_updates
+           GROUP BY doc_id
+           HAVING update_count >= ? OR total_bytes >= ? OR MAX(created_at) <= ?
+           ORDER BY total_bytes DESC
+           LIMIT ?`
+        )
+        .all(minUpdateCount, minUpdateBytes, staleCutoffMs, limit) as Array<{ doc_id: string }>;
+      return rows.map((row) => row.doc_id);
+    },
+    purgeStoredDoc: async (docId) => {
+      const db = openDb();
+      if (!db) return;
+      const cursorUrls = new Set<string>(
+        (await store.storageAdapter.docCursorIndex?.load(docId)) ?? []
+      );
+      for (const url of findDocumentRemoteCursorUrls(db, store.workspaceId, docId, bucketId)) {
+        cursorUrls.add(url);
+      }
+      for (const url of cursorUrls) {
+        await store.sharedDocumentRemoteCursorStore.delete?.(url);
+      }
+      await store.storageAdapter.docCursorIndex?.delete(docId);
+      await store.storageAdapter.deleteDoc?.(docId);
+    },
+    compactStoredDoc: async (docId) => {
+      if (!openDb()) return;
+      const doc = await store.storageAdapter.loadDoc(docId);
+      (doc as { free?: () => void } | undefined)?.free?.();
+    },
+    readSpaceStats,
+    upgradeToIncrementalAndVacuum: () => {
+      const db = openDb();
+      if (!db) return 0;
+      const before = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      db.pragma('auto_vacuum = INCREMENTAL');
+      db.exec('VACUUM');
+      const after = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      return Math.max(0, before - after);
+    },
+    runIncrementalVacuumStep: (pages) => {
+      const db = openDb();
+      if (!db) return 0;
+      const before = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      if (before <= 0) return 0;
+      db.pragma(`incremental_vacuum(${Math.max(1, Math.floor(pages))})`);
+      const after = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      return Math.max(0, before - after);
+    },
+    runWalCheckpoint: () => {
+      const db = openDb();
+      if (!db) return;
+      db.pragma('wal_checkpoint(TRUNCATE)');
+    },
+  };
+};
 
 export const createDocumentRemoteCursorStore = (
   store: CliSqliteRepoStore,

@@ -113,7 +113,7 @@ import {
 } from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
 import { CliPromptSuggestions } from './prompt-suggestions';
-import { SqliteRepoMaintenance } from './sqlite-repo-maintenance';
+import { SqliteRepoMaintenanceLegacy } from './sqlite-repo-maintenance';
 import type { LodyPromptSuggestion } from 'acp-extension-core';
 import {
   attachAutoMarkLatestUserHistoryAsRead,
@@ -142,6 +142,7 @@ import {
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   createCliIncompleteRecoveryStore,
+  createSqliteRepoMaintenanceStore,
   ProcessDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
@@ -489,7 +490,7 @@ export class LoroDocumentManager {
   private readonly localLoroDataPlaneServer: LocalLoroDataPlaneServerLegacy | null;
   private readonly sqliteRepoStore: CliSqliteRepoStore | null;
   private readonly documentRemoteCursorStore: RemoteCursorStore | null;
-  private readonly sqliteRepoMaintenance: SqliteRepoMaintenance | null;
+  private readonly sqliteRepoMaintenance: SqliteRepoMaintenanceLegacy | null;
   private remoteStreamsAttached: boolean;
   private remoteStreamsGeneration: number;
   private machineExistenceWatcher: RepoWatchHandle | null = null;
@@ -924,11 +925,13 @@ export class LoroDocumentManager {
       }
     );
     if (options.documentCursorScope === 'shared-durable' && this.sqliteRepoStore) {
-      this.sqliteRepoMaintenance = new SqliteRepoMaintenance({
+      this.sqliteRepoMaintenance = new SqliteRepoMaintenanceLegacy({
         repo: this.repo,
-        store: this.sqliteRepoStore,
-        workspaceId: this.workspaceId,
-        bucketId: this.encryptedWorkspace?.bucketId(),
+        store: createSqliteRepoMaintenanceStore(
+          this.sqliteRepoStore,
+          options.documentCursorScope,
+          this.encryptedWorkspace?.bucketId()
+        ),
         logger: this.logger,
         isDocActive: (docId) => {
           const sessionId = getSessionIdFromRoomId(docId);
@@ -943,7 +946,6 @@ export class LoroDocumentManager {
           return this.localDocRoomBridges.has(docId);
         },
       });
-      this.sqliteRepoMaintenance.start();
     } else {
       this.sqliteRepoMaintenance = null;
     }
@@ -2466,7 +2468,7 @@ export class LoroDocumentManager {
     }
     this.detachMachineFlockMetaRoomSyncedListener?.();
     this.detachMachineFlockMetaRoomSyncedListener = null;
-    await this.sqliteRepoMaintenance?.stop();
+    await this.sqliteRepoMaintenance?.close();
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
     const attempt = async (scope: string, close: () => Promise<unknown>) => {

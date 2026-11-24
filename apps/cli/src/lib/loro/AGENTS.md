@@ -64,8 +64,13 @@ process saves and deletions stay in memory. The [decision](../../../../../.agent
 explains why unchecked shared reads lose data. Never use a shared `remoteCursorStore`
 or schedule-only `onPersist*`. The incomplete-recovery scope survives reattachment.
 Its metadata persists independently of cursors; only daemons publish it.
-One-shot managers disable cloud ephemeral sinks. Test:
-`tests/cli-streams-replica-checkpoints.test.ts`.
+One-shot managers disable cloud ephemeral sinks. SQLite repo maintenance
+(`createSqliteRepoMaintenanceStore` / `makeSqliteRepoMaintenance`) is daemon-only
+(`shared-durable` scope): it purges local bodies and cursors for soft-deleted
+non-machine docs without touching active in-memory docs or `metaFlock`
+tombstones, compacts accumulated or stale `doc_updates`, and reclaims freelist
+pages only with a disk-headroom check before full `VACUUM`. Test:
+`tests/cli-streams-replica-checkpoints.test.ts`, `src/lib/loro/sqlite-repo-store.test.ts`.
 
 ## Shared ACP runtime config contains no secrets
 
