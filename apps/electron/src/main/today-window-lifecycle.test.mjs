@@ -88,15 +88,19 @@ void test('closing parks the window and reopening binds the day before showing i
   const { lifecycle, created, parked, reopened } = setup()
   const window = lifecycle.open({ workspace: 'w' })
   lifecycle.committed(window, 0)
+  assert.equal(lifecycle.getOpenWindow('w')?.window, window)
   window.close()
   assert.equal(window.destroyed, false)
   assert.equal(window.visible, false)
   assert.equal(parked.has(window), true)
   assert.deepEqual(window.sent.at(-1), { channel: CHANNEL, payload: null })
+  assert.equal(lifecycle.getOpenWindow('w'), null)
+  assert.equal(lifecycle.getOpenWindow(), null)
 
   assert.equal(lifecycle.open({ workspace: 'w', date: '2026-11-25' }), window)
   assert.equal(created.length, 1)
   assert.equal(parked.has(window), true)
+  assert.equal(lifecycle.getOpenWindow('w')?.ready, false)
   assert.deepEqual(window.sent.at(-1), {
     channel: CHANNEL,
     payload: { member: undefined, date: '2026-11-25', bindingId: 1 }
@@ -108,6 +112,7 @@ void test('closing parks the window and reopening binds the day before showing i
   lifecycle.committed(window, 1)
   assert.equal(window.visible, true)
   assert.equal(parked.has(window), false)
+  assert.equal(lifecycle.getOpenWindow('w')?.ready, true)
   assert.deepEqual(reopened, [window])
 })
 

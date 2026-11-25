@@ -32,6 +32,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  GLOBAL_SHORTCUT_DEFAULTS,
   TODAY_MENTION_CHAR,
   buildTodayLink,
   getSessionRoomId,
@@ -43,6 +44,7 @@ import {
   type TodayRichText,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
 import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
 import { Toggle } from '@lody/ui/toggle';
@@ -64,6 +66,7 @@ import {
 import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { runtimeAtom } from '@/atoms/runtime';
+import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '../user-avatar';
@@ -108,6 +111,11 @@ export type TodayOpenSession = (target: { sessionId: SessionId; workspaceId: str
 export const TODAY_READABLE_WIDTH = 720;
 
 const styles = stylex.create({
+  tooltipWithShortcut: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+  },
   root: {
     position: 'relative',
     display: 'flex',
@@ -388,6 +396,12 @@ export function TodayView(props: {
     return restoreScrollAnchor(controller?.getSurface() ?? null, anchor);
   }, [controller, focusDate]);
 
+  const { shortcuts: globalShortcuts } = useGlobalShortcuts();
+  const toggleWindowEntry = globalShortcuts.find((entry) => entry.id === 'today.toggleWindow');
+  const toggleWindowBinding = toggleWindowEntry
+    ? toggleWindowEntry.binding
+    : GLOBAL_SHORTCUT_DEFAULTS['today.toggleWindow'];
+
   if (!runtime || !userId) return null;
   const toolbarSurface: TodayToolbarSurface = standalone
     ? 'standalone'
@@ -464,7 +478,16 @@ export function TodayView(props: {
                       </Button>
                     }
                   />
-                  <Tooltip.Content side="bottom">{openWindowLabel}</Tooltip.Content>
+                  <Tooltip.Content side="bottom">
+                    {toggleWindowBinding ? (
+                      <span {...stylex.props(styles.tooltipWithShortcut)}>
+                        {openWindowLabel}
+                        <Kbd>{formatKeyBinding(toggleWindowBinding)}</Kbd>
+                      </span>
+                    ) : (
+                      openWindowLabel
+                    )}
+                  </Tooltip.Content>
                 </Tooltip.Root>
               ) : null}
               {props.onTogglePin ? (

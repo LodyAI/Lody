@@ -78,6 +78,7 @@ import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
+import { WebCookieConsentBanner } from '@/components/web-cookie-consent-banner';
 import { ReferralLeadAttacher } from '@/components/referral-lead-attacher';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
 import { ERROR_BOUNDARY_PROBE_EVENT, consumeErrorBoundaryProbe } from '@/lib/error-boundary-probe';
@@ -242,7 +243,7 @@ function RootApp() {
 
   return (
     <LodyPostHogProvider>
-      {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
+      {telemetryEnabled && <AppLaunchAnalyticsTracker />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
       <SessionDeepLinkRouter />
       <ReferralLeadAttacher
@@ -273,6 +274,7 @@ function RootApp() {
                     {isElectron && isLocalAppPlatform() && <TodayCompanionHost />}
                   </RuntimeProvider>
                 </ErrorBoundary>
+                {telemetryEnabled && !isElectron && <WebCookieConsentBanner />}
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>

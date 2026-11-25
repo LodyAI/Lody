@@ -62,8 +62,16 @@ type CreateMainWindowOptions = {
   icon?: string
   initialPath?: string
   auxiliary?: boolean
-  /** A single-surface companion window: its own size, centred, never the primary window. */
-  companion?: { width: number; height: number; minWidth: number; minHeight: number }
+  /** A single-surface companion window: its own bounds, never the primary window. */
+  companion?: {
+    width: number
+    height: number
+    minWidth: number
+    minHeight: number
+    x?: number
+    y?: number
+    center?: boolean
+  }
   hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
   /**
@@ -399,7 +407,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
     ...(options.companion
-      ? { ...options.companion, center: true }
+      ? options.companion
       : {
           ...getMainWindowConstructorOptions(),
           ...(options.auxiliary ? { width: 1000, height: 760 } : {})
@@ -491,12 +499,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 
   window.webContents.setWindowOpenHandler((details) => {
     const today = allowTodayCompanion(window, details, {
-      width: 440,
-      height: 760,
-      minWidth: 320,
-      minHeight: 360,
       show: false,
-      center: true,
       backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
       autoHideMenuBar: true,
       ...(process.platform === 'darwin'

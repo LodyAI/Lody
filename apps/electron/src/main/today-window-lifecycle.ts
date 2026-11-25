@@ -19,8 +19,10 @@ type TodayLifecycleWindow = {
   }
 }
 
+type OpenOptions = { stealFocus?: boolean }
+
 type TodayWindowLifecycleDeps<W extends TodayLifecycleWindow> = {
-  create(target: TodayWindowTarget): W
+  create(target: TodayWindowTarget, options?: OpenOptions): W
   focus(window: W): void
   bindChannel: string
   canPark(window: W): boolean
@@ -59,8 +61,8 @@ export function createTodayWindowLifecycle<W extends TodayLifecycleWindow>(
     }
   }
 
-  const create = (target: TodayWindowTarget): W => {
-    const window = deps.create(target)
+  const create = (target: TodayWindowTarget, options?: OpenOptions): W => {
+    const window = deps.create(target, options)
     const entry: Entry<W> = { window, bindingId: 0, ready: false, pending: null }
     entries.set(target.workspace, entry)
     window.on('close', (event) => {
@@ -86,9 +88,9 @@ export function createTodayWindowLifecycle<W extends TodayLifecycleWindow>(
   }
 
   return {
-    open(target: TodayWindowTarget): W {
+    open(target: TodayWindowTarget, options?: OpenOptions): W {
       const entry = entries.get(target.workspace)
-      if (!entry || entry.window.isDestroyed()) return create(target)
+      if (!entry || entry.window.isDestroyed()) return create(target, options)
       const { window } = entry
       if (parked === entry) {
         parked = null
@@ -97,7 +99,7 @@ export function createTodayWindowLifecycle<W extends TodayLifecycleWindow>(
         const cancel = deps.setTimer(() => {
           const shouldReopen = deps.canPark(window)
           window.destroy()
-          if (shouldReopen) create(target)
+          if (shouldReopen) create(target, options)
         }, deps.revealDeadlineMs)
         entry.pending = { cancel, target, requestedAt: performance.now() }
         window.webContents.send(deps.bindChannel, {
@@ -136,6 +138,14 @@ export function createTodayWindowLifecycle<W extends TodayLifecycleWindow>(
     hasWorkspace(workspace: string): boolean {
       const entry = entries.get(workspace)
       return !!entry && !entry.window.isDestroyed()
+    },
+    getOpenWindow(workspace?: string): { window: W; ready: boolean } | null {
+      for (const [slug, entry] of entries) {
+        if ((!workspace || slug === workspace) && entry !== parked && !entry.window.isDestroyed()) {
+          return { window: entry.window, ready: !entry.pending }
+        }
+      }
+      return null
     },
     has(window: unknown): boolean {
       return [...entries.values()].some(

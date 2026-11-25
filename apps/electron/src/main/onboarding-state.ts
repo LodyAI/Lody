@@ -31,9 +31,13 @@ const onboardingStateStore = createSettingsStoreWithFallback<OnboardingStateSche
 export function getInitialDesktopPath(): InitialDesktopPath {
   return resolveInitialDesktopPath({
     isPackaged: app.isPackaged,
-    onboardingCompleted: onboardingStateStore.get('completed'),
+    onboardingCompleted: isOnboardingCompleted(),
     forceOnboarding: process.env['LODY_ELECTRON_FORCE_ONBOARDING'] === '1'
   })
+}
+
+export function isOnboardingCompleted(): boolean {
+  return onboardingStateStore.get('completed')
 }
 
 export function markOnboardingCompleted(): void {

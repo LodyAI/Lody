@@ -8503,11 +8503,13 @@ export const LocalAttachmentCard = ({
         (opening && remote
           ? t('sessions.localAttachmentDownloading', 'Downloading from original computer…')
           : remote
-            ? t('sessions.localAttachmentDownload', 'Download from original computer')
-            : t('sessions.localAttachmentOnly', 'Available only on the original computer'))
+            ? available
+              ? t('sessions.localAttachmentDownload', 'Download from original computer')
+              : t('sessions.localAttachmentOnly', 'Available only on the original computer')
+            : undefined)
       }
       actionIcon={
-        remote ? (
+        remote && (available || opening) ? (
           opening ? (
             <Spinner className={stylex.props(localAttachmentStyles.actionGlyph).className} />
           ) : (

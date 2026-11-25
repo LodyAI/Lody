@@ -7,9 +7,7 @@
  * `captureCli`, which is a no-op until `initCliAnalytics` runs and swallows its
  * own errors.
  *
- * Privacy: only ids/hashes/enums are forwarded. Never pass raw email/name,
- * repo_full_name, branch, path, url, token, prompt text, or image URLs. Use
- * `hashAnalyticsId` for any free-form id that is not already an opaque id.
+ * The upload boundary retains registered names and a process-scoped identifier.
  */
 
 import { captureCli } from '@/lib/analytics/posthog';
@@ -49,12 +47,6 @@ export function captureSessionCommandEvent(
   captureCli(`cli/${event}`, properties, { tier: 'A', distinctId: opts?.distinctId });
 }
 
-/**
- * Emit `app/active` for this CLI/daemon process. distinct_id defaults to the
- * machine_id resolved by the analytics layer; pass it explicitly when a
- * logged-in machine id is already known so the active event is attributed to
- * the right machine even before the system machine id is read.
- */
 export function captureCliActiveUser(properties?: Props, opts?: { distinctId?: string }): void {
   captureCli(
     'app/active',
@@ -73,7 +65,7 @@ export const ACTIVE_PING_MIN_INTERVAL_MS = 60_000;
 /**
  * Emit `app/active_ping` (tier C: high-frequency telemetry, sampled). Callers
  * MUST gate this to >= ACTIVE_PING_MIN_INTERVAL_MS and stop while idle; this
- * helper only applies tier-C sampling and stamps the sample_rate.
+ * helper only applies tier-C sampling.
  */
 export function captureCliActivePing(properties?: Props, opts?: { distinctId?: string }): void {
   captureCli('app/active_ping', properties, { tier: 'C', distinctId: opts?.distinctId });

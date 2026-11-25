@@ -42,4 +42,6 @@ times out, main replaces the renderer with a cold open. Cloud windows use the no
 The local primary window can open a [same-renderer companion](../../../../../.agents/notes/implemented/architecture/2026-11-25-today-shared-renderer.md).
 The companion mounts the note surface in a second native window and shares the primary runtime's
 page cache. The standalone route handles opens without that runtime and can take over when
-the primary window closes or reloads.
+the primary window closes or reloads. Both window types use the same saved position and size.
+The global toggle raises or closes the existing window of either type. When no Today window
+is open, it opens the standalone route for the active workspace.

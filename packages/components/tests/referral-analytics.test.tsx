@@ -42,7 +42,7 @@ describe('referral landing observation', () => {
     captureReferralLanding(client, localStorage, 2000);
     captureReferralLanding(client, localStorage, 3000);
     expect(sink.events.map((e) => e.event)).toEqual(['referral/landed']);
-    expect(sink.events[0]!.properties.source).toBe('stored_attribution');
+    expect(sink.events[0]!.properties).toEqual({});
     expect(JSON.stringify(sink.events)).not.toContain(code);
     expect(readReferral(localStorage, 3000)).toBe(code);
     expect(readReferral(localStorage, 1000 + 30 * 86400000)).toBeUndefined();

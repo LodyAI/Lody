@@ -7,6 +7,17 @@ export type Price = {
 };
 
 export const PRICE_DATA: { [key: string]: Price } = {
+  // https://developers.openai.com/api/docs/pricing (Standard, short context)
+  'gpt-6.2-astra': {
+    inputCostPerToken: 8e-6,
+    cacheReadInputTokenCost: 4e-7,
+    outputCostPerToken: 4e-5,
+  },
+  'gpt-6.2-sol': {
+    inputCostPerToken: 2e-6,
+    cacheReadInputTokenCost: 1e-7,
+    outputCostPerToken: 1e-5,
+  },
   'gpt-6-astra': {
     inputCostPerToken: 1e-5,
     cacheReadInputTokenCost: 1e-6,

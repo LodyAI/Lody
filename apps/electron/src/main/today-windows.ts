@@ -10,6 +10,7 @@ import { adoptAuxiliaryReloadPath, createMainWindow, focusMainWindow } from './w
 import { getTodayWindowPath, type TodayWindowTarget } from './today-window-target'
 import { isLocalPlatform } from './platform'
 import { createTodayWindowLifecycle } from './today-window-lifecycle'
+import { getTodayWindowConstructorOptions, trackTodayWindowBounds } from './window-persistence'
 import {
   getMainWindow,
   isAppQuitting,
@@ -24,16 +25,20 @@ import {
 const TODAY_WINDOW_BOOT_LOG_PREFIX = '[today-window] boot timeline'
 const TODAY_WINDOW_REOPEN_LOG_PREFIX = '[today-window] reopen'
 
-const TODAY_WINDOW_SIZE = { width: 440, height: 760, minWidth: 320, minHeight: 360 }
-
 const lifecycle = createTodayWindowLifecycle<BrowserWindow>({
-  create: (target) => {
+  create: (target, options) => {
     const requestedAt = Date.now()
     const window = createMainWindow({
       auxiliary: true,
-      companion: TODAY_WINDOW_SIZE,
+      companion: getTodayWindowConstructorOptions(),
       initialPath: getTodayWindowPath(target)
     })
+    trackTodayWindowBounds(window)
+    if (options?.stealFocus) {
+      window.once('ready-to-show', () => {
+        if (!window.isDestroyed()) focusMainWindow(window)
+      })
+    }
     traceTodayWindowBoot(window, requestedAt)
     return window
   },
@@ -76,14 +81,23 @@ const preparations = new WeakMap<
   }
 >()
 const companions = new Map<string, Companion>()
+let activeTodayWorkspace: string | null = null
 
-export function openTodayWindow(target: TodayWindowTarget): void {
+export function setActiveTodayWorkspace(workspace: string | null): void {
+  if (workspace) activeTodayWorkspace = workspace
+}
+
+export function openTodayWindow(
+  target: TodayWindowTarget,
+  options?: { stealFocus?: boolean }
+): void {
+  setActiveTodayWorkspace(target.workspace)
   const companion = companions.get(target.workspace)
   if (companion) {
     if (companion.ready) focusMainWindow(companion.window)
     return
   }
-  lifecycle.open(target)
+  lifecycle.open(target, options)
 }
 
 export function prepareTodayCompanion(
@@ -128,9 +142,10 @@ export function allowTodayCompanion(
   return {
     action: 'allow',
     outlivesOpener: true,
-    overrideBrowserWindowOptions: options,
+    overrideBrowserWindowOptions: { ...options, ...getTodayWindowConstructorOptions() },
     createWindow: (browserOptions) => {
       const window = new BrowserWindow(browserOptions)
+      trackTodayWindowBounds(window)
       const companion: Companion = {
         owner,
         window,
@@ -140,6 +155,7 @@ export function allowTodayCompanion(
         openedAt: preparation.openedAt,
         cancelReveal: () => {}
       }
+      setActiveTodayWorkspace(target.workspace)
       companions.set(target.workspace, companion)
       registerProductWindow(window, false)
       markCompanionWindow(window, owner)
@@ -261,6 +277,35 @@ function traceTodayWindowBoot(window: BrowserWindow, requestedAt: number): void 
 
 export function closeTodayWindow(window: BrowserWindow): void {
   lifecycle.close(window)
+}
+
+function findOpenTodayWindow(workspace?: string): { window: BrowserWindow; ready: boolean } | null {
+  const companion = workspace ? companions.get(workspace) : companions.values().next().value
+  return companion ?? lifecycle.getOpenWindow(workspace)
+}
+
+/**
+ * Sticky-note style toggle:
+ * - Visible and focused -> close immediately.
+ * - Open but unfocused/minimized/hidden -> raise and focus.
+ * - Not open -> open for the active workspace at its persisted bounds and focus.
+ */
+export function toggleTodayWindow(workspace?: string | null): boolean {
+  const targetWorkspace = workspace ?? activeTodayWorkspace
+  const existing = findOpenTodayWindow(targetWorkspace ?? undefined) ?? findOpenTodayWindow()
+  if (existing) {
+    if (!existing.ready) return true
+    const { window } = existing
+    if (window.isVisible() && window.isFocused()) {
+      window.close()
+    } else {
+      focusMainWindow(window)
+    }
+    return true
+  }
+  if (!targetWorkspace) return false
+  openTodayWindow({ workspace: targetWorkspace }, { stealFocus: true })
+  return true
 }
 
 export function isTodayWindow(window: BrowserWindow | null): window is BrowserWindow {

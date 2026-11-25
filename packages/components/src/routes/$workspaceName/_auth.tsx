@@ -24,7 +24,6 @@ import {
   getAppLaunchPerformanceProperties,
   getDurationSinceMs,
   getPerformanceNowMs,
-  identifyPostHogWorkspace,
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { installPushPort, schedulePushTask } from '@/lib/push-notifications';
@@ -152,7 +151,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
     }
 
     identifyPostHogUser(postHog, currentUser);
-    identifyPostHogWorkspace(postHog, currentWorkspaceId);
   }, [currentUser, currentWorkspaceId, postHog]);
 
   useEffect(() => {
@@ -163,7 +161,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
       return;
     }
 
-    identifyPostHogWorkspace(postHog, currentWorkspaceId);
     const authReadyProperties = {
       user_id: currentUser.id,
       workspace_id: currentWorkspaceId ?? null,
