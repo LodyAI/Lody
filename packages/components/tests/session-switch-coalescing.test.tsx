@@ -365,40 +365,45 @@ describe('sidebar visible session 1-9 shortcuts and pills', () => {
     expect(store.get(sidebarShortcutOverlayActiveAtom)).toBe(false);
   });
 
-  it('renders macOS icon pills and Windows Control pills only on the first 9 rows', () => {
-    renderWith(
-      createElement(
-        'div',
-        null,
-        createElement(Harness),
-        createElement(SidebarRowEndSlot, { sessionId: 's1', selected: true }),
-        createElement(SidebarRowEndSlot, { sessionId: 's9' }),
-        createElement(SidebarRowEndSlot, { sessionId: 's10' })
-      )
-    );
+  it.each([
+    { os: 'darwin', modifierText: '', modifierIcons: 1 },
+    { os: 'win32', modifierText: 'Ctrl', modifierIcons: 0 },
+    { os: 'linux', modifierText: 'Ctrl', modifierIcons: 0 },
+  ])(
+    'matches the navigation shortcut labels on $os for the first 9 rows',
+    ({ os, modifierText, modifierIcons }) => {
+      vi.stubGlobal('__LODY_PLATFORM__', { os });
+      __resetPlatformCacheForTests();
+      try {
+        renderWith(
+          createElement(
+            'div',
+            null,
+            createElement(Harness),
+            createElement(SidebarBindingPill, { binding: 'Mod+N' }),
+            createElement(SidebarRowEndSlot, { sessionId: 's1', selected: true }),
+            createElement(SidebarRowEndSlot, { sessionId: 's9' }),
+            createElement(SidebarRowEndSlot, { sessionId: 's10' })
+          )
+        );
 
-    act(() => {
-      store.set(sidebarShortcutPlatformOverrideAtom, 'mac');
-      store.set(sidebarShortcutOverlayActiveAtom, true);
-    });
+        act(() => store.set(sidebarShortcutOverlayActiveAtom, true));
 
-    const pill1 = container.querySelector('[data-sidebar-shortcut-pill="1"]');
-    const pill9 = container.querySelector('[data-sidebar-shortcut-pill="9"]');
-    const pill10 = container.querySelector('[data-sidebar-shortcut-pill="10"]');
-    expect(pill1?.getAttribute('data-sidebar-shortcut-platform')).toBe('mac');
-    expect(pill1?.querySelector('svg')).not.toBeNull();
-    expect(pill1?.textContent).toBe('1');
-    expect(pill9?.textContent).toBe('9');
-    expect(pill10).toBeNull();
-
-    act(() => {
-      store.set(sidebarShortcutPlatformOverrideAtom, 'windows');
-    });
-    const winPill1 = container.querySelector('[data-sidebar-shortcut-pill="1"]');
-    expect(winPill1?.getAttribute('data-sidebar-shortcut-platform')).toBe('windows');
-    expect(winPill1?.querySelector('svg')).toBeNull();
-    expect(winPill1?.textContent).toBe('Control1');
-  });
+        const navigationPill = container.querySelector('[data-sidebar-binding-pill="Mod+N"]');
+        const firstSessionPill = container.querySelector('[data-sidebar-shortcut-pill="1"]');
+        const lastSessionPill = container.querySelector('[data-sidebar-shortcut-pill="9"]');
+        expect(navigationPill?.textContent).toBe(`${modifierText}N`);
+        expect(navigationPill?.querySelectorAll('svg')).toHaveLength(modifierIcons);
+        expect(firstSessionPill?.textContent).toBe(`${modifierText}1`);
+        expect(firstSessionPill?.querySelectorAll('svg')).toHaveLength(modifierIcons);
+        expect(lastSessionPill?.textContent).toBe(`${modifierText}9`);
+        expect(container.querySelector('[data-sidebar-shortcut-pill="10"]')).toBeNull();
+      } finally {
+        vi.unstubAllGlobals();
+        __resetPlatformCacheForTests();
+      }
+    }
+  );
 
   it('grows the ⇧ glyph inside a macOS binding pill to match ⌘ ink', () => {
     (window as { __LODY_PLATFORM__?: { os?: string } }).__LODY_PLATFORM__ = { os: 'darwin' };

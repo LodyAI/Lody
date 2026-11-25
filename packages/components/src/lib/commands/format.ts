@@ -19,10 +19,10 @@ export function formatKeyBinding(binding: string): string {
  *
  * Use this when rendering each key as its own visual chip (Kbd primitive).
  */
-export function formatKeyParts(binding: string): string[] {
+export function formatKeyParts(binding: string, platform = getHotkeyPlatform()): string[] {
   const separator = '\u001f';
   return formatForDisplay(binding, {
-    platform: getHotkeyPlatform(),
+    platform,
     separatorToken: separator,
   }).split(separator);
 }
