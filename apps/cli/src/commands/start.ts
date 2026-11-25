@@ -1,4 +1,5 @@
 import { ManagedDaemonUpgradeOptionsSchema } from '@lody/shared';
+import { configureLoroWasmBudget } from '@lody/shared/loro-wasm-budget';
 import { EXIT_CODE_REMOTE_UPGRADE } from '@/lib/machine-lifecycle';
 import {
   confirmManagedProcessTreesGone,
@@ -144,6 +145,7 @@ export const startCommand = new Command('start')
   )
   .option('--auth <credential>', 'Connect with a CLI API key or machine connection token')
   .action(async (options: StartOptions) => {
+    configureLoroWasmBudget();
     createHybridLogger({ level: options.debug ? 'debug' : 'info' });
     const logger = getLogger('start');
     registerProcessExitTrace({ scope: 'start' });

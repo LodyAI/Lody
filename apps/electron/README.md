@@ -180,6 +180,14 @@ which the Hub trusts without an Origin header. In Lody, review and
 select the resulting MCP catalog entry in trusted UI/CLI before starting a later
 agent session.
 
+### Loro WASM memory
+
+The renderer and its background session sync worker each configure their own
+Loro WASM instance. Each starts reclaiming memory at 200 MiB of live allocations
+and targets 160 MiB. Loro applies its 512 MiB hard budget to live allocations and
+linear memory at its admission checks. WASM pages stay allocated until their
+instance exits.
+
 ### Build
 
 Every build command below uses the local OSS renderer, embeds the local-only
