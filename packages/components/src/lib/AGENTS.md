@@ -36,8 +36,8 @@ shells supply `window.__LODY_CLIPBOARD__` (Android WebView denies the web API).
   copies its V2 tokens into plain DOM, never React/StyleX/Tailwind.
 - Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
   error; the copyable fallback stays until the user presses a recovery button.
-- A cloud query throws into render and keeps throwing: an optional surface owns an inline
-  `ErrorBoundary`, so a backend failure degrades locally.
+- Cloud queries never throw backend errors into render; surfaces that need explicit
+  failure/retry UI read `useCloudQueryState` instead of relying on an `ErrorBoundary`.
 - `lib/clear-local-cache.ts` owns `restartIntoCacheClear` (recoverable `lody*` caches,
   still signed in; reloads one window) and `startHardReset` (full wipe/sign-out,
   host-native first, own confirmation). Defer deletes to next boot; clear synchronous

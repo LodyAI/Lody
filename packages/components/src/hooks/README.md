@@ -126,16 +126,23 @@ profile data can still show a fallback. Evidence and limits:
 
 ## Cloud query recovery
 
-`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
-session and semantic query shares one watch and three retries after 1, 2 and 4 seconds.
-All consumers release the failed watch before a new one starts, which waits for a
-server update rather than reading the SDK's cached error. Opaque server failures
-return loading during bounded recovery; application errors and exhausted failures throw to the nearest
-boundary. Auth expiry continues through the central supervisor and retains only a
-matching committed snapshot. Brief success and temporary auth skips do not replenish
-attempts; 30 seconds of continuously observed success resets the budget. Skipped or
-unmounted queries stop retries, and session/query identity fences callbacks and results.
-Public queries and local-only clients keep their existing behavior.
+`use-recoverable-convex-query.ts` owns both the authenticated and public query adapters
+(`useRecoverableConvexQuery`, `useOptionalRecoverableConvexQuery`,
+`usePublicConvexQuery`, `useOptionalPublicConvexQuery`). Raw `convex/react` `useQuery`
+is forbidden by the platform boundary check so backend errors can never throw into React
+render. Each client, session and semantic query shares one watch and three retries after
+1, 2 and 4 seconds. All consumers release the failed watch before a new one starts, which
+waits for a server update rather than reading the SDK's cached error. Opaque server
+failures return loading during bounded recovery; structured errors (such as `ConvexError`)
+and exhausted failures are reported once per outage episode to `client-log.ts` and
+redacted telemetry, then contained as `undefined` in `useCloudQuery` (never throwing into
+render, and never returning stale authorization rows). Consumers that display an inline
+failure notice or retry action read `useCloudQueryState` from `@lody/platform/react`.
+Auth expiry continues through the central supervisor and retains only a matching
+committed snapshot. Brief success and temporary auth skips do not replenish attempts;
+30 seconds of continuously observed success resets the budget. Skipped or unmounted
+queries stop retries, and session/query identity fences callbacks and results. Local-only
+clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
 
 `providers/cloud-platform-api.ts` also admits imperative queries, subscriptions,

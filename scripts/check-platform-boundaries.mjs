@@ -30,6 +30,8 @@ const cliRuntimeRoots = [
 ];
 
 const cloudSdkPattern = /(?:from\s+|import\s*\()['"](?:@lody\/convex|convex\/(?:browser|react))['"]/gu;
+const directConvexUseQueryPattern =
+  /(?:import\s*\{[^}]*\buseQuery\b[^}]*\}\s*from\s*['"]convex\/react['"]|\bConvexReact\.useQuery\b)/gu;
 const cloudEndpointPattern = /\bLODY_(?:AUTH_URL|AUTH_SITE_URL|SERVER_URL)\b/gu;
 const localRendererIdentityPattern = /['"]local:renderer['"]/gu;
 
@@ -91,6 +93,12 @@ async function main() {
 
     if (file.startsWith('packages/components/src/')) {
       violations.push(
+        ...collectMatches(
+          file,
+          content,
+          directConvexUseQueryPattern,
+          'raw convex/react useQuery throws backend errors into render; use watchQuery through use-recoverable-convex-query',
+        ),
         ...collectMatches(
           file,
           content,
