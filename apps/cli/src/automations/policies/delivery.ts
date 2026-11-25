@@ -1,19 +1,39 @@
+import { Clock, Effect, Semaphore } from 'effect';
 import {
+  AUTO_DELIVERY_ORIGIN_PROMPT,
+  CREATE_PR_BASE_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  buildFixCiRequest,
+  buildMergePrRequest,
+  buildResolveConflictsRequest,
+  getSessionRoomId,
+  isLoroRepoDocDeleted,
   resolveSessionPullRequests,
+  withPrBranchUpkeep,
+  withProjectGroupPrScope,
+  withQuickActionOrigin,
+  type MachineId,
   type PrPromptProvider,
   type SessionAutoDelivery,
   type SessionAutoDeliveryStallReason,
+  type SessionAutoDeliveryStatus,
+  type SessionId,
   type SessionMeta,
   type SessionPullRequestCiState,
   type SessionPullRequestMergeState,
 } from '@lody/shared';
-import type {
-  AutoDeliverOptions,
-  AutomationEvent,
-  AutomationReceipt,
-  ConditionObservation,
+import {
+  autoDeliverOptionsSchema,
+  type AutoDeliverOptions,
+  type AutomationEvent,
+  type AutomationReceipt,
+  type ConditionObservation,
 } from '@lody/shared/automations';
+import { z } from 'zod';
+import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { Logger } from '@/utils/logger';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
+import { CANCELLABLE_DELIVERY_STATES, SESSION_BUSY_BLOCK_REASONS } from '../storage/schema';
 import {
   inferPullRequestProvider,
   mapGitHubCiState,
@@ -22,6 +42,7 @@ import {
   type PullRequestCheckStatus,
   type PullRequestMergeability,
 } from '../sources/pull-requests';
+import { configureSessionPolicies } from './session';
 
 /**
  * Auto delivery: after the user turns it on, the Host requests the next step for
@@ -36,6 +57,8 @@ export const DELIVERY_ATTEMPT_LIMIT = 3;
 /** How long after a settled Create PR request a missing PR stops delivery. */
 export const DELIVERY_PR_CREATION_GRACE_MS = 10 * 60_000;
 export const DELIVERY_CI_REPORT_GRACE_MS = 5 * 60_000;
+/** How long a transient or unconfirmed receipt block stays quiet before surfacing as stalled. */
+export const DELIVERY_TRANSIENT_BLOCK_GRACE_MS = 60_000;
 
 export type DeliveryStep = 'create_pr' | 'fix_ci' | 'resolve_conflicts' | 'merge';
 
@@ -63,6 +86,7 @@ export type DeliveryProgress = {
     attempt?: number;
     prUrl?: string;
     headSha?: string;
+    blockedSince?: number;
   };
 };
 
@@ -82,29 +106,37 @@ export type PullRequestSnapshot = {
 export type StepOutcome =
   | { state: 'outstanding' }
   | { state: 'stopped' }
+  | { state: 'blocked'; reason?: string; transient?: boolean }
   | { state: 'failed' }
   | { state: 'superseded' }
   | { state: 'settled'; at: number };
 
-export type DeliveryStatus = Omit<SessionAutoDelivery, 'updatedAt'>;
+const TRANSIENT_BLOCK_REASONS: ReadonlySet<string> = new Set([
+  'execution_release_unconfirmed',
+  'guard:delivery_pr_unobserved',
+  'adapter_unavailable',
+  'permission_unconfirmed',
+  'target_permission_unconfirmed',
+  'target_unavailable',
+  'owner_unavailable',
+  'target_owner_unavailable',
+]);
+
+export type DeliveryStatus = SessionAutoDeliveryStatus;
+
+export type DeliveryStepDecision =
+  | { step: 'create_pr' }
+  | { step: 'fix_ci' | 'resolve_conflicts'; attempt: number; pr: PullRequestSnapshot }
+  | { step: 'merge'; pr: PullRequestSnapshot };
 
 export type DeliveryDecision = {
   status: DeliveryStatus;
   progress: DeliveryProgress;
-  step?: { step: DeliveryStep; attempt?: number; pr?: PullRequestSnapshot };
+  step?: DeliveryStepDecision;
   /** All tracked pull requests were merged: delivery has ended and the setting turns off. */
   finished?: boolean;
   observed?: PullRequestSnapshot;
 };
-
-const stepState = (step: DeliveryStep): DeliveryStatus['state'] =>
-  step === 'create_pr'
-    ? 'pr'
-    : step === 'fix_ci'
-      ? 'fix'
-      : step === 'resolve_conflicts'
-        ? 'conflict'
-        : 'merge';
 
 const emptyAttempts = (): DeliveryPrAttempts => ({
   fixHeads: [],
@@ -133,6 +165,7 @@ function readPrAttempts(progress: DeliveryProgress, url: string): DeliveryPrAtte
   return emptyAttempts();
 }
 
+/** Mirrors active PR attempts onto legacy top-level fields for checkpoint backward compatibility. */
 function writePrAttempts(
   progress: DeliveryProgress,
   url: string,
@@ -143,6 +176,15 @@ function writePrAttempts(
   progress.conflictHeads = [...attempts.conflictHeads];
   progress.mergeHeads = [...attempts.mergeHeads];
   progress.unreportedCi = attempts.unreportedCi;
+}
+
+function stepStatusPayload(
+  step: DeliveryStep,
+  attempt?: number
+): { state: 'pr' | 'merge' } | { state: 'fix' | 'conflict'; attempt?: number } {
+  if (step === 'create_pr') return { state: 'pr' };
+  if (step === 'merge') return { state: 'merge' };
+  return { state: step === 'fix_ci' ? 'fix' : 'conflict', ...(attempt ? { attempt } : {}) };
 }
 
 /** Pure decision from durable progress and the latest provider-neutral observations. */
@@ -168,32 +210,45 @@ export function decideDelivery(input: {
     if (input.pr && input.pr.url === url) return input.pr;
     return undefined;
   };
-  const prPosition = (url: string | undefined) => {
+  const prRef = (url: string | undefined) => {
+    if (!url) return {};
     const total = progress.prUrls?.length ?? 0;
-    if (total <= 1 || !url) return {};
+    if (total <= 1) return { prUrl: url };
     const index = progress.prUrls!.indexOf(url);
-    return index >= 0 ? { prIndex: index + 1, prTotal: total } : { prTotal: total };
+    return index >= 0
+      ? { prUrl: url, prIndex: index + 1, prTotal: total }
+      : { prUrl: url, prTotal: total };
   };
-  const statusFor = (
-    url: string | undefined,
-    state: DeliveryStatus['state'],
-    extra: Partial<DeliveryStatus> = {}
-  ) => ({
-    status: { state, ...(url ? { prUrl: url } : {}), ...prPosition(url), ...extra },
+  const emit = (url: string | undefined, status: DeliveryStatus): DeliveryDecision => ({
+    status: { ...prRef(url), ...status },
     progress,
   });
 
   const last = progress.lastStep;
-  if (last && input.lastStep?.state === 'outstanding')
-    return statusFor(
-      last.prUrl ?? progress.prUrl,
-      stepState(last.step),
-      last.attempt ? { attempt: last.attempt } : {}
-    );
+  if (last && input.lastStep?.state === 'outstanding') {
+    if (last.blockedSince !== undefined) {
+      const { blockedSince: _, ...cleared } = last;
+      progress.lastStep = cleared;
+    }
+    return emit(last.prUrl ?? progress.prUrl, stepStatusPayload(last.step, last.attempt));
+  }
   if (input.lastStep?.state === 'stopped')
-    return statusFor(last?.prUrl ?? progress.prUrl, 'stalled', { reason: 'stopped' });
+    return emit(last?.prUrl ?? progress.prUrl, { state: 'stalled', reason: 'stopped' });
+  if (input.lastStep?.state === 'blocked') {
+    if (input.lastStep.transient && last) {
+      const since = last.blockedSince ?? now;
+      if (last.blockedSince === undefined) progress.lastStep = { ...last, blockedSince: since };
+      if (now - since < DELIVERY_TRANSIENT_BLOCK_GRACE_MS)
+        return emit(last.prUrl ?? progress.prUrl, stepStatusPayload(last.step, last.attempt));
+    }
+    return emit(last?.prUrl ?? progress.prUrl, {
+      state: 'stalled',
+      reason: 'request_blocked',
+      ...(input.lastStep.reason ? { blockReason: input.lastStep.reason } : {}),
+    });
+  }
   if (input.lastStep?.state === 'failed')
-    return statusFor(last?.prUrl ?? progress.prUrl, 'stalled', { reason: 'request_failed' });
+    return emit(last?.prUrl ?? progress.prUrl, { state: 'stalled', reason: 'request_failed' });
   const settledAt = input.lastStep?.state === 'settled' ? input.lastStep.at : undefined;
 
   if (!progress.prUrls?.length) {
@@ -205,13 +260,13 @@ export function decideDelivery(input: {
     } else if (!progress.createRequested) {
       progress.createRequested = true;
       return {
-        ...statusFor(undefined, 'pr'),
+        ...emit(undefined, { state: 'pr' }),
         step: { step: 'create_pr' },
       };
     } else if (settledAt !== undefined && now - settledAt > DELIVERY_PR_CREATION_GRACE_MS) {
-      return statusFor(undefined, 'stalled', { reason: 'pr_not_created' });
+      return emit(undefined, { state: 'stalled', reason: 'pr_not_created' });
     } else {
-      return statusFor(undefined, 'pr');
+      return emit(undefined, { state: 'pr' });
     }
   }
 
@@ -222,7 +277,7 @@ export function decideDelivery(input: {
   if (pr?.status === 'merged') {
     const nextUrl = queue.find((url) => lookupPr(url)?.status !== 'merged');
     if (!nextUrl) {
-      return { ...statusFor(activeUrl, 'merged'), finished: true };
+      return { ...emit(activeUrl, { state: 'merged' }), finished: true };
     }
     activeUrl = nextUrl;
     progress.prUrl = nextUrl;
@@ -231,25 +286,16 @@ export function decideDelivery(input: {
     progress.prUrl = activeUrl;
   }
 
-  const status = (state: DeliveryStatus['state'], extra: Partial<DeliveryStatus> = {}) =>
-    statusFor(activeUrl, state, extra);
-  const stalled = (reason: SessionAutoDeliveryStallReason) => status('stalled', { reason });
-  const request = (
-    step: DeliveryStep,
-    targetPr?: PullRequestSnapshot,
-    attempt?: number
-  ): DeliveryDecision => ({
-    ...status(stepState(step), attempt ? { attempt } : {}),
-    step: { step, ...(attempt ? { attempt } : {}), ...(targetPr ? { pr: targetPr } : {}) },
-  });
+  const stalled = (reason: Exclude<SessionAutoDeliveryStallReason, 'request_blocked'>) =>
+    emit(activeUrl, { state: 'stalled', reason });
 
-  if (!activeUrl || !pr || pr.url !== activeUrl) return status('ci');
-  if (pr.status === 'merged') return { ...status('merged'), finished: true };
+  if (!activeUrl || !pr || pr.url !== activeUrl) return emit(activeUrl, { state: 'ci' });
+  if (pr.status === 'merged') return { ...emit(activeUrl, { state: 'merged' }), finished: true };
   if (pr.status === 'closed') return stalled('pr_closed');
   if (pr.status === 'draft') return stalled('pr_draft');
   const lastStepForActive = !last?.prUrl || last.prUrl === activeUrl;
   if (!pr.headSha || (lastStepForActive && settledAt !== undefined && pr.observedAt <= settledAt))
-    return status('ci');
+    return emit(activeUrl, { state: 'ci' });
   if (input.workspacePending) return stalled('workspace_unpushed');
   const head = pr.headSha;
   const attempts = readPrAttempts(progress, activeUrl);
@@ -260,7 +306,11 @@ export function decideDelivery(input: {
     if (attempts.conflictHeads.length >= DELIVERY_ATTEMPT_LIMIT) return stalled('conflict_limit');
     attempts.conflictHeads = [...attempts.conflictHeads, head];
     writePrAttempts(progress, activeUrl, attempts);
-    return request('resolve_conflicts', pr, attempts.conflictHeads.length);
+    const attempt = attempts.conflictHeads.length;
+    return {
+      ...emit(activeUrl, { state: 'conflict', attempt }),
+      step: { step: 'resolve_conflicts', attempt, pr },
+    };
   }
   if (pr.checks === 'failed') {
     if (!options.fixCi) return stalled('ci_failed');
@@ -268,23 +318,31 @@ export function decideDelivery(input: {
     if (attempts.fixHeads.length >= DELIVERY_ATTEMPT_LIMIT) return stalled('ci_limit');
     attempts.fixHeads = [...attempts.fixHeads, head];
     writePrAttempts(progress, activeUrl, attempts);
-    return request('fix_ci', pr, attempts.fixHeads.length);
+    const attempt = attempts.fixHeads.length;
+    return {
+      ...emit(activeUrl, { state: 'fix', attempt }),
+      step: { step: 'fix_ci', attempt, pr },
+    };
   }
   if (pr.checks === 'none') {
     if (attempts.unreportedCi?.head !== head)
       attempts.unreportedCi = { head, since: pr.observedAt };
     writePrAttempts(progress, activeUrl, attempts);
     if (pr.observedAt - attempts.unreportedCi.since < DELIVERY_CI_REPORT_GRACE_MS)
-      return status('ci');
+      return emit(activeUrl, { state: 'ci' });
   }
-  if (pr.checks === 'pending' || pr.mergeability === 'unknown') return status('ci');
+  if (pr.checks === 'pending' || pr.mergeability === 'unknown')
+    return emit(activeUrl, { state: 'ci' });
   if (pr.mergeability === 'blocked') return stalled('merge_blocked');
   if (pr.mergeability === 'behind') return stalled('merge_behind');
-  if (!options.merge) return status('ready');
+  if (!options.merge) return emit(activeUrl, { state: 'ready' });
   if (attempts.mergeHeads.includes(head)) return stalled('merge_failed');
   attempts.mergeHeads = [...attempts.mergeHeads, head];
   writePrAttempts(progress, activeUrl, attempts);
-  return request('merge', pr);
+  return {
+    ...emit(activeUrl, { state: 'merge' }),
+    step: { step: 'merge', pr },
+  };
 }
 
 export const deliveryCheckpointId = (sessionId: string) =>
@@ -387,7 +445,16 @@ const receiptOutcome = (receipt: AutomationReceipt): StepOutcome => {
     case 'cancelled':
       return { state: 'stopped' };
     case 'blocked':
-      return receipt.reason === 'target_stopped' ? { state: 'stopped' } : { state: 'outstanding' };
+      if (receipt.reason === 'target_stopped') return { state: 'stopped' };
+      if (receipt.reason && SESSION_BUSY_BLOCK_REASONS.has(receipt.reason))
+        return { state: 'outstanding' };
+      return {
+        state: 'blocked',
+        ...(receipt.reason ? { reason: receipt.reason } : {}),
+        ...(receipt.reason && TRANSIENT_BLOCK_REASONS.has(receipt.reason)
+          ? { transient: true }
+          : {}),
+      };
     default:
       return { state: 'outstanding' };
   }
@@ -460,19 +527,24 @@ export function advanceDelivery(input: {
   const activeUrl = decision.progress.prUrl;
   const observed = activeUrl ? prs[activeUrl] : undefined;
   if (decision.step) {
-    const { step, attempt, pr } = decision.step;
+    const stepDecision = decision.step;
+    const pr = stepDecision.step === 'create_pr' ? undefined : stepDecision.pr;
+    const attempt =
+      stepDecision.step === 'fix_ci' || stepDecision.step === 'resolve_conflicts'
+        ? stepDecision.attempt
+        : undefined;
     const prKey = pr ? automationIdentity(pr.url).slice(0, 8) : 'none';
     const eventId = [
       meta.id,
       decision.progress.epoch,
       prKey,
-      step,
+      stepDecision.step,
       pr?.headSha ?? 'none',
       attempt ?? 0,
     ].join(':');
     const lastStep = {
       eventId,
-      step,
+      step: stepDecision.step,
       ...(attempt ? { attempt } : {}),
       ...(pr ? { prUrl: pr.url } : {}),
       ...(pr?.headSha ? { headSha: pr.headSha } : {}),
@@ -547,4 +619,193 @@ export function deliveryStepCurrent(
   if (pr.status !== 'open' || pr.headSha !== step.headSha)
     return { value: 'no', reason: 'delivery_pr_changed' };
   return { value: 'yes', reason: 'delivery_current' };
+}
+
+const deliveryValues = z
+  .object({
+    provider: z.enum(['github', 'gitlab', 'other']).optional(),
+    repoFullName: z.string().min(1).optional(),
+    prNumber: z.number().int().positive().optional(),
+    prUrl: z.string().url().optional(),
+    headSha: z.string().min(1).optional(),
+    mergeMethod: z.enum(['auto', 'squash', 'merge', 'rebase']).optional(),
+    projectGroup: z.boolean().optional(),
+  })
+  .passthrough();
+
+/**
+ * Auto delivery sends the same request the matching Info Bar button sends, after
+ * an origin line; it adds only facts the agent cannot discover (the merged head).
+ */
+export function deliveryRequest(step: string, values: unknown): string | undefined {
+  const parsed = deliveryValues.safeParse(values);
+  if (!parsed.success) return undefined;
+  const { provider, repoFullName, prNumber, prUrl, headSha, mergeMethod } = parsed.data;
+  const target = prUrl
+    ? {
+        ...(provider ? { provider } : {}),
+        repoFullName: repoFullName ?? null,
+        prNumber: prNumber ?? null,
+        prUrl,
+      }
+    : undefined;
+  const request =
+    step === 'create_pr'
+      ? withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT)
+      : step === 'fix_ci' && target
+        ? buildFixCiRequest(target)
+        : step === 'resolve_conflicts' && target
+          ? buildResolveConflictsRequest(target)
+          : step === 'merge' && target && headSha
+            ? buildMergePrRequest({ ...target, headSha, ...(mergeMethod ? { mergeMethod } : {}) })
+            : undefined;
+  if (!request) return undefined;
+  return withQuickActionOrigin(
+    AUTO_DELIVERY_ORIGIN_PROMPT,
+    parsed.data.projectGroup ? withProjectGroupPrScope(request) : request
+  );
+}
+
+const deliveryStatusKey = (
+  status: DeliveryStatus | SessionAutoDelivery | null | undefined
+): string => {
+  if (!status) return '';
+  const attempt =
+    status.state === 'fix' || status.state === 'conflict' ? status.attempt : undefined;
+  const reason = status.state === 'stalled' ? status.reason : undefined;
+  const blockReason =
+    status.state === 'stalled' && status.reason === 'request_blocked'
+      ? status.blockReason
+      : undefined;
+  return JSON.stringify([
+    status.state,
+    attempt,
+    reason,
+    blockReason,
+    status.prUrl,
+    status.prIndex,
+    status.prTotal,
+  ]);
+};
+
+/**
+ * Serializes `SessionMeta.autoDelivery` publication separately from engine `gate`.
+ * Invariant: release `statusLock` before calling `Automations.cancel` (AB-BA order).
+ */
+export class DeliveryCoordinator {
+  private readonly statusLock = Semaphore.makeUnsafe(1);
+
+  constructor(
+    private readonly deps: {
+      ledger: AutomationLedger;
+      manager: LoroDocumentManager;
+      machineId: MachineId;
+      logger: Logger;
+    }
+  ) {}
+
+  private enabledRules() {
+    const out: Array<{ sessionId: SessionId; ownerUserId: string; options: unknown }> = [];
+    for (const rule of this.deps.ledger.rules()) {
+      if (
+        rule.enabled &&
+        rule.scope.sessionId &&
+        rule.handler.kind === 'policy' &&
+        rule.handler.policy === 'auto-deliver' &&
+        rule.ownerMachineId === this.deps.machineId
+      ) {
+        out.push({
+          sessionId: rule.scope.sessionId as SessionId,
+          ownerUserId: rule.ownerUserId,
+          options: rule.handler.options,
+        });
+      }
+    }
+    return out;
+  }
+
+  /** Serializes `SessionMeta.autoDelivery` writers against `advanceAll`. */
+  withStatusLock<A>(body: (now: number) => Promise<A>): Effect.Effect<A, unknown> {
+    return this.statusLock.withPermit(
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) =>
+          Effect.tryPromise({ try: () => body(now), catch: (cause) => cause })
+        ),
+        Effect.uninterruptible
+      )
+    );
+  }
+
+  /** Advance all enabled Auto delivery rules on this machine and sync status transitions. */
+  advanceAll(): Effect.Effect<void, unknown> {
+    return this.withStatusLock(async (now) => {
+      const { ledger, manager, logger } = this.deps;
+      for (const rule of this.enabledRules()) {
+        const { sessionId } = rule;
+        try {
+          const options = autoDeliverOptionsSchema.parse(rule.options);
+          const roomId = getSessionRoomId(sessionId);
+          const record = await manager.repo.getDocMeta(roomId);
+          const meta = record?.meta as SessionMeta | undefined;
+          if (!record || !meta || isLoroRepoDocDeleted(record) || meta.isArchived) continue;
+          const decision = advanceDelivery({ ledger, meta, options, now });
+          if (decision.finished) {
+            configureSessionPolicies(
+              ledger,
+              sessionId,
+              rule.ownerUserId,
+              { autoDeliver: false },
+              now
+            );
+          }
+          if (deliveryStatusKey(meta.autoDelivery) !== deliveryStatusKey(decision.status)) {
+            const pr = decision.observed;
+            logger.debug(`Auto delivery ${sessionId}: ${deliveryStatusKey(decision.status)}`, {
+              step: decision.step?.step,
+              ...(pr
+                ? {
+                    provider: pr.provider,
+                    head: pr.headSha,
+                    status: pr.status,
+                    checks: pr.checks,
+                    mergeability: pr.mergeability,
+                    observedAt: pr.observedAt,
+                  }
+                : {}),
+              workspaceDirty: meta.workspaceDirty,
+              workspaceUnpushed: meta.workspaceUnpushed,
+            });
+            await manager.repo.upsertDocMeta(roomId, {
+              autoDelivery: { ...decision.status, updatedAt: now },
+            });
+          }
+        } catch (cause) {
+          // One Session's failure leaves the others' delivery running.
+          logger.warn(`Auto delivery pass failed for ${sessionId}`, cause);
+        }
+      }
+    });
+  }
+
+  /** Sessions with active Auto delivery demand for PR poller high-lane scheduling. */
+  observationOwners(): Set<SessionId> {
+    return new Set(this.enabledRules().map((rule) => rule.sessionId));
+  }
+
+  /** Must run outside `withStatusLock` to preserve the lock hierarchy. */
+  cancelOutstandingStep(
+    sessionId: string,
+    cancelReceipt: (id: string) => Effect.Effect<void, unknown>
+  ): Effect.Effect<void, unknown> {
+    const { ledger } = this.deps;
+    return Effect.gen(function* () {
+      const lastStep = readDeliveryProgress(ledger, sessionId)?.lastStep;
+      if (!lastStep) return;
+      for (const receipt of ledger.eventReceipts(DELIVERY_EVENT_SOURCE, lastStep.eventId)) {
+        if (CANCELLABLE_DELIVERY_STATES.has(receipt.state)) {
+          yield* cancelReceipt(receipt.id);
+        }
+      }
+    });
+  }
 }

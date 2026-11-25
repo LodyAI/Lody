@@ -81,6 +81,10 @@ async function workspaceFixture(
     close: async () => {},
   };
   let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+  let onIdle: ((sessionId: SessionId) => void) | undefined;
+  let settledOverride:
+    | (() => Promise<{ value: 'yes' | 'no' | 'unknown'; reason: string }>)
+    | undefined;
   let rewriteBarrier = false;
   let beforeArchiveAdmission: (() => Promise<void> | void) | undefined;
   const editors = new Set(['user']);
@@ -90,7 +94,9 @@ async function workspaceFixture(
     canEdit: async (_sessionId: string, userId: string) =>
       editors.has(userId) ? ('yes' as const) : ('no' as const),
     setPendingWork: noop,
-    setObservations: noop,
+    setObservations: (sink?: { idle?(sessionId: SessionId): void }) => {
+      onIdle = sink?.idle;
+    },
     setAdmission: (check: typeof admit) => {
       admit = check;
     },
@@ -112,10 +118,12 @@ async function workspaceFixture(
     },
     ...(archiveAuthority
       ? {
-          settled: async () =>
-            rewriteBarrier
+          settled: async () => {
+            if (settledOverride) return settledOverride();
+            return rewriteBarrier
               ? ({ value: 'no', reason: 'session_work_active' } as const)
-              : ({ value: 'yes', reason: 'group_settled' } as const),
+              : ({ value: 'yes', reason: 'group_settled' } as const);
+          },
           archived: async () => meta.isArchived === true,
           archive: async (
             _sessionId: SessionId,
@@ -190,6 +198,12 @@ async function workspaceFixture(
     testEditors: editors,
     testAuthors: authors,
     testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
+    testNotifyIdle: (sessionId: SessionId) => onIdle?.(sessionId),
+    testSetSettled: (
+      hook: (() => Promise<{ value: 'yes' | 'no' | 'unknown'; reason: string }>) | undefined
+    ) => {
+      settledOverride = hook;
+    },
     testBeforeArchiveAdmission: (hook: (() => Promise<void> | void) | undefined) => {
       beforeArchiveAdmission = hook;
     },
@@ -517,6 +531,64 @@ describe('Automation control authority', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(host.ledger.receipt(request.id)?.state).toBe('cancelled');
     expect(host.ledger.hasSessionWork('session-a')).toBe(false);
+  });
+  it('surfaces denied Auto delivery blocks in SessionMeta and wakes busy blocks immediately on idle', async () => {
+    vi.useFakeTimers();
+    const prUrl = 'https://github.com/owner/project/pull/42';
+    const meta = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      cliType: 'builtin',
+      agentType: 'antigravity',
+      collaborationStopped: false,
+      pullRequests: [{ url: prUrl, status: 'open' as const }],
+      autoDelivery: undefined as Record<string, unknown> | null | undefined,
+    };
+    const host = await workspaceFixture(meta, undefined, undefined, undefined, 'plaintext', true);
+    host.testSetSettled(async () => ({ value: 'no', reason: 'permission_denied' }));
+    await host.recordObservations(
+      meta as never,
+      'owner/project',
+      [
+        {
+          number: 42,
+          url: prUrl,
+          status: 'open',
+          headSha: 'a'.repeat(40),
+          headRefName: 'fix/test',
+          ciState: 's',
+          mergeState: 'c',
+          updatedAt: new Date(Date.now()).toISOString(),
+        },
+      ],
+      Date.now()
+    );
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: true } },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toMatchObject({
+      state: 'stalled',
+      reason: 'request_blocked',
+      blockReason: 'permission_denied',
+      prUrl,
+    });
+
+    host.testSetSettled(async () => ({ value: 'no', reason: 'native_work_active' }));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toMatchObject({ state: 'merge', prUrl });
+
+    host.testSetSettled(async () => ({ value: 'yes', reason: 'group_settled' }));
+    host.testNotifyIdle('session-a' as SessionId);
+    await vi.advanceTimersByTimeAsync(1);
+    const backend = await createSessionBackend(host.testDocument);
+    expect(await backend.getMessageQueue()).toHaveLength(1);
+    expect(meta.autoDelivery).toMatchObject({ state: 'merge', prUrl });
   });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {
