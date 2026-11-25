@@ -76,10 +76,6 @@ export function resolveIcon(name: string) {
 }
 
 /* `Mock`: nested JSX layout → this flex pass computes coordinates → greyscale svg. */
-const MOCK_COL = ({ children }: GenuiProps) => <>{children}</>;
-const MOCK_ROW = ({ children }: GenuiProps) => <>{children}</>;
-const MOCK_CELL = (_p: GenuiProps) => null;
-const MOCK_BOX = (_p: GenuiProps) => null;
 const G = '#888';
 const G2 = '#64748b';
 const FILL: Record<string, { fill: string; op: number; dash?: boolean; stroke?: string }> = {
@@ -99,13 +95,13 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
     if (!el || typeof el !== 'object' || Array.isArray(el)) return undefined;
     const e = el as { type?: unknown; props?: Record<string, unknown> };
     const dir =
-      e.type === MOCK_COL
+      e.type === 'm:col'
         ? 'col'
-        : e.type === MOCK_ROW
+        : e.type === 'm:row'
           ? 'row'
-          : e.type === MOCK_CELL
+          : e.type === 'm:cell'
             ? 'cell'
-            : e.type === MOCK_BOX
+            : e.type === 'm:box'
               ? 'box'
               : undefined;
     if (!dir) return undefined;
@@ -459,10 +455,10 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   Select: (props) => <GenuiSelect {...props} />,
   Slider: (props) => <GenuiSlider {...props} />,
   Mock: (props) => <GenuiMock {...props} />,
-  'Mock:Col': (props) => <MOCK_COL {...props} />,
-  'Mock:Row': (props) => <MOCK_ROW {...props} />,
-  'Mock:Cell': (props) => <MOCK_CELL {...props} />,
-  'Mock:Box': (props) => <MOCK_BOX {...props} />,
+  'Mock:Col': (props) => createElement('m:col' as 'div', props),
+  'Mock:Row': (props) => createElement('m:row' as 'div', props),
+  'Mock:Cell': (props) => createElement('m:cell' as 'div', props),
+  'Mock:Box': (props) => createElement('m:box' as 'div', props),
   svg: ({ children, ...rest }) => (
     <svg
       {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
