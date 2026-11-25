@@ -279,7 +279,10 @@ function routeRoostHistory(
   let reader: SessionHistoryReader | undefined;
   let opening: Promise<SessionHistoryReader> | undefined;
   let switching: Promise<void> | undefined;
-  let admittingOwner: Promise<void> | undefined;
+  type RecoverySource = 'streams' | 'machine';
+  let ownerRecovery:
+    | { result: Promise<RecoverySource>; streamsAnswered: () => void; close: () => void }
+    | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
   let disposed = false;
@@ -363,28 +366,50 @@ function routeRoostHistory(
     const status = cloud.syncStatus();
     return status.phase === 'retrying' && status.httpStatus === 503;
   };
-  const recoverOwner = () =>
-    (admittingOwner ??= (async () => {
-      const previous = cloud.syncStatus();
-      if (disposed || reader !== cloud.history || previous.phase === 'refused') return;
-      // The normal machine reader can open a cached page. Admit this source
-      // through the machine RPC before exposing that page or its subscription.
-      await admitOwnerRead();
-      const current = cloud.syncStatus();
-      if (
-        disposed ||
-        reader !== cloud.history ||
-        current.phase === 'refused' ||
-        (current !== previous && current.phase === 'ready')
-      )
-        return;
-      usingOwnerDuringOutage = true;
-      ownerReadable = true;
-      scheduleRetry();
-      select(owner);
-    })().finally(() => {
-      admittingOwner = undefined;
-    }));
+  const recoverOwner = (): Promise<RecoverySource> => {
+    if (ownerRecovery) return ownerRecovery.result;
+    if (cloud.syncStatus().phase === 'refused') return Promise.resolve('streams');
+
+    const result = Promise.withResolvers<RecoverySource>();
+    let streamsAnswered = false;
+    const resumeStreams = () => {
+      streamsAnswered = true;
+      result.resolve('streams');
+    };
+    ownerRecovery = {
+      result: result.promise,
+      streamsAnswered: resumeStreams,
+      close: () => result.reject(new Error('Roost session bridge is disposed')),
+    };
+
+    void (async () => {
+      try {
+        // Admit the cached machine reader through a fresh machine RPC.
+        await admitOwnerRead();
+        if (
+          !disposed &&
+          reader === cloud.history &&
+          cloud.syncStatus().phase !== 'refused' &&
+          (!streamsAnswered || cloudUnavailable())
+        ) {
+          usingOwnerDuringOutage = true;
+          ownerReadable = true;
+          scheduleRetry();
+          select(owner);
+        }
+        result.resolve('machine');
+      } catch (error) {
+        result.reject(error);
+        if (cloudUnavailable()) scheduleRetry();
+      } finally {
+        ownerRecovery = undefined;
+      }
+    })();
+
+    if (observers.size) cloud.refresh();
+    else void cloud.catchUp().then(resumeStreams, () => {});
+    return result.promise;
+  };
   const refreshRoute = () => {
     if (disposed || !reader || retry || (reader === owner && !active())) return;
     if (switching) return switching;
@@ -400,7 +425,7 @@ function routeRoostHistory(
       }
       if (reader === cloud.history) {
         cloud.refresh();
-        if (cloudUnavailable()) await recoverOwner();
+        if (cloudUnavailable()) void recoverOwner().catch(scheduleRetry);
         return;
       }
       try {
@@ -427,7 +452,9 @@ function routeRoostHistory(
   const unsubscribePublication = cloud.watchPublication(refresh);
   const unsubscribeStatus = cloud.watchSyncStatus(() => {
     if (disposed) return;
-    if (usingOwnerDuringOutage && cloud.syncStatus().phase === 'refused') {
+    const { phase } = cloud.syncStatus();
+    if (phase === 'ready' || phase === 'refused') ownerRecovery?.streamsAnswered();
+    if (usingOwnerDuringOutage && phase === 'refused') {
       select(cloud.history);
       return;
     }
@@ -436,6 +463,7 @@ function routeRoostHistory(
       void recoverOwner().catch(scheduleRetry);
   });
   const read = async <T>(work: (source: SessionHistoryReader) => T | Promise<T>): Promise<T> => {
+    let retriedStreams = false;
     for (;;) {
       const source = await initialReader();
       try {
@@ -450,7 +478,10 @@ function routeRoostHistory(
           error instanceof RoostCloudHistoryRequestError &&
           error.status === 503
         ) {
-          await recoverOwner();
+          if ((await recoverOwner()) === 'streams' && !retriedStreams) {
+            retriedStreams = true;
+            continue;
+          }
         } else if (
           !disposed &&
           source === owner &&
@@ -489,11 +520,17 @@ function routeRoostHistory(
     observe(listener) {
       const observer: Observer = { listener };
       observers.add(observer);
+      let usedObservation: SessionObservation | undefined;
       const initialPage = read(async (source) => {
         if (!observers.has(observer))
           return pageWithSource(source, await source.readLatestDirectoryPage!(40));
         const observation = attach(observer, source);
-        const page = await observation.initialPage!;
+        const pendingPage =
+          usedObservation === observation
+            ? source.readLatestDirectoryPage!(40)
+            : observation.initialPage!;
+        usedObservation = observation;
+        const page = await pendingPage;
         if (source === owner && reader === owner && observers.has(observer)) {
           ownerReadable = true;
           void refreshRoute();
@@ -522,6 +559,7 @@ function routeRoostHistory(
     refresh,
     dispose() {
       disposed = true;
+      ownerRecovery?.close();
       unsubscribePublication();
       unsubscribeStatus();
       if (retry) clearTimeout(retry);

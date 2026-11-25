@@ -169,6 +169,11 @@ describe('createConversationSession backend seam', () => {
     'HEAD 503',
     'published grant 503',
     'published grant 503 then refusal',
+    'published grant 503 then Streams recovers first',
+    'published grant 503 then Streams refuses first',
+    'published grant 503 without an observer',
+    'published grant 503 with both sources unavailable',
+    'published grant 503 then conversation closes',
     'published live 503',
   ])(
     'opens Roost on the correct reader and resumes Streams with its owner offline (%s)',
@@ -178,6 +183,17 @@ describe('createConversationSession backend seam', () => {
       const editDuringMetadata = startingState === 'earlier metadata changes';
       const updateDuringMetadata = appendDuringMetadata || editDuringMetadata;
       const liveOutage = startingState === 'published live 503';
+      const streamsRefusesFirst =
+        startingState === 'published grant 503 then Streams refuses first';
+      const withoutObserver = startingState === 'published grant 503 without an observer';
+      const bothUnavailable = startingState === 'published grant 503 with both sources unavailable';
+      const closing = startingState === 'published grant 503 then conversation closes';
+      const slowOwner =
+        streamsRefusesFirst ||
+        withoutObserver ||
+        bothUnavailable ||
+        closing ||
+        startingState === 'published grant 503 then Streams recovers first';
       const cloudOutage = liveOutage || startingState.startsWith('published grant 503');
       const alreadyPublished = startingState === 'published' || updateDuringMetadata || cloudOutage;
       let cloudUnavailable = cloudOutage && !liveOutage;
@@ -443,6 +459,14 @@ describe('createConversationSession backend seam', () => {
               : { state: 'ready', turn },
         pageTurns: [turn],
       });
+      const ownerStarted = Promise.withResolvers<void>();
+      const ownerReply = Promise.withResolvers<Awaited<ReturnType<typeof ownerRead>>>();
+      const delayedOwner: typeof ownerRead = (machine, session, query) => {
+        if (query.kind !== 'count') return ownerRead(machine, session, query);
+        ownerStarted.resolve();
+        return ownerReply.promise;
+      };
+      const requestOwner = slowOwner ? delayedOwner : ownerRead;
       let readGrants = 0;
       const first = open(
         async () => {
@@ -451,8 +475,9 @@ describe('createConversationSession backend seam', () => {
             throw new RoostCloudHistoryRequestError(403);
           if (startingState === 'grant 503' && readGrants === 1)
             throw new RoostCloudHistoryRequestError(503);
-          if (cloudUnavailable) throw new RoostCloudHistoryRequestError(503);
-          if (startingState === 'published grant 503 then refusal')
+          if (cloudUnavailable && (!withoutObserver || readGrants === 1))
+            throw new RoostCloudHistoryRequestError(503);
+          if (startingState === 'published grant 503 then refusal' || streamsRefusesFirst)
             throw new RoostCloudHistoryRequestError(403);
           if (awaitingPublication) return { state: 'pending' };
           return {
@@ -464,11 +489,48 @@ describe('createConversationSession backend seam', () => {
             expiresIn: 60,
           };
         },
-        discovering ? timedOut : alreadyPublished && !cloudOutage ? offline : ownerRead
+        discovering ? timedOut : alreadyPublished && !cloudOutage ? offline : requestOwner
       );
       if (discovering || pendingWithoutNotice || cloudOutage)
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let closed = false;
       try {
+        if (slowOwner) {
+          const observation = withoutObserver ? undefined : first.history.observe(() => {});
+          void observation?.initial.catch(() => {});
+          const page = observation?.initialPage ?? first.history.readLatestDirectoryPage!(40);
+          void page.catch(() => {});
+          await ownerStarted.promise;
+          if (closing) {
+            first.dispose();
+            closed = true;
+            await expect(page).rejects.toThrow('Roost session bridge is disposed');
+          } else if (bothUnavailable) {
+            ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
+            await expect(page).rejects.toMatchObject({
+              failure: { source: 'transport', code: 'response_timeout' },
+            });
+            cloudUnavailable = false;
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+          } else {
+            cloudUnavailable = false;
+            await vi.advanceTimersByTimeAsync(0);
+            if (streamsRefusesFirst) {
+              await expect(page).rejects.toMatchObject({ status: 403 });
+              expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: 403 });
+            } else {
+              await expect(page).resolves.toMatchObject({ rows: [{ turnId: turn.id }] });
+              expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+            }
+          }
+          ownerReply.resolve(await ownerRead(machineId, sessionId, { kind: 'count' }));
+          await vi.advanceTimersByTimeAsync(0);
+          expect(usedOwnerDuringOutage).toBe(false);
+          observation?.unsubscribe();
+          return;
+        }
         const observation = first.history.observe(() => {});
         void observation.initial.catch(() => {});
         if (cloudOutage) {
@@ -598,7 +660,8 @@ describe('createConversationSession backend seam', () => {
         ]);
         observation.unsubscribe();
       } finally {
-        first.dispose();
+        if (!closed) first.dispose();
+        if (slowOwner) ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
         if (discovering || pendingWithoutNotice || cloudOutage) vi.useRealTimers();
         if (discovering || pendingWithoutNotice || updateDuringMetadata || cloudOutage)
           vi.unstubAllGlobals();

@@ -299,8 +299,9 @@ retry or refusal, and whether Streams is still serving a prior publication.
 An observed conversation retries a temporary Streams catch-up failure and
 rechecks an unconfirmed publication. If the Streams request returns HTTP 503,
 the conversation can read from the owning machine after a fresh machine RPC
-admits the exact session. The status shows the machine source while Streams
-recovers. Once the Streams window is readable, it becomes the source again.
+admits the exact session. Streams retries continue during machine admission.
+A readable Streams window resumes the current read as soon as it is ready.
+The status shows the machine source while Streams recovers after a switch.
 A refusal for a known binding ends that reader. Switching the source invalidates
 that window's paging cursors. Electron reads its own
 machine through local session control. A shared snapshot catches up to an
