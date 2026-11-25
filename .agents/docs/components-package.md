@@ -301,11 +301,11 @@ rechecks an unconfirmed publication. If the Streams request returns HTTP 503,
 the conversation can read from the owning machine after a fresh machine RPC
 admits the exact session. Streams retries continue during machine admission.
 A readable Streams window resumes the current read as soon as it is ready.
-The status shows the machine source while Streams recovers after a switch.
-A refusal for a known binding ends that reader. Switching the source invalidates
-that window's paging cursors. Electron reads its own
-machine through local session control. A shared snapshot catches up to an
-observed Streams tail before detaching the history.
+Changing sources wakes pending reads and expires the previous selection's
+replies and paging cursors. The status shows the machine source while Streams
+recovers after a switch. A refusal for a known binding ends that reader.
+Electron reads its own machine through local session control. A shared
+snapshot catches up to an observed Streams tail before detaching the history.
 
 The Streams replica drains persisted SDK receipts before exposing an applied
 position. Its initial live cursor comes from the observed history window. It

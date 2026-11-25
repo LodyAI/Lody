@@ -173,6 +173,10 @@ describe('createConversationSession backend seam', () => {
     'published grant 503 then Streams refuses first',
     'published grant 503 without an observer',
     'published grant 503 with both sources unavailable',
+    'published grant 503 with a pending machine page when Streams recovers',
+    'published grant 503 with a pending machine page when Streams refuses',
+    'published grant 503 with a pending machine page when the conversation closes',
+    'published grant 503 with an older page across two source switches',
     'published grant 503 then conversation closes',
     'published live 503',
   ])(
@@ -183,6 +187,13 @@ describe('createConversationSession backend seam', () => {
       const editDuringMetadata = startingState === 'earlier metadata changes';
       const updateDuringMetadata = appendDuringMetadata || editDuringMetadata;
       const liveOutage = startingState === 'published live 503';
+      const paginating =
+        startingState === 'published grant 503 with an older page across two source switches';
+      const machinePagePending = startingState.startsWith(
+        'published grant 503 with a pending machine page'
+      );
+      const refuseDuringPage = machinePagePending && startingState.endsWith('Streams refuses');
+      const closeDuringPage = machinePagePending && startingState.endsWith('conversation closes');
       const streamsRefusesFirst =
         startingState === 'published grant 503 then Streams refuses first';
       const withoutObserver = startingState === 'published grant 503 without an observer';
@@ -290,6 +301,7 @@ describe('createConversationSession backend seam', () => {
       const applied = Promise.withResolvers<void>();
       const switched = Promise.withResolvers<void>();
       const recovered = Promise.withResolvers<void>();
+      const returnedToOwner = Promise.withResolvers<void>();
       const readingLive = Promise.withResolvers<void>();
       const breakLive = Promise.withResolvers<void>();
       const machineReading = Promise.withResolvers<void>();
@@ -395,6 +407,7 @@ describe('createConversationSession backend seam', () => {
               switched.resolve();
               if (usedOwnerDuringOutage) recovered.resolve();
             } else if (cloudOutage) {
+              if (usedOwnerDuringOutage) returnedToOwner.resolve();
               usedOwnerDuringOutage = true;
             }
           },
@@ -443,30 +456,38 @@ describe('createConversationSession backend seam', () => {
         type: 'session/history-read_response',
         sessionId,
         success: true,
-        historyCount: 1,
+        historyCount: paginating ? 2 : 1,
         historyRevision: 1,
         result:
           query.kind === 'count'
-            ? 1
+            ? paginating
+              ? 2
+              : 1
             : query.kind === 'readLatestPage'
               ? {
-                  startPosition: 0,
-                  totalCount: 1,
-                  hasMoreOlder: false,
-                  cursor: null,
-                  rows: [createRoostDirectoryRow(0, turn)],
+                  startPosition: paginating ? 1 : 0,
+                  totalCount: paginating ? 2 : 1,
+                  hasMoreOlder: paginating,
+                  cursor: paginating ? 'machine-older' : null,
+                  rows: [createRoostDirectoryRow(paginating ? 1 : 0, turn)],
                 }
               : { state: 'ready', turn },
         pageTurns: [turn],
       });
       const ownerStarted = Promise.withResolvers<void>();
       const ownerReply = Promise.withResolvers<Awaited<ReturnType<typeof ownerRead>>>();
-      const delayedOwner: typeof ownerRead = (machine, session, query) => {
-        if (query.kind !== 'count') return ownerRead(machine, session, query);
+      const delayedRequest = slowOwner
+        ? 'count'
+        : machinePagePending
+          ? 'readLatestPage'
+          : paginating
+            ? 'readOlderPage'
+            : undefined;
+      const requestOwner: typeof ownerRead = (machine, session, query) => {
+        if (query.kind !== delayedRequest) return ownerRead(machine, session, query);
         ownerStarted.resolve();
         return ownerReply.promise;
       };
-      const requestOwner = slowOwner ? delayedOwner : ownerRead;
       let readGrants = 0;
       const first = open(
         async () => {
@@ -477,7 +498,11 @@ describe('createConversationSession backend seam', () => {
             throw new RoostCloudHistoryRequestError(503);
           if (cloudUnavailable && (!withoutObserver || readGrants === 1))
             throw new RoostCloudHistoryRequestError(503);
-          if (startingState === 'published grant 503 then refusal' || streamsRefusesFirst)
+          if (
+            startingState === 'published grant 503 then refusal' ||
+            streamsRefusesFirst ||
+            refuseDuringPage
+          )
             throw new RoostCloudHistoryRequestError(403);
           if (awaitingPublication) return { state: 'pending' };
           return {
@@ -504,7 +529,7 @@ describe('createConversationSession backend seam', () => {
           if (closing) {
             first.dispose();
             closed = true;
-            await expect(page).rejects.toThrow('Roost session bridge is disposed');
+            await expect(page).rejects.toMatchObject({ name: 'AbortError' });
           } else if (bothUnavailable) {
             ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
             await expect(page).rejects.toMatchObject({
@@ -533,6 +558,60 @@ describe('createConversationSession backend seam', () => {
         }
         const observation = first.history.observe(() => {});
         void observation.initial.catch(() => {});
+        if (machinePagePending || paginating) {
+          const initialPage = observation.initialPage!;
+          const oldCursor = paginating ? (await initialPage).cursor! : undefined;
+          const request = oldCursor
+            ? first.history.readOlderDirectoryPage!(oldCursor, 40)
+            : initialPage;
+          void request.catch(() => {});
+          await ownerStarted.promise;
+          expect(sync).toMatchObject({ source: 'machine', phase: 'retrying', httpStatus: 503 });
+          if (closeDuringPage) {
+            first.dispose();
+            closed = true;
+            await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+          } else {
+            cloudUnavailable = false;
+            await vi.advanceTimersByTimeAsync(1_000);
+            await recovered.promise;
+            if (refuseDuringPage) {
+              await expect(request).rejects.toMatchObject({ status: 403 });
+            } else if (oldCursor) {
+              await expect(request).rejects.toThrow('Roost history source changed');
+              failHead = true;
+              await expect(replica.catchUp()).rejects.toMatchObject({ status: 503 });
+              await returnedToOwner.promise;
+              const latest = await first.history.readLatestDirectoryPage!(40);
+              expect(latest.cursor).toBeTruthy();
+              expect(latest.cursor).not.toBe(oldCursor);
+              await expect(first.history.readOlderDirectoryPage!(oldCursor, 40)).rejects.toThrow(
+                'Roost history source changed'
+              );
+            } else {
+              await expect(request).resolves.toMatchObject({ rows: [{ turnId: turn.id }] });
+              const retiredTurn = { ...turn, id: 'retired-machine-turn' };
+              ownerReply.resolve({
+                ...(await ownerRead(machineId, sessionId, { kind: 'readLatestPage', limit: 40 })),
+                result: {
+                  startPosition: 0,
+                  totalCount: 1,
+                  hasMoreOlder: false,
+                  cursor: null,
+                  rows: [createRoostDirectoryRow(0, retiredTurn)],
+                },
+                pageTurns: [retiredTurn],
+              });
+              await vi.advanceTimersByTimeAsync(0);
+              expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+              await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+                rows: [{ turnId: turn.id }],
+              });
+            }
+          }
+          observation.unsubscribe();
+          return;
+        }
         if (cloudOutage) {
           await expect(observation.initialPage).resolves.toMatchObject({
             rows: [{ turnId: turn.id }],
@@ -661,7 +740,8 @@ describe('createConversationSession backend seam', () => {
         observation.unsubscribe();
       } finally {
         if (!closed) first.dispose();
-        if (slowOwner) ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
+        if (delayedRequest)
+          ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
         if (discovering || pendingWithoutNotice || cloudOutage) vi.useRealTimers();
         if (discovering || pendingWithoutNotice || updateDuringMetadata || cloudOutage)
           vi.unstubAllGlobals();

@@ -271,17 +271,29 @@ function routeRoostHistory(
   admitOwnerRead: () => Promise<unknown>,
   { active = () => true, onCloudHistoryRoute, onHistorySync }: RoostHistoryObservationOptions
 ) {
+  type SelectedReader = {
+    readonly reader: SessionHistoryReader;
+    readonly cursorPrefix: string;
+    readonly invalidated: AbortController;
+  };
   type Observer = {
     listener: SessionDataChangeListener;
-    source?: SessionHistoryReader;
+    selection?: SelectedReader;
     observation?: SessionObservation;
   };
-  let reader: SessionHistoryReader | undefined;
-  let opening: Promise<SessionHistoryReader> | undefined;
-  let switching: Promise<void> | undefined;
   type RecoverySource = 'streams' | 'machine';
+
+  let selection: SelectedReader | undefined;
+  let selectionNumber = 0;
+  let opening: Promise<SelectedReader> | undefined;
+  let switching: Promise<void> | undefined;
   let ownerRecovery:
-    | { result: Promise<RecoverySource>; streamsAnswered: () => void; close: () => void }
+    | {
+        selection: SelectedReader;
+        result: Promise<RecoverySource>;
+        streamsAnswered: () => void;
+        close: () => void;
+      }
     | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
@@ -291,9 +303,10 @@ function routeRoostHistory(
   let usingOwnerDuringOutage = false;
   let lastStatus: RoostHistorySyncState | undefined;
   const observers = new Set<Observer>();
+  const closeError = () => new DOMException('Roost session bridge is disposed', 'AbortError');
   const emitStatus = () => {
-    if (disposed || !reader || !onHistorySync) return;
-    const source = reader === owner ? 'machine' : 'streams';
+    if (disposed || !selection || !onHistorySync) return;
+    const source = selection.reader === owner ? 'machine' : 'streams';
     const status = !cloudAllowed
       ? { phase: 'idle' as const }
       : usingOwnerDuringOutage
@@ -310,43 +323,49 @@ function routeRoostHistory(
     onHistorySync(lastStatus);
   };
   const assertOpen = () => {
-    if (disposed) throw new Error('Roost session bridge is disposed');
+    if (disposed) throw closeError();
   };
-  const attach = (observer: Observer, source: SessionHistoryReader) => {
-    if (observer.source === source && observer.observation) return observer.observation;
+  const attach = (observer: Observer, selected: SelectedReader) => {
+    if (observer.selection === selected && observer.observation) return observer.observation;
     observer.observation?.unsubscribe();
-    observer.source = source;
-    const observation = source.observe((change) => {
-      if (reader === source) observer.listener(change);
+    observer.selection = selected;
+    const observation = selected.reader.observe((change) => {
+      if (selection === selected && observers.has(observer)) observer.listener(change);
     });
     void observation.initial.catch(() => {});
     void observation.initialPage?.catch(() => {});
     return (observer.observation = observation);
   };
   const select = (next: SessionHistoryReader) => {
-    if (disposed || reader === next) return;
-    const changed = reader !== undefined;
-    reader = next;
+    const previous = selection;
+    if (disposed || previous?.reader === next) return;
+    const selected: SelectedReader = {
+      reader: next,
+      cursorPrefix: `${next === owner ? 'owner' : 'streams'}:${++selectionNumber}:`,
+      invalidated: new AbortController(),
+    };
+    selection = selected;
+    previous?.invalidated.abort();
     if (next === cloud.history) usingOwnerDuringOutage = false;
     onCloudHistoryRoute?.(next === cloud.history);
     emitStatus();
-    if (changed) {
+    if (previous) {
       for (const observer of observers) {
         if (!observer.observation) continue;
-        attach(observer, next);
+        attach(observer, selected);
         observer.listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
       }
     }
   };
   const initialReader = () => {
     assertOpen();
-    if (reader) return Promise.resolve(reader);
+    if (selection) return Promise.resolve(selection);
     return (opening ??= (async () => {
       const first = cloud.published() && (await allowCloud()) ? cloud.history : owner;
       assertOpen();
       select(first);
       if (first === owner && cloud.published()) queueMicrotask(refresh);
-      return first;
+      return selection!;
     })().finally(() => {
       opening = undefined;
     }));
@@ -367,7 +386,9 @@ function routeRoostHistory(
     return status.phase === 'retrying' && status.httpStatus === 503;
   };
   const recoverOwner = (): Promise<RecoverySource> => {
-    if (ownerRecovery) return ownerRecovery.result;
+    const selected = selection;
+    if (!selected || selected.reader !== cloud.history) return Promise.resolve('machine');
+    if (ownerRecovery?.selection === selected) return ownerRecovery.result;
     if (cloud.syncStatus().phase === 'refused') return Promise.resolve('streams');
 
     const result = Promise.withResolvers<RecoverySource>();
@@ -376,11 +397,13 @@ function routeRoostHistory(
       streamsAnswered = true;
       result.resolve('streams');
     };
-    ownerRecovery = {
+    const recovery = {
+      selection: selected,
       result: result.promise,
       streamsAnswered: resumeStreams,
-      close: () => result.reject(new Error('Roost session bridge is disposed')),
+      close: () => result.reject(closeError()),
     };
+    ownerRecovery = recovery;
 
     void (async () => {
       try {
@@ -388,7 +411,7 @@ function routeRoostHistory(
         await admitOwnerRead();
         if (
           !disposed &&
-          reader === cloud.history &&
+          selection === selected &&
           cloud.syncStatus().phase !== 'refused' &&
           (!streamsAnswered || cloudUnavailable())
         ) {
@@ -400,9 +423,9 @@ function routeRoostHistory(
         result.resolve('machine');
       } catch (error) {
         result.reject(error);
-        if (cloudUnavailable()) scheduleRetry();
+        if (selection === selected && cloudUnavailable()) scheduleRetry();
       } finally {
-        ownerRecovery = undefined;
+        if (ownerRecovery === recovery) ownerRecovery = undefined;
       }
     })();
 
@@ -411,7 +434,7 @@ function routeRoostHistory(
     return result.promise;
   };
   const refreshRoute = () => {
-    if (disposed || !reader || retry || (reader === owner && !active())) return;
+    if (disposed || !selection || retry || (selection.reader === owner && !active())) return;
     if (switching) return switching;
     return (switching = (async () => {
       const allowed = await allowCloud();
@@ -423,7 +446,7 @@ function routeRoostHistory(
         emitStatus();
         return;
       }
-      if (reader === cloud.history) {
+      if (selection?.reader === cloud.history) {
         cloud.refresh();
         if (cloudUnavailable()) void recoverOwner().catch(scheduleRetry);
         return;
@@ -442,8 +465,12 @@ function routeRoostHistory(
       }));
   };
   const refresh = () => {
-    if (disposed || !reader || switching || (usingOwnerDuringOutage && retry)) return;
-    if (reader === owner && !cloud.published() && (!ownerReadable || !observers.size || retry))
+    if (disposed || !selection || switching || (usingOwnerDuringOutage && retry)) return;
+    if (
+      selection.reader === owner &&
+      !cloud.published() &&
+      (!ownerReadable || !observers.size || retry)
+    )
       return;
     if (retry) clearTimeout(retry);
     retry = undefined;
@@ -453,89 +480,116 @@ function routeRoostHistory(
   const unsubscribeStatus = cloud.watchSyncStatus(() => {
     if (disposed) return;
     const { phase } = cloud.syncStatus();
-    if (phase === 'ready' || phase === 'refused') ownerRecovery?.streamsAnswered();
+    if (
+      ownerRecovery &&
+      ownerRecovery.selection === selection &&
+      (phase === 'ready' || phase === 'refused')
+    )
+      ownerRecovery.streamsAnswered();
     if (usingOwnerDuringOutage && phase === 'refused') {
       select(cloud.history);
       return;
     }
     emitStatus();
-    if (reader === cloud.history && observers.size && active() && cloudUnavailable())
+    if (selection?.reader === cloud.history && observers.size && active() && cloudUnavailable())
       void recoverOwner().catch(scheduleRetry);
   });
-  const read = async <T>(work: (source: SessionHistoryReader) => T | Promise<T>): Promise<T> => {
+  const sourceChanged = Symbol('Roost history source changed');
+  const whileSelected = async <T>(
+    selected: SelectedReader,
+    work: () => T | Promise<T>
+  ): Promise<T | typeof sourceChanged> => {
+    const signal = selected.invalidated.signal;
+    if (signal.aborted) return sourceChanged;
+    const changed = Promise.withResolvers<typeof sourceChanged>();
+    const invalidate = () => changed.resolve(sourceChanged);
+    signal.addEventListener('abort', invalidate, { once: true });
+    try {
+      return await Promise.race([work(), changed.promise]);
+    } catch (error) {
+      if (signal.aborted) return sourceChanged;
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', invalidate);
+    }
+  };
+  const read = async <T>(work: (selected: SelectedReader) => T | Promise<T>): Promise<T> => {
     let retriedStreams = false;
     for (;;) {
-      const source = await initialReader();
+      const selected = await initialReader();
+      const { reader: source } = selected;
       try {
-        const value = await work(source);
+        const value = await whileSelected(selected, () => work(selected));
         assertOpen();
-        if (source === reader) return value;
+        if (value !== sourceChanged && selection === selected) return value;
       } catch (error) {
-        if (source !== reader && !disposed) continue;
+        assertOpen();
+        if (selection !== selected) continue;
         if (
-          !disposed &&
           source === cloud.history &&
           error instanceof RoostCloudHistoryRequestError &&
           error.status === 503
         ) {
-          if ((await recoverOwner()) === 'streams' && !retriedStreams) {
+          if ((await whileSelected(selected, recoverOwner)) === 'streams' && !retriedStreams) {
             retriedStreams = true;
             continue;
           }
         } else if (
-          !disposed &&
           source === owner &&
           error instanceof SessionHistoryRequestError &&
           error.failure.source === 'transport'
         ) {
-          await refreshRoute();
+          await whileSelected(selected, refreshRoute);
         }
-        if (source === reader || disposed) throw error;
+        assertOpen();
+        if (selection === selected) throw error;
       }
     }
   };
-  const cursorPrefix = (source: SessionHistoryReader) => (source === owner ? 'owner:' : 'streams:');
-  const pageWithSource = (source: SessionHistoryReader, page: SessionHistoryDirectoryPage) =>
-    page.cursor ? { ...page, cursor: cursorPrefix(source) + page.cursor } : page;
+  const pageWithSource = (selected: SelectedReader, page: SessionHistoryDirectoryPage) =>
+    page.cursor ? { ...page, cursor: selected.cursorPrefix + page.cursor } : page;
   const history: SessionHistoryReader = {
-    count: () => read((source) => source.count()),
-    readAt: (position) => read((source) => source.readAt(position)),
-    readTurn: (turnId) => read((source) => source.readTurn(turnId)),
-    readRange: (from, to) => read((source) => source.readRange(from, to)),
-    readDirectory: (from, to) => read((source) => source.readDirectory(from, to)),
-    readMetadata: () => read((source) => source.readMetadata!()),
-    readAll: () => read((source) => source.readAll()),
-    readTurnOutput: (id) => read((source) => source.readTurnOutput(id)),
+    count: () => read(({ reader }) => reader.count()),
+    readAt: (position) => read(({ reader }) => reader.readAt(position)),
+    readTurn: (turnId) => read(({ reader }) => reader.readTurn(turnId)),
+    readRange: (from, to) => read(({ reader }) => reader.readRange(from, to)),
+    readDirectory: (from, to) => read(({ reader }) => reader.readDirectory(from, to)),
+    readMetadata: () => read(({ reader }) => reader.readMetadata!()),
+    readAll: () => read(({ reader }) => reader.readAll()),
+    readTurnOutput: (id) => read(({ reader }) => reader.readTurnOutput(id)),
     readLatestDirectoryPage: (limit) =>
-      read(async (source) => pageWithSource(source, await source.readLatestDirectoryPage!(limit))),
+      read(async (selected) =>
+        pageWithSource(selected, await selected.reader.readLatestDirectoryPage!(limit))
+      ),
     readOlderDirectoryPage: (cursor, limit) =>
-      read(async (source) => {
-        const prefix = cursorPrefix(source);
-        if (!cursor.startsWith(prefix)) throw new Error('Roost history source changed');
+      read(async (selected) => {
+        const { reader, cursorPrefix } = selected;
+        if (!cursor.startsWith(cursorPrefix)) throw new Error('Roost history source changed');
         return pageWithSource(
-          source,
-          await source.readOlderDirectoryPage!(cursor.slice(prefix.length), limit)
+          selected,
+          await reader.readOlderDirectoryPage!(cursor.slice(cursorPrefix.length), limit)
         );
       }),
     observe(listener) {
       const observer: Observer = { listener };
       observers.add(observer);
       let usedObservation: SessionObservation | undefined;
-      const initialPage = read(async (source) => {
+      const initialPage = read(async (selected) => {
+        const { reader: source } = selected;
         if (!observers.has(observer))
-          return pageWithSource(source, await source.readLatestDirectoryPage!(40));
-        const observation = attach(observer, source);
+          return pageWithSource(selected, await source.readLatestDirectoryPage!(40));
+        const observation = attach(observer, selected);
         const pendingPage =
           usedObservation === observation
             ? source.readLatestDirectoryPage!(40)
             : observation.initialPage!;
         usedObservation = observation;
         const page = await pendingPage;
-        if (source === owner && reader === owner && observers.has(observer)) {
+        if (source === owner && selection === selected && observers.has(observer)) {
           ownerReadable = true;
           void refreshRoute();
         }
-        return pageWithSource(source, page);
+        return pageWithSource(selected, page);
       });
       return {
         initialPage,
@@ -554,11 +608,14 @@ function routeRoostHistory(
   return {
     history,
     readSnapshot: (readOwner: () => Promise<SessionEntry[]>) =>
-      read((source) => (source === cloud.history ? cloud.readPublishedSnapshot() : readOwner())),
-    usingCloud: () => reader === cloud.history,
+      read(({ reader }) =>
+        reader === cloud.history ? cloud.readPublishedSnapshot() : readOwner()
+      ),
+    usingCloud: () => selection?.reader === cloud.history,
     refresh,
     dispose() {
       disposed = true;
+      selection?.invalidated.abort();
       ownerRecovery?.close();
       unsubscribePublication();
       unsubscribeStatus();
