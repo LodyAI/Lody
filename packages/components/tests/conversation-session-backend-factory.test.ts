@@ -84,12 +84,21 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
-  it.each(['published', 'append during metadata', 'publication notice', 'grant 503', 'HEAD 503'])(
+  it.each([
+    'published',
+    'append during metadata',
+    'earlier metadata changes',
+    'publication notice',
+    'grant 503',
+    'HEAD 503',
+  ])(
     'opens Roost on the correct reader and resumes Streams with its owner offline (%s)',
     { timeout: 30_000 },
     async (startingState) => {
       const appendDuringMetadata = startingState === 'append during metadata';
-      const alreadyPublished = startingState === 'published' || appendDuringMetadata;
+      const editDuringMetadata = startingState === 'earlier metadata changes';
+      const updateDuringMetadata = appendDuringMetadata || editDuringMetadata;
+      const alreadyPublished = startingState === 'published' || updateDuringMetadata;
       const discovering = startingState === 'grant 503' || startingState === 'HEAD 503';
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
@@ -120,7 +129,8 @@ describe('createConversationSession backend seam', () => {
       };
       const append = async (
         entry: typeof turn,
-        preceding?: Awaited<ReturnType<typeof writer.acceptToView>>
+        preceding?: Awaited<ReturnType<typeof writer.acceptToView>>,
+        segmentId = 'primary'
       ) => {
         const parent = preceding ? await stream.readTurnHeader(preceding.turnId) : undefined;
         const parents =
@@ -131,11 +141,11 @@ describe('createConversationSession backend seam', () => {
           viewId: sessionId,
           expectedRevision: preceding?.revision ?? 0n,
           expectedHead: preceding?.newHead ?? null,
-          operationId: entry.id,
+          operationId: `${entry.id}:${segmentId}`,
           input: {
             kind: 'message',
             businessId: entry.id,
-            segmentId: 'primary',
+            segmentId,
             parents,
             content: fromApplicationJson(entry),
           },
@@ -151,7 +161,7 @@ describe('createConversationSession backend seam', () => {
         );
       let accepted = await append(turn);
       const precedingIds = [turn.id];
-      if (appendDuringMetadata) {
+      if (updateDuringMetadata) {
         for (let index = 1; index < 42; index++) {
           const id = `synthetic-turn-${index}`;
           accepted = await append({ ...turn, id }, accepted);
@@ -159,7 +169,10 @@ describe('createConversationSession backend seam', () => {
         }
       }
       const bytes = await exportHistory();
-      await append(reply, accepted);
+      if (editDuringMetadata) {
+        const edited = { ...turn, inputConfig: { modelId: 'revised-model' } };
+        await append(edited, accepted, 'late:edit-metadata');
+      } else await append(reply, accepted);
       const incremental = await exportHistory();
       await store.close();
       await storage.close();
@@ -233,12 +246,12 @@ describe('createConversationSession backend seam', () => {
           return Promise.resolve(
             headOffset === tail ? next(new Uint8Array(incremental), tail) : next(null, startOffset)
           );
-        if (offset === startOffset && !appendDuringMetadata) {
+        if (offset === startOffset && !updateDuringMetadata) {
           requestsToTail++;
           headOffset = tail;
           return Promise.resolve(next(new Uint8Array(incremental), tail));
         }
-        if (offset === tail || (appendDuringMetadata && offset === startOffset)) {
+        if (offset === tail || (updateDuringMetadata && offset === startOffset)) {
           if (!read.searchParams.has('live')) return Promise.resolve(next(null, tail));
           const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
           return new Promise<Response>((_resolve, reject) => {
@@ -355,10 +368,11 @@ describe('createConversationSession backend seam', () => {
           return;
         }
         const page = await observation.initialPage;
-        if (appendDuringMetadata) {
+        if (updateDuringMetadata) {
           expect(page.startPosition).toBe(2);
           const readPage = LodyHistory.prototype.readActiveBranchPage;
           let intake: Promise<void> | undefined;
+          let olderPageTotal: number | undefined;
           const spy = vi
             .spyOn(LodyHistory.prototype, 'readActiveBranchPage')
             .mockImplementation(async function (this: LodyHistory, ...args) {
@@ -368,17 +382,26 @@ describe('createConversationSession backend seam', () => {
                 intake = replica.catchUp();
                 void intake.catch(() => {});
               }
+              if (args[1]?.before && intake) olderPageTotal ??= page.totalCount;
               return page;
             });
           try {
-            const metadata = await first.history.readMetadata!();
-            expect(metadata.map((row) => row.id)).toEqual(precedingIds);
+            const result = first.history.readMetadata!();
+            if (editDuringMetadata) {
+              await expect(result).rejects.toThrow('Roost history observation was superseded');
+            } else {
+              expect((await result).map((row) => row.id)).toEqual(precedingIds);
+              expect(olderPageTotal).toBe(precedingIds.length + 1);
+            }
             expect(intake).toBeDefined();
             await intake;
-            expect((await first.history.readMetadata!()).map((row) => row.id)).toEqual([
-              ...precedingIds,
-              reply.id,
-            ]);
+            const refreshed = await first.history.readMetadata!();
+            if (editDuringMetadata) {
+              expect(refreshed.map((row) => row.id)).toEqual(precedingIds);
+              expect(refreshed[0]?.inputConfig?.modelId).toBe('revised-model');
+            } else {
+              expect(refreshed.map((row) => row.id)).toEqual([...precedingIds, reply.id]);
+            }
           } finally {
             spy.mockRestore();
             observation.unsubscribe();
@@ -412,7 +435,7 @@ describe('createConversationSession backend seam', () => {
       } finally {
         first.dispose();
         if (discovering) vi.useRealTimers();
-        if (discovering || appendDuringMetadata) vi.unstubAllGlobals();
+        if (discovering || updateDuringMetadata) vi.unstubAllGlobals();
       }
       cachedBinding = binding;
       const reopened = open(offline);

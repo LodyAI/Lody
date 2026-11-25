@@ -14,7 +14,7 @@ import type { Logger } from '@/utils/logger';
 import { RoostHistoryGeneration } from './roost-history-generation';
 import { acquireRoostCloudUploadOwner } from './roost-node-session';
 
-const MAX_SEND = 32n;
+const MAX_APPENDS_PER_ROUND = 32;
 const RETRY_MS = 2_000;
 
 type UploadOwner = Awaited<ReturnType<typeof acquireRoostCloudUploadOwner>>;
@@ -246,21 +246,26 @@ export class RoostCloudHistoryPublisher {
         if (this.remotes.size >= 256) this.remotes.clear();
         this.remotes.set(remoteKey, remoteId);
       }
-      const result = await sync.upload({ maxSend: MAX_SEND }, { signal });
-      signal.throwIfAborted();
-      if (result.transportError) throw new Error('Roost cloud history upload failed');
-      if (result.waitingLocal.length || result.waitingParents.length) {
-        if (result.confirmed.length) return false;
-        throw new Error('Roost cloud history has unconfirmed writes');
+      for (let i = 0; i < MAX_APPENDS_PER_ROUND; i++) {
+        signal.throwIfAborted();
+        const result = await sync.upload({ maxSend: 1n }, { signal });
+        signal.throwIfAborted();
+        if (result.transportError) throw new Error('Roost cloud history upload failed');
+        if (result.waitingLocal.length || result.waitingParents.length) {
+          if (result.confirmed.length) return false;
+          throw new Error('Roost cloud history has unconfirmed writes');
+        }
+        if (result.sent.length !== result.confirmed.length) return false;
+        if (!result.sent.length) {
+          await history.resolve();
+          signal.throwIfAborted();
+          if (history.observationStream !== source) return false;
+          if (await this.options.isOwned(sessionId))
+            await this.options.publish(sessionId, binding, signal);
+          return true;
+        }
       }
-      if (BigInt(result.sent.length) >= MAX_SEND || result.sent.length !== result.confirmed.length)
-        return false;
-      await history.resolve();
-      signal.throwIfAborted();
-      if (history.observationStream !== source) return false;
-      if (await this.options.isOwned(sessionId))
-        await this.options.publish(sessionId, binding, signal);
-      return true;
+      return false;
     } catch (error) {
       this.remotes.delete(remoteKey);
       throw error;

@@ -507,6 +507,15 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     replica.endpoint = url;
   };
 
+  const readHistoryIdentity = async (replica: Replica, turnId: Uint8Array) => {
+    try {
+      const { value } = await replica.stream.readValue(turnId, [{ key: 'lodyHistory' }]);
+      return value instanceof Map ? value : undefined;
+    } catch (error) {
+      if (!(error instanceof StoreError && error.code === 'invalid')) throw error;
+    }
+  };
+
   const changes = async (replica: Replica) => {
     const ids = new Set<string>();
     let structure = false;
@@ -520,15 +529,8 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
           structure = true;
           continue;
         }
-        let identity;
-        try {
-          identity = (await replica.stream.readValue(event.update.turnId, [{ key: 'lodyHistory' }]))
-            .value;
-        } catch (error) {
-          if (error instanceof StoreError && error.code === 'invalid') continue;
-          throw error;
-        }
-        if (identity instanceof Map && identity.get('kind') === 'message') {
+        const identity = await readHistoryIdentity(replica, event.update.turnId);
+        if (identity?.get('kind') === 'message') {
           const id = identity.get('businessId');
           if (typeof id === 'string') ids.add(id);
         }
@@ -924,6 +926,69 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     await fetchOlder(replica);
   };
 
+  const metadataSuperseded = () => new Error('Roost history observation was superseded');
+
+  const readMetadataRows = async (): Promise<SessionDirectoryRow[] | undefined> => {
+    const pages: SessionDirectoryRow[][] = [];
+    const changed = new Set<string>();
+    let observation: { replica: Replica; through: bigint } | undefined;
+    let before: ActiveBranchPageCursor | undefined;
+    do {
+      const next = await run(async () => {
+        const replica = await open();
+        if (observation && observation.replica !== replica) throw metadataSuperseded();
+        return await network(replica, async () => {
+          const through = await replica.history.observedEventCursor();
+          const page = await replica.history.readActiveBranchPage(options.sessionId, {
+            ...(before ? { before } : { latest: true }),
+            limit: PAGE_SIZE,
+          });
+          if (!page.complete || (page.state.revision === 0n && !replica.meta.reachedStart)) {
+            await fillBranch(replica);
+            return;
+          }
+          // The SDK cursor verifies the branch prefix. Check for later writes
+          // to the physical segments still needed to read that prefix.
+          for (let after = observation?.through ?? through; after < through;) {
+            const events = await replica.stream.eventsAfter(after, 128);
+            if (!events.length) throw metadataSuperseded();
+            for (const { cursor, event } of events) {
+              if (cursor > through) break;
+              if (event.kind !== 'changed') continue;
+              const { turnId, seq } = event.update;
+              if (seq === 0n) {
+                const identity = await readHistoryIdentity(replica, turnId);
+                if (identity?.get('kind') === 'branch_state') throw metadataSuperseded();
+              }
+              changed.add(hex(turnId));
+            }
+            after = events.at(-1)!.cursor;
+          }
+          // Readers without Web Locks may see another replica commit during
+          // this page. Reopen the observation before accepting those rows.
+          if ((await replica.stream.eventsAfter(through, 1)).length) return;
+          if (page.messages.some((message) => changed.has(hex(message.turnId))))
+            throw metadataSuperseded();
+          const rows = project(page.messages).map((entry, index) =>
+            createRoostDirectoryRow(page.startPosition + index, entry)
+          );
+          const end = before ? before.position + 1 : page.totalCount;
+          if (
+            page.startPosition + rows.length !== end ||
+            (page.cursor?.position ?? -1) !== page.startPosition - 1
+          )
+            throw metadataSuperseded();
+          return { replica, through, rows, cursor: page.cursor };
+        });
+      });
+      if (!next) return;
+      pages.push(next.rows);
+      observation = { replica: next.replica, through: next.through };
+      before = next.cursor ?? undefined;
+    } while (before);
+    return pages.reverse().flat();
+  };
+
   const history: SessionHistoryReader = {
     count: () => {
       assertLive();
@@ -992,40 +1057,8 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       run(async () => await older(await open(), cursor, limit)),
     readMetadata: async () => {
       for (;;) {
-        const metadata = await run(async () => {
-          const replica = await open();
-          return await network(replica, async () => {
-            // Keep local directory reads together so this reader's live intake
-            // cannot advance the view between pages. Retain only scalar rows.
-            const checkpoint = await replica.history.observedEventCursor();
-            const pages: SessionDirectoryRow[][] = [];
-            let before: ActiveBranchPageCursor | undefined;
-            do {
-              assertLive();
-              const page = await replica.history.readActiveBranchPage(options.sessionId, {
-                ...(before ? { before } : { latest: true }),
-                limit: PAGE_SIZE,
-              });
-              if (!page.complete || (page.state.revision === 0n && !replica.meta.reachedStart)) {
-                // Release the reader between bounded history fetches.
-                await fillBranch(replica);
-                return;
-              }
-              pages.push(
-                project(page.messages).map((entry, index) =>
-                  createRoostDirectoryRow(page.startPosition + index, entry)
-                )
-              );
-              before = page.cursor ?? undefined;
-            } while (before);
-            // A separate reader may have imported frames without Web Locks.
-            if ((await replica.stream.eventsAfter(checkpoint, 1)).length) return;
-            return await readSessionHistoryMetadata({
-              readDirectory: () => pages.reverse().flat(),
-            });
-          });
-        });
-        if (metadata) return metadata;
+        const rows = await readMetadataRows();
+        if (rows) return await readSessionHistoryMetadata({ readDirectory: () => rows });
       }
     },
     readAll: () =>
