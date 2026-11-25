@@ -1562,6 +1562,18 @@ describe('encrypted workspace settings', () => {
     expect(container.textContent).toContain('e2ee.security.complete');
     expect(signed).toBe(false);
   });
+  it('shows the encrypted status row directly before management state settles instead of flashing identityMissing', async () => {
+    const pending = Promise.withResolvers<E2eeManagementState>();
+    platform.e2eeWorkspaces!.runtime!.managementState = () => pending.promise;
+    await render();
+    expect(container.textContent).toContain('e2ee.security.current');
+    expect(container.textContent).not.toContain('e2ee.security.identityMissing');
+    expect(container.querySelector('[data-testid="e2ee-security-add-device"]')).not.toBeNull();
+    await act(async () => pending.reject(new Error('e2ee_management_retry')));
+    expect(container.textContent).toContain('e2ee.security.current');
+    expect(container.textContent).not.toContain('e2ee.security.identityMissing');
+    expect(container.textContent).toContain('e2ee.security.error.retry.title');
+  });
   it('ordinary workspaces show ordinary settings and never access a management port', async () => {
     platform.e2eeWorkspaces!.runtime!.managementState = async () => {
       throw new Error('ordinary must never query crypto');
