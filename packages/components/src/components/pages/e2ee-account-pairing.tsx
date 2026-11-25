@@ -1,3 +1,4 @@
+import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
 import * as stylex from '@stylexjs/stylex';
 import { Result } from 'effect';
 import { ScanLine } from 'lucide-react';
@@ -67,11 +68,14 @@ export function localCodeError(input: string): string | null {
 }
 /** Host refusals become specific messages; anything else keeps the custody wording. */
 export function failureKey(error: unknown) {
-  const code = accountPairingErrorCode(error);
+  const code =
+    accountPairingErrorCode(error) ?? accountPairingErrorCode({ code: requestFailureCode(error) });
   if (code) return `e2ee.accountPair.error.${code}`;
-  return (
-    custodyFailureMessage(classifyE2eeControlFailure(error).kind) ?? 'e2ee.accountPair.error.failed'
-  );
+  const custody = custodyFailureMessage(classifyE2eeControlFailure(error).kind);
+  if (custody) return custody;
+  return isRequestUnavailable(error)
+    ? 'e2ee.accountPair.error.unavailable'
+    : 'e2ee.accountPair.error.failed';
 }
 /** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used.
  * An optional `subscribe` hint runs it at once on a change; the poll stays the fallback,
@@ -475,8 +479,7 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
   const subscribeApproval = useMemo(
     () =>
       shownLookupId && runtime.subscribeAccountPairingApproval
-        ? (changed: () => void) =>
-            runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
+        ? (changed: () => void) => runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
         : undefined,
     [shownLookupId, runtime]
   );

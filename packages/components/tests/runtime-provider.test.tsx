@@ -1584,6 +1584,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
     if (content?.mode !== 'protected') throw new Error('expected protected content');
     const room = content.resolve({ kind: 'doc', docId: 'retry-after-grace' });
     if (room.mode !== 'protected') throw new Error('expected protected room');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     await act(async () => {
       await expect(
         room.config.provider.seal({
@@ -1602,6 +1603,7 @@ describe('RuntimeProvider warm workspace preparation', () => {
       hasCurrentKey: true,
       writeEpoch: 1,
     });
+    await act(async () => vi.advanceTimersByTime(20_000));
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
     expect(store.get(runtimeAtom)).toBe(prepared);
     expect(prepared.disposed).toBe(false);
@@ -1654,22 +1656,29 @@ describe('RuntimeProvider warm workspace preparation', () => {
     await act(async () => {
       await expect(room.config.provider.seal(request)).rejects.toBe(failure);
     });
-    const retry = container.querySelector<HTMLButtonElement>('button')!;
-    expect(retry.textContent).toBe('e2ee.content.retryKeyUpdate');
+    expect(container.querySelector('button')).toBeNull();
     await act(async () => {
-      vi.advanceTimersByTime(29_999);
+      vi.advanceTimersByTime(4_999);
     });
     expect(container.textContent).not.toContain('e2ee.content.receivingNewKey');
     await act(async () => {
       await expect(room.config.provider.seal(request)).rejects.toBe(failure);
     });
     await act(async () => {
-      vi.advanceTimersByTime(2);
+      vi.advanceTimersByTime(1);
     });
     expect(container.querySelector('p[role="status"]')?.textContent).toBe(
       'e2ee.content.receivingNewKey'
     );
-    expect(container.querySelector('button')).toBe(retry);
+    expect(container.querySelector('button')).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(container.querySelector('p[role="status"]')?.textContent).toBe(
+      'e2ee.content.receivingNewKeySlow'
+    );
+    const retry = container.querySelector<HTMLButtonElement>('button')!;
+    expect(retry.textContent).toBe('e2ee.content.retryHostIdentity');
     await act(async () => retry.click());
     expect(container.querySelector('p[role="status"]')).not.toBeNull();
     expect(store.get(runtimeAtom)).toBe(prepared);

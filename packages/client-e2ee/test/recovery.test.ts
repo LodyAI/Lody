@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Effect, Layer, ManagedRuntime } from 'effect';
 import { TestClock } from 'effect/testing';
 import { ConvexHttpClient } from 'convex/browser';
+import { ConvexError } from 'convex/values';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { makeClientRecovery } from '../src/recovery';
 import { makeRecoveryWorkspaces, type RecoveryWorkspaceProgress } from '../src/recovery-workspaces';
@@ -131,6 +132,28 @@ function fixture() {
     },
   };
 }
+it.each([
+  [new ConvexError({ code: 'e2ee_recovery_conflict' }), 'e2ee_recovery_conflict'],
+  [new ConvexError({ code: 'authentication' }), 'e2ee_recovery_authentication'],
+  [new TypeError('Failed to fetch'), 'e2ee_recovery_unavailable'],
+])(
+  'reports the recovery service failure without requesting a backup file',
+  async (failure, code) => {
+    const f = fixture();
+    f.setIntercept((path) =>
+      path === 'e2eeRecoveryVault:hasAccountVault' ? Promise.reject(failure) : undefined
+    );
+    await expect(
+      Effect.runPromise(
+        f.service.create(async () => {
+          throw new Error('should not ask the user to save a file');
+        })
+      )
+    ).rejects.toThrow(code);
+    expect(f.paths).toEqual(['e2eeRecoveryVault:hasAccountVault']);
+  }
+);
+
 it('first browser login creates an empty vault after file readback, and the saved file reopens it', async () => {
   const f = fixture();
   let file = new Uint8Array();
@@ -209,7 +232,7 @@ it('bounds hung vault and workspace recovery RPCs at 90s while preserving 30s Un
     ]);
     expect(early).toBe('waiting');
     await clock.runPromise(TestClock.adjust(1));
-    await expect(hungList).rejects.toThrow('e2ee_recovery_failed');
+    await expect(hungList).rejects.toThrow('e2ee_recovery_unavailable');
 
     f.setIntercept(undefined);
     expect(await clock.runPromise(f.service.list({ file }))).toEqual({

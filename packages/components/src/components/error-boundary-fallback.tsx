@@ -346,11 +346,13 @@ export function HardResetConfirmDialog({
   onOpenChange,
   isResetting,
   onConfirm,
+  additionalWarning,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResetting: boolean;
   onConfirm: () => void;
+  additionalWarning?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -364,6 +366,13 @@ export function HardResetConfirmDialog({
             {t(
               'errorBoundary.hardResetConfirmDescription',
               'This signs you out and deletes everything Lody stored on this device — local caches, offline copies, and preferences — then restarts the app. Work already synced to your account stays safe and downloads again after you sign in. Unsynced local drafts on this device are lost.'
+            )}
+            {additionalWarning && (
+              <>
+                <br />
+                <br />
+                {additionalWarning}
+              </>
             )}
           </AlertDialog.Description>
         </AlertDialog.Header>

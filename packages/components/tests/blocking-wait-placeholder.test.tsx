@@ -33,6 +33,7 @@ vi.mock('../src/components/preloaded-main-layout', () => ({
 }));
 
 import 'fake-indexeddb/auto';
+import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
 import { docMetaCacheScopeAtom } from '../src/atoms/doc-meta';
 import {
   runtimeAtom,
@@ -216,6 +217,32 @@ const DAMAGED = 'Data stored on this device may be damaged.';
 const GENERIC = "Reload first. If that doesn't help";
 
 describe('BlockingWaitPlaceholder', () => {
+  it('warns before clearing this device’s authorization when an encrypted workspace times out', () => {
+    const store = createStore();
+    store.set(setWorkspaceContextAtom, { slug: 'acme', workspaceId: runtime.workspaceId });
+    store.set(workspaceContentModeAtom, {
+      accountId: 'account',
+      workspaceSlug: 'acme',
+      workspaceId: runtime.workspaceId,
+      descriptor: {
+        workspaceId: runtime.workspaceId,
+        contentMode: 'e2ee',
+        contentModeVersion: 1,
+        cryptoOrgId: 'org',
+        genesisHash: '11'.repeat(32),
+        activation: 'control-only',
+      },
+    });
+    render(store);
+    act(() => vi.advanceTimersByTime(RECOVERY_DELAY_MS));
+    expect(text()).toContain('This encrypted workspace is still waiting');
+    click('Clear all local data and sign out');
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("also removes this device's encrypted access");
+    expect(readPendingLocalClearMode()).toBeNull();
+    expect(app.relaunches).toEqual([]);
+  });
+
   it('shows the ways out at once for a failed scan, and clears nothing on its own', () => {
     render(createWorkspaceStore({ scan: 'failed' }));
 

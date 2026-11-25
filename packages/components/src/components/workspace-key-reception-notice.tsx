@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 
@@ -24,28 +25,39 @@ export function WorkspaceKeyReceptionNotice({
   workspaceId,
   waiting,
   clock = systemClock,
+  onCheckAgain,
 }: {
   workspaceId: string | null | undefined;
   waiting: KeyReceptionWait | null;
   clock?: KeyReceptionNoticeClock;
+  onCheckAgain?: () => void;
 }) {
   const { t } = useTranslation();
-  const [visibleWait, setVisibleWait] = useState<KeyReceptionWait | null>(null);
+  const [visible, setVisible] = useState<{ wait: KeyReceptionWait; slow: boolean } | null>(null);
   useEffect(() => {
     if (!waiting || waiting.workspaceId !== workspaceId) return undefined;
     const started = clock.now();
     let timer: ReturnType<typeof setTimeout>;
     const check = () => {
-      const remaining = 30_000 - (clock.now() - started);
-      if (remaining > 0) timer = clock.setTimeout(check, remaining);
-      else setVisibleWait(waiting);
+      const elapsed = clock.now() - started;
+      if (elapsed >= 5_000) setVisible({ wait: waiting, slow: elapsed >= 20_000 });
+      if (elapsed < 20_000)
+        timer = clock.setTimeout(check, (elapsed < 5_000 ? 5_000 : 20_000) - elapsed);
     };
-    timer = clock.setTimeout(check, 30_000);
+    timer = clock.setTimeout(check, 5_000);
     return () => clock.clearTimeout(timer);
   }, [clock, waiting, workspaceId]);
-  return waiting && waiting === visibleWait && waiting.workspaceId === workspaceId ? (
-    <p role="status" aria-live="polite" {...stylex.props(styles.notice)}>
-      {t('e2ee.content.receivingNewKey')}
-    </p>
-  ) : null;
+  if (!waiting || visible?.wait !== waiting || waiting.workspaceId !== workspaceId) return null;
+  return (
+    <div {...stylex.props(styles.notice)}>
+      <p role="status">
+        {t(visible.slow ? 'e2ee.content.receivingNewKeySlow' : 'e2ee.content.receivingNewKey')}
+      </p>
+      {visible.slow && onCheckAgain && (
+        <Button type="button" size="small" variant="secondary" onClick={onCheckAgain}>
+          {t('e2ee.content.retryHostIdentity')}
+        </Button>
+      )}
+    </div>
+  );
 }

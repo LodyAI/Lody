@@ -1,3 +1,4 @@
+import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
@@ -17,6 +18,7 @@ export type WorkspaceDataScopeObservation = {
   organizationsReady: boolean;
   docMetaScanErrorType: string | null;
   runtimeInitErrorType: string | null;
+  targetEncrypted: boolean;
 };
 
 /**
@@ -31,6 +33,7 @@ export function useWorkspaceDataScopeState(): WorkspaceDataScopeObservation {
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const runtimeInitFailure = useAtomValue(workspaceRuntimeInitFailureAtom);
+  const mode = useAtomValue(workspaceContentModeAtom);
   const docMetaScope = useAtomValue(docMetaCacheScopeAtom);
   const targetSlug = routeTargetSlug ?? atomWorkspaceSlug ?? null;
   const scope = useMemo(
@@ -49,6 +52,15 @@ export function useWorkspaceDataScopeState(): WorkspaceDataScopeObservation {
   );
   return {
     targetSlug,
+    targetEncrypted: Boolean(
+      (mode?.workspaceSlug === targetSlug &&
+        mode.descriptor &&
+        'contentMode' in mode.descriptor &&
+        mode.descriptor.contentMode === 'e2ee') ||
+      (runtime?.workspaceSlug === targetSlug && runtime.contentMode === 'e2ee') ||
+      (runtimeInitFailure?.workspaceSlug === targetSlug &&
+        runtimeInitFailure.modeAdmission?.knownEncrypted)
+    ),
     scope,
     workspaceId: runtime?.workspaceId ?? null,
     organizationsReady: currentWorkspaceId !== null,
