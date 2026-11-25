@@ -1,8 +1,9 @@
 import {
+  getCurrentPullRequestsByRepository,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  parseGitHubPullRequestUrl,
   resolveSessionPullRequests,
-  getCurrentPullRequestsByRepository,
   type AgentConfigId,
   type MachineId,
   type SessionId,
@@ -11,6 +12,7 @@ import {
 import {
   automationInvocationSchema,
   automationOriginSchema,
+  type AutomationCondition,
   type AutomationOrigin,
   type AutomationReceipt,
   type AutomationRule,
@@ -18,23 +20,30 @@ import {
 } from '@lody/shared/automations';
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
+import type { Lody } from '@/lib/lody';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import type { Logger } from '@/utils/logger';
+import { createSessionBackend } from '@/session/session-backend';
 import {
   providerBindingFingerprint,
   type ProviderBinding,
 } from '@/session/automation-observations';
 import type { SessionAutomationAuthority } from '@/session/session-automation-authority';
 import type { AutomationLedger } from '../storage/ledger';
+import { TERMINAL_WORK_STATES } from '../storage/schema';
 import type { ActionAuthorization } from '../runtime/engine';
+import { evaluateCapacity } from '../runtime/capacity';
+import { isQuotaRecoveryReceipt, quotaRecoveryRetryAt } from '../policies/session';
+import { deliveryStepCurrent } from '../policies/delivery';
+import { pullRequestCheckpointId } from '../sources/pull-requests';
 import { checkWorkflowEvidence } from '../sources/workflows';
-import { isQuotaRecoveryReceipt } from '../conditions/evaluator';
 
 export const sessionActionSchema = z.object({ sessionId: z.string().min(1) });
 export const compactActionSchema = sessionActionSchema
   .extend({ idleTurnId: z.string().min(1), expiresAt: z.number().int().positive() })
   .strict();
 
-const durableSessionDenials = new Set([
+const durableSessionDenials: ReadonlySet<string> = new Set([
   'invocation_revoked',
   'authorization_revoked',
   'target_not_granted',
@@ -48,11 +57,51 @@ const durableSessionDenials = new Set([
   'workflow_target_changed',
 ]);
 
+export const isDurableSessionDenialReason = (reason: string): boolean =>
+  durableSessionDenials.has(reason) || reason.startsWith('guard:');
+
 /** `'no'` verdicts only new authority or target state could lift; callers converge, never re-verify. */
 export const isDurableSessionDenial = (observation: ActionAuthorization): boolean =>
-  observation.terminalState !== undefined ||
-  durableSessionDenials.has(observation.reason) ||
-  observation.reason.startsWith('guard:');
+  observation.value !== 'yes' &&
+  (observation.terminalState !== undefined || isDurableSessionDenialReason(observation.reason));
+
+export type SessionMetaRead =
+  | { status: 'deleted' }
+  | { status: 'missing' }
+  | { status: 'ok'; meta: SessionMeta };
+
+export async function readSessionMeta(
+  manager: LoroDocumentManager,
+  sessionId: SessionId
+): Promise<SessionMetaRead> {
+  const record = await manager.repo.getDocMeta(getSessionRoomId(sessionId));
+  if (record && isLoroRepoDocDeleted(record)) return { status: 'deleted' };
+  const meta = record?.meta as SessionMeta | undefined;
+  return meta ? { status: 'ok', meta } : { status: 'missing' };
+}
+
+export async function evaluateBindingCapacity(
+  deps: { manager: LoroDocumentManager; ledger: AutomationLedger; machineId: MachineId },
+  bindingId: string,
+  modelId: string | undefined,
+  now: number
+): Promise<
+  | { status: 'unavailable' }
+  | { status: 'evaluated'; fingerprint: string; observation: ConditionObservation }
+> {
+  const config = await deps.manager.getAgentConfigForMachineLaunch(
+    bindingId as AgentConfigId,
+    deps.machineId
+  );
+  if (!config) return { status: 'unavailable' };
+  const fingerprint = providerBindingFingerprint(config);
+  const snapshot = deps.ledger.capacity(bindingId, modelId) ?? deps.ledger.capacity(bindingId);
+  return {
+    status: 'evaluated',
+    fingerprint,
+    observation: evaluateCapacity(snapshot, { bindingId, fingerprint, modelId }, now),
+  };
+}
 
 const preparedOrigin = z.union([
   z
@@ -125,8 +174,8 @@ export function retainsAutomationGrant(
 }
 
 /**
- * Synchronous Inbox-gate admission check. Runs inside the Session Inbox gate, so
- * it must stay strictly synchronous and read only the local ledger snapshot.
+ * Synchronous Inbox-gate admission check. Runs inside `SessionExecutionService`'s
+ * Inbox gate, so it must stay strictly synchronous and read only the local ledger.
  */
 export function canSubmitAutomationInput(
   ledger: AutomationLedger,
@@ -143,7 +192,7 @@ export function canSubmitAutomationInput(
     origin.workIntentId &&
     (!work ||
       work.invocationId !== origin.invocationId ||
-      ['settled', 'cancelled', 'failed', 'unknown'].includes(work.state) ||
+      TERMINAL_WORK_STATES.has(work.state) ||
       (binding !== undefined &&
         (!binding ||
           binding.bindingId !== work.bindingId ||
@@ -163,6 +212,203 @@ export function canSubmitAutomationInput(
     receipt.rule.revision === origin.ruleRevision &&
     ['submitting', 'queued', 'running', 'resolved', 'blocked'].includes(receipt.state)
   );
+}
+
+export async function canAcceptPendingWork(
+  deps: {
+    ledger: AutomationLedger;
+    manager: LoroDocumentManager;
+    authority: SessionAutomationAuthority;
+    machineId: MachineId;
+  },
+  args: { sessionId: SessionId; turnId: string; userId: string; origin: AutomationOrigin }
+): Promise<boolean> {
+  const { ledger, manager, authority, machineId } = deps;
+  const { sessionId, turnId, userId, origin } = args;
+  const work = origin.workIntentId && ledger.work(origin.workIntentId);
+  if (!work || !canSubmitAutomationInput(ledger, sessionId, turnId, origin)) return false;
+  const read = await readSessionMeta(manager, sessionId);
+  if (read.status !== 'ok') return false;
+  const { meta } = read;
+  return (
+    meta.machineId === machineId &&
+    !meta.isArchived &&
+    !meta.collaborationStopped &&
+    meta.acpSessionId === work.nativeSessionId &&
+    (meta.latestUserMsgId === work.turnId || meta.latestUserMsgId === turnId) &&
+    (await authority.canEdit(sessionId, userId)) === 'yes'
+  );
+}
+
+export async function observeCurrentPr(
+  deps: { manager: LoroDocumentManager; ledger: AutomationLedger },
+  receipt: AutomationReceipt,
+  prUrl: string
+): Promise<ConditionObservation> {
+  const sessionId = receipt.event.scope.sessionId;
+  if (!sessionId) return { value: 'unknown', reason: 'source_session_unlinked' };
+  const read = await readSessionMeta(deps.manager, sessionId as SessionId);
+  if (read.status !== 'ok') return { value: 'unknown', reason: 'source_session_unavailable' };
+  const linked = resolveSessionPullRequests(read.meta);
+  const repository = parseGitHubPullRequestUrl(prUrl)?.repoFullName.toLowerCase();
+  const pr = linked
+    .filter(
+      (item) => parseGitHubPullRequestUrl(item.url)?.repoFullName.toLowerCase() === repository
+    )
+    .at(-1);
+  if (!repository || !pr) return { value: 'unknown', reason: 'pr_link_unconfirmed' };
+  if (pr.url !== prUrl) return { value: 'no', reason: 'pr_superseded' };
+  const observation = deps.ledger.checkpoint(pullRequestCheckpointId(sessionId, prUrl));
+  if (!observation) return { value: 'unknown', reason: 'pr_observation_missing' };
+  // Merged is terminal provider evidence; a busy group must not hold that stale forever.
+  if (observation.data.status === 'merged' && pr.status === 'merged')
+    return { value: 'yes', reason: 'merged' };
+  if (Date.now() - observation.observedAt > 5 * 60_000)
+    return { value: 'unknown', reason: 'pr_observation_stale' };
+  return { value: 'no', reason: String(observation.data.status) };
+}
+
+function withQuotaRecoveryRetryAt(
+  observation: ConditionObservation,
+  receipt: AutomationReceipt,
+  now: number
+): ConditionObservation {
+  if (
+    observation.value === 'yes' ||
+    observation.retryAt !== undefined ||
+    !isQuotaRecoveryReceipt(receipt) ||
+    !observation.reason.startsWith('capacity_')
+  ) {
+    return observation;
+  }
+  return { ...observation, retryAt: quotaRecoveryRetryAt(receipt, now) };
+}
+
+export type AdmissionDeps = {
+  ledger: AutomationLedger;
+  lody: Lody;
+  manager: LoroDocumentManager;
+  authority: SessionAutomationAuthority;
+  machineId: MachineId;
+  userId: string;
+  workspaceId: string;
+  logger: Logger;
+};
+
+/** Evaluates all built-in automation conditions and guards without circular action trampolines. */
+export async function evaluateAutomationCondition(
+  deps: AdmissionDeps,
+  spec: AutomationCondition,
+  receipt: AutomationReceipt
+): Promise<ConditionObservation> {
+  const { ledger, lody, manager, authority, machineId, logger } = deps;
+  const parameters = spec.parameters;
+  switch (spec.kind) {
+    case 'automation.wait.ready': {
+      const wait =
+        typeof parameters.waitId === 'string' ? ledger.wait(parameters.waitId) : undefined;
+      if (!wait || wait.state !== 'matched' || wait.invocationId !== receipt.id)
+        return { value: 'no', reason: 'wait_revoked' };
+      return { value: 'yes', reason: 'wait_matched' };
+    }
+    case 'session.group.settled':
+      if (typeof parameters.rootId !== 'string') throw new Error('AUTOMATION_CONDITION_INVALID');
+      return authority.settled(
+        parameters.rootId as SessionId,
+        receipt.rule.ownerUserId,
+        receipt.id
+      );
+    case 'session.turn.finalized': {
+      if (typeof parameters.sessionId !== 'string' || typeof parameters.turnId !== 'string')
+        throw new Error('AUTOMATION_CONDITION_INVALID');
+      const doc = await manager.getOrCreateSessionDoc(parameters.sessionId as SessionId);
+      const backend = await createSessionBackend(doc);
+      const read = await backend.readTurn(parameters.turnId);
+      if (read.state !== 'ready') return { value: 'unknown', reason: 'turn_unavailable' };
+      const ended =
+        ['handled', 'failed', 'canceled'].includes(read.turn.status ?? '') ||
+        read.turn.finished === true;
+      return {
+        value:
+          ended && !lody.hasAutomationSessionWork(parameters.sessionId as SessionId) ? 'yes' : 'no',
+        reason: 'turn_finalization',
+      };
+    }
+    case 'session.delivery.current':
+      if (typeof parameters.sessionId !== 'string' || typeof parameters.eventId !== 'string')
+        throw new Error('AUTOMATION_CONDITION_INVALID');
+      return deliveryStepCurrent(ledger, parameters.sessionId, parameters.eventId);
+    case 'github.pr.is_merged':
+      if (typeof parameters.prUrl !== 'string') throw new Error('AUTOMATION_CONDITION_INVALID');
+      return observeCurrentPr({ manager, ledger }, receipt, parameters.prUrl);
+    case 'provider.capacity.can_dispatch': {
+      if (typeof parameters.bindingId !== 'string') throw new Error('AUTOMATION_CONDITION_INVALID');
+      const bindingId = parameters.bindingId;
+      const recovery =
+        receipt.rule.handler.kind === 'policy' &&
+        receipt.rule.handler.policy === 'recover-capacity';
+      const workRef = receipt.intent.action.parameters.input;
+      const work =
+        recovery &&
+        workRef &&
+        typeof workRef === 'object' &&
+        !Array.isArray(workRef) &&
+        typeof workRef.ref === 'string'
+          ? ledger.work(workRef.ref)
+          : undefined;
+      const recoveryBinding =
+        work && work.bindingId === bindingId && work.sessionId === receipt.rule.scope.sessionId;
+      if (
+        !recoveryBinding &&
+        ![receipt.rule.grants, ledger.rule(receipt.rule.id)?.grants].every((grant) =>
+          grant?.bindingIds.includes(bindingId)
+        )
+      )
+        return withQuotaRecoveryRetryAt(
+          { value: 'no', reason: 'capacity_binding_not_granted' },
+          receipt,
+          Date.now()
+        );
+      const modelId = typeof parameters.modelId === 'string' ? parameters.modelId : undefined;
+      const initial = await evaluateBindingCapacity(
+        { manager, ledger, machineId },
+        bindingId,
+        modelId,
+        Date.now()
+      );
+      if (initial.status === 'unavailable')
+        return withQuotaRecoveryRetryAt(
+          { value: 'unknown', reason: 'capacity_binding_unavailable' },
+          receipt,
+          Date.now()
+        );
+      let observed = initial.observation;
+      const quotaRecovery = isQuotaRecoveryReceipt(receipt);
+      const quotaResetDue =
+        quotaRecovery &&
+        observed.value === 'no' &&
+        observed.reason === 'capacity_exhausted' &&
+        observed.retryAt === undefined;
+      if (observed.value === 'unknown' || quotaResetDue) {
+        try {
+          await authority.refreshCapacity(bindingId);
+        } catch (cause) {
+          if (!quotaRecovery) throw cause;
+          logger.warn('Automation capacity refresh failed', cause);
+          return withQuotaRecoveryRetryAt(observed, receipt, Date.now());
+        }
+        const refreshed = ledger.capacity(bindingId, modelId) ?? ledger.capacity(bindingId);
+        observed = evaluateCapacity(
+          refreshed,
+          { bindingId, fingerprint: initial.fingerprint, modelId },
+          Date.now()
+        );
+      }
+      return withQuotaRecoveryRetryAt(observed, receipt, Date.now());
+    }
+    default:
+      return { value: 'unknown', reason: `condition_unsupported:${spec.kind}` };
+  }
 }
 
 export type ReceiptAuthorizationDeps = {
@@ -199,6 +445,7 @@ export async function authorizeAutomationReceipt(
   const action = receipt.intent.action;
   let sessionId: string;
   let unavailableFails = false;
+  let cachedMeta: SessionMeta | undefined;
   if (action.kind === 'agent.invoke') {
     const invocation = automationInvocationSchema.parse(action.parameters);
     const work =
@@ -214,7 +461,7 @@ export async function authorizeAutomationReceipt(
       if (work.unresolvedEffects || work.release !== 'released')
         return { value: 'unknown', reason: 'pending_work_boundary_unconfirmed' };
       if (
-        ['cancelled', 'settled', 'failed', 'unknown'].includes(work.state) ||
+        TERMINAL_WORK_STATES.has(work.state) ||
         (work.invocationId && work.invocationId !== receipt.id)
       )
         return { value: 'no', reason: 'pending_work_ended', terminalState: 'superseded' };
@@ -224,13 +471,13 @@ export async function authorizeAutomationReceipt(
       );
       if (!config || providerBindingFingerprint(config) !== work.fingerprint)
         return { value: 'no', reason: 'pending_work_binding_changed' };
-      const target = await manager.repo.getDocMeta(getSessionRoomId(work.sessionId as SessionId));
-      const meta = target?.meta as SessionMeta | undefined;
-      if (!target || !meta || isLoroRepoDocDeleted(target))
-        return { value: 'unknown', reason: 'target_unavailable' };
+      const targetRead = await readSessionMeta(manager, work.sessionId as SessionId);
+      if (targetRead.status !== 'ok') return { value: 'unknown', reason: 'target_unavailable' };
+      cachedMeta = targetRead.meta;
       if (
-        meta.acpSessionId !== work.nativeSessionId ||
-        (meta.latestUserMsgId !== work.turnId && meta.latestUserMsgId !== receipt.turnId)
+        cachedMeta.acpSessionId !== work.nativeSessionId ||
+        (cachedMeta.latestUserMsgId !== work.turnId &&
+          cachedMeta.latestUserMsgId !== receipt.turnId)
       )
         return { value: 'no', reason: 'pending_work_superseded', terminalState: 'superseded' };
       if (!quotaRecovery && work.notBefore !== undefined && work.notBefore > Date.now())
@@ -255,10 +502,7 @@ export async function authorizeAutomationReceipt(
     if (invocation.target.kind === 'new') {
       if (current.ownerUserId !== userId)
         return { value: 'no', reason: 'target_permission_revoked' };
-      if (
-        !current.grants.agentRoleIds.includes(invocation.target.agentRoleId) ||
-        invocation.target.machineId !== machineId
-      )
+      if (invocation.target.machineId !== machineId)
         return { value: 'unknown', reason: 'target_owner_unavailable' };
       return { value: 'yes', reason: 'role_granted' };
     }
@@ -267,14 +511,13 @@ export async function authorizeAutomationReceipt(
   } else {
     sessionId = sessionActionSchema.parse(action.parameters).sessionId;
   }
-  if (
-    !current.grants.sessionIds.includes(sessionId) &&
-    !(current.grants.allowLinkedSession && receipt.event.scope.sessionId === sessionId)
-  )
-    return { value: 'no', reason: 'target_not_granted' };
-  const record = await manager.repo.getDocMeta(getSessionRoomId(sessionId as SessionId));
-  const meta = record?.meta as SessionMeta | undefined;
-  if (!record || !meta || isLoroRepoDocDeleted(record))
+
+  const meta =
+    cachedMeta ??
+    (await readSessionMeta(manager, sessionId as SessionId).then((res) =>
+      res.status === 'ok' ? res.meta : undefined
+    ));
+  if (!meta)
     return {
       value: 'unknown',
       reason: 'target_unavailable',
@@ -319,4 +562,48 @@ export async function authorizeAutomationReceipt(
   // Stop stays transient even when `onUnavailable === 'fail'` (2026-10-30 Stop contract).
   if (meta.collaborationStopped) return { value: 'no', reason: 'target_stopped' };
   return { value: 'yes', reason: 'authorized' };
+}
+
+/** Re-runs authorization and guard (with `guard:` namespace) at resource admission. */
+export async function recheckAdmission(
+  deps: AdmissionDeps,
+  receipt: AutomationReceipt
+): Promise<ActionAuthorization> {
+  const authorization = await authorizeAutomationReceipt(
+    {
+      ...deps,
+      capacity: (bindingId, modelId, item) =>
+        evaluateAutomationCondition(
+          deps,
+          {
+            kind: 'provider.capacity.can_dispatch',
+            parameters: { bindingId, ...(modelId ? { modelId } : {}) },
+          },
+          item
+        ),
+    },
+    receipt
+  );
+  if (authorization.value !== 'yes' || authorization.reason === 'archive_already_committed')
+    return authorization;
+  if (receipt.intent.guard) {
+    const guard = await evaluateAutomationCondition(deps, receipt.intent.guard, receipt);
+    if (guard.value !== 'yes') return { ...guard, reason: `guard:${guard.reason}` };
+  }
+  return { value: 'yes', reason: 'authorized' };
+}
+
+/** Full admission check including pre-queue condition when receipt has not been queued yet. */
+export async function recheckReceipt(
+  deps: AdmissionDeps,
+  receipt: AutomationReceipt
+): Promise<ActionAuthorization> {
+  const admission = await recheckAdmission(deps, receipt);
+  if (admission.value !== 'yes' || admission.reason === 'archive_already_committed')
+    return admission;
+  if (receipt.intent.condition && !['queued', 'running', 'unknown'].includes(receipt.state)) {
+    const predicate = await evaluateAutomationCondition(deps, receipt.intent.condition, receipt);
+    if (predicate.value !== 'yes') return predicate;
+  }
+  return admission;
 }

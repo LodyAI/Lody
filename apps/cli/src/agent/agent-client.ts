@@ -2592,12 +2592,8 @@ export class AgentClient implements acp.Client {
    * woken by are live. Null when it is idle, reported nothing for the current
    * ACP session, or does not advertise the capability.
    */
-  /** Whether the agent advertised the Core `sessionActivity` level. */
+  /** Core `sessionActivity` v1 uses replace semantics: absent update means idle. */
   reportsSessionActivity(): boolean {
-    return this.hasCoreSessionActivityExtension();
-  }
-
-  private hasCoreSessionActivityExtension(): boolean {
     return this.lodyExtensionCapabilities.sessionActivity?.version === 1;
   }
 
@@ -2618,13 +2614,6 @@ export class AgentClient implements acp.Client {
   /** True while authoritative native work is active. */
   hasUnsettledNativeWork(): boolean {
     return this.getNativeWork() !== null;
-  }
-
-  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unsupported' {
-    if (!this.reportsSessionActivity()) return 'unsupported';
-    // Core `sessionActivity` v1 uses replace semantics: no update yet for the active
-    // ACP session means idle with no background tasks.
-    return this.getNativeWork() ?? 'idle';
   }
 
   /** Raw prompts and steer submissions remain owned after their local waits end. */

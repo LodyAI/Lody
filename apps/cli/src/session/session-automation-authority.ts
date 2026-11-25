@@ -21,6 +21,20 @@ export type AutomationSessionAdmission = {
 };
 
 export type SessionEditAccess = 'yes' | 'no' | 'unknown';
+export type SessionNativeActivity = 'idle' | 'running' | 'background' | 'unknown';
+
+/** Shared with Auto delivery so busy waits never silently surface as `request_blocked`. */
+export const SESSION_BUSY_BLOCK_REASONS = [
+  'session_work_active',
+  'input_pending',
+  'queue_pending',
+  'goal_active',
+  'automation_work_pending',
+  'native_work_active',
+  'session_admission_busy',
+  'session_admission_blocked',
+] as const;
+export type SessionBusyBlockReason = (typeof SESSION_BUSY_BLOCK_REASONS)[number];
 
 /** Existing Session owner; Automations cannot commit lifecycle changes through metadata alone. */
 export class SessionAutomationAuthority {
@@ -31,7 +45,7 @@ export class SessionAutomationAuthority {
       machineId: string;
       hasOtherWork(sessionId: SessionId): boolean;
       hasGoal(sessionId: SessionId): Promise<boolean>;
-      nativeActivity(sessionId: SessionId): 'idle' | 'running' | 'background' | 'unknown';
+      nativeActivity(sessionId: SessionId): SessionNativeActivity;
       author(sessionId: SessionId): string | undefined;
       canEdit(sessionId: SessionId, userId: string): Promise<SessionEditAccess>;
     }
@@ -39,7 +53,7 @@ export class SessionAutomationAuthority {
 
   private observations: import('./automation-observations').AutomationObservationSink | undefined;
   private pendingAutomationWork:
-    | ((sessionId: string, excludingInvocationId?: string) => boolean)
+    | ((sessionId: SessionId, excludingInvocationId?: string) => boolean)
     | undefined;
   setPendingWork(check: SessionAutomationAuthority['pendingAutomationWork']): void {
     this.pendingAutomationWork = check;

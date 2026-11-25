@@ -81,6 +81,10 @@ async function workspaceFixture(
     close: async () => {},
   };
   let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+  let onIdle: ((sessionId: SessionId) => void) | undefined;
+  let settledOverride:
+    | (() => Promise<{ value: 'yes' | 'no' | 'unknown'; reason: string }>)
+    | undefined;
   let rewriteBarrier = false;
   let beforeArchiveAdmission: (() => Promise<void> | void) | undefined;
   const editors = new Set(['user']);
@@ -90,7 +94,9 @@ async function workspaceFixture(
     canEdit: async (_sessionId: string, userId: string) =>
       editors.has(userId) ? ('yes' as const) : ('no' as const),
     setPendingWork: noop,
-    setObservations: noop,
+    setObservations: (sink?: { idle?(sessionId: SessionId): void }) => {
+      onIdle = sink?.idle;
+    },
     setAdmission: (check: typeof admit) => {
       admit = check;
     },
@@ -112,10 +118,12 @@ async function workspaceFixture(
     },
     ...(archiveAuthority
       ? {
-          settled: async () =>
-            rewriteBarrier
+          settled: async () => {
+            if (settledOverride) return settledOverride();
+            return rewriteBarrier
               ? ({ value: 'no', reason: 'session_work_active' } as const)
-              : ({ value: 'yes', reason: 'group_settled' } as const),
+              : ({ value: 'yes', reason: 'group_settled' } as const);
+          },
           archived: async () => meta.isArchived === true,
           archive: async (
             _sessionId: SessionId,
@@ -190,6 +198,12 @@ async function workspaceFixture(
     testEditors: editors,
     testAuthors: authors,
     testAdmission: (args: AutomationSessionAdmission) => admit?.(args),
+    testNotifyIdle: (sessionId: SessionId) => onIdle?.(sessionId),
+    testSetSettled: (
+      hook: (() => Promise<{ value: 'yes' | 'no' | 'unknown'; reason: string }>) | undefined
+    ) => {
+      settledOverride = hook;
+    },
     testBeforeArchiveAdmission: (hook: (() => Promise<void> | void) | undefined) => {
       beforeArchiveAdmission = hook;
     },
@@ -520,102 +534,19 @@ describe('Automation control authority', () => {
   });
   it('surfaces a blocked Auto delivery receipt in SessionMeta and wakes immediately on idle', async () => {
     vi.useFakeTimers();
-    let settledState: { value: 'yes' | 'no' | 'unknown'; reason: string } = {
-      value: 'unknown',
-      reason: 'native_activity_unobserved',
-    };
-    let onIdle: ((sessionId: SessionId) => void) | undefined;
     const prUrl = 'https://github.com/owner/project/pull/42';
-    const meta: Record<string, unknown> = {
+    const meta = {
       id: 'session-a',
       machineId: 'machine',
       userId: 'user',
       cliType: 'builtin',
       agentType: 'antigravity',
       collaborationStopped: false,
-      pullRequests: [{ url: prUrl, status: 'open' }],
-      autoDelivery: undefined,
+      pullRequests: [{ url: prUrl, status: 'open' as const }],
+      autoDelivery: undefined as Record<string, unknown> | null | undefined,
     };
-    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-automation-blocked-'));
-    roots.push(root);
-    vi.stubEnv('LODY_DATA_DIR', root);
-    const noop = () => {};
-    const logger: Logger = {
-      debug: noop,
-      trace: noop,
-      info: noop,
-      warn: noop,
-      error: noop,
-      success: noop,
-      setLevel: noop,
-      setDebug: noop,
-      child: () => logger,
-      close: async () => {},
-    };
-    const repo = {
-      getDocMeta: async (room: string) =>
-        room === getSessionRoomId('session-a' as SessionId) ? { meta } : undefined,
-      upsertDocMeta: async (room: string, patch: Record<string, unknown>) => {
-        if (room !== getSessionRoomId('session-a' as SessionId)) throw new Error('Unknown session');
-        Object.assign(meta, patch);
-      },
-      flush: async () => {},
-    };
-    const doc = new SessionDocument(
-      repo as never,
-      'session-a' as SessionId,
-      async () => {},
-      logger
-    );
-    composeTestSessionDoc(doc);
-    let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
-    const authority = {
-      author: () => 'user',
-      canEdit: async () => 'yes' as const,
-      setPendingWork: noop,
-      setObservations: (sink?: { idle?(sessionId: SessionId): void }) => {
-        onIdle = sink?.idle;
-      },
-      setAdmission: (check: typeof admit) => {
-        admit = check;
-      },
-      settled: async () => settledState,
-      acceptInput: (args: {
-        sessionId: SessionId;
-        turnId: string;
-        userId: string;
-        config: SessionTurnInputConfig;
-      }) => {
-        const origin = args.config._lodyAutomation;
-        return origin && admit ? admit({ ...args, origin }) : Promise.resolve(false);
-      },
-      inputDisposition: () => 'unsubmitted',
-      cancelInput: async () => true,
-    };
-    const host = await createAutomationWorkspaceLegacy({
-      lody: {
-        documentManager: {
-          repo,
-          isEncryptedWorkspace: () => false,
-          signMachineInput: async () => undefined,
-          getOrCreateSessionDoc: async () => doc,
-          getAgentConfigForMachineLaunch: async () => undefined,
-        },
-        hasAutomationSessionWork: () => false,
-        resolveAutomationWorkdir: async () => root,
-        getAutomationSessionAuthority: () => authority,
-      } as unknown as Lody,
-      workspace: { id: 'workspace', name: 'synthetic', slug: 'synthetic' } as WorkspaceSummary,
-      auth: {
-        token: 'token',
-        userId: 'user',
-        userName: 'User',
-        userEmail: 'user@example.com',
-        machineId: 'machine',
-      } as AuthContext,
-      logger,
-    });
-    owners.push(host);
+    const host = await workspaceFixture(meta, undefined, undefined, undefined, 'plaintext', true);
+    host.testSetSettled(async () => ({ value: 'unknown', reason: 'native_activity_unobserved' }));
     await host.recordObservations(
       meta as never,
       'owner/project',
@@ -646,11 +577,10 @@ describe('Automation control authority', () => {
       prUrl,
     });
 
-    // Once the agent settles, notifying idle wakes delivery immediately (well before the 15s cap).
-    settledState = { value: 'yes', reason: 'group_settled' };
-    onIdle?.('session-a' as SessionId);
+    host.testSetSettled(async () => ({ value: 'yes', reason: 'group_settled' }));
+    host.testNotifyIdle('session-a' as SessionId);
     await vi.advanceTimersByTimeAsync(1);
-    const backend = await createSessionBackend(doc);
+    const backend = await createSessionBackend(host.testDocument);
     expect(await backend.getMessageQueue()).toHaveLength(1);
     expect(meta.autoDelivery).toMatchObject({ state: 'merge', prUrl });
   });

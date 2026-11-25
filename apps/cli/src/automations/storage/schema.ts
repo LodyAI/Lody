@@ -24,16 +24,36 @@ export type SourceCheckpoint = {
   data: Record<string, unknown>;
 };
 
-export const TERMINAL_STATES = new Set<AutomationState>([
+export const TERMINAL_STATES: ReadonlySet<AutomationState> = new Set<AutomationState>([
   'settled',
   'failed',
   'cancelled',
   'superseded',
 ]);
 
+export const IN_FLIGHT_STATES: ReadonlySet<AutomationState> = new Set<AutomationState>([
+  'submitting',
+  'queued',
+  'running',
+  'unknown',
+]);
+
+export const CANCELLABLE_DELIVERY_STATES: ReadonlySet<AutomationState> = new Set<AutomationState>([
+  'accepted',
+  'waiting',
+  'resolved',
+  'blocked',
+  'submitting',
+  'queued',
+]);
+
+export const TERMINAL_WORK_STATES: ReadonlySet<PendingWork['state']> = new Set<
+  PendingWork['state']
+>(['settled', 'cancelled', 'failed', 'unknown']);
+
 export const NONTERMINAL_STATES_SQL = `'accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling'`;
 
-type JsonRow = { payload: string };
+export type JsonRow = { payload: string };
 
 /** The payload is the frozen acceptance record; every queried field lives in a real column. */
 export const eventColumns = (event: AutomationEvent) => ({

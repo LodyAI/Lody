@@ -1956,7 +1956,6 @@ describe('Auto delivery', () => {
     });
     const receipt = required(deliver(ledger, 101)[0]);
 
-    // Normal busy wait keeps the active step state while waiting for the session to settle.
     ledger.update(
       receipt.id,
       receipt.state,
@@ -1968,7 +1967,13 @@ describe('Auto delivery', () => {
       prUrl,
     });
 
-    // Unexpected/external block surfaces immediately as stalled with blockReason.
+    ledger.update(receipt.id, 'blocked', { state: 'blocked', reason: 'target_stopped' }, 103);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+      state: 'stalled',
+      reason: 'stopped',
+      prUrl,
+    });
+
     ledger.update(
       receipt.id,
       'blocked',
@@ -1982,12 +1987,73 @@ describe('Auto delivery', () => {
       prUrl,
     });
 
-    // Clearing the block restores active delivery without burning attempts or ending the enablement.
     ledger.update(receipt.id, 'blocked', { state: 'queued', reason: undefined }, 106);
     expect(advanceDelivery({ ledger, meta: linked, options, now: 107 }).status).toEqual({
       state: 'merge',
       prUrl,
     });
+  });
+
+  it('wakes session-blocked receipts on idle without waking capacity-parked or sibling sessions', () => {
+    const ledger = enabled();
+    const head = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(head, 's', 'c')], 100);
+    advanceDelivery({ ledger, meta: linked, options, now: 101 });
+    const receipt = required(deliver(ledger, 101)[0]);
+    ledger.update(
+      receipt.id,
+      receipt.state,
+      { state: 'blocked', reason: 'native_work_active', retryAt: 20_000 },
+      102
+    );
+
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 102);
+    ledger.recordWork(
+      {
+        id: 'quota-work',
+        ownerUserId: 'user',
+        updatedAt: 102,
+        sessionId: 'session',
+        turnId: 'input',
+        nativeSessionId: 'native',
+        bindingId: 'binding',
+        fingerprint: 'fp',
+        inputRef: 'input',
+        confirmedBoundary: 'assistant',
+        unresolvedEffects: false,
+        release: 'released',
+        state: 'blocked_on_capacity',
+        attempts: 0,
+      },
+      {
+        id: 'quota-work',
+        source: 'session/session',
+        type: 'provider.quota.exhausted',
+        version: 1,
+        subject: 'quota-work',
+        observedAt: 102,
+        scope: { workspaceId: 'workspace', sessionId: 'session' },
+        data: { workId: 'quota-work', bindingId: 'binding' },
+        provenance: 'callback',
+        completeness: 'observed',
+        depth: 0,
+      }
+    );
+    const quotaReceipt = required(deliver(ledger, 103)[0]);
+    ledger.update(
+      quotaReceipt.id,
+      quotaReceipt.state,
+      { state: 'blocked', reason: 'capacity_unobserved', retryAt: Number.MAX_SAFE_INTEGER },
+      104
+    );
+
+    expect(ledger.wakeSessionBlocked('other-session', 500)).toBe(0);
+    expect(ledger.wakeSessionBlocked('session', 500)).toBe(1);
+    expect(ledger.receipt(receipt.id)).toMatchObject({ retryAt: 500, capacityWakeRevision: 1 });
+    expect(ledger.receipt(quotaReceipt.id)).toMatchObject({
+      retryAt: Number.MAX_SAFE_INTEGER,
+    });
+    expect(ledger.receipt(quotaReceipt.id)?.capacityWakeRevision).toBeUndefined();
   });
 
   const prUrls = [prUrl, 'https://github.com/owner/project/pull/43'];

@@ -339,7 +339,10 @@ export function AutoDeliveryDialog({
   );
 }
 
-function autoDeliveryStallReasonLabel(status: SessionAutoDelivery, t: TFunction): string {
+function autoDeliveryStallReasonLabel(
+  status: Extract<SessionAutoDelivery, { state: 'stalled' }>,
+  t: TFunction
+): string {
   if (status.reason === 'request_blocked') {
     if (status.blockReason) {
       const key = `sessions.autoDelivery.blockReason.${status.blockReason}`;
@@ -482,7 +485,10 @@ export function SessionAutoDeliveryNote({
   const hasUpdatedAt = now !== undefined && status.updatedAt > 0;
   const showOptions = !merged && Boolean(options) && Boolean(onOptionsChange);
   const hasPrUrl = Boolean(status.prUrl);
-  const hasBlockReason = Boolean(status.blockReason);
+  const blockReason =
+    status.state === 'stalled' && status.reason === 'request_blocked'
+      ? status.blockReason
+      : undefined;
 
   return (
     <SessionAutomationNoteShell
@@ -496,7 +502,7 @@ export function SessionAutoDeliveryNote({
       dataAttributes={{ 'data-auto-delivery-state': status.state }}
       role="status"
       popoverBody={
-        hasPrUrl || hasUpdatedAt || hasBlockReason || showOptions ? (
+        hasPrUrl || hasUpdatedAt || Boolean(blockReason) || showOptions ? (
           <div {...stylex.props(styles.popoverSection)}>
             {status.prUrl ? (
               <SessionAutomationNoteRow
@@ -505,11 +511,11 @@ export function SessionAutoDeliveryNote({
                 value={shortPrLabel(status.prUrl)}
               />
             ) : null}
-            {status.blockReason ? (
+            {blockReason ? (
               <SessionAutomationNoteRow
                 icon={AlertTriangle}
                 label={t('sessions.autoDelivery.blockDetail', 'Blocked reason')}
-                value={status.blockReason}
+                value={blockReason}
               />
             ) : null}
             {hasUpdatedAt ? (

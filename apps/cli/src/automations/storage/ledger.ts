@@ -44,6 +44,7 @@ import {
   waitColumns,
   workColumns,
   type Delivery,
+  type JsonRow,
   type SourceCheckpoint,
 } from './schema';
 
@@ -51,7 +52,6 @@ export type { Delivery, SourceCheckpoint } from './schema';
 
 export const automationIdentity = (...parts: Array<string | number>): string =>
   createHash('sha256').update(JSON.stringify(parts)).digest('hex');
-type JsonRow = { payload: string };
 
 /** One machine owner; facts, source checkpoints and frozen deliveries commit together. */
 export class AutomationLedger {
@@ -915,18 +915,22 @@ export class AutomationLedger {
         : {}),
     };
   }
-  /** Make session-blocked receipts due immediately when native work becomes idle. */
+  /** Wakes session receipts on idle; preserves `MAX_SAFE_INTEGER` sentinel and bumps wake revision. */
   wakeSessionBlocked(sessionId: string, now: number): number {
     return this.connection.withImmediate(() => {
       const rows = this.connection.raw
-        .prepare(`SELECT id,payload FROM receipts WHERE session_id=? AND state='blocked'`)
+        .prepare(
+          `SELECT id,payload FROM receipts WHERE session_id=? AND state IN ('accepted','waiting','resolved','blocked')`
+        )
         .all(sessionId) as Array<{ id: string; payload: string }>;
       let woken = 0;
       for (const row of rows) {
         const receipt = JSON.parse(row.payload) as AutomationReceipt;
         if (receipt.retryAt === Number.MAX_SAFE_INTEGER) continue;
-        if (receipt.retryAt !== undefined && receipt.retryAt <= now) continue;
-        if (this.update(row.id, 'blocked', { retryAt: now }, now)) woken += 1;
+        const revision = (receipt.capacityWakeRevision ?? 0) + 1;
+        const retryAt = Math.min(receipt.retryAt ?? now, now);
+        if (this.update(row.id, receipt.state, { retryAt, capacityWakeRevision: revision }, now))
+          woken += 1;
       }
       return woken;
     });

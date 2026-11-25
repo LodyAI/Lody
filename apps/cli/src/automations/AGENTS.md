@@ -69,6 +69,8 @@
   receipt blocks surface as `stalled` (`request_blocked` + `blockReason`) without
   ending the enablement, while agents without Core `sessionActivity` v1 follow the
   shared `lateActivity` presence contract rather than stalling as unobserved.
+  Keep `DeliveryCoordinator.statusLock` separate from the engine `gate`, and release
+  `statusLock` before cancelling receipts to avoid lock-order deadlocks.
   [Spec](../../../../specs/session-auto-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools

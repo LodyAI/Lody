@@ -13000,16 +13000,16 @@ export class MessageHandler {
   }
 
   /**
-   * Work the native agent does outside Lody's turns (a background shell, or a
-   * model turn it started itself). GC must not stop such a session as idle.
+   * Native agent work outside Lody turns, shared by GC and automation settlement:
+   * Core `sessionActivity` v1 is authoritative (no update yet = idle); agents
+   * without it fall back to `lateActivity`'s passive 30s pulse.
    */
   getNativeWork(sessionId: SessionId): NativeAgentWork {
     const session = this.sessionManager.getSession(sessionId);
     if (!session || session.hasLiveAgentProcess?.() === false) return null;
-    return (
-      session.agentClient?.getNativeWork() ??
-      (this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null)
-    );
+    const client = session.agentClient;
+    if (client?.reportsSessionActivity()) return client.getNativeWork();
+    return this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : null;
   }
 
   /**
@@ -13098,15 +13098,7 @@ export class MessageHandler {
         this.hasSessionActivePresence(sessionId) ||
         this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
       hasGoal: (sessionId) => this.hasActiveGoal(sessionId),
-      nativeActivity: (sessionId) => {
-        const session = this.sessionManager.getSession(sessionId);
-        if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
-        const observation = session.agentClient?.getNativeActivityObservation();
-        if (!observation || observation === 'unsupported') {
-          return this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : 'idle';
-        }
-        return observation;
-      },
+      nativeActivity: (sessionId) => this.getNativeWork(sessionId) ?? 'idle',
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,
       canEdit: (sessionId, userId) => this.verifyAutomationEditAccess(sessionId, userId),

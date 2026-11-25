@@ -118,7 +118,7 @@ export const ConversationStatusLine: Story = {
         <div {...stylex.props(themeStyles.notesStack)}>
           {STATES.map((status) => (
             <SessionAutoDeliveryNote
-              key={`${status.state}-${status.reason ?? ''}`}
+              key={`${status.state}-${status.state === 'stalled' ? status.reason : ''}`}
               status={status}
               now={1_700_000_060_000}
               options={DEFAULT_AUTO_DELIVER_OPTIONS}
