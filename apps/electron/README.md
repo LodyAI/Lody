@@ -79,8 +79,11 @@ Required values are `VITE_CONVEX_DEPLOY_URL`, `VITE_CONVEX_SITE_URL`,
 Missing values fail the build; neither platform discovers deployment dotenv files.
 Package through `pnpm --dir apps/electron package -- --production` (or
 `--staging`) with the same platform and update values. Packaging checks the built
-update config and release identity before invoking electron-builder. Native macOS
-signing and notarization use electron-builder directly on the release runner.
+update config and release identity before invoking electron-builder. The Stable
+macOS release checks that the Passkey provisioning profile includes the selected
+Developer ID signing certificate before packaging. After signing and notarization,
+it checks the embedded profile against the certificate that signed each archived
+app. A mismatch stops publication of the desktop update.
 
 Set `LODY_LORO_STREAMS_WS_ENABLED=1` (or `true`) when building Cloud Electron
 to opt the renderer and bundled daemon presence into Streams WebSocket. An unset
