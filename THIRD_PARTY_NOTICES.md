@@ -2423,7 +2423,7 @@ This list covers shipped production dependencies plus vendored third-party asset
   - Description: Fast (and loose) selective `process.env` replacer using js-tokens instead of an AST
 - `loro-adaptors @ 0.6.1` — https://github.com/loro-dev/protocol/tree/main/packages/loro-adaptors
   - Author: Loro Team
-- `loro-crdt @ 1.17.0` — https://loro.dev
+- `loro-crdt @ 1.19.1` — https://loro.dev
   - Description: Loro CRDTs is a high-performance CRDT framework that makes your app state synchronized, collaborative and maintainable effortlessly.
 - `loro-mirror @ 2.3.2` — https://github.com/loro-dev/loro-mirror#readme
   - Author: Loro Team

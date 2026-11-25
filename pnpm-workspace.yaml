@@ -49,7 +49,7 @@ catalog:
   effect: 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
-  loro-crdt: 1.17.0
+  loro-crdt: 1.19.1
   loro-mirror: 2.3.2
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
@@ -180,7 +180,7 @@ minimumReleaseAgeExclude:
   - vitest@5.0.2 || 5.1.0
   - '@vitest/mocker@5.0.2 || 5.1.0'
   - '@vitest/spy@5.0.2 || 5.1.0'
-  - loro-crdt@1.17.0
+  - loro-crdt@1.19.1
   - '@loro-dev/streams-crdt@0.22.1 || 0.23.0 || 0.24.0'
   - '@loro-dev/streams-client@0.14.0 || 0.15.0 || 0.16.0'
   - loro-repo@0.26.0 || 0.28.0 || 0.29.0

@@ -1,4 +1,5 @@
 import { SessionId } from '@lody/shared';
+import { LORO_WASM_HARD_LIMIT_BYTES } from '@lody/shared/loro-wasm-budget';
 import { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -85,7 +86,7 @@ export interface SessionGCConfig {
   pressureRecheckDelayMs: number;
   /**
    * Loro WebAssembly heap size at which the idle sweep shortens its timeout to
-   * `wasmPressureIdleTimeoutMs` (default: 3 GiB of the 4 GiB limit). Host memory
+   * `wasmPressureIdleTimeoutMs` (default: 75% of the Loro hard budget). Host memory
    * says nothing about this heap: it fills on a 128 GiB machine while host
    * pressure never fires.
    */
@@ -216,7 +217,10 @@ export function loadGCConfig(): SessionGCConfig {
       'LODY_SESSION_GC_PRESSURE_RECHECK_DELAY_MS',
       DEFAULT_PRESSURE_RECHECK_DELAY_MS
     ),
-    wasmPressureHeapBytes: readEnvNumber('LODY_SESSION_GC_WASM_HEAP_BYTES', 3 * GIB),
+    wasmPressureHeapBytes: readEnvNumber(
+      'LODY_SESSION_GC_WASM_HEAP_BYTES',
+      LORO_WASM_HARD_LIMIT_BYTES * 0.75
+    ),
     wasmPressureIdleTimeoutMs: readEnvNumber(
       'LODY_SESSION_GC_WASM_PRESSURE_IDLE_TIMEOUT_MS',
       2 * 60 * 1000

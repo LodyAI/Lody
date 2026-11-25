@@ -1,4 +1,5 @@
 import * as loro from 'loro-crdt';
+import { LORO_WASM_HARD_LIMIT_BYTES } from '@lody/shared/loro-wasm-budget';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 
@@ -137,9 +138,7 @@ export function readLoroWasmHeapBytes(): number | null {
   return resolvedMemory?.buffer.byteLength ?? null;
 }
 
-/** 32-bit WebAssembly memory cannot grow past 4 GiB. */
-export const WASM32_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
-/** Fractions of the 4 GiB limit that each leave one warning per process. */
+/** Fractions of the configured Loro limit that each leave one warning per process. */
 const HEAP_WARNING_THRESHOLDS = [0.75, 0.9] as const;
 export const WASM_HEAP_LOG_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -157,7 +156,7 @@ const toMiB = (bytes: number): number => Math.round(bytes / 1024 / 1024);
 
 /**
  * Log Loro's WebAssembly heap size periodically, and warn once per threshold as
- * it nears the 4 GiB limit. The heap never shrinks, so its size is the high-water
+ * it nears the configured budget. The heap never shrinks, so its size is the high-water
  * mark of live document data.
  */
 export function startWasmHeapMonitor(
@@ -170,15 +169,15 @@ export function startWasmHeapMonitor(
   const sample = () => {
     const bytes = readHeapBytes();
     if (bytes === null) return;
-    const fraction = bytes / WASM32_MEMORY_LIMIT_BYTES;
+    const fraction = bytes / LORO_WASM_HARD_LIMIT_BYTES;
     logger.debug(
-      `[wasm-heap] loro=${toMiB(bytes)}MiB of ${toMiB(WASM32_MEMORY_LIMIT_BYTES)}MiB (${Math.round(fraction * 100)}%)`
+      `[wasm-heap] loro=${toMiB(bytes)}MiB of ${toMiB(LORO_WASM_HARD_LIMIT_BYTES)}MiB (${Math.round(fraction * 100)}%)`
     );
     for (const threshold of HEAP_WARNING_THRESHOLDS.slice(warned)) {
       if (fraction < threshold) break;
       warned += 1;
       logger.warn(
-        `[wasm-heap] Loro WebAssembly heap reached ${toMiB(bytes)}MiB, ${Math.round(fraction * 100)}% of its 4 GiB limit`
+        `[wasm-heap] Loro WebAssembly heap reached ${toMiB(bytes)}MiB, ${Math.round(fraction * 100)}% of its ${toMiB(LORO_WASM_HARD_LIMIT_BYTES)}MiB budget`
       );
     }
   };
