@@ -220,6 +220,69 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  it('does not cancel a newer latestUserMsgId when cancelling a turn with no processingUserMsgId', async () => {
+    const upsertDocMeta = vi.fn(async () => {});
+    const sessionDoc = withHistoryPort({
+      getHistory: vi.fn(() => []),
+      setStatus: vi.fn(async () => {}),
+      updateHistory: vi.fn(async () => {}),
+    });
+    const session = {
+      acpSessionId: 'acp-system-cancel' as ACPSessionId,
+      agentClient: {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+      },
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => session),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      validateSessionCredentials: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      getActiveTurnId: vi.fn(() => 'assistant:inbox:completion:1'),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta,
+          getDocMeta: vi.fn(async () => ({
+            meta: {
+              latestUserMsgId: 'turn-steer-pending',
+              lastHandledUserMsgId: 'turn-previous-1',
+            },
+          })),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-system-cancel' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:inbox:completion:1',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(session.agentClient.cancel).toHaveBeenCalledWith('acp-system-cancel');
+    expect(upsertDocMeta).not.toHaveBeenCalledWith(
+      'session-session-system-cancel',
+      expect.objectContaining({ lastHandledUserMsgId: 'turn-steer-pending' })
+    );
+    expect(
+      service.getTerminalUserTurnStatusWithoutEntry(
+        'session-system-cancel' as SessionId,
+        'turn-steer-pending'
+      )
+    ).toBeUndefined();
+  });
+
   it('stops authentication when aborted while the launch config is loading', async () => {
     let resolveConfig!: (value: ReturnType<typeof createLaunchConfig>) => void;
     const config = new Promise<ReturnType<typeof createLaunchConfig>>((resolve) => {
