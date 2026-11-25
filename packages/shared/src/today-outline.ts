@@ -296,8 +296,8 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
   let structureDirty = true;
   const dirtyText = new Set<string>();
   /**
-   * The tree's shape mirrored in JS (child ids per parent, '' for the roots),
-   * kept by tree events: reading it costs no calls into the document.
+   * Child IDs by parent ('' for roots), maintained by tree events.
+   * Revived IDs replay their descendants, so retained child lists must be rebuilt.
    */
   const ROOT_KEY = '';
   const kids = new Map<string, string[]>();
@@ -326,8 +326,6 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         if (mirrorBroken) continue;
         for (const item of event.diff.diff) {
           if (item.action === 'create') {
-            // Undo can revive a subtree with the same IDs and emit creates for its
-            // descendants. Rebuild instead of inserting into retained child lists.
             if (kids.has(item.target)) {
               mirrorBroken = true;
               break;
