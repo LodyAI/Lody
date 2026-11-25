@@ -72,26 +72,37 @@ Ryugi page ── event ──> ryugi-hook (host lody) ──> Lody delivery com
 
 ## 待定问题
 
-- 投递应该默认开启并提供机器级开关关闭，还是由用户主动开启？
+- 投递是保持默认开启并提供显式关闭开关（当前为 `LODY_DISABLE_RYUGI_HOST=1`），还是需要
+  增加界面上的机器级设置项或改为由用户主动开启？
 - 别人在已发布的 Ryugi Cloud 产物上留的评论也会被 Ryugi 转发。Lody 是否接收它们进入
-  会话，又该如何标识？
-- 从 Ryugi 的后台 worker 调用投递命令，在本地模式和云模式下能否正确认证？会话自己的
-  进程能否往该会话投递？
-- Ryugi 的投递是至少一次，回执丢失可能导致重复输入。Lody 是否按 Ryugi 的事件标识去重，
-  数据里是否带有稳定的标识？
-- 加密工作区要求排队的自动化输入由机器签名。第一版是支持它们，还是拒绝投递？
-- 会话结束后，Ryugi 的 worker 要等下一次投递被拒绝才会退出。Lody 是否需要更早地停止它？
+  会话，以及是否需要与本地 Ryugi 反馈区分标识？
+- 会话结束后，Ryugi 的 worker 要等下一次投递被退出码 10 拒绝才会退出。Lody 是否需要
+  更早地停止它？
 
 ## 依据
 
-这里只描述预期行为，尚未实现，也未执行任何验证。查阅过的源码：
+当前分支已完成实现并通过单元测试与本地 Unix socket IPC 测试验证；本环境未安装
+`ryugi-hook` 二进制，尚未执行与真实 `ryugi-hook` 进程的端到端实测：
 
-- Ryugi `7a3ee3c`（1.108.2）：`hook/src/hosts.rs`（自定义宿主、`RYUGI_HOSTS_CONFIG`）、
-  `hook/src/cmd.rs`（投递数据、回执、退出码 10）、`hook/src/subs.rs` 的 `identity()`
-  （自定义宿主优先）、`hook/src/watch.rs` 和 `hook/src/codex.rs`（内置 watcher 让路）、
-  `.pi/extensions/ryugi.ts` 和 `.dsh/index.mjs`（自己起回合的投递方式），以及
-  `docs/install.md`（Codex 需要 App Server 地址）。
-- Lody：`apps/cli/src/session/session.ts` 的 `buildShellEnv`，`createAgent` 和
-  terminal manager 都使用它。
-- Pi 适配层 `66cc30a`：`src/connection.ts` 只认 ACP 发起的回合，发送 prompt 时不带
-  `streamingBehavior`，没有 ACP 回合时丢弃事件。
+- 共享契约：`packages/shared/src/message-author.ts`（`ExternalMessageAuthorSchema`）、
+  `packages/shared/src/session-doc-schemas.ts`（`messageQueueItemSchema.author`）、
+  `packages/shared/src/session-inbox-deliver.ts`（`/session-inbox-deliver` schema 与
+  退出码 10），以及 `packages/shared/src/node/local-ipc.ts`（`sessionInboxDeliver`）。
+- 宿主文件与环境变量注入：`apps/cli/src/lib/ryugi-host.ts`
+  （`prepareRyugiHostsConfigSync`、只读合并用户配置、冲突规避、`LODY_DISABLE_RYUGI_HOST=1`
+  关闭开关、Node/Electron/SEA 命令解析），接入 `apps/cli/src/session/session.ts`
+  （`buildShellEnv`）和 `apps/cli/src/lib/terminal-pty-service.ts`（`buildTerminalEnv`）。
+- 投递命令与 daemon 处理：`apps/cli/src/commands/session-inbox.ts`
+  （`lody session inbox deliver --source ryugi`、事件规范化去重、`queued`/`retry`/退出码
+  10 回执）、`apps/cli/src/lib/session-inbox-deliver.ts`（以机器所有者身份重查编辑权限、
+  `resolveSessionConversationConfig`、加密工作区 `signMachineInput`、队列唤醒）、
+  `apps/cli/src/lib/local-session-control.ts`、`apps/cli/src/lib/local-control-handler.ts`、
+  `apps/cli/src/lib/lody-fleet.ts`，以及 `apps/cli/src/session/session-dispatch-watcher.ts`
+  （队列晋升时保留 `author`）。
+- 界面来源标识：`packages/components/src/components/ai-gui/message-author-identity.tsx`
+  （`ExternalMessageAuthorIdentity`）、`packages/components/src/components/ai-gui/view.tsx`、
+  `packages/components/src/components/sessions/message-queue/message-queue-row.tsx` 及
+  `locales/{en,zh_CN}.json`。
+- 查阅过的上游源码：Ryugi `7a3ee3c`（`hook/src/{hosts,cmd,subs,watch,codex,wake,queue}.rs`、
+  `.pi/extensions/ryugi.ts`、`.dsh/index.mjs`、`docs/install.md`）与 Pi 适配层 `66cc30a`
+  （`src/connection.ts`）。

@@ -205,6 +205,7 @@ export * from './session-acp-identity';
 
 export * from './memory-provider';
 export * from './message-author';
+export * from './session-inbox-deliver';
 
 export * from './magpie-import';
 

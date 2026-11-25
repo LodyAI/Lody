@@ -7,7 +7,10 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import type { SessionLocalAttachment } from '@lody/shared';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
-import { MessageAuthorIdentity } from './message-author-identity';
+import {
+  ExternalMessageAuthorIdentity,
+  MessageAuthorIdentity,
+} from './message-author-identity';
 import { useSessionLinkNavigator } from './session-link-context';
 import { resolveSenderDisplayName } from '@/lib/workspace-sender-identity';
 import * as stylex from '@stylexjs/stylex';
@@ -5144,6 +5147,8 @@ export function UserMessageAuthorSlot({
     <div {...stylex.props(conversationSurface.author)}>
       {author?.kind === 'agent' ? (
         <MessageAuthorIdentity author={author} onNavigateSession={navigateSourceSession} />
+      ) : author?.kind === 'external' ? (
+        <ExternalMessageAuthorIdentity author={author} />
       ) : (
         <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
       )}
@@ -5166,6 +5171,7 @@ export function UserMessageMetadataAuthor({
   isMobile: boolean;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) {
+  const { t } = useTranslation();
   const sessionLinkNavigate = useSessionLinkNavigator();
   const navigateSourceSession = onNavigateSession ?? sessionLinkNavigate ?? undefined;
   const sourceSessionId =
@@ -5187,6 +5193,21 @@ export function UserMessageMetadataAuthor({
           />
         ) : null}
       </>
+    );
+  }
+
+  if (author?.kind === 'external') {
+    const sourceName = author.label ?? author.source;
+    const originLabel = t('sessions.messageAuthor.fromExternal', 'From {{source}}', {
+      source: sourceName,
+    });
+    return (
+      <span
+        {...stylex.props(conversationSurface.metadataSenderName)}
+        title={author.artifact ? `${originLabel} · ${author.artifact}` : originLabel}
+      >
+        {originLabel}
+      </span>
     );
   }
 

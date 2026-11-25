@@ -145,7 +145,7 @@ const MessageRowConnected = memo(function MessageRowConnected({
   const userInfo = useWorkspaceSenderProfile({
     userId: message.userId,
     workspaceId,
-    enabled: message.role === 'user' && message.author?.kind !== 'agent',
+    enabled: message.role === 'user' && (!message.author || message.author.kind === 'human'),
   });
 
   return (

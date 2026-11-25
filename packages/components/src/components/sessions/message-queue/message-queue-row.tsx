@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
-import { normalizeSessionInputBlocks } from '@lody/shared';
+import { normalizeSessionInputBlocks, readMessageAuthor } from '@lody/shared';
 import { Menu } from '@lody/ui/menu';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -193,6 +193,12 @@ export const queueRowStyles = stylex.create({
     gap: themeSpace[1],
   },
   overflowCount: { fontSize: '10px', color: MUTED_FOREGROUND_70 },
+  externalOrigin: {
+    marginRight: themeSpace[1],
+    fontSize: type.captionSize,
+    fontWeight: themeFontWeight.medium,
+    color: MUTED_FOREGROUND_70,
+  },
   rowBody: {
     display: 'flex',
     minWidth: 0,
@@ -568,6 +574,14 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
     );
   }
 
+  const externalAuthor = readMessageAuthor(item.author);
+  const externalOriginLabel =
+    externalAuthor?.kind === 'external'
+      ? t('sessions.messageAuthor.fromExternal', 'From {{source}}', {
+          source: externalAuthor.label ?? externalAuthor.source,
+        })
+      : null;
+
   return (
     <div {...stylex.props(queueRowStyles.rowBody, props.roomy && queueSurface.roomyBody)}>
       {inlineImages.length > 0 ? (
@@ -596,6 +610,9 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
         }}
       >
         {props.footerPosition === 'inline' && props.footer ? <>{props.footer} </> : null}
+        {externalOriginLabel ? (
+          <span {...stylex.props(queueRowStyles.externalOrigin)}>[{externalOriginLabel}]</span>
+        ) : null}
         {item.task}
       </div>
     </div>

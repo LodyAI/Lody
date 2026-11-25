@@ -396,6 +396,25 @@ export class LodyFleet {
           };
         }
       },
+      dispatchSessionInboxDeliver: async (message) => {
+        const { deliverSessionInboxMessage } = await import('./session-inbox-deliver');
+        return await deliverSessionInboxMessage(message, {
+          machineId: this.machineId,
+          ownerUserId: this.userId,
+          getWorkspaces: () =>
+            Array.from(this.runtimes.values(), (runtime) => ({
+              workspaceId: runtime.workspace.id,
+              manager: runtime.lody.documentManager,
+              revoked: this.remoteRevokedWorkspaceIds.has(runtime.workspace.id),
+              canEdit: (sessionId, userId) =>
+                runtime.lody.getAutomationSessionAuthority().canEdit(sessionId, userId),
+            })),
+          isStartupSyncPending: () =>
+            this.runtimeStateReporter.snapshot().startupStage !== 'ready' ||
+            this.startInFlight.size > 0 ||
+            this.waitingForPairing.size > 0,
+        });
+      },
       dispatchE2eeReset: (message) => this.resetLocalE2eeIdentity(message),
       dispatchE2eePairing: (message) => this.dispatchLocalE2eePairing(message),
       dispatchSchedule: async (message) => {
