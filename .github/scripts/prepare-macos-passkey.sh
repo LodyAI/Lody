@@ -63,7 +63,12 @@ if ! openssl pkcs12 -in "${p12_path}" -clcerts -nokeys -passin env:CSC_KEY_PASSW
   fi
 fi
 
-if ! node .github/scripts/macos-passkey-profile.mjs --plist "${plist_path}" --cert-pem "${cert_pem_path}"; then
+expected_app_id="${LODY_PASSKEY_EXPECTED_APP_ID:-YTRMX32C99.ai.lody.desktop}"
+
+if ! node .github/scripts/macos-passkey-profile.mjs \
+  --plist "${plist_path}" \
+  --cert-pem "${cert_pem_path}" \
+  --app-id "${expected_app_id}"; then
   rm -f "${profile_path}"
   exit 1
 fi
