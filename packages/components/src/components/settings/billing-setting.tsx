@@ -21,7 +21,8 @@ import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import { useCloudMutation, useCloudQuery, useCloudQueryState } from '@lody/platform/react';
+import { Button } from '@lody/ui/button';
 import { isElectronRenderer } from '@/lib/electron';
 import { useAppCapability } from '@/lib/app-platform';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -99,7 +100,11 @@ function CloudBillingSettings() {
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const localSessionCount = useAtomValue(sessionMetaCountAtom);
-  const fetchedOverview = useCloudQuery(
+  const {
+    data: fetchedOverview,
+    error: overviewError,
+    retry: retryOverview,
+  } = useCloudQueryState(
     cloudOperations.billing.getBillingOverview,
     workspaceId ? { workspaceId } : 'skip'
   );
@@ -769,6 +774,26 @@ function CloudBillingSettings() {
 
   return (
     <>
+      {overviewError && fetchedOverview === undefined && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 12,
+            padding: '8px 12px',
+            borderRadius: 8,
+            border: '1px solid var(--border, rgba(128, 128, 128, 0.25))',
+          }}
+        >
+          <span>{t('common.tryAgain')}</span>
+          <Button size="small" variant="ghost" onClick={retryOverview}>
+            {t('common.retry', 'Retry')}
+          </Button>
+        </div>
+      )}
       <BillingSettingsView
         overview={overview}
         sessionCount={localSessionCount}

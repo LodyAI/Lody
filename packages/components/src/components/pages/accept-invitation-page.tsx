@@ -31,6 +31,7 @@ export interface AcceptInvitationPageProps {
   onSwitchAccount?: () => void;
   onVerifyEmail?: () => void;
   onAccept?: () => void;
+  onRetry?: () => void;
   onBackHome?: () => void;
 }
 
@@ -60,6 +61,7 @@ export function AcceptInvitationPage({
   onSwitchAccount,
   onVerifyEmail,
   onAccept,
+  onRetry,
   onBackHome,
 }: AcceptInvitationPageProps) {
   const { t } = useTranslation();
@@ -116,6 +118,11 @@ export function AcceptInvitationPage({
             {state === 'billing_blocked' && (
               <Button size="large" onClick={onAccept}>
                 {t('invite.billing.retry')}
+              </Button>
+            )}
+            {state === 'error' && onRetry && (
+              <Button size="large" onClick={onRetry}>
+                {t('common.retry', 'Retry')}
               </Button>
             )}
             <Button size="large" variant="secondary" onClick={onBackHome}>

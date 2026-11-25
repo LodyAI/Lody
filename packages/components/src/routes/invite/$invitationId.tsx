@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
 import type { Invitation } from 'better-auth/plugins/organization';
-import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { useCloudQueryState, usePlatformCapability } from '@lody/platform/react';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations, type InvitationPreview } from '@/lib/cloud-api-operations';
 import {
@@ -50,10 +50,14 @@ export function AcceptInvitationComponent() {
   const { data: session, isPending, isRetrying, error: sessionError } = useStableSession();
   const isAuthenticated = Boolean(session?.user);
   const invitationsAvailable = usePlatformCapability('multiWorkspace');
-  const preview: InvitationPreview | undefined = useCloudQuery(
-    cloudOperations.auth.getInvitationPreview,
-    { invitationId }
-  );
+  const {
+    data: preview,
+    error: previewError,
+    retry: retryPreview,
+  } = useCloudQueryState<
+    { invitationId: string },
+    InvitationPreview
+  >(cloudOperations.auth.getInvitationPreview, { invitationId });
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [status, setStatus] = useState<AcceptInvitationPageState>('loading');
   const [organizationName, setOrganizationName] = useState<string>('');
@@ -174,11 +178,12 @@ export function AcceptInvitationComponent() {
     continueToLogin();
   };
 
-  if (sessionError || !invitationsAvailable) {
+  if (sessionError || !invitationsAvailable || previewError) {
     return (
       <AcceptInvitationPage
         state="error"
         errorMessage={t('invite.error.unknown')}
+        onRetry={previewError ? retryPreview : undefined}
         onBackHome={() => {
           void navigate({ to: '/' });
         }}
