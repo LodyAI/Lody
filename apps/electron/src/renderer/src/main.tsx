@@ -7,6 +7,7 @@ import { observePreparedTarget, waitForTargetContentPainted } from './warm-windo
 import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
 import {
   isSessionWindow,
+  isTodayWindow,
   isWarmWindow,
   clearWarmWindowFlag
 } from '@lody/components/lib/desktop-window'
@@ -36,6 +37,9 @@ import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
 import { installAppIconBridge } from './app-icon'
+import { markTodayWindowBoot } from '@lody/components/lib/today/today-window-boot-timeline'
+
+markTodayWindowBoot('renderer-entry')
 
 const stopClientDiagnostics = installClientLog()
 import.meta.hot?.dispose(stopClientDiagnostics)
@@ -129,6 +133,26 @@ function RendererCommitSentinel(): null {
     return undefined
   }, [])
   return null
+}
+
+function installTodayWindowBinding(router: ReturnType<typeof createRouter>): void {
+  if (!isTodayWindow()) return
+  const workspaceName = router.history.location.pathname.split('/')[1]
+  if (!workspaceName) return
+  onIpcEvent('app.todayWindowTarget', (binding) => {
+    void (
+      binding
+        ? router.navigate({
+            to: '/$workspaceName/today-window',
+            params: { workspaceName },
+            search: binding,
+            replace: true
+          })
+        : router.navigate({ to: '/', replace: true })
+    ).catch((error) => {
+      console.error('[today-window] Could not bind the Today route', error)
+    })
+  })
 }
 
 /**
@@ -231,6 +255,7 @@ try {
   const detectedLanguage = storedLanguage ?? detectBrowserLanguage()
   const bootLanguage = detectedLanguage ?? fallbackLanguage
   await initI18n(bootLanguage)
+  markTodayWindowBoot('i18n-ready')
   if (!storedLanguage && detectedLanguage) {
     jotaiStore.set(languageAtom, detectedLanguage)
   }
@@ -247,6 +272,7 @@ try {
     history: usesHashHistory ? createHashHistory() : undefined
   })
   installWarmWindowBinding(router)
+  installTodayWindowBinding(router)
   installWindowPreparationIntent()
   if (isWarmWindow()) {
     void preloadMainLayout().catch((error) => {
@@ -263,6 +289,7 @@ try {
       sessionStorage.setItem('lody:windowFocusConsumed', '1')
     }
   }
+  markTodayWindowBoot('react-render')
   createRoot(rootElement, {
     // ErrorBoundary remains the single owner of caught-error UI and PostHog.
     // React 19 no longer rethrows render errors, so these root callbacks only

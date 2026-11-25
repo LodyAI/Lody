@@ -69,10 +69,11 @@ export function TodaySelectionBar(props: {
     if (!selection || !surface) return undefined;
     const bump = () => setLayout((value) => value + 1);
     surface.addEventListener('scroll', bump, { passive: true });
-    window.addEventListener('resize', bump);
+    const view = surface.ownerDocument.defaultView;
+    view?.addEventListener('resize', bump);
     return () => {
       surface.removeEventListener('scroll', bump);
-      window.removeEventListener('resize', bump);
+      view?.removeEventListener('resize', bump);
     };
   }, [selection, surface]);
 

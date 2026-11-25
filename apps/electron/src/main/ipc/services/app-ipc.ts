@@ -13,7 +13,15 @@ import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
 import { isValidTodayWorkspace, parseTodayWindowTarget } from '../../today-window-target'
-import { isTodayWindow, openTodayWindow, setActiveTodayWorkspace } from '../../today-windows'
+import {
+  closeTodayWindow,
+  isTodayWindow,
+  openTodayWindow,
+  prepareTodayCompanion,
+  revealTodayWindow,
+  setActiveTodayWorkspace,
+  updateTodayCompanion
+} from '../../today-windows'
 import { openLinkInMainWindow } from '../../window'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -207,6 +215,41 @@ export class AppIpc extends ProductWindowIpcService {
     openTodayWindow(parseTodayWindowTarget(raw))
   }
 
+  @IpcMethod()
+  async prepareTodayCompanion(raw: { workspace: string; member?: string; date?: string }) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner) throw new Error('Missing Today companion owner')
+    return prepareTodayCompanion(owner, parseTodayWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async updateTodayCompanion(
+    name: string,
+    action:
+      | { type: 'show' }
+      | { type: 'pin'; pinned: boolean }
+      | { type: 'target'; target: { workspace: string; member?: string; date?: string } }
+  ) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner || typeof name !== 'string' || !action)
+      throw new Error('Invalid Today companion action')
+    if (action.type === 'show') return updateTodayCompanion(owner, name, action)
+    if (action.type === 'pin' && typeof action.pinned === 'boolean') {
+      return updateTodayCompanion(owner, name, action)
+    }
+    if (action.type === 'target') {
+      return updateTodayCompanion(owner, name, {
+        type: 'target',
+        target: parseTodayWindowTarget(action.target)
+      })
+    }
+    throw new Error('Invalid Today companion action')
+  }
+
   /**
    * Syncs whether the Today experiment is enabled and the active workspace slug
    * so the OS-level toggle shortcut only registers while the experiment is on
@@ -238,6 +281,18 @@ export class AppIpc extends ProductWindowIpcService {
   @IpcMethod()
   async getTodayWindowAlwaysOnTop(): Promise<boolean> {
     return todayWindowSender().isAlwaysOnTop()
+  }
+
+  /** The Today window committed its bound day: a reopening window shows now. */
+  @IpcMethod()
+  async revealTodayWindow(bindingId: number): Promise<void> {
+    revealTodayWindow(todayWindowSender(), bindingId)
+  }
+
+  /** Closes for good, where the window's own close only parks it (experiment turned off). */
+  @IpcMethod()
+  async closeTodayWindow(): Promise<void> {
+    closeTodayWindow(todayWindowSender())
   }
 
   /** A conversation opened from the Today window shows in the primary window. */

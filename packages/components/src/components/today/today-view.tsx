@@ -96,6 +96,7 @@ import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
 import { TodayBreadcrumb, type TodayCrumb } from './today-breadcrumb';
 import { useTodayClock } from './use-today-clock';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 
 /**
  * What a Today surface shows: a member's stream around `date`, or with
@@ -251,10 +252,12 @@ export function TodayView(props: {
   onTogglePin?: () => void;
   /** Rendered as the desktop's standalone Today window. */
   standalone?: boolean;
+  ownerWindow?: Window;
+  onDayReady?: () => void;
   onOpenSession?: TodayOpenSession;
 }) {
   const { t, i18n } = useTranslation();
-  const scope = useResolvedWorkspaceScope();
+  const scope = useResolvedWorkspaceScope({ docMetaRequired: false });
   const activeRuntime = useAtomValue(runtimeAtom);
   const runtime =
     scope.enabled && activeRuntime && scope.workspaceId === activeRuntime.workspaceId
@@ -262,7 +265,7 @@ export function TodayView(props: {
       : null;
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
-  const today = useTodayClock();
+  const today = useTodayClock(undefined, props.ownerWindow);
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
@@ -286,6 +289,7 @@ export function TodayView(props: {
     setRegistered([]);
     setEmpty(new Set());
     if (!runtime || !userId) return undefined;
+    markTodayWindowBoot('view-runtime');
     return runtime.todayPages.observeDates(userId, setRegistered);
   }, [runtime, userId]);
 
@@ -595,6 +599,7 @@ export function TodayView(props: {
                 date={date}
                 today={today}
                 isTop={index === 0}
+                onPageReady={index === 0 ? props.onDayReady : undefined}
                 onEmptyChange={onEmptyChange}
                 zoomRoot={zoomRoot}
                 onOpenDay={focusDate ? undefined : nav.openDay}
@@ -714,7 +719,7 @@ function TodayNodeMenu(props: {
   const node = store.outline.getNode(nodeId);
   const positioned = useMemo(
     () =>
-      anchor instanceof HTMLElement
+      'getBoundingClientRect' in anchor
         ? anchor
         : {
             getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0),

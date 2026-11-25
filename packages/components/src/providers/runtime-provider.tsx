@@ -34,7 +34,7 @@ import {
 } from '../components/workspace-key-reception-notice';
 import { WorkspaceHostIdentityNotice } from '../components/workspace-host-identity-notice';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { atom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import {
   authTokenAtom,
@@ -76,7 +76,9 @@ import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-poli
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
 import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
+import { getAppWindowLocation } from '@/lib/app-location';
 import { isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -160,6 +162,8 @@ const resolveRuntimeEagerSyncSurface = (): EagerSyncSurface => {
   return 'web';
 };
 
+const deferredDocMetaSubscriptionAtom = atom(undefined);
+
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   const { t } = useTranslation();
@@ -191,7 +195,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const setControlConnectionState = useSetAtom(lodyControlConnectionStateAtom);
   const setRuntimeInitializing = useSetAtom(runtimeInitializingAtom);
   const setBrowserOnline = useSetAtom(browserOnlineAtom);
-  useAtomValue(docMetaSubscriptionAtom);
+  const isLocalPlatform = platform.sync.mode === 'local';
+  const todayPath = isLocalPlatform && isTodayWindow() ? getAppWindowLocation().pathname : null;
+  const deferDocMeta = todayPath === '/' || todayPath?.endsWith('/today-window');
+  useAtomValue(deferDocMeta ? deferredDocMetaSubscriptionAtom : docMetaSubscriptionAtom);
   useAtomValue(localProbeEffectAtom);
   const clearDocMetaCache = useSetAtom(clearDocMetaCacheAtom);
   const clearPresenceStates = useSetAtom(clearLodyPresenceStatesAtom);
@@ -227,7 +234,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   // Local (open-source) platform: the effective workspace id is the CLI's
   // implicit workspace — no cached/server id arbitration, no auth involved.
-  const isLocalPlatform = platform.sync.mode === 'local';
   const offlineEncryptedCandidate =
     !isLocalPlatform &&
     Boolean(platform.e2eeWorkspaces) &&
@@ -1246,7 +1252,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // loro-repo/streams-crdt/flock stay out of the boot chunk: this provider
         // module is statically reachable from the root route, so the workspace
         // runtime stack loads only once a workspace runtime is actually needed.
+        markTodayWindowBoot('runtime-start');
         const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
+        markTodayWindowBoot('runtime-module');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
           ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor
@@ -1314,6 +1322,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // The owner's cleanup or the retirement chain disposes it once.
           return;
         }
+        markTodayWindowBoot('runtime-ready');
         setRuntime(workspaceRuntime);
         // Local runtime (IndexedDB-backed Loro repo) is ready — unblock UI
         // rendering immediately. WebSocket sync state is tracked separately

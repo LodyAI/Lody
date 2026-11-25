@@ -144,12 +144,12 @@ export function TodayConvertDialog({
       // An Esc that ends an IME composition belongs to the input method.
       const event = details?.event;
       if (
-        event instanceof KeyboardEvent &&
+        event && 'key' in event &&
         isImeComposingNativeKeyboardEvent({
-          key: event.key,
-          isComposing: event.isComposing,
-          keyCode: event.keyCode,
-          which: event.which,
+          key: (event as KeyboardEvent).key,
+          isComposing: (event as KeyboardEvent).isComposing,
+          keyCode: (event as KeyboardEvent).keyCode,
+          which: (event as KeyboardEvent).which,
         })
       ) {
         return;

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 import { getIpcServices, onIpcEvent } from '@/lib/electron-ipc-client';
 
 export const isElectronRenderer = (): boolean => {
@@ -47,11 +47,15 @@ const subscribeFullscreen = (listener: () => void): (() => void) => {
   };
 };
 
+export const ElectronFullscreenContext = createContext<boolean | null>(null);
+
 /** Reactive native-fullscreen state of the Electron window; always `false` outside Electron. */
 export const useElectronFullscreen = (): boolean => {
-  return useSyncExternalStore(
+  const companionFullscreen = useContext(ElectronFullscreenContext);
+  const sourceFullscreen = useSyncExternalStore(
     subscribeFullscreen,
     () => fullscreenSnapshot,
     () => false
   );
+  return companionFullscreen ?? sourceFullscreen;
 };

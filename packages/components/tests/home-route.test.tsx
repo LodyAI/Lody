@@ -47,6 +47,7 @@ vi.mock('@/hooks/use-mobile', () => ({
 }));
 vi.mock('@/lib/desktop-window', () => ({
   isWarmWindow: () => state.warm,
+  isTodayWindow: () => false,
   isSessionWindow: () => false,
   windowStorage: () => localStorage,
 }));

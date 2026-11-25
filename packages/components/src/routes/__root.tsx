@@ -98,6 +98,7 @@ import { isLocalAppPlatform, useAppCapability } from '@/lib/app-platform';
 import { getLocalPlatformProvider } from '../providers/local-platform-provider';
 import { LocalPlatformAuthProvider } from '../providers/local-platform-auth-provider';
 import { CloudPlatformProvider } from '../providers/cloud-platform-provider';
+import { TodayCompanionHost } from '@/components/today/today-companion-host';
 import { useOpenToday } from '@/components/today/use-open-today';
 
 const PENDING_MACHINE_PAIRING_KEY = 'lody:pending-machine-pairing-request';
@@ -270,6 +271,7 @@ function RootApp() {
                 <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
                   <RuntimeProvider>
                     <RootOutletBoundary />
+                    {isElectron && isLocalAppPlatform() && <TodayCompanionHost />}
                   </RuntimeProvider>
                 </ErrorBoundary>
                 {telemetryEnabled && !isElectron && <WebCookieConsentBanner />}

@@ -1,3 +1,4 @@
+import { allowTodayCompanion } from './today-windows'
 import { installRendererUnloadConfirmation } from './renderer-unload'
 import { isAppResourceLink } from '@lody/shared/session-link'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
@@ -497,6 +498,19 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   })
 
   window.webContents.setWindowOpenHandler((details) => {
+    const today = allowTodayCompanion(window, details, {
+      show: false,
+      backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
+      autoHideMenuBar: true,
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
+        : {}),
+      ...(process.platform === 'win32'
+        ? { titleBarStyle: 'hidden', titleBarOverlay: getMainWindowTitleBarOverlay(resolvedTheme) }
+        : {}),
+      webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true }
+    })
+    if (today) return today
     if (isAppResourceLink(details.url)) {
       window.webContents.send('app.deepLink', details.url)
       return { action: 'deny' }
@@ -687,8 +701,9 @@ export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWind
 /** Adopt a prepared view without navigating or replacing its renderer. */
 export function adoptPreparedMainWindow(window: BrowserWindow, target: ElectronWindowTarget): void {
   unmarkWarmWindow(window)
-  setReloadTarget(
-    window,
-    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
-  )
+  adoptAuxiliaryReloadPath(window, getWindowTargetPath(target))
+}
+
+export function adoptAuxiliaryReloadPath(window: BrowserWindow, path: string): void {
+  setReloadTarget(window, resolveMainRendererTarget(path, isDevbarRendererEnabled(), true))
 }
