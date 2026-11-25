@@ -684,4 +684,25 @@ describe('Today page undo', () => {
     ctx.doc.commit({ origin: 'sys:init' });
     expect(ctx.undo.canUndo()).toBe(false);
   });
+
+  it('recovers and commits text edits when Loro UndoManager is not ready after a checkout', () => {
+    const peerDoc = new LoroDoc();
+    const peerOutline = openTodayOutline(peerDoc);
+    const created = peerOutline.insertFirst('from-peer') as { nodeId: string };
+
+    const ctx = setup();
+    ctx.doc.import(peerDoc.export({ mode: 'update' }));
+    ctx.doc.checkout([]);
+    ctx.doc.checkoutToLatest();
+
+    type(ctx, created.nodeId, 9, '+local');
+    expect(ctx.outline.getNode(created.nodeId as never)?.text).toBe('from-peer+local');
+    expect(ctx.undo.canUndo()).toBe(true);
+
+    peerDoc.import(ctx.doc.export({ mode: 'update', from: peerDoc.version() }));
+    expect(peerOutline.getNode(created.nodeId as never)?.text).toBe('from-peer+local');
+
+    ctx.undo.undo();
+    expect(ctx.outline.getNode(created.nodeId as never)?.text).toBe('from-peer');
+  });
 });
