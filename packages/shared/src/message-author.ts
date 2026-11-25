@@ -48,13 +48,44 @@ export const AgentMessageAuthorSchema = z.object({
   planMode: z.boolean().optional(),
 });
 
+export const ExternalMessageAuthorSchema = z.object({
+  v: z.literal(1),
+  kind: z.literal('external'),
+  source: id,
+  label: label.optional(),
+  artifact: label.optional(),
+  eventType: label.optional(),
+});
+
 export const MessageAuthorSchema = z.discriminatedUnion('kind', [
   z.object({ v: z.literal(1), kind: z.literal('human'), userId: id }),
   AgentMessageAuthorSchema,
+  ExternalMessageAuthorSchema,
   z.object({ v: z.literal(1), kind: z.literal('system') }),
 ]);
 export type MessageAuthor = z.infer<typeof MessageAuthorSchema>;
 export type AgentMessageAuthor = z.infer<typeof AgentMessageAuthorSchema>;
+export type ExternalMessageAuthor = z.infer<typeof ExternalMessageAuthorSchema>;
+
+export function buildExternalMessageAuthor(input: {
+  source: string;
+  label?: string;
+  artifact?: string;
+  eventType?: string;
+}): ExternalMessageAuthor {
+  const source = short(input.source) ?? input.source;
+  const displayLabel = short(input.label);
+  const artifact = short(input.artifact);
+  const eventType = short(input.eventType);
+  return ExternalMessageAuthorSchema.parse({
+    v: 1,
+    kind: 'external',
+    source,
+    ...(displayLabel ? { label: displayLabel } : {}),
+    ...(artifact ? { artifact } : {}),
+    ...(eventType ? { eventType } : {}),
+  });
+}
 
 const short = (value: string | undefined): string | undefined =>
   value?.trim().slice(0, 256) || undefined;

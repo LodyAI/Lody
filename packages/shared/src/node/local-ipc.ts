@@ -24,6 +24,12 @@ import {
   type WorkspaceBundleControlRequest,
   type WorkspaceBundleControlResponse,
 } from '../workspace-bundle-control';
+import {
+  LOCAL_SESSION_INBOX_DELIVER_PATH,
+  SessionInboxDeliverResponseSchema,
+  type SessionInboxDeliverRequest,
+  type SessionInboxDeliverResponse,
+} from '../session-inbox-deliver';
 import crypto from 'node:crypto';
 import {
   AUTOMATION_CONTROL_PATH,
@@ -211,6 +217,10 @@ export type LocalControlClientService = {
     message: AutomationControlRequest,
     options?: LocalIpcRequestOptions
   ) => Effect.Effect<AutomationControlResponse, IpcError>;
+  sessionInboxDeliver: (
+    message: SessionInboxDeliverRequest,
+    options?: LocalIpcRequestOptions
+  ) => Effect.Effect<SessionInboxDeliverResponse, IpcError>;
   e2eeReset: (
     message: LocalE2eeResetRequest,
     options?: LocalIpcRequestOptions
@@ -1141,6 +1151,19 @@ function makeControlClient(
           parseJsonBody<AutomationControlResponse>(
             automationControlResponseSchema,
             (status) => `Invalid Automation response (HTTP ${status})`
+          )(response, payload)
+      ),
+    sessionInboxDeliver: (message, requestOptions) =>
+      Effect.flatMap(
+        post(
+          LOCAL_SESSION_INBOX_DELIVER_PATH,
+          message,
+          requestOptions?.timeoutMs ?? DEFAULT_LOCAL_CONTROL_TIMEOUT_MS
+        ),
+        ({ response, payload }) =>
+          parseJsonBody<SessionInboxDeliverResponse>(
+            SessionInboxDeliverResponseSchema,
+            (status) => `Invalid session inbox deliver response (HTTP ${status})`
           )(response, payload)
       ),
     projectControl: (message, requestOptions) =>

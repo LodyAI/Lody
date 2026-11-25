@@ -3805,7 +3805,9 @@ const appendQuotedMessages = async (
           ? `human user ${author.userId}`
           : author?.kind === 'agent'
             ? `agent in Session ${author.sessionId}`
-            : turn.role;
+            : author?.kind === 'external'
+              ? (author.label ?? author.source)
+              : turn.role;
       const title = source?.title ? ` "${source.title}"` : '';
       const body = Array.from(text).slice(0, MAX_QUOTE_CHARS).join('');
       blocks.push(

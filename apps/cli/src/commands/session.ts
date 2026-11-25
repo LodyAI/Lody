@@ -28,6 +28,7 @@ import {
   type MachineFlockFreshness,
 } from './session-catalog-read';
 export { MachineFlockReadUnavailableError } from './session-catalog-read';
+import { sessionInboxCommand } from './session-inbox';
 import {
   MachineOfflineError,
   readMachinePresence,
@@ -6429,6 +6430,7 @@ export const sessionCommand = new Command('session')
   .description('Manage sessions without the web UI')
   .addCommand(sessionCreateCommand)
   .addCommand(sessionChatCommand)
+  .addCommand(sessionInboxCommand)
   .addCommand(sessionCancelCommand)
   .addCommand(sessionListCommand)
   .addCommand(sessionHistoryCommand)

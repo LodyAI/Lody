@@ -7,6 +7,7 @@ import EventEmitter from 'eventemitter3';
 import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
 import { prependGhShimBinDirToPath } from '@/lib/gh-shim-script';
+import { prepareRyugiHostsConfigSync, RYUGI_HOSTS_CONFIG_ENV } from '@/lib/ryugi-host';
 import { ACPSessionId, getServerNow, MachineId, SessionId } from '@lody/shared';
 import type { CreateAgentConfig, ISession, SessionMonitorRuntimeInfo } from './session-manager';
 import {
@@ -611,6 +612,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         )
           finalEnv[key] = configEnv[key];
       }
+    }
+    try {
+      const ryugiHostsConfig = prepareRyugiHostsConfigSync(finalEnv);
+      if (ryugiHostsConfig) {
+        finalEnv[RYUGI_HOSTS_CONFIG_ENV] = ryugiHostsConfig;
+      }
+    } catch (error) {
+      this.logger.debug(
+        `[${this.sessionId}] Skipping Ryugi hosts config injection: ${formatErrorMessage(error)}`
+      );
     }
     /** Desktop launches the CLI under ELECTRON_RUN_AS_NODE; agents are normal Node processes and must not inherit it. agent-client.ts/pi-extensions.ts read process.env directly, so this stays last. */
     delete finalEnv.ELECTRON_RUN_AS_NODE;

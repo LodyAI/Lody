@@ -84,30 +84,43 @@ Ryugi page ── event ──> ryugi-hook (host lody) ──> Lody delivery com
 
 ## Open questions
 
-- Should delivery be on by default with a machine-level switch to disable it, or
-  should the user opt in?
+- Should delivery stay on by default with an explicit disable switch (currently
+  `LODY_DISABLE_RYUGI_HOST=1`), or should it also have a UI machine setting or opt-in
+  flow?
 - Comments that other people leave on a published Ryugi Cloud artifact are forwarded
-  by Ryugi. Should Lody accept them into the Session, and how should they be labelled?
-- Does the delivery command authenticate correctly from Ryugi's detached worker in
-  local and cloud modes, and may a Session's own process deliver into that Session?
-- Ryugi's delivery is at least once, so a lost receipt can duplicate input. Should
-  Lody suppress duplicates by Ryugi's event identity, and does the payload carry a
-  stable one?
-- Encrypted workspaces require queued automation input to be signed by the machine.
-  Should the first version support them or reject delivery?
-- Ryugi's worker for an ended Session exits only after its next delivery is refused.
-  Does Lody need to stop it sooner?
+  by Ryugi. Should Lody accept them into the Session, and should they be labelled
+  differently from local Ryugi feedback?
+- Ryugi's worker for an ended Session exits only after its next delivery is refused
+  with exit code 10. Does Lody need to stop it sooner?
 
 ## Evidence
 
-Intended behavior only; nothing is implemented or executed yet. Inspected sources:
+Implemented in this branch and validated with unit and local Unix-socket IPC tests;
+live end-to-end execution with an installed `ryugi-hook` binary has not yet been run
+in this checkout:
 
-- Ryugi `7a3ee3c` (1.108.2): `hook/src/hosts.rs` (custom hosts, `RYUGI_HOSTS_CONFIG`),
-  `hook/src/cmd.rs` (delivery payload, receipts, exit code 10), `hook/src/subs.rs`
-  `identity()` (custom host first), `hook/src/watch.rs` and `hook/src/codex.rs`
-  (built-in watchers stand down), `.pi/extensions/ryugi.ts` and `.dsh/index.mjs`
-  (turn-starting delivery), and `docs/install.md` (Codex endpoint requirement).
-- Lody: `apps/cli/src/session/session.ts` `buildShellEnv`, used by `createAgent` and
-  the terminal manager.
-- Pi adapter at `66cc30a`: `src/connection.ts` admits only ACP-started runs, sends
-  prompts without `streamingBehavior`, and drops events when no ACP run is active.
+- Shared contracts: `packages/shared/src/message-author.ts`
+  (`ExternalMessageAuthorSchema`), `packages/shared/src/session-doc-schemas.ts`
+  (`messageQueueItemSchema.author`), `packages/shared/src/session-inbox-deliver.ts`
+  (`/session-inbox-deliver` schemas and exit code 10), and
+  `packages/shared/src/node/local-ipc.ts` (`sessionInboxDeliver`).
+- Host file and environment injection: `apps/cli/src/lib/ryugi-host.ts`
+  (`prepareRyugiHostsConfigSync`, read-only user config merge, conflict avoidance,
+  `LODY_DISABLE_RYUGI_HOST=1` opt-out, Node/Electron/SEA command resolution),
+  wired in `apps/cli/src/session/session.ts` (`buildShellEnv`) and
+  `apps/cli/src/lib/terminal-pty-service.ts` (`buildTerminalEnv`).
+- Delivery command and daemon handler: `apps/cli/src/commands/session-inbox.ts`
+  (`lody session inbox deliver --source ryugi`, canonical event deduplication,
+  `queued`/`retry`/exit-10 receipts), `apps/cli/src/lib/session-inbox-deliver.ts`
+  (machine-owner edit-access recheck, `resolveSessionConversationConfig`, encrypted
+  workspace `signMachineInput`, queue signaling), `apps/cli/src/lib/local-session-control.ts`,
+  `apps/cli/src/lib/local-control-handler.ts`, `apps/cli/src/lib/lody-fleet.ts`, and
+  `apps/cli/src/session/session-dispatch-watcher.ts` (preserving `author` on queue
+  promotion).
+- UI attribution: `packages/components/src/components/ai-gui/message-author-identity.tsx`
+  (`ExternalMessageAuthorIdentity`), `packages/components/src/components/ai-gui/view.tsx`,
+  `packages/components/src/components/sessions/message-queue/message-queue-row.tsx`,
+  and `locales/{en,zh_CN}.json`.
+- Inspected upstream sources: Ryugi `7a3ee3c` (`hook/src/{hosts,cmd,subs,watch,codex,wake,queue}.rs`,
+  `.pi/extensions/ryugi.ts`, `.dsh/index.mjs`, `docs/install.md`) and Pi adapter
+  `66cc30a` (`src/connection.ts`).

@@ -157,6 +157,54 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).not.toContain('Model: model-b');
   });
 
+  it('labels an external Ryugi author without the human profile and exposes artifact details', async () => {
+    const ryugiMessage = {
+      ...message,
+      id: 'message-from-ryugi',
+      author: {
+        v: 1 as const,
+        kind: 'external' as const,
+        source: 'ryugi',
+        label: 'Ryugi',
+        artifact: 'document/design',
+        eventType: 'ryugi-comments',
+      },
+      items: [{ type: 'text', text: 'Ryugi feedback on document/design.' }],
+    } as unknown as SessionHistoryParsed;
+
+    await act(async () =>
+      root?.render(
+        createElement(
+          JotaiProvider,
+          null,
+          createElement(
+            ForceDesktopLayoutProvider,
+            null,
+            createElement(MessageRowView, {
+              message: ryugiMessage,
+              sessionId,
+              user,
+              showSenderIdentity: false,
+            })
+          )
+        )
+      )
+    );
+
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('From Ryugi');
+    expect(container?.querySelector('button[aria-label="View profile for Maya Chen"]')).toBeNull();
+    const trigger = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="View external source: Ryugi"]'
+    );
+    expect(trigger).toBeTruthy();
+    await click(trigger!);
+    expect(document.body.textContent).toContain('From Ryugi');
+    expect(document.body.textContent).toContain('Artifact: document/design');
+    expect(document.body.textContent).not.toContain('maya.chen@example.com');
+  });
+
   it('shows human-readable model names for new snapshots and safely formats legacy, custom, and gateway model IDs', async () => {
     const onNavigateSession = vi.fn();
     const providerModelId = '550e8400-e29b-41d4-a716-446655440000/codex%2Fgpt-6.2-sol';

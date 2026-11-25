@@ -1,5 +1,6 @@
 import {
   buildAgentMessageAuthor,
+  buildExternalMessageAuthor,
   enrichAgentMessageAuthorModel,
   formatAgentAuthorModelDisplayName,
 } from '../src/message-author';
@@ -735,6 +736,28 @@ describe('single history writer', () => {
       author: { v: 1, kind: 'human', userId: 'editor' },
     }));
     expect(mirror.getState().history[0]?.author).toEqual({ v: 1, kind: 'human', userId: 'editor' });
+
+    const externalAuthor = buildExternalMessageAuthor({
+      source: 'ryugi',
+      label: 'Ryugi',
+      artifact: 'document/spec',
+      eventType: 'ryugi-comments',
+    });
+    mirror.historyWriter.updateEntry('turn', (turn) => ({
+      ...turn,
+      author: externalAuthor,
+    }));
+    expect(mirror.getState().history[0]?.author).toEqual(externalAuthor);
+    const restoredExternalDoc = new Loro();
+    restoredExternalDoc.import(doc.export({ mode: 'snapshot' }));
+    expect(open(restoredExternalDoc).getState().history[0]?.author).toEqual(externalAuthor);
+    expect(() =>
+      mirror.historyWriter.updateEntry('turn', (turn) => ({
+        ...turn,
+        author: { ...externalAuthor, source: '   ' },
+      }))
+    ).toThrow();
+    expect(mirror.getState().history[0]?.author).toEqual(externalAuthor);
   });
 
   it('prefers human-readable model names, upgrades configured assistant authors on reopen, and formats legacy/gateway IDs safely', () => {
