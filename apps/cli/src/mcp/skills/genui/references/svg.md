@@ -94,7 +94,9 @@ Hand-placed SVG looks clean only with restraint. Follow this scale:
 ## Elements
 
 - `svg` — root. `viewBox` (e.g. `"0 0 340 220"`), `width`, `height`,
-  `preserveAspectRatio`, `role`, `aria-label`.
+  `preserveAspectRatio`, `role`, `aria-label`. The root already sets
+  `fill="currentColor"` and the system font — `svg:text` inherits it and stays
+  readable in light and dark themes without a per-element `fill`.
 - `g` — group. Shares paint attributes plus `transform`.
 - `rect` — `x`, `y`, `width`, `height`, `rx`, `ry`.
 - `circle` — `cx`, `cy`, `r`. `ellipse` — `cx`, `cy`, `rx`, `ry`.
