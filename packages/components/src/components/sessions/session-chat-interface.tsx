@@ -95,6 +95,7 @@ import {
   Plus,
   Search,
   Share2,
+  Sparkles,
   SquareArrowOutUpRight,
   Timer,
   Trash2,
@@ -1873,7 +1874,7 @@ export function SessionHeaderMenu({
 
           {continuationTweaks && (
             <Menu.Submenu>
-              <Menu.SubmenuTrigger>
+              <Menu.SubmenuTrigger icon={Sparkles}>
                 {t('sessions.continuation.tweaks.title', '自动化设置')}
               </Menu.SubmenuTrigger>
               <Menu.Content xstyle={themeStyles.glyph}>{continuationTweaks}</Menu.Content>

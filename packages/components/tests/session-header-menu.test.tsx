@@ -251,6 +251,25 @@ describe('SessionHeaderMenu', () => {
     expect(onOpenFolder).toHaveBeenCalledTimes(1);
   });
 
+  it('shows the Sparkles icon on the automation submenu', async () => {
+    await act(async () =>
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={() => {}}
+          continuationTweaks={<div>Session automation options</div>}
+          t={translate}
+        />
+      )
+    );
+    await openMenu();
+    const trigger = menuItem('自动化设置');
+    expect(trigger.querySelector('svg.lucide-sparkles')).toBeInstanceOf(SVGElement);
+    await act(async () => trigger.click());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(document.body.textContent).toContain('Session automation options');
+  });
+
   it('disables owner candidates without machine access and keeps an accessible candidate selectable', async () => {
     let assigned = 'a';
     await act(async () =>
