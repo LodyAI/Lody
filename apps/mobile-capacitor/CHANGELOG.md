@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.116.1](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.116.0...lody-mobile-v0.116.1) (2026-11-25)
+
+
+### Chores
+
+* **lody-mobile:** Synchronize lody-clients versions
+
 ## [0.116.0](https://github.com/LodyAI/Lody/compare/lody-mobile-v0.115.1...lody-mobile-v0.116.0) (2026-11-24)
 
 
