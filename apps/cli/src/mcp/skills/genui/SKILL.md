@@ -15,14 +15,15 @@ reduces the reader's scan cost:
 - Interactive controls — only when the reader can act on the UI itself. For
   static data a markdown table is usually clearer.
 - `Mock` — **the default for any wireframe, UI mock-up, layout or architecture
-  schematic.** Nest `Mock:Col`/`Mock:Row` (split space), `Mock:Cell` (blank
-  block), `Mock:Box` (centred `label`/`sub`/`hint`) and the renderer computes
+  schematic.** Nest `Mock:Col`/`Mock:Row` (split space), `Mock:Cell` (a labelled
+  or blank block), `Mock:Box` (a block centred on `label`/`sub`/`hint`) and the renderer computes
   every coordinate — you never write x/y/w/h and it always comes out aligned.
   Do not hand-place `svg` rects for a layout; `svg` is only for shapes `Mock`
   cannot express (icons, annotations). Node→edge graphs → ```` ```mermaid ````.
   Containers hold the leaves directly — a `Mock:Box` or `Mock:Cell` is already
   a region; wrap it in another `Mock:Col`/`Mock:Row` only to nest a further
-  split.
+  split. `tone` is a 5-step grey ramp deep→faint; `Cell` takes one `label`,
+  `Box` up to three (`label`/`sub`/`hint`, dropped when the block is too short).
 
   ```genui
   <Mock w={160} h={132}>

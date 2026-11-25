@@ -79,4 +79,52 @@ describe('Mock', () => {
     expect(el.props.h).toBe(132);
     expect(el.props.children).toBe('x');
   });
+
+  it('lays out a nested Col/Row tree into svg rects and clipped labels', () => {
+    const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
+    const { createElement } = require('react') as typeof import('react');
+    const tree = createElement(
+      GENUI_CATALOG.Mock as never,
+      { w: 100, h: 60 } as never,
+      createElement(
+        GENUI_CATALOG['Mock:Col'] as never,
+        null,
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { h: 16, tone: 'deep' } as never),
+        createElement(
+          GENUI_CATALOG['Mock:Row'] as never,
+          null,
+          createElement(GENUI_CATALOG['Mock:Cell'] as never, { w: 30, tone: 'band' } as never),
+          createElement(
+            GENUI_CATALOG['Mock:Box'] as never,
+            { tone: 'faint', label: 'Main', sub: 'view' } as never
+          )
+        )
+      )
+    );
+    const svg = renderToStaticMarkup(tree);
+    expect((svg.match(/<rect/g) ?? []).length).toBeGreaterThanOrEqual(4);
+    expect(svg).toContain('>Main<');
+    expect(svg).toContain('clip-path');
+  });
+
+  it('splits the free space by flex and honours fixed main-axis sizes', () => {
+    const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
+    const { createElement } = require('react') as typeof import('react');
+    const tree = createElement(
+      GENUI_CATALOG.Mock as never,
+      { w: 90, h: 40, pad: 0, gap: 0 } as never,
+      createElement(
+        GENUI_CATALOG['Mock:Row'] as never,
+        { gap: 0 } as never,
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { w: 30 } as never),
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { flex: 1 } as never),
+        createElement(GENUI_CATALOG['Mock:Cell'] as never, { flex: 2 } as never)
+      )
+    );
+    const svg = renderToStaticMarkup(tree);
+    const widths = [
+      ...svg.matchAll(/<rect x="[\d.]+" y="[\d.]+" width="([\d.]+)"[^>]*fill-opacity/g),
+    ].map((m) => parseFloat(m[1]));
+    expect(widths).toEqual([30, 19.5, 38.5]);
+  });
 });

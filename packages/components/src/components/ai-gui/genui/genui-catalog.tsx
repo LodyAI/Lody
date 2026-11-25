@@ -76,14 +76,20 @@ export function resolveIcon(name: string) {
 }
 
 /* `Mock`: nested JSX layout → this flex pass computes coordinates → greyscale svg. */
-const G = '#888';
-const G2 = '#64748b';
+const G = '#64748b';
 const FILL: Record<string, { fill: string; op: number; dash?: boolean; stroke?: string }> = {
-  deep: { fill: G, op: 0.35 },
-  mid: { fill: G, op: 0.18 },
-  band: { fill: G, op: 0.12 },
-  soft: { fill: G2, op: 0.25 },
-  faint: { fill: G2, op: 0.1, dash: true, stroke: G2 },
+  deep: { fill: G, op: 0.5 },
+  mid: { fill: G, op: 0.3 },
+  band: { fill: G, op: 0.16 },
+  soft: { fill: G, op: 0.09 },
+  faint: { fill: G, op: 0.05, dash: true, stroke: G },
+};
+
+type MockDir = 'col' | 'row' | 'cell' | 'box';
+const mockTag = (dir: MockDir) => {
+  const c = (props: GenuiProps) => createElement(`m:${dir}` as 'div', props);
+  (c as { genuiMock?: MockDir }).genuiMock = dir;
+  return c;
 };
 
 function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps) {
@@ -91,20 +97,23 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
   const W = num(w, 160);
   const H = num(h, 132);
   const P = num(pad, 4);
-  type Node = { dir: 'col' | 'row' | 'cell' | 'box'; props: Record<string, unknown>; kids: Node[] };
+  type Node = { dir: MockDir; props: Record<string, unknown>; kids: Node[] };
   const read = (el: unknown): Node | undefined => {
     if (!el || typeof el !== 'object' || Array.isArray(el)) return undefined;
     const e = el as { type?: unknown; props?: Record<string, unknown> };
+    const t = e.type;
     const dir =
-      e.type === 'm:col'
-        ? 'col'
-        : e.type === 'm:row'
-          ? 'row'
-          : e.type === 'm:cell'
-            ? 'cell'
-            : e.type === 'm:box'
-              ? 'box'
-              : undefined;
+      typeof t === 'function'
+        ? (t as { genuiMock?: MockDir }).genuiMock
+        : t === 'm:col'
+          ? 'col'
+          : t === 'm:row'
+            ? 'row'
+            : t === 'm:cell'
+              ? 'cell'
+              : t === 'm:box'
+                ? 'box'
+                : undefined;
     if (!dir) return undefined;
     const kids = (Array.isArray(e.props?.children) ? e.props.children : [e.props?.children])
       .map(read)
@@ -115,6 +124,7 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
     .map(read)
     .filter((n): n is Node => n !== undefined);
 
+  const q = (n: number) => Math.round(n * 2) / 2;
   const rects: { x: number; y: number; w: number; h: number; tone: string; rx: number }[] = [];
   const texts: { x: number; y: number; s: number; w: number; t: string; clip: number }[] = [];
 
@@ -151,8 +161,26 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       }
       return;
     }
-    // leaf: cell or labelled box — paint a rect, box also centres up to 3 lines.
-    rects.push({ x, y, w, h, tone: str(p.tone, 'mid'), rx: Math.min(4, w / 2, h / 2) });
+    rects.push({
+      x: q(x),
+      y: q(y),
+      w: q(w),
+      h: q(h),
+      tone: str(p.tone, 'mid'),
+      rx: Math.min(4, w / 2, h / 2),
+    });
+    const cellLabel = node.dir === 'cell' ? str(p.label) : '';
+    if (node.dir === 'cell' && cellLabel) {
+      const fs = h >= 26 ? 10 : 8;
+      texts.push({
+        x: x + w / 2,
+        y: y + h / 2 + fs * 0.35,
+        s: fs,
+        w: 500,
+        t: cellLabel,
+        clip: rects.length - 1,
+      });
+    }
     if (node.dir === 'box') {
       const clip = rects.length - 1;
       const cx = x + w / 2;
@@ -160,15 +188,26 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       const label = str(p.label),
         sub = str(p.sub),
         hint = str(p.hint);
+      const fs = h >= 64 ? 12 : h >= 34 ? 10 : 8; // shrink label to box height
       const lines = [
-        label && { t: label, s: 12, b: 600 },
-        sub && { t: sub, s: 9 },
-        hint && { t: hint, s: 8 },
+        label && { t: label, s: fs, b: 600 },
+        sub && h >= 40 && { t: sub, s: 9 },
+        hint && h >= 56 && { t: hint, s: 8 },
       ].filter(Boolean) as { t: string; s: number; b?: number }[];
-      const blockH = lines.length * 12;
-      lines.forEach((l, i) =>
-        texts.push({ x: cx, y: cy - blockH / 2 + 9 + i * 14, s: l.s, w: l.b ?? 400, t: l.t, clip })
-      );
+      const slots = lines.map((l) => l.s * 1.4);
+      const blockH = slots.reduce((a, b) => a + b, 0);
+      let ty = cy - blockH / 2;
+      lines.forEach((l, i) => {
+        texts.push({
+          x: cx,
+          y: Math.round((ty + slots[i] / 2 + l.s * 0.35) * 10) / 10,
+          s: l.s,
+          w: l.b ?? 400,
+          t: l.t,
+          clip,
+        });
+        ty += slots[i];
+      });
     }
   };
   for (const r of roots) layout(r, P, P, W - P * 2, H - P * 2);
@@ -183,7 +222,16 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       role="img"
       aria-label={str(ariaLabel, 'wireframe')}
     >
-      <rect x={P} y={P} width={W - P * 2} height={H - P * 2} rx={5} stroke={G} fill="none" />
+      <rect
+        x={P}
+        y={P}
+        width={W - P * 2}
+        height={H - P * 2}
+        rx={5}
+        stroke={G}
+        strokeOpacity={0.5}
+        fill="none"
+      />
       <defs>
         {rects.map((r, i) => (
           <clipPath key={i} id={`${uid}c${i}`}>
@@ -461,10 +509,10 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   Select: (props) => <GenuiSelect {...props} />,
   Slider: (props) => <GenuiSlider {...props} />,
   Mock: (props) => <GenuiMock {...props} />,
-  'Mock:Col': (props) => createElement('m:col' as 'div', props),
-  'Mock:Row': (props) => createElement('m:row' as 'div', props),
-  'Mock:Cell': (props) => createElement('m:cell' as 'div', props),
-  'Mock:Box': (props) => createElement('m:box' as 'div', props),
+  'Mock:Col': mockTag('col'),
+  'Mock:Row': mockTag('row'),
+  'Mock:Cell': mockTag('cell'),
+  'Mock:Box': mockTag('box'),
   svg: ({ children, ...rest }) => (
     <svg
       {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
