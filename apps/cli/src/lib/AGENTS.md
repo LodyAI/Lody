@@ -11,6 +11,8 @@ Credential JSON publication creates an exclusive 0600 temporary file and atomica
 replaces its destination on POSIX. New state roots use 0700; existing custom
 directories keep their permissions. Windows retains direct file writes.
 
+Before changing `machine-identity.ts`, `credentials-file.ts`, or `machine-identity-restore.ts`, read the [machine identity rules](../../../../.agents/docs/cli-lib-machine-identity.md): resolution precedence, default-dir anchor isolation, probe failure containment, telemetry read-only ordering, and offline/online restore boundaries.
+
 ## Composition and transports
 
 - Encrypted local RPC allows iOS simulators; `session/dispatch-turn` stays blocked.

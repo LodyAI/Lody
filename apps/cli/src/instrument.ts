@@ -7,7 +7,7 @@ import { resolvePlatformKind } from '@lody/shared/platform-kind';
 import { name as packageName } from '../package.json';
 import { version as packageVersion } from '@/pkg';
 import { getRuntimeEnv } from './utils/runtime-env';
-import { getSystemMachineId } from './utils/const';
+import { readExistingMachineId } from './lib/machine-identity';
 import { captureCli, flushCliAnalytics } from './lib/analytics/posthog';
 
 /** CLI and embedded cloud-daemon failures use a fixed error vocabulary. The
@@ -32,11 +32,10 @@ function resolveHost(): string {
 }
 
 function resolveDistinctId(): string {
-  // Use the machine id (non-PII surrogate, never the user's email) as the
-  // distinct id, matching the analytics poster. Error tracking deliberately
-  // does not attach the user id.
+  // Use the existing machine id (non-PII surrogate, never the user's email) without
+  // creating identity files or probing OS hardware before commands run.
   try {
-    const machineId = getSystemMachineId();
+    const machineId = readExistingMachineId();
     if (machineId) return machineId;
   } catch {
     // fall through to a stable placeholder
@@ -47,8 +46,8 @@ function resolveDistinctId(): string {
 const runtimeEnv = getRuntimeEnv();
 const apiKey = resolveApiKey();
 const release = `${packageName}@${packageVersion}`;
-const distinctId = resolveDistinctId();
 const errorReportingEnabled = runtimeEnv !== 'dev' && !!apiKey;
+const distinctId = errorReportingEnabled && apiKey ? resolveDistinctId() : 'cli-unknown-machine';
 
 let client: PostHog | null = null;
 if (errorReportingEnabled && apiKey) {

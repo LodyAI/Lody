@@ -3,7 +3,9 @@ import { createServer, type Server } from 'node:http';
 import { gunzipSync } from 'node:zlib';
 import { once } from 'node:events';
 
-vi.mock('../src/utils/const', () => ({ getSystemMachineId: () => 'synthetic-machine' }));
+vi.mock('../src/lib/machine-identity', () => ({
+  readExistingMachineId: () => 'synthetic-machine',
+}));
 const analytics = vi.hoisted(() => ({
   captureCli: vi.fn(),
   flushCliAnalytics: vi.fn(async () => {}),
