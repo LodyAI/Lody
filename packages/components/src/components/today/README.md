@@ -38,3 +38,5 @@ The local desktop can retain one previously opened Today renderer while another 
 remains. The hidden window goes to the root route and releases its workspace runtime. Reopening
 binds a new day and shows the window once its local outline or retry UI commits. If the binding
 times out, main replaces the renderer with a cold open. Cloud windows use the normal close path.
+
+The standalone window currently starts its own runtime. A [shared-renderer proposal](../../../../../.agents/notes/proposed/architecture/2026-11-25-today-shared-renderer.md) records the companion experiment and what runtime ownership would require.
