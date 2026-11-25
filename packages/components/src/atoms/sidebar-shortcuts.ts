@@ -1,8 +1,8 @@
 import { atom } from 'jotai';
-import { getHotkeyPlatform } from '@/lib/commands/platform';
+import { isMac } from '@/lib/commands/platform';
 import { sidebarNavItemsAtom, type SidebarNavItem } from './focus-layer';
 
-export type SidebarShortcutPlatform = ReturnType<typeof getHotkeyPlatform>;
+export type SidebarShortcutPlatform = 'mac' | 'windows';
 
 export type SidebarSessionShortcut = {
   readonly index: number;
@@ -21,14 +21,14 @@ export const sidebarShortcutOverlayActiveAtom = atom<boolean>(false);
 
 /**
  * Optional platform override used by Storybook previews to toggle between
- * platform-specific pills without mutating OS globals.
+ * macOS (`⌘ 1`) and Windows (`Ctrl 1`) pills without mutating OS globals.
  */
 export const sidebarShortcutPlatformOverrideAtom = atom<SidebarShortcutPlatform | null>(null);
 
 export const resolvedSidebarShortcutPlatformAtom = atom<SidebarShortcutPlatform>((get) => {
   const override = get(sidebarShortcutPlatformOverrideAtom);
   if (override) return override;
-  return getHotkeyPlatform();
+  return isMac() ? 'mac' : 'windows';
 });
 
 /**
@@ -76,8 +76,5 @@ export const SIDEBAR_SHORTCUT_SLOTS: Record<
   ),
   windows: Array.from({ length: MAX_SIDEBAR_SHORTCUT_SLOTS }, (_, idx) =>
     Object.freeze({ index: idx + 1, platform: 'windows' as const })
-  ),
-  linux: Array.from({ length: MAX_SIDEBAR_SHORTCUT_SLOTS }, (_, idx) =>
-    Object.freeze({ index: idx + 1, platform: 'linux' as const })
   ),
 };

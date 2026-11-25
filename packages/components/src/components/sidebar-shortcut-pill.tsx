@@ -96,7 +96,6 @@ export function SidebarShortcutPill({
   selected = false,
   animate = true,
 }: SidebarShortcutPillProps) {
-  const [modifier, key] = formatKeyParts(`Mod+${index}`, platform);
   return (
     <kbd
       aria-hidden="true"
@@ -109,12 +108,12 @@ export function SidebarShortcutPill({
         animate && styles.animated
       )}
     >
-      {modifier === '⌘' ? (
+      {platform === 'mac' ? (
         <Command {...stylex.props(styles.icon)} strokeWidth={2} aria-hidden="true" />
       ) : (
-        <span>{modifier}</span>
+        <span>Ctrl</span>
       )}
-      <span>{key}</span>
+      <span>{index}</span>
     </kbd>
   );
 }

@@ -54,15 +54,8 @@ import {
   type SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
 import { useSidebarShortcutHold } from '@/hooks/use-sidebar-shortcut-hold';
-import { formatKeyParts } from '@/lib/commands/format';
-import { getHotkeyPlatform } from '@/lib/commands/platform';
+import { isMac } from '@/lib/commands/platform';
 import { isSidebarBucketCollapsed } from '@/lib/sidebar-status-group';
-
-const shortcutPlatforms = [
-  { id: 'mac', label: 'macOS' },
-  { id: 'windows', label: 'Windows' },
-  { id: 'linux', label: 'Linux' },
-] as const;
 
 const storyStyles = stylex.create({
   sidebarPreview: { display: 'flex', width: '280px', flexDirection: 'column', gap: themeSpace[2] },
@@ -390,8 +383,8 @@ function GallerySidebarColumn({
 }
 
 /**
- * Style review sheet for 1–9 pills on macOS, Windows and Linux, and for how
- * the pills replace the row status while the primary modifier is held.
+ * Style review sheet: inspects the pill anatomy across 1–9 on both macOS and
+ * Windows, plus side-by-side row comparison (resting vs holding Command vs holding Control).
  */
 export const PillGallery: Story = {
   render: () => (
@@ -400,9 +393,11 @@ export const PillGallery: Story = {
         <div {...stylex.props(storyStyles.section)}>
           <h2 {...stylex.props(storyStyles.heading)}>Pill Scale (1–9)</h2>
           <div {...stylex.props(storyStyles.pillGrid)}>
-            {shortcutPlatforms.map(({ id: platform, label }) => (
+            {(['mac', 'windows'] as const).map((platform) => (
               <div key={platform} {...stylex.props(storyStyles.pillCard)}>
-                <div {...stylex.props(storyStyles.sidebarCaption)}>{label}</div>
+                <div {...stylex.props(storyStyles.sidebarCaption)}>
+                  {platform === 'mac' ? 'macOS · Command icon' : 'Windows / Linux · Ctrl label'}
+                </div>
                 <div {...stylex.props(storyStyles.inlineControls)}>
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => (
                     <SidebarShortcutPill
@@ -727,7 +722,9 @@ function toRepoRow(s: PlaygroundSession): SessionListRow {
 function PlaygroundContent() {
   const store = useMemo(() => createStore(), []);
   const [organizeMode, setOrganizeMode] = useState<LoroSidebarOrganizeMode>('workspace');
-  const [platform, setPlatform] = useState(getHotkeyPlatform);
+  const [platform, setPlatform] = useState<SidebarShortcutPlatform>(() =>
+    isMac() ? 'mac' : 'windows'
+  );
   const [lockOverlay, setLockOverlay] = useState(false);
   const [selectedId, setSelectedId] = useState<string>('local-lody-1');
   const [lastTriggerNote, setLastTriggerNote] = useState<string | null>(null);
@@ -1025,7 +1022,7 @@ function PlaygroundInner({
       if (!targetId) return;
       onSelectSession(targetId);
       const targetTitle = sessionById.get(targetId)?.title ?? targetId;
-      const label = formatKeyParts(`Mod+${slot}`, platform).join(' ');
+      const label = platform === 'mac' ? `⌘${slot}` : `Ctrl+${slot}`;
       onLastTriggerNote(`${label} (${source}) → ${targetTitle}`);
     },
     [onLastTriggerNote, onSelectSession, platform, sessionById, slotSessionIds]
@@ -1213,7 +1210,12 @@ function PlaygroundInner({
             </div>
 
             <div {...stylex.props(storyStyles.segmentedControls)}>
-              {shortcutPlatforms.map((item) => (
+              {(
+                [
+                  { id: 'mac', label: 'macOS (⌘)' },
+                  { id: 'windows', label: 'Windows (Ctrl)' },
+                ] as const
+              ).map((item) => (
                 <Button
                   key={item.id}
                   type="button"
@@ -1258,8 +1260,7 @@ function PlaygroundInner({
             Collapse/expand any section (Pinned, Maintenance, Mac Studio, projects, GitHub repos,
             Focus, Later, Settled, Chats) or click <em>Show more</em> to see slots 1–9 adapt live.
             Note: web browsers reserve <code>⌘1–⌘9</code> for browser tabs, so use{' '}
-            <code>Ctrl+1–9</code> in Windows or Linux mode or click any slot below to test
-            switching.
+            <code>Ctrl+1–9</code> in Windows mode or click any slot below to test switching.
           </p>
         </div>
 
@@ -1305,7 +1306,7 @@ function PlaygroundInner({
 
 /**
  * Interactive sidebar playground: switch between Project / Updated / Status views,
- * preview macOS, Windows or Linux pills, hold Command/Ctrl for 150ms, and fold/unfold
+ * toggle macOS vs Windows pills, hold Command/Control for 150ms, and fold/unfold
  * sections to feel how 1–9 adapts to visible rows.
  */
 export const InteractiveSidebar: Story = {
