@@ -265,6 +265,7 @@ patchedDependencies:
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
+  electron-sparkle-updater@0.5.1: patches/electron-sparkle-updater@0.5.1.patch
   glob@13.0.1: patches/glob@13.0.1.patch
   mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch
   pdfjs-dist@6.3.289: patches/pdfjs-dist@6.3.289.patch

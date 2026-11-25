@@ -67,3 +67,42 @@ export function resolveSparkleAddonPath(input: {
   }
   return candidates.find((candidate) => input.exists(candidate)) ?? null
 }
+
+function readXmlTagValue(itemXml: string, tagName: string): string | undefined {
+  const match = new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'u').exec(itemXml)
+  return readNonEmptyString(match?.[1])
+}
+
+function readEnclosureAttribute(itemXml: string, attributeName: string): string | undefined {
+  const enclosureMatch = /<enclosure\b([^>]*)\/?>/u.exec(itemXml)
+  if (!enclosureMatch?.[1]) return undefined
+  const attrMatch = new RegExp(`\\b${attributeName}="([^"]+)"`, 'u').exec(enclosureMatch[1])
+  return readNonEmptyString(attrMatch?.[1])
+}
+
+export function findLatestSparkleFeedVersion(
+  xml: string,
+  options: { arch?: string } = {}
+): string | undefined {
+  const stripped = xml
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/gu, '')
+    .replace(/<sparkle:deltas\b[^>]*>[\s\S]*?<\/sparkle:deltas>/gu, '')
+  const itemPattern = /<item\b[^>]*>([\s\S]*?)<\/item>/gu
+  for (const match of stripped.matchAll(itemPattern)) {
+    const itemXml = match[1]
+    const hardware = readXmlTagValue(itemXml, 'sparkle:hardwareRequirements')
+    if (hardware && options.arch) {
+      const supportedArches = hardware.split(/[\s,]+/u).filter(Boolean)
+      if (supportedArches.length > 0 && !supportedArches.includes(options.arch)) {
+        continue
+      }
+    }
+    const version =
+      readXmlTagValue(itemXml, 'sparkle:shortVersionString') ??
+      readEnclosureAttribute(itemXml, 'sparkle:shortVersionString') ??
+      readXmlTagValue(itemXml, 'sparkle:version') ??
+      readEnclosureAttribute(itemXml, 'sparkle:version')
+    if (version) return version
+  }
+  return undefined
+}

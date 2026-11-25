@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 import { sparkleEventToStatePatch } from './app-updater-sparkle-events.ts'
+import { findLatestSparkleFeedVersion } from './app-updater-sparkle-policy.ts'
 
 const require = createRequire(import.meta.url)
 
@@ -62,6 +63,8 @@ async function loadUpdater({
   linuxInstall,
   intervals,
   sparkleBridge,
+  netFetch,
+  arch = 'arm64',
   windowState = { setAppQuitting() {} }
 }) {
   const autoUpdater = {
@@ -76,7 +79,13 @@ async function loadUpdater({
   const { AppUpdaterService } = await load(
     './app-updater-service.ts',
     {
-      electron: { app, BrowserWindow: { getAllWindows: () => [] } },
+      electron: {
+        app,
+        BrowserWindow: { getAllWindows: () => [] },
+        net: {
+          fetch: netFetch ?? (() => Promise.reject(new Error('unexpected net.fetch')))
+        }
+      },
       'electron-updater': { autoUpdater },
       'electron-sparkle-updater': { loadSparkleBridge: () => sparkleBridge ?? null },
       '@lody/shared/node/process': { startProcessLegacy: () => ({ child: {} }) },
@@ -88,6 +97,7 @@ async function loadUpdater({
       './app-updater-metadata': { readUpdaterReleaseMetadata: () => ({}) },
       './app-updater-sparkle-events': { sparkleEventToStatePatch },
       './app-updater-sparkle-policy': {
+        findLatestSparkleFeedVersion,
         shouldUseSparkleUpdater: () => sparkleBridge !== undefined,
         sparklePackageJsonPathFromModuleEntry: () => undefined,
         resolveSparkleAddonPath: () => '/synthetic/sparkle.node',
@@ -95,7 +105,8 @@ async function loadUpdater({
       }
     },
     {
-      process: { platform: 'linux', env: {}, resourcesPath: '/synthetic' },
+      AbortSignal,
+      process: { platform: 'linux', arch, env: {}, resourcesPath: '/synthetic' },
       setInterval: (callback) => {
         const handle = { callback }
         intervals.add(handle)
@@ -217,4 +228,107 @@ void test('a Sparkle error during a quit already owned by the barrier keeps wind
   emit({ type: 'error', message: 'synthetic background check failure' })
 
   assert.equal(quitting, true)
+})
+
+void test('manual Sparkle re-check supersedes a downloaded update without clobbering active downloads', async () => {
+  let emit = () => {}
+  let checks = 0
+  const { service } = await loadUpdater({
+    app: syntheticApp(),
+    intervals: new Set(),
+    sparkleBridge: {
+      init: () => true,
+      setEventHandler: (handler) => {
+        emit = handler
+      },
+      setAutomaticChecks() {},
+      checkForUpdates() {
+        checks++
+      },
+      installUpdateNow() {}
+    }
+  })
+  service.start()
+
+  emit({ type: 'update-available', version: '1.1.0' })
+  emit({ type: 'download-progress', percent: 42 })
+  const inProgress = await service.checkForUpdates()
+  assert.equal(inProgress.started, false)
+  assert.equal(inProgress.error, 'check_in_progress')
+  assert.equal(service.getState().phase, 'downloading')
+  assert.equal(service.getState().percent, 42)
+  assert.equal(checks, 0)
+
+  emit({ type: 'update-downloaded', version: '1.1.0' })
+  assert.equal(service.getState().downloadedVersion, '1.1.0')
+
+  const recheck = await service.checkForUpdates()
+  assert.equal(recheck.started, true)
+  assert.equal(checks, 1)
+  assert.equal(service.getState().phase, 'checking')
+  assert.equal(service.getState().downloadedVersion, undefined)
+
+  emit({ type: 'update-downloaded', version: '1.2.0' })
+  assert.equal(service.getState().phase, 'downloaded')
+  assert.equal(service.getState().downloadedVersion, '1.2.0')
+})
+
+void test('periodic Sparkle feed poll supersedes a parked update only when a newer release is published', async () => {
+  let emit = () => {}
+  let checks = 0
+  let feedXml =
+    '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:shortVersionString>1.1.0</sparkle:shortVersionString><sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements></item></channel></rss>'
+  let failFetch = false
+  const intervals = new Set()
+  const settle = () => new Promise((resolve) => setImmediate(resolve))
+
+  const { service } = await loadUpdater({
+    app: syntheticApp(),
+    intervals,
+    netFetch: async () => {
+      if (failFetch) throw new Error('offline')
+      return { ok: true, text: async () => feedXml }
+    },
+    sparkleBridge: {
+      init: () => true,
+      setEventHandler: (handler) => {
+        emit = handler
+      },
+      setAutomaticChecks() {},
+      getFeedUrl: () => 'https://updates.example.com/production/arm64/appcast.xml',
+      checkForUpdates() {
+        checks++
+      },
+      installUpdateNow() {}
+    }
+  })
+  service.start()
+  assert.equal(intervals.size, 1)
+
+  emit({ type: 'update-downloaded', version: '1.1.0' })
+
+  for (const interval of intervals) interval.callback()
+  await settle()
+  assert.equal(checks, 0)
+  assert.equal(service.getState().phase, 'downloaded')
+
+  failFetch = true
+  for (const interval of intervals) interval.callback()
+  await settle()
+  assert.equal(checks, 0)
+  assert.equal(service.getState().phase, 'downloaded')
+
+  failFetch = false
+  feedXml =
+    '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item><sparkle:shortVersionString>1.2.0</sparkle:shortVersionString><sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements></item></channel></rss>'
+  for (const interval of intervals) interval.callback()
+  await settle()
+  assert.equal(checks, 1)
+  assert.equal(service.getState().phase, 'checking')
+
+  emit({ type: 'update-downloaded', version: '1.1.0' })
+  for (const interval of intervals) interval.callback()
+  await settle()
+  assert.equal(checks, 1)
+  assert.equal(service.getState().phase, 'downloaded')
 })
