@@ -67,6 +67,19 @@ runs Release Please again and selects one client component plus its required SEA
 publication/check. Other partial releases
 use the component workflow or rerun failed jobs; ambiguous state fails closed.
 
+## macOS Passkey packaging rollback
+
+Stable and manual Electron releases use ordinary Developer ID signing without
+Passkey provisioning or its native addon. Version 0.116.0 embedded a profile whose
+allowed signing certificate differed from the app's actual signing certificate;
+matching Team IDs and successful signature/notarization checks did not establish
+that authorization. Re-enable release Passkey packaging only after final arm64 and
+x64 archives verify that the actual signing certificate belongs to the embedded
+profile's `DeveloperCertificates`. iOS Passkey packaging remains enabled.
+
+Ship this rollback under a higher version; preserve already-published immutable
+0.116.0 artifacts. Removing a feed entry does not repair installed applications.
+
 ## Native iOS Nightly
 
 Nightly calls `publish-ios-native.yml` to build the pinned `apps/mobile/ios`
