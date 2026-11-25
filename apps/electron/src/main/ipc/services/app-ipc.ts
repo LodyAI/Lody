@@ -1,3 +1,4 @@
+import { writeUsageSharing, desktopUsageChoice } from '@lody/shared/node/usage-sharing'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { assertProductWindowSender } from '../assert-sender'
 import {
@@ -369,6 +370,12 @@ export class AppIpc extends ProductWindowIpcService {
   }
 
   @IpcMethod()
+  async isOnboardingCompleted() {
+    const state = await import('../../onboarding-state')
+    return state.isOnboardingCompleted()
+  }
+
+  @IpcMethod()
   async completeOnboarding() {
     const { event } = getIpcContext()
     const { getMainWindow, completeOnboarding } = getIpcServiceDeps()
@@ -651,6 +658,17 @@ export class AppIpc extends ProductWindowIpcService {
         .filter(({ available }) => available)
         .map(({ launcherId }) => launcherId)
     }
+  }
+
+  @IpcMethod()
+  async setUsageSharingEnabled(enabled: boolean) {
+    if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean')
+    writeUsageSharing(enabled)
+  }
+
+  @IpcMethod()
+  async getUsageSharingEnabled() {
+    return desktopUsageChoice()
   }
 
   @IpcMethod()

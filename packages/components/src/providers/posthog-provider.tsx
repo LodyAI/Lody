@@ -1,9 +1,4 @@
-import { createIrohDaily, installIrohDailyRecorder, observeIrohDaily } from '@/lib/iroh-daily';
-import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { isElectronRenderer } from '@/lib/electron';
-import { isNativeAppShell, isIOSRuntimeEnvironment } from '@/lib/native-platform';
-import { readNativeAppInfo } from '@/lib/native-app-info';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { PostHogContext, usePostHog } from '@/lib/posthog-context';
 import { useAtomValue } from 'jotai';
 import { userAtom } from '@/atoms';
@@ -14,7 +9,25 @@ import {
 } from '@/lib/deferred-posthog';
 import { captureReferralLanding } from '@/lib/referral-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
-import { usePlatformCapability } from '@lody/platform/react';
+import {
+  hasPendingUsageOptOut,
+  markUsageOptOutPending,
+  rememberAccountUsageSharing,
+  pendingAccountChoice,
+  readDeviceUsageChoice,
+  writeDeviceUsageSharing,
+  setAccountUsageAllowed,
+  subscribeUsageSharing,
+  syncSdkUsageSharing,
+} from '@/lib/usage-sharing';
+import { cloudOperations } from '@/lib/cloud-api-operations';
+import { getIpcServices } from '@/lib/electron-ipc-client';
+import {
+  useCloudMutation,
+  usePlatform,
+  usePlatformSession,
+  usePlatformCapability,
+} from '@lody/platform/react';
 
 import { POSTHOG_OPTIONS, POSTHOG_HOST } from './posthog-options';
 export { POSTHOG_OPTIONS } from './posthog-options';
@@ -38,11 +51,98 @@ function getPostHogClient(enabled: boolean) {
 }
 
 export function LodyPostHogProvider({ children }: { children: ReactNode }) {
-  const enabled = usePlatformCapability('telemetry');
+  const supported = usePlatformCapability('telemetry');
+  const session = usePlatformSession();
+  const choice = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageChoice, () => null);
+  const device = choice ?? (typeof window !== 'undefined' && !window.__LODY_ELECTRON__);
+  const preference = usePlatform().cloudApi?.useOptionalAuthenticatedQuery?.(
+    cloudOperations.analytics.getUsageSharing,
+    session.status === 'authenticated' ? { accountId: session.user.id } : 'skip'
+  );
+  const account = preference?.data;
+  const allowed =
+    session.status === 'authenticated'
+      ? account === true
+      : session.status === 'unauthenticated' && !session.uncertain;
+  if (typeof account === 'boolean') rememberAccountUsageSharing(account);
+  const [desktopReady, setDesktopReady] = useState(
+    () => typeof window !== 'undefined' && !window.__LODY_ELECTRON__
+  );
+  useEffect(() => {
+    if (!supported || !window.__LODY_ELECTRON__) return;
+    let live = true;
+    const initialChoice = readDeviceUsageChoice();
+    const native = getIpcServices();
+    if (native)
+      void native.app
+        .getUsageSharingEnabled()
+        .then((enabled) => {
+          if (!live) return;
+          if (
+            readDeviceUsageChoice() === initialChoice &&
+            (enabled === false || (enabled === true && initialChoice === null))
+          ) {
+            writeDeviceUsageSharing(enabled);
+          }
+          setDesktopReady(true);
+        })
+        .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [supported]);
+  const enabled = supported && allowed && device && desktopReady;
+  setAccountUsageAllowed(supported && allowed && desktopReady);
+  const savePreference = useCloudMutation(cloudOperations.analytics.setUsageSharing);
+  const accountId = session.status === 'authenticated' ? session.user.id : null;
+  useEffect(() => {
+    if (!accountId) return;
+    if (window.__LODY_ELECTRON__ && hasPendingUsageOptOut('next-login')) {
+      markUsageOptOutPending(accountId, true);
+      markUsageOptOutPending('next-login', false);
+    }
+    if (typeof account !== 'boolean') return;
+    let desired: boolean | null;
+    try {
+      desired = pendingAccountChoice(accountId);
+    } catch {
+      return;
+    }
+    if (desired === null) return;
+    if (account === desired) {
+      markUsageOptOutPending(accountId, false);
+      return;
+    }
+    void savePreference({ enabled: desired, accountId }).catch(() => {});
+  }, [account, accountId, savePreference, choice]);
+  useEffect(() => {
+    if (!enabled) {
+      scheduleDeferredPostHogInitialization(null, POSTHOG_OPTIONS);
+      if (deferredPostHog.__loaded) {
+        syncSdkUsageSharing(deferredPostHog, false);
+        deferredPostHog._requestQueue?.unload();
+        deferredPostHog._retryQueue?.unload();
+      }
+    } else if (deferredPostHog.__loaded) {
+      syncSdkUsageSharing(deferredPostHog, true);
+    }
+  }, [enabled]);
+  useEffect(() => {
+    if (
+      supported &&
+      desktopReady &&
+      typeof account === 'boolean' &&
+      window.__LODY_ELECTRON__ &&
+      readDeviceUsageChoice() !== null
+    ) {
+      void getIpcServices()
+        ?.app.setUsageSharingEnabled(account && device)
+        .catch(() => {});
+    }
+  }, [supported, desktopReady, account, device]);
   const client = getPostHogClient(enabled);
   return (
-    <PostHogContext.Provider value={{ client }}>
-      {enabled && <IrohDailyReporting />}
+    <PostHogContext.Provider value={enabled ? { client } : null}>
       {enabled && <PostHogIdentitySync />}
       {enabled && <PostHogInitialPageView />}
       {enabled && import.meta.env.VITE_PUBLIC_POSTHOG_KEY && POSTHOG_HOST && (
@@ -79,54 +179,5 @@ function PostHogIdentitySync() {
     identifyPostHogUser(postHog, user);
   }, [postHog, user]);
 
-  return null;
-}
-
-/** One shared origin store, with Web Locks fencing every read/modify/enqueue/write. */
-function IrohDailyReporting() {
-  useEffect(() => {
-    if (
-      !import.meta.env.VITE_PUBLIC_POSTHOG_KEY ||
-      !POSTHOG_HOST ||
-      !navigator.locks ||
-      (!isElectronRenderer() && !isNativeAppShell())
-    )
-      return;
-    let active = true;
-    let reporting: ReturnType<typeof observeIrohDaily> | undefined;
-    const daily = createIrohDaily({
-      enabled: () => active,
-      onActivity: () => reporting?.activate(),
-      now: Date.now,
-      storage: localStorage,
-      exclusive: async (run) => await navigator.locks.request('lody:iroh-daily', run),
-      digest: async (text) => {
-        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-        return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join(
-          ''
-        );
-      },
-      random: () => crypto.randomUUID(),
-      online: () => navigator.onLine,
-      // Use the real client through the deferred proxy: `capture` returns
-      // undefined until the SDK resolves, so `enqueue` stays falsy and
-      // `state.pending` is retained for the next check instead of being
-      // committed into the evictable deferred queue.
-      enqueue: (properties, uuid) =>
-        active && !!capturePostHogEvent(deferredPostHog, 'e2ee/iroh_daily', properties, { uuid }),
-      platform: isElectronRenderer() ? 'desktop' : isIOSRuntimeEnvironment() ? 'ios' : 'android',
-      version: () =>
-        readNativeAppInfo().app_version ??
-        readNativeAppInfo().version ??
-        (typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown'),
-    });
-    const remove = installIrohDailyRecorder(daily.record, daily);
-    reporting = observeIrohDaily(daily, window, document);
-    return () => {
-      active = false;
-      remove();
-      reporting?.dispose();
-    };
-  }, []);
   return null;
 }

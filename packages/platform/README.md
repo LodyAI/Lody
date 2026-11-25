@@ -5,6 +5,12 @@ This package contains platform-neutral composition contracts. The optional
 inspection with persistent host custody. It never enables document transports;
 see the [workspace bootstrap guide](../../.agents/docs/e2ee-workspace-bootstrap.md).
 
+Cloud analytics emits registered event names and opaque identifiers. The browser
+projects newly captured events and queued requests to the same property allowlist.
+The SDK can attach device and session metadata. Pageviews carry no URL or title,
+and exceptions carry only a fixed type and code. Session replay and DOM autocapture
+are disabled in every workspace. Local composition disables PostHog.
+
 Hosted entries may pass `createE2eeRuntime: E2eeRuntimeFactory` to the shared
 `createRouter`. Its cloud provider borrows the returned `E2eeWorkspaceRuntime`
 without changing optional methods or reader labels. Standalone login without

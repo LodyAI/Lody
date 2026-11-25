@@ -1,3 +1,5 @@
+import { usageSharingAllowed } from './usage-sharing';
+export { usageSharingAllowed } from './usage-sharing';
 // Pure-DOM fallback UI used when the React tree cannot mount or has crashed
 // during boot. Lives outside the React tree so it works even when no
 // component or hook has had a chance to run.
@@ -51,13 +53,13 @@ export type BootFailureOptions = {
    */
   buildInfo?: Record<string, string>;
   /**
-   * Normalized boot-failure classification for the `app/boot_failed` beacon.
+   * Normalized boot-failure classification for the local diagnostics screen.
    * Per-shell callers already compute the specific kind (stale asset / legacy
    * browser / offline); pass it here. When omitted we classify from the error.
    */
   failureKind?: BootFailureKind;
   /**
-   * Platform tag for the beacon (web/electron/mobile). Defaults to 'web'.
+   * Legacy shell argument retained for callers that supply their platform.
    */
   platform?: string;
   /**
@@ -97,8 +99,6 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-const BOOT_BEACON_INSTALL_ID_KEY = 'lody_install_id';
-
 // Classify a boot failure into a stable, low-cardinality kind for analytics.
 // Message-pattern based because at boot time we only have the raw throw — but we
 // never SEND the message, only the resulting enum (spec §2.3/§7.4).
@@ -136,27 +136,11 @@ export function classifyBootFailureKind(error: unknown): BootFailureKind {
   return 'unknown';
 }
 
-function resolveBootBeaconInstallId(): string {
-  if (typeof window === 'undefined') return 'anonymous';
-  try {
-    const existing = window.localStorage.getItem(BOOT_BEACON_INSTALL_ID_KEY);
-    if (existing) return existing;
-    const generated =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(BOOT_BEACON_INSTALL_ID_KEY, generated);
-    return generated;
-  } catch {
-    return 'anonymous';
-  }
-}
-
 function getBootBeaconConfig(): { key: string; host: string } | null {
   // import.meta.env is statically replaced by Vite at build time in every shell
   // that bundles this module, so reading it here works pre-React.
   const env = import.meta.env;
-  if (env.VITE_LODY_PLATFORM !== 'cloud') return null;
+  if (!usageSharingAllowed() || env.VITE_LODY_PLATFORM !== 'cloud') return null;
   const key = env.VITE_PUBLIC_POSTHOG_KEY;
   const host = env.VITE_PUBLIC_POSTHOG_HOST;
   if (!key || !host) return null;
@@ -167,7 +151,7 @@ function getBootBeaconConfig(): { key: string; host: string } | null {
 // fails, so we POST the capture payload directly via sendBeacon (survives the
 // imminent reload/navigation) with a fetch keepalive fallback. Fire-and-forget;
 // any failure is swallowed so it can never compound the boot failure (spec §7.4).
-function postBootBeaconEvent(eventName: string, properties: Record<string, unknown>): void {
+function postBootBeaconEvent(eventName: string): void {
   try {
     const config = getBootBeaconConfig();
     if (!config) return;
@@ -175,13 +159,11 @@ function postBootBeaconEvent(eventName: string, properties: Record<string, unkno
     const payload = {
       api_key: config.key,
       event: eventName,
-      distinct_id: resolveBootBeaconInstallId(),
+      distinct_id: crypto.randomUUID(),
       properties: {
         // $process_person_profile=false: these anonymous pre-auth beacons must
         // not create or mutate a person profile before the user is identified.
         $process_person_profile: false,
-        client_ts_ms: Date.now(),
-        ...properties,
       },
     };
 
@@ -217,17 +199,8 @@ function postBootBeaconEvent(eventName: string, properties: Record<string, unkno
 }
 
 // Pre-React `app/boot_failed` beacon (spec §7.4, tier A — full, never sampled).
-export function captureBootFailedBeacon(error: unknown, options: BootFailureOptions = {}): void {
-  const failureKind = options.failureKind ?? classifyBootFailureKind(error);
-  postBootBeaconEvent('app/boot_failed', {
-    failure_kind: failureKind,
-    platform: options.platform ?? 'web',
-    error_type: error instanceof Error ? 'Error' : typeof error,
-    is_online: typeof navigator !== 'undefined' ? navigator.onLine : null,
-    // install_id doubles as the distinct id; surface it as a prop too so it
-    // joins with `app/launch.install_id` for the same install.
-    install_id: resolveBootBeaconInstallId(),
-  });
+export function captureBootFailedBeacon(): void {
+  postBootBeaconEvent('app/boot_failed');
 }
 
 export function collectBootDiagnostics(
@@ -574,7 +547,7 @@ export function renderBootFailure(
 
   // Pre-React `app/boot_failed` beacon (spec §7.4): emit once, here at the single
   // entry point every shell funnels boot failures through, before the SDK exists.
-  captureBootFailedBeacon(error, { ...options, failureKind });
+  captureBootFailedBeacon();
   // The standalone recovery page has no AppInitializer; a no-op when the app already installed it.
   installClientLog();
   recordClientError('boot.failed', error, { failureKind, surface: options.surface ?? 'boot' });
@@ -647,15 +620,13 @@ export function renderBootFailure(
     setDiagnosticsOpen(diagnosticsButton.getAttribute('aria-expanded') !== 'true');
   });
 
-  const beaconPlatform = options.platform ?? 'web';
-
   if (copyButton) {
     let copiedTimer: number | undefined;
     const showCopyLabel = (copied: boolean) => {
       copyButton.textContent = copied ? copy.copied : copy.copy;
     };
     copyButton.addEventListener('click', () => {
-      postBootBeaconEvent('app/boot_failure_copy_clicked', { platform: beaconPlatform });
+      postBootBeaconEvent('app/boot_failure_copy_clicked');
       copyButton.disabled = true;
       void copyToClipboard(diag.copyableText).then((ok) => {
         copyButton.disabled = false;
@@ -677,7 +648,7 @@ export function renderBootFailure(
 
   if (reloadButton) {
     reloadButton.addEventListener('click', () => {
-      postBootBeaconEvent('app/boot_failure_reload_clicked', { platform: beaconPlatform });
+      postBootBeaconEvent('app/boot_failure_reload_clicked');
       recordClientLog('warn', 'boot.failure_reload_clicked');
       void flushClientLog();
       reloadButton.disabled = true;

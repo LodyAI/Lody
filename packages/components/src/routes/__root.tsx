@@ -241,7 +241,7 @@ function RootApp() {
 
   return (
     <LodyPostHogProvider>
-      {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
+      {telemetryEnabled && <AppLaunchAnalyticsTracker />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
       <SessionDeepLinkRouter />
       <ReferralLeadAttacher

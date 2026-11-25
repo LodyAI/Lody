@@ -1,446 +1,204 @@
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { expect, it, vi } from 'vitest';
+import type { PostHog } from 'posthog-js';
+import { createPostHogPrivacy } from '../src/lib/posthog-privacy';
+import { identifyPostHogUser } from '../src/lib/posthog-identity';
 
-import { POSTHOG_OPTIONS } from '../src/providers/posthog-options';
-
-import {
-  postHogPrivacy,
-  createPostHogPrivacy,
-  holdPrivateTelemetrySurface,
-  installWorkspaceTelemetryScope,
-  setTelemetryRouteTarget,
-  suspendWorkspaceTelemetry,
-} from '../src/lib/posthog-privacy';
-
-function runBeforeSend(event: {
-  event: string;
-  properties?: Record<string, unknown>;
-}): { event: string; properties?: Record<string, unknown> } | null {
-  const beforeSend = POSTHOG_OPTIONS.before_send;
-  if (typeof beforeSend !== 'function') {
-    throw new Error('Expected PostHog before_send to be configured');
-  }
-  return beforeSend(event) as { event: string; properties?: Record<string, unknown> } | null;
-}
-
-describe('PostHog provider options', () => {
-  let uninstall: () => void;
-  beforeEach(() => {
-    uninstall = installWorkspaceTelemetryScope(() => 'plain-test-scope');
-    setTelemetryRouteTarget('test', true);
-  });
-  afterEach(() => {
-    uninstall();
-    vi.unstubAllGlobals();
-  });
-
-  it('retires boundary analytics and projects boundary exceptions in ordinary scopes too', () => {
-    expect(
-      runBeforeSend({
-        event: 'app/error_boundary_triggered',
-        properties: {
-          reason_code: 'SYNTHETIC_TOKEN',
-          error_fingerprint: 'SYNTHETIC_HASH',
-        },
-      })
-    ).toBeNull();
-    const projected = runBeforeSend({
-      event: '$exception',
-      properties: {
-        errorBoundary: 'SYNTHETIC_BOUNDARY',
-        error_type: 'SYNTHETIC_NAME',
-        error_code: 'SYNTHETIC_CODE',
-        componentStack: 'SYNTHETIC_STACK',
-        $exception_list: [{ type: 'SYNTHETIC_NAME', value: 'SYNTHETIC_MESSAGE' }],
-        $groups: { workspace: 'SYNTHETIC_WORKSPACE' },
-      },
-    });
-    expect(projected?.properties).toMatchObject({
-      source: 'errorBoundary',
-      error_type: 'unknown',
-      error_code: 'redacted_exception',
-      $exception_list: [{ type: 'Error', value: 'redacted_exception' }],
-    });
-    expect(JSON.stringify(projected)).not.toContain('SYNTHETIC_');
-  });
-
-  it('keeps an encrypted approval private above ordinary workspaces until all actual surfaces retire', () => {
-    let current = 'ordinary-A';
-    const removeScope = installWorkspaceTelemetryScope(() => current);
-    const first = holdPrivateTelemetrySurface(),
-      nested = holdPrivateTelemetrySurface();
-    const frame = {
-      event: '$snapshot',
-      properties: { $snapshot_data: ['synthetic pairing code'] },
-    };
-    try {
-      expect(runBeforeSend(frame)).toBeNull();
-      first();
-      first();
-      expect(runBeforeSend(frame)).toBeNull();
-      current = 'ordinary-B';
-      setTelemetryRouteTarget('B', true);
-      expect(runBeforeSend(frame)).toBeNull();
-      expect(
-        runBeforeSend({
-          event: '$exception',
-          properties: { message: 'synthetic device name', error_code: 'e2ee_pairing_expired' },
-        })?.properties
-      ).not.toHaveProperty('message');
-      nested();
-      expect(
-        runBeforeSend({ event: '$snapshot', properties: { $snapshot_data: ['ordinary-B'] } })
-      ).not.toBeNull();
-    } finally {
-      first();
-      nested();
-      removeScope();
-    }
-  });
-
-  it('drops snapshots and redacts exceptions across an unknown workspace transition', () => {
-    const snapshot = { event: '$snapshot', properties: { $snapshot_data: ['private path'] } };
-    expect(runBeforeSend(snapshot)).toEqual(snapshot);
-    suspendWorkspaceTelemetry();
-    expect(runBeforeSend(snapshot)).toBeNull();
-    expect(
-      runBeforeSend({
-        event: '$exception',
-        properties: {
-          $exception_list: [{ value: 'private error', stacktrace: { frames: ['private path'] } }],
-          arbitrary: { secret: 'private content' },
-          error_code: 'e2ee_feature_unavailable',
-        },
-      })
-    ).toEqual({
-      event: '$exception',
-      properties: {
-        token: undefined,
-        distinct_id: undefined,
-        $exception_list: [{ type: 'Error', value: 'e2ee_feature_unavailable' }],
-        error_code: 'e2ee_feature_unavailable',
-        error_type: 'unknown',
-        source: 'unknown',
-        platform: 'web',
-        $lib: 'unknown',
-        $exception_fingerprint:
-          'lody-redacted-v1:web:web:unknown:unknown:unknown:e2ee_feature_unavailable',
-      },
-    });
-  });
-
-  it('keeps recovery recordings and late exceptions private until both UI and command settle', () => {
-    const releaseUI = holdPrivateTelemetrySurface();
-    const releaseCommand = holdPrivateTelemetrySurface();
-    const prepared = postHogPrivacy.prepareException([new Error('recovery-secret')]);
-    releaseUI();
-    setTelemetryRouteTarget('test', true);
-    expect(
-      runBeforeSend({ event: '$snapshot', properties: { $snapshot_data: ['recovery-secret'] } })
-    ).toBeNull();
-    releaseUI(); // releasing one holder twice cannot release the pending command
-    expect(postHogPrivacy.isAllowed()).toBe(false);
-    releaseCommand();
-    expect(postHogPrivacy.isAllowed()).toBe(true);
-    const late = runBeforeSend({
-      event: '$exception',
-      properties: {
-        ...(prepared[1] as Record<string, unknown>),
-        $exception_list: [{ value: 'recovery-secret' }],
-      },
-    });
-    expect(JSON.stringify(late)).not.toContain('recovery-secret');
-  });
-
-  it('keeps delayed exceptions redacted across unknown and returning plaintext scopes', () => {
-    const plaintext = postHogPrivacy.prepareException([
-      new Error('private-before-switch'),
-      { nested: { file: 'private path' } },
-    ]);
-    suspendWorkspaceTelemetry();
-    const unknown = postHogPrivacy.prepareException([
-      new Error('private-unknown'),
-      { nested: { file: 'private path' } },
-    ]);
-    setTelemetryRouteTarget('test', true);
-    for (const prepared of [plaintext, unknown]) {
-      const event = runBeforeSend({
-        event: '$exception',
-        properties: {
-          ...(prepared[1] as Record<string, unknown>),
-          $exception_list: [{ value: String(prepared[0]) }],
-          $exception_steps: [{ message: 'private breadcrumb' }],
-        },
-      });
-      expect(JSON.stringify(event)).not.toContain('private');
-      expect(event).toMatchObject({ properties: { error_code: 'redacted_exception' } });
-    }
-  });
-});
-
-it('keeps GitHub installation retry capabilities out of the locked SDK replay URL metadata', () => {
-  const require = createRequire(import.meta.url);
-  const sdkRoot = dirname(require.resolve('posthog-js/package.json'));
-  // Exercise the real locked recorder URL masking boundary without starting replay timers.
-  const { LazyLoadedSessionRecording } = require(
-    join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
-  );
-  const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
-    _instance: {
-      config: { ...POSTHOG_OPTIONS, session_recording: { ...POSTHOG_OPTIONS.session_recording } },
-    },
-  }) as {
-    _instance: {
-      config: {
-        disable_capture_url_hashes?: boolean;
-        session_recording: { maskCapturedNetworkRequestFn?: unknown };
-      };
-    };
-    _maskReplayUrl: (url: string) => string;
-  };
-  const capability =
-    'https://lody.example/team/settings/github#github-install-retry=SIGNED_INSTALL_STATE_SECRET';
-  expect(recorder._maskReplayUrl(capability)).toBe('https://lody.example/team/settings/github');
-  recorder._instance.config.disable_capture_url_hashes = false;
-  delete recorder._instance.config.session_recording.maskCapturedNetworkRequestFn;
-  expect(recorder._maskReplayUrl(capability)).toContain('SIGNED_INSTALL_STATE_SECRET');
-});
-
-it.each([
-  '?state=QUERY_CAPABILITY_SECRET&theme=dark',
-  '?github-install-retry=https%3A%2F%2Fcallback.example%2F%3Fstate%3DQUERY_CAPABILITY_SECRET&theme=dark',
-  '?github_install_error=temporarily_unavailable%23github-install-retry%3Dhttps%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark',
-  '?next=https%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark',
-])('keeps accidental query capabilities out of real SDK replay metadata: %s', (query) => {
-  const require = createRequire(import.meta.url);
-  const sdkRoot = dirname(require.resolve('posthog-js/package.json'));
-  const { LazyLoadedSessionRecording } = require(
-    join(sdkRoot, 'lib/src/extensions/replay/external/lazy-loaded-session-recorder.js')
-  );
-  const recorder = Object.assign(Object.create(LazyLoadedSessionRecording.prototype), {
-    _instance: {
-      config: { ...POSTHOG_OPTIONS, session_recording: { ...POSTHOG_OPTIONS.session_recording } },
-    },
-  }) as {
-    _maskReplayUrl: (url: string) => string;
-    _instance: { config: { session_recording: { maskCapturedNetworkRequestFn?: unknown } } };
-  };
-  const source = `https://lody.example/team/chat${query}`;
-  const masked = recorder._maskReplayUrl(source);
-  expect(masked).not.toContain('QUERY_CAPABILITY_SECRET');
-  expect(new URL(masked).searchParams.get('theme')).toBe('dark');
-  delete recorder._instance.config.session_recording.maskCapturedNetworkRequestFn;
-  expect(recorder._maskReplayUrl(source)).toContain('QUERY_CAPABILITY_SECRET');
-});
-
-it('scrubs nested replay and exception query contamination while keeping neutral diagnostics', () => {
-  const uninstall = installWorkspaceTelemetryScope(() => 'ordinary');
-  setTelemetryRouteTarget('ordinary', true);
-  const contaminated =
-    'https://lody.example/team/chat?github_install_error=temporarily_unavailable%23github-install-retry%3Dhttps%253A%252F%252Fcallback.example%252F%253Fstate%253DQUERY_CAPABILITY_SECRET&theme=dark';
-  try {
-    for (const event of ['$snapshot', '$exception', 'navigation/failed']) {
-      const result = runBeforeSend({
-        event,
-        properties: {
-          state: 'loading',
-          error_code: 'temporarily_unavailable',
-          nested: [
-            {
-              data: {
-                href: contaminated,
-                detail: encodeURIComponent(contaminated),
-                neutral: 'https://lody.example/team/chat?theme=dark&tab=github',
-              },
-            },
-          ],
-        },
-      });
-      expect(JSON.stringify(result)).not.toContain('QUERY_CAPABILITY_SECRET');
-      expect(result?.properties?.state).toBe('loading');
-      expect(result?.properties?.error_code).toBe('temporarily_unavailable');
-      expect(result?.properties?.nested).toEqual([
+it('projects persisted batches again before transport in every workspace', () => {
+  for (const scope of [null, 'ordinary']) {
+    const sent: unknown[] = [];
+    const client = { _send_request: (options: { data: unknown }) => sent.push(options.data) };
+    const privacy = createPostHogPrivacy(() => scope);
+    privacy.attach(client as unknown as PostHog);
+    client._send_request({
+      data: [
+        { event: 'synthetic-private-name', properties: {} },
+        { event: '$snapshot', properties: { data: 'private' } },
+        { event: '$autocapture', properties: { elements: 'private' } },
         {
-          data: {
-            href: 'https://lody.example/team/chat?theme=dark',
-            detail: '[redacted_installation_capability]',
-            neutral: 'https://lody.example/team/chat?theme=dark&tab=github',
+          event: '$pageview',
+          uuid: 'private',
+          timestamp: { route: 'private' },
+          $set_once: { name: 'private' },
+          properties: {
+            $lib: 'web',
+            token: 'project',
+            distinct_id: 'synthetic_123',
+            email: 'private',
+            $current_url: 'private',
+            $title: 'private',
+            $set: { nested: 'private' },
+            user_id: 'me@example.test',
           },
         },
-      ]);
-    }
-  } finally {
-    uninstall();
+        { event: '$identify', properties: { distinct_id: 'me@example.test' } },
+      ],
+    });
+    expect(sent).toEqual([
+      [
+        {
+          event: '$pageview',
+          properties: {
+            $lib: 'web',
+            token: 'project',
+            distinct_id: 'synthetic_123',
+          },
+        },
+      ],
+    ]);
   }
 });
 
-it('scrubs a queued replay URL contaminated after capture before it reaches the transport encoder', () => {
-  const bodies: string[] = [];
+it('identifies only an opaque internal account id', () => {
+  const calls: unknown[][] = [];
   const client = {
-    __loaded: false,
-    _send_request: (options: { data: unknown }) => {
-      bodies.push(JSON.stringify(options.data));
+    identify: (...args: unknown[]) => {
+      calls.push(args);
     },
   };
-  const privacy = createPostHogPrivacy(() => 'ordinary');
-  privacy.attach(client as never);
-  const frame = {
-    event: '$snapshot',
-    properties: {
-      token: 'synthetic-project-key',
-      $snapshot_data: [{ data: { href: 'https://lody.example/team/chat?theme=dark' } }],
-    },
-  };
-  privacy.beforeSend(frame);
-  frame.properties.$snapshot_data[0]!.data.href =
-    'https://lody.example/team/chat?state=QUEUED_CAPABILITY_SECRET&theme=dark';
-  client._send_request({ data: [frame] });
-  expect(bodies).toHaveLength(1);
-  expect(bodies[0]).not.toContain('QUEUED_CAPABILITY_SECRET');
-  expect(bodies[0]).toContain('theme=dark');
-  expect(bodies[0]).toContain('synthetic-project-key');
+  identifyPostHogUser(client, 'opaque_123');
+  identifyPostHogUser(client, 'test@example.test');
+  expect(calls).toEqual([['opaque_123']]);
 });
 
-it('keeps restricted categories, source and version through deferred capture and repeated transport redaction', () => {
-  const bodies: unknown[] = [];
-  let scope: string | null = null;
-  const privacy = createPostHogPrivacy(() => scope);
-  const client = {
-    __loaded: false,
-    _send_request: (options: { data: unknown }) => bodies.push(options.data),
-  };
-  privacy.attach(client as never);
-  const emit = (
-    error: unknown,
-    extra: Record<string, unknown> = {},
-    version = '0.112.0-nightly.3'
-  ) => {
-    const prepared = privacy.prepareException([
-      error,
-      {
-        errorBoundary: 'PRIVATE_BOUNDARY',
-        path: '/PRIVATE_PATH',
-        ...extra,
-      },
-    ]);
-    expect(JSON.stringify(prepared)).not.toContain('PRIVATE_');
-    const event = privacy.beforeSend({
-      event: '$exception',
-      properties: {
-        ...(prepared[1] as Record<string, unknown>),
-        $exception_list: [
-          { type: 'Error', value: String(prepared[0]), stacktrace: 'PRIVATE_STACK' },
-        ],
-        platform: 'electron',
-        electron_process: 'renderer',
-        $lib: 'desktop',
-        app_version: version,
-        $lib_version: version,
-        $exception_fingerprint: 'PRIVATE_FINGERPRINT',
+it('stops and resumes uploads from the settings switch and retains the choice on remount', async () => {
+  const { createElement, act } = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { PlatformContext } = await import('@lody/platform/react');
+  const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+  const { UsageSharingRow } = await import('../src/components/settings/usage-sharing-row');
+  const { usageSharingAllowed } = await import('../src/lib/usage-sharing');
+  const { initI18n } = await import('../src/i18n');
+  await initI18n('en');
+  const platform = {
+    ...TEST_CLOUD_PLATFORM,
+    cloudApi: {
+      ...TEST_CLOUD_PLATFORM.cloudApi!,
+      useMutation: () => async () => null,
+      useOptionalAuthenticatedQuery: undefined,
+    },
+  } as typeof TEST_CLOUD_PLATFORM;
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  const row = createElement(
+    PlatformContext.Provider,
+    { value: platform },
+    createElement(UsageSharingRow)
+  );
+  const toggle = () => host.querySelector<HTMLElement>('[role="switch"]')!;
+  try {
+    await act(async () => root.render(row));
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    await act(async () => toggle().click());
+    expect(usageSharingAllowed()).toBe(false);
+    await act(async () => root.render(null));
+    await act(async () => root.render(row));
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle().click());
+    expect(usageSharingAllowed()).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    window.localStorage.clear();
+  }
+});
+
+it.each([true, false])(
+  'waits for sign-in and durable desktop onboarding before saving a choice (%s)',
+  async (allow) => {
+    const { createElement, act } = await import('react');
+    const { createRoot } = await import('react-dom/client');
+    const { PlatformContext } = await import('@lody/platform/react');
+    const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
+    const { DesktopUsageSharingPrompt } =
+      await import('../src/components/onboarding/desktop-usage-sharing-prompt');
+    const { readDeviceUsageChoice, usageSharingAllowed, pendingAccountChoice } =
+      await import('../src/lib/usage-sharing');
+    const { initI18n } = await import('../src/i18n');
+    await initI18n('en');
+    vi.stubGlobal('__LODY_ELECTRON__', true);
+    vi.stubGlobal('scrollTo', () => {});
+    const { createStore: createPlatformStore } = await import('@lody/platform');
+    const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
+      status: 'unauthenticated',
+    });
+    const platform = {
+      ...TEST_CLOUD_PLATFORM,
+      identity: { ...TEST_CLOUD_PLATFORM.identity, session },
+    };
+    let completed = !allow;
+    let nativeChoice: boolean | null = null;
+    vi.stubGlobal('ipc', {
+      invoke: async (channel: string, enabled: boolean) => {
+        if (channel === 'app.isOnboardingCompleted') return completed;
+        if (channel !== 'app.setUsageSharingEnabled') throw new Error(channel);
+        nativeChoice = enabled;
       },
     });
-    client._send_request({ data: [event] });
-    scope = 'ordinary';
-    privacy.sync();
-    scope = null;
-    client._send_request({ data: [event] });
-    return (bodies.at(-1) as Array<{ properties: Record<string, unknown> }>)[0]!.properties;
-  };
-  const type = emit(new TypeError('PRIVATE_TOKEN'));
-  const again = emit(new TypeError('PRIVATE_OTHER_TEXT'));
-  const nextVersion = emit(new TypeError('PRIVATE_TOKEN'), {}, '0.113.0');
-  const manual = emit(new TypeError('PRIVATE_TOKEN'), { errorBoundary: undefined });
-  const range = emit(new RangeError('PRIVATE_TOKEN'));
-  const forbidden = emit(new TypeError('PRIVATE_TOKEN'), { error_code: 'forbidden' });
-  expect(type).toMatchObject({
-    error_type: 'TypeError',
-    source: 'errorBoundary',
-    platform: 'electron',
-    electron_process: 'renderer',
-    app_version: '0.112.0-nightly.3',
-    $lib: 'desktop',
-  });
-  expect(type.$exception_fingerprint).toBe(again.$exception_fingerprint);
-  expect(type.$exception_fingerprint).toBe(nextVersion.$exception_fingerprint);
-  expect(nextVersion.app_version).toBe('0.113.0');
-  expect(type.$exception_fingerprint).not.toBe(manual.$exception_fingerprint);
-  expect(type.$exception_fingerprint).not.toBe(range.$exception_fingerprint);
-  expect(type.$exception_fingerprint).not.toBe(forbidden.$exception_fingerprint);
-  expect(bodies[0]).toEqual(bodies[1]);
-  expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
-});
-
-it('rejects unrecognized diagnostic fields and versions rather than hashing secret error text', () => {
-  const privacy = createPostHogPrivacy(() => null);
-  const result = privacy.beforeSend({
-    event: '$exception',
-    properties: {
-      $exception_list: [
-        { type: 'PRIVATE_TYPE', value: 'PRIVATE_MESSAGE', mechanism: { type: 'PRIVATE_SOURCE' } },
-      ],
-      error_code: 'PRIVATE_CODE',
-      source: 'PRIVATE_SOURCE',
-      platform: 'PRIVATE_PLATFORM',
-      $lib: 'PRIVATE_LIB',
-      $lib_version: '1.2.3-PRIVATE_TOKEN',
-      app_version: 'PRIVATE_VERSION',
-      release: 'PRIVATE_RELEASE',
-      operation: 'PRIVATE_OPERATION',
-      stage: 'doc_meta_scan_failed',
-      failure_kind: 'rejected',
-      handling_state: 'observed',
-      retry_state: 'not_scheduled',
-      $exception_fingerprint: 'PRIVATE_FINGERPRINT',
-      extra: { cause: 'PRIVATE_CAUSE' },
-    },
-  });
-  expect(result?.properties).toMatchObject({
-    error_type: 'unknown',
-    source: 'unknown',
-    platform: 'unknown',
-  });
-  expect(result?.properties).not.toHaveProperty('app_version');
-  expect(result?.properties).not.toHaveProperty('stage');
-  expect(JSON.stringify(result)).not.toContain('PRIVATE_');
-});
-
-it('preserves fixed sync diagnostics through deferred capture and transport reprojection', () => {
-  const privacy = createPostHogPrivacy(() => null);
-  const sent: unknown[] = [];
-  const client = {
-    __loaded: false,
-    _send_request: (options: { data: unknown }) => sent.push(options.data),
-  };
-  privacy.attach(client as never);
-  const prepared = privacy.prepareException([
-    new Error('PRIVATE_MESSAGE'),
-    {
-      operation: 'workspace_sync',
-      stage: 'doc_meta_scan_failed',
-      failure_kind: 'rejected',
-      handling_state: 'observed',
-      retry_state: 'not_scheduled',
-      workspace_id: 'PRIVATE_WORKSPACE',
-    },
-  ]);
-  const event = privacy.beforeSend({
-    event: '$exception',
-    properties: prepared[1] as Record<string, unknown>,
-  });
-  client._send_request({ data: [event] });
-  client._send_request({ data: sent[0] });
-  expect(sent[1]).toEqual(sent[0]);
-  expect(sent[0]).toMatchObject([
-    {
-      properties: {
-        operation: 'workspace_sync',
-        stage: 'doc_meta_scan_failed',
-        failure_kind: 'rejected',
-        handling_state: 'observed',
-        retry_state: 'not_scheduled',
-      },
-    },
-  ]);
-  expect(JSON.stringify(sent)).not.toContain('PRIVATE_');
-});
+    const mount = document.createElement('div');
+    document.body.appendChild(mount);
+    const root = createRoot(mount);
+    const {
+      createMemoryHistory,
+      createRouter,
+      createRootRoute,
+      createRoute,
+      RouterProvider,
+      Outlet,
+    } = await import('@tanstack/react-router');
+    const { Provider, createStore } = await import('jotai');
+    const { desktopOnboardingCompletionRevisionAtom } = await import('../src/atoms/onboarding');
+    const store = createStore();
+    const route = createRootRoute({ component: Outlet });
+    const onboarding = createRoute({ getParentRoute: () => route, path: '/onboarding' });
+    const home = createRoute({
+      getParentRoute: () => route,
+      path: '/',
+      component: DesktopUsageSharingPrompt,
+    });
+    const router = createRouter({
+      routeTree: route.addChildren([onboarding, home]),
+      history: createMemoryHistory({ initialEntries: [allow ? '/onboarding' : '/'] }),
+    });
+    await router.load();
+    try {
+      expect(readDeviceUsageChoice()).toBeNull();
+      expect(usageSharingAllowed()).toBe(false);
+      await act(async () =>
+        root.render(
+          createElement(
+            PlatformContext.Provider,
+            { value: platform },
+            createElement(Provider, { store }, createElement(RouterProvider, { router }))
+          )
+        )
+      );
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      await act(async () => session.set({ status: 'authenticated', user: { id: 'opaque_123' } }));
+      if (allow) {
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        await act(async () => {
+          await router.navigate({ to: '/' });
+        });
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        expect(usageSharingAllowed()).toBe(false);
+        completed = true;
+        await act(async () => store.set(desktopOnboardingCompletionRevisionAtom, 1));
+      }
+      const buttons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')
+      );
+      expect(buttons.map((button) => button.textContent)).toEqual(['Don’t share', 'Allow sharing']);
+      await act(async () => buttons[allow ? 1 : 0]!.click());
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(nativeChoice).toBe(allow);
+      expect(readDeviceUsageChoice()).toBe(allow);
+      expect(usageSharingAllowed()).toBe(allow);
+      expect(pendingAccountChoice('opaque_123')).toBe(allow);
+    } finally {
+      await act(async () => root.unmount());
+      mount.remove();
+      window.localStorage.clear();
+      vi.unstubAllGlobals();
+    }
+  }
+);

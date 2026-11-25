@@ -31,20 +31,13 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 
 ## Telemetry privacy
 
-- E2EE and unconfirmed workspace scopes must not record or upload replay. Only a
-  matching account, route, workspace and verified plaintext descriptor may enable
-  it; an ordinary provisional runtime or listing is not plaintext proof. Pause
-  before switching targets and discard buffered work across that boundary.
-- Encrypted approval overlays on ordinary workspaces hold a private-surface lease
-  through actual DOM removal. Nested surfaces release only their own lease, and
-  a route commit cannot override an outstanding lease.
-- Automatic exceptions in those scopes use a fixed diagnostic vocabulary. Shared
-  main/daemon processes cannot infer one workspace mode and always use that
-  vocabulary. Restricted diagnostics retain only allowlisted category/source/runtime
-  fields, consumer-specific operation/stage/status values and bounded numeric versions; grouping uses these fixed fields, never
-  hashes of original messages/stacks. Reprojection must preserve safe diagnostics.
-  Preserve detailed local, user-submitted support reports.
-  [SDK buffering rationale](../../.agents/notes/implemented/bug-fix/2026-10-29-workspace-telemetry-privacy.md).
+- Cloud Electron and its embedded CLI require an explicit device choice before collecting usage data. Other cloud surfaces retain their configured default. Honor opt-out before collection and delivery, including queued events, early boot reports and account-side analytics. Local composition always disables telemetry.
+
+- Disable session replay, DOM autocapture, network recording and person or workspace profile updates in every workspace.
+- Project analytics at the upload boundary, including queued requests. Allow fixed
+  event names, opaque identifiers, SDK/device/session metadata and fixed exception
+  categories. Drop application context, page titles and URLs, free text, stacks
+  and nested properties. User-submitted support reports have a separate delivery path.
 
 ## Streams token capability
 

@@ -1,13 +1,13 @@
+import { usageSharingRevision } from '@lody/shared/node/usage-sharing';
 import { PostHog } from 'posthog-node';
 import { redactedTelemetryException } from '@lody/platform/telemetry';
 import { resolvePlatformKind } from '@lody/shared/platform-kind';
 // The published package name stays `lody`, but the version must follow the
 // release manifest (`@/pkg`): cloud builds alias it to the composing package so
 // the bundle reports the version that was actually published to npm.
-import { name as packageName } from '../package.json';
 import { version as packageVersion } from '@/pkg';
 import { getRuntimeEnv } from './utils/runtime-env';
-import { readExistingMachineId } from './lib/machine-identity';
+import { randomUUID } from 'node:crypto';
 import { captureCli, flushCliAnalytics } from './lib/analytics/posthog';
 
 /** CLI and embedded cloud-daemon failures use a fixed error vocabulary. The
@@ -31,42 +31,12 @@ function resolveHost(): string {
   return host && host.trim() ? host.trim().replace(/\/+$/, '') : DEFAULT_HOST;
 }
 
-function resolveDistinctId(): string {
-  // Use the existing machine id (non-PII surrogate, never the user's email) without
-  // creating identity files or probing OS hardware before commands run.
-  try {
-    const machineId = readExistingMachineId();
-    if (machineId) return machineId;
-  } catch {
-    // fall through to a stable placeholder
-  }
-  return 'cli-unknown-machine';
-}
-
 const runtimeEnv = getRuntimeEnv();
 const apiKey = resolveApiKey();
-const release = `${packageName}@${packageVersion}`;
 const errorReportingEnabled = runtimeEnv !== 'dev' && !!apiKey;
-const distinctId = errorReportingEnabled && apiKey ? resolveDistinctId() : 'cli-unknown-machine';
+const distinctId = randomUUID();
 
 let client: PostHog | null = null;
-if (errorReportingEnabled && apiKey) {
-  client = new PostHog(apiKey, {
-    host: resolveHost(),
-    // Exceptions are rare; send promptly and flush explicitly before exit.
-    flushAt: 1,
-  });
-}
-
-const baseExceptionProps: Record<string, unknown> = {
-  $lib: 'lody-cli',
-  $lib_version: packageVersion,
-  platform: 'cli',
-  app_version: packageVersion,
-  env: runtimeEnv,
-  release,
-  machine_id: distinctId,
-};
 
 export const flushErrorReporting = async (timeoutMs = DEFAULT_FLUSH_TIMEOUT_MS): Promise<void> => {
   if (!client) return;
@@ -94,29 +64,20 @@ export const captureException = (
   error: unknown,
   context?: { component?: string; extra?: Record<string, unknown> }
 ): Promise<void> => {
-  if (!client) {
+  if (!errorReportingEnabled || !apiKey || !usageSharingRevision()) {
     return Promise.resolve();
   }
   try {
     // A daemon can own several workspaces. There is no process-wide plaintext
     // admission, including in the cloud desktop's embedded CLI.
+    client ??= new PostHog(apiKey, { host: resolveHost(), fetchRetryCount: 0, flushAt: 1 });
     const pending = client.captureImmediate({
       event: '$exception',
       distinctId,
       properties: {
-        ...baseExceptionProps,
-        ...redactedTelemetryException(
-          {
-            ...baseExceptionProps,
-            source:
-              context?.component === 'uncaughtException' ||
-              context?.component === 'unhandledRejection'
-                ? context.component
-                : 'captureException',
-            ...context?.extra,
-          },
-          error
-        ),
+        $lib: 'lody-cli',
+        $lib_version: packageVersion,
+        $exception_list: redactedTelemetryException(context?.extra, error).$exception_list,
       },
     });
     return Promise.race([
@@ -147,4 +108,5 @@ export const captureMessage = (
   return flushCliAnalytics();
 };
 
-export const isErrorReportingEnabled = () => errorReportingEnabled;
+export const isErrorReportingEnabled = () =>
+  errorReportingEnabled && usageSharingRevision() !== null;

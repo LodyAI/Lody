@@ -1,3 +1,4 @@
+import { usageSharingAllowed } from './usage-sharing';
 import { isHandledShortcutTokenError } from './shortcut-token-attempt';
 import type posthogJsType from 'posthog-js';
 import { isElectronRenderer } from './electron';
@@ -258,10 +259,10 @@ export function createDeferredPostHogController(
   };
 
   const runInit = (): boolean => {
+    if (resolveClient && !usageSharingAllowed()) return false;
     try {
       options.onBeforeInitialize?.(real());
       real().init(apiKey!, initOptions!);
-      postHogPrivacy.sync(true);
       initialized = true;
       initializationFailed = false;
       return true;
@@ -355,6 +356,7 @@ export function createDeferredPostHogController(
   };
 
   const enqueueOrInvoke = (method: DeferredMethod, args: unknown[]): unknown => {
+    if (disabled || (resolveClient && !usageSharingAllowed())) return undefined;
     if (method === 'captureException' && isHandledShortcutTokenError(args[0])) return undefined;
     // The privacy scrub applies only to the shared posthog-js SDK — the
     // controller that owns it is the one constructed with `resolveClient`.
@@ -588,13 +590,14 @@ function installDeferredPageLifecycleListeners(): void {
 }
 
 export function trackDeferredPostHogPageView(navigationKey: string): void {
-  deferredPostHogController.trackPageView(navigationKey);
+  if (usageSharingAllowed()) deferredPostHogController.trackPageView(navigationKey);
 }
 
 export function scheduleDeferredPostHogInitialization(
   apiKey: string | null | undefined,
   options: PostHogOptions
 ): void {
+  if (!usageSharingAllowed()) apiKey = null;
   const shouldCaptureStartupErrors = deferredPostHogController.configure(apiKey, options);
   if (apiKey?.trim()) {
     installDeferredPageLifecycleListeners();

@@ -89,6 +89,14 @@ lody start --auth <token>          # sign in and start the runtime in one step
 Store the token somewhere private (for example a secrets manager or a `LODY_AUTH` environment
 variable). It grants the same access as an interactive login for the workspaces you belong to.
 
+## Product analytics
+
+Cloud desktop asks whether to share usage data once you sign in, finish onboarding and enter your workspace. Returning users who have completed onboarding see the prompt in their signed-in workspace if they have not chosen. Collection starts only after you select **Allow sharing**. Change your choice in Settings → General → **Share app usage data**. Turning it off stops analytics on this device, including its desktop CLI and daemon when they use the same installation directory. Signed-in changes also control account-side analytics.
+
+For a standalone cloud CLI, set `LODY_DISABLE_USAGE_SHARING=1` in its environment to disable its usage analytics.
+
+Local builds disable PostHog. When a cloud CLI has analytics configured, it sends registered event names, event time, a random process identifier and library metadata. Automatic errors carry a fixed type and code. Command arguments, machine IDs, repository paths and error messages are excluded from these requests.
+
 ## Daemon Mode
 
 `lody daemon start` runs the Lody CLI in the background and keeps it available for desktop, web,

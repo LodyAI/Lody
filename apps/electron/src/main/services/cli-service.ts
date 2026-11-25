@@ -678,6 +678,7 @@ export class CliService {
     const envOverrides: NodeJS.ProcessEnv = {
       ...buildCliRuntimeEnvOverrides(),
       [CLI_ELECTRON_BOOTSTRAP_ENV]: '1',
+      LODY_REQUIRE_USAGE_SHARING_CHOICE: '1',
       [LODY_SUPERVISOR_CONTRACT_ENV]: LOCAL_CLI_SUPERVISOR_CONTRACT_VERSION,
       [LODY_SUPERVISOR_PID_ENV]: String(process.pid),
       [LODY_SUPERVISOR_INSTANCE_ID_ENV]: this.supervisorInstanceId,

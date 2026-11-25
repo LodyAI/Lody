@@ -10,6 +10,7 @@ describe('PostHog analytics helpers', () => {
   it('removes sensitive event properties while keeping opaque analytics ids', () => {
     expect(
       sanitizePostHogProperties({
+        user_id: 'user_123',
         workspace_id: 'workspace_123',
         $current_url: 'https://app.lody.ai/acme/session/session_123',
         $pathname: '/acme/session/session_123',
@@ -24,14 +25,7 @@ describe('PostHog analytics helpers', () => {
           ok: true,
         },
       })
-    ).toEqual({
-      workspace_id: 'workspace_123',
-      session_id: 'session_123',
-      machine_id: 'machine_123',
-      nested: {
-        ok: true,
-      },
-    });
+    ).toEqual({ user_id: 'user_123' });
   });
 
   it('keeps PostHog reserved transport keys out of the init property_denylist', () => {
@@ -57,9 +51,6 @@ describe('PostHog analytics helpers', () => {
       failure_reason: 'unknown',
     });
 
-    expect(capture).toHaveBeenCalledWith('session/start_failed', {
-      workspace_id: 'workspace_123',
-      failure_reason: 'unknown',
-    });
+    expect(capture).toHaveBeenCalledWith('session/start_failed', {});
   });
 });

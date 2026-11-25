@@ -1,5 +1,4 @@
 /** @vitest-environment jsdom */
-/** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   captureBootFailedBeacon,
@@ -114,7 +113,7 @@ describe('boot failure telemetry boundary', () => {
     });
     const error = new Error('PRIVATE_MESSAGE');
     error.name = 'PRIVATE_PATH';
-    captureBootFailedBeacon(error);
+    captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
     const wire = await new Promise<string>((resolve) => {
       const reader = new FileReader();
@@ -122,10 +121,14 @@ describe('boot failure telemetry boundary', () => {
       reader.readAsText(bodies[0]!);
     });
     expect(wire).not.toContain('PRIVATE_');
-    expect(JSON.parse(wire).properties.error_type).toBe('Error');
+    expect(JSON.parse(wire).properties).toEqual({ $process_person_profile: false });
     expect(collectBootDiagnostics(error).message).toContain('PRIVATE_MESSAGE');
+    window.localStorage.setItem('lody:usage-sharing', 'off');
+    captureBootFailedBeacon();
+    expect(bodies).toHaveLength(1);
+    window.localStorage.removeItem('lody:usage-sharing');
     vi.stubEnv('VITE_LODY_PLATFORM', 'local');
-    captureBootFailedBeacon(error);
+    captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
   });
 });

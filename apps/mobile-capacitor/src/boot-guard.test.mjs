@@ -180,10 +180,12 @@ void test('pre-React failure beacon excludes an error name carrying private meta
     { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }
   ).outputText;
   const beacons = [];
+  let sharing = true;
   let visibleError;
   const context = vm.createContext({
     Error,
     Blob,
+    crypto: globalThis.crypto,
     navigator: {
       onLine: true,
       sendBeacon(_url, body) {
@@ -198,6 +200,7 @@ void test('pre-React failure beacon excludes an error name carrying private meta
     '@capacitor/core': { Capacitor: { getPlatform: () => 'ios' } },
     '@capacitor/app': { App: {} },
     '@lody/components/lib/boot-failure': {
+      usageSharingAllowed: () => sharing,
       renderBootFailure(_root, error) {
         visibleError = error;
       },
@@ -233,6 +236,9 @@ void test('pre-React failure beacon excludes an error name carrying private meta
   assert.equal(beacons.length, 1);
   const wire = await beacons[0].text();
   assert.equal(wire.includes('PRIVATE_'), false);
-  assert.equal(JSON.parse(wire).properties.error_type, 'Error');
+  assert.deepEqual(JSON.parse(wire).properties, { $process_person_profile: false });
   assert.equal(visibleError, error, 'local copyable diagnostics retain the original');
+  sharing = false;
+  module.namespace.showMobileBootFailure({}, error);
+  assert.equal(beacons.length, 1);
 });

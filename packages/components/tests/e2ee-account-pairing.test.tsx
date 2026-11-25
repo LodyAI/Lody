@@ -1274,7 +1274,7 @@ describe('automatic pairing product flow', () => {
       await act(async () => find('e2ee.auto.later').click());
       expect(container.textContent).toContain('e2ee.auto.inbox');
       expect(codeInput()).toBeNull();
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
       await act(async () => find('e2ee.auto.inbox').click());
       expect(document.body.textContent).toContain('Synthetic team');
       expect(replay()).toBeNull();
@@ -1293,7 +1293,7 @@ describe('automatic pairing product flow', () => {
       await tick(2000);
       expect(authorized).toBe(true);
       expect(container.textContent).toBe('');
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
     } finally {
       removeTelemetryScope();
       focus.mockRestore();

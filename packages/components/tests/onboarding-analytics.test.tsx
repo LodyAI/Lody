@@ -67,7 +67,7 @@ describe('desktop onboarding analytics', () => {
     mocks.capture.mockReset();
   });
 
-  it('captures fixed trace fields and strips user-authored or raw-error properties', async () => {
+  it('reports the fixed event without onboarding fields', async () => {
     const platform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
       capabilities: CLOUD_PLATFORM_CAPABILITIES,
@@ -82,14 +82,7 @@ describe('desktop onboarding analytics', () => {
       );
     });
 
-    expect(mocks.capture).toHaveBeenCalledOnce();
-    expect(mocks.capture).toHaveBeenCalledWith('onboarding/operation_failed', {
-      flow_id: expect.any(String),
-      flow_schema_version: 1,
-      step: 'workspace',
-      operation: 'workspace_create',
-      failure_code: 'workspace_create_failed',
-    });
+    expect(mocks.capture.mock.calls).toEqual([['onboarding/operation_failed', {}]]);
   });
 
   it('does not capture or persist a flow id when telemetry is unavailable', async () => {
@@ -111,7 +104,7 @@ describe('desktop onboarding analytics', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
-  it('links a failed Summary retry to its started attempt without raw error detail', async () => {
+  it('reports the Summary retry and failure without attempt identifiers', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const platform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
@@ -138,18 +131,9 @@ describe('desktop onboarding analytics', () => {
       await Promise.resolve();
     });
 
-    const retryEvents = mocks.capture.mock.calls.filter(
-      ([, properties]) => properties.operation === 'agent_setup_retry_request'
-    );
-    expect(retryEvents.map(([event]) => event)).toEqual([
-      'onboarding/operation_started',
-      'onboarding/operation_failed',
+    expect(mocks.capture.mock.calls.slice(-2)).toEqual([
+      ['onboarding/operation_started', {}],
+      ['onboarding/operation_failed', {}],
     ]);
-    expect(retryEvents[1]?.[1]).toMatchObject({
-      failure_code: 'agent_setup_retry_failed',
-      retryable: true,
-    });
-    expect(retryEvents[1]?.[1]).not.toHaveProperty('message');
-    expect(retryEvents[1]?.[1].flow_id).toBe(retryEvents[0]?.[1].flow_id);
   });
 });
