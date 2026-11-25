@@ -3815,14 +3815,6 @@ export class SessionExecutionService {
     if (runtime?.cancelFinalized) {
       return Effect.void;
     }
-    const owningTurnId =
-      this.turnRuntimeBySession.get(options.sessionId)?.turnId ??
-      this.currentTurnBySession.get(options.sessionId) ??
-      this.deps.getActiveTurnId(options.sessionId);
-    if (!runtime && owningTurnId && owningTurnId !== options.turnId) {
-      this.clearTurnCancellation(options.sessionId, options.turnId);
-      return Effect.void;
-    }
 
     const self = this;
     return Effect.gen(function* () {
@@ -9021,7 +9013,13 @@ export class SessionExecutionService {
       this.turnRuntimeBySession.get(sessionId)?.turnId ??
       this.currentTurnBySession.get(sessionId) ??
       this.deps.getActiveTurnId(sessionId);
-    if (currentOwnerTurnId() !== turnId) {
+    const ownerTurnId = currentOwnerTurnId();
+    if (ownerTurnId !== turnId) {
+      if (this.deps.getActiveTurnId(sessionId) === turnId) {
+        this.markTurnCancelled(sessionId, turnId);
+      } else if (!ownerTurnId) {
+        await this.clearCancelRequest(sessionId);
+      }
       return { success: true };
     }
     this.pendingGoalTurnBySession.delete(sessionId);
@@ -9079,8 +9077,12 @@ export class SessionExecutionService {
     }
 
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    if (currentOwnerTurnId() !== turnId) {
+    const postDocOwnerTurnId = currentOwnerTurnId();
+    if (postDocOwnerTurnId !== turnId) {
       this.clearTurnCancellation(sessionId, turnId);
+      if (!postDocOwnerTurnId) {
+        await this.clearCancelRequest(sessionId);
+      }
       return { success: true };
     }
     if (this.getTurnRuntime(sessionId, turnId)) return this.cancelSession(message, options);
