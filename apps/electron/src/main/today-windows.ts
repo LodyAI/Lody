@@ -1,31 +1,60 @@
 import type { BrowserWindow } from 'electron'
-import { createMainWindow, focusMainWindow } from './window'
+import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
+import { adoptAuxiliaryReloadPath, createMainWindow, focusMainWindow } from './window'
 import { getTodayWindowPath, type TodayWindowTarget } from './today-window-target'
+import { isLocalPlatform } from './platform'
+import { createTodayWindowLifecycle } from './today-window-lifecycle'
+import {
+  isAppQuitting,
+  isWarmWindow,
+  markWarmWindow,
+  productWindows,
+  unmarkWarmWindow
+} from './window-state'
 
 const TODAY_WINDOW_BOOT_LOG_PREFIX = '[today-window] boot timeline'
+const TODAY_WINDOW_REOPEN_LOG_PREFIX = '[today-window] reopen'
 
 const TODAY_WINDOW_SIZE = { width: 440, height: 760, minWidth: 320, minHeight: 360 }
 
-/** One Today window per workspace: opening it again raises the existing one. */
-const todayWindows = new Map<string, BrowserWindow>()
+const lifecycle = createTodayWindowLifecycle<BrowserWindow>({
+  create: (target) => {
+    const requestedAt = Date.now()
+    const window = createMainWindow({
+      auxiliary: true,
+      companion: TODAY_WINDOW_SIZE,
+      initialPath: getTodayWindowPath(target)
+    })
+    traceTodayWindowBoot(window, requestedAt)
+    return window
+  },
+  focus: focusMainWindow,
+  bindChannel: IPC_PUSH_CHANNELS.appTodayWindowTarget,
+  canPark: (window) =>
+    isLocalPlatform() &&
+    !isAppQuitting() &&
+    [...productWindows].some(
+      (candidate) => candidate !== window && !candidate.isDestroyed() && !isWarmWindow(candidate)
+    ),
+  setParked: (window, parked) => (parked ? markWarmWindow(window) : unmarkWarmWindow(window)),
+  setTimer: (callback, ms) => {
+    const timer = setTimeout(callback, ms)
+    return () => clearTimeout(timer)
+  },
+  revealDeadlineMs: 1_500,
+  onReopened: (window, target, shown) => {
+    adoptAuxiliaryReloadPath(window, getTodayWindowPath(target))
+    console.info(`${TODAY_WINDOW_REOPEN_LOG_PREFIX} ${JSON.stringify({ shown })}`)
+  }
+})
 
 export function openTodayWindow(target: TodayWindowTarget): void {
-  const existing = todayWindows.get(target.workspace)
-  if (existing && !existing.isDestroyed()) {
-    focusMainWindow(existing)
-    return
-  }
-  const requestedAt = Date.now()
-  const window = createMainWindow({
-    auxiliary: true,
-    companion: TODAY_WINDOW_SIZE,
-    initialPath: getTodayWindowPath(target)
-  })
-  traceTodayWindowBoot(window, requestedAt)
-  todayWindows.set(target.workspace, window)
-  window.once('closed', () => {
-    if (todayWindows.get(target.workspace) === window) todayWindows.delete(target.workspace)
-  })
+  lifecycle.open(target)
+}
+
+/** The Today window committed the day it was bound to; show it if it is reopening. */
+export function revealTodayWindow(window: BrowserWindow, bindingId: number): void {
+  lifecycle.committed(window, bindingId)
 }
 
 /**
@@ -63,6 +92,10 @@ function traceTodayWindowBoot(window: BrowserWindow, requestedAt: number): void 
   })
 }
 
+export function closeTodayWindow(window: BrowserWindow): void {
+  lifecycle.close(window)
+}
+
 export function isTodayWindow(window: BrowserWindow | null): window is BrowserWindow {
-  return !!window && !window.isDestroyed() && [...todayWindows.values()].includes(window)
+  return !!window && lifecycle.has(window)
 }

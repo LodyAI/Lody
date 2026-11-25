@@ -679,8 +679,9 @@ export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWind
 /** Adopt a prepared view without navigating or replacing its renderer. */
 export function adoptPreparedMainWindow(window: BrowserWindow, target: ElectronWindowTarget): void {
   unmarkWarmWindow(window)
-  setReloadTarget(
-    window,
-    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
-  )
+  adoptAuxiliaryReloadPath(window, getWindowTargetPath(target))
+}
+
+export function adoptAuxiliaryReloadPath(window: BrowserWindow, path: string): void {
+  setReloadTarget(window, resolveMainRendererTarget(path, isDevbarRendererEnabled(), true))
 }

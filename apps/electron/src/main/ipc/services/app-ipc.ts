@@ -12,7 +12,12 @@ import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
 import { parseTodayWindowTarget } from '../../today-window-target'
-import { isTodayWindow, openTodayWindow } from '../../today-windows'
+import {
+  closeTodayWindow,
+  isTodayWindow,
+  openTodayWindow,
+  revealTodayWindow
+} from '../../today-windows'
 import { openLinkInMainWindow } from '../../window'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -218,6 +223,18 @@ export class AppIpc extends ProductWindowIpcService {
   @IpcMethod()
   async getTodayWindowAlwaysOnTop(): Promise<boolean> {
     return todayWindowSender().isAlwaysOnTop()
+  }
+
+  /** The Today window committed its bound day: a reopening window shows now. */
+  @IpcMethod()
+  async revealTodayWindow(bindingId: number): Promise<void> {
+    revealTodayWindow(todayWindowSender(), bindingId)
+  }
+
+  /** Closes for good, where the window's own close only parks it (experiment turned off). */
+  @IpcMethod()
+  async closeTodayWindow(): Promise<void> {
+    closeTodayWindow(todayWindowSender())
   }
 
   /** A conversation opened from the Today window shows in the primary window. */

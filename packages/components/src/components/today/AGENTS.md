@@ -45,3 +45,6 @@ Behavior: [Today Spec](../../../../../specs/today-outline.md). Files: [README.md
 - The desktop Today window route stays outside the `_auth` workspace layout and its runtime passes
   `backgroundWork: false`: it must not mount the sidebar, notifiers, badges or window-ownership election,
   nor start eager-sync. Its mentions open conversations in the primary window through main.
+- On local desktop, closing Today can retain one renderer outside the workspace route while another
+  product window remains. Reveal it only for the current day binding. On timeout replace it with
+  a cold open. [Decision](../../../../../.agents/notes/implemented/architecture/2026-11-25-today-window-local-open.md).

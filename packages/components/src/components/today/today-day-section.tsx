@@ -268,6 +268,7 @@ export function TodayDaySection(props: {
   date: TodayDate;
   today: TodayDate;
   isTop: boolean;
+  onPageReady?: () => void;
   /** A day's synced page is empty (skipped from the stream), or holds content again. */
   onEmptyChange: (date: TodayDate, empty: boolean) => void;
   /** Shows only this node and its subtree, under its text as the title. */
@@ -277,7 +278,16 @@ export function TodayDaySection(props: {
 }) {
   const { t, i18n } = useTranslation();
   const ref = useRef<HTMLElement | null>(null);
-  const page = useNearViewportPage(ref, props.cache, getTodayDocId(props.userId, props.date));
+  const page = useNearViewportPage(
+    ref,
+    props.cache,
+    getTodayDocId(props.userId, props.date),
+    props.isTop
+  );
+  const { onPageReady } = props;
+  useLayoutEffect(() => {
+    if (page.store || page.failed) onPageReady?.();
+  }, [onPageReady, page.store, page.failed]);
   const heading = formatTodayHeading(props.date, props.today, i18n.language);
   const { onOpenDay, date } = props;
   const label = (
@@ -340,7 +350,9 @@ function TodayStaticOutline(props: {
     if (!isTop) return undefined;
     markTodayWindowBoot('page-acquired');
     let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => markTodayWindowBoot('content-painted'));
+      frame = requestAnimationFrame(() => {
+        markTodayWindowBoot('content-painted');
+      });
     });
     void store.synced.then(() => markTodayWindowBoot('page-synced'));
     return () => cancelAnimationFrame(frame);
@@ -782,25 +794,27 @@ function TodayStaticText(props: { node: TodayNodeView }) {
 function useNearViewportPage(
   ref: React.RefObject<HTMLElement | null>,
   cache: TodayPageStoreCache,
-  docId: string
+  docId: string,
+  eager: boolean
 ): { store: TodayPageStore | undefined; failed: boolean; retry: () => void } {
   const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined');
+  const shouldAcquire = eager || near;
   const [store, setStore] = useState<TodayPageStore | undefined>(() => cache.peek(docId));
   const [failed, setFailed] = useState(false);
   // Bumped by Retry: a failed open is not cached, so acquiring again starts over.
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const element = ref.current;
-    if (!element || typeof IntersectionObserver === 'undefined') return undefined;
+    if (eager || !element || typeof IntersectionObserver === 'undefined') return undefined;
     const observer = new IntersectionObserver(
       (entries) => setNear(entries.some((entry) => entry.isIntersecting)),
       { rootMargin: '150% 0px' }
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [eager, ref]);
   useEffect(() => {
-    if (!near) return undefined;
+    if (!shouldAcquire) return undefined;
     let cancelled = false;
     let held = false;
     setFailed(false);
@@ -823,7 +837,7 @@ function useNearViewportPage(
       setStore(undefined);
       if (held) cache.releaseRef(docId);
     };
-  }, [attempt, cache, docId, near]);
+  }, [attempt, cache, docId, shouldAcquire]);
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
   return { store, failed, retry };
 }

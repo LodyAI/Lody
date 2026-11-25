@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useStore } from 'jotai';
+import { docMetaSubscriptionAtom } from '@/atoms/doc-meta';
+import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useTranslation } from 'react-i18next';
 import { buildSessionLink } from '@lody/shared/session-link';
+import { revealTodayWindow } from '@/lib/desktop-window';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 import { WorkspaceCard } from '../workspace-frame';
@@ -13,13 +17,32 @@ import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
  * the window ground. Its pin keeps the window above all others; conversations open
  * in the primary window. Behavior: specs/today-outline.md (Switch and entry).
  */
-export function TodayWindow(props: { memberId?: string; anchorDate?: string }) {
+export function TodayWindow(props: { memberId?: string; anchorDate?: string; bindingId: number }) {
   const { t } = useTranslation();
   markTodayWindowBoot('view-chunk');
   const [target, setTarget] = useState<TodayViewTarget>({
     member: props.memberId,
     date: props.anchorDate,
   });
+  const store = useStore();
+  const [dayReady, setDayReady] = useState(false);
+  const onDayReady = useCallback(() => {
+    revealTodayWindow(props.bindingId);
+    setDayReady(true);
+  }, [props.bindingId]);
+  useEffect(() => {
+    if (!dayReady || !isLocalAppPlatform()) return undefined;
+    let unsubscribe: (() => void) | undefined;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        unsubscribe = store.sub(docMetaSubscriptionAtom, () => {});
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      unsubscribe?.();
+    };
+  }, [dayReady, store]);
   const [onTop, setOnTop] = useState(false);
   useEffect(() => {
     let current = true;
@@ -46,6 +69,7 @@ export function TodayWindow(props: { memberId?: string; anchorDate?: string }) {
           target={target}
           onNavigate={setTarget}
           standalone
+          onDayReady={onDayReady}
           pinned={onTop}
           onTogglePin={() => {
             void getIpcServices()

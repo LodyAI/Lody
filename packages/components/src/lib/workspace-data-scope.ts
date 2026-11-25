@@ -51,6 +51,7 @@ export function resolveWorkspaceDataScope({
   docMetaScope,
   organizationsReady,
   expectedWorkspaceId,
+  docMetaRequired = true,
 }: {
   targetSlug: string;
   runtime: WorkspaceRuntime | null;
@@ -58,6 +59,7 @@ export function resolveWorkspaceDataScope({
   docMetaScope: DocMetaCacheScope | null;
   organizationsReady: boolean;
   expectedWorkspaceId: string | null;
+  docMetaRequired?: boolean;
 }): WorkspaceDataScopeState {
   if (!runtime) {
     const failed = runtimeInitFailure?.workspaceSlug === targetSlug;
@@ -70,7 +72,10 @@ export function resolveWorkspaceDataScope({
   if (runtime.workspaceSlug !== targetSlug) {
     return { status: 'switching', targetSlug, blocker: 'runtime_other_workspace' };
   }
-  if (!docMetaScope || docMetaScope.runtime !== runtime || !docMetaScope.ready) {
+  if (
+    docMetaRequired &&
+    (!docMetaScope || docMetaScope.runtime !== runtime || !docMetaScope.ready)
+  ) {
     const failed = docMetaScope?.runtime === runtime && docMetaScope.scanFailure !== undefined;
     return {
       status: 'switching',

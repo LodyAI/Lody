@@ -27,6 +27,7 @@ export const ELECTRON_TEST_GROUPS = [
       'src/main/desktop-log-core.test.mjs',
       'src/main/renderer-hang-watchdog.test.mjs',
       'src/main/close-focused-tab-or-window.test.mjs',
+      'src/main/today-window-lifecycle.test.mjs',
       'src/main/context-menu-template.test.mjs',
       'src/main/window-theme.test.mjs',
       'src/main/desktop-channel.test.mjs',

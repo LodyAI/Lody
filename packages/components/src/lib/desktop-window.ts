@@ -45,6 +45,20 @@ export function openTodayWindow(target: {
   return true;
 }
 
+export function closeTodayWindow(): void {
+  const services = getIpcServices();
+  if (!services) {
+    window.close();
+    return;
+  }
+  void services.app.closeTodayWindow().catch(console.error);
+}
+
+export function revealTodayWindow(bindingId: number): void {
+  if (!isTodayWindow()) return;
+  void getIpcServices()?.app.revealTodayWindow(bindingId).catch(console.error);
+}
+
 // Preserve the primary window's existing drafts and navigation. Auxiliary
 // windows start empty and keep their own view state across reloads.
 export const windowStorage = (): Storage =>

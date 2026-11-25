@@ -4,7 +4,9 @@ import { BootNavigate } from '@/components/boot-navigate';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
-import { isWarmWindow } from '@/lib/desktop-window';
+import { closeTodayWindow, isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
+import { useAtomValue } from 'jotai';
+import { todayFeatureEnabledAtom } from '@/atoms/settings';
 import { RouteMessage } from '@/components/route-message';
 import { useEffect, useState } from 'react';
 import { useStableSession } from '@/hooks/useStableSession';
@@ -31,12 +33,21 @@ export function HomeRoute({ destination }: { destination?: HomeDestination } = {
   // The spare stays natively hidden on `/` while RuntimeProvider prepares the
   // local workspace. Target UI mounts only after the window is claimed.
   if (isWarmWindow()) return null;
+  if (isTodayWindow()) return <ParkedTodayWindow />;
   // Local (open-source) platform: no login route exists. Land straight on the
   // single implicit workspace once the CLI has provisioned it.
   if (isLocalAppPlatform()) {
     return <LocalHomeRoute />;
   }
   return <CloudHomeRoute destination={destination} />;
+}
+
+function ParkedTodayWindow() {
+  const enabled = useAtomValue(todayFeatureEnabledAtom);
+  useEffect(() => {
+    if (!enabled) closeTodayWindow();
+  }, [enabled]);
+  return null;
 }
 
 function LocalHomeRoute() {

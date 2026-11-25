@@ -28,3 +28,13 @@ Data model and undo: `packages/shared/src/today-outline.ts` (a mention is one ma
 
 Desktop window cold-open phases: `src/lib/today/today-window-boot-timeline.ts`; main logs them with its own
 milestones as one `[today-window] boot timeline` JSON line per open.
+
+The top day opens from the workspace's local page store as soon as the matching runtime is ready.
+The local standalone window starts the conversation metadata scan after the first day paints.
+Mentions use the projection as it becomes available. Earlier days acquire their page stores
+near the viewport.
+
+The local desktop can retain one previously opened Today renderer while another product window
+remains. The hidden window goes to the root route and releases its workspace runtime. Reopening
+binds a new day and shows the window once its local outline or retry UI commits. If the binding
+times out, main replaces the renderer with a cold open. Cloud windows use the normal close path.

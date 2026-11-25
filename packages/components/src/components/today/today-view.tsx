@@ -244,10 +244,11 @@ export function TodayView(props: {
   onTogglePin?: () => void;
   /** Rendered as the desktop's standalone Today window. */
   standalone?: boolean;
+  onDayReady?: () => void;
   onOpenSession?: TodayOpenSession;
 }) {
   const { t, i18n } = useTranslation();
-  const scope = useResolvedWorkspaceScope();
+  const scope = useResolvedWorkspaceScope({ docMetaRequired: false });
   const activeRuntime = useAtomValue(runtimeAtom);
   const runtime =
     scope.enabled && activeRuntime && scope.workspaceId === activeRuntime.workspaceId
@@ -574,6 +575,7 @@ export function TodayView(props: {
                 date={date}
                 today={today}
                 isTop={index === 0}
+                onPageReady={index === 0 ? props.onDayReady : undefined}
                 onEmptyChange={onEmptyChange}
                 zoomRoot={zoomRoot}
                 onOpenDay={focusDate ? undefined : nav.openDay}

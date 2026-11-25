@@ -7,6 +7,7 @@ import { observePreparedTarget, waitForTargetContentPainted } from './warm-windo
 import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
 import {
   isSessionWindow,
+  isTodayWindow,
   isWarmWindow,
   clearWarmWindowFlag
 } from '@lody/components/lib/desktop-window'
@@ -134,6 +135,26 @@ function RendererCommitSentinel(): null {
   return null
 }
 
+function installTodayWindowBinding(router: ReturnType<typeof createRouter>): void {
+  if (!isTodayWindow()) return
+  const workspaceName = router.history.location.pathname.split('/')[1]
+  if (!workspaceName) return
+  onIpcEvent('app.todayWindowTarget', (binding) => {
+    void (
+      binding
+        ? router.navigate({
+            to: '/$workspaceName/today-window',
+            params: { workspaceName },
+            search: binding,
+            replace: true
+          })
+        : router.navigate({ to: '/', replace: true })
+    ).catch((error) => {
+      console.error('[today-window] Could not bind the Today route', error)
+    })
+  })
+}
+
 /**
  * Binds a claimed warm window to a concrete route without a reload. The renderer
  * is already booted; this reproduces the storage flags a fresh auxiliary window
@@ -251,6 +272,7 @@ try {
     history: usesHashHistory ? createHashHistory() : undefined
   })
   installWarmWindowBinding(router)
+  installTodayWindowBinding(router)
   installWindowPreparationIntent()
   if (isWarmWindow()) {
     void preloadMainLayout().catch((error) => {

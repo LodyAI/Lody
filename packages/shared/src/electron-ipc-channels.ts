@@ -42,6 +42,8 @@ export type IpcPushMap = {
   'app.windowTarget': ElectronWindowTarget;
   'app.prepareWindowTarget': PreparedWindowTarget;
   'app.activatePreparedWindow': PreparedWindowTarget;
+  /** The parked Today window's next day to show, or null to park (leave its workspace). */
+  'app.todayWindowTarget': { member?: string; date?: string; bindingId: number } | null;
   /** Re-read hint only: the renderer learns the exact reason from its own refresh. */
   'e2ee.accessLost': { workspaceId: string };
   /** OS sleep/lock transitions; lock events exist on macOS and Windows only. */
@@ -87,6 +89,7 @@ export const IPC_PUSH_CHANNELS = {
   appWindowTarget: 'app.windowTarget',
   appPrepareWindowTarget: 'app.prepareWindowTarget',
   appActivatePreparedWindow: 'app.activatePreparedWindow',
+  appTodayWindowTarget: 'app.todayWindowTarget',
   e2eeAccessLost: 'e2ee.accessLost',
   appPowerState: 'app.powerState',
   e2eeRecoveryProgress: 'e2ee.recoveryProgress',
