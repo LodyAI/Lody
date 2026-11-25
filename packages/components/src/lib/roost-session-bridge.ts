@@ -304,14 +304,17 @@ function routeRoostHistory(
   let selection: SelectedReader | undefined;
   let selectionNumber = 0;
   let opening: Promise<SelectedReader> | undefined;
+  let planeCheck: Promise<boolean> | undefined;
   let streamProbe: Promise<void> | undefined;
   let ownerAdmission: OwnerAdmission | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
   let disposed = false;
   let cloudAllowed = false;
+  let pendingReads = 0;
   let lastStatus: RoostHistorySyncState | undefined;
   const observers = new Set<Observer>();
+  const hasReaders = () => observers.size > 0 || pendingReads > 0;
   const closeError = () => new DOMException('Roost session bridge is disposed', 'AbortError');
 
   const assertOpen = () => {
@@ -367,12 +370,12 @@ function routeRoostHistory(
     retry = undefined;
   };
   const scheduleRetry = () => {
-    if (retry || disposed || !cloudAllowed || !observers.size || !active()) return;
+    if (retry || disposed || !cloudAllowed || !hasReaders() || !active()) return;
     failures++;
     retry = setTimeout(
       () => {
         retry = undefined;
-        if (observers.size && active()) void probeStreams();
+        if (hasReaders() && active()) void probeStreams();
       },
       Math.min(30_000, 500 * 2 ** Math.min(failures, 6))
     );
@@ -386,28 +389,32 @@ function routeRoostHistory(
     emitStatus();
     pending?.resumeStreams();
   };
-  const checkPlane = async () => {
-    const allowed = await allowCloud();
-    assertOpen();
-    if (cloudAllowed && !allowed) {
-      clearRetry();
-      const pending = ownerAdmission;
-      ownerAdmission = undefined;
-      select(owner);
-      pending?.resumeStreams();
-    }
-    cloudAllowed = allowed;
-    emitStatus();
-    return allowed;
-  };
+  const checkPlane = () =>
+    (planeCheck ??= (async () => {
+      const allowed = await allowCloud();
+      assertOpen();
+      if (cloudAllowed !== allowed) {
+        cloudAllowed = allowed;
+        clearRetry();
+        failures = 0;
+        const pending = ownerAdmission;
+        ownerAdmission = undefined;
+        if (selection) select(allowed ? cloud.history : owner);
+        pending?.resumeStreams();
+      }
+      emitStatus();
+      return allowed;
+    })().finally(() => {
+      planeCheck = undefined;
+    }));
   const probeStreams = () =>
     (streamProbe ??= (async () => {
       if (!(await checkPlane()) || cloud.syncStatus().phase === 'refused') return;
       await cloud.prepareLatestWindow();
       if (await checkPlane()) settleStreams();
     })()
-      .catch((error) => {
-        if (canReadRoostHistoryFromOwnerAfter(error)) scheduleRetry();
+      .catch(() => {
+        if (cloud.syncStatus().phase !== 'refused') scheduleRetry();
       })
       .finally(() => {
         streamProbe = undefined;
@@ -425,8 +432,7 @@ function routeRoostHistory(
   };
   const recoverOwner = () => {
     if (ownerAdmission) return ownerAdmission.result;
-    if (disposed || selection?.reader !== cloud.history || !cloudAllowed)
-      return Promise.resolve();
+    if (disposed || selection?.reader !== cloud.history || !cloudAllowed) return Promise.resolve();
     if (cloud.syncStatus().phase === 'refused') return Promise.resolve();
 
     const selected = selection;
@@ -479,7 +485,7 @@ function routeRoostHistory(
       selection?.reader === cloud.history &&
       observers.size &&
       active() &&
-      cloud.canRecoverFromOwner()
+      cloud.ownerReadAllowed()
     )
       void recoverOwner().catch(() => {});
   });
@@ -502,7 +508,9 @@ function routeRoostHistory(
       signal.removeEventListener('abort', invalidate);
     }
   };
-  const read = async <T>(work: (selected: SelectedReader) => T | Promise<T>): Promise<T> => {
+  const readSelected = async <T>(
+    work: (selected: SelectedReader) => T | Promise<T>
+  ): Promise<T> => {
     let retriedStreams = false;
     for (;;) {
       const selected = await initialReader();
@@ -530,6 +538,16 @@ function routeRoostHistory(
         assertOpen();
         if (selection === selected) throw error;
       }
+    }
+  };
+  const read = async <T>(work: (selected: SelectedReader) => T | Promise<T>): Promise<T> => {
+    pendingReads++;
+    try {
+      if (selection?.reader === owner && cloudAllowed && !retry && active()) void probeStreams();
+      return await readSelected(work);
+    } finally {
+      pendingReads--;
+      if (!hasReaders()) clearRetry();
     }
   };
   const pageWithSource = (selected: SelectedReader, page: SessionHistoryDirectoryPage) =>
@@ -578,7 +596,7 @@ function routeRoostHistory(
         unsubscribe() {
           observers.delete(observer);
           observer.observation?.unsubscribe();
-          if (!observers.size) clearRetry();
+          if (!hasReaders()) clearRetry();
         },
       };
     },

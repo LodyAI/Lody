@@ -2339,6 +2339,7 @@
   "sessions.historySync.machine": "历史来自目标机器",
   "sessions.historySync.streams": "历史来自 Lody Streams",
   "sessions.historySync.checking": "正在确认云端历史",
+  "sessions.historySync.ownerRequired": "需要目标机器确认历史读取权限",
   "sessions.historySync.pending": "等待发布云端历史",
   "sessions.historySync.syncing": "正在同步云端历史",
   "sessions.historySync.unconfirmed": "暂未确认云端历史可用，正在重试",

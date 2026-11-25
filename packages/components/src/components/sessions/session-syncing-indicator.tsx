@@ -39,6 +39,12 @@ export function RoostHistorySyncIndicator({ state }: { state: RoostHistorySyncSt
     case 'pending':
       detail = t('sessions.historySync.pending', 'Waiting for cloud publication');
       break;
+    case 'owner-required':
+      detail = t(
+        'sessions.historySync.ownerRequired',
+        'The target machine must confirm access to this history'
+      );
+      break;
     case 'syncing':
       detail = t('sessions.historySync.syncing', 'Syncing cloud history');
       break;

@@ -294,14 +294,18 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 A remote plaintext Roost session starts by requesting an exact-session Streams
 grant. Metadata publication fields wake the reader. The grant authorizes and
 identifies the replica, including when those fields have yet to arrive. The
-server reports pending publication separately from an access refusal. Pending
-publication or temporary transport failure lets the owning machine admit a fresh
-exact-session read. An access refusal ends the read route.
+server distinguishes pending publication, access that requires the target
+machine, and refusal. Pending publication, required machine authorization, or
+temporary transport failure lets the owning machine admit a fresh exact-session
+read. A Streams access refusal ends that read route.
 
 During machine admission and while the machine serves history, Streams can
 prepare a window at a captured tail independently. The route switches when
-that window is readable. Changing sources wakes waiting reads and expires
-replies and paging cursors from the previous selection. The status shows the
+that window is readable. The replica renews its exact-session grant before
+serving an expired window. A new grant for a different generation retires the
+old replica and restarts the affected read on Streams. Changing sources wakes
+waiting reads and expires replies and paging cursors from the previous selection.
+The status shows the
 selected source, pending publication, retry or refusal, and whether a prior
 publication is still being served. Electron reads its own machine through
 local session control. A shared snapshot catches up to an observed Streams tail

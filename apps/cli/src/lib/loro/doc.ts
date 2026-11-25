@@ -59,8 +59,6 @@ import {
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
-  isContainedSession,
-  type RoostCloudHistoryAuthority,
   type RoostCloudHistoryBinding,
   NEW_SESSION_HISTORY_BACKEND,
   LEGACY_SESSION_HISTORY_BACKEND,
@@ -589,63 +587,34 @@ export class LoroDocumentManager {
     };
     const owns = (meta: SessionMeta | undefined): meta is SessionMeta =>
       meta?.machineId === machineId && meta.historyBackend === 'roost';
-    const historyAuthority = async (sessionId: SessionId, signal: AbortSignal) => {
-      const meta = await metadata(sessionId, signal);
-      if (!owns(meta)) return;
-      const child = { ...meta, id: sessionId };
-      const parentId = child.parentSessionId;
-      const parentMeta = parentId ? await metadata(parentId, signal) : undefined;
-      const parent = parentMeta && parentId ? { ...parentMeta, id: parentId } : undefined;
-      const root = parent && isContainedSession(child, parent) ? parent : child;
-      const authority: RoostCloudHistoryAuthority = {
-        rootSessionId: root.id,
-        sessionOwnerUserId: root.userId,
-        localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
-      };
-      return { authority, meta };
-    };
-    const indexed = new Map<SessionId, SessionId | undefined>();
-    const published = new Map<
-      SessionId,
-      {
-        binding: RoostCloudHistoryBinding;
-        authority: RoostCloudHistoryAuthority;
-      }
-    >();
+    const indexed = new Set<SessionId>();
+    const published = new Map<SessionId, RoostCloudHistoryBinding>();
     const createPublisher = () =>
       new RoostCloudHistoryPublisher({
         workspaceId: this.workspaceId,
         machineId,
         grant: async (sessionId, binding, signal) => {
-          const source = await historyAuthority(sessionId, signal);
-          signal.throwIfAborted();
-          if (!source) throw new Error('Roost history owner changed');
-          return await cloud.uploadGrant(
-            { ...target(sessionId), binding, authority: source.authority },
-            signal
-          );
+          if (!owns(await metadata(sessionId, signal)))
+            throw new Error('Roost history owner changed');
+          return await cloud.uploadGrant({ ...target(sessionId), binding }, signal);
         },
         isOwned: async (sessionId, signal) => {
           const meta = await metadata(sessionId, signal);
           if (!owns(meta)) return false;
-          indexed.set(sessionId, meta.parentSessionId);
+          indexed.add(sessionId);
           return true;
         },
         publish: async (sessionId, binding, signal) => {
-          const source = await historyAuthority(sessionId, signal);
-          if (!source) return;
-          const { authority, meta } = source;
-          signal.throwIfAborted();
-          const notice = { binding, authority };
-          if (!isDeepStrictEqual(published.get(sessionId), notice)) {
-            await cloud.publish({ ...target(sessionId), ...notice }, signal);
-            published.set(sessionId, notice);
+          if (!owns(await metadata(sessionId, signal))) return;
+          if (!isDeepStrictEqual(published.get(sessionId), binding)) {
+            await cloud.publish({ ...target(sessionId), binding }, signal);
+            published.set(sessionId, binding);
           }
           const roostCloudGeneration = binding.generation;
           const roostCloudAuthor = binding.ownerPublicKey;
-          signal.throwIfAborted();
+          const meta = await metadata(sessionId, signal);
           if (
-            !owns(await metadata(sessionId, signal)) ||
+            !owns(meta) ||
             (meta.roostCloudGeneration === roostCloudGeneration &&
               meta.roostCloudAuthor === roostCloudAuthor)
           )
@@ -677,24 +646,20 @@ export class LoroDocumentManager {
           if (indexed.delete(sessionId)) this.enqueueRoostCloudHistory(sessionId, true);
         } else if (event.kind === 'doc-metadata') {
           if (event.patch.machineId === machineId && event.patch.historyBackend === 'roost')
-            indexed.set(sessionId, event.patch.parentSessionId as SessionId | undefined);
-          if (indexed.has(sessionId) && 'parentSessionId' in event.patch)
-            indexed.set(sessionId, event.patch.parentSessionId as SessionId | undefined);
+            indexed.add(sessionId);
           if (
             indexed.has(sessionId) ||
             event.patch.historyBackend === 'roost' ||
             event.patch.machineId === machineId
           )
             this.enqueueRoostCloudHistory(sessionId);
-          for (const [childId, parentId] of indexed)
-            if (parentId === sessionId) this.enqueueRoostCloudHistory(childId);
         }
       },
       {
         query: { prefix: SESSION_DOC_PREFIX },
         filter: {
           kinds: ['doc-metadata', 'doc-existence-changed'],
-          metadataFields: ['historyBackend', 'machineId', 'parentSessionId', 'userId', 'project'],
+          metadataFields: ['historyBackend', 'machineId'],
         },
       }
     );
@@ -710,7 +675,7 @@ export class LoroDocumentManager {
       if (!sessionId || !owns(meta)) continue;
       if (row.deleted) this.enqueueRoostCloudHistory(sessionId, true);
       else {
-        indexed.set(sessionId, meta.parentSessionId);
+        indexed.add(sessionId);
         this.enqueueRoostCloudHistory(sessionId);
       }
     }

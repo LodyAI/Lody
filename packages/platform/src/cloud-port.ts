@@ -22,7 +22,6 @@ import type {
   MachineId,
   SessionId,
   WorkspaceId,
-  RoostCloudHistoryAuthority,
   RoostCloudHistoryBinding,
   RoostCloudHistoryGrant,
   RoostCloudHistoryTarget,
@@ -210,14 +209,12 @@ export interface CloudAccessPort {
     uploadGrant(
       request: RoostCloudHistoryTarget & {
         binding: RoostCloudHistoryBinding;
-        authority: RoostCloudHistoryAuthority;
       },
       signal: AbortSignal
     ): Promise<RoostCloudHistoryGrant>;
     publish(
       request: RoostCloudHistoryTarget & {
         binding: RoostCloudHistoryBinding;
-        authority: RoostCloudHistoryAuthority;
       },
       signal: AbortSignal
     ): Promise<void>;

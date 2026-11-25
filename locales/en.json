@@ -2339,6 +2339,7 @@
   "sessions.historySync.machine": "History from the target machine",
   "sessions.historySync.streams": "History from Lody Streams",
   "sessions.historySync.checking": "Checking cloud history",
+  "sessions.historySync.ownerRequired": "The target machine must confirm access to this history",
   "sessions.historySync.pending": "Waiting for cloud publication",
   "sessions.historySync.syncing": "Syncing cloud history",
   "sessions.historySync.unconfirmed": "Cloud history unconfirmed, retrying",

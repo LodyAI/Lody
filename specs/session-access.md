@@ -77,11 +77,14 @@ terminal methods, or other sessions. Ordinary history writes require a separate
 editing proof. Owner-served history requires the machine to be available. Loro retains its
 document reader.
 
-Ordinary cloud viewers can also read published Roost history while the owning
-machine is offline. The service resolves the published generation from that
-machine's authenticated registration and uses the same session sharing rules.
-The grant covers a single published stream and expires within 60 seconds. The
-next grant reevaluates access after withdrawal. Editing still requires the owner.
+The machine owner and current workspace members with an explicit grant on that
+conversation can read published Roost history while the machine is offline.
+The service resolves the generation from an authenticated machine registration
+and checks the current protected sharing policy. Access inferred from assignment,
+containment, or machine/project sharing requires the serving machine. The
+detached read grant covers one stream and expires within 60 seconds. Each
+issuance reevaluates access and observes conversation removal. Editing still
+requires the owner.
 
 ## Interface
 
@@ -103,12 +106,12 @@ editing authority before writing; assignment/read grants do not pass that guard.
 
 ## Accepted trust boundary and later phases
 
-**This prevents accidental interface exposure for honest members; it does not
-isolate malicious members who directly edit synchronized data.** `machineId`,
+**Directory visibility and machine routing prevent accidental interface exposure
+for honest members.** `machineId`,
 containment and `userId` are mutable CRDT metadata. A malicious member can forge
 those fields and defeat these visibility/read-routing rules, including the assigned-owner
-fallback. Owner accepted that boundary on 2026-11-10; there is no authoritative
-session-to-machine registry in this phase.
+fallback. Owner accepted that boundary on 2026-11-10. Detached Roost grants use
+the protected publication and explicit sharing records.
 
 **E2EE privacy is interface hiding, not cryptographic privacy.** Members retain
 workspace content keys and may recover content outside this interface. Stronger

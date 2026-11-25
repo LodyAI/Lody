@@ -11,16 +11,6 @@ export const roostCloudHistoryBindingSchema = z.object({
 
 export type RoostCloudHistoryBinding = z.infer<typeof roostCloudHistoryBindingSchema>;
 
-export const roostCloudHistoryAuthoritySchema = z
-  .object({
-    rootSessionId: z.string().min(1).max(512),
-    sessionOwnerUserId: z.string().min(1).max(512).optional(),
-    localProjectId: z.string().min(1).max(512).optional(),
-  })
-  .strict();
-
-export type RoostCloudHistoryAuthority = z.infer<typeof roostCloudHistoryAuthoritySchema>;
-
 export const roostCloudHistoryGrantSchema = z.object({
   binding: roostCloudHistoryBindingSchema,
   streamUrl: z.url(),
@@ -32,6 +22,7 @@ export type RoostCloudHistoryGrant = z.infer<typeof roostCloudHistoryGrantSchema
 
 export const roostCloudHistoryReadResultSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('pending') }).strict(),
+  z.object({ state: z.literal('owner-required') }).strict(),
   roostCloudHistoryGrantSchema.extend({
     state: z.literal('published'),
     newerVersionPending: z.boolean(),
@@ -41,7 +32,15 @@ export const roostCloudHistoryReadResultSchema = z.discriminatedUnion('state', [
 export type RoostCloudHistoryReadResult = z.infer<typeof roostCloudHistoryReadResultSchema>;
 
 export type RoostCloudSyncState = {
-  phase: 'idle' | 'checking' | 'pending' | 'syncing' | 'ready' | 'retrying' | 'refused';
+  phase:
+    | 'idle'
+    | 'checking'
+    | 'pending'
+    | 'owner-required'
+    | 'syncing'
+    | 'ready'
+    | 'retrying'
+    | 'refused';
   httpStatus?: number;
   newerVersionPending?: boolean;
 };

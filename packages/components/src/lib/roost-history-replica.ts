@@ -69,11 +69,18 @@ const MAX_WINDOW_BYTES = 64 * 1024 * 1024;
 const byteOffset = (value: string | undefined) =>
   value !== undefined && /^\d+$/.test(value) ? BigInt(value) : undefined;
 
+class OwnerAuthorizationRequired extends Error {
+  constructor() {
+    super('Roost history requires authorization from the target machine');
+  }
+}
+
 export function canReadRoostHistoryFromOwnerAfter(error: unknown): boolean {
   if ((error instanceof HistoryError || error instanceof LinkError) && error.code === 'transport')
     error = error.cause;
   return (
     error instanceof RoostCloudHistoryPendingError ||
+    error instanceof OwnerAuthorizationRequired ||
     error instanceof RoostCloudHistoryTransportError ||
     (error instanceof RoostCloudHistoryRequestError && error.retryable) ||
     (error instanceof TransportError && error.code === 'unavailable') ||
@@ -205,7 +212,6 @@ type Replica = {
   transport?: StreamsTransport;
   streamClient?: StreamsClient;
   livePage?: { offset: string; page: ReadPage };
-  grant?: { value: PublishedGrant; expires: number };
   endpoint?: string;
 };
 type CachedTurn = { position: number; turn: SessionEntry; segments: Uint8Array[]; dirty: boolean };
@@ -231,7 +237,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   history: SessionHistoryReader;
   watchPublication(listener: () => void): () => void;
   syncStatus(): RoostCloudSyncState;
-  canRecoverFromOwner(): boolean;
+  ownerReadAllowed(): boolean;
   watchSyncStatus(listener: () => void): () => void;
   prepareLatestWindow(): Promise<void>;
   readPublishedSnapshot(): Promise<SessionEntry[]>;
@@ -260,7 +266,9 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   let failures = 0;
   let lastBranchRevision: bigint | undefined;
   let totalCount = 0;
-  let observedBinding: RoostCloudHistoryBinding | undefined;
+  let currentBinding: RoostCloudHistoryBinding | undefined;
+  let latestGrant: { value: PublishedGrant; expires: number } | undefined;
+  let pendingGrant: Promise<PublishedGrant> | undefined;
   let forceGrant = false;
   let terminal: RoostCloudHistoryRequestError | undefined;
   let readDeadline: AbortSignal | undefined;
@@ -275,8 +283,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   ) => {
     if (abort.signal.aborted) return;
     const ownerRecoveryChanged =
-      canReadRoostHistoryFromOwnerAfter(readFailure) !==
-      canReadRoostHistoryFromOwnerAfter(failure);
+      canReadRoostHistoryFromOwnerAfter(readFailure) !== canReadRoostHistoryFromOwnerAfter(failure);
     readFailure = failure;
     if (
       !ownerRecoveryChanged &&
@@ -293,32 +300,46 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     for (const listener of statusListeners) listener();
   };
 
-  const assertLive = () => {
+  const assertOpen = () => {
     if (abort.signal.aborted) throw new Error('Roost history replica is disposed');
     if (terminal) throw terminal;
+  };
+  const assertLive = () => {
+    assertOpen();
     readDeadline?.throwIfAborted();
   };
-  const stopOnRefusal = (error: unknown) => {
-    if (
-      error instanceof RoostCloudHistoryRequestError &&
-      !error.retryable &&
-      terminal?.status !== error.status
-    ) {
-      terminal = error;
-      report('refused', error.status, false);
-      bodies.clear();
-      positions.clear();
-      cursors.clear();
-      lastBranchRevision = undefined;
-      options.onSyncState?.({ reason: error.message });
-    }
+  const invalidateWindow = () => {
+    const hadWindow = lastBranchRevision !== undefined;
+    bodies.clear();
+    positions.clear();
+    cursors.clear();
+    lastBranchRevision = undefined;
+    if (hadWindow)
+      for (const listener of listeners)
+        listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
   };
+
   const reportFailure = (error: unknown) => {
-    if (abort.signal.aborted) return;
-    stopOnRefusal(error);
-    if (terminal) return;
-    if (error instanceof RoostCloudHistoryPendingError) {
-      report('pending', undefined, false, error);
+    if (abort.signal.aborted || terminal) return;
+    if (error instanceof RoostCloudHistoryRequestError && !error.retryable) {
+      terminal = error;
+      invalidateWindow();
+      report('refused', error.status, false);
+      options.onSyncState?.({ reason: error.message });
+      return;
+    }
+    if (
+      error instanceof RoostCloudHistoryPendingError ||
+      error instanceof OwnerAuthorizationRequired
+    ) {
+      invalidateWindow();
+      report(
+        error instanceof OwnerAuthorizationRequired ? 'owner-required' : 'pending',
+        undefined,
+        false,
+        error
+      );
+      options.onSyncState?.({ reason: error.message });
       return;
     }
     report(
@@ -328,49 +349,85 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       error
     );
   };
-  const requestGrant = async (): Promise<PublishedGrant> => {
+
+  const grant = (refresh = false): Promise<PublishedGrant> => {
+    assertLive();
+    if (pendingGrant) return pendingGrant;
+    if (!refresh && !forceGrant && latestGrant && Date.now() < latestGrant.expires)
+      return Promise.resolve(latestGrant.value);
+    forceGrant = false;
     if (status.phase === 'idle') report('checking');
     const signal = readDeadline ? AbortSignal.any([abort.signal, readDeadline]) : abort.signal;
-    try {
+    pendingGrant = (async () => {
       const result = await options.requestGrant(signal);
       assertLive();
       if (result.state === 'pending') throw new RoostCloudHistoryPendingError();
+      if (result.state === 'owner-required') throw new OwnerAuthorizationRequired();
+      latestGrant = { value: result, expires: Date.now() + (result.expiresIn - 5) * 1_000 };
+      const replaced = currentBinding && !sameBinding(currentBinding, result.binding);
+      if (replaced) {
+        stopWaiting();
+        schedule();
+      }
+      report(
+        status.phase === 'ready' && !replaced ? 'ready' : 'syncing',
+        undefined,
+        result.newerVersionPending
+      );
       return result;
-    } catch (error) {
-      reportFailure(error);
-      throw error;
-    }
+    })()
+      .catch((error) => {
+        latestGrant = undefined;
+        reportFailure(error);
+        throw error;
+      })
+      .finally(() => {
+        pendingGrant = undefined;
+      });
+    return pendingGrant;
   };
+
+  const grantWasReplaced = (binding: RoostCloudHistoryBinding) =>
+    latestGrant !== undefined && !sameBinding(binding, latestGrant.value.binding);
+
   const run = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = serial
-      .then(async () => {
-        assertLive();
-        if (opened) {
-          const current = await opened;
-          const binding = observedBinding;
-          if (binding && !sameBinding(current.meta.binding, binding)) {
-            report('syncing', undefined, false);
-            options.onSyncState?.({ reason: 'roost_cloud_history_changed' });
-            opened = undefined;
-            await current.lease.release();
-            bodies.clear();
-            positions.clear();
-            cursors.clear();
-            lastBranchRevision = undefined;
-            for (const listener of listeners)
-              listener({ kind: 'structure', from: 0, to: Number.MAX_SAFE_INTEGER });
-          } else {
-            await changes(current);
+    const result = serial.then(async () => {
+      readDeadline = AbortSignal.timeout(20_000);
+      try {
+        for (;;) {
+          const { binding } = await grant();
+          if (opened) {
+            const current = await opened;
+            if (!sameBinding(current.meta.binding, binding)) {
+              opened = undefined;
+              currentBinding = undefined;
+              invalidateWindow();
+              options.onSyncState?.({ reason: 'roost_cloud_history_changed' });
+              await current.lease.release();
+            } else await changes(current);
+          }
+          try {
+            const value = await operation();
+            assertLive();
+            if (pendingGrant) await pendingGrant;
+            if (!latestGrant) await grant();
+            if (!grantWasReplaced(binding)) return value;
+          } catch (error) {
+            assertLive();
+            if (!grantWasReplaced(binding)) throw error;
           }
         }
-        return await operation();
-      })
-      .catch((error) => {
+      } catch (error) {
+        reportFailure(error);
         throw terminal ?? error;
-      });
-    serial = result.catch(stopOnRefusal);
+      } finally {
+        readDeadline = undefined;
+      }
+    });
+    serial = result.catch(() => {});
     return result;
   };
+
   const persistMeta = async (replica: Replica) => {
     const space = replica.stream.space('lody_remote_reader_v1');
     const bytes = encoder.encode(JSON.stringify(replica.meta));
@@ -383,9 +440,8 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       opened = (async () => {
         // Metadata hints can wake this reader, but only a live session grant
         // identifies the replica that this reader may expose.
-        forceGrant = false;
-        const initialGrant = await requestGrant();
-        const binding = observedBinding = initialGrant.binding;
+        const initialGrant = await grant();
+        const binding = initialGrant.binding;
         report('syncing', undefined, initialGrant.newerVersionPending);
         assertLive();
         const name =
@@ -420,10 +476,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
             history,
             meta,
             eventCursor: await history.observedEventCursor(),
-            grant: {
-              value: initialGrant,
-              expires: Date.now() + (initialGrant.expiresIn - 5) * 1_000,
-            },
           };
           if (meta.remoteId) {
             await network(replica, async () => {
@@ -439,6 +491,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
               replica.forwardOffset = offset;
             });
           }
+          currentBinding = binding;
           return replica;
         } catch (error) {
           await lease.release();
@@ -482,27 +535,23 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   };
 
   const grantFor = async (replica: Replica, refresh = false) => {
+    const value = await grant(refresh);
     assertLive();
-    const cached = replica.grant;
-    if (!refresh && !forceGrant && cached && Date.now() < cached.expires) return cached.value;
-    forceGrant = false;
-    const value = await requestGrant();
-    assertLive();
-    observedBinding = value.binding;
-    if (!sameBinding(replica.meta.binding, value.binding)) {
-      schedule();
-      throw new Error('Roost history observation was superseded');
-    }
-    replica.grant = { value, expires: Date.now() + (value.expiresIn - 5) * 1_000 };
-    report(status.phase === 'ready' ? 'ready' : 'syncing', undefined, value.newerVersionPending);
+    if (!sameBinding(replica.meta.binding, value.binding))
+      throw new Error('Roost history generation changed');
     return value;
   };
 
   const connect = async (replica: Replica) => {
-    const grant = await grantFor(replica);
+    const access = await grantFor(replica);
     assertLive();
     const binding = replica.meta.binding;
-    if (replica.endpoint === grant.streamUrl && replica.transport && replica.link && replica.reader)
+    if (
+      replica.endpoint === access.streamUrl &&
+      replica.transport &&
+      replica.link &&
+      replica.reader
+    )
       return;
     const physical = roostCloudHistoryStreamId(
       options.workspaceId,
@@ -510,7 +559,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       options.sessionId,
       binding
     );
-    const url = grant.streamUrl;
+    const url = access.streamUrl;
     if (
       !new URL(url).pathname.endsWith(
         `/ds/${ROOST_HISTORY_BUCKET_ID}/${encodeURIComponent(physical)}`
@@ -557,8 +606,10 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       const signal = AbortSignal.any(signals);
       const response = await fetch(input, { ...init, signal });
       signal.throwIfAborted();
-      if (response.status === 403 || response.status === 404 || response.status === 410)
-        stopOnRefusal(new RoostCloudHistoryRequestError(response.status));
+      if (response.status === 403 || response.status === 404 || response.status === 410) {
+        await grantFor(replica, true);
+        reportFailure(new RoostCloudHistoryRequestError(response.status));
+      }
       return response;
     };
     const auth = async (context?: { reason: string }) => {
@@ -597,6 +648,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     let structure = false;
     let cursor = replica.eventCursor;
     for (;;) {
+      assertLive();
       const events = await replica.stream.eventsAfter(cursor, 128);
       if (!events.length) break;
       for (const { event } of events) {
@@ -730,21 +782,9 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     return report.upToDate;
   };
 
-  const withReadDeadline = async <T>(operation: () => Promise<T>): Promise<T> => {
-    stopWaiting();
-    readDeadline = AbortSignal.timeout(20_000);
-    try {
-      return await operation();
-    } catch (error) {
-      reportFailure(error);
-      throw error;
-    } finally {
-      readDeadline = undefined;
-      schedule();
-    }
-  };
   const atPublishedTail = async <T>(operation: (replica: Replica) => Promise<T>) =>
-    run(() => withReadDeadline(async () => {
+    run(async () => {
+      stopWaiting();
       const replica = await open();
       return await network(replica, async () => {
         await connect(replica);
@@ -757,7 +797,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         options.onSyncState?.({ checkpoint: checkpoint(replica) });
         return result;
       });
-    }));
+    }).finally(() => schedule());
 
   const waitAtTail = (replica: Replica) => {
     const waiter = new AbortController();
@@ -790,7 +830,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       (error: unknown) => {
         if (tailWait !== waiter) return;
         tailWait = undefined;
-        reportFailure(error);
+        if (!grantWasReplaced(replica.meta.binding)) reportFailure(error);
         if (terminal) return;
         failures++;
         options.onSyncState?.({ reason: 'roost_cloud_sync_unavailable' });
@@ -997,8 +1037,17 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     }
   };
 
+  const hasLiveWindowGrant = () =>
+    !forceGrant &&
+    !pendingGrant &&
+    currentBinding !== undefined &&
+    latestGrant !== undefined &&
+    Date.now() < latestGrant.expires &&
+    sameBinding(currentBinding, latestGrant.value.binding);
+
   const cachedRange = (from: number, to: number): CachedTurn[] | undefined => {
-    assertLive();
+    assertOpen();
+    if (!hasLiveWindowGrant()) return;
     if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to))
       throw new Error('Invalid Roost history range');
     if (lastBranchRevision === undefined) return undefined;
@@ -1084,20 +1133,23 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   };
 
   const readLatestWindow = (limit = PAGE_SIZE) =>
-    run(() => withReadDeadline(async () => latest(await open(), limit)));
+    run(async () => {
+      stopWaiting();
+      return await latest(await open(), limit);
+    }).finally(() => schedule());
 
   const history: SessionHistoryReader = {
     count: () => {
-      assertLive();
-      return lastBranchRevision === undefined
-        ? run(async () => (await latest(await open())).totalCount)
-        : totalCount;
+      assertOpen();
+      return hasLiveWindowGrant() && lastBranchRevision !== undefined
+        ? totalCount
+        : run(async () => (await latest(await open())).totalCount);
     },
     readAt: (position) => {
-      assertLive();
+      assertOpen();
       const id = positions.get(position);
       const cached = id ? bodies.get(id) : undefined;
-      if (cached && !cached.dirty)
+      if (hasLiveWindowGrant() && cached && !cached.dirty)
         return { state: 'ready', turn: structuredClone(cached.turn) as SessionTurn };
       return run(async () => {
         const replica = await open();
@@ -1105,9 +1157,9 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       });
     },
     readTurn: (id) => {
-      assertLive();
+      assertOpen();
       const cached = bodies.get(id);
-      if (cached && !cached.dirty)
+      if (hasLiveWindowGrant() && cached && !cached.dirty)
         return { state: 'ready', turn: structuredClone(cached.turn) as SessionTurn };
       return run(async () => {
         const replica = await open();
@@ -1246,7 +1298,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       return () => publicationListeners.delete(listener);
     },
     syncStatus: () => status,
-    canRecoverFromOwner: () => canReadRoostHistoryFromOwnerAfter(readFailure),
+    ownerReadAllowed: () => canReadRoostHistoryFromOwnerAfter(readFailure),
     watchSyncStatus(listener) {
       statusListeners.add(listener);
       return () => statusListeners.delete(listener);
