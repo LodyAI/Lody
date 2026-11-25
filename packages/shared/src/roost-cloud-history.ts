@@ -30,6 +30,31 @@ export const roostCloudHistoryGrantSchema = z.object({
 
 export type RoostCloudHistoryGrant = z.infer<typeof roostCloudHistoryGrantSchema>;
 
+export const roostCloudHistoryReadResultSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('pending') }).strict(),
+  roostCloudHistoryGrantSchema.extend({
+    state: z.literal('published'),
+    newerVersionPending: z.boolean(),
+  }),
+]);
+
+export type RoostCloudHistoryReadResult = z.infer<typeof roostCloudHistoryReadResultSchema>;
+
+export type RoostCloudSyncState = {
+  phase: 'idle' | 'checking' | 'pending' | 'syncing' | 'ready' | 'retrying' | 'refused';
+  httpStatus?: number;
+  newerVersionPending?: boolean;
+};
+
+export type RoostHistorySyncState = RoostCloudSyncState & { source: 'machine' | 'streams' };
+
+export class RoostCloudHistoryPendingError extends Error {
+  constructor() {
+    super('Roost history publication is pending');
+    this.name = 'RoostCloudHistoryPendingError';
+  }
+}
+
 export class RoostCloudHistoryRequestError extends Error {
   constructor(readonly status: number) {
     super(`Roost history request failed (HTTP ${status})`);

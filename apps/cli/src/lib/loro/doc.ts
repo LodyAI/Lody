@@ -589,6 +589,21 @@ export class LoroDocumentManager {
     };
     const owns = (meta: SessionMeta | undefined): meta is SessionMeta =>
       meta?.machineId === machineId && meta.historyBackend === 'roost';
+    const historyAuthority = async (sessionId: SessionId, signal: AbortSignal) => {
+      const meta = await metadata(sessionId, signal);
+      if (!owns(meta)) return;
+      const child = { ...meta, id: sessionId };
+      const parentId = child.parentSessionId;
+      const parentMeta = parentId ? await metadata(parentId, signal) : undefined;
+      const parent = parentMeta && parentId ? { ...parentMeta, id: parentId } : undefined;
+      const root = parent && isContainedSession(child, parent) ? parent : child;
+      const authority: RoostCloudHistoryAuthority = {
+        rootSessionId: root.id,
+        sessionOwnerUserId: root.userId,
+        localProjectId: child.project?.kind === 'local' ? child.project.localProjectId : undefined,
+      };
+      return { authority, meta };
+    };
     const indexed = new Map<SessionId, SessionId | undefined>();
     const published = new Map<
       SessionId,
@@ -601,8 +616,15 @@ export class LoroDocumentManager {
       new RoostCloudHistoryPublisher({
         workspaceId: this.workspaceId,
         machineId,
-        grant: (sessionId, binding, signal) =>
-          cloud.uploadGrant({ ...target(sessionId), binding }, signal),
+        grant: async (sessionId, binding, signal) => {
+          const source = await historyAuthority(sessionId, signal);
+          signal.throwIfAborted();
+          if (!source) throw new Error('Roost history owner changed');
+          return await cloud.uploadGrant(
+            { ...target(sessionId), binding, authority: source.authority },
+            signal
+          );
+        },
         isOwned: async (sessionId, signal) => {
           const meta = await metadata(sessionId, signal);
           if (!owns(meta)) return false;
@@ -610,19 +632,9 @@ export class LoroDocumentManager {
           return true;
         },
         publish: async (sessionId, binding, signal) => {
-          const meta = await metadata(sessionId, signal);
-          if (!owns(meta)) return;
-          const child = { ...meta, id: sessionId };
-          const parentId = child.parentSessionId;
-          const parentMeta = parentId ? await metadata(parentId, signal) : undefined;
-          const parent = parentMeta && parentId ? { ...parentMeta, id: parentId } : undefined;
-          const root = parent && isContainedSession(child, parent) ? parent : child;
-          const authority = {
-            rootSessionId: root.id,
-            sessionOwnerUserId: root.userId,
-            localProjectId:
-              child.project?.kind === 'local' ? child.project.localProjectId : undefined,
-          };
+          const source = await historyAuthority(sessionId, signal);
+          if (!source) return;
+          const { authority, meta } = source;
           signal.throwIfAborted();
           const notice = { binding, authority };
           if (!isDeepStrictEqual(published.get(sessionId), notice)) {

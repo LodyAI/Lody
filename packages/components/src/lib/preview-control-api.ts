@@ -4,7 +4,7 @@ import {
   type PreviewControlIntent,
   type PreviewControlProof,
   RoostCloudHistoryRequestError,
-  roostCloudHistoryGrantSchema,
+  roostCloudHistoryReadResultSchema,
   type RoostCloudHistoryTarget,
 } from '@lody/shared';
 import { requireCloudAuthBaseUrl } from './cloud-http-port';
@@ -23,7 +23,7 @@ export async function getRoostCloudHistoryReadGrant(
     signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
   });
   if (!response.ok) throw new RoostCloudHistoryRequestError(response.status);
-  return roostCloudHistoryGrantSchema.parse(await response.json());
+  return roostCloudHistoryReadResultSchema.parse(await response.json());
 }
 
 const TokenResponse = z

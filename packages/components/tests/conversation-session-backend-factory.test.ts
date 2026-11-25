@@ -15,7 +15,7 @@ import {
 } from '@lody/shared';
 import { createRoostHistoryReplica } from '../src/lib/roost-history-replica';
 
-import type { SessionId, MachineId, WorkspaceId } from '@lody/shared';
+import type { SessionId, MachineId, RoostHistorySyncState, WorkspaceId } from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view/create-conversation-session';
 import {
   createLocalRoostSessionDataFactory,
@@ -50,11 +50,15 @@ describe('createConversationSession backend seam', () => {
         throw new Error('unexpected owner read');
       };
       let requests = 0;
+      let sync: RoostHistorySyncState | undefined;
       const data = createRemoteRoostSessionDataFactory({
         workspaceId,
         machineId,
         requestHistoryRead: ownerRead,
         requestHistoryWrite: ownerRead,
+        onHistorySync: (next) => {
+          sync = next;
+        },
         cloudHistory: () =>
           createRoostHistoryReplica({
             workspaceId,
@@ -74,6 +78,7 @@ describe('createConversationSession backend seam', () => {
       try {
         await expect(observation.initialPage).rejects.toMatchObject({ status });
         await expect(data.history.readAll()).rejects.toMatchObject({ status });
+        expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: status });
         expect(requests).toBe(1);
       } finally {
         observation.unsubscribe();
@@ -89,6 +94,7 @@ describe('createConversationSession backend seam', () => {
     'append during metadata',
     'earlier metadata changes',
     'publication notice',
+    'publication without notice',
     'grant 403 before publication',
     'grant 503',
     'HEAD 503',
@@ -103,6 +109,8 @@ describe('createConversationSession backend seam', () => {
       const discovering = ['grant 403 before publication', 'grant 503', 'HEAD 503'].includes(
         startingState
       );
+      const pendingWithoutNotice = startingState === 'publication without notice';
+      let awaitingPublication = !alreadyPublished && !discovering;
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
       const workspaceId = 'roost-cloud-workspace' as WorkspaceId;
@@ -269,13 +277,10 @@ describe('createConversationSession backend seam', () => {
       let cachedBinding: typeof binding | undefined = alreadyPublished ? binding : undefined;
       const publicationWakes = new Set<() => void>();
       let replica: ReturnType<typeof createRoostHistoryReplica>;
+      let sync: RoostHistorySyncState | undefined;
+      const reportedPending = Promise.withResolvers<void>();
       const open = (
-        requestGrant: () => Promise<{
-          binding: typeof binding;
-          streamUrl: string;
-          token: string;
-          expiresIn: number;
-        }>,
+        requestGrant: Parameters<typeof createRoostHistoryReplica>[0]['requestGrant'],
         owner: Parameters<
           typeof createRemoteRoostSessionDataFactory
         >[0]['requestHistoryRead'] = offline
@@ -285,6 +290,10 @@ describe('createConversationSession backend seam', () => {
           machineId,
           onCloudHistoryRoute: (active) => {
             if (active) switched.resolve();
+          },
+          onHistorySync: (next) => {
+            sync = next;
+            if (next.phase === 'pending') reportedPending.resolve();
           },
           cloudHistory: () =>
             (replica = createRoostHistoryReplica({
@@ -348,7 +357,10 @@ describe('createConversationSession backend seam', () => {
             throw new RoostCloudHistoryRequestError(403);
           if (startingState === 'grant 503' && readGrants === 1)
             throw new RoostCloudHistoryRequestError(503);
+          if (awaitingPublication) return { state: 'pending' };
           return {
+            state: 'published',
+            newerVersionPending: startingState === 'publication notice',
             binding,
             streamUrl: url,
             token: 'synthetic-read-grant',
@@ -357,7 +369,8 @@ describe('createConversationSession backend seam', () => {
         },
         discovering ? timedOut : alreadyPublished ? offline : ownerRead
       );
-      if (discovering) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      if (discovering || pendingWithoutNotice)
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         const observation = first.history.observe(() => {});
         if (discovering) {
@@ -365,6 +378,7 @@ describe('createConversationSession backend seam', () => {
           await expect(observation.initialPage).rejects.toMatchObject({
             failure: { source: 'transport', code: 'response_timeout' },
           });
+          expect(sync).toMatchObject({ source: 'machine', phase: 'retrying' });
           await vi.advanceTimersByTimeAsync(1_000);
           await switched.promise;
           await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
@@ -416,11 +430,28 @@ describe('createConversationSession backend seam', () => {
         expect(page.rows).toMatchObject([{ turnId: turn.id }]);
         expect(await first.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
         if (!alreadyPublished) {
-          expect(readGrants).toBe(0);
+          await reportedPending.promise;
+          expect(sync).toMatchObject({ source: 'machine', phase: 'pending' });
+          awaitingPublication = false;
+          if (pendingWithoutNotice) {
+            await vi.advanceTimersByTimeAsync(1_000);
+            await switched.promise;
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+            expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+            observation.unsubscribe();
+            return;
+          }
           cachedBinding = binding;
           for (const wake of publicationWakes) wake();
         }
         await applied.promise;
+        expect(sync).toMatchObject({
+          source: 'streams',
+          phase: 'ready',
+          newerVersionPending: startingState === 'publication notice',
+        });
         expect(requestsToTail).toBe(1);
         expect(await first.history.readTurn(reply.id)).toMatchObject({
           state: 'ready',
@@ -439,8 +470,8 @@ describe('createConversationSession backend seam', () => {
         observation.unsubscribe();
       } finally {
         first.dispose();
-        if (discovering) vi.useRealTimers();
-        if (discovering || updateDuringMetadata) vi.unstubAllGlobals();
+        if (discovering || pendingWithoutNotice) vi.useRealTimers();
+        if (discovering || pendingWithoutNotice || updateDuringMetadata) vi.unstubAllGlobals();
       }
       cachedBinding = binding;
       const reopened = open(offline);

@@ -292,11 +292,13 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 ## Published Roost history
 
 The conversation keeps one reader while the owning machine serves unpublished
-history and the Streams replica prepares its first readable window. A failed
-owner transport can discover publication before its metadata arrives. An
-observed conversation retries a temporary Streams catch-up failure and retries
-a refused discovery probe while the publication binding is unknown. A refusal
-for a published binding ends that reader. Switching
+history and the Streams replica prepares its first readable window. An
+exact-session probe can discover publication before its metadata arrives. The
+conversation status shows the selected reader, authorized pending publication,
+retry or refusal, and whether Streams is still serving a prior publication.
+An observed conversation retries a temporary Streams catch-up failure and
+rechecks an unconfirmed publication. A refusal for a known binding ends that
+reader. Switching
 the source invalidates that window's paging cursors. Electron reads its own
 machine through local session control. A shared snapshot catches up to an
 observed Streams tail before detaching the history.

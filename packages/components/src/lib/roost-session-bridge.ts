@@ -3,6 +3,7 @@ import type {
   LocalSessionControlResponse,
   MachineId,
   PermissionOutcome,
+  RoostHistorySyncState,
   SessionHistoryChange,
   SessionHistoryInput,
   SessionHistoryReadQuery,
@@ -87,6 +88,7 @@ type RoostHistoryTransport = {
 type RoostHistoryObservationOptions = {
   readonly cloudHistory?: (sessionId: SessionId) => ReturnType<typeof createRoostHistoryReplica>;
   readonly onCloudHistoryRoute?: (active: boolean) => void;
+  readonly onHistorySync?: (state: RoostHistorySyncState) => void;
   readonly cacheNamespace?: string;
   readonly pollIntervalMs?: number;
   readonly coherentInspection?: boolean | (() => boolean);
@@ -266,7 +268,7 @@ function routeRoostHistory(
   owner: SessionHistoryReader,
   cloud: ReturnType<typeof createRoostHistoryReplica>,
   allowCloud: () => Promise<boolean>,
-  onCloudRoute?: (active: boolean) => void
+  { active = () => true, onCloudHistoryRoute, onHistorySync }: RoostHistoryObservationOptions
 ) {
   type Observer = {
     listener: SessionDataChangeListener;
@@ -278,7 +280,23 @@ function routeRoostHistory(
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
   let disposed = false;
+  let cloudAllowed = true;
+  let lastStatus: RoostHistorySyncState | undefined;
   const observers = new Set<Observer>();
+  const emitStatus = () => {
+    if (disposed || !reader || !onHistorySync) return;
+    const source = reader === owner ? 'machine' : 'streams';
+    const status = cloudAllowed ? cloud.syncStatus() : { phase: 'idle' as const };
+    if (
+      source === lastStatus?.source &&
+      status.phase === lastStatus.phase &&
+      status.httpStatus === lastStatus.httpStatus &&
+      status.newerVersionPending === lastStatus.newerVersionPending
+    )
+      return;
+    lastStatus = { ...status, source };
+    onHistorySync(lastStatus);
+  };
   const assertOpen = () => {
     if (disposed) throw new Error('Roost session bridge is disposed');
   };
@@ -295,7 +313,8 @@ function routeRoostHistory(
     if (disposed || reader === next) return;
     const changed = reader !== undefined;
     reader = next;
-    onCloudRoute?.(next === cloud.history);
+    onCloudHistoryRoute?.(next === cloud.history);
+    emitStatus();
     if (changed) {
       for (const observer of observers) {
         if (!observer.observation) continue;
@@ -318,11 +337,15 @@ function routeRoostHistory(
     }));
   };
   const refreshRoute = () => {
-    if (disposed || !reader || retry) return;
+    if (disposed || !reader || retry || (reader === owner && !active())) return;
     if (switching) return switching;
     return (switching = (async () => {
-      if (!(await allowCloud())) {
+      const allowed = await allowCloud();
+      if (disposed) return;
+      cloudAllowed = allowed;
+      if (!allowed) {
         select(owner);
+        emitStatus();
         return;
       }
       if (reader === cloud.history) {
@@ -338,7 +361,7 @@ function routeRoostHistory(
       failures = 0;
     })()
       .catch(() => {
-        if (!disposed && observers.size) {
+        if (!disposed && observers.size && active()) {
           failures++;
           retry = setTimeout(
             () => {
@@ -354,12 +377,14 @@ function routeRoostHistory(
       }));
   };
   const refresh = () => {
-    if (disposed || !reader || switching || (reader === owner && !cloud.published())) return;
+    if (disposed || !reader || switching) return;
+    if (reader === owner && !cloud.published() && (!observers.size || retry)) return;
     if (retry) clearTimeout(retry);
     retry = undefined;
     void refreshRoute();
   };
   const unsubscribePublication = cloud.watchPublication(refresh);
+  const unsubscribeStatus = cloud.watchSyncStatus(emitStatus);
   const read = async <T>(work: (source: SessionHistoryReader) => T | Promise<T>): Promise<T> => {
     for (;;) {
       const source = await initialReader();
@@ -410,6 +435,7 @@ function routeRoostHistory(
         if (!observers.has(observer))
           return pageWithSource(source, await source.readLatestDirectoryPage!(40));
         const observation = attach(observer, source);
+        if (source === owner) void refreshRoute();
         return pageWithSource(source, await observation.initialPage!);
       });
       return {
@@ -435,6 +461,7 @@ function routeRoostHistory(
     dispose() {
       disposed = true;
       unsubscribePublication();
+      unsubscribeStatus();
       if (retry) clearTimeout(retry);
       for (const observer of observers) observer.observation?.unsubscribe();
       observers.clear();
@@ -1483,9 +1510,7 @@ const createRoostSessionDataFactoryFromTransport =
         };
       },
     };
-    const routed =
-      cloudHistory &&
-      routeRoostHistory(history, cloudHistory, allowCloud, options.onCloudHistoryRoute);
+    const routed = cloudHistory && routeRoostHistory(history, cloudHistory, allowCloud, options);
     const unsubscribeWake = options.subscribeWake?.(() => {
       if (routed) routed.refresh();
       if (routed?.usingCloud()) return;

@@ -94,6 +94,7 @@ import {
   getLoroStreamIdForDocId,
   getLoroStreamsBaseUrl,
   roostCloudHistoryBinding,
+  type RoostHistorySyncState,
   getLoroStreamsPresenceBaseUrl,
   getLoroStreamsShardUrls,
   getSessionRoomId,
@@ -5348,6 +5349,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     let rendererSessionDataFactory =
       protectedContent && backendKind === 'roost' ? undefined : deps.createSessionData;
     let disposeReaderObservation = () => {};
+    let historySync: RoostHistorySyncState | undefined;
+    const historySyncListeners = new Set<() => void>();
     let conversation: ReturnType<typeof createConversationSession>;
     try {
       if (!rendererSessionDataFactory && backendKind === 'roost') {
@@ -5403,6 +5406,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         const bridge: RemoteRoostSessionBridgeOptions = {
           ...(cloudPlaneEnabled && !protectedContent
             ? {
+                onHistorySync: (next: RoostHistorySyncState) => {
+                  historySync = next;
+                  for (const listener of historySyncListeners) listener();
+                },
                 cloudHistory: (targetSessionId: SessionId) => {
                   let meta: Record<string, unknown> | undefined;
                   return createRoostHistoryReplica({
@@ -5720,6 +5727,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           listener(syncLeaseCount > 0 || roomSub || joinAttempt ? state : 'idle');
         }),
       getState: () => mirror.getState() as SessionDocState,
+      getHistorySync: () => historySync,
+      subscribeHistorySync: (listener) => {
+        historySyncListeners.add(listener);
+        return () => historySyncListeners.delete(listener);
+      },
       setState: (updater) => {
         mirror.setState(updater as never);
       },
@@ -5735,6 +5747,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         unsubscribeImportWatch();
         disposeConversation();
         disposeReaderObservation();
+        historySyncListeners.clear();
       },
       inspectSync: async ({ uploadProbeTimeoutMs }) => {
         const binding = roomSub ? readinessBindingForDocRoom(roomSub, roomId) : null;

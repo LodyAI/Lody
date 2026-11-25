@@ -2850,6 +2850,7 @@ export const SessionChatInterface = memo(
       ready: sessionDocReady,
       synced: sessionDocSynced,
       syncState: sessionDocSyncState,
+      historySync,
     } = useSessionDoc(session.id, {
       enabled: !hideMessageArea,
       syncEnabled: !hideMessageArea && syncEnabled,
@@ -8143,6 +8144,7 @@ export const SessionChatInterface = memo(
                             : undefined
                         }
                         diffStat={infoBarDiffStat}
+                        historySync={historySync}
                         // Desktop only: mobile already shows catch-up in its header.
                         syncStatus={
                           isMobile

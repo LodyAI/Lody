@@ -208,7 +208,10 @@ export interface CloudAccessPort {
   /** Owner-only, exact-stream upload authority. */
   roostHistory?: {
     uploadGrant(
-      request: RoostCloudHistoryTarget & { binding: RoostCloudHistoryBinding },
+      request: RoostCloudHistoryTarget & {
+        binding: RoostCloudHistoryBinding;
+        authority: RoostCloudHistoryAuthority;
+      },
       signal: AbortSignal
     ): Promise<RoostCloudHistoryGrant>;
     publish(
