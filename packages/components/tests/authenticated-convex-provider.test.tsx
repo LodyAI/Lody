@@ -1,6 +1,4 @@
 /** @vitest-environment jsdom */
-
-/** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +15,15 @@ const mocks = vi.hoisted(() => ({
     confirmedUnauthenticated: false,
     rawData: { session: { id: 'session-1' } } as { session: { id: string } } | null,
   },
+  sessionListeners: new Set<() => void>(),
+  publishSession: () => {
+    for (const listener of [...mocks.sessionListeners]) listener();
+  },
+  sessionSupervisor: null as null | {
+    getSnapshot: () => unknown;
+    subscribe: (listener: () => void) => () => void;
+    refetch: typeof mocks.refetch;
+  },
 }));
 
 vi.mock('../src/components/auth-recovery-error', () => ({
@@ -29,12 +36,29 @@ vi.mock('../src/components/auth-recovery-error', () => ({
     ),
 }));
 
+vi.mock('../src/components/auth-recovery-entry', () => ({
+  AuthRecoveryEntryProvider: ({
+    children,
+    notice,
+  }: {
+    children: React.ReactNode;
+    notice: React.ReactNode;
+  }) => (
+    <>
+      {children}
+      {notice}
+    </>
+  ),
+}));
+
 vi.mock('convex/react', () => ({
   useConvexAuth: () => mocks.convexAuth,
 }));
 
+vi.mock('@lody/shared', () => ({ isConvexError: () => false }), { virtual: true });
+
 vi.mock('../src/hooks/useStableSession', () => ({
-  useStableSession: () => ({ ...mocks.session, refetch: mocks.refetch }),
+  useStableSessionSupervisor: () => mocks.sessionSupervisor,
 }));
 
 vi.mock('../src/providers/convex-provider', () => ({
@@ -68,6 +92,27 @@ describe('AuthenticatedConvexProvider', () => {
     mocks.session.hasRawUser = true;
     mocks.session.confirmedUnauthenticated = false;
     mocks.session.rawData = { session: { id: 'session-1' } };
+    mocks.sessionListeners.clear();
+    mocks.sessionSupervisor = {
+      getSnapshot: () => ({
+        data: null,
+        rawData: mocks.session.rawData,
+        bootstrapSnapshot: null,
+        hasLocalToken: mocks.session.hasLocalToken,
+        hasRawUser: mocks.session.hasRawUser,
+        isOptimistic: false,
+        isPending: mocks.session.isPending,
+        isRetrying: mocks.session.isRetrying,
+        error: null,
+        confirmedUnauthenticated: mocks.session.confirmedUnauthenticated,
+        refetch: mocks.refetch,
+      }),
+      subscribe: (listener) => {
+        mocks.sessionListeners.add(listener);
+        return () => mocks.sessionListeners.delete(listener);
+      },
+      refetch: mocks.refetch,
+    };
     mocks.refetch.mockReset();
     mocks.restartConvexAuth.mockReset();
     current = null;
@@ -146,13 +191,14 @@ describe('AuthenticatedConvexProvider', () => {
     expect(current?.isRecovering).toBe(false);
   });
   async function renderProvider() {
-    await act(async () =>
+    await act(async () => {
+      mocks.publishSession();
       root.render(
         <AuthenticatedConvexProvider>
           <Consumer />
         </AuthenticatedConvexProvider>
-      )
-    );
+      );
+    });
   }
 
   async function rejectAttempt(delay: number) {

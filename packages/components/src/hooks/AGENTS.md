@@ -53,16 +53,17 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   dispatch for pending/seen entries even if CLI already changed their status. Never
   repair active, terminal, removed, or delivery-unknown turns.
 
-- `useStableSession` treats an HTTP 401 from `authClient.useSession()` as potentially
-  stale and verifies it once with the current credential. Only a second 401 for the
-  unchanged local token is terminal: stop retrying, ignore cached user/bootstrap and
-  grace state, and confirm unauthenticated so the root sign-out path clears both Lody
-  auth state and platform credential storage. A rotated token or successful
-  verification fences late responses from an older login. Native login holds
-  `nativeSignInInProgressAtom` from the first sign-in request through successful page
-  replacement, and root session invalidation must respect that fence. A transport
-  failure (timeout, 5xx, `Client disconnected`) or userless in-flight refetch is never
-  terminal and must not sign out a recoverable user.
+- `getStableSessionSupervisor`/`acquireStableSessionSupervisor` own one ref-counted
+  Better Auth room per auth client: session atom, retry/grace state, 401 verification,
+  boot publication, resume and keepalive refreshes. React only borrows/releases and projects
+  it; it never calls `authClient.useSession()` or owns those timers/listeners. Verify a 401
+  against the current credential; only an unchanged-token second 401 is terminal. Token
+  rotation/success fences old responses. Transport failure or a userless in-flight read never
+  signs out a recoverable user; root invalidation respects the native-login fence.
+  `getAuthRecoverySupervisor`/`acquireAuthRecoverySupervisor` likewise own one room per
+  session/restart owner for the per-session budget, deadlines, availability pause and
+  automatic-command fence. `AuthenticatedConvexProvider` only bridges SDK auth state,
+  borrows/releases that room, projects its snapshot and renders the nonmodal notice.
 - `use-session-doc.ts` publishes the initial mirror snapshot immediately, then coalesces
   history-only mirror bursts to the latest snapshot once per animation frame through
   `lib/latest-frame-subscription.ts`. Control state (`session`, message queue, fork,
