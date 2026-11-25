@@ -5,20 +5,21 @@ import { createPostHogPrivacy } from '../src/lib/posthog-privacy';
 import { identifyPostHogUser } from '../src/lib/posthog-identity';
 import { writeDeviceUsageSharing } from '../src/lib/usage-sharing';
 
-it('blocks uploads before consent and projects persisted batches in every workspace after opt-in', () => {
+it('projects persisted batches by default and blocks uploads after opt-out', () => {
   window.localStorage.clear();
+  writeDeviceUsageSharing(false);
   const blocked: unknown[] = [];
   const blockedClient = {
     _send_request: (options: { data: unknown }) => blocked.push(options.data),
   };
-  const preConsentPrivacy = createPostHogPrivacy(() => 'ordinary');
-  preConsentPrivacy.attach(blockedClient as unknown as PostHog);
+  const optedOutPrivacy = createPostHogPrivacy(() => 'ordinary');
+  optedOutPrivacy.attach(blockedClient as unknown as PostHog);
   blockedClient._send_request({
     data: [{ event: 'session/message_submit_requested', properties: { distinct_id: 'u1' } }],
   });
   expect(blocked).toEqual([]);
 
-  writeDeviceUsageSharing(true);
+  window.localStorage.clear();
   try {
     for (const scope of [null, 'ordinary']) {
       const sent: unknown[] = [];
@@ -154,130 +155,24 @@ it('stops and resumes uploads from the settings switch and retains the choice on
   const toggle = () => host.querySelector<HTMLElement>('[role="switch"]')!;
   try {
     await act(async () => root.render(row));
-    expect(toggle().getAttribute('aria-checked')).toBe('false');
-    expect(usageSharingAllowed()).toBe(false);
-    await act(async () => toggle().click());
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
     expect(usageSharingAllowed()).toBe(true);
     window.localStorage.setItem('ph_test_posthog', 'cached-id');
-    await act(async () => root.render(null));
-    await act(async () => root.render(row));
-    expect(toggle().getAttribute('aria-checked')).toBe('true');
     await act(async () => toggle().click());
     expect(usageSharingAllowed()).toBe(false);
     expect(window.localStorage.getItem('ph_test_posthog')).toBeNull();
+    await act(async () => root.render(null));
+    await act(async () => root.render(row));
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    await act(async () => toggle().click());
+    expect(usageSharingAllowed()).toBe(true);
   } finally {
     await act(async () => root.unmount());
     window.localStorage.clear();
   }
 });
 
-it.each([true, false])(
-  'waits for sign-in and durable desktop onboarding before saving a choice (%s)',
-  async (allow) => {
-    const { createElement, act } = await import('react');
-    const { createRoot } = await import('react-dom/client');
-    const { PlatformContext } = await import('@lody/platform/react');
-    const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
-    const { DesktopUsageSharingPrompt } =
-      await import('../src/components/onboarding/desktop-usage-sharing-prompt');
-    const { readDeviceUsageChoice, usageSharingAllowed, pendingAccountChoice } =
-      await import('../src/lib/usage-sharing');
-    const { initI18n } = await import('../src/i18n');
-    await initI18n('en');
-    vi.stubGlobal('__LODY_ELECTRON__', true);
-    vi.stubGlobal('scrollTo', () => {});
-    const { createStore: createPlatformStore } = await import('@lody/platform');
-    const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
-      status: 'unauthenticated',
-    });
-    const platform = {
-      ...TEST_CLOUD_PLATFORM,
-      identity: { ...TEST_CLOUD_PLATFORM.identity, session },
-      cloudApi: {
-        ...TEST_CLOUD_PLATFORM.cloudApi!,
-        useOptionalAuthenticatedQuery: undefined,
-      },
-    } as typeof TEST_CLOUD_PLATFORM;
-    let completed = !allow;
-    let nativeChoice: boolean | null = null;
-    vi.stubGlobal('ipc', {
-      invoke: async (channel: string, enabled: boolean) => {
-        if (channel === 'app.isOnboardingCompleted') return completed;
-        if (channel === 'app.getUsageSharingEnabled') return nativeChoice;
-        if (channel !== 'app.setUsageSharingEnabled') throw new Error(channel);
-        nativeChoice = enabled;
-      },
-    });
-    const mount = document.createElement('div');
-    document.body.appendChild(mount);
-    const root = createRoot(mount);
-    const {
-      createMemoryHistory,
-      createRouter,
-      createRootRoute,
-      createRoute,
-      RouterProvider,
-      Outlet,
-    } = await import('@tanstack/react-router');
-    const { Provider, createStore } = await import('jotai');
-    const { desktopOnboardingCompletionRevisionAtom } = await import('../src/atoms/onboarding');
-    const store = createStore();
-    const route = createRootRoute({ component: Outlet });
-    const onboarding = createRoute({ getParentRoute: () => route, path: '/onboarding' });
-    const home = createRoute({
-      getParentRoute: () => route,
-      path: '/',
-      component: DesktopUsageSharingPrompt,
-    });
-    const router = createRouter({
-      routeTree: route.addChildren([onboarding, home]),
-      history: createMemoryHistory({ initialEntries: [allow ? '/onboarding' : '/'] }),
-    });
-    await router.load();
-    try {
-      expect(readDeviceUsageChoice()).toBeNull();
-      expect(usageSharingAllowed()).toBe(false);
-      await act(async () =>
-        root.render(
-          createElement(
-            PlatformContext.Provider,
-            { value: platform },
-            createElement(Provider, { store }, createElement(RouterProvider, { router }))
-          )
-        )
-      );
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      await act(async () => session.set({ status: 'authenticated', user: { id: 'opaque_123' } }));
-      if (allow) {
-        expect(document.querySelector('[role="dialog"]')).toBeNull();
-        await act(async () => {
-          await router.navigate({ to: '/' });
-        });
-        expect(document.querySelector('[role="dialog"]')).toBeNull();
-        expect(usageSharingAllowed()).toBe(false);
-        completed = true;
-        await act(async () => store.set(desktopOnboardingCompletionRevisionAtom, 1));
-      }
-      const buttons = Array.from(
-        document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')
-      );
-      expect(buttons.map((button) => button.textContent)).toEqual(['Don’t share', 'Allow sharing']);
-      await act(async () => buttons[allow ? 1 : 0]!.click());
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(nativeChoice).toBe(allow);
-      expect(readDeviceUsageChoice()).toBe(allow);
-      expect(usageSharingAllowed()).toBe(allow);
-      expect(pendingAccountChoice('opaque_123')).toBe(allow);
-    } finally {
-      await act(async () => root.unmount());
-      mount.remove();
-      window.localStorage.clear();
-      vi.unstubAllGlobals();
-    }
-  }
-);
-
-it('waits for cloud save before enabling desktop usage sharing and disables the switch while account preference loads', async () => {
+it('waits for cloud save before re-enabling desktop usage sharing and disables the switch while account preference loads', async () => {
   const { createElement, act } = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { PlatformContext } = await import('@lody/platform/react');
@@ -345,71 +240,6 @@ it('waits for cloud save before enabling desktop usage sharing and disables the 
     vi.unstubAllGlobals();
   }
 });
-
-it.each([true, false])(
-  'prompts on first sign-in for web and mobile clients and skips when account already opted out (%s)',
-  async (allow) => {
-    const { createElement, act } = await import('react');
-    const { createRoot } = await import('react-dom/client');
-    const { PlatformContext } = await import('@lody/platform/react');
-    const { createStore: createPlatformStore } = await import('@lody/platform');
-    const { TEST_CLOUD_PLATFORM } = await import('./test-platform');
-    const { UsageSharingPrompt } =
-      await import('../src/components/onboarding/desktop-usage-sharing-prompt');
-    const {
-      hasAccountUsagePromptDecision,
-      pendingAccountChoice,
-      readDeviceUsageChoice,
-      usageSharingAllowed,
-    } = await import('../src/lib/usage-sharing');
-    const { initI18n } = await import('../src/i18n');
-    await initI18n('en');
-    vi.stubGlobal('scrollTo', () => {});
-    const session = createPlatformStore<import('@lody/platform').PlatformSessionState>({
-      status: 'unauthenticated',
-    });
-    const platform = {
-      ...TEST_CLOUD_PLATFORM,
-      identity: { ...TEST_CLOUD_PLATFORM.identity, session },
-      cloudApi: {
-        ...TEST_CLOUD_PLATFORM.cloudApi!,
-        useOptionalAuthenticatedQuery: () => ({ data: true }),
-      },
-    } as unknown as typeof TEST_CLOUD_PLATFORM;
-    const mount = document.createElement('div');
-    document.body.appendChild(mount);
-    const root = createRoot(mount);
-    try {
-      await act(async () =>
-        root.render(
-          createElement(
-            PlatformContext.Provider,
-            { value: platform },
-            createElement(UsageSharingPrompt)
-          )
-        )
-      );
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(usageSharingAllowed()).toBe(false);
-      await act(async () => session.set({ status: 'authenticated', user: { id: 'web_user_1' } }));
-      const buttons = Array.from(
-        document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')
-      );
-      expect(buttons.map((button) => button.textContent)).toEqual(['Don’t share', 'Allow sharing']);
-      await act(async () => buttons[allow ? 1 : 0]!.click());
-      expect(document.querySelector('[role="dialog"]')).toBeNull();
-      expect(readDeviceUsageChoice()).toBe(allow);
-      expect(hasAccountUsagePromptDecision('web_user_1')).toBe(true);
-      expect(pendingAccountChoice('web_user_1')).toBe(allow);
-      expect(usageSharingAllowed()).toBe(allow);
-    } finally {
-      await act(async () => root.unmount());
-      mount.remove();
-      window.localStorage.clear();
-      vi.unstubAllGlobals();
-    }
-  }
-);
 
 it('renders the web cookie consent banner only in European consent regions and updates gtag on choice', async () => {
   const { createElement, act } = await import('react');

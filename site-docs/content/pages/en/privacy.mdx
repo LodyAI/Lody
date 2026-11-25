@@ -27,12 +27,13 @@ Based on current product behavior, we collect the following categories of data:
 - Billing and subscription status metadata (payment card details are processed directly by Stripe
   and are not stored by Lody)
 
-### 2.2 Device, Analytics, and Technical Data (Opt-In)
+### 2.2 Device, Analytics, and Technical Data
 
-- When you explicitly allow usage sharing, we collect minimal product usage counts (such as
-  sign-ups, message submission counts, coarse platform/OS, and built-in agent provider category)
-  and redacted error categories. Conversation content, repository paths, URLs, page titles, custom
-  agent names, and raw error stacks are excluded from product analytics.
+- Unless you turn off usage sharing in Settings → About, cloud clients collect minimal product usage
+  counts (such as sign-ups, message submission counts, coarse platform/OS, and built-in agent
+  provider category) and redacted error categories. Conversation content, repository paths, URLs,
+  page titles, custom agent names, and raw error stacks are excluded from product analytics. Local
+  open-source builds disable product analytics entirely.
 - Product analytics resolves coarse country-level region before discarding raw client IP addresses
   prior to storage.
 - On our public website, optional analytics cookies are disabled by default in the European Economic
@@ -56,10 +57,11 @@ the following lawful bases:
 
 - **Contract performance (Art. 6(1)(b))**: authenticating your account, providing core workspace
   and collaboration features, and managing paid subscriptions
-- **Consent (Art. 6(1)(a))**: optional product usage data sharing and optional website analytics
-  cookies; you may withdraw consent at any time without affecting prior lawful processing
-- **Legitimate interests (Art. 6(1)(f))**: securing the Services, preventing abuse, and diagnosing
-  operational outages
+- **Consent (Art. 6(1)(a))**: optional website analytics cookies in the EEA, UK, and Switzerland;
+  you may withdraw consent at any time without affecting prior lawful processing
+- **Legitimate interests (Art. 6(1)(f))**: securing the Services, preventing abuse, diagnosing
+  operational outages, and collecting minimized, cookie-less product usage counts and redacted error
+  categories (which you may turn off anytime via the unified account switch)
 - **Legal obligations (Art. 6(1)(c))**: tax, accounting, and compliance duties required by law
 
 ## 4. Cookies and Local Storage
@@ -70,8 +72,8 @@ the following lawful bases:
   until you accept in the Cookie Consent Banner (advertising and ad-personalization storage remain
   disabled everywhere). Visitors in all regions can change or disable optional analytics cookies
   anytime via **Cookie settings** in the website footer.
-- **Product analytics storage**: Lody apps do not set product analytics cookies and do not
-  initialize product analytics until you sign in and opt in.
+- **Product analytics storage**: Lody apps do not set product analytics cookies and clear local
+  analytics state immediately when you turn off usage sharing.
 
 ## 5. Third-Party Services and Processing
 
@@ -82,7 +84,7 @@ We use trusted service providers (sub-processors) to run parts of the Services:
 - GitHub (third-party login and repository integration)
 - Stripe (subscription billing and payment processing)
 - Google Analytics (optional public website analytics)
-- PostHog (opt-in minimal product analytics and redacted error reporting)
+- PostHog (minimal product analytics and redacted error reporting, configurable in Settings → About)
 
 These providers process data under their own terms, privacy policies, and applicable data
 processing agreements (DPAs).
@@ -110,10 +112,9 @@ strict data minimization controls.
 
 You have the right to:
 
-- **Control usage data sharing uniformly across your account**: choose whether to share usage data
-  after your first sign-in on desktop, web, or mobile, change the unified account-level switch
-  anytime in Settings → About → **Share app usage data** (applies across desktop, web, mobile,
-  and synced CLI), or override CLI telemetry via `LODY_DISABLE_USAGE_SHARING=1` or `DO_NOT_TRACK=1`
+- **Control usage data sharing uniformly across your account**: turn usage sharing off or back on
+  anytime in Settings → About → **Share app usage data** (applies across desktop, web, mobile, and
+  synced CLI), or override CLI telemetry via `LODY_DISABLE_USAGE_SHARING=1` or `DO_NOT_TRACK=1`
 - **Manage website cookies**: accept or reject optional analytics cookies via the Cookie Consent
   Banner or **Cookie settings** in the website footer
 - **Access and export** a copy of your personal data (Art. 15 & Art. 20 data portability)

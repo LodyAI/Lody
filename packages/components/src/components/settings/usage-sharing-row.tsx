@@ -11,7 +11,6 @@ import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import {
   clearPostHogLocalStorage,
-  markAccountUsagePromptDecided,
   markUsageOptOutPending,
   readDeviceUsageSharing,
   subscribeUsageSharing,
@@ -36,10 +35,10 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
   const account = preference?.data;
   const loadingAccount = authenticated && preference !== undefined && typeof account !== 'boolean';
   const save = useCloudMutation(cloudOperations.analytics.setUsageSharing);
-  const device = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageSharing, () => false);
+  const device = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageSharing, () => true);
   const [pending, setPending] = useState(false);
   const [retry, setRetry] = useState<boolean | null>(null);
-  const enabled = loadingAccount ? false : device && account !== false;
+  const enabled = loadingAccount ? device : device && account !== false;
   async function change(next: boolean) {
     setPending(true);
     setRetry(null);
@@ -52,7 +51,6 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
             clearPostHogLocalStorage();
             writeDeviceUsageSharing(false);
             if (authenticated) {
-              markAccountUsagePromptDecided(session.user.id);
               markUsageOptOutPending(session.user.id, true);
             } else if (window.__LODY_ELECTRON__) {
               markUsageOptOutPending('next-login', true);
@@ -78,7 +76,6 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
       if (authenticated) {
         await save({ enabled: true, accountId: session.user.id });
         markUsageOptOutPending(session.user.id, false);
-        markAccountUsagePromptDecided(session.user.id);
       } else if (window.__LODY_ELECTRON__) {
         markUsageOptOutPending('next-login', false);
       }

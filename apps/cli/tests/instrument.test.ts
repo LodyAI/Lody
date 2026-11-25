@@ -48,50 +48,25 @@ describe('CLI exception ingestion using the real SDK', () => {
     );
   });
 
-  it('stays silent by default and follows unified account usage sharing sync', async () => {
+  it('is enabled by default on cloud CLI and honors unified account usage sharing opt-out', async () => {
     const { syncAccountUsageSharing, writeUsageSharing } =
       await import('@lody/shared/node/usage-sharing');
     const { captureCli, initCliAnalytics, flushCliAnalytics } =
       await import('../src/lib/analytics/posthog');
     const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
     initCliAnalytics();
-    expect(isErrorReportingEnabled()).toBe(false);
-    captureCli('app/active');
-    await captureException(new Error('before-account-sync'));
-    await flushCliAnalytics();
-    expect(bodies).toEqual([]);
-
-    syncAccountUsageSharing(true);
     expect(isErrorReportingEnabled()).toBe(true);
+
     captureCli('app/active');
-    writeUsageSharing(false);
+    syncAccountUsageSharing(false);
+    expect(isErrorReportingEnabled()).toBe(false);
     await captureException(new Error('off'));
     captureCli('cli/diagnostic');
-    syncAccountUsageSharing(true);
     await flushCliAnalytics();
     expect(bodies).toEqual([]);
-    captureCli('app/launch');
-    await flushCliAnalytics();
-    expect(bodies).toMatchObject([{ batch: [{ event: 'app/launch' }] }]);
-  });
 
-  it('keeps the embedded desktop CLI silent until the desktop records an affirmative choice', async () => {
-    process.env.LODY_REQUIRE_USAGE_SHARING_CHOICE = '1';
-    const { syncAccountUsageSharing, writeUsageSharing, desktopUsageChoice } =
-      await import('@lody/shared/node/usage-sharing');
-    const { captureCli, initCliAnalytics, flushCliAnalytics } =
-      await import('../src/lib/analytics/posthog');
-    const { captureException } = await import('../src/instrument');
-    initCliAnalytics();
-    expect(desktopUsageChoice()).toBeNull();
-    // Server default true must not override an unanswered desktop onboarding prompt.
-    syncAccountUsageSharing(true);
-    expect(desktopUsageChoice()).toBeNull();
-    captureCli('app/active');
-    await captureException(new Error('before-choice'));
-    await flushCliAnalytics();
-    expect(bodies).toEqual([]);
     writeUsageSharing(true);
+    expect(isErrorReportingEnabled()).toBe(true);
     captureCli('app/launch');
     await flushCliAnalytics();
     expect(bodies).toMatchObject([{ batch: [{ event: 'app/launch' }] }]);

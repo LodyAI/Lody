@@ -113,9 +113,10 @@ describe('boot failure telemetry boundary', () => {
     });
     const error = new Error('PRIVATE_MESSAGE');
     error.name = 'PRIVATE_PATH';
+    window.localStorage.setItem('lody:usage-sharing', 'off');
     captureBootFailedBeacon();
     expect(bodies).toHaveLength(0);
-    window.localStorage.setItem('lody:usage-sharing', `on:${Date.now()}`);
+    window.localStorage.removeItem('lody:usage-sharing');
     captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
     const wire = await new Promise<string>((resolve) => {

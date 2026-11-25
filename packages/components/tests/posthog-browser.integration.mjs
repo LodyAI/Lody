@@ -155,17 +155,9 @@ try {
       await page.waitForFunction(() => !!window.POSTHOG_OPTIONS);
       if (!negative) {
         const before = received.length;
-        const initializedWeb = await page.evaluate(() => {
-          window.scheduleDeferredPostHogInitialization('synthetic-key', {
-            ...window.POSTHOG_OPTIONS,
-            api_host: location.origin,
-          });
-          window.dispatchEvent(new Event('pagehide'));
-          return !!window.posthog.__loaded;
-        });
-        assert.equal(initializedWeb, false);
-        const initializedElectron = await page.evaluate(() => {
+        const initializedAfterOptOut = await page.evaluate(() => {
           window.__LODY_ELECTRON__ = true;
+          window.writeDeviceUsageSharing(false);
           window.scheduleDeferredPostHogInitialization('synthetic-key', {
             ...window.POSTHOG_OPTIONS,
             api_host: location.origin,
@@ -173,7 +165,7 @@ try {
           window.dispatchEvent(new Event('pagehide'));
           return !!window.posthog.__loaded;
         });
-        assert.equal(initializedElectron, false);
+        assert.equal(initializedAfterOptOut, false);
         assert.equal(received.length, before);
         await page.evaluate(() => window.writeDeviceUsageSharing(true));
       }
@@ -214,7 +206,11 @@ try {
         page,
         () =>
           page.evaluate(() => {
-            window.posthog.capture('$pageview', { title: document.title }, { send_instantly: true });
+            window.posthog.capture(
+              '$pageview',
+              { title: document.title },
+              { send_instantly: true }
+            );
             window.posthog.capture(
               'session/message_submit_requested',
               { title: document.title, cli_type: 'builtin', agent_type: 'claude' },

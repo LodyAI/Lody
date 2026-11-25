@@ -1,5 +1,3 @@
-import { UsageSharingPrompt } from '@/components/onboarding/desktop-usage-sharing-prompt';
-import { useAppCapability } from '@/lib/app-platform';
 import { Outlet } from '@tanstack/react-router';
 import { WorkspaceCheckoutPendingDialog } from '@/components/workspace-checkout-pending-dialog';
 import { ElectronSessionCompletionNotifier } from '@/components/electron-session-completion-notifier';
@@ -15,12 +13,10 @@ export function AuthenticatedWorkspaceContent({
 }: {
   showWorkspaceCheckout?: boolean;
 }) {
-  const telemetry = useAppCapability('telemetry');
   useObserveWindowReadEngagement();
   return (
     <>
       <Outlet />
-      {telemetry && <UsageSharingPrompt />}
       <ElectronSessionCompletionNotifier />
       <ElectronDesktopForegroundPresence />
       <ElectronMenuHandler />

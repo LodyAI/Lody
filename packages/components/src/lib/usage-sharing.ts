@@ -1,6 +1,5 @@
 const key = 'lody:usage-sharing';
 const accountKey = 'lody:usage-sharing-account-blocked';
-const accountDecisionPrefix = 'lody:usage-sharing:account:';
 let sessionBlocked = false;
 let accountAllowed = true;
 
@@ -15,27 +14,7 @@ export function readDeviceUsageChoice(): boolean | null {
 }
 
 export function readDeviceUsageSharing(): boolean {
-  return readDeviceUsageChoice() === true;
-}
-
-export function hasAccountUsagePromptDecision(accountId: string): boolean {
-  if (typeof window === 'undefined' || !accountId) return false;
-  try {
-    return window.localStorage.getItem(accountDecisionPrefix + accountId) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function markAccountUsagePromptDecided(accountId: string): void {
-  if (typeof window === 'undefined' || !accountId) return;
-  try {
-    window.localStorage.setItem(accountDecisionPrefix + accountId, '1');
-  } catch {
-    // Ignore storage failures; in-memory state remains fail-closed.
-  } finally {
-    window.dispatchEvent(new Event(key));
-  }
+  return readDeviceUsageChoice() !== false;
 }
 
 export function clearPostHogLocalStorage(): void {
@@ -71,12 +50,7 @@ export function setAccountUsageAllowed(allowed: boolean): void {
 
 export function subscribeUsageSharing(listener: () => void): () => void {
   const storage = (event: StorageEvent) => {
-    if (
-      event.key === null ||
-      event.key === key ||
-      event.key === accountKey ||
-      event.key.startsWith(accountDecisionPrefix)
-    ) {
+    if (event.key === null || event.key === key || event.key === accountKey) {
       listener();
     }
   };
@@ -138,11 +112,6 @@ export function hasPendingUsageOptOut(accountId: string): boolean {
   } catch {
     return false;
   }
-}
-
-export function rememberDesktopAccountChoice(accountId: string, enabled: boolean): void {
-  if (!enabled) markUsageOptOutPending(accountId, true);
-  else window.localStorage.setItem(key + ':pending:' + accountId, 'allow');
 }
 
 export function pendingAccountChoice(accountId: string): boolean | null {

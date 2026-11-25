@@ -4,7 +4,6 @@ import { getLogger, rootLogger } from '../utils/logger';
 import { reportError } from '../utils/telemetry';
 import { AuthClient } from '@/lib/auth';
 import { flushTelemetry } from '@/instrument';
-import { writeUsageSharing } from '@lody/shared/node/usage-sharing';
 import { captureAuthEvent } from './analytics-events';
 
 interface LogoutOptions {
@@ -45,11 +44,4 @@ export const logoutCommand = new Command('logout')
     logger.info(`Logging out user: ${chalk.cyan(logoutResult.user.email)}`);
     logger.success('\n' + chalk.green('✓') + ' Successfully logged out!');
     await flushTelemetry();
-    if (process.env.LODY_ELECTRON_BOOTSTRAP !== '1') {
-      try {
-        writeUsageSharing(false);
-      } catch {
-        // Best-effort local preference cleanup on logout.
-      }
-    }
   });

@@ -12,14 +12,6 @@ function isEnvUsageSharingDisabled(): boolean {
   return disable === '1' || disable === 'true' || process.env.DO_NOT_TRACK?.trim() === '1';
 }
 
-function isDesktopSupervisedProcess(): boolean {
-  return (
-    process.env.LODY_REQUIRE_USAGE_SHARING_CHOICE === '1' ||
-    process.env.LODY_ELECTRON_BOOTSTRAP === '1' ||
-    !!process.versions.electron
-  );
-}
-
 function storedRevision(): string | null {
   if (isEnvUsageSharingDisabled()) return null;
   try {
@@ -35,7 +27,7 @@ export function desktopUsageChoice(): boolean | null {
   return revision === 'default' ? null : revision !== null;
 }
 
-export function usageSharingRevision(requireChoice = true): string | null {
+export function usageSharingRevision(requireChoice = false): string | null {
   const revision = storedRevision();
   return requireChoice && revision === 'default' ? null : revision;
 }
@@ -52,12 +44,5 @@ export function writeUsageSharing(enabled: boolean): void {
 
 export function syncAccountUsageSharing(enabled: boolean): void {
   if (isEnvUsageSharingDisabled()) return;
-  if (!enabled) {
-    writeUsageSharing(false);
-    return;
-  }
-  if (isDesktopSupervisedProcess() && desktopUsageChoice() === null) {
-    return;
-  }
-  writeUsageSharing(true);
+  writeUsageSharing(enabled);
 }

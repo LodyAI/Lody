@@ -75,7 +75,7 @@ export async function captureElectronMainException(
   error: unknown,
   context?: { component?: string; extra?: Record<string, unknown> }
 ): Promise<void> {
-  if (!usageSharingRevision(true)) return
+  if (!usageSharingRevision()) return
   const posthog = getClient()
   if (!posthog) return
 

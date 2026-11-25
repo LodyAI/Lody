@@ -6,9 +6,7 @@ import { deferredPostHog, scheduleDeferredPostHogInitialization } from '@/lib/de
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import {
   clearPostHogLocalStorage,
-  hasAccountUsagePromptDecision,
   hasPendingUsageOptOut,
-  markAccountUsagePromptDecided,
   markUsageOptOutPending,
   rememberAccountUsageSharing,
   pendingAccountChoice,
@@ -49,11 +47,6 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
   const session = usePlatformSession();
   const choice = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageChoice, () => null);
   const accountId = session.status === 'authenticated' ? session.user.id : null;
-  const promptDecided = useSyncExternalStore(
-    subscribeUsageSharing,
-    () => (accountId ? hasAccountUsagePromptDecision(accountId) : false),
-    () => false
-  );
   const preference = usePlatform().cloudApi?.useOptionalAuthenticatedQuery?.(
     cloudOperations.analytics.getUsageSharing,
     accountId ? { accountId } : 'skip'
@@ -73,15 +66,14 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
         .getUsageSharingEnabled()
         .then((enabled) => {
           if (!live) return;
-          if (
-            readDeviceUsageChoice() === initialChoice &&
-            (enabled === false || (enabled === true && initialChoice === null))
-          ) {
-            writeDeviceUsageSharing(enabled);
+          if (readDeviceUsageChoice() === initialChoice && enabled === false) {
+            writeDeviceUsageSharing(false);
           }
           setDesktopReady(true);
         })
-        .catch(() => {});
+        .catch(() => {
+          if (live) setDesktopReady(true);
+        });
     return () => {
       live = false;
     };
@@ -96,14 +88,9 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const hasExplicitDecision = promptDecided || choice !== null;
-  // Unified user-level opt-in: stay disabled before sign-in and before explicit consent.
-  const allowed =
-    session.status === 'authenticated' &&
-    account === true &&
-    hasExplicitDecision &&
-    pendingChoice !== false;
-  const enabled = supported && allowed && choice === true && desktopReady;
+  const accountLoaded = !accountId || preference === undefined || typeof account === 'boolean';
+  const allowed = accountLoaded && account !== false && pendingChoice !== false;
+  const enabled = supported && allowed && choice !== false && desktopReady;
   setAccountUsageAllowed(supported && allowed && desktopReady);
 
   const savePreference = useCloudMutation(cloudOperations.analytics.setUsageSharing);
@@ -126,7 +113,7 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
       return;
     }
     void savePreference({ enabled: desired, accountId }).catch(() => {});
-  }, [account, accountId, savePreference, choice, promptDecided]);
+  }, [account, accountId, savePreference, choice]);
 
   // Keep local client state and Electron main/CLI file synced with the unified account switch.
   useEffect(() => {
@@ -140,9 +127,6 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
     if (desired !== null) return;
 
     if (account === false) {
-      if (!hasAccountUsagePromptDecision(accountId)) {
-        markAccountUsagePromptDecided(accountId);
-      }
       if (readDeviceUsageChoice() !== false) {
         try {
           writeDeviceUsageSharing(false);
@@ -158,22 +142,19 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // account === true: mirror to local/desktop only after the user has explicitly decided.
-    if (hasAccountUsagePromptDecision(accountId) || readDeviceUsageChoice() !== null) {
-      if (readDeviceUsageChoice() !== true) {
-        try {
-          writeDeviceUsageSharing(true);
-        } catch {
-          // Ignore storage write failure.
-        }
-      }
-      if (window.__LODY_ELECTRON__) {
-        void getIpcServices()
-          ?.app.setUsageSharingEnabled(true)
-          .catch(() => {});
+    if (readDeviceUsageChoice() === false) {
+      try {
+        writeDeviceUsageSharing(true);
+      } catch {
+        // Ignore storage write failure.
       }
     }
-  }, [supported, desktopReady, account, accountId, choice, promptDecided]);
+    if (window.__LODY_ELECTRON__) {
+      void getIpcServices()
+        ?.app.setUsageSharingEnabled(true)
+        .catch(() => {});
+    }
+  }, [supported, desktopReady, account, accountId, choice]);
 
   useEffect(() => {
     if (!enabled) {
