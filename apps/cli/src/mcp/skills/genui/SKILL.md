@@ -14,10 +14,12 @@ reduces the reader's scan cost:
   options. Never wrap plain prose in a card.
 - Interactive controls — only when the reader can act on the UI itself. For
   static data a markdown table is usually clearer.
-- `Mock` — architecture/layout wireframes: nest `Mock:Col`/`Mock:Row`/`Mock:Cell`/
-  `Mock:Box` and the renderer computes every coordinate — never write x/y/w/h.
-  For node→edge graphs use a ```` ```mermaid ```` fence; for hand-tuned vector
-  scenes use `svg` + `svg:text`.
+- `Mock` — **the default for any wireframe, UI mock-up, layout or architecture
+  schematic.** Nest `Mock:Col`/`Mock:Row` (split space), `Mock:Cell` (blank
+  block), `Mock:Box` (centred `label`/`sub`/`hint`) and the renderer computes
+  every coordinate — you never write x/y/w/h and it always comes out aligned.
+  Do not hand-place `svg` rects for a layout; `svg` is only for shapes `Mock`
+  cannot express (icons, annotations). Node→edge graphs → ```` ```mermaid ````.
 
 ## Fence rules
 
@@ -52,6 +54,8 @@ before any markup that reads it — elements mount as their open tag closes.
 - `<strong>`/`<em>` inside `Text`/`Badge` — unknown tags; use a template literal.
 - `Badge` for emphasis — it marks real state only, one per status.
 - Prose inside `Card`, markup inside an inline `Badge` label — both break.
+- Hand-placed `svg` rects for a window/panel layout — use `Mock` so the
+  renderer computes coordinates; `svg` is for shapes `Mock` cannot express.
 
 ## Inline tags (no fence)
 
