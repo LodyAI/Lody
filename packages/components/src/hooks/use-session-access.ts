@@ -54,8 +54,6 @@ export function useSessionAccess(options: WorkspaceScopeOptions = {}) {
     lease?.port === port
       ? lease.store
       : null;
-  // The lease effect owns the room; this projection subscribes only while a
-  // store is bound. An unbound scope reads the shared empty snapshot.
   const snapshot = useExternalSnapshot(store ?? EMPTY_SESSION_ACCESS_SOURCE);
   return { ...snapshot, store, port, workspaceId: scope.workspaceId, enabled };
 }

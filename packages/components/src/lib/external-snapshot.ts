@@ -45,11 +45,8 @@ export function useExternalSnapshot<T>(
   source: SnapshotSource<T>,
   acquire?: () => SnapshotLease
 ): T {
-  // Latest acquire closure; the lease effect keys on `source` alone because
-  // the lease is a property of the room's lifetime, not of the render that
-  // produced the closure. Assignment happens in an effect so a concurrent
-  // render that never commits cannot swap the closure a committed effect
-  // later invokes.
+  // The lease keys on `source` alone: it belongs to the room's lifetime, not
+  // the render that produced this closure.
   const acquireRef = useRef(acquire);
   useEffect(() => {
     acquireRef.current = acquire;

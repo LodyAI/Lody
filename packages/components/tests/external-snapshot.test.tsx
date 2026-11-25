@@ -1,9 +1,4 @@
 /** @vitest-environment jsdom */
-// Contract tests for the single useSyncExternalStore adapter. These pin the
-// behaviors business modules rely on so no call site needs to hand-wire the
-// primitive again: lease lifecycle keyed on the room, no re-render for
-// same-identity publishes, the render/effect gap closed by the adapter, and
-// StrictMode effect replay not corrupting lease counts.
 import { act, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -73,8 +68,6 @@ describe('useExternalSnapshot', () => {
     }
     await act(async () => root.render(<Consumer />));
     const baseline = renders;
-    // The room notifies listeners but the object identity is unchanged:
-    // the adapter must not schedule a re-render.
     await act(async () => room.publish(room.source.getSnapshot()));
     expect(renders).toBe(baseline);
   });
@@ -86,9 +79,8 @@ describe('useExternalSnapshot', () => {
       return <output>{v.n}</output>;
     }
     await act(async () => root.render(<Consumer />));
-    // Mutate without notifying, then publish the already-current object: the
-    // publish signal alone must surface the room's latest value, because
-    // reads always go to getSnapshot rather than a cached copy.
+    // The publish signal alone must surface mutations the room never notified,
+    // because reads always go to getSnapshot rather than a cached copy.
     room.mutateSilent({ n: 3 });
     await act(async () => room.publish(room.source.getSnapshot()));
     expect(container.querySelector('output')!.textContent).toBe('3');
@@ -133,7 +125,6 @@ describe('useExternalSnapshot', () => {
       return <button onClick={() => force((n) => n + 1)}>{tick}</button>;
     }
     await act(async () => root.render(<Consumer />));
-    // Re-render with a brand-new inline acquire closure identity.
     await act(async () => {
       container.querySelector('button')!.click();
     });
@@ -190,8 +181,7 @@ describe('useExternalSnapshot', () => {
         </StrictMode>
       )
     );
-    // StrictMode replays setup/cleanup once: acquires may exceed releases by
-    // exactly the one live lease, and the subscription must be live.
+    // StrictMode replays setup/cleanup once; the one live lease must survive.
     expect(acquires - releases).toBe(1);
     expect(room.listenerCount()).toBe(1);
     await act(async () => room.publish({ n: 5 }));

@@ -31,17 +31,17 @@ vi.mock('convex/react', () => ({
 import { RecoverableConvexBetterAuthProvider } from '../src/providers/recoverable-convex-better-auth-provider';
 
 function createSessionStore(read: () => unknown) {
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(value: unknown) => void>();
   return {
     store: {
       get: read,
-      listen(listener: () => void) {
+      listen(listener: (value: unknown) => void) {
         listeners.add(listener);
         return () => listeners.delete(listener);
       },
     },
     publish() {
-      for (const listener of [...listeners]) listener();
+      for (const listener of [...listeners]) listener(read());
     },
   };
 }
