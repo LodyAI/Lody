@@ -22,7 +22,6 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import {
   getTelemetryRouteTarget,
   installWorkspaceTelemetryScope,
-  postHogPrivacy,
   suspendWorkspaceTelemetry,
 } from '@/lib/posthog-privacy';
 import {
@@ -121,7 +120,6 @@ export function CloudPlatformProvider({
   const atomStore = useStore();
   const telemetryLive = useRef({ session, hasAuthenticatedConvex });
   telemetryLive.current = { session, hasAuthenticatedConvex };
-  useLayoutEffect(() => postHogPrivacy.sync());
   useEffect(() => {
     const uninstall = installWorkspaceTelemetryScope(() => {
       const live = telemetryLive.current;
@@ -168,19 +166,7 @@ export function CloudPlatformProvider({
         return null;
       return JSON.stringify([identity.user.id, mode.workspaceId, target]);
     });
-    const refresh = () => postHogPrivacy.sync();
-    const unsubscribes = [
-      sessionStore.subscribe(refresh),
-      workspacesStore.subscribe(refresh),
-      atomStore.sub(userAtom, refresh),
-      atomStore.sub(workspaceContentModeAtom, refresh),
-      atomStore.sub(currentWorkspaceIdAtom, refresh),
-      atomStore.sub(currentWorkspaceSlugAtom, refresh),
-    ];
-    return () => {
-      uninstall();
-      for (const unsubscribe of unsubscribes) unsubscribe();
-    };
+    return uninstall;
   }, [atomStore, sessionStore, workspacesStore]);
   const [uninstallGitHubTokenPort] = useState(() =>
     installGitHubTokenPort(
@@ -630,10 +616,7 @@ export function CloudPlatformProvider({
 
   return (
     <PlatformContext.Provider value={provider}>
-      <CloudWorkspaceBridge
-        organizationRef={organizationRef}
-        workspacesStore={workspacesStore}
-      />
+      <CloudWorkspaceBridge organizationRef={organizationRef} workspacesStore={workspacesStore} />
       <E2eeAutomaticPairingInbox
         key={session.data?.user.id ?? 'signed-out'}
         runtime={e2eeWorkspaces.runtime}

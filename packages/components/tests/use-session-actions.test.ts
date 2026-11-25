@@ -1379,22 +1379,28 @@ describe('useSessionActions', () => {
     await streamCreate.promise;
   });
 
-  it('records encrypted workspace daily activity after creating a session', async () => {
-    const sessionId = 'encrypted-dau' as SessionId;
-    const runtime = createRuntime({ contentMode: 'e2ee' });
-    const actions = await renderActions(runtime);
-    const created = await actions.startSession(createSessionPayload(sessionId), {
-      role: 'user',
-      userId: 'user-1',
-      timestamp: '2026-11-23T00:00:00.000Z',
-      items: [{ type: 'text', text: 'synthetic' }],
-      fileDiff: [],
-      inputConfig: { inputBlocks: [{ type: 'text', text: 'synthetic' }] },
-    } as never);
-    expect(created?.sessionId).toBe(sessionId);
-    expect(recordMyWorkspaceDailyActiveUser.mock.calls).toContainEqual([
-      { workspaceId: runtime.workspaceId },
-    ]);
+  it('records encrypted workspace daily activity after creating a session when usage sharing is allowed', async () => {
+    const { writeDeviceUsageSharing } = await import('../src/lib/usage-sharing');
+    writeDeviceUsageSharing(true);
+    try {
+      const sessionId = 'encrypted-dau' as SessionId;
+      const runtime = createRuntime({ contentMode: 'e2ee' });
+      const actions = await renderActions(runtime);
+      const created = await actions.startSession(createSessionPayload(sessionId), {
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-11-23T00:00:00.000Z',
+        items: [{ type: 'text', text: 'synthetic' }],
+        fileDiff: [],
+        inputConfig: { inputBlocks: [{ type: 'text', text: 'synthetic' }] },
+      } as never);
+      expect(created?.sessionId).toBe(sessionId);
+      expect(recordMyWorkspaceDailyActiveUser.mock.calls).toContainEqual([
+        { workspaceId: runtime.workspaceId },
+      ]);
+    } finally {
+      window.localStorage.clear();
+    }
   });
 
   it('blocks a new free session when the Flock metadata cache is at the limit', async () => {
