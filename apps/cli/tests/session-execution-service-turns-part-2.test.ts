@@ -220,6 +220,161 @@ describe('SessionExecutionService', () => {
     });
   });
 
+  it('ignores a stale Stop when its target turn finishes while pauseQueuedDrafts is awaiting', async () => {
+    const prompting = createDeferred<void>();
+    const finishPrompt = createDeferred<void>();
+    const queueEntered = createDeferred<void>();
+    const releaseQueue = createDeferred<void>();
+    const f = inboxExecutionFixture(async () => {
+      prompting.resolve();
+      await finishPrompt.promise;
+      return { stopReason: 'end_turn' };
+    });
+    f.service.setOperationInbox(undefined);
+    let activeTurnId: string | undefined;
+    f.deps.beginConversationTurn = (_sid, userTurnId) => {
+      activeTurnId = `assistant:${userTurnId}`;
+      return activeTurnId;
+    };
+    f.deps.getActiveTurnId = () => activeTurnId;
+    f.deps.clearActiveTurnId = (_sid, turnId) => {
+      if (activeTurnId === turnId) activeTurnId = undefined;
+    };
+    const cancelSpy = vi.spyOn(f.client, 'cancel');
+    const origGetQueue = f.doc.getMessageQueue.bind(f.doc);
+    let intercepted = false;
+    vi.spyOn(f.doc, 'getMessageQueue').mockImplementation(async () => {
+      if (!intercepted) {
+        intercepted = true;
+        queueEntered.resolve();
+        await releaseQueue.promise;
+      }
+      return await origGetQueue();
+    });
+    const sessionId = f.message.sessionId;
+    try {
+      const runA = f.service.continueSession(f.message);
+      await prompting.promise;
+      const turnAId = f.service.getExecutionSnapshot(sessionId).activeTurnId!;
+
+      const stopA = f.service.cancelSession({
+        type: 'session/cancel',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: turnAId,
+      });
+      await queueEntered.promise;
+
+      // Turn A finishes normally and releases its runtime while Stop A is still awaiting.
+      finishPrompt.resolve();
+      await runA;
+      expect(f.service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
+
+      releaseQueue.resolve();
+      expect(await stopA).toEqual({ success: true });
+
+      expect(cancelSpy).not.toHaveBeenCalled();
+      const backend = await createSessionBackend(f.doc);
+      expect((await backend.readTurn('human-input')).turn).toMatchObject({ status: 'handled' });
+    } finally {
+      finishPrompt.resolve();
+      releaseQueue.resolve();
+      await f.close();
+    }
+  });
+
+  it('does not cancel a successor turn that starts while an older no-runtime Stop awaits ACP cancel', async () => {
+    const cancelEntered = createDeferred<void>();
+    const releaseCancel = createDeferred<void>();
+    const turnBPrompting = createDeferred<void>();
+    const releaseTurnB = createDeferred<void>();
+    const f = inboxExecutionFixture(async () => {
+      turnBPrompting.resolve();
+      await releaseTurnB.promise;
+      return { stopReason: 'end_turn' };
+    });
+    f.service.setOperationInbox(undefined);
+
+    let legacyActiveTurnId: string | undefined = 'assistant:turn-a';
+    const origGetActiveTurnId = f.deps.getActiveTurnId;
+    f.deps.getActiveTurnId = (sid) => legacyActiveTurnId ?? origGetActiveTurnId(sid);
+    const origClearActiveTurnId = f.deps.clearActiveTurnId;
+    f.deps.clearActiveTurnId = (sid, tid) => {
+      if (legacyActiveTurnId === tid) legacyActiveTurnId = undefined;
+      origClearActiveTurnId(sid, tid);
+    };
+    f.client.cancel = async () => {
+      cancelEntered.resolve();
+      await releaseCancel.promise;
+    };
+
+    const sessionId = f.message.sessionId;
+    const turnBId = 'user-b';
+    const turnBConfig = { ...f.message.acpSessionConfig, prompt: 'NEXT_REQUEST' };
+    await f.doc.sessionData.commands.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        id: turnBId,
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-10-12T00:01:00Z',
+        status: 'pending',
+        read: false,
+        items: [{ type: 'text', text: 'NEXT_REQUEST' }],
+        inputConfig: turnBConfig,
+        finished: true,
+        fileDiff: [],
+      },
+    });
+
+    try {
+      const stopA = f.service.cancelSession({
+        type: 'session/cancel',
+        sessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: 'assistant:turn-a',
+      });
+      await cancelEntered.promise;
+
+      // Successor turn B begins and owns the session while old Stop A awaits ACP cancel.
+      const runB = f.service.continueSession({
+        ...f.message,
+        userTurnId: turnBId,
+        acpSessionConfig: turnBConfig,
+      });
+      await turnBPrompting.promise;
+
+      releaseCancel.resolve();
+      expect(await stopA).toEqual({ success: true });
+
+      const backend = await createSessionBackend(f.doc);
+      const metaDuringB = (
+        await f.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId))
+      )?.meta as SessionMeta | undefined;
+      expect((await backend.readTurn(turnBId)).turn).toMatchObject({ status: 'processing' });
+      expect(metaDuringB?.processingUserMsgId).toBe(turnBId);
+      expect(metaDuringB?.lastHandledUserMsgId).not.toBe(turnBId);
+      expect(f.service.getExecutionSnapshot(sessionId)).toMatchObject({
+        hasActiveTurn: true,
+        activeTurnId: `assistant:${turnBId}`,
+      });
+
+      releaseTurnB.resolve();
+      await runB;
+      expect((await backend.readTurn(turnBId)).turn).toMatchObject({ status: 'handled' });
+      const metaAfterB = (
+        await f.deps.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId))
+      )?.meta as SessionMeta | undefined;
+      expect(metaAfterB?.lastHandledUserMsgId).toBe(turnBId);
+    } finally {
+      releaseCancel.resolve();
+      releaseTurnB.resolve();
+      await f.close();
+    }
+  });
+
   it('stops authentication when aborted while the launch config is loading', async () => {
     let resolveConfig!: (value: ReturnType<typeof createLaunchConfig>) => void;
     const config = new Promise<ReturnType<typeof createLaunchConfig>>((resolve) => {

@@ -3815,6 +3815,14 @@ export class SessionExecutionService {
     if (runtime?.cancelFinalized) {
       return Effect.void;
     }
+    const owningTurnId =
+      this.turnRuntimeBySession.get(options.sessionId)?.turnId ??
+      this.currentTurnBySession.get(options.sessionId) ??
+      this.deps.getActiveTurnId(options.sessionId);
+    if (!runtime && owningTurnId && owningTurnId !== options.turnId) {
+      this.clearTurnCancellation(options.sessionId, options.turnId);
+      return Effect.void;
+    }
 
     const self = this;
     return Effect.gen(function* () {
@@ -9009,6 +9017,13 @@ export class SessionExecutionService {
       )
         return { success: false, error: 'Execution changed before cancellation.' };
     }
+    const currentOwnerTurnId = () =>
+      this.turnRuntimeBySession.get(sessionId)?.turnId ??
+      this.currentTurnBySession.get(sessionId) ??
+      this.deps.getActiveTurnId(sessionId);
+    if (currentOwnerTurnId() !== turnId) {
+      return { success: true };
+    }
     this.pendingGoalTurnBySession.delete(sessionId);
     this.markTurnCancelled(sessionId, turnId);
     const runtime = this.getTurnRuntime(sessionId, turnId);
@@ -9064,11 +9079,10 @@ export class SessionExecutionService {
     }
 
     const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const liveTurnId =
-      this.turnRuntimeBySession.get(sessionId)?.turnId ??
-      this.currentTurnBySession.get(sessionId) ??
-      this.deps.getActiveTurnId(sessionId);
-    if (liveTurnId && liveTurnId !== turnId) return { success: true };
+    if (currentOwnerTurnId() !== turnId) {
+      this.clearTurnCancellation(sessionId, turnId);
+      return { success: true };
+    }
     if (this.getTurnRuntime(sessionId, turnId)) return this.cancelSession(message, options);
     if (isPrompting) {
       this.deps.clearActiveTurnId(sessionId, turnId);
@@ -9117,6 +9131,11 @@ export class SessionExecutionService {
 
     try {
       await session.agentClient.cancel(session.acpSessionId);
+      const successorTurnId = currentOwnerTurnId();
+      if (successorTurnId && successorTurnId !== turnId) {
+        this.clearTurnCancellation(sessionId, turnId);
+        return { success: true };
+      }
       this.deps.logger.debug(`[${sessionId}] Cancel signal sent to agent for turn ${turnId}`);
       this.deps.clearSessionActivePresence(sessionId);
       await this.finalizeCancelledTurn({
