@@ -130,14 +130,15 @@ Props that matter per tag; full prop tables and per-family examples live in
 | `Checkbox` / `Switch` | Boolean toggle | `checked`, `onCheckedChange(v)`, `disabled` |
 | `Select` | Dropdown | `items`, `value`, `onValueChange(v)`, `placeholder` |
 | `Slider` | Numeric range | `value`, `min`, `max`, `step`, `disabled`, `onChange(n)` |
-| `svg` family | Custom diagrams | `viewBox`; `rect` `circle` `ellipse` `line` `polyline` `polygon` `path` `g`; labels via `svg:text` |
+| `Diagram` | Auto-laid-out layered diagram | `layers` (array), `edges` (array), `aria-label` |
+| `svg` family | Hand-placed vector shapes | `viewBox`; `rect` `circle` `ellipse` `line` `polyline` `polygon` `path` `g`; labels via `svg:text` |
 
 ## References (read on demand)
 
 - [expressions](references/expressions.md) — confined-JS subset, state semantics, `lody.*` capabilities, error shapes.
 - [layout-text](references/layout-text.md) — Card, Row, Column, Divider, Spacer, Text, Heading, Badge, Icon: props, examples, misuse patterns.
 - [controls](references/controls.md) — Button, Input, Checkbox, Switch, Select, Slider: props, event contracts, worked examples.
-- [svg](references/svg.md) — svg, shapes, svg:text: the confined diagram subset, paint attributes, examples.
+- [svg](references/svg.md) — Diagram (auto layout), svg, shapes, svg:text: the confined diagram subset, paint attributes, examples.
 
 ## Validate before shipping
 

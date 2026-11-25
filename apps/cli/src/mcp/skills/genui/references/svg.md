@@ -1,11 +1,69 @@
 # svg diagrams
 
+Two ways to draw: **`Diagram`** for structured layered/flow pictures — you give
+data, it computes every coordinate — and the lowercase **`svg` family** for
+hand-placed shapes when you need exact control.
+
+## Prefer `Diagram` for architecture and flows
+
+`Diagram` renders a top-down layered diagram. You describe *what* connects, not
+*where*; the layout (positions, sizing, alignment, label placement) is computed
+for you, so output stays aligned without hand-written coordinates.
+
+```genui
+<Diagram
+  layers={[
+    { label: 'Clients', items: [
+      { id: 'desk', title: 'Desktop' },
+      { id: 'web', title: 'Web' },
+      { id: 'mob', title: 'Mobile' },
+    ]},
+    { label: 'Daemon', items: [
+      { id: 'core', title: 'Core', subtitle: 'Projects · Threads · Runtime' },
+      { id: 'ext', title: 'Extensions' },
+    ]},
+    { items: [{ id: 'run', title: 'External runners', tone: 'accent' }] },
+  ]}
+  edges={[
+    { from: 'web', to: 'core', label: 'RPC' },
+    { from: 'core', to: 'run', dashed: true },
+  ]}
+/>
+```
+
+- `layers` — array of bands, top to bottom. Each layer: `label` (optional,
+  small-caps band header), `items` (array of boxes), optional `tone`.
+- item — `id` (edge anchor, unique), `title`, optional `subtitle`, `tone`.
+- `edges` — `from`/`to` are item `id`s; `label`, `tone`, `dashed` optional.
+- `tone: 'accent'` highlights a box, band, or edge with the accent colour.
+- Items in a layer share the band width evenly; edges run bottom-of-source to
+  top-of-target. An edge naming a missing `id` is skipped.
+- `aria-label` sets the accessible name (default `diagram`).
+
+Reach for `Diagram` before hand-writing `<svg>`: it is the disciplined default.
+Drop to the `svg` family only for a shape `Diagram` cannot express — a free-form
+wireframe, a sequence chart, or a single annotated figure.
+
+## `svg` family — hand-placed shapes
+
 `<svg>` draws custom diagrams, wireframes, and charts inline — the family keeps
 real lowercase SVG element names, unlike the PascalCase catalog components. It
 is a confined subset: only the elements and attributes below exist, so a
 surface can paint vector shapes but never load resources, embed HTML, or run
 handlers. The one exception is `svg:text`, namespaced to stay distinct from
 the prose `Text` tag.
+
+### Typography discipline
+
+Hand-placed SVG looks clean only with restraint. Follow this scale:
+
+- Font sizes: `8` (captions), `9` (labels), `10` (item titles), `11–12`
+  (section titles). `font-weight="600"` for titles only; everything else `400`.
+- Colour: `currentColor` for all text. Fills use `currentColor` with
+  `fill-opacity` in `.05` / `.08` / `.12` / `.15` bands. One accent hue maximum
+  (e.g. `#8b5cf6`), reserved for the single element you want highlighted.
+- Outlines: `stroke="currentColor"` `stroke-opacity=".25"–.35`; dashed
+  connectors via `stroke-dasharray="4 3"` or `"3 3"`.
 
 ## Elements
 

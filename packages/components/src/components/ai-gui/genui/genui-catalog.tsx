@@ -57,6 +57,296 @@ const pascal = (name: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join('');
 
+/* --------------------------------------------------------------------------
+ * Diagram: a declarative layered/flow diagram. The model supplies structure
+ * (`layers` and `edges` data); the renderer computes all geometry at render
+ * time so the output stays aligned — the model never writes coordinates.
+ * ------------------------------------------------------------------------ */
+
+const ACCENT = '#8b5cf6';
+const DIAGRAM = {
+  width: 560,
+  padX: 20,
+  padTop: 18,
+  padBottom: 18,
+  layerGap: 46,
+  itemGap: 12,
+  layerPadX: 14,
+  layerPadTop: 18,
+  layerPadBottom: 12,
+  itemH: 44,
+  edgeStub: 10,
+  fontTitle: 10,
+  fontItem: 9,
+  fontSub: 8,
+  fontLabel: 8,
+} as const;
+
+interface DiagramItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  tone?: string;
+}
+interface DiagramLayer {
+  label?: string;
+  tone?: string;
+  items: DiagramItem[];
+}
+interface DiagramEdge {
+  from: string;
+  to: string;
+  label?: string;
+  tone?: string;
+  dashed?: boolean;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function readItem(v: unknown, index: number): DiagramItem | undefined {
+  if (!isRecord(v)) return undefined;
+  const title = str(v.title);
+  if (!title) return undefined;
+  return {
+    id: str(v.id) || `item-${index}`,
+    title,
+    subtitle: v.subtitle === undefined ? undefined : str(v.subtitle),
+    tone: v.tone === undefined ? undefined : str(v.tone),
+  };
+}
+
+function readLayers(v: unknown): DiagramLayer[] {
+  if (!Array.isArray(v)) return [];
+  const layers: DiagramLayer[] = [];
+  for (const raw of v) {
+    if (!isRecord(raw)) continue;
+    const items = Array.isArray(raw.items)
+      ? raw.items.map(readItem).filter((i): i is DiagramItem => i !== undefined)
+      : [];
+    layers.push({
+      label: raw.label === undefined ? undefined : str(raw.label),
+      tone: raw.tone === undefined ? undefined : str(raw.tone),
+      items,
+    });
+  }
+  return layers;
+}
+
+function readEdges(v: unknown): DiagramEdge[] {
+  if (!Array.isArray(v)) return [];
+  const edges: DiagramEdge[] = [];
+  for (const raw of v) {
+    if (!isRecord(raw)) continue;
+    const from = str(raw.from);
+    const to = str(raw.to);
+    if (!from || !to) continue;
+    edges.push({
+      from,
+      to,
+      label: raw.label === undefined ? undefined : str(raw.label),
+      tone: raw.tone === undefined ? undefined : str(raw.tone),
+      dashed: bool(raw.dashed),
+    });
+  }
+  return edges;
+}
+
+const toneStroke = (tone?: string) => (tone === 'accent' ? ACCENT : 'currentColor');
+const toneOpacity = (tone?: string, base = 0.05) => (tone === 'accent' ? 0.12 : base);
+
+/**
+ * Compute a top-down layered layout. Each layer is a band; items inside a
+ * layer share the band width equally. Edges run from the bottom-centre of a
+ * source item to the top-centre of its target. Returns the svg children.
+ */
+function GenuiDiagram({ layers, edges, ariaLabel }: GenuiProps) {
+  const ls = readLayers(layers);
+  const es = readEdges(edges);
+  const D = DIAGRAM;
+  const innerW = D.width - D.padX * 2;
+
+  // Pre-compute each layer's band height (taller when it has a label).
+  const bandH = (layer: DiagramLayer) =>
+    (layer.label ? D.layerPadTop : 8) + D.itemH + D.layerPadBottom;
+
+  const totalH =
+    D.padTop +
+    ls.reduce((h, l) => h + bandH(l), 0) +
+    Math.max(0, ls.length - 1) * D.layerGap +
+    D.padBottom;
+
+  // Place every item: record its box and layer index for edge routing.
+  const boxes = new Map<string, { x: number; y: number; w: number; h: number; layer: number }>();
+  const layerRects: { x: number; y: number; w: number; h: number; label?: string; tone?: string }[] =
+    [];
+  let cursorY = D.padTop;
+  ls.forEach((layer, layerIndex) => {
+    const h = bandH(layer);
+    layerRects.push({ x: D.padX, y: cursorY, w: innerW, h, label: layer.label, tone: layer.tone });
+    const n = Math.max(1, layer.items.length);
+    const itemW = (innerW - D.layerPadX * 2 - (n - 1) * D.itemGap) / n;
+    const itemY = cursorY + (layer.label ? D.layerPadTop : 8);
+    layer.items.forEach((item, i) => {
+      const x = D.padX + D.layerPadX + i * (itemW + D.itemGap);
+      boxes.set(item.id, { x, y: itemY, w: itemW, h: D.itemH, layer: layerIndex });
+    });
+    cursorY += h + D.layerGap;
+  });
+
+  const cx = (b: { x: number; w: number }) => b.x + b.w / 2;
+  // Cross-layer edges route through a right-hand gutter so the stroke never
+  // crosses an intermediate band.
+  const gutterX = D.width - 8;
+
+  return (
+    <svg
+      viewBox={`0 0 ${D.width} ${totalH}`}
+      width="100%"
+      role="img"
+      aria-label={str(ariaLabel, 'diagram')}
+      {...stylex.props(styles.svg)}
+    >
+      {/* edges first so boxes paint over their endpoints */}
+      {es.map((edge, i) => {
+        const a = boxes.get(edge.from);
+        const b = boxes.get(edge.to);
+        if (!a || !b) return null;
+        const stroke = toneStroke(edge.tone);
+        const accent = edge.tone === 'accent';
+        const strokeProps = {
+          stroke,
+          strokeOpacity: accent ? 0.95 : 0.4,
+          strokeWidth: accent ? 1.8 : 1,
+          strokeDasharray: edge.dashed ? '4 3' : undefined,
+        };
+        const adjacent = Math.abs(a.layer - b.layer) === 1;
+        if (adjacent) {
+          // Straight line between vertically neighbouring layers.
+          const [top, bot] = a.layer < b.layer ? [a, b] : [b, a];
+          const x1 = cx(top);
+          const y1 = top.y + top.h;
+          const x2 = cx(bot);
+          const y2 = bot.y;
+          return (
+            <g key={`e${i}`}>
+              <line x1={x1} y1={y1} x2={x2} y2={y2} {...strokeProps} />
+              {edge.label ? (
+                <text
+                  x={(x1 + x2) / 2 + 4}
+                  y={(y1 + y2) / 2}
+                  fontSize={D.fontLabel}
+                  fill="currentColor"
+                  opacity={0.6}
+                >
+                  {edge.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        }
+        // Same-layer or multi-layer edge: exit the source's right edge into
+        // the gutter, descend to just above the target's layer, then enter
+        // the target's top edge — the stroke never crosses a band and the
+        // flow still lands from above like the adjacent-layer strokes.
+        const midY = a.y + a.h / 2;
+        const topY = b.y - D.layerGap / 2;
+        const d = [
+          `M ${a.x + a.w} ${midY}`,
+          `L ${gutterX} ${midY}`,
+          `L ${gutterX} ${topY}`,
+          `L ${cx(b)} ${topY}`,
+          `L ${cx(b)} ${b.y}`,
+        ].join(' ');
+        return (
+          <g key={`e${i}`}>
+            <path d={d} fill="none" {...strokeProps} />
+            {edge.label ? (
+              <text
+                x={(gutterX + cx(b)) / 2}
+                y={topY - 3 - (i % 3) * 9}
+                fontSize={D.fontLabel}
+                fill="currentColor"
+                opacity={0.6}
+                textAnchor="middle"
+              >
+                {edge.label}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
+      {/* layer bands */}
+      {layerRects.map((r, i) => (
+        <g key={`l${i}`}>
+          <rect
+            x={r.x}
+            y={r.y}
+            width={r.w}
+            height={r.h}
+            rx={8}
+            fill="currentColor"
+            opacity={toneOpacity(r.tone, 0.04)}
+            stroke="currentColor"
+            strokeOpacity={0.25}
+          />
+          {r.label ? (
+            <text
+              x={r.x + 12}
+              y={r.y + 14}
+              fontSize={D.fontLabel}
+              letterSpacing={1}
+              fill="currentColor"
+              opacity={0.55}
+            >
+              {r.label.toUpperCase()}
+            </text>
+          ) : null}
+        </g>
+      ))}
+      {/* items */}
+      {ls.flatMap((layer) =>
+        layer.items.map((item) => {
+          const b = boxes.get(item.id);
+          if (!b) return null;
+          const accent = item.tone === 'accent';
+          const hasSub = Boolean(item.subtitle);
+          return (
+            <g key={item.id}>
+              <rect
+                x={b.x}
+                y={b.y}
+                width={b.w}
+                height={b.h}
+                rx={6}
+                fill={accent ? ACCENT : 'currentColor'}
+                opacity={toneOpacity(item.tone)}
+                stroke={toneStroke(item.tone)}
+                strokeOpacity={accent ? 0.9 : 0.35}
+              />
+              <text
+                x={b.x + 10}
+                y={hasSub ? b.y + 18 : b.y + b.h / 2 + 3}
+                fontSize={D.fontItem}
+                fontWeight={600}
+                fill="currentColor"
+              >
+                {item.title}
+              </text>
+              {hasSub ? (
+                <text x={b.x + 10} y={b.y + 32} fontSize={D.fontSub} fill="currentColor" opacity={0.6}>
+                  {item.subtitle}
+                </text>
+              ) : null}
+            </g>
+          );
+        })
+      )}
+    </svg>
+  );
+}
+
 // lucide-react 1.x dropped deprecated aliases like `x-circle` (now `circle-x`);
 // models still write the old kebab names, so retry with rotated segments.
 export function resolveIcon(name: string) {
@@ -310,6 +600,7 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   ),
   Select: (props) => <GenuiSelect {...props} />,
   Slider: (props) => <GenuiSlider {...props} />,
+  Diagram: GenuiDiagram,
   svg: ({ children, ...rest }) => (
     <svg
       {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
