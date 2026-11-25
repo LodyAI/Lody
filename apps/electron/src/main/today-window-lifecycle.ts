@@ -92,11 +92,9 @@ export function createTodayWindowLifecycle<W extends TodayLifecycleWindow>(
       const { window } = entry
       if (parked === entry) {
         parked = null
-        // Keep the hidden marker until the renderer has committed the new target.
         entry.ready = false
         entry.bindingId += 1
         const cancel = deps.setTimer(() => {
-          // Recover using the normal cold path if the old renderer cannot bind.
           const shouldReopen = deps.canPark(window)
           window.destroy()
           if (shouldReopen) create(target)

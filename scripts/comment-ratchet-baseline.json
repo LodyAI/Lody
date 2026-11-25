@@ -2,7 +2,7 @@
   "version": 1,
   "scopes": {
     "apps/cli": 7379,
-    "apps/electron": 1552,
+    "apps/electron": 1551,
     "apps/mobile": 7,
     "apps/mobile-capacitor": 300,
     "e2e/cucumber.mjs": 0,
