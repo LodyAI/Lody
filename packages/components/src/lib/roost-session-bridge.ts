@@ -317,11 +317,10 @@ function routeRoostHistory(
       opening = undefined;
     }));
   };
-  const refresh = () => {
-    if (disposed || !reader || switching || (reader === owner && !cloud.published())) return;
-    if (retry) clearTimeout(retry);
-    retry = undefined;
-    switching = (async () => {
+  const refreshRoute = () => {
+    if (disposed || !reader || retry) return;
+    if (switching) return switching;
+    return (switching = (async () => {
       if (!(await allowCloud())) {
         select(owner);
         return;
@@ -341,12 +340,24 @@ function routeRoostHistory(
       .catch(() => {
         if (!disposed && observers.size) {
           failures++;
-          retry = setTimeout(refresh, Math.min(30_000, 500 * 2 ** Math.min(failures, 6)));
+          retry = setTimeout(
+            () => {
+              retry = undefined;
+              void refreshRoute();
+            },
+            Math.min(30_000, 500 * 2 ** Math.min(failures, 6))
+          );
         }
       })
       .finally(() => {
         switching = undefined;
-      });
+      }));
+  };
+  const refresh = () => {
+    if (disposed || !reader || switching || (reader === owner && !cloud.published())) return;
+    if (retry) clearTimeout(retry);
+    retry = undefined;
+    void refreshRoute();
   };
   const unsubscribePublication = cloud.watchPublication(refresh);
   const read = async <T>(work: (source: SessionHistoryReader) => T | Promise<T>): Promise<T> => {
@@ -361,24 +372,10 @@ function routeRoostHistory(
         if (
           !disposed &&
           source === owner &&
-          !cloud.published() &&
           error instanceof SessionHistoryRequestError &&
           error.failure.source === 'transport'
-        ) {
-          if (
-            (await allowCloud()) &&
-            (await cloud.catchUp().then(
-              () => true,
-              () => false
-            ))
-          ) {
-            if (await allowCloud()) {
-              assertOpen();
-              select(cloud.history);
-              continue;
-            }
-          }
-        }
+        )
+          await refreshRoute();
         if (source === reader || disposed) throw error;
       }
     }

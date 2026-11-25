@@ -84,10 +84,12 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
-  it.each([true, false])(
-    'opens Roost on the correct reader and resumes Streams with its owner offline (already published=%s)',
+  it.each(['published', 'publication notice', 'grant 503', 'HEAD 503'])(
+    'opens Roost on the correct reader and resumes Streams with its owner offline (%s)',
     { timeout: 30_000 },
-    async (alreadyPublished) => {
+    async (startingState) => {
+      const alreadyPublished = startingState === 'published';
+      const discovering = startingState === 'grant 503' || startingState === 'HEAD 503';
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
       const workspaceId = 'roost-cloud-workspace' as WorkspaceId;
@@ -162,14 +164,20 @@ describe('createConversationSession backend seam', () => {
       const startOffset = String(bytes.length);
       const tail = String(bytes.length + incremental.length);
       const applied = Promise.withResolvers<void>();
+      const switched = Promise.withResolvers<void>();
       let requestsToTail = 0;
       let headOffset = startOffset;
+      let failHead = startingState === 'HEAD 503';
       vi.stubGlobal('fetch', (input: string | Request, init?: RequestInit) => {
         const read = new URL(input instanceof Request ? input.url : input);
         const { pathname, origin } = new URL(url);
         if (read.origin !== origin || read.pathname !== pathname)
           throw new Error('Unexpected cloud history transport');
-        if ((init?.method ?? (input instanceof Request ? input.method : 'GET')) === 'HEAD')
+        if ((init?.method ?? (input instanceof Request ? input.method : 'GET')) === 'HEAD') {
+          if (failHead) {
+            failHead = false;
+            return Promise.resolve(new Response(null, { status: 503 }));
+          }
           return Promise.resolve(
             new Response(null, {
               headers: {
@@ -178,6 +186,7 @@ describe('createConversationSession backend seam', () => {
               },
             })
           );
+        }
         if (read.searchParams.get('direction') === 'backward') {
           return Promise.resolve(
             new Response(new Uint8Array(bytes), {
@@ -245,6 +254,9 @@ describe('createConversationSession backend seam', () => {
         createRemoteRoostSessionDataFactory({
           workspaceId,
           machineId,
+          onCloudHistoryRoute: (active) => {
+            if (active) switched.resolve();
+          },
           cloudHistory: () =>
             createRoostHistoryReplica({
               workspaceId,
@@ -265,6 +277,20 @@ describe('createConversationSession backend seam', () => {
           requestHistoryRead: owner,
           requestHistoryWrite: offline,
         })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      const timedOut: Parameters<
+        typeof createRemoteRoostSessionDataFactory
+      >[0]['requestHistoryRead'] = async () => ({
+        type: 'session/history-read_response',
+        sessionId,
+        success: false,
+        error: 'Synthetic owner is offline',
+        rpcFailure: {
+          source: 'transport',
+          code: 'response_timeout',
+          requestId: 'synthetic-owner-read',
+          machineId,
+        },
+      });
       const ownerRead: Parameters<
         typeof createRemoteRoostSessionDataFactory
       >[0]['requestHistoryRead'] = async (_machine, _session, query) => ({
@@ -289,6 +315,8 @@ describe('createConversationSession backend seam', () => {
       const first = open(
         async () => {
           readGrants++;
+          if (startingState === 'grant 503' && readGrants === 1)
+            throw new RoostCloudHistoryRequestError(503);
           return {
             binding,
             streamUrl: url,
@@ -296,10 +324,23 @@ describe('createConversationSession backend seam', () => {
             expiresIn: 60,
           };
         },
-        alreadyPublished ? offline : ownerRead
+        discovering ? timedOut : alreadyPublished ? offline : ownerRead
       );
+      if (discovering) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         const observation = first.history.observe(() => {});
+        if (discovering) {
+          void observation.initial.catch(() => {});
+          await expect(observation.initialPage).rejects.toMatchObject({
+            failure: { source: 'transport', code: 'response_timeout' },
+          });
+          await vi.advanceTimersByTimeAsync(1_000);
+          await switched.promise;
+          await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+            rows: [{ turnId: turn.id }],
+          });
+          return;
+        }
         const page = await observation.initialPage;
         expect(page.rows).toMatchObject([{ turnId: turn.id }]);
         expect(await first.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
@@ -327,6 +368,10 @@ describe('createConversationSession backend seam', () => {
         observation.unsubscribe();
       } finally {
         first.dispose();
+        if (discovering) {
+          vi.useRealTimers();
+          vi.unstubAllGlobals();
+        }
       }
       cachedBinding = binding;
       const reopened = open(offline);
