@@ -68,7 +68,6 @@ function publicWait(ledger: AutomationLedger, wait: AutomationWait) {
   };
 }
 
-/** Unified local CLI/MCP and proof-verified remote automation control surface. */
 export function createAutomationController(deps: AutomationControlDeps) {
   const { ledger, lody, authority, workspaceId, machineId, managedRunLogs, delivery } = deps;
   const remoteNonce = randomUUID();
@@ -152,7 +151,6 @@ export function createAutomationController(deps: AutomationControlDeps) {
         if (command.type === 'configure') {
           const currentTurn =
             command.settings.recoverCapacity === true ? meta.latestUserMsgId : undefined;
-          // Release statusLock before cancelling receipts (AB-BA lock-order invariant).
           yield* delivery.withStatusLock(async (lockedNow) => {
             const previous = sessionPolicySettings(ledger, sessionId);
             const wasRecoveryEnabled = previous.recoverCapacity === true;

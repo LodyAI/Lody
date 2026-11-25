@@ -173,10 +173,7 @@ export function retainsAutomationGrant(
   );
 }
 
-/**
- * Synchronous Inbox-gate admission check. Runs inside `SessionExecutionService`'s
- * Inbox gate, so it must stay strictly synchronous and read only the local ledger.
- */
+/** Synchronous Inbox-gate admission check; must stay sync and read only the local ledger. */
 export function canSubmitAutomationInput(
   ledger: AutomationLedger,
   sessionId: SessionId,
@@ -564,7 +561,6 @@ export async function authorizeAutomationReceipt(
   return { value: 'yes', reason: 'authorized' };
 }
 
-/** Re-runs authorization and guard (with `guard:` namespace) at resource admission. */
 export async function recheckAdmission(
   deps: AdmissionDeps,
   receipt: AutomationReceipt
@@ -593,7 +589,6 @@ export async function recheckAdmission(
   return { value: 'yes', reason: 'authorized' };
 }
 
-/** Full admission check including pre-queue condition when receipt has not been queued yet. */
 export async function recheckReceipt(
   deps: AdmissionDeps,
   receipt: AutomationReceipt

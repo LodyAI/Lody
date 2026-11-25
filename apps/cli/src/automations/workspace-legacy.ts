@@ -239,7 +239,6 @@ export async function createAutomationWorkspaceLegacy(options: {
 
   const appLayer = Layer.unwrap(
     Effect.gen(function* () {
-      // Shared wake queue eliminates any startup race between ManagedRuns.onExit and Automations.
       const wakeQueue = yield* Queue.dropping<void>(1);
       const wakeSignal = Queue.offer(wakeQueue, undefined).pipe(Effect.asVoid);
 

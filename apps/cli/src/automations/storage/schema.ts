@@ -112,7 +112,6 @@ export const deliveryColumns = (delivery: Delivery) => ({
   updated_at: delivery.updatedAt,
 });
 
-/** Initializes tables, upgrades schema through v4, and ensures all covering indexes exist. */
 export function initializeAutomationLedgerSchema(connection: OrchestrationConnection): void {
   const db = connection.raw;
   const version = Number(db.pragma('user_version', { simple: true }));
