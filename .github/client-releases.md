@@ -72,8 +72,9 @@ use the component workflow or rerun failed jobs; ambiguous state fails closed.
 Nightly calls `publish-ios-native.yml` to build the pinned `apps/mobile/ios`
 submodule, including its nested dependencies. It installs the native client's own
 pnpm workspace and lockfile, generates runtime assets and the XcodeGen project,
-then archives the `Lody` scheme. It does not install or sync Capacitor. Stable
-and manual production recovery continue to use `publish-ios.yml`.
+then archives the `Lody` scheme for the **Lody Native** TestFlight app
+(`ai.lody.mobile`). Stable releases build Capacitor in `release-clients.yml`;
+`publish-ios.yml` provides a manual Capacitor recovery entry on `release`.
 
 The native publisher keeps the reserved Nightly marketing version, App Store
 Connect build-number lookup, non-canceling iOS lock, exact-source admission and
