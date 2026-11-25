@@ -1,5 +1,5 @@
 import { startProcessLegacy } from '@lody/shared/node/process'
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
@@ -22,13 +22,17 @@ import {
 import { readUpdaterReleaseMetadata } from './app-updater-metadata'
 import { sparkleEventToStatePatch } from './app-updater-sparkle-events'
 import {
+  readSparkleFeedUrlFromInfoPlist,
   resolveSparkleAddonPath,
   resolveSparkleAppcastUrl,
+  shouldRefreshStaleSparkleDownload,
   shouldUseSparkleUpdater,
   sparklePackageJsonPathFromModuleEntry
 } from './app-updater-sparkle-policy'
 
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+const SPARKLE_APPCAST_PROBE_TIMEOUT_MS = 15_000
+const MAX_SPARKLE_APPCAST_BYTES = 5 * 1024 * 1024
 const LODY_UPDATER_STATE_EVENT = IPC_PUSH_CHANNELS.updaterState
 
 function readNonEmptyString(value: unknown): string | undefined {
@@ -89,6 +93,9 @@ export class AppUpdaterService {
   private checkInFlight = false
   private intervalRef: NodeJS.Timeout | null = null
   private sparkleBridge: SparkleBridge | null = null
+  private sparkleAppcastUrl: string | undefined
+  private sparkleAppcastEtag: string | undefined
+  private sparkleRefreshInFlight = false
   /** Package electron-updater has on disk, cleared when a newer one supersedes it. */
   private downloadedFile: string | undefined
   private errorCount = 0
@@ -113,8 +120,10 @@ export class AppUpdaterService {
       })
       return
     }
-    // Sparkle schedules its own checks, which `stop()` leaves running.
-    if (this.sparkleBridge) return
+    if (this.sparkleBridge) {
+      this.syncSparkleRefreshTimer()
+      return
+    }
 
     const sparkleBridge = this.tryLoadSparkleBridge()
     if (sparkleBridge) {
@@ -158,10 +167,7 @@ export class AppUpdaterService {
   /** Stop periodic checks; a recovered quit calls `start()` again to resume them. */
   stop(): void {
     this.started = false
-    if (this.intervalRef) {
-      clearInterval(this.intervalRef)
-      this.intervalRef = null
-    }
+    this.clearPeriodicTimer()
   }
 
   async checkForUpdates(): Promise<CheckForElectronUpdateResult> {
@@ -172,6 +178,15 @@ export class AppUpdaterService {
       }
     }
     if (this.sparkleBridge) {
+      if (this.state.phase === 'downloaded') {
+        return await this.refreshStaleSparkleDownload()
+      }
+      if (this.state.phase === 'downloading') {
+        return {
+          started: false,
+          error: 'check_in_progress'
+        }
+      }
       try {
         this.setState({
           phase: 'checking',
@@ -228,6 +243,7 @@ export class AppUpdaterService {
   async quitAndInstall(): Promise<QuitAndInstallElectronUpdateResult> {
     if (this.sparkleBridge) {
       try {
+        this.clearPeriodicTimer()
         setAppQuitting(true)
         this.sparkleInstallRequested = true
         this.sparkleBridge.installUpdateNow()
@@ -401,16 +417,32 @@ export class AppUpdaterService {
     })
     if (!bridge) return null
 
+    let plistAppcastUrl: string | undefined
+    if (app.isPackaged && typeof process.resourcesPath === 'string' && process.resourcesPath) {
+      try {
+        const plistPath = join(process.resourcesPath, '..', 'Info.plist')
+        if (existsSync(plistPath)) {
+          plistAppcastUrl = readSparkleFeedUrlFromInfoPlist(readFileSync(plistPath, 'utf8'))
+        }
+      } catch {
+        plistAppcastUrl = undefined
+      }
+    }
+
+    const appcastUrl = resolveSparkleAppcastUrl({
+      configuredAppcastUrl: readNonEmptyString(process.env.SPARKLE_APPCAST_URL),
+      plistAppcastUrl
+    })
+
     const initialized = bridge.init({
-      appcastUrl: resolveSparkleAppcastUrl({
-        configuredAppcastUrl: readNonEmptyString(process.env.SPARKLE_APPCAST_URL)
-      }),
+      appcastUrl,
       publicEdKey: readNonEmptyString(process.env.SPARKLE_ED_PUBLIC_KEY)
     })
     if (!initialized) {
       log('init failed')
       return null
     }
+    this.sparkleAppcastUrl = appcastUrl
     return bridge
   }
 
@@ -423,16 +455,189 @@ export class AppUpdaterService {
       try {
         const patch = sparkleEventToStatePatch(event, Date.now())
         if (!patch) return
+        if (patch.phase === 'downloading' && patch.availableVersion) {
+          this.sparkleAppcastEtag = undefined
+        }
         // A failed install leaves the app running, so close-to-hide must apply again.
         if (patch.phase === 'error' && this.sparkleInstallRequested) {
           this.sparkleInstallRequested = false
           setAppQuitting(false)
         }
         this.setState(patch)
+        this.syncSparkleRefreshTimer()
       } catch (error) {
         console.log(`[sparkle] event handler failed: ${formatUnknownError(error)}`)
       }
     })
+  }
+
+  private clearPeriodicTimer(): void {
+    if (this.intervalRef) {
+      clearInterval(this.intervalRef)
+      this.intervalRef = null
+    }
+  }
+
+  private syncSparkleRefreshTimer(): void {
+    if (!this.sparkleBridge) return
+    if (this.started && this.state.phase === 'downloaded' && !this.sparkleInstallRequested) {
+      if (!this.intervalRef) {
+        this.intervalRef = setInterval(() => {
+          void this.refreshStaleSparkleDownload()
+        }, UPDATE_CHECK_INTERVAL_MS)
+      }
+      return
+    }
+    this.clearPeriodicTimer()
+  }
+
+  private async readBoundedAppcastText(response: Response): Promise<string> {
+    const rawLength = response.headers.get('content-length')
+    if (rawLength) {
+      const parsedLength = Number(rawLength)
+      if (Number.isFinite(parsedLength) && parsedLength > MAX_SPARKLE_APPCAST_BYTES) {
+        throw new Error(`Sparkle appcast exceeds ${MAX_SPARKLE_APPCAST_BYTES} bytes`)
+      }
+    }
+    if (!response.body) {
+      const text = await response.text()
+      if (Buffer.byteLength(text, 'utf8') > MAX_SPARKLE_APPCAST_BYTES) {
+        throw new Error(`Sparkle appcast exceeds ${MAX_SPARKLE_APPCAST_BYTES} bytes`)
+      }
+      return text
+    }
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let totalBytes = 0
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value) continue
+        totalBytes += value.byteLength
+        if (totalBytes > MAX_SPARKLE_APPCAST_BYTES) {
+          throw new Error(`Sparkle appcast exceeds ${MAX_SPARKLE_APPCAST_BYTES} bytes`)
+        }
+        chunks.push(value)
+      }
+    } finally {
+      reader.releaseLock()
+    }
+    return Buffer.concat(chunks).toString('utf8')
+  }
+
+  private async refreshStaleSparkleDownload(): Promise<CheckForElectronUpdateResult> {
+    if (this.sparkleRefreshInFlight) {
+      return {
+        started: false,
+        error: 'check_in_progress'
+      }
+    }
+    const bridge = this.sparkleBridge
+    const feedUrl = this.sparkleAppcastUrl
+    const downloadedVersion = this.state.downloadedVersion
+    if (!bridge || this.state.phase !== 'downloaded' || this.sparkleInstallRequested) {
+      return {
+        started: false,
+        error: 'update_not_downloaded'
+      }
+    }
+    if (!feedUrl || !downloadedVersion || typeof globalThis.fetch !== 'function') {
+      return {
+        started: false,
+        error: 'sparkle_feed_unavailable'
+      }
+    }
+
+    this.sparkleRefreshInFlight = true
+    try {
+      const headers = this.sparkleAppcastEtag
+        ? { 'If-None-Match': this.sparkleAppcastEtag }
+        : undefined
+      const signal =
+        typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(SPARKLE_APPCAST_PROBE_TIMEOUT_MS)
+          : undefined
+      const response = await globalThis.fetch(feedUrl, { headers, signal })
+
+      if (response.status === 304) {
+        if (this.state.phase === 'downloaded') {
+          this.setState({ checkedAtMs: Date.now() })
+        }
+        return { started: true }
+      }
+      if (!response.ok) {
+        return {
+          started: false,
+          error: `HTTP ${response.status}`
+        }
+      }
+
+      const appcastXml = await this.readBoundedAppcastText(response)
+      const nextEtag = readNonEmptyString(response.headers.get('etag'))
+      if (nextEtag) {
+        this.sparkleAppcastEtag = nextEtag
+      }
+
+      if (
+        !this.sparkleBridge ||
+        this.state.phase !== 'downloaded' ||
+        this.sparkleInstallRequested ||
+        this.state.downloadedVersion !== downloadedVersion
+      ) {
+        return { started: true }
+      }
+
+      const currentOsVersion =
+        typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : undefined
+      if (
+        !shouldRefreshStaleSparkleDownload({
+          appcastXml,
+          downloadedVersion,
+          currentOsVersion
+        })
+      ) {
+        this.setState({
+          checkedAtMs: Date.now(),
+          error: undefined
+        })
+        return { started: true }
+      }
+
+      bridge.discardDownloadedUpdate()
+      this.clearPeriodicTimer()
+      this.setState({
+        phase: 'checking',
+        error: undefined,
+        checkedAtMs: Date.now(),
+        percent: undefined,
+        bytesPerSecond: undefined,
+        transferred: undefined,
+        total: undefined
+      })
+      try {
+        bridge.checkForUpdates()
+      } catch (error) {
+        const message = formatUnknownError(error)
+        this.setState({
+          phase: 'error',
+          error: message,
+          checkedAtMs: Date.now()
+        })
+        return {
+          started: false,
+          error: message
+        }
+      }
+      return { started: true }
+    } catch (error) {
+      return {
+        started: false,
+        error: formatUnknownError(error)
+      }
+    } finally {
+      this.sparkleRefreshInFlight = false
+    }
   }
 
   private isUpdaterEnabled(): boolean {

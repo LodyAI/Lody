@@ -5,6 +5,11 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import ts from 'typescript'
 import { sparkleEventToStatePatch } from './app-updater-sparkle-events.ts'
+import {
+  readSparkleFeedUrlFromInfoPlist,
+  resolveSparkleAppcastUrl,
+  shouldRefreshStaleSparkleDownload
+} from './app-updater-sparkle-policy.ts'
 
 const require = createRequire(import.meta.url)
 
@@ -24,8 +29,10 @@ async function load(relative, dependencies, context = {}) {
     {
       exports,
       console: { log() {}, info() {}, error() {} },
+      Buffer,
       Date,
       Promise,
+      AbortSignal,
       require: (id) => (Object.hasOwn(dependencies, id) ? dependencies[id] : require(id)),
       ...context
     }
@@ -62,7 +69,10 @@ async function loadUpdater({
   linuxInstall,
   intervals,
   sparkleBridge,
-  windowState = { setAppQuitting() {} }
+  windowState = { setAppQuitting() {} },
+  fsStub,
+  fetchStub,
+  processOverrides = {}
 }) {
   const autoUpdater = {
     checks: 0,
@@ -73,37 +83,43 @@ async function loadUpdater({
       return Promise.resolve()
     }
   }
-  const { AppUpdaterService } = await load(
-    './app-updater-service.ts',
-    {
-      electron: { app, BrowserWindow: { getAllWindows: () => [] } },
-      'electron-updater': { autoUpdater },
-      'electron-sparkle-updater': { loadSparkleBridge: () => sparkleBridge ?? null },
-      '@lody/shared/node/process': { startProcessLegacy: () => ({ child: {} }) },
-      '@lody/shared/electron-ipc': { IPC_PUSH_CHANNELS: { updaterState: 'updater-state' } },
-      '../utils': { formatUnknownError: String },
-      '../window-state': windowState,
-      '../relaunch-intent': relaunchIntent ?? {},
-      './app-updater-linux-install': linuxInstall ?? {},
-      './app-updater-metadata': { readUpdaterReleaseMetadata: () => ({}) },
-      './app-updater-sparkle-events': { sparkleEventToStatePatch },
-      './app-updater-sparkle-policy': {
-        shouldUseSparkleUpdater: () => sparkleBridge !== undefined,
-        sparklePackageJsonPathFromModuleEntry: () => undefined,
-        resolveSparkleAddonPath: () => '/synthetic/sparkle.node',
-        resolveSparkleAppcastUrl: () => 'https://synthetic.invalid/appcast.xml'
-      }
-    },
-    {
-      process: { platform: 'linux', env: {}, resourcesPath: '/synthetic' },
-      setInterval: (callback) => {
-        const handle = { callback }
-        intervals.add(handle)
-        return handle
-      },
-      clearInterval: (handle) => intervals.delete(handle)
+  const dependencies = {
+    electron: { app, BrowserWindow: { getAllWindows: () => [] } },
+    'electron-updater': { autoUpdater },
+    'electron-sparkle-updater': { loadSparkleBridge: () => sparkleBridge ?? null },
+    '@lody/shared/node/process': { startProcessLegacy: () => ({ child: {} }) },
+    '@lody/shared/electron-ipc': { IPC_PUSH_CHANNELS: { updaterState: 'updater-state' } },
+    '../utils': { formatUnknownError: String },
+    '../window-state': windowState,
+    '../relaunch-intent': relaunchIntent ?? {},
+    './app-updater-linux-install': linuxInstall ?? {},
+    './app-updater-metadata': { readUpdaterReleaseMetadata: () => ({}) },
+    './app-updater-sparkle-events': { sparkleEventToStatePatch },
+    './app-updater-sparkle-policy': {
+      readSparkleFeedUrlFromInfoPlist,
+      shouldRefreshStaleSparkleDownload,
+      shouldUseSparkleUpdater: () => sparkleBridge !== undefined,
+      sparklePackageJsonPathFromModuleEntry: () => undefined,
+      resolveSparkleAddonPath: () => '/synthetic/sparkle.node',
+      resolveSparkleAppcastUrl: (input) =>
+        fsStub || processOverrides.env?.SPARKLE_APPCAST_URL
+          ? resolveSparkleAppcastUrl(input)
+          : 'https://synthetic.invalid/appcast.xml'
     }
-  )
+  }
+  if (fsStub) {
+    dependencies['node:fs'] = fsStub
+  }
+  const { AppUpdaterService } = await load('./app-updater-service.ts', dependencies, {
+    process: { platform: 'linux', env: {}, resourcesPath: '/synthetic', ...processOverrides },
+    globalThis: { fetch: fetchStub },
+    setInterval: (callback) => {
+      const handle = { callback }
+      intervals.add(handle)
+      return handle
+    },
+    clearInterval: (handle) => intervals.delete(handle)
+  })
   return { service: new AppUpdaterService({ enabled: true }), autoUpdater }
 }
 
@@ -217,4 +233,202 @@ void test('a Sparkle error during a quit already owned by the barrier keeps wind
   emit({ type: 'error', message: 'synthetic background check failure' })
 
   assert.equal(quitting, true)
+})
+
+function sparkleAppcastXml(version) {
+  return `<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <item>
+      <sparkle:version>${version}</sparkle:version>
+      <sparkle:shortVersionString>${version}</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://updates.lody.ai/production/arm64/Lody-${version}-arm64.zip" length="100" />
+    </item>
+  </channel>
+</rss>`
+}
+
+void test('packaged Sparkle init reads SUFeedURL from Info.plist instead of overriding with the OSS default', async () => {
+  const initOptions = []
+  const plistPath = '/Applications/Lody.app/Contents/Info.plist'
+  const plistXml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>SUFeedURL</key>
+  <string>https://updates.lody.ai/production/arm64/appcast.xml</string>
+</dict></plist>`
+  const { service } = await loadUpdater({
+    app: syntheticApp(),
+    intervals: new Set(),
+    processOverrides: {
+      platform: 'darwin',
+      resourcesPath: '/Applications/Lody.app/Contents/Resources'
+    },
+    fsStub: {
+      appendFileSync() {},
+      existsSync: (target) => target === plistPath,
+      readFileSync: (target) => {
+        if (target === plistPath) return plistXml
+        throw new Error(`unexpected read: ${target}`)
+      }
+    },
+    sparkleBridge: {
+      init(options) {
+        initOptions.push(options)
+        return true
+      },
+      setEventHandler() {},
+      setAutomaticChecks() {},
+      checkForUpdates() {},
+      discardDownloadedUpdate() {},
+      installUpdateNow() {}
+    }
+  })
+
+  service.start()
+
+  assert.equal(initOptions.length, 1)
+  assert.equal(initOptions[0].appcastUrl, 'https://updates.lody.ai/production/arm64/appcast.xml')
+})
+
+void test('stale downloaded Sparkle update stays intact on 304/same-version/network errors and supersedes when a newer release ships', async () => {
+  const intervals = new Set()
+  const actions = []
+  const seenHeaders = []
+  let emit = () => {}
+  let responsePlan = 'same'
+
+  const { service } = await loadUpdater({
+    app: syntheticApp(),
+    intervals,
+    processOverrides: {
+      platform: 'darwin',
+      getSystemVersion: () => '15.6.1'
+    },
+    fetchStub: async (_url, init) => {
+      seenHeaders.push(init?.headers)
+      if (responsePlan === 'same') {
+        return new Response(sparkleAppcastXml('0.115.1'), {
+          status: 200,
+          headers: { etag: '"etag-115"' }
+        })
+      }
+      if (responsePlan === 'not-modified') {
+        return new Response(null, { status: 304 })
+      }
+      if (responsePlan === 'offline') {
+        throw new Error('network offline')
+      }
+      return new Response(sparkleAppcastXml('0.116.1'), {
+        status: 200,
+        headers: { etag: '"etag-116"' }
+      })
+    },
+    sparkleBridge: {
+      init: () => true,
+      setEventHandler: (handler) => {
+        emit = handler
+      },
+      setAutomaticChecks() {},
+      discardDownloadedUpdate() {
+        actions.push('discard')
+      },
+      checkForUpdates() {
+        actions.push('check')
+      },
+      installUpdateNow() {}
+    }
+  })
+
+  service.start()
+  assert.equal(intervals.size, 0)
+
+  emit({ type: 'update-downloaded', version: '0.115.1' })
+  assert.equal(service.getState().phase, 'downloaded')
+  assert.equal(intervals.size, 1)
+
+  const sameResult = await service.checkForUpdates()
+  assert.equal(sameResult.started, true)
+  assert.equal(service.getState().phase, 'downloaded')
+  assert.equal(service.getState().downloadedVersion, '0.115.1')
+  assert.deepEqual(actions, [])
+
+  responsePlan = 'not-modified'
+  await service.checkForUpdates()
+  assert.equal(seenHeaders[1]?.['If-None-Match'], '"etag-115"')
+  assert.equal(service.getState().phase, 'downloaded')
+  assert.deepEqual(actions, [])
+
+  responsePlan = 'offline'
+  const offlineResult = await service.checkForUpdates()
+  assert.equal(offlineResult.started, false)
+  assert.equal(service.getState().phase, 'downloaded')
+  assert.equal(service.getState().downloadedVersion, '0.115.1')
+  assert.deepEqual(actions, [])
+
+  responsePlan = 'newer'
+  const [timer] = intervals
+  timer.callback()
+  await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(actions, ['discard', 'check'])
+  assert.equal(service.getState().phase, 'checking')
+  assert.equal(intervals.size, 0)
+
+  emit({ type: 'update-downloaded', version: '0.116.1' })
+  assert.equal(intervals.size, 1)
+  service.stop()
+  assert.equal(intervals.size, 0)
+  service.start()
+  assert.equal(intervals.size, 1)
+})
+
+void test('an in-flight Sparkle feed probe does not discard an update once quitAndInstall begins', async () => {
+  const intervals = new Set()
+  const actions = []
+  let emit = () => {}
+  let resolveFetch
+
+  const { service } = await loadUpdater({
+    app: syntheticApp(),
+    intervals,
+    processOverrides: {
+      platform: 'darwin',
+      getSystemVersion: () => '15.6.1'
+    },
+    fetchStub: () =>
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }),
+    sparkleBridge: {
+      init: () => true,
+      setEventHandler: (handler) => {
+        emit = handler
+      },
+      setAutomaticChecks() {},
+      discardDownloadedUpdate() {
+        actions.push('discard')
+      },
+      checkForUpdates() {
+        actions.push('check')
+      },
+      installUpdateNow() {
+        actions.push('install')
+      }
+    }
+  })
+
+  service.start()
+  emit({ type: 'update-downloaded', version: '0.115.1' })
+  const pendingCheck = service.checkForUpdates()
+
+  assert.equal((await service.quitAndInstall()).ok, true)
+  assert.equal(intervals.size, 0)
+
+  resolveFetch(new Response(sparkleAppcastXml('0.116.1'), { status: 200 }))
+  await pendingCheck
+
+  assert.deepEqual(actions, ['install'])
+  assert.equal(service.getState().phase, 'downloaded')
 })

@@ -15,9 +15,13 @@ import { readUpdaterReleaseMetadata } from './app-updater-metadata.ts'
 import { sparkleEventToStatePatch } from './app-updater-sparkle-events.ts'
 import {
   DEFAULT_SPARKLE_APPCAST_URL,
+  compareSparkleVersions,
+  readLatestSparkleAppcastVersion,
+  readSparkleFeedUrlFromInfoPlist,
   resolveSparkleAddonPath,
   resolveSparkleAppcastUrl,
   shouldConstructUpdaterEnabled,
+  shouldRefreshStaleSparkleDownload,
   shouldUseSparkleUpdater,
   sparklePackageJsonPathFromModuleEntry
 } from './app-updater-sparkle-policy.ts'
@@ -71,18 +75,128 @@ void test('uses Sparkle only for packaged macOS when the native bridge is availa
   )
 })
 
-void test('resolves the GitHub Releases appcast and ignores blank overrides', () => {
+void test('resolves the Sparkle appcast with env > Info.plist > OSS default precedence', () => {
   assert.equal(
     resolveSparkleAppcastUrl({}),
     'https://github.com/LodyAI/Lody/releases/latest/download/appcast.xml'
   )
   assert.equal(
-    resolveSparkleAppcastUrl({ configuredAppcastUrl: '  https://example.com/appcast.xml  ' }),
+    resolveSparkleAppcastUrl({
+      plistAppcastUrl: 'https://updates.lody.ai/production/arm64/appcast.xml'
+    }),
+    'https://updates.lody.ai/production/arm64/appcast.xml'
+  )
+  assert.equal(
+    resolveSparkleAppcastUrl({
+      configuredAppcastUrl: '  https://example.com/appcast.xml  ',
+      plistAppcastUrl: 'https://updates.lody.ai/production/arm64/appcast.xml'
+    }),
     'https://example.com/appcast.xml'
   )
   assert.equal(
-    resolveSparkleAppcastUrl({ configuredAppcastUrl: '   ' }),
+    resolveSparkleAppcastUrl({
+      configuredAppcastUrl: '   ',
+      plistAppcastUrl: 'https://nightly-updates.lody.ai/production/nightly/arm64/appcast.xml'
+    }),
+    'https://nightly-updates.lody.ai/production/nightly/arm64/appcast.xml'
+  )
+  assert.equal(
+    resolveSparkleAppcastUrl({ configuredAppcastUrl: '   ', plistAppcastUrl: '  ' }),
     DEFAULT_SPARKLE_APPCAST_URL
+  )
+})
+
+void test('extracts SUFeedURL from packaged macOS Info.plist XML and ignores fail-closed placeholders', () => {
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>CFBundleShortVersionString</key>
+  <string>0.116.1</string>
+  <key>SUFeedURL</key>
+  <string>https://updates.lody.ai/production/arm64/appcast.xml</string>
+</dict>
+</plist>`
+  assert.equal(
+    readSparkleFeedUrlFromInfoPlist(plist),
+    'https://updates.lody.ai/production/arm64/appcast.xml'
+  )
+  assert.equal(
+    readSparkleFeedUrlFromInfoPlist(
+      plist.replace(
+        'https://updates.lody.ai/production/arm64/appcast.xml',
+        'https://invalid.invalid/appcast.xml'
+      )
+    ),
+    undefined
+  )
+  assert.equal(readSparkleFeedUrlFromInfoPlist('<plist><dict></dict></plist>'), undefined)
+})
+
+void test('compares stable, nightly prerelease, and OS versions consistently', () => {
+  assert.ok(compareSparkleVersions('0.116.1', '0.115.1') > 0)
+  assert.ok(compareSparkleVersions('0.114.0-nightly.16', '0.114.0-nightly.15') > 0)
+  assert.ok(compareSparkleVersions('0.114.0-nightly.10', '0.114.0-nightly.9') > 0)
+  assert.ok(compareSparkleVersions('0.114.0', '0.114.0-nightly.15') > 0)
+  assert.equal(compareSparkleVersions('0.116.1', '0.116.1'), 0)
+  assert.ok(compareSparkleVersions('13.0', '15.6.1') < 0)
+})
+
+void test('detects newer compatible appcast releases while ignoring older, informational, and incompatible items', () => {
+  const appcastXml = `<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <item>
+      <sparkle:version>0.117.0</sparkle:version>
+      <sparkle:shortVersionString>0.117.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>16.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://updates.lody.ai/production/arm64/Lody-0.117.0-arm64.zip" length="100" />
+    </item>
+    <item>
+      <sparkle:version>0.116.2</sparkle:version>
+      <sparkle:shortVersionString>0.116.2</sparkle:shortVersionString>
+      <sparkle:informationalUpdate><sparkle:belowVersion>0.110.0</sparkle:belowVersion></sparkle:informationalUpdate>
+      <enclosure url="https://updates.lody.ai/production/arm64/Lody-0.116.2-arm64.zip" length="100" />
+    </item>
+    <item>
+      <sparkle:version>1.10.17</sparkle:version>
+      <sparkle:shortVersionString>0.114.0-nightly.15</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[<sparkle:shortVersionString>9.9.9</sparkle:shortVersionString>]]></description>
+      <enclosure url="https://nightly-updates.lody.ai/production/nightly/arm64/Lody.zip" length="100" />
+      <sparkle:deltas>
+        <enclosure url="https://nightly-updates.lody.ai/production/nightly/arm64/patch.delta" sparkle:version="9.9.8" />
+      </sparkle:deltas>
+    </item>
+  </channel>
+</rss>`
+
+  assert.equal(
+    readLatestSparkleAppcastVersion({ appcastXml, currentOsVersion: '15.6.1' }),
+    '0.114.0-nightly.15'
+  )
+  assert.equal(
+    shouldRefreshStaleSparkleDownload({
+      appcastXml,
+      downloadedVersion: '0.114.0-nightly.14',
+      currentOsVersion: '15.6.1'
+    }),
+    true
+  )
+  assert.equal(
+    shouldRefreshStaleSparkleDownload({
+      appcastXml,
+      downloadedVersion: '0.114.0-nightly.15',
+      currentOsVersion: '15.6.1'
+    }),
+    false
+  )
+  assert.equal(
+    shouldRefreshStaleSparkleDownload({
+      appcastXml:
+        '<!DOCTYPE rss><rss><channel><item><sparkle:version>9.0.0</sparkle:version></item></channel></rss>',
+      downloadedVersion: '0.114.0-nightly.14'
+    }),
+    false
   )
 })
 

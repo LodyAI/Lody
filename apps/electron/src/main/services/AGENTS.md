@@ -84,7 +84,13 @@ before main can terminate. Quit diagnostics name phases, never credentials or ca
 
 - Sparkle load failure falls back to electron-updater. Sparkle UI stays silent;
   progress and ready-to-install go through `ElectronUpdaterState` for the renderer
-  banner. Packaging-side updater rules live in the [Electron guide](../../../AGENTS.md).
+  banner. Packaged macOS builds read `SUFeedURL` from `Info.plist` before passing
+  `appcastUrl` to `electron-sparkle-updater`, so the delegate never overrides cloud
+  or Nightly feeds with the OSS default. While a Sparkle update is staged in
+  `downloaded`, periodic and manual checks probe that feed and call
+  `discardDownloadedUpdate()` before re-checking only when a newer compatible
+  version appears, preserving the staged update otherwise. Packaging-side updater
+  rules live in the [Electron guide](../../../AGENTS.md).
 - Linux `.deb` installs go through `app-updater-linux-install.ts`, never
   electron-updater's `DebUpdater`: its `spawnSync` freezes the main process for
   the whole polkit prompt, which no JS-side timeout can interrupt. Spawn
