@@ -244,6 +244,7 @@ export function TodayView(props: {
   onTogglePin?: () => void;
   /** Rendered as the desktop's standalone Today window. */
   standalone?: boolean;
+  ownerWindow?: Window;
   onDayReady?: () => void;
   onOpenSession?: TodayOpenSession;
 }) {
@@ -256,7 +257,7 @@ export function TodayView(props: {
       : null;
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
-  const today = useTodayClock();
+  const today = useTodayClock(undefined, props.ownerWindow);
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
@@ -695,7 +696,7 @@ function TodayNodeMenu(props: {
   const node = store.outline.getNode(nodeId);
   const positioned = useMemo(
     () =>
-      anchor instanceof HTMLElement
+      'getBoundingClientRect' in anchor
         ? anchor
         : {
             getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0),

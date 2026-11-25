@@ -36,6 +36,7 @@ export type IpcPushMap = {
   'auth.loginState': ElectronLoginState;
   'app.menuAction': string;
   'app.fullscreen': boolean;
+  'app.todayCompanionFullscreen': { name: string; fullscreen: boolean };
   'app.nativeTheme': 'light' | 'dark';
   'app.globalShortcut': GlobalShortcutTriggeredPayload;
   'app.sessionCompletionClick': SessionCompletionNotificationClickPayload;
@@ -83,6 +84,7 @@ export const IPC_PUSH_CHANNELS = {
   authLoginState: 'auth.loginState',
   appMenuAction: 'app.menuAction',
   appFullscreen: 'app.fullscreen',
+  appTodayCompanionFullscreen: 'app.todayCompanionFullscreen',
   appNativeTheme: 'app.nativeTheme',
   appGlobalShortcut: 'app.globalShortcut',
   appSessionCompletionClick: 'app.sessionCompletionClick',

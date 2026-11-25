@@ -16,7 +16,9 @@ import {
   closeTodayWindow,
   isTodayWindow,
   openTodayWindow,
-  revealTodayWindow
+  prepareTodayCompanion,
+  revealTodayWindow,
+  updateTodayCompanion
 } from '../../today-windows'
 import { openLinkInMainWindow } from '../../window'
 import { access } from 'node:fs/promises'
@@ -209,6 +211,41 @@ export class AppIpc extends ProductWindowIpcService {
   async openTodayWindow(raw: { workspace: string; member?: string; date?: string }) {
     assertProductWindowSender(getIpcContext().event)
     openTodayWindow(parseTodayWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async prepareTodayCompanion(raw: { workspace: string; member?: string; date?: string }) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner) throw new Error('Missing Today companion owner')
+    return prepareTodayCompanion(owner, parseTodayWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async updateTodayCompanion(
+    name: string,
+    action:
+      | { type: 'show' }
+      | { type: 'pin'; pinned: boolean }
+      | { type: 'target'; target: { workspace: string; member?: string; date?: string } }
+  ) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (!owner || typeof name !== 'string' || !action)
+      throw new Error('Invalid Today companion action')
+    if (action.type === 'show') return updateTodayCompanion(owner, name, action)
+    if (action.type === 'pin' && typeof action.pinned === 'boolean') {
+      return updateTodayCompanion(owner, name, action)
+    }
+    if (action.type === 'target') {
+      return updateTodayCompanion(owner, name, {
+        type: 'target',
+        target: parseTodayWindowTarget(action.target)
+      })
+    }
+    throw new Error('Invalid Today companion action')
   }
 
   /** The Today window's pin: keep it above every other window. */

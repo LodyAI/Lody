@@ -133,6 +133,10 @@ export function createTodayWindowLifecycle<W extends TodayLifecycleWindow>(
         return
       }
     },
+    hasWorkspace(workspace: string): boolean {
+      const entry = entries.get(workspace)
+      return !!entry && !entry.window.isDestroyed()
+    },
     has(window: unknown): boolean {
       return [...entries.values()].some(
         (entry) => entry.window === window && !entry.window.isDestroyed()

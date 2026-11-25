@@ -13,6 +13,8 @@ runtime is available. Local desktop can reuse one previously opened renderer aft
 its workspace route. A matching day commit reveals that window. A failed bind falls back to
 a cold open.
 
+The [shared-renderer companion](2026-11-25-today-shared-renderer.md) uses this independent path for fallback and handoff.
+
 ## Decision
 
 The local outline can render before conversation projections. Workspace admission, slug and

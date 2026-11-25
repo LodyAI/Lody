@@ -26,15 +26,23 @@ export function isWarmWindow(window: BrowserWindow): boolean {
   return warmWindows.has(window)
 }
 
-const companionWindows = new WeakSet<BrowserWindow>()
+const companionWindows = new WeakMap<BrowserWindow, BrowserWindow | null>()
 
 /**
  * Single-surface companions (the Today window) are user-facing but never take
  * over the primary role: deep links, menus and Cmd+W semantics stay on a full
  * workspace window.
  */
-export function markCompanionWindow(window: BrowserWindow): void {
-  companionWindows.add(window)
+export function markCompanionWindow(
+  window: BrowserWindow,
+  owner: BrowserWindow | null = null
+): void {
+  companionWindows.set(window, owner)
+}
+
+export function getCompanionWindowOwner(window: BrowserWindow): BrowserWindow | null {
+  const owner = companionWindows.get(window)
+  return owner && !owner.isDestroyed() ? owner : null
 }
 
 export function getMainWindow(): BrowserWindow | null {

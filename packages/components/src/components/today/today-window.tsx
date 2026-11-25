@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useStore } from 'jotai';
 import { docMetaSubscriptionAtom } from '@/atoms/doc-meta';
 import { isLocalAppPlatform } from '@/lib/app-platform';
@@ -60,30 +60,29 @@ export function TodayWindow(props: { memberId?: string; anchorDate?: string; bin
     document.title = t('today.nav', 'Today');
   }, [t]);
   return (
-    <div
-      className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true, surface: 'sidebar' })}
-    >
+    <TodayWindowFrame>
+      <TodayView
+        target={target}
+        onNavigate={setTarget}
+        standalone
+        onDayReady={onDayReady}
+        pinned={onTop}
+        onTogglePin={() => {
+          void getIpcServices()?.app.setTodayWindowAlwaysOnTop(!onTop).then(setOnTop).catch(console.error);
+        }}
+        onOpenSession={(link) => {
+          void getIpcServices()?.app.openSessionInMainWindow(buildSessionLink(link)).catch(console.error);
+        }}
+      />
+    </TodayWindowFrame>
+  );
+}
+
+export function TodayWindowFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className={getWebWorkspaceLayoutRootClassName({ settingsRoute: true, surface: 'sidebar' })}>
       <WindowDragStrip />
-      <WorkspaceCard anchored={false}>
-        <TodayView
-          target={target}
-          onNavigate={setTarget}
-          standalone
-          onDayReady={onDayReady}
-          pinned={onTop}
-          onTogglePin={() => {
-            void getIpcServices()
-              ?.app.setTodayWindowAlwaysOnTop(!onTop)
-              .then(setOnTop)
-              .catch(console.error);
-          }}
-          onOpenSession={(link) => {
-            void getIpcServices()
-              ?.app.openSessionInMainWindow(buildSessionLink(link))
-              .catch(console.error);
-          }}
-        />
-      </WorkspaceCard>
+      <WorkspaceCard anchored={false}>{children}</WorkspaceCard>
     </div>
   );
 }

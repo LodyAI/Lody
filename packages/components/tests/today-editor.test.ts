@@ -1791,6 +1791,26 @@ describe('Today block selection on the surface', () => {
     ctx.surface.remove();
   });
 
+  it('clears the selection in the window that owns the outline', async () => {
+    const ctx = await setup();
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const child = frame.contentDocument!;
+    const text = child.createTextNode('selected in Today');
+    child.body.append(ctx.surface);
+    ctx.surface.append(text);
+    const selection = child.getSelection()!;
+    selection.selectAllChildren(ctx.surface);
+    try {
+      expect(selection.toString()).toBe('selected in Today');
+      ctx.controller.selectBlocks(ctx.store, [ctx.ids[0]!]);
+      expect(selection.rangeCount).toBe(0);
+    } finally {
+      ctx.controller.dispose();
+      frame.remove();
+    }
+  });
+
   it('pasting lines over a block selection turns this workspace’s conversation links into mentions', async () => {
     const ctx = await setup();
     ctx.controller.workspaceId = 'ws1';

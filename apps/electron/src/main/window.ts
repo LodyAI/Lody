@@ -1,3 +1,4 @@
+import { allowTodayCompanion } from './today-windows'
 import { installRendererUnloadConfirmation } from './renderer-unload'
 import { isAppResourceLink } from '@lody/shared/session-link'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
@@ -489,6 +490,24 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   })
 
   window.webContents.setWindowOpenHandler((details) => {
+    const today = allowTodayCompanion(window, details, {
+      width: 440,
+      height: 760,
+      minWidth: 320,
+      minHeight: 360,
+      show: false,
+      center: true,
+      backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
+      autoHideMenuBar: true,
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
+        : {}),
+      ...(process.platform === 'win32'
+        ? { titleBarStyle: 'hidden', titleBarOverlay: getMainWindowTitleBarOverlay(resolvedTheme) }
+        : {}),
+      webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true }
+    })
+    if (today) return today
     if (isAppResourceLink(details.url)) {
       window.webContents.send('app.deepLink', details.url)
       return { action: 'deny' }
