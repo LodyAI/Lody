@@ -2774,7 +2774,6 @@
   "sessions.autoDelivery.reason.request_blocked": "the request is blocked from being delivered",
   "sessions.autoDelivery.reason.request_failed": "Lody could not send the request",
   "sessions.autoDelivery.blockDetail": "Blocked reason",
-  "sessions.autoDelivery.blockReason.native_activity_unobserved": "the agent's background activity could not be observed",
   "sessions.autoDelivery.blockReason.permission_denied": "permission to edit this conversation was revoked",
   "sessions.autoDelivery.blockReason.permission_unconfirmed": "permission to edit this conversation could not be confirmed",
   "sessions.autoDelivery.blockReason.target_permission_revoked": "permission to edit this conversation was revoked",

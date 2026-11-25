@@ -532,7 +532,7 @@ describe('Automation control authority', () => {
     expect(host.ledger.receipt(request.id)?.state).toBe('cancelled');
     expect(host.ledger.hasSessionWork('session-a')).toBe(false);
   });
-  it('surfaces a blocked Auto delivery receipt in SessionMeta and wakes immediately on idle', async () => {
+  it('surfaces denied Auto delivery blocks in SessionMeta and wakes busy blocks immediately on idle', async () => {
     vi.useFakeTimers();
     const prUrl = 'https://github.com/owner/project/pull/42';
     const meta = {
@@ -546,7 +546,7 @@ describe('Automation control authority', () => {
       autoDelivery: undefined as Record<string, unknown> | null | undefined,
     };
     const host = await workspaceFixture(meta, undefined, undefined, undefined, 'plaintext', true);
-    host.testSetSettled(async () => ({ value: 'unknown', reason: 'native_activity_unobserved' }));
+    host.testSetSettled(async () => ({ value: 'no', reason: 'permission_denied' }));
     await host.recordObservations(
       meta as never,
       'owner/project',
@@ -573,9 +573,15 @@ describe('Automation control authority', () => {
     expect(meta.autoDelivery).toMatchObject({
       state: 'stalled',
       reason: 'request_blocked',
-      blockReason: 'native_activity_unobserved',
+      blockReason: 'permission_denied',
       prUrl,
     });
+
+    host.testSetSettled(async () => ({ value: 'no', reason: 'native_work_active' }));
+    await vi.advanceTimersByTimeAsync(15_000);
+    await host.wake();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toMatchObject({ state: 'merge', prUrl });
 
     host.testSetSettled(async () => ({ value: 'yes', reason: 'group_settled' }));
     host.testNotifyIdle('session-a' as SessionId);

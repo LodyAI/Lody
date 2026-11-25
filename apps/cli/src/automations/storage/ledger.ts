@@ -40,6 +40,7 @@ import {
   initializeAutomationLedgerSchema,
   NONTERMINAL_STATES_SQL as nonterminal,
   receiptColumns,
+  SESSION_BUSY_BLOCK_REASONS,
   TERMINAL_STATES as terminal,
   waitColumns,
   workColumns,
@@ -915,21 +916,20 @@ export class AutomationLedger {
         : {}),
     };
   }
-  /** Wakes session receipts on idle; preserves `MAX_SAFE_INTEGER` sentinel and bumps wake revision. */
+  /** Wakes session-busy blocked receipts on idle without disturbing quota or not_before timers. */
   wakeSessionBlocked(sessionId: string, now: number): number {
     return this.connection.withImmediate(() => {
       const rows = this.connection.raw
-        .prepare(
-          `SELECT id,payload FROM receipts WHERE session_id=? AND state IN ('accepted','waiting','resolved','blocked')`
-        )
+        .prepare(`SELECT id,payload FROM receipts WHERE session_id=? AND state='blocked'`)
         .all(sessionId) as Array<{ id: string; payload: string }>;
       let woken = 0;
       for (const row of rows) {
         const receipt = JSON.parse(row.payload) as AutomationReceipt;
+        if (!receipt.reason || !SESSION_BUSY_BLOCK_REASONS.has(receipt.reason)) continue;
         if (receipt.retryAt === Number.MAX_SAFE_INTEGER) continue;
         const revision = (receipt.capacityWakeRevision ?? 0) + 1;
         const retryAt = Math.min(receipt.retryAt ?? now, now);
-        if (this.update(row.id, receipt.state, { retryAt, capacityWakeRevision: revision }, now))
+        if (this.update(row.id, 'blocked', { retryAt, capacityWakeRevision: revision }, now))
           woken += 1;
       }
       return woken;

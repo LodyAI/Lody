@@ -21,20 +21,7 @@ export type AutomationSessionAdmission = {
 };
 
 export type SessionEditAccess = 'yes' | 'no' | 'unknown';
-export type SessionNativeActivity = 'idle' | 'running' | 'background' | 'unknown';
-
-/** Shared with Auto delivery so busy waits never silently surface as `request_blocked`. */
-export const SESSION_BUSY_BLOCK_REASONS = [
-  'session_work_active',
-  'input_pending',
-  'queue_pending',
-  'goal_active',
-  'automation_work_pending',
-  'native_work_active',
-  'session_admission_busy',
-  'session_admission_blocked',
-] as const;
-export type SessionBusyBlockReason = (typeof SESSION_BUSY_BLOCK_REASONS)[number];
+export type SessionNativeActivity = 'idle' | 'running' | 'background';
 
 /** Existing Session owner; Automations cannot commit lifecycle changes through metadata alone. */
 export class SessionAutomationAuthority {
@@ -149,7 +136,6 @@ export class SessionAutomationAuthority {
     if (this.pendingAutomationWork?.(meta.id, excludingInvocationId))
       return { value: 'no', reason: 'automation_work_pending' };
     const native = this.deps.nativeActivity(meta.id);
-    if (native === 'unknown') return { value: 'unknown', reason: 'native_activity_unobserved' };
     if (native !== 'idle') return { value: 'no', reason: 'native_work_active' };
     return { value: 'yes', reason: 'session_settled' };
   }

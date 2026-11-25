@@ -2774,7 +2774,6 @@
   "sessions.autoDelivery.reason.request_blocked": "请求被阻塞，暂无法下发",
   "sessions.autoDelivery.reason.request_failed": "Lody 没能发出请求",
   "sessions.autoDelivery.blockDetail": "阻塞原因",
-  "sessions.autoDelivery.blockReason.native_activity_unobserved": "无法确认 agent 后台活动状态",
   "sessions.autoDelivery.blockReason.permission_denied": "已失去该会话的编辑权限",
   "sessions.autoDelivery.blockReason.permission_unconfirmed": "暂无法确认该会话的编辑权限",
   "sessions.autoDelivery.blockReason.target_permission_revoked": "已失去该会话的编辑权限",

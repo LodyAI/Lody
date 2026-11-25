@@ -442,7 +442,6 @@ export async function authorizeAutomationReceipt(
   const action = receipt.intent.action;
   let sessionId: string;
   let unavailableFails = false;
-  let cachedMeta: SessionMeta | undefined;
   if (action.kind === 'agent.invoke') {
     const invocation = automationInvocationSchema.parse(action.parameters);
     const work =
@@ -470,11 +469,10 @@ export async function authorizeAutomationReceipt(
         return { value: 'no', reason: 'pending_work_binding_changed' };
       const targetRead = await readSessionMeta(manager, work.sessionId as SessionId);
       if (targetRead.status !== 'ok') return { value: 'unknown', reason: 'target_unavailable' };
-      cachedMeta = targetRead.meta;
       if (
-        cachedMeta.acpSessionId !== work.nativeSessionId ||
-        (cachedMeta.latestUserMsgId !== work.turnId &&
-          cachedMeta.latestUserMsgId !== receipt.turnId)
+        targetRead.meta.acpSessionId !== work.nativeSessionId ||
+        (targetRead.meta.latestUserMsgId !== work.turnId &&
+          targetRead.meta.latestUserMsgId !== receipt.turnId)
       )
         return { value: 'no', reason: 'pending_work_superseded', terminalState: 'superseded' };
       if (!quotaRecovery && work.notBefore !== undefined && work.notBefore > Date.now())
@@ -509,17 +507,14 @@ export async function authorizeAutomationReceipt(
     sessionId = sessionActionSchema.parse(action.parameters).sessionId;
   }
 
-  const meta =
-    cachedMeta ??
-    (await readSessionMeta(manager, sessionId as SessionId).then((res) =>
-      res.status === 'ok' ? res.meta : undefined
-    ));
-  if (!meta)
+  const targetRead = await readSessionMeta(manager, sessionId as SessionId);
+  if (targetRead.status !== 'ok')
     return {
       value: 'unknown',
       reason: 'target_unavailable',
       ...(unavailableFails ? { terminalState: 'failed' } : {}),
     };
+  const meta = targetRead.meta;
   if (meta.machineId !== machineId) return { value: 'unknown', reason: 'target_owner_unavailable' };
   const access = await authority.canEdit(sessionId as SessionId, current.ownerUserId);
   if (access === 'no') return { value: 'no', reason: 'target_permission_revoked' };

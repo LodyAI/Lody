@@ -32,9 +32,8 @@ import {
 import { z } from 'zod';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
-import { SESSION_BUSY_BLOCK_REASONS } from '@/session/session-automation-authority';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
-import { CANCELLABLE_DELIVERY_STATES } from '../storage/schema';
+import { CANCELLABLE_DELIVERY_STATES, SESSION_BUSY_BLOCK_REASONS } from '../storage/schema';
 import {
   inferPullRequestProvider,
   mapGitHubCiState,
@@ -58,6 +57,8 @@ export const DELIVERY_ATTEMPT_LIMIT = 3;
 /** How long after a settled Create PR request a missing PR stops delivery. */
 export const DELIVERY_PR_CREATION_GRACE_MS = 10 * 60_000;
 export const DELIVERY_CI_REPORT_GRACE_MS = 5 * 60_000;
+/** How long a transient or unconfirmed receipt block stays quiet before surfacing as stalled. */
+export const DELIVERY_TRANSIENT_BLOCK_GRACE_MS = 60_000;
 
 export type DeliveryStep = 'create_pr' | 'fix_ci' | 'resolve_conflicts' | 'merge';
 
@@ -85,6 +86,7 @@ export type DeliveryProgress = {
     attempt?: number;
     prUrl?: string;
     headSha?: string;
+    blockedSince?: number;
   };
 };
 
@@ -104,12 +106,21 @@ export type PullRequestSnapshot = {
 export type StepOutcome =
   | { state: 'outstanding' }
   | { state: 'stopped' }
-  | { state: 'blocked'; reason?: string }
+  | { state: 'blocked'; reason?: string; transient?: boolean }
   | { state: 'failed' }
   | { state: 'superseded' }
   | { state: 'settled'; at: number };
 
-const BUSY_BLOCK_REASONS: ReadonlySet<string> = new Set(SESSION_BUSY_BLOCK_REASONS);
+const TRANSIENT_BLOCK_REASONS: ReadonlySet<string> = new Set([
+  'execution_release_unconfirmed',
+  'guard:delivery_pr_unobserved',
+  'adapter_unavailable',
+  'permission_unconfirmed',
+  'target_permission_unconfirmed',
+  'target_unavailable',
+  'owner_unavailable',
+  'target_owner_unavailable',
+]);
 
 export type DeliveryStatus = SessionAutoDeliveryStatus;
 
@@ -214,16 +225,28 @@ export function decideDelivery(input: {
   });
 
   const last = progress.lastStep;
-  if (last && input.lastStep?.state === 'outstanding')
+  if (last && input.lastStep?.state === 'outstanding') {
+    if (last.blockedSince !== undefined) {
+      const { blockedSince: _, ...cleared } = last;
+      progress.lastStep = cleared;
+    }
     return emit(last.prUrl ?? progress.prUrl, stepStatusPayload(last.step, last.attempt));
+  }
   if (input.lastStep?.state === 'stopped')
     return emit(last?.prUrl ?? progress.prUrl, { state: 'stalled', reason: 'stopped' });
-  if (input.lastStep?.state === 'blocked')
+  if (input.lastStep?.state === 'blocked') {
+    if (input.lastStep.transient && last) {
+      const since = last.blockedSince ?? now;
+      if (last.blockedSince === undefined) progress.lastStep = { ...last, blockedSince: since };
+      if (now - since < DELIVERY_TRANSIENT_BLOCK_GRACE_MS)
+        return emit(last.prUrl ?? progress.prUrl, stepStatusPayload(last.step, last.attempt));
+    }
     return emit(last?.prUrl ?? progress.prUrl, {
       state: 'stalled',
       reason: 'request_blocked',
       ...(input.lastStep.reason ? { blockReason: input.lastStep.reason } : {}),
     });
+  }
   if (input.lastStep?.state === 'failed')
     return emit(last?.prUrl ?? progress.prUrl, { state: 'stalled', reason: 'request_failed' });
   const settledAt = input.lastStep?.state === 'settled' ? input.lastStep.at : undefined;
@@ -423,8 +446,15 @@ const receiptOutcome = (receipt: AutomationReceipt): StepOutcome => {
       return { state: 'stopped' };
     case 'blocked':
       if (receipt.reason === 'target_stopped') return { state: 'stopped' };
-      if (receipt.reason && BUSY_BLOCK_REASONS.has(receipt.reason)) return { state: 'outstanding' };
-      return { state: 'blocked', ...(receipt.reason ? { reason: receipt.reason } : {}) };
+      if (receipt.reason && SESSION_BUSY_BLOCK_REASONS.has(receipt.reason))
+        return { state: 'outstanding' };
+      return {
+        state: 'blocked',
+        ...(receipt.reason ? { reason: receipt.reason } : {}),
+        ...(receipt.reason && TRANSIENT_BLOCK_REASONS.has(receipt.reason)
+          ? { transient: true }
+          : {}),
+      };
     default:
       return { state: 'outstanding' };
   }

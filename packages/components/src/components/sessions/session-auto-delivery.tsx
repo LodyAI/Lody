@@ -339,14 +339,18 @@ export function AutoDeliveryDialog({
   );
 }
 
+function autoDeliveryBlockReasonLabel(blockReason: string, t: TFunction): string | undefined {
+  const translated = t(`sessions.autoDelivery.blockReason.${blockReason}`, { defaultValue: '' });
+  return translated || undefined;
+}
+
 function autoDeliveryStallReasonLabel(
   status: Extract<SessionAutoDelivery, { state: 'stalled' }>,
   t: TFunction
 ): string {
   if (status.reason === 'request_blocked') {
     if (status.blockReason) {
-      const key = `sessions.autoDelivery.blockReason.${status.blockReason}`;
-      const translated = t(key, { defaultValue: '' });
+      const translated = autoDeliveryBlockReasonLabel(status.blockReason, t);
       if (translated) return translated;
       const fallback = t('sessions.autoDelivery.reason.request_blocked', {
         defaultValue: '请求被阻塞，暂无法下发',
@@ -515,7 +519,7 @@ export function SessionAutoDeliveryNote({
               <SessionAutomationNoteRow
                 icon={AlertTriangle}
                 label={t('sessions.autoDelivery.blockDetail', 'Blocked reason')}
-                value={blockReason}
+                value={autoDeliveryBlockReasonLabel(blockReason, t) ?? blockReason}
               />
             ) : null}
             {hasUpdatedAt ? (

@@ -67,11 +67,14 @@
   The daemon never mutates GitHub. Keep its per-kind repair limit and one merge
   request per head; exhausted limits stop with a reason, never retry. Non-busy
   receipt blocks surface as `stalled` (`request_blocked` + `blockReason`) without
-  ending the enablement, while agents without Core `sessionActivity` v1 follow the
-  shared `lateActivity` presence contract rather than stalling as unobserved.
-  Keep `DeliveryCoordinator.statusLock` separate from the engine `gate`, and release
-  `statusLock` before cancelling receipts to avoid lock-order deadlocks.
-  [Spec](../../../../specs/session-auto-delivery.md).
+  ending the enablement (with a 60-second grace window for transient/unconfirmed
+  blocks), while agents without Core `sessionActivity` v1 follow the shared
+  `lateActivity` presence contract rather than stalling as unobserved. Idle wakes
+  target only `state = 'blocked'` session-busy receipts so quota and `not_before`
+  timers are never perturbed. Keep `DeliveryCoordinator.statusLock` separate from
+  the engine `gate`, and release `statusLock` before cancelling receipts to avoid
+  lock-order deadlocks. [Spec](../../../../specs/session-auto-delivery.md);
+  [Decision](../../../../.agents/notes/implemented/bug-fix/2026-11-25-automation-native-activity-and-blocked-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.

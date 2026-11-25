@@ -51,6 +51,19 @@ export const TERMINAL_WORK_STATES: ReadonlySet<PendingWork['state']> = new Set<
   PendingWork['state']
 >(['settled', 'cancelled', 'failed', 'unknown']);
 
+/** Receipt block reasons caused by normal concurrent session or inbox activity. */
+export const SESSION_BUSY_BLOCK_REASONS: ReadonlySet<string> = new Set([
+  'session_work_active',
+  'input_pending',
+  'target_input_pending',
+  'queue_pending',
+  'goal_active',
+  'automation_work_pending',
+  'native_work_active',
+  'session_admission_busy',
+  'session_admission_blocked',
+]);
+
 export const NONTERMINAL_STATES_SQL = `'accepted','waiting','resolved','submitting','queued','running','blocked','unknown','cancelling'`;
 
 export type JsonRow = { payload: string };

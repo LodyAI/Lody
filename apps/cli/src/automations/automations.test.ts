@@ -1946,7 +1946,7 @@ describe('Auto delivery', () => {
     expect(deliver(ledger, 103)).toEqual([]);
   });
 
-  it('surfaces non-busy blocked receipts as stalled with blockReason and resumes once unblocked', () => {
+  it('surfaces non-busy blocked receipts as stalled with grace for transient unknowns and resumes once unblocked', () => {
     const ledger = enabled();
     const head = 'a'.repeat(40);
     observePullRequests(ledger, linked, 'owner/project', [pr(head, 's', 'c')], 100);
@@ -1956,104 +1956,179 @@ describe('Auto delivery', () => {
     });
     const receipt = required(deliver(ledger, 101)[0]);
 
+    for (const busyReason of ['session_work_active', 'target_input_pending']) {
+      ledger.update(receipt.id, receipt.state, { state: 'blocked', reason: busyReason }, 102);
+      expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+        state: 'merge',
+        prUrl,
+      });
+    }
+
     ledger.update(
       receipt.id,
-      receipt.state,
-      { state: 'blocked', reason: 'session_work_active' },
-      102
+      'blocked',
+      { state: 'blocked', reason: 'execution_release_unconfirmed' },
+      1_000
     );
-    expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 1_000 }).status).toEqual({
       state: 'merge',
       prUrl,
     });
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 59_999 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_000 }).status).toEqual({
+      state: 'stalled',
+      reason: 'request_blocked',
+      blockReason: 'execution_release_unconfirmed',
+      prUrl,
+    });
 
-    ledger.update(receipt.id, 'blocked', { state: 'blocked', reason: 'target_stopped' }, 103);
-    expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+    ledger.update(receipt.id, 'blocked', { state: 'blocked', reason: 'target_stopped' }, 61_001);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_001 }).status).toEqual({
       state: 'stalled',
       reason: 'stopped',
       prUrl,
     });
 
-    ledger.update(
-      receipt.id,
-      'blocked',
-      { state: 'blocked', reason: 'native_activity_unobserved' },
-      104
-    );
-    expect(advanceDelivery({ ledger, meta: linked, options, now: 105 }).status).toEqual({
+    ledger.update(receipt.id, 'blocked', { state: 'blocked', reason: 'permission_denied' }, 61_002);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_002 }).status).toEqual({
       state: 'stalled',
       reason: 'request_blocked',
-      blockReason: 'native_activity_unobserved',
+      blockReason: 'permission_denied',
       prUrl,
     });
 
-    ledger.update(receipt.id, 'blocked', { state: 'queued', reason: undefined }, 106);
-    expect(advanceDelivery({ ledger, meta: linked, options, now: 107 }).status).toEqual({
+    ledger.update(receipt.id, 'blocked', { state: 'queued', reason: undefined }, 61_003);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_004 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+
+    ledger.update(
+      receipt.id,
+      'queued',
+      { state: 'blocked', reason: 'execution_release_unconfirmed' },
+      61_005
+    );
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_005 }).status).toEqual({
       state: 'merge',
       prUrl,
     });
   });
 
-  it('wakes session-blocked receipts on idle without waking capacity-parked or sibling sessions', () => {
+  it('wakes only session-busy blocked receipts on idle without disturbing quota, waiting, or denied receipts', () => {
     const ledger = enabled();
     const head = 'a'.repeat(40);
     observePullRequests(ledger, linked, 'owner/project', [pr(head, 's', 'c')], 100);
     advanceDelivery({ ledger, meta: linked, options, now: 101 });
-    const receipt = required(deliver(ledger, 101)[0]);
+    const busyReceipt = required(deliver(ledger, 101)[0]);
     ledger.update(
-      receipt.id,
-      receipt.state,
+      busyReceipt.id,
+      busyReceipt.state,
       { state: 'blocked', reason: 'native_work_active', retryAt: 20_000 },
       102
     );
 
     configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 102);
-    ledger.recordWork(
-      {
-        id: 'quota-work',
-        ownerUserId: 'user',
-        updatedAt: 102,
-        sessionId: 'session',
-        turnId: 'input',
-        nativeSessionId: 'native',
-        bindingId: 'binding',
-        fingerprint: 'fp',
-        inputRef: 'input',
-        confirmedBoundary: 'assistant',
-        unresolvedEffects: false,
-        release: 'released',
-        state: 'blocked_on_capacity',
-        attempts: 0,
-      },
-      {
-        id: 'quota-work',
-        source: 'session/session',
-        type: 'provider.quota.exhausted',
-        version: 1,
-        subject: 'quota-work',
-        observedAt: 102,
-        scope: { workspaceId: 'workspace', sessionId: 'session' },
-        data: { workId: 'quota-work', bindingId: 'binding' },
-        provenance: 'callback',
-        completeness: 'observed',
-        depth: 0,
-      }
-    );
-    const quotaReceipt = required(deliver(ledger, 103)[0]);
+    const makeWork = (id: string) => ({
+      id,
+      ownerUserId: 'user',
+      updatedAt: 102,
+      sessionId: 'session',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'binding',
+      fingerprint: 'fp',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    });
+    ledger.recordWork(makeWork('quota-sentinel'), {
+      id: 'quota-sentinel',
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      version: 1,
+      subject: 'quota-sentinel',
+      observedAt: 102,
+      scope: { workspaceId: 'workspace', sessionId: 'session' },
+      data: { workId: 'quota-sentinel', bindingId: 'binding' },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    ledger.recordWork(makeWork('quota-reset'), {
+      id: 'quota-reset',
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      version: 1,
+      subject: 'quota-reset',
+      observedAt: 102,
+      scope: { workspaceId: 'workspace', sessionId: 'session' },
+      data: { workId: 'quota-reset', bindingId: 'binding', retryAt: 90_000 },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    ledger.recordWork(makeWork('overload-wait'), {
+      id: 'overload-wait',
+      source: 'session/session',
+      type: 'provider.model.overloaded',
+      version: 1,
+      subject: 'overload-wait',
+      observedAt: 102,
+      scope: { workspaceId: 'workspace', sessionId: 'session' },
+      data: { workId: 'overload-wait', bindingId: 'binding', retryAt: 95_000 },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const delivered = deliver(ledger, 103);
+    const sentinelReceipt = required(delivered.find((r) => r.event.id === 'quota-sentinel'));
+    const resetReceipt = required(delivered.find((r) => r.event.id === 'quota-reset'));
+    const waitingReceipt = required(delivered.find((r) => r.event.id === 'overload-wait'));
     ledger.update(
-      quotaReceipt.id,
-      quotaReceipt.state,
+      sentinelReceipt.id,
+      sentinelReceipt.state,
       { state: 'blocked', reason: 'capacity_unobserved', retryAt: Number.MAX_SAFE_INTEGER },
+      104
+    );
+    ledger.update(
+      resetReceipt.id,
+      resetReceipt.state,
+      { state: 'blocked', reason: 'capacity_exhausted', retryAt: 90_000 },
+      104
+    );
+    ledger.update(
+      waitingReceipt.id,
+      waitingReceipt.state,
+      { state: 'waiting', reason: 'not_before', retryAt: 95_000 },
       104
     );
 
     expect(ledger.wakeSessionBlocked('other-session', 500)).toBe(0);
     expect(ledger.wakeSessionBlocked('session', 500)).toBe(1);
-    expect(ledger.receipt(receipt.id)).toMatchObject({ retryAt: 500, capacityWakeRevision: 1 });
-    expect(ledger.receipt(quotaReceipt.id)).toMatchObject({
+    expect(ledger.receipt(busyReceipt.id)).toMatchObject({ retryAt: 500, capacityWakeRevision: 1 });
+    expect(ledger.receipt(sentinelReceipt.id)).toMatchObject({
       retryAt: Number.MAX_SAFE_INTEGER,
+      updatedAt: 104,
     });
-    expect(ledger.receipt(quotaReceipt.id)?.capacityWakeRevision).toBeUndefined();
+    expect(ledger.receipt(resetReceipt.id)).toMatchObject({
+      retryAt: 90_000,
+      updatedAt: 104,
+    });
+    expect(ledger.receipt(waitingReceipt.id)).toMatchObject({
+      state: 'waiting',
+      retryAt: 95_000,
+      updatedAt: 104,
+    });
+    expect(ledger.receipt(sentinelReceipt.id)?.capacityWakeRevision).toBeUndefined();
+    expect(ledger.receipt(resetReceipt.id)?.capacityWakeRevision).toBeUndefined();
+    expect(ledger.receipt(waitingReceipt.id)?.capacityWakeRevision).toBeUndefined();
   });
 
   const prUrls = [prUrl, 'https://github.com/owner/project/pull/43'];
