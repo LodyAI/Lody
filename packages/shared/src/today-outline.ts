@@ -325,9 +325,17 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
         structureDirty = true;
         if (mirrorBroken) continue;
         for (const item of event.diff.diff) {
-          if (item.action === 'create') attach(item.target, item.parent, item.index);
-          else if (item.action === 'delete') detach(item.target, item.oldParent, item.oldIndex);
-          else {
+          if (item.action === 'create') {
+            // Undo can revive a subtree with the same IDs and emit creates for its
+            // descendants. Rebuild instead of inserting into retained child lists.
+            if (kids.has(item.target)) {
+              mirrorBroken = true;
+              break;
+            }
+            attach(item.target, item.parent, item.index);
+          } else if (item.action === 'delete') {
+            detach(item.target, item.oldParent, item.oldIndex);
+          } else {
             detach(item.target, item.oldParent, item.oldIndex);
             attach(item.target, item.parent, item.index);
           }
@@ -388,6 +396,7 @@ export function openTodayOutline(doc: LoroDoc, options: { origin?: string } = {}
       if (event.diff.type !== 'map') continue;
       const id = dataOwner.get(String(event.target));
       if (id === undefined) continue;
+      if (Object.hasOwn(event.diff.updated, 'text')) richCache.delete(id);
       const before = attrCache.get(id);
       attrCache.delete(id);
       const node = tree.getNodeByID(id as TodayNodeId);
