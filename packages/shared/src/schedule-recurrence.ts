@@ -1,7 +1,8 @@
-import type { ScheduleProposalRule } from './ai';
+import type { ScheduleEditProposalMeta, ScheduleProposalRule } from './ai';
 import { SCHEDULE_CUSTOM_STEP_MAX } from './message-schemas';
 import { validateScheduleTrigger } from './schedule-time';
-import type { ScheduleTrigger } from './schedule-types';
+import type { ScheduleDraft } from './schedule-repository';
+import type { ScheduleDocument, ScheduleTrigger } from './schedule-types';
 
 /**
  * The human-facing shape of a time rule.
@@ -293,8 +294,11 @@ export function recurrenceToTrigger(recurrence: ScheduleRecurrence, now: number)
 export function sameScheduleRecurrence(a: ScheduleRecurrence, b: ScheduleRecurrence): boolean {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
-    case 'once':
-      return a.at === (b as typeof a).at;
+    case 'once': {
+      const aMs = Date.parse(a.at);
+      const bMs = Date.parse((b as typeof a).at);
+      return Number.isFinite(aMs) && aMs === bMs ? true : a.at === (b as typeof a).at;
+    }
     case 'minutes':
     case 'hours':
       return a.every === (b as typeof a).every && a.timeZone === (b as typeof a).timeZone;
@@ -475,6 +479,54 @@ export function scheduleProposalRuleToTrigger(
 ): ScheduleTrigger {
   const recurrence = scheduleProposalRuleToRecurrence(rule, deviceTimeZone);
   return recurrence ? recurrenceToTrigger(recurrence, now) : { kind: 'manual' };
+}
+
+/**
+ * Id of the latest activity that wrote the schedule's content. Pause, resume
+ * and manual runs keep it, so they do not make an edit proposal stale.
+ */
+export function scheduleContentRevision(document: Pick<ScheduleDocument, 'timeline'>): string {
+  const writes = document.timeline.filter((e) => e.kind === 'created' || e.kind === 'edited');
+  return writes[writes.length - 1]?.id ?? '';
+}
+
+/**
+ * The draft an edit proposal means for the schedule as it is now: the proposed
+ * fields over everything else unchanged. `null` when the schedule was edited
+ * after the agent read it, so a stale proposal never overwrites a newer edit.
+ * When `activityId` is already in the timeline, that save landed: the draft is the
+ * content as it is now, so a retried Apply completes the write and changes nothing.
+ */
+export function applyScheduleEditProposal(
+  proposal: Pick<ScheduleEditProposalMeta, 'patch' | 'baseActivityId'>,
+  document: ScheduleDocument,
+  now: number,
+  machineTimeZone: string,
+  activityId: string
+): ScheduleDraft | null {
+  const landed = document.timeline.some((entry) => entry.id === activityId);
+  if (!landed && scheduleContentRevision(document) !== proposal.baseActivityId) return null;
+  const patch: ScheduleEditProposalMeta['patch'] = landed ? {} : proposal.patch;
+  const current = document.definition;
+  const nextRecurrence = patch.rule
+    ? scheduleProposalRuleToRecurrence(patch.rule, machineTimeZone)
+    : undefined;
+  return {
+    title: patch.title ?? current.title,
+    prompt: patch.prompt ?? document.prompt,
+    trigger: !patch.rule
+      ? current.trigger
+      : nextRecurrence
+        ? applyScheduleRecurrence(nextRecurrence, now, current.trigger)
+        : { kind: 'manual' },
+    machineId: current.machineId,
+    misfirePolicy: current.misfirePolicy,
+    overlapPolicy: current.overlapPolicy,
+    agent: current.agent,
+    ...(current.project ? { project: current.project } : {}),
+    destination: current.destination,
+    retryPolicy: current.retryPolicy,
+  };
 }
 
 /**

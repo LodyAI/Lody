@@ -39,10 +39,17 @@ export type GitDirectoryScanInput = {
   readonly recursive: boolean;
 };
 
-export async function isInsideGitWorktree(
-  workspaceRoot: string,
-  signal?: AbortSignal
-): Promise<boolean> {
+export type CodeCollabAllChangesPolicy =
+  | { readonly scope: 'uncommitted' }
+  | { readonly scope: 'branch'; readonly baseBranch?: string };
+
+export const DEFAULT_ALL_CHANGES_POLICY: CodeCollabAllChangesPolicy = { scope: 'branch' };
+
+export type ResolvedGitDiffBase =
+  | { readonly ok: true; readonly commit: string }
+  | { readonly ok: false; readonly reason: 'not_a_git_worktree' | 'no_commits' };
+
+async function isInsideGitWorktree(workspaceRoot: string, signal?: AbortSignal): Promise<boolean> {
   const inside = await runGit(workspaceRoot, ['rev-parse', '--is-inside-work-tree'], signal);
   return inside.ok && inside.stdout.trim() === 'true';
 }
@@ -164,7 +171,11 @@ export async function computeProjectAllChangesSnapshot(
   const gitMemberBases: Record<string, string> = {};
   for (const member of members) {
     const directory = await resolveProjectGitDirectory(root, member.path);
-    const diffBase = (await resolveAllChangesDiffBase(directory, member.base)) ?? 'HEAD';
+    const resolved = await resolveGitDiffBase(directory, {
+      scope: 'branch',
+      baseBranch: member.base,
+    });
+    const diffBase = resolved.ok ? resolved.commit : 'HEAD';
     gitMemberBases[member.path] = diffBase;
     const state = await computeAllChanges(directory, { diffBase });
     for (const [file, change] of Object.entries(state)) changes[`${member.path}/${file}`] = change;
@@ -175,17 +186,18 @@ export async function computeProjectAllChangesSnapshot(
 export async function computeAllChanges(
   workspaceRoot: string,
   options: {
-    readonly preferredBaseBranch?: string;
+    readonly policy?: CodeCollabAllChangesPolicy;
     readonly diffBase?: string;
     readonly signal?: AbortSignal;
     /** Untracked files whose content may be read for line counts; later ones stay uncounted. */
     readonly untrackedLineCountBudget?: number;
   } = {}
 ): Promise<CodeCollabV2AllChangesState> {
-  const diffBase =
-    options.diffBase ??
-    (await resolveAllChangesDiffBase(workspaceRoot, options.preferredBaseBranch, options.signal));
-  const diffTarget = diffBase ?? 'HEAD';
+  let diffTarget = options.diffBase;
+  if (diffTarget === undefined) {
+    const resolved = await resolveGitDiffBase(workspaceRoot, options.policy, options.signal);
+    diffTarget = resolved.ok ? resolved.commit : 'HEAD';
+  }
   const results = await Promise.allSettled([
     // `--numstat` cannot use `-z`, so disable `core.quotePath` to keep non-ASCII paths
     // raw (matching the `-z` outputs below); otherwise they are mis-keyed and lose their
@@ -287,29 +299,48 @@ export async function computeAllChanges(
   return changes;
 }
 
-export async function resolveAllChangesDiffBase(
+export async function resolveGitDiffBase(
   workspaceRoot: string,
-  preferredBaseBranch?: string,
+  policy: CodeCollabAllChangesPolicy = DEFAULT_ALL_CHANGES_POLICY,
   signal?: AbortSignal
-): Promise<string | null> {
+): Promise<ResolvedGitDiffBase> {
   if (!(await isInsideGitWorktree(workspaceRoot, signal))) {
-    return null;
+    return { ok: false, reason: 'not_a_git_worktree' };
   }
-
-  const baseRef = await resolveAllChangesBaseRef(workspaceRoot, preferredBaseBranch, signal);
-  if (baseRef) {
-    const mergeBase = await runGit(workspaceRoot, ['merge-base', baseRef, 'HEAD'], signal);
-    const trimmed = mergeBase.ok ? mergeBase.stdout.trim() : '';
-    if (trimmed) {
-      return trimmed;
+  if (policy.scope === 'branch') {
+    const baseRef = await resolveAllChangesBaseRef(workspaceRoot, policy.baseBranch, signal);
+    if (baseRef) {
+      const mergeBase = await runGit(workspaceRoot, ['merge-base', baseRef, 'HEAD'], signal);
+      const trimmed = mergeBase.ok ? mergeBase.stdout.trim() : '';
+      if (trimmed) {
+        return { ok: true, commit: trimmed };
+      }
     }
   }
-
   const head = await resolveGitHeadCommit(workspaceRoot, signal);
+  return head ? { ok: true, commit: head } : { ok: false, reason: 'no_commits' };
+}
+
+export async function resolveGitDiffBaseVersion(
+  directory: string,
+  policy: CodeCollabAllChangesPolicy = DEFAULT_ALL_CHANGES_POLICY,
+  signal?: AbortSignal
+): Promise<string> {
+  const head = await resolveGitHeadCommit(directory, signal);
+  if (!head) return 'non-git';
+  if (policy.scope === 'uncommitted') return head;
+  for (const candidate of gitDiffBaseRefCandidates(policy.baseBranch)) {
+    const base = await runGit(
+      directory,
+      ['rev-parse', '--verify', `${candidate}^{commit}`],
+      signal
+    );
+    if (base.ok) return JSON.stringify([head, base.stdout.trim()]);
+  }
   return head;
 }
 
-export async function resolveGitHeadCommit(
+async function resolveGitHeadCommit(
   workspaceRoot: string,
   signal?: AbortSignal
 ): Promise<string | null> {

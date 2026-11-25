@@ -1648,20 +1648,58 @@ describe('MessageHandler ACP batching', () => {
   });
 
   it.each([
-    { reportsSessionActivity: true, restartsClock: true },
-    { reportsSessionActivity: false, restartsClock: false },
+    {
+      name: 'activity-reporting agent resets GC clock on late output without synthesizing late presence',
+      reportsSessionActivity: true,
+      update: {
+        sessionUpdate: 'agent_message_chunk' as const,
+        content: { type: 'text' as const, text: 'after the background task' },
+      },
+      restartsClock: true,
+      activatesLatePresence: false,
+    },
+    {
+      name: 'non-activity-reporting agent resets GC clock and activates bounded late presence on visible late output',
+      reportsSessionActivity: false,
+      update: {
+        sessionUpdate: 'tool_call' as const,
+        toolCallId: 'late-tool-1',
+        title: 'Edit file',
+        status: 'in_progress' as const,
+      },
+      restartsClock: true,
+      activatesLatePresence: true,
+    },
+    {
+      name: 'non-activity-reporting agent ignores non-visible late metadata updates for GC clock and presence',
+      reportsSessionActivity: false,
+      update: {
+        sessionUpdate: 'available_commands_update' as const,
+        availableCommands: [{ name: 'help', description: 'Help' }],
+      },
+      restartsClock: false,
+      activatesLatePresence: false,
+    },
   ])(
-    'post-turn output restarts the GC idle clock only for activity-reporting agents (%o)',
-    async ({ reportsSessionActivity, restartsClock }) => {
+    'post-turn output policy: $name',
+    async ({ reportsSessionActivity, update, restartsClock, activatesLatePresence }) => {
       const sessionId = 'late-output-activity' as SessionId;
       const { repo, handler, sessionManagerMock } = await createHandlerHarness([sessionId]);
       sessionManagerMock.getSession.mockImplementation(
-        () => ({ agentClient: { reportsSessionActivity: () => reportsSessionActivity } }) as never
+        () =>
+          ({
+            hasLiveAgentProcess: () => true,
+            agentClient: {
+              reportsSessionActivity: () => reportsSessionActivity,
+              getNativeWork: () => null,
+            },
+          }) as never
       );
       const host = handler as unknown as {
         beginConversationTurn(sessionId: SessionId): string;
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+        clearSessionActivePresence(sessionId: SessionId): void;
       };
       const text = (value: string): AcpSessionNotification => ({
         sessionId,
@@ -1677,10 +1715,20 @@ describe('MessageHandler ACP batching', () => {
         expect(handler.getLastActivity(sessionId)).toBe(beforeOutput);
         await host.finalizeACPState(sessionId, turnId);
 
-        // Claude was woken later by a finished background shell.
+        // Agent was woken later by a finished background task or subagent.
         await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
-        host.enqueueACPUpdate(sessionId, text('after the background task'));
+        host.enqueueACPUpdate(sessionId, { sessionId, update });
         expect(handler.getLastActivity(sessionId)).toBe(restartsClock ? Date.now() : beforeOutput);
+        expect(handler.getSessionMonitorState(sessionId).status).toBe(
+          activatesLatePresence ? 'running' : 'idle'
+        );
+        expect(handler.getNativeWork(sessionId)).toBe(activatesLatePresence ? 'running' : null);
+
+        if (activatesLatePresence) {
+          host.clearSessionActivePresence(sessionId);
+          expect(handler.getSessionMonitorState(sessionId).status).toBe('idle');
+          expect(handler.getNativeWork(sessionId)).toBeNull();
+        }
       } finally {
         await destroyRepoOnRealTimers(repo);
       }
@@ -2907,7 +2955,7 @@ describe('MessageHandler ACP batching', () => {
           ok: true,
           ownerSessionId: sessionId,
           workspaceRoot: '/tmp',
-          allChangesBaseBranch: 'main',
+          allChanges: { scope: 'branch', baseBranch: 'main' },
         })
         .mockRejectedValueOnce(new Error('transient persistence failure'))
         .mockResolvedValueOnce({ ok: false, code: 'workspace_unavailable' });

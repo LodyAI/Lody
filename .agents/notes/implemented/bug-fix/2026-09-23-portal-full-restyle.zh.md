@@ -32,7 +32,7 @@ Translation: current
 
 ## 决策
 
-- `src/tailwind/index.css` 不再 `@source` 扫描 `konsta/react`、`konsta/shared`、`konsta/styles`。
+- `src/style/index.css` 不再 `@source` 扫描 `konsta/react`、`konsta/shared`、`konsta/styles`。
   实际只用到主题、safe-area 工具类和 `safe-areas` 钩子；减少了 417 个类（69KB），所有被标记为
   "仍被引用"的类都是误报，其真实的变体写法仍由我们自己的源码生成。
 - `lib/body-tail-sentinel.ts` 由 `routes/__root.tsx` 调用一次，在 `#root` 之后插入隐藏元素，使将来

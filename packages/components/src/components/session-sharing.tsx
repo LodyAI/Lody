@@ -15,7 +15,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -234,7 +234,7 @@ export function SessionSharingIndicator({
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={clsx(stylex.props(styles.lockMark).className, className)}
+            className={cn(stylex.props(styles.lockMark).className, className)}
           >
             {state.access === 'read' ? (
               <Eye {...stylex.props(styles.glyph)} aria-hidden="true" />
@@ -271,7 +271,7 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={clsx(SESSION_HEADER_STATUS_PILL_CLASS, className)}
+            className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
           >
             <Archive {...stylex.props(styles.glyph)} aria-hidden="true" />
             <span>{label}</span>
@@ -845,7 +845,7 @@ export function SessionAccessControl({
           <button
             type="button"
             aria-label={label}
-            className={clsx(
+            className={cn(
               SESSION_HEADER_STATUS_PILL_CLASS,
               open && stylex.props(styles.statusPillOpen).className,
               className
@@ -1008,6 +1008,16 @@ export function ProjectShareDialog({
 
 const themeStyles = stylex.create({
   layout: { justifyContent: 'flex-start' },
-  layout2: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'break-word' },
-  glyph: { marginRight: 'calc(var(--spacing) * 1.5)', height: 'calc(var(--spacing) * 4)', width: 'calc(var(--spacing) * 4)' },
+  layout2: {
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    overflowWrap: 'break-word',
+  },
+  glyph: {
+    marginRight: 'calc(var(--spacing) * 1.5)',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
 });

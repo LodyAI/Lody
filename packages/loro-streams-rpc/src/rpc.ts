@@ -1,4 +1,8 @@
-import { ManagedDaemonUpgradeOptionsSchema, type ManagedDaemonUpgradeOptions } from '@lody/shared';
+import {
+  ManagedDaemonUpgradeOptionsSchema,
+  type LoroStreamsWebSocketOptions,
+  type ManagedDaemonUpgradeOptions,
+} from '@lody/shared';
 import {
   CodeCollabOpenDiffManifestResponseSchema,
   CodeCollabReadBlobResponseSchema,
@@ -81,6 +85,7 @@ import {
   type HeadStreamOutput,
   type StreamError,
   type StreamPart,
+  type StreamsClientWebSocketOptions,
   type TimeoutConfig,
 } from '@loro-dev/streams-client';
 import type {
@@ -1105,6 +1110,11 @@ export type LoroJsonStreamBatch = {
 
 export type LoroJsonLiveBatchHandler = (batch: LoroJsonStreamBatch) => Promise<void> | void;
 
+export type LoroJsonLiveAutoCreateOptions = {
+  readonly contentType?: string;
+  readonly ttlSeconds?: number;
+};
+
 export type LoroJsonLiveReadOptions = {
   signal?: AbortSignal;
   /**
@@ -1114,9 +1124,11 @@ export type LoroJsonLiveReadOptions = {
    * `live-mode-policy.ts`.
    */
   modePolicy?: LoroStreamsLiveModePolicy;
+  autoCreate?: LoroJsonLiveAutoCreateOptions;
 };
 
 export type LoroStreamsJsonStreamClient = {
+  readonly webSocketEnabled?: boolean;
   ensureJsonStream: (streamId: string, retentionSeconds?: number) => Promise<void>;
   appendJson: (streamId: string, value: unknown) => Promise<string | undefined>;
   readJsonLive: (
@@ -1294,6 +1306,11 @@ export function createLoroStreamsJsonStreamClient(options: {
    * Pass `0` to disable. Defaults to {@link DEFAULT_LIVE_IDLE_TIMEOUT_MS}.
    */
   liveIdleTimeoutMs?: number;
+  webSocket?:
+    | StreamsClientWebSocketOptions
+    | (Omit<StreamsClientWebSocketOptions, 'auth'> & {
+        readonly auth?: LoroStreamsWebSocketOptions['auth'];
+      });
   timeout?: Partial<TimeoutConfig>;
   shardUrls?: {
     readonly bootstrap?: readonly string[];
@@ -1303,6 +1320,7 @@ export function createLoroStreamsJsonStreamClient(options: {
   };
 }): LoroStreamsJsonStreamClient {
   const fetchImpl = options.fetchImpl ?? fetch;
+  const wsEnabled = options.webSocket?.enabled === true;
 
   const getStreamUrl = (streamId: string, operation: JsonStreamOperation = 'ensure'): string => {
     const baseUrl = normalizeLoroGatewayBaseUrl(options.getBaseUrl?.() ?? options.baseUrl);
@@ -1328,6 +1346,7 @@ export function createLoroStreamsJsonStreamClient(options: {
         url,
         auth: async () => await options.getToken(),
         fetch: fetchImpl as typeof fetch,
+        ...(wsEnabled ? { webSocket: options.webSocket } : {}),
         // RPC appends retain their request deadline; SDK bulk uploads default to 60s.
         timeout:
           operation === 'append'
@@ -1347,6 +1366,7 @@ export function createLoroStreamsJsonStreamClient(options: {
   };
 
   return {
+    webSocketEnabled: wsEnabled,
     ensureJsonStream: async (streamId: string, retentionSeconds?: number): Promise<void> => {
       const { client: streamClient, context } = getStreamClient(streamId);
       const requestedTtlSeconds = normalizeRetentionSeconds(retentionSeconds);
@@ -1407,6 +1427,11 @@ export function createLoroStreamsJsonStreamClient(options: {
 
       const modePolicy = liveOptions?.modePolicy;
       const requestedMode = modePolicy?.selectRequestMode() ?? options.liveMode ?? 'sse';
+      const liveMode: JsonStreamLiveMode = wsEnabled
+        ? requestedMode === 'long-poll'
+          ? 'long-poll'
+          : 'auto'
+        : requestedMode;
       // Reported back to the policy so it can distinguish "SSE worked" from
       // "SSE failed" and from "the server downgraded us to long-poll".
       let observedTransport: LoroStreamsLiveTransport | undefined;
@@ -1420,16 +1445,24 @@ export function createLoroStreamsJsonStreamClient(options: {
       // to the caller's stop signal so a real stop still propagates.
       const watchdog = createLiveIdleWatchdog(
         options.liveIdleTimeoutMs ?? DEFAULT_LIVE_IDLE_TIMEOUT_MS,
-        liveOptions?.signal
+        liveOptions?.signal,
+        { startDisarmed: wsEnabled && liveMode !== 'long-poll' }
       );
       try {
         for await (const event of streamClient.live({
           offset: state.nextOffset ?? 'now',
-          mode: requestedMode,
+          mode: liveMode,
+          ...(wsEnabled ? { webSocket: options.webSocket } : {}),
+          ...(liveOptions?.autoCreate !== undefined ? { autoCreate: liveOptions.autoCreate } : {}),
           signal: watchdog.signal,
         })) {
-          watchdog.reset();
+          if (event.mode === 'ws') {
+            watchdog.disarm();
+          } else {
+            watchdog.reset();
+          }
           observedTransport = event.mode;
+          modePolicy?.noteObservedTransport?.(event.mode);
           switch (event.type) {
             case 'data':
               deliveredBatch = true;
@@ -1482,7 +1515,7 @@ export function createLoroStreamsJsonStreamClient(options: {
         // switch) says nothing about transport health, so it is not scored.
         if (modePolicy && liveOptions?.signal?.aborted !== true) {
           modePolicy.noteReadOutcome({
-            requestedMode,
+            requestedMode: liveMode,
             observedTransport,
             deliveredBatch,
             error: readError,
@@ -1498,6 +1531,8 @@ type LiveIdleWatchdog = {
   readonly signal: AbortSignal;
   /** Call on every received event to restart the idle timer. */
   reset(): void;
+  /** Clear the timer when a ping/pong-backed WebSocket connection takes over. */
+  disarm(): void;
   /** Clear the timer and detach the parent-signal listener. */
   dispose(): void;
 };
@@ -1511,7 +1546,8 @@ type LiveIdleWatchdog = {
  */
 function createLiveIdleWatchdog(
   timeoutMs: number,
-  parentSignal: AbortSignal | undefined
+  parentSignal: AbortSignal | undefined,
+  options?: { readonly startDisarmed?: boolean }
 ): LiveIdleWatchdog {
   const controller = new AbortController();
   const armed = Number.isFinite(timeoutMs) && timeoutMs > 0;
@@ -1526,28 +1562,32 @@ function createLiveIdleWatchdog(
     }
   }
 
+  const disarm = (): void => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+
   const reset = (): void => {
     if (!armed || controller.signal.aborted) {
       return;
     }
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
+    disarm();
     // Unref where available so the timer never keeps a Node process alive.
     timer = setTimeout(() => controller.abort(), timeoutMs);
     (timer as { unref?: () => void }).unref?.();
   };
 
   const dispose = (): void => {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
+    disarm();
     parentSignal?.removeEventListener('abort', onParentAbort);
   };
 
-  reset();
-  return { signal: controller.signal, reset, dispose };
+  if (!options?.startDisarmed) {
+    reset();
+  }
+  return { signal: controller.signal, reset, disarm, dispose };
 }
 
 function selectJsonStreamOperationBaseUrl(
@@ -2743,8 +2783,13 @@ export class LoroStreamsRpcResponseDispatcher {
       const onStop = (): void => readController.abort();
       this.stopController.signal.addEventListener('abort', onStop, { once: true });
       this.currentReadController = readController;
+      const retentionSeconds = normalizeRetentionSeconds(
+        this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
+      );
+      const useWsAutoCreate =
+        this.shouldPrecreateResponseStream && this.options.streamClient.webSocketEnabled === true;
       try {
-        if (this.shouldPrecreateResponseStream && !this.responseStreamEnsured) {
+        if (this.shouldPrecreateResponseStream && !this.responseStreamEnsured && !useWsAutoCreate) {
           await this.options.streamClient.ensureJsonStream(
             this.responseStreamId,
             this.options.retentionSeconds ?? LORO_STREAMS_RPC_RETENTION_SECONDS
@@ -2762,7 +2807,18 @@ export class LoroStreamsRpcResponseDispatcher {
               await this.handleRawResponse(raw);
             }
           },
-          { signal: readController.signal, modePolicy: this.liveModePolicy }
+          {
+            signal: readController.signal,
+            modePolicy: this.liveModePolicy,
+            ...(useWsAutoCreate
+              ? {
+                  autoCreate: {
+                    contentType: JSON_STREAM_CONTENT_TYPE,
+                    ...(retentionSeconds !== undefined ? { ttlSeconds: retentionSeconds } : {}),
+                  },
+                }
+              : {}),
+          }
         );
       } catch (error) {
         if (this.stopped) {

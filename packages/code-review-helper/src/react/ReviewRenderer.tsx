@@ -72,7 +72,7 @@ import {
   type ReviewCheckState,
 } from '../review-checklist';
 import { FileIcon } from '../file-icons';
-import { clsx } from 'clsx';
+import { cn } from '../cn';
 import { Alert, AlertDescription, AlertTitle } from '@/ui/alert';
 import { Button } from '@/ui/button';
 import {
@@ -1381,7 +1381,7 @@ export function ReviewRenderer({
     <ErrorBoundary fallback={<ReviewRenderError />}>
       <div
         ref={shellRef}
-        className={clsx(
+        className={cn(
           'crh-shell dark',
           stylex.props(
             rootLayoutStyles.shell,
@@ -1415,7 +1415,7 @@ export function ReviewRenderer({
           />
         )}
         <aside
-          className={clsx(
+          className={cn(
             'crh-sidebar',
             stylex.props(rootLayoutStyles.sidebar, !sidebarVisible && rootLayoutStyles.hidden)
               .className
@@ -1437,7 +1437,7 @@ export function ReviewRenderer({
               return (
                 <div key={group.id} {...stylex.props(rootLayoutStyles.group)}>
                   <div
-                    className={clsx(
+                    className={cn(
                       stylex.props(
                         rootLayoutStyles.groupRow,
                         isActive ? rootLayoutStyles.groupActive : rootLayoutStyles.groupInactive
@@ -1513,11 +1513,11 @@ export function ReviewRenderer({
 
         <main
           ref={mainRef}
-          className={clsx('crh-main', stylex.props(rootLayoutStyles.main).className)}
+          className={cn('crh-main', stylex.props(rootLayoutStyles.main).className)}
         >
           <div
             ref={toolbarRef}
-            className={clsx('crh-toolbar', stylex.props(rootLayoutStyles.toolbar).className)}
+            className={cn('crh-toolbar', stylex.props(rootLayoutStyles.toolbar).className)}
           >
             <Button
               type="button"
@@ -1531,7 +1531,7 @@ export function ReviewRenderer({
               title={sidebarVisible ? 'Hide review map' : 'Show review map'}
             >
               <PanelLeft
-                className={clsx(
+                className={cn(
                   'crh-size-explicit',
                   stylex.props(explicitGlyphStyles.standard).className
                 )}
@@ -1555,14 +1555,14 @@ export function ReviewRenderer({
             >
               {copyState === 'copied' ? (
                 <Check
-                  className={clsx(
+                  className={cn(
                     'crh-size-explicit',
                     stylex.props(explicitGlyphStyles.standard).className
                   )}
                 />
               ) : (
                 <Copy
-                  className={clsx(
+                  className={cn(
                     'crh-size-explicit',
                     stylex.props(explicitGlyphStyles.standard).className
                   )}
@@ -1587,7 +1587,7 @@ export function ReviewRenderer({
                 title={panelVisible ? 'Hide review thread' : 'Show review thread'}
               >
                 <PanelRight
-                  className={clsx(
+                  className={cn(
                     'crh-size-explicit',
                     stylex.props(explicitGlyphStyles.standard).className
                   )}
@@ -1714,7 +1714,7 @@ const renderErrorStyles = stylex.create({
 // message instead of a blank white page.
 function ReviewRenderError() {
   return (
-    <div className={clsx('crh-shell dark', stylex.props(renderErrorStyles.root).className)}>
+    <div className={cn('crh-shell dark', stylex.props(renderErrorStyles.root).className)}>
       <div {...stylex.props(renderErrorStyles.content)}>
         <p {...stylex.props(renderErrorStyles.title)}>
           Something went wrong rendering this review.
@@ -1756,7 +1756,7 @@ function DiffStyleControl({
         gap="calc(var(--spacing) * 1.5)"
       >
         <Rows3
-          className={clsx('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+          className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
         />
         Unified
       </ToggleGroupItem>
@@ -1767,7 +1767,7 @@ function DiffStyleControl({
         gap="calc(var(--spacing) * 1.5)"
       >
         <Columns2
-          className={clsx('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+          className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
         />
         Split
       </ToggleGroupItem>
@@ -1953,7 +1953,7 @@ function FindingItem({
   return (
     <li
       id={findingDomId(finding.id)}
-      className={clsx('crh-finding', stylex.props(findingsStyles.item).className)}
+      className={cn('crh-finding', stylex.props(findingsStyles.item).className)}
     >
       <span {...stylex.props(findingsStyles.badge, SEVERITY_MARKER[finding.severity])}>
         {findingSeverityLabel(finding.severity)}
@@ -2290,7 +2290,7 @@ function renderLightMarkdownBlock(
       return (
         <Tag
           key={key}
-          className={clsx(
+          className={cn(
             options.blockClassName,
             stylex.props(
               markdownStyles.heading,
@@ -2308,7 +2308,7 @@ function renderLightMarkdownBlock(
       return (
         <ul
           key={key}
-          className={clsx(
+          className={cn(
             options.blockClassName,
             stylex.props(
               markdownStyles.list,
@@ -2386,7 +2386,7 @@ function FindingRefChip({
       type="button"
       onClick={() => onJump(refItem)}
       title={`Jump to ${refItem.path}${refItem.range ? ` line ${refItem.range.start}` : ''}`}
-      className={clsx('crh-ref-chip', stylex.props(findingsStyles.refChip).className)}
+      className={cn('crh-ref-chip', stylex.props(findingsStyles.refChip).className)}
     >
       <FileIcon filePath={refItem.path} {...stylex.props(findingsStyles.refGlyph)} />
       <span {...stylex.props(findingsStyles.refLabel)}>
@@ -2571,11 +2571,11 @@ const ReviewGroupSection = memo(function ReviewGroupSection({
       id={groupDomId(group.id)}
       data-group-id={group.id}
       aria-labelledby={headingId}
-      className={clsx('crh-group-section', stylex.props(groupSectionStyles.section).className)}
+      className={cn('crh-group-section', stylex.props(groupSectionStyles.section).className)}
     >
       <header
         ref={headerRef}
-        className={clsx('crh-group-header', stylex.props(groupSectionStyles.header).className)}
+        className={cn('crh-group-header', stylex.props(groupSectionStyles.header).className)}
       >
         <div {...stylex.props(groupSectionStyles.headingRow)}>
           <span {...stylex.props(groupSectionStyles.index)}>{index + 1}</span>
@@ -2736,7 +2736,7 @@ function Checkbox({
   }, [indeterminate]);
   return (
     <span
-      className={clsx(
+      className={cn(
         stylex.props(
           checkboxStyles.base,
           checked || indeterminate ? checkboxStyles.checked : checkboxStyles.unchecked,
@@ -2880,7 +2880,7 @@ function GroupMenu({
           aria-label="Group actions"
         >
           <MoreHorizontal
-            className={clsx(
+            className={cn(
               'crh-size-explicit',
               stylex.props(explicitGlyphStyles.standard).className
             )}
@@ -2936,7 +2936,7 @@ function ColumnResizer({
       aria-label={label}
       tabIndex={0}
       style={side === 'left' ? { left: `${offset}px` } : { right: `${offset}px` }}
-      className={clsx(
+      className={cn(
         'crh-resizer',
         stylex.props(rootLayoutStyles.resizerVisibility).className,
         side === 'left' ? 'crh-resizer-left' : 'crh-resizer-right',
@@ -3489,7 +3489,7 @@ function FileTreeRow({
             )}
           >
             <ChevronDown
-              className={clsx(
+              className={cn(
                 stylex.props(
                   treeCommitStyles.treeChevron,
                   treeCommitStyles.commitTransitionTransform,
@@ -3551,7 +3551,7 @@ function FileTreeRow({
       >
         <FileIcon filePath={node.path} {...stylex.props(treeCommitStyles.fileGlyph)} />
         <span
-          className={clsx(
+          className={cn(
             stylex.props(treeCommitStyles.fileLabel).className,
             state === 'checked'
               ? stylex.props(treeCommitStyles.fileLabelChecked).className
@@ -3594,7 +3594,7 @@ function GroupCommits({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className={clsx(
+        className={cn(
           stylex.props(
             treeCommitStyles.commitsToggle,
             treeCommitStyles.commitControlFocus,
@@ -3603,7 +3603,7 @@ function GroupCommits({
         )}
       >
         <ChevronDown
-          className={clsx(
+          className={cn(
             stylex.props(
               treeCommitStyles.commitsChevron,
               treeCommitStyles.commitTransitionTransform,
@@ -3623,7 +3623,7 @@ function GroupCommits({
               <button
                 type="button"
                 onClick={() => setExpanded((current) => !current)}
-                className={clsx(
+                className={cn(
                   stylex.props(
                     treeCommitStyles.showMore,
                     treeCommitStyles.commitControlFocus,
@@ -3705,7 +3705,7 @@ function CommitRow({
                 )}
               >
                 <ChevronDown
-                  className={clsx(
+                  className={cn(
                     stylex.props(
                       treeCommitStyles.commitChevron,
                       treeCommitStyles.commitTransitionTransform,
@@ -4209,7 +4209,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
           onClick={() => onStartDraft(block.path, fromPierreSide(hovered.side), hovered.lineNumber)}
         >
           <Plus
-            className={clsx('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
+            className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
           />
         </Button>
       );
@@ -4220,7 +4220,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
   return (
     <div
       ref={blockRef}
-      className={clsx(
+      className={cn(
         // Rounded card. The border lives on the header + body (not the block) so the
         // sticky header carries its own complete border and never doubles with the
         // block frame while pinned. overflow-hidden is only applied while collapsed
@@ -4234,9 +4234,9 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
       )}
       data-block-path={block.path}
     >
-      <div className={clsx('crh-block-header', stylex.props(diffBlockStyles.header).className)}>
+      <div className={cn('crh-block-header', stylex.props(diffBlockStyles.header).className)}>
         <div
-          className={clsx(
+          className={cn(
             'crh-block-header-inner',
             stylex.props(diffBlockStyles.headerInner, collapsed && diffBlockStyles.bottomCorners)
               .className
@@ -4244,7 +4244,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
         >
           <button
             type="button"
-            className={clsx(
+            className={cn(
               'group',
               stylex.props(diffBlockStyles.toggle, treeCommitStyles.commitControlFocus).className
             )}
@@ -4259,7 +4259,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
             }}
           >
             <ChevronDown
-              className={clsx(
+              className={cn(
                 stylex.props(
                   diffBlockStyles.chevron,
                   collapsed && treeCommitStyles.collapsedChevron
@@ -4290,7 +4290,7 @@ const ReviewDiffBlock = memo(function ReviewDiffBlock({
               title="Add a review comment"
             >
               <MessageSquarePlus
-                className={clsx(
+                className={cn(
                   'crh-size-explicit',
                   stylex.props(explicitGlyphStyles.small).className
                 )}
@@ -4371,7 +4371,7 @@ function ContextBody({ block }: { readonly block: ReviewResolvedBlock }) {
   const end = Math.min(lineCount, range.end + CONTEXT_BODY_CONTEXT_LINES);
   const displayLines = allLines.slice(start - 1, end);
   return (
-    <div className={clsx('crh-context-body', stylex.props(contextBlockStyles.root).className)}>
+    <div className={cn('crh-context-body', stylex.props(contextBlockStyles.root).className)}>
       <div {...stylex.props(contextBlockStyles.header)}>
         <Info {...stylex.props(contextBlockStyles.icon)} />
         <span>Context from current commit</span>
@@ -4511,7 +4511,7 @@ function InlineAnnotation({
       : 'info';
 
   return (
-    <div className={clsx('crh-line-annotation', hasInline && 'crh-line-annotation--inline')}>
+    <div className={cn('crh-line-annotation', hasInline && 'crh-line-annotation--inline')}>
       {hasFinding && !hasPanel && (
         <span data-anno={metadata.key} aria-hidden className="crh-finding-anchor" />
       )}
@@ -4522,7 +4522,7 @@ function InlineAnnotation({
           onClick={() => onFocus(metadata.key)}
           title="View in review thread"
           aria-label="View in review thread"
-          className={clsx(
+          className={cn(
             'crh-anno',
             stylex.props(
               annotationStyles.marker,
@@ -4544,7 +4544,7 @@ function InlineAnnotation({
       {inlineNotes.map((note) => (
         <div
           key={note.id}
-          className={clsx('crh-inline-note', stylex.props(annotationStyles.note).className)}
+          className={cn('crh-inline-note', stylex.props(annotationStyles.note).className)}
         >
           {note.severity === 'question' ? (
             <HelpCircle {...stylex.props(annotationStyles.noteGlyph, annotationStyles.question)} />
@@ -5069,7 +5069,7 @@ function CommentPanel({
 }) {
   return (
     <aside
-      className={clsx('crh-panel', stylex.props(commentStyles.panel).className)}
+      className={cn('crh-panel', stylex.props(commentStyles.panel).className)}
       aria-label="Review comments"
     >
       <div data-cr-panel-scroll {...stylex.props(commentStyles.scroll)}>
@@ -5097,7 +5097,7 @@ function CommentPanel({
             >
               <button
                 type="button"
-                className={clsx(
+                className={cn(
                   'group',
                   stylex.props(commentStyles.pathButton, treeCommitStyles.commitControlFocus)
                     .className
@@ -5106,7 +5106,7 @@ function CommentPanel({
                 title={`Jump to ${thread.path}`}
               >
                 <FileIcon filePath={thread.path} {...stylex.props(commentStyles.glyph)} />
-                <span className={clsx(stylex.props(commentStyles.pathLabel).className)}>
+                <span className={cn(stylex.props(commentStyles.pathLabel).className)}>
                   {thread.path}
                 </span>
               </button>
@@ -5211,7 +5211,7 @@ function ThreadCard({
   return (
     <article
       data-anchor={item.anchor}
-      className={clsx(
+      className={cn(
         stylex.props(commentStyles.threadCard, treeCommitStyles.commitTransitionColors).className,
         focused && 'crh-thread-focused'
       )}
@@ -5221,7 +5221,7 @@ function ThreadCard({
           type="button"
           onClick={() => onFocus(item.anchor, item.path)}
           title="Jump to this line in the diff"
-          className={clsx(
+          className={cn(
             stylex.props(commentStyles.threadJump, treeCommitStyles.commitControlFocus).className
           )}
         >
@@ -5257,17 +5257,12 @@ function ThreadCard({
             title="Delete comment"
           >
             <Trash2
-              className={clsx(
-                'crh-size-explicit',
-                stylex.props(explicitGlyphStyles.small).className
-              )}
+              className={cn('crh-size-explicit', stylex.props(explicitGlyphStyles.small).className)}
             />
           </Button>
         )}
       </header>
-      <div
-        className={clsx('crh-line-annotation', stylex.props(commentStyles.threadBody).className)}
-      >
+      <div className={cn('crh-line-annotation', stylex.props(commentStyles.threadBody).className)}>
         {item.body}
       </div>
     </article>
@@ -5316,7 +5311,7 @@ function SimpleMarkdown({
 
   return (
     <div
-      className={clsx(
+      className={cn(
         'crh-markdown',
         stylex.props(
           markdownStyles.body,

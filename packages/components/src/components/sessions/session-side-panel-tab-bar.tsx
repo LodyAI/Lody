@@ -27,7 +27,7 @@ import { FileIcon } from '@/components/icons/file-icons';
 import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { ScrollArea } from '@lody/ui/scroll-area';
 import { Menu } from '@/ui/menu';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 
 export type SessionSidePanelTabItem = {
@@ -739,7 +739,7 @@ function SidePanelTab({
         });
         if ('clientX' in event) onDragEnd(event.clientX);
       }}
-      className={clsx(
+      className={cn(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -935,7 +935,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
 
   return (
     <div
-      className={clsx(stylex.props(styles.container, xstyle).className, windowDragClass, className)}
+      className={cn(stylex.props(styles.container, xstyle).className, windowDragClass, className)}
       style={stylex.props(styles.container, xstyle).style}
     >
       <ScrollArea
@@ -1002,7 +1002,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         </MotionConfig>
       </ScrollArea>
       {moreSlot ? (
-        <div className={clsx(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+        <div className={cn(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
           {moreSlot}
         </div>
       ) : null}
@@ -1013,7 +1013,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
               type="button"
               disabled={availablePanels.length === 0}
               aria-label={addPanelLabel}
-              className={clsx(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              className={cn(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
             >
               <Plus {...stylex.props(styles.addGlyph)} />
             </button>
@@ -1023,7 +1023,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
             type="button"
             disabled={availablePanels.length === 0}
             aria-label={addPanelLabel}
-            className={clsx(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+            className={cn(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
           >
             <Plus {...stylex.props(styles.addGlyph)} />
           </button>
@@ -1042,7 +1042,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         </Menu.Content>
       </Menu.Root>
       {endSlot ? (
-        <div className={clsx(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+        <div className={cn(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
           {endSlot}
         </div>
       ) : null}

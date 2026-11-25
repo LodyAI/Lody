@@ -434,7 +434,7 @@ test('composer measurement preserves the conversation layout and reading offset'
 
 // Load the real rules without imports that require Storybook's CSS pipeline.
 const markdownStyles = readFileSync(
-  new URL('../../src/tailwind/index.css', import.meta.url),
+  new URL('../../src/style/index.css', import.meta.url),
   'utf8'
 ).replace(/^@import .*$/gm, '');
 

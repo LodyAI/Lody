@@ -1,5 +1,5 @@
 /* Terminal overflow geometry; native scrollbar appearance comes from the
-   product baseline in tailwind/scrollbars.css. */
+   product baseline in style/scrollbars.css. */
 .lody-terminal-panel .xterm .xterm-viewport {
   overflow-y: overlay !important;
   scrollbar-gutter: auto !important;

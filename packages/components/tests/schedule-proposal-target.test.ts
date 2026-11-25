@@ -8,6 +8,7 @@ import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
 } from '@lody/shared';
 import { resolveScheduleProposalTarget } from '../src/components/schedules/schedule-proposal-target';
+import { diffPromptLines } from '../src/components/schedules/schedule-prompt-diff';
 import i18next, { type TFunction } from 'i18next';
 import en from '../../../locales/en.json';
 import {
@@ -495,3 +496,29 @@ describe('schedule-write-sync', () => {
     await cache.disposeAll();
   });
 });
+
+describe('the prompt diff on an edit proposal card', () => {
+  const kinds = (before: string, after: string) =>
+    diffPromptLines(before, after)?.map((line) => `${line.kind}:${line.text}`);
+
+  it('marks changed lines and folds unchanged text away from them', () => {
+    const before = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'].join('\n');
+    expect(kinds(before, before.replace('seven', 'SEVEN'))).toEqual([
+      'gap:',
+      'same:five',
+      'same:six',
+      'del:seven',
+      'add:SEVEN',
+      'same:eight',
+    ]);
+  });
+
+  it('shows a prompt that only grew or shrank, and gives no diff when equal or too long', () => {
+    expect(kinds('keep', 'keep\nnew rule')).toEqual(['same:keep', 'add:new rule']);
+    expect(kinds('keep\nold rule', 'keep')).toEqual(['same:keep', 'del:old rule']);
+    const long = 'line\n'.repeat(2500);
+    expect(diffPromptLines(long, `${long}more`)).toBe(null);
+    expect(diffPromptLines('same\ntext', 'same\ntext')).toBe(null);
+  });
+});
+

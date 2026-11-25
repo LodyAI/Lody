@@ -524,8 +524,10 @@ export class PrPollScheduler {
         highOwnerCap: config.highOwnerCap,
       });
       const workflowOwners = runtime.handle.workflowObservationOwners?.();
+      const deliveryOwners = runtime.handle.deliveryObservationOwners?.();
       for (const entry of runtime.entries) {
-        const lane = highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
+        const deliveryDemand = deliveryOwners?.has(entry.ownerSessionId) ?? false;
+        const lane = deliveryDemand || highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
         const workflowDemand = workflowOwners?.has(entry.ownerSessionId) ?? false;
         const ownerMeta = runtime.sessionMetas.get(entry.ownerSessionId)?.meta;
         const statusTargets =
@@ -1524,6 +1526,7 @@ export class PrPollScheduler {
           patch.pullRequestState = plan.pullRequestState;
         }
         await runtime.handle.writeOwnerMeta(ownerSessionId, patch);
+        await runtime.handle.onPullRequestMetaWritten?.();
         this.counters.corrections += plan.changedStatusUrls.length;
         for (const url of plan.changedStatusUrls) {
           logger.debug(

@@ -8,6 +8,7 @@ const REGION = `color-mix(in oklab, transparent, ${colors.label} 5%)`;
 export const dialogLayout = { width: '800px', maxHeight: 'min(760px, 85dvh)' };
 
 export const styles = stylex.create({
+  configuration: { overflowWrap: 'anywhere', textWrap: 'pretty' },
   /** The task at full depth; everything under the heading scrolls as one column. */
   detail: {
     display: 'flex',
@@ -27,7 +28,6 @@ export const styles = stylex.create({
     margin: 0,
     paddingBlock: space[2],
     paddingInlineStart: space[3],
-    // Room for the copy button in the corner.
     paddingInlineEnd: '36px',
     backgroundColor: REGION,
     borderRadius: radius.medium,

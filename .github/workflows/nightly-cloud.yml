@@ -185,6 +185,7 @@ jobs:
       VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
       VITE_ELECTRON_UPDATE_CHANNEL: nightly
       ELECTRON_UPDATE_CHANNEL: nightly
+      LODY_LORO_STREAMS_WS_ENABLED: '1'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
@@ -251,6 +252,21 @@ jobs:
           corepack pnpm --dir apps/electron build
           corepack pnpm --dir apps/electron "package:nightly:${TARGET}"
           node apps/electron/nightly-artifacts.mjs stage "$TARGET" candidate/candidate.json release-assets
+      - name: Prepare macOS Passkey credentials and native addons (nightly)
+        if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
+        shell: bash
+        env:
+          MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          LODY_PASSKEY_EXPECTED_APP_ID: YTRMX32C99.ai.lody.desktop.nightly
+        run: |
+          set -euo pipefail
+          if [[ -z "${MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64:-}" ]]; then
+            echo "MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 not configured in cloud-nightly; skipping Nightly Passkey packaging"
+            exit 0
+          fi
+          bash .github/scripts/prepare-macos-passkey.sh
       - name: Build, sign and notarize directly on native macOS
         if: steps.cached.outputs.id == '0' && matrix.target == 'mac'
         shell: bash
@@ -273,7 +289,7 @@ jobs:
 
           key_file="$(mktemp "${RUNNER_TEMP}/nightly-notary.XXXXXX")"
 
-          trap 'rm -f "${key_file}"' EXIT
+          trap 'rm -f "${key_file}" "${RUNNER_TEMP}/macos-passkey.provisionprofile"' EXIT
 
           printf '%s' "${APPLE_API_KEY_P8}" > "${key_file}"
 
@@ -289,6 +305,14 @@ jobs:
           NIGHTLY_VERSION: ${{ steps.identity.outputs.version }}
         run: |
           set -euo pipefail
+          if [[ "${LODY_ENABLE_PASSKEY:-}" == "1" ]]; then
+            LODY_PASSKEY_VERSION="${NIGHTLY_VERSION}" \
+            LODY_PASSKEY_APP_NAME="Lody Nightly" \
+            LODY_PASSKEY_ARCHIVE_SUFFIX="-nightly" \
+            LODY_PASSKEY_EXPECTED_APP_ID="YTRMX32C99.ai.lody.desktop.nightly" \
+              bash .github/scripts/verify-macos-passkey-archive.sh
+            exit 0
+          fi
           verify_dir="$(mktemp -d "${RUNNER_TEMP}/nightly-signature.XXXXXX")"
           trap 'rm -rf "${verify_dir}"' EXIT
           for arch in arm64 x64; do
@@ -376,6 +400,7 @@ jobs:
       VITE_PUBLIC_POSTHOG_HOST: ${{ vars.VITE_PUBLIC_POSTHOG_HOST || vars.POSTHOG_HOST }}
       VITE_PUBLIC_POSTHOG_KEY: ${{ vars.VITE_PUBLIC_POSTHOG_KEY || vars.POSTHOG_KEY }}
       VITE_VIBELOFT_WEB_AUTH_KEY: ${{ vars.VITE_VIBELOFT_WEB_AUTH_KEY }}
+      VITE_LORO_STREAMS_WS_ENABLED: '1'
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
     steps:
@@ -646,6 +671,7 @@ jobs:
       LODY_AUTH_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL }}
       LODY_SERVER_URL: ${{ vars.LODY_SERVER_URL || vars.SERVER_URL }}
       SITE_URL: ${{ vars.SITE_URL }}
+      LODY_LORO_STREAMS_WS_ENABLED: '1'
       NODE_OPTIONS: --max-old-space-size=6144
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud

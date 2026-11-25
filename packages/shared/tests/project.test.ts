@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getLocalProjectHistoryCatalogKey, getExternalAcpHistoryImportKey } from '../src/project';
+import {
+  getLocalProjectHistoryCatalogKey,
+  getExternalAcpHistoryImportKey,
+  isWorktreeSessionMeta,
+} from '../src/project';
 import {
   resolveResumableAcpSessionId,
   resolveSessionAcpTargetId,
@@ -44,5 +48,81 @@ describe('imported ACP session identity', () => {
         sourceAcpSessionId: source,
       });
     expect(key(a)).toBe(key(family));
+  });
+});
+
+describe('isWorktreeSessionMeta', () => {
+  const localProjectId = 'local-proj' as LocalProjectId;
+
+  it('classifies direct local projects (even with a GitHub remote) and plain chats as non-worktree', () => {
+    expect(isWorktreeSessionMeta(undefined)).toBe(false);
+    expect(isWorktreeSessionMeta(null)).toBe(false);
+    expect(isWorktreeSessionMeta({})).toBe(false);
+    expect(
+      isWorktreeSessionMeta({
+        project: {
+          kind: 'local',
+          localProjectId,
+          branch: 'main',
+          githubRepoFullName: 'lodyai/lody',
+          useWorktree: false,
+        },
+        repoFullName: 'lodyai/lody',
+      })
+    ).toBe(false);
+    expect(
+      isWorktreeSessionMeta({
+        project: { kind: 'local', localProjectId },
+        repoFullName: 'lodyai/lody',
+        isWorktree: false,
+      })
+    ).toBe(false);
+  });
+
+  it('classifies GitHub sessions, local worktree sessions, and legacy repo sessions as worktree', () => {
+    expect(
+      isWorktreeSessionMeta({
+        project: { kind: 'github', repoFullName: 'lodyai/lody', branch: 'main' },
+      })
+    ).toBe(true);
+    expect(
+      isWorktreeSessionMeta({
+        project: { kind: 'local', localProjectId, useWorktree: true },
+      })
+    ).toBe(true);
+    expect(
+      isWorktreeSessionMeta({
+        project: { kind: 'local', localProjectId },
+        isWorktree: true,
+      })
+    ).toBe(true);
+    expect(isWorktreeSessionMeta({ repoFullName: 'lodyai/lody' })).toBe(true);
+    expect(isWorktreeSessionMeta({ isWorktree: true })).toBe(true);
+  });
+
+  it('checks projectRun members rather than relying on the first-member compatibility flag', () => {
+    expect(
+      isWorktreeSessionMeta({
+        isWorktree: false,
+        project: { kind: 'local', localProjectId, useWorktree: false },
+        projectRun: {
+          members: {
+            docs: { access: 'additional' },
+            app: { access: 'worktree' },
+          },
+        },
+      })
+    ).toBe(true);
+    expect(
+      isWorktreeSessionMeta({
+        isWorktree: false,
+        projectRun: {
+          members: {
+            docs: { access: 'additional' },
+            notes: { access: 'link' },
+          },
+        },
+      })
+    ).toBe(false);
   });
 });

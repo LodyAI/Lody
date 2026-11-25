@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import * as ToggleGroupPrimitive from '@radix-ui/react-toggle-group';
-import { clsx, type ClassValue } from 'clsx';
+import { cn, type ClassValue } from '../cn';
 
 const RING = '0 0 0 3px color-mix(in oklab, hsl(var(--ring)) 50%, transparent)';
 const styles = stylex.create({
@@ -105,7 +105,7 @@ function itemStyles(
 function toggleGroupItemVariants(
   options: ToggleGroupVariant & { className?: ClassValue; class?: ClassValue } = {}
 ) {
-  return clsx(itemStyles(options).className, options.class, options.className);
+  return cn(itemStyles(options).className, options.class, options.className);
 }
 
 const ToggleGroupContext = React.createContext<ToggleGroupVariant>({
@@ -146,7 +146,7 @@ function ToggleGroup({
       asChild={asChild}
       data-slot="toggle-group"
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       {...props}
       style={sx.style ? { ...sx.style, ...fieldStyle } : fieldStyle}
     >
@@ -190,7 +190,7 @@ function ToggleGroupItem({
       asChild={asChild}
       data-slot="toggle-group-item"
       {...sx}
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       {...props}
       style={sx.style ? { ...sx.style, ...fieldStyle } : fieldStyle}
     />

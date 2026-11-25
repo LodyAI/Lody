@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
@@ -15,6 +15,7 @@ import {
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
 import { Separator } from '@lody/ui/separator';
+import { Switch } from '@lody/ui/switch';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -23,6 +24,7 @@ import {
   describeSessionContinuation,
   type SessionContinuationDetail,
   type SessionContinuationNextCheck,
+  type SessionContinuationTone,
   type SessionContinuationView,
 } from './session-continuation';
 
@@ -181,6 +183,10 @@ const styles = stylex.create({
       default: 'none',
       ':focus-visible': `0 0 0 2px ${colors.accent}`,
     },
+    ':disabled': {
+      opacity: 0.5,
+      cursor: 'default',
+    },
   },
   nudge: {
     display: 'flex',
@@ -285,6 +291,45 @@ const styles = stylex.create({
     marginInlineEnd: `calc(-1 * ${space[2]})`,
   },
   footerSpacer: { flex: 1 },
+  tweakRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    paddingBlock: space[1.5],
+  },
+  tweakIcon: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 26,
+    height: 26,
+    flexShrink: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    backgroundColor: colors.wellBackground,
+    color: colors.secondaryLabel,
+  },
+  tweakCopy: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    flex: 1,
+  },
+  tweakTitle: {
+    color: colors.label,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+  },
+  tweakDescription: {
+    color: colors.tertiaryLabel,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    marginTop: 1,
+  },
+  tweakUnsupported: {
+    color: colors.warning,
+  },
 });
 
 function iconFor(
@@ -326,35 +371,104 @@ function absoluteLabel(at: number, locale: string): string {
   }).format(at);
 }
 
+export type SessionAutomationNoteRowProps = {
+  icon: LucideIcon;
+  label: string;
+  value: ReactNode;
+};
+
+/** One metadata row inside an automation note popover. */
+export function SessionAutomationNoteRow({
+  icon: Icon,
+  label,
+  value,
+}: SessionAutomationNoteRowProps) {
+  return (
+    <div {...stylex.props(styles.row)}>
+      <Icon {...stylex.props(styles.rowIcon)} />
+      <span {...stylex.props(styles.rowLabel)}>{label}</span>
+      <span {...stylex.props(styles.rowValue)}>{value}</span>
+    </div>
+  );
+}
+
+export type SessionAutomationNoteNudgeProps = {
+  icon?: LucideIcon;
+  title: string;
+  reason: string;
+  actions: ReactNode;
+  dataAttributes?: Record<string, string | undefined>;
+};
+
+/** Full-width attention banner shared by automation notes when the Session is stopped. */
+export function SessionAutomationNoteNudge({
+  icon: Icon = Sun,
+  title,
+  reason,
+  actions,
+  dataAttributes,
+}: SessionAutomationNoteNudgeProps) {
+  return (
+    <div
+      {...dataAttributes}
+      {...stylex.props(styles.nudge)}
+      role="status"
+      aria-live="polite"
+    >
+      <span {...stylex.props(styles.icon, styles.iconAttention)} aria-hidden="true">
+        <Icon size={13} strokeWidth={2} />
+      </span>
+      <div {...stylex.props(styles.nudgeCopy)}>
+        <span {...stylex.props(styles.nudgeTitle)}>{title}</span>
+        <span {...stylex.props(styles.nudgeReason)}>{reason}</span>
+      </div>
+      <div {...stylex.props(styles.nudgeActions)}>{actions}</div>
+    </div>
+  );
+}
+
+export type SessionAutomationNoteShellProps = {
+  tone: SessionContinuationTone;
+  icon: LucideIcon;
+  title: string;
+  detail: string;
+  time?: string;
+  compact?: boolean;
+  showDetailInCompact?: boolean;
+  inlineAction?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+  } | null;
+  popoverDescription?: string;
+  popoverBody?: ReactNode;
+  popoverFooter?: ReactNode;
+  dataAttributes?: Record<string, string | undefined>;
+  triggerDataAttributes?: Record<string, string | undefined>;
+  role?: string;
+};
+
 /**
- * The one-line promise the Agent leaves in a conversation. It is deliberately
- * not a panel: a moon, the Agent's own sentence, a countdown, and a way out.
- * The popover is the only place with inspection detail.
+ * Shared one-line automation chip + inspection popover used by both Session
+ * continuations and Auto delivery so every automation status speaks one visual language.
  */
-export function SessionContinuationNote({
-  view,
-  now,
+export function SessionAutomationNoteShell({
+  tone,
+  icon: Icon,
+  title,
+  detail,
+  time,
   compact = false,
-  statusUnavailable = false,
-  onCancel,
-  onResume,
-  onAskAgent,
-  onOpenTweaks,
-}: SessionContinuationNoteProps) {
-  const { t, i18n } = useTranslation();
+  showDetailInCompact = false,
+  inlineAction,
+  popoverDescription,
+  popoverBody,
+  popoverFooter,
+  dataAttributes,
+  triggerDataAttributes,
+  role,
+}: SessionAutomationNoteShellProps) {
   const noteRef = useRef<HTMLDivElement>(null);
-  const locale = toIntlLocaleOrEn(i18n.language);
-  const descriptor = useMemo(() => describeSessionContinuation(view, now), [view, now]);
-
-  if (!descriptor.visible) return null;
-
-  const title = descriptor.title ?? t('sessions.continuation.fallbackTitle', '会话自动继续');
-  const detail = statusUnavailable
-    ? t('sessions.continuation.statusUnavailable', 'Status temporarily unavailable. Retrying…')
-    : t(DETAIL_COPY[descriptor.detail].key, DETAIL_COPY[descriptor.detail].fallback);
-  const nextCheck = nextCheckLabel(descriptor.nextCheck, t, locale);
-  const tone = descriptor.tone;
-  const Icon = iconFor(descriptor.detail, tone);
   const toneStyle =
     tone === 'attention' ? styles.noteAttention : tone === 'active' ? styles.noteActive : undefined;
   const iconToneStyle =
@@ -366,60 +480,18 @@ export function SessionContinuationNote({
         ? styles.popoverIconActive
         : undefined;
 
-  if (descriptor.detail === 'blockedStopped') {
-    return (
-      <div
-        {...stylex.props(styles.nudge)}
-        data-session-continuation-note="blocked"
-        data-session-continuation-id={view.id}
-        role="status"
-        aria-live="polite"
-      >
-        <span {...stylex.props(styles.icon, styles.iconAttention)} aria-hidden="true">
-          <Sun size={13} strokeWidth={2} />
-        </span>
-        <div {...stylex.props(styles.nudgeCopy)}>
-          <span {...stylex.props(styles.nudgeTitle)}>
-            {t('sessions.continuation.stopped.title', '条件已满足，会话已停止。')}
-          </span>
-          <span {...stylex.props(styles.nudgeReason)}>{title}</span>
-        </div>
-        <div {...stylex.props(styles.nudgeActions)}>
-          {descriptor.actions.resume && onResume ? (
-            <Button type="button" variant="primary" size="mini" onClick={() => onResume(view.id)}>
-              {t('sessions.continuation.resume', '恢复会话')}
-            </Button>
-          ) : null}
-          <Button type="button" variant="ghost" size="mini" onClick={() => onCancel(view.id)}>
-            {t('sessions.continuation.cancel', '取消等待')}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const canAskAgent = descriptor.actions.askAgent && Boolean(onAskAgent);
-  const action =
-    descriptor.actions.resume && onResume
-      ? ('resume' as const)
-      : canAskAgent
-        ? ('askAgent' as const)
-        : descriptor.actions.cancel
-          ? ('cancel' as const)
-          : null;
-
   const trigger = (
     <button
       type="button"
+      {...triggerDataAttributes}
       {...stylex.props(styles.trigger)}
-      data-session-continuation-trigger=""
-      aria-label={`${title} · ${detail}${nextCheck ? ` · ${nextCheck}` : ''}`}
+      aria-label={`${title} · ${detail}${time ? ` · ${time}` : ''}`}
     >
       <span {...stylex.props(styles.icon, iconToneStyle)} aria-hidden="true">
         <Icon size={13} strokeWidth={2} />
       </span>
       <span {...stylex.props(styles.title)}>{title}</span>
-      {!compact || statusUnavailable ? (
+      {!compact || showDetailInCompact ? (
         <>
           <span {...stylex.props(styles.separator)} aria-hidden="true">
             ·
@@ -427,12 +499,12 @@ export function SessionContinuationNote({
           <span {...stylex.props(styles.detail)}>{detail}</span>
         </>
       ) : null}
-      {nextCheck ? (
+      {time ? (
         <>
           <span {...stylex.props(styles.separator)} aria-hidden="true">
             ·
           </span>
-          <span {...stylex.props(styles.time)}>{nextCheck}</span>
+          <span {...stylex.props(styles.time)}>{time}</span>
         </>
       ) : null}
     </button>
@@ -441,10 +513,9 @@ export function SessionContinuationNote({
   return (
     <div
       ref={noteRef}
+      {...dataAttributes}
       {...stylex.props(styles.note, toneStyle, compact && styles.noteCompact)}
-      data-session-continuation-note="note"
-      data-session-continuation-id={view.id}
-      data-session-continuation-tone={tone}
+      role={role}
     >
       <Popover.Root>
         <Popover.Trigger render={trigger} />
@@ -462,97 +533,239 @@ export function SessionContinuationNote({
               </span>
               <Popover.Title>{title}</Popover.Title>
               <Popover.Description {...stylex.props(styles.popoverDescription)}>
-                {detail}
+                {popoverDescription ?? detail}
               </Popover.Description>
             </div>
 
-            {(nextCheck || view.checkedAt !== undefined || view.expiresAt !== undefined) && (
-              <div {...stylex.props(styles.rows)}>
-                {nextCheck ? (
-                  <div {...stylex.props(styles.row)}>
-                    <Clock {...stylex.props(styles.rowIcon)} />
-                    <span {...stylex.props(styles.rowLabel)}>
-                      {t('sessions.continuation.nextCheck', '下次检查')}
-                    </span>
-                    <span {...stylex.props(styles.rowValue)}>{nextCheck}</span>
-                  </div>
-                ) : null}
-                {view.checkedAt !== undefined ? (
-                  <div {...stylex.props(styles.row)}>
-                    <Check {...stylex.props(styles.rowIcon)} />
-                    <span {...stylex.props(styles.rowLabel)}>
-                      {t('sessions.continuation.lastChecked', '上次检查')}
-                    </span>
-                    <span {...stylex.props(styles.rowValue)}>
-                      {formatLocalizedRelativeTime(view.checkedAt, t, new Date(now))}
-                    </span>
-                  </div>
-                ) : null}
-                {view.expiresAt !== undefined ? (
-                  <div {...stylex.props(styles.row)}>
-                    <CalendarClock {...stylex.props(styles.rowIcon)} />
-                    <span {...stylex.props(styles.rowLabel)}>
-                      {t('sessions.continuation.expires', '截止时间')}
-                    </span>
-                    <span {...stylex.props(styles.rowValue)}>
-                      {absoluteLabel(view.expiresAt, locale)}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            )}
+            {popoverBody}
 
-            <Separator />
-
-            <div {...stylex.props(styles.footer)}>
-              {canAskAgent ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="mini"
-                  onClick={() => onAskAgent?.(view)}
-                >
-                  <MessageCircle size={14} strokeWidth={1.8} />
-                  {t('sessions.continuation.askAgent', '请 Agent 检查')}
-                </Button>
-              ) : null}
-              {descriptor.actions.cancel ? (
-                <Button type="button" variant="ghost" size="mini" onClick={() => onCancel(view.id)}>
-                  {t('sessions.continuation.cancel', '取消等待')}
-                </Button>
-              ) : null}
-              <span {...stylex.props(styles.footerSpacer)} />
-              {onOpenTweaks ? (
-                <Button type="button" variant="ghost" size="mini" onClick={onOpenTweaks}>
-                  {t('sessions.continuation.moreTweaks', '自动化设置')}
-                  <ChevronRight size={14} strokeWidth={1.8} />
-                </Button>
-              ) : null}
-            </div>
+            {popoverFooter ? (
+              <>
+                <Separator />
+                <div {...stylex.props(styles.footer)}>{popoverFooter}</div>
+              </>
+            ) : null}
           </div>
         </Popover.Content>
       </Popover.Root>
 
-      {action && !compact ? (
+      {inlineAction && !compact ? (
         <>
           <span {...stylex.props(styles.divider)} aria-hidden="true" />
           <button
             type="button"
+            disabled={inlineAction.disabled}
             {...stylex.props(styles.inlineAction)}
-            onClick={() => {
-              if (action === 'resume') onResume?.(view.id);
-              else if (action === 'askAgent') onAskAgent?.(view);
-              else onCancel(view.id);
-            }}
+            onClick={inlineAction.onClick}
           >
-            {action === 'resume'
-              ? t('sessions.continuation.resume', '恢复会话')
-              : action === 'askAgent'
-                ? t('sessions.continuation.askAgentShort', '请 Agent 检查')
-                : t('sessions.continuation.cancel', '取消等待')}
+            {inlineAction.label}
           </button>
         </>
       ) : null}
     </div>
+  );
+}
+
+/** Spacer aligning trailing actions in a `SessionAutomationNoteShell` popover footer. */
+export function SessionAutomationNoteFooterSpacer() {
+  return <span {...stylex.props(styles.footerSpacer)} />;
+}
+
+export type SessionAutomationTweakRowProps = {
+  icon: LucideIcon;
+  title: string;
+  description?: string;
+  checked: boolean;
+  disabled?: boolean;
+  unsupported?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  dataAttributes?: Record<string, string | undefined>;
+};
+
+/** Shared automation switch row (icon well + title/description + Switch). */
+export function SessionAutomationTweakRow({
+  icon: Icon,
+  title,
+  description,
+  checked,
+  disabled,
+  unsupported,
+  onCheckedChange,
+  dataAttributes,
+}: SessionAutomationTweakRowProps) {
+  return (
+    <div {...dataAttributes} {...stylex.props(styles.tweakRow)}>
+      <span {...stylex.props(styles.tweakIcon)} aria-hidden="true">
+        <Icon size={14} strokeWidth={1.8} />
+      </span>
+      <span {...stylex.props(styles.tweakCopy)}>
+        <span {...stylex.props(styles.tweakTitle)}>{title}</span>
+        {description ? (
+          <span {...stylex.props(styles.tweakDescription, unsupported && styles.tweakUnsupported)}>
+            {description}
+          </span>
+        ) : null}
+      </span>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+        aria-label={title}
+      />
+    </div>
+  );
+}
+
+/**
+ * The one-line promise the Agent leaves in a conversation. It is deliberately
+ * not a panel: a moon, the Agent's own sentence, a countdown, and a way out.
+ * The popover is the only place with inspection detail.
+ */
+export function SessionContinuationNote({
+  view,
+  now,
+  compact = false,
+  statusUnavailable = false,
+  onCancel,
+  onResume,
+  onAskAgent,
+  onOpenTweaks,
+}: SessionContinuationNoteProps) {
+  const { t, i18n } = useTranslation();
+  const locale = toIntlLocaleOrEn(i18n.language);
+  const descriptor = useMemo(() => describeSessionContinuation(view, now), [view, now]);
+
+  if (!descriptor.visible) return null;
+
+  const title = descriptor.title ?? t('sessions.continuation.fallbackTitle', '会话自动继续');
+  const detail = statusUnavailable
+    ? t('sessions.continuation.statusUnavailable', 'Status temporarily unavailable. Retrying…')
+    : t(DETAIL_COPY[descriptor.detail].key, DETAIL_COPY[descriptor.detail].fallback);
+  const nextCheck = nextCheckLabel(descriptor.nextCheck, t, locale);
+  const tone = descriptor.tone;
+  const Icon = iconFor(descriptor.detail, tone);
+
+  if (descriptor.detail === 'blockedStopped') {
+    return (
+      <SessionAutomationNoteNudge
+        title={t('sessions.continuation.stopped.title', '条件已满足，会话已停止。')}
+        reason={title}
+        dataAttributes={{
+          'data-session-continuation-note': 'blocked',
+          'data-session-continuation-id': view.id,
+        }}
+        actions={
+          <>
+            {descriptor.actions.resume && onResume ? (
+              <Button type="button" variant="primary" size="mini" onClick={() => onResume(view.id)}>
+                {t('sessions.continuation.resume', '恢复会话')}
+              </Button>
+            ) : null}
+            <Button type="button" variant="ghost" size="mini" onClick={() => onCancel(view.id)}>
+              {t('sessions.continuation.cancel', '取消等待')}
+            </Button>
+          </>
+        }
+      />
+    );
+  }
+
+  const canAskAgent = descriptor.actions.askAgent && Boolean(onAskAgent);
+  const action =
+    descriptor.actions.resume && onResume
+      ? ('resume' as const)
+      : canAskAgent
+        ? ('askAgent' as const)
+        : descriptor.actions.cancel
+          ? ('cancel' as const)
+          : null;
+
+  const inlineAction = action
+    ? {
+        label:
+          action === 'resume'
+            ? t('sessions.continuation.resume', '恢复会话')
+            : action === 'askAgent'
+              ? t('sessions.continuation.askAgentShort', '请 Agent 检查')
+              : t('sessions.continuation.cancel', '取消等待'),
+        onClick: () => {
+          if (action === 'resume') onResume?.(view.id);
+          else if (action === 'askAgent') onAskAgent?.(view);
+          else onCancel(view.id);
+        },
+      }
+    : null;
+
+  return (
+    <SessionAutomationNoteShell
+      tone={tone}
+      icon={Icon}
+      title={title}
+      detail={detail}
+      time={nextCheck}
+      compact={compact}
+      showDetailInCompact={statusUnavailable}
+      inlineAction={inlineAction}
+      dataAttributes={{
+        'data-session-continuation-note': 'note',
+        'data-session-continuation-id': view.id,
+        'data-session-continuation-tone': tone,
+      }}
+      triggerDataAttributes={{ 'data-session-continuation-trigger': '' }}
+      popoverBody={
+        nextCheck || view.checkedAt !== undefined || view.expiresAt !== undefined ? (
+          <div {...stylex.props(styles.rows)}>
+            {nextCheck ? (
+              <SessionAutomationNoteRow
+                icon={Clock}
+                label={t('sessions.continuation.nextCheck', '下次检查')}
+                value={nextCheck}
+              />
+            ) : null}
+            {view.checkedAt !== undefined ? (
+              <SessionAutomationNoteRow
+                icon={Check}
+                label={t('sessions.continuation.lastChecked', '上次检查')}
+                value={formatLocalizedRelativeTime(view.checkedAt, t, new Date(now))}
+              />
+            ) : null}
+            {view.expiresAt !== undefined ? (
+              <SessionAutomationNoteRow
+                icon={CalendarClock}
+                label={t('sessions.continuation.expires', '截止时间')}
+                value={absoluteLabel(view.expiresAt, locale)}
+              />
+            ) : null}
+          </div>
+        ) : null
+      }
+      popoverFooter={
+        <>
+          {canAskAgent ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="mini"
+              onClick={() => onAskAgent?.(view)}
+            >
+              <MessageCircle size={14} strokeWidth={1.8} />
+              {t('sessions.continuation.askAgent', '请 Agent 检查')}
+            </Button>
+          ) : null}
+          {descriptor.actions.cancel ? (
+            <Button type="button" variant="ghost" size="mini" onClick={() => onCancel(view.id)}>
+              {t('sessions.continuation.cancel', '取消等待')}
+            </Button>
+          ) : null}
+          <SessionAutomationNoteFooterSpacer />
+          {onOpenTweaks ? (
+            <Button type="button" variant="ghost" size="mini" onClick={onOpenTweaks}>
+              {t('sessions.continuation.moreTweaks', '自动化设置')}
+              <ChevronRight size={14} strokeWidth={1.8} />
+            </Button>
+          ) : null}
+        </>
+      }
+    />
   );
 }

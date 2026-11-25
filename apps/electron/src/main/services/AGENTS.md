@@ -84,7 +84,12 @@ before main can terminate. Quit diagnostics name phases, never credentials or ca
 
 - Sparkle load failure falls back to electron-updater. Sparkle UI stays silent;
   progress and ready-to-install go through `ElectronUpdaterState` for the renderer
-  banner. Packaging-side updater rules live in the [Electron guide](../../../AGENTS.md).
+  banner. While a Sparkle update is parked waiting for restart, manual
+  `checkForUpdates()` cancels the staged installer and starts a fresh appcast
+  check, and the periodic feed poll triggers the same re-check when a newer
+  release appears so long-running macOS sessions do not step through
+  intermediate versions one at a time. Packaging-side updater rules live in the
+  [Electron guide](../../../AGENTS.md).
 - Linux `.deb` installs go through `app-updater-linux-install.ts`, never
   electron-updater's `DebUpdater`: its `spawnSync` freezes the main process for
   the whole polkit prompt, which no JS-side timeout can interrupt. Spawn

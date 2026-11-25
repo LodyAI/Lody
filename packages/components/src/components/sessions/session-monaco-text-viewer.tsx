@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import 'monaco-editor/min/vs/editor/editor.main.css';
 import './session-monaco-text-viewer.css';
 
@@ -262,7 +262,7 @@ export function SessionMonacoTextViewer({
   }, [findRequestSeq]);
 
   return (
-    <div className={clsx(stylex.props(styles.root).className, 'lody-session-monaco', className)}>
+    <div className={cn(stylex.props(styles.root).className, 'lody-session-monaco', className)}>
       <div ref={containerRef} {...stylex.props(styles.editorContainer)} />
     </div>
   );

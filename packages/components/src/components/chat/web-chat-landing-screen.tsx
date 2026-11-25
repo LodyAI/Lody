@@ -45,7 +45,7 @@ const stage = stylex.create({
     gap: '20px',
   },
   /* A plain heading in the interface font; named so it glides when the boards below change
-     height (`tailwind/index.css`). */
+     height (`style/index.css`). */
   heading: {
     margin: 0,
     fontSize: 'calc(var(--ui-font-size, 14px) * 36 / 14)',

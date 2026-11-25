@@ -123,9 +123,9 @@ liveness over the local plane while offline.
 
 ## Session active presence has exactly one owner
 
-`session-active-presence.ts` alone owns session active presence. It owns visible Turn leases and native agent activity. Turn phases take precedence; after
+`session-active-presence.ts` alone owns session active presence. It owns visible Turn leases, native agent activity, and bounded late-stream activity. Turn phases take precedence; after
 a Turn releases, the latest native running or background level remains visible until the
-agent reports idle or its process exits. Native levels reconcile on a one-second timer and
+agent reports idle or its process exits. For agents that do not advertise Core `sessionActivity`, visible post-turn ACP output (`noteLateActivity`) holds a 30-second sliding presence pulse that auto-expires on silence and clears on new Turn start, stop/teardown, or retire. Both native and late-stream levels reconcile on the same one-second timer and
 heartbeat while active, so repeated agent notifications cannot flood the shared channel.
 A Turn lease clears only on the owning Effect release. Never publish or clear session presence from `setStatus`, RPC
 dispatch, permission or image callbacks, or watcher recovery paths — a second writer

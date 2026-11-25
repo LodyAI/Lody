@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Spinner } from '@/ui/spinner';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { Badge } from '@lody/ui/badge';
@@ -123,7 +123,7 @@ function MobileMachineList({ controller: c }: { controller: RemoteDirectoryPicke
   return (
     <div
       {...stylex.props(surface.scroller, surface.scrollerSafeArea)}
-      className={clsx(
+      className={cn(
         stylex.props(surface.scroller, surface.scrollerSafeArea).className,
         'scrollbar-pro'
       )}
@@ -327,7 +327,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
       {/* List */}
       <div
         {...stylex.props(surface.scroller, surface.scrollerOverscroll)}
-        className={clsx(
+        className={cn(
           stylex.props(surface.scroller, surface.scrollerOverscroll).className,
           'scrollbar-pro'
         )}

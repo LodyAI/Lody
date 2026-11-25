@@ -2,7 +2,7 @@ import { control } from '@lody/ui/tokens/scales.stylex';
 import React from 'react';
 import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { ChevronRight } from 'lucide-react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
 import { themeColors } from '../style/theme-colors.stylex';
@@ -260,7 +260,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
     const rootProps = stylex.props(styles.root, xstyle);
     return (
       <Tooltip.Provider delay={500}>
-        <div {...rootProps} className={clsx(rootProps.className, className)}>
+        <div {...rootProps} className={cn(rootProps.className, className)}>
           <TreeItem
             data={data}
             ref={ref}
@@ -445,7 +445,7 @@ const TreeNode = ({
           aria-level={level + 1}
           aria-selected={isSelected}
           aria-disabled={item.disabled === true ? true : undefined}
-          className={clsx(rowProps.className, GROUP_CLASS, item.className)}
+          className={cn(rowProps.className, GROUP_CLASS, item.className)}
           {...(rowProps.style && {
             style: { paddingLeft: level * TREE_INDENT_PX + 8, ...rowProps.style },
           })}
@@ -590,11 +590,11 @@ const TreeLeaf = React.forwardRef<
         aria-level={level + 1}
         aria-selected={isSelected}
         aria-disabled={item.disabled === true ? true : undefined}
-        className={clsx(
+        className={cn(
           leafProps.className,
           rowProps.className,
           GROUP_CLASS,
-          clsx(className, item.className)
+          cn(className, item.className)
         )}
         style={{ ...rowProps.style, ...leafProps.style, paddingLeft: leafPaddingLeft }}
         onClick={activate}
@@ -641,7 +641,7 @@ const AccordionTrigger = React.forwardRef<
     <AccordionPrimitive.Header>
       <AccordionPrimitive.Trigger
         ref={ref}
-        className={clsx(triggerProps.className, className)}
+        className={cn(triggerProps.className, className)}
         style={{ paddingLeft: level * TREE_INDENT_PX + 8 }}
         {...props}
       >
@@ -662,7 +662,7 @@ const AccordionContent = React.forwardRef<
   return (
     <AccordionPrimitive.Content
       ref={ref}
-      className={clsx(contentProps.className, className)}
+      className={cn(contentProps.className, className)}
       {...props}
     >
       <div>{children}</div>
@@ -706,7 +706,7 @@ const TreeItemLabel = ({ name, className }: { name: string; className?: string }
 
   const labelProps = stylex.props(styles.label);
   const label = (
-    <span ref={textRef} className={clsx(labelProps.className, className)}>
+    <span ref={textRef} className={cn(labelProps.className, className)}>
       {name}
     </span>
   );

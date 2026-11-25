@@ -1,6 +1,6 @@
 import { useMemo, type ComponentType } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { getFileIconUrl, getFolderIconUrl } from '@/components/icons/file-icons/asset-url';
 import { ICON_GLYPH_BOX_CLASS, iconSurface } from '@/components/icons/surface';
 import {
@@ -113,7 +113,7 @@ export const MonochromeFileIcon = ({
     <span
       aria-hidden="true"
       {...glyph}
-      className={clsx(glyph.className, className)}
+      className={cn(glyph.className, className)}
       style={maskStyle(iconUrl)}
     />
   );
@@ -129,7 +129,7 @@ export const MonochromeFolderIcon = ({
     <span
       aria-hidden="true"
       {...glyph}
-      className={clsx(glyph.className, className)}
+      className={cn(glyph.className, className)}
       style={maskStyle(iconUrl)}
     />
   );

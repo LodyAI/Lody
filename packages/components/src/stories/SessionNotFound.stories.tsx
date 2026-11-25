@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { SessionNotFound } from '@/components/sessions/session-not-found';
@@ -61,7 +61,7 @@ export const DarkMode: Story = {
   },
   decorators: [
     (Story) => (
-      <div className={clsx(stylex.props(storyLayout.frame2).className, 'dark')}>
+      <div className={cn(stylex.props(storyLayout.frame2).className, 'dark')}>
         <Story />
       </div>
     ),

@@ -20,10 +20,9 @@ vi.mock('../src/lib/native-platform', () => ({
   isNativeAppShell: () => runtime.native,
   isNativeIOSAppShell: () => runtime.native && runtime.ios,
 }));
-vi.mock('../src/lib/utils', async () => {
-  const { clsx } = await import('clsx');
-  return { cn: clsx };
-});
+vi.mock('../src/lib/utils', () => ({
+  cn: (...inputs: (string | false | null | undefined)[]) => inputs.filter(Boolean).join(' '),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

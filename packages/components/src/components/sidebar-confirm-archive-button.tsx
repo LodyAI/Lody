@@ -10,7 +10,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import {
@@ -212,7 +212,7 @@ export const SidebarConfirmArchiveButton = forwardRef<
       ref={ref}
       type="button"
       {...buttonStyle}
-      className={clsx(buttonStyle.className, className)}
+      className={cn(buttonStyle.className, className)}
       aria-label={isConfirming ? `Confirm ${label}` : label}
       onClick={handleClick}
       onBlur={handleBlur}
@@ -225,7 +225,7 @@ export const SidebarConfirmArchiveButton = forwardRef<
           <span {...stylex.props(styles.label)}>{confirmLabel}</span>
         </>
       ) : (
-        <Archive {...glyphStyle} className={clsx(glyphStyle.className, iconClassName)} />
+        <Archive {...glyphStyle} className={cn(glyphStyle.className, iconClassName)} />
       )}
     </button>
   );

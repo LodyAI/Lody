@@ -286,7 +286,6 @@ export function DesktopSessionDetailLayout({
         </ResizablePanel>
 
         <ResizableHandle
-          appearance="edge"
           disabled={!splitSidebarOpen}
           // The seam is the side panel's own left hairline; the handle paints
           // nothing at rest. Hover or keyboard focus reveals one small ink

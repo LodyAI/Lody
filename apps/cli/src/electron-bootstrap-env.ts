@@ -23,3 +23,23 @@ export function withoutElectronBootstrapCredentials(env: NodeJS.ProcessEnv): Nod
   }
   return childEnv;
 }
+
+/**
+ * Desktop launches the embedded CLI via the Electron binary with
+ * `ELECTRON_RUN_AS_NODE=1`. Non-Electron children must not inherit it, while
+ * children spawned through `process.execPath` must keep it so packaged macOS
+ * Electron Helpers run as Node instead of exiting with code 64.
+ */
+export function resolveElectronRunAsNodeEnv(
+  command: string,
+  env: NodeJS.ProcessEnv
+): NodeJS.ProcessEnv {
+  const childEnv = { ...env };
+  const flag = process.env.ELECTRON_RUN_AS_NODE;
+  if (flag && command === process.execPath) {
+    childEnv.ELECTRON_RUN_AS_NODE = flag;
+  } else {
+    delete childEnv.ELECTRON_RUN_AS_NODE;
+  }
+  return childEnv;
+}

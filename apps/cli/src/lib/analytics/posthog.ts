@@ -22,7 +22,7 @@ import {
   type AnalyticsSamplingTier,
 } from '@lody/shared';
 import { resolvePlatformKind } from '@lody/shared/platform-kind';
-import { getSystemMachineId } from '@/utils/const';
+import { readExistingMachineId } from '@/lib/machine-identity';
 import { getRuntimeEnv } from '@/utils/runtime-env';
 import pkg from '@/pkg';
 
@@ -65,7 +65,7 @@ function resolveHost(): string {
 }
 
 /**
- * Resolve a stable distinct_id for the machine. Prefers the system machine id
+ * Resolve a stable distinct_id for the machine. Prefers the existing machine id
  * (same value used elsewhere as `machine_id`); falls back to a per-process
  * anonymous id so events are never dropped just because the machine id could
  * not be read. The anon id is intentionally not persisted: an unresolved
@@ -75,7 +75,7 @@ function resolveHost(): string {
 function resolveDistinctId(explicit?: string): string {
   if (explicit && explicit.trim()) return explicit.trim();
   try {
-    const machineId = getSystemMachineId();
+    const machineId = readExistingMachineId();
     if (machineId) return machineId;
   } catch {
     // fall through to anon id

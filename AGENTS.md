@@ -50,10 +50,15 @@ directories and is not the rule source. Archives are history, not current author
   PR only for durable rationale. A fix that is merely done belongs in its PR and
   test. Every new note runs the [supersession check](.agents/notes/AGENTS.md#supersession);
   keep implemented notes' cited facts current, and report deferred notes for read-only work.
-- Update affected docs and READMEs. Run `pnpm run docs status` at start and
-  `pnpm run docs check` at finish, and review SHA-protected changes before confirming.
-  Checks and translations establish neither correctness nor approval. See
-  [document maintenance](.agents/README.md).
+- Update affected docs and READMEs. When a substantial user-facing product or CLI
+  capability changes, also update the public documentation in
+  [`site-docs/content/docs/`](site-docs/content/AGENTS.md) (`en` and `zh`) and the
+  affected agent skills — installable user skills in [`skills`](skills/README.md)
+  (`LodyAI/skills`, via a companion PR and submodule bump) and built-in MCP skills
+  under [`apps/cli/src/mcp/skills/`](apps/cli/src/mcp/skills/AGENTS.md). Run
+  `pnpm run docs status` at start and `pnpm run docs check` at finish, and review
+  SHA-protected changes before confirming. Checks and translations establish neither
+  correctness nor approval. See [document maintenance](.agents/README.md).
 - Keep PR docs compact: consolidate decisions, evidence and limits; avoid fix/run logs.
   Follow [submission consolidation](.agents/AGENTS.md#documentation-at-submission).
 - Keep binding rules in the nearest `AGENTS.md` as complete sentences (new scopes

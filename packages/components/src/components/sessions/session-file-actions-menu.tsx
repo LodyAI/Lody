@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import { MoreHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import { themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import type { SessionFileMenuItem } from '@/hooks/use-session-file-actions';
@@ -62,7 +62,7 @@ export function SessionFileActionsMenu({
             type="button"
             aria-label={t('sessions.fileActions.more', 'File actions')}
             {...triggerProps}
-            className={clsx(triggerProps.className, className)}
+            className={cn(triggerProps.className, className)}
           >
             <MoreHorizontal {...glyphProps} />
           </button>
@@ -72,7 +72,7 @@ export function SessionFileActionsMenu({
           type="button"
           aria-label={t('sessions.fileActions.more', 'File actions')}
           {...triggerProps}
-          className={clsx(triggerProps.className, className)}
+          className={cn(triggerProps.className, className)}
         >
           <MoreHorizontal {...glyphProps} />
         </button>

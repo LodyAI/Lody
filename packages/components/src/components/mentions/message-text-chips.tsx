@@ -10,7 +10,7 @@ import {
   type SessionId,
 } from '@lody/shared';
 import { buildSessionLink } from '@lody/shared/session-link';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useSessionLinkNavigator } from '@/components/ai-gui/session-link-context';
 import { SessionReadonlyContext } from '@/components/ai-gui/session-readonly-context';
 import {
@@ -163,7 +163,7 @@ function MessageTextChip({
     onToggle && styles.toggle,
     isBoxed && styles.pasteButton
   );
-  const className = clsx(
+  const className = cn(
     chipProps.className,
     span.kind === 'pasted_text' ? MENTION_NEUTRAL_CHIP_CLASS_NAME : MENTION_CHIP_CLASS_NAME,
     span.kind === 'message_quote' && 'text-markdown-link',
@@ -182,10 +182,7 @@ function MessageTextChip({
   ) : (
     getMentionKindIcon(span.kind, {
       path: span.target,
-      className: clsx(
-        MENTION_ICON_CLASS_NAME,
-        stylex.props(!isBoxed && styles.inlineIcon).className
-      ),
+      className: cn(MENTION_ICON_CLASS_NAME, stylex.props(!isBoxed && styles.inlineIcon).className),
     })
   );
   // Split by grapheme rather than code point so a surrogate pair, combining

@@ -387,29 +387,8 @@ const MenuSearchInput = React.forwardRef<HTMLInputElement, MenuSearchInputProps>
     React.useEffect(() => {
       if (typeof window === 'undefined') return undefined;
       if (!window.matchMedia?.('(pointer: fine)').matches) return undefined;
-      const claim = () => inputRef.current?.focus();
-      const frame = requestAnimationFrame(claim);
-      /* A same-beat open-focus on a menu row hands the field focus back. */
-      const onFocusIn = (event: FocusEvent) => {
-        const target = event.target;
-        if (
-          target instanceof HTMLElement &&
-          target !== inputRef.current &&
-          target.closest('[role="menu"]') !== null
-        ) {
-          claim();
-        }
-      };
-      document.addEventListener('focusin', onFocusIn);
-      const disarm = window.setTimeout(
-        () => document.removeEventListener('focusin', onFocusIn),
-        250
-      );
-      return () => {
-        cancelAnimationFrame(frame);
-        clearTimeout(disarm);
-        document.removeEventListener('focusin', onFocusIn);
-      };
+      const frame = requestAnimationFrame(() => inputRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
     }, []);
 
     React.useEffect(() => {

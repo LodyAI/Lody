@@ -4,7 +4,7 @@ import { Effect } from 'effect';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { createRouter } from '@lody/components/router';
-import '@lody/components/tailwind/index.css';
+import '@lody/components/style/index.css';
 import { jotaiStore } from '@lody/components/lib';
 import {
   detectBrowserLanguage,
@@ -64,7 +64,6 @@ function reportBootFailure(error: unknown): void {
     bootGuard.fail(error);
     return;
   }
-  // No inline guard present (unexpected host / test env): render directly.
   const root = document.getElementById('root');
   if (root) showMobileBootFailure(root, error);
 }

@@ -10,12 +10,12 @@ import {
   writeBillingOverviewCache,
 } from '../src/components/settings/billing-overview-cache';
 
-const useCloudQuery = vi.fn();
+const useCloudQueryState = vi.fn();
 const useAppCapability = vi.fn();
 const useAuthenticatedConvex = vi.fn();
 
 vi.mock('@lody/platform/react', () => ({
-  useCloudQuery,
+  useCloudQueryState,
 }));
 
 vi.mock('../src/hooks/use-authenticated-convex', () => ({
@@ -41,12 +41,12 @@ describe('useBillingOverviewPreload', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    useCloudQuery.mockReset();
+    useCloudQueryState.mockReset();
     useAppCapability.mockReset();
     useAuthenticatedConvex.mockReset();
     currentAuthSessionId = 'session-1';
     useAuthenticatedConvex.mockImplementation(() => ({ authSessionId: currentAuthSessionId }));
-    useCloudQuery.mockReturnValue(undefined);
+    useCloudQueryState.mockReturnValue({ data: undefined, error: null, retry: () => {} });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -118,10 +118,14 @@ describe('useBillingOverviewPreload', () => {
   it('contains a rejected preload query and retries for the next workspace', async () => {
     useAppCapability.mockReturnValue(true);
     writeBillingOverviewCache('workspace-1', 'session-1', OPTIMISTIC_BILLING_OVERVIEW);
-    useCloudQuery.mockImplementation((_operation: unknown, args: unknown) => {
+    useCloudQueryState.mockImplementation((_operation: unknown, args: unknown) => {
       if (args !== 'skip' && (args as { workspaceId: string }).workspaceId === 'workspace-1')
-        throw new Error('Forbidden');
-      return { ...OPTIMISTIC_BILLING_OVERVIEW, effectivePlanTier: 'plus' };
+        return { data: undefined, error: new Error('Forbidden'), retry: () => {} };
+      return {
+        data: { ...OPTIMISTIC_BILLING_OVERVIEW, effectivePlanTier: 'plus' },
+        error: null,
+        retry: () => {},
+      };
     });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onError = (event: ErrorEvent) => event.preventDefault();

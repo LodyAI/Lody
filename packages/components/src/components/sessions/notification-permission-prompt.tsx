@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -155,7 +155,7 @@ export function NotificationPermissionPrompt({
           painted the whole card amber next to otherwise neutral chrome. Colour
           is left to the one primary action. */}
       <div
-        className={clsx(
+        className={cn(
           stylex.props(styles.prompt, composerSurfaceStyles.composerElevation).className,
           className
         )}

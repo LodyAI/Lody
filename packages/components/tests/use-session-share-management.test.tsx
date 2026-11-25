@@ -1007,6 +1007,74 @@ describe('static publication client lifecycle', () => {
     expect(control.result?.url).toContain('/s/share#access=v1.');
   });
 
+  it.each(['loading row', 'confirmed row'])(
+    'tolerates its own deployment admission while uploading (%s)',
+    async (admission) => {
+      // A request card feeds `request.shareId` into the management hook: it is
+      // undefined until this very beginDeployment confirms the request and assigns
+      // the share. Treating that echo as a concurrent edit used to fail approval
+      // with "Share confirmation changed" and abandon the confirmed deployment.
+      const shareId = { current: undefined as string | undefined };
+      function RequestHarness() {
+        control = useSessionShareManagement(
+          'workspace' as WorkspaceId,
+          'root',
+          ['root'],
+          shareId.current,
+          confirmation
+        );
+        return null;
+      }
+      const renderRequest = () =>
+        act(async () =>
+          root.render(
+            <Provider store={store}>
+              <RequestHarness />
+            </Provider>
+          )
+        );
+      confirmation = {
+        requestId: 'request',
+        sessionIds: ['root'],
+        deliveryPublicKey: recipient.publicKey,
+      };
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      cloud.upload.mockImplementation(async () => {
+        entered();
+        await held;
+      });
+      await renderRequest();
+      let publishing!: Promise<void>;
+      await act(async () => {
+        publishing = control.onPublish();
+        await started;
+      });
+      shareId.current = 'share';
+      cloud.state =
+        admission === 'loading row'
+          ? (undefined as never)
+          : { ...entry, status: 'draft', revision: 0 };
+      await renderRequest();
+      await act(async () => {
+        release();
+        await publishing;
+      });
+      expect(control.error).toBeNull();
+      expect(control.result?.url).toBe('https://share.test/s/share#access=v1.' + 'a'.repeat(64));
+      expect(control.hasPending).toBe(false);
+      expect(cloud.mutation.mock.calls.map(([name]) => name)).toEqual([
+        'sessionSharing:beginDeployment',
+        'sessionSharing:publishDeployment',
+      ]);
+    }
+  );
+
   it('keeps the encrypted result identical after an ambiguous begin response', async () => {
     confirmation = {
       requestId: 'request',

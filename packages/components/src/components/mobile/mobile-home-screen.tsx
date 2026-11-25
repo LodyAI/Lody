@@ -46,7 +46,7 @@ import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { useMobileBackRevealClass } from './mobile-drill-page-layout';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
@@ -1267,7 +1267,7 @@ function MobileReactIcon({
      `text-[0.72rem]` for the label, so 1em collapsed Material icons to ~12px. */
   return (
     <span
-      className={clsx(stylex.props(styles.reactIcon).className, className)}
+      className={cn(stylex.props(styles.reactIcon).className, className)}
       aria-hidden={ariaHidden}
     >
       <Icon {...stylex.props(styles.reactIconGlyph)} />
@@ -1904,7 +1904,7 @@ function formatHomeRowAgeLabel(dateValue: number | string | undefined | null): s
 /* Trailing-slot content for list rows on the Local + GitHub tabs.
    Stacks the semantic age label on top with an unread-count pill
    underneath — when there's nothing to show, the whole slot collapses
-   to `null` so Konsta's row layout doesn't reserve extra width. */
+   to `null` so the row layout doesn't reserve extra width. */
 function RowTrailingMeta({
   latestMessageAt,
   unreadCount,
@@ -2658,7 +2658,7 @@ export function MobileHomeScreen({
 
   return (
     /* The `safe-areas` class opts this subtree into the `--k-safe-area-*`
-       vars (defined in `tailwind/theme-defaults.css`): without an ancestor
+       vars (defined in `style/theme-defaults.css`): without an ancestor
        carrying it the vars stay 0px, so the mobile header/tabbar that read
        them would lose their insets. */
     <div {...withClassName(stylex.props(styles.appRoot), 'mobile-home-app safe-areas')}>
@@ -2666,9 +2666,7 @@ export function MobileHomeScreen({
          scroll region — keeps the vertical scrollbar contained to
          the list area instead of running through the chrome at the
          top. Mirrors the structure on MobileProjectScreen. */}
-      <div
-        {...withClassName(stylex.props(styles.shell), clsx('mobile-home-shell', backRevealClass))}
-      >
+      <div {...withClassName(stylex.props(styles.shell), cn('mobile-home-shell', backRevealClass))}>
         {/* Sticky header: safe-area padding outside the chrome row so the
            status/pull pill can center on the same h-9 band as the
            workspace / search / trailing controls — not the full header

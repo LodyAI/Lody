@@ -69,18 +69,19 @@ File-by-file responsibilities: [README.md](README.md).
   Non-recursive refreshes scan the filesystem. Classification stays path-only;
   never read file contents. Root init/full/turn refreshes use the worker
   `full-state` path when available to keep listing and index building off-thread.
-- Machine RPC is the integration boundary. Local/Electron direct transport can be
-  added below that RPC abstraction, but file operations still route to the single CLI
-  service. In particular, local `code-collab/get-file-index` scans/builds the initial
-  tree and All Changes snapshot without awaiting Flock publication, then queues a
-  force-reconcile of that fresh in-memory state without delaying the response. This
-  repairs a durable file-index Flock that became stale while the CLI was stopped;
-  Flock remains the durable replication path for remote consumers and local renderer
-  invalidation after that initial snapshot.
+- Machine RPC is the integration boundary; local/Electron direct transport routes
+  to the same CLI service, and local `code-collab/get-file-index` returns the fresh
+  in-memory snapshot without awaiting Flock publication while queuing background
+  reconciliation (see `README.md`).
 - Non-Git All Changes bounds SQLite decompression: at most four concurrent paths
   and 8 MiB of cached raw snapshots per request by default. Over-limit paths stay
   deferred for single-file loading. Never collect unbounded candidates or
   reconstruct deferred paths twice.
+- Default All Changes uses `CodeCollabAllChangesPolicy` (`{ scope: 'branch', baseBranch? }`
+  for worktree Sessions, `{ scope: 'uncommitted' }` for non-worktree Sessions and extra
+  roots) and falls back to `diff-store` outside Git or before the first commit; explicit
+  `scope: 'uncommitted'` stays strictly Git `HEAD` and reports explicit unavailability
+  (`not_a_git_worktree` / `no_commits`).
 - Git-backed current diffs must check file state against the same resolved repository and
   pinned base before declaring equal text or binary placeholders unchanged. Content
   equality does not rule out mode changes. Comparison failures stay retryable per file;

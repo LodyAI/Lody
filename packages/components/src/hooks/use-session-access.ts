@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePlatform } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useWorkspaceLocalAccountId } from '@/lib/e2ee-account';
 import { acquireSessionAccessStore, EMPTY_SESSION_ACCESS } from '@/lib/session-access-store';
+import { constantSnapshotSource, useExternalSnapshot } from '@/lib/external-snapshot';
 import { useLegacyWorkspaceQueryStatus } from './use-workspace-feature';
 import {
   useResolvedWorkspaceScope,
   type WorkspaceScopeOptions,
 } from './use-resolved-workspace-scope';
+
+const EMPTY_SESSION_ACCESS_SOURCE = constantSnapshotSource(EMPTY_SESSION_ACCESS);
 
 export function useSessionAccess(options: WorkspaceScopeOptions = {}) {
   const scope = useResolvedWorkspaceScope(options);
@@ -31,23 +34,15 @@ export function useSessionAccess(options: WorkspaceScopeOptions = {}) {
       })
     | null
   >(null);
+  // The shared room owns browser lifecycle and refreshes; this effect only borrows
+  // its snapshot owner for the current account/workspace projection.
   useEffect(() => {
     if (!enabled || !port || !accountId || !scope.workspaceId) return;
     const acquired = acquireSessionAccessStore(port, accountId, scope.workspaceId);
     setLease({ ...acquired, accountId, workspaceId: scope.workspaceId, runtime, port });
-    const refresh = () => {
-      void acquired.store.refresh();
-    };
-    const visible = () => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', visible);
     return () => {
       setLease(null);
       acquired.release();
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', visible);
     };
   }, [enabled, port, accountId, scope.workspaceId, runtime]);
   // Scope is checked during render too, so old-account grants never survive one effect turn.
@@ -59,11 +54,6 @@ export function useSessionAccess(options: WorkspaceScopeOptions = {}) {
     lease?.port === port
       ? lease.store
       : null;
-  const subscribe = useCallback(
-    (listener: () => void) => store?.subscribe(listener) ?? (() => {}),
-    [store]
-  );
-  const getSnapshot = useCallback(() => store?.getSnapshot() ?? EMPTY_SESSION_ACCESS, [store]);
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const snapshot = useExternalSnapshot(store ?? EMPTY_SESSION_ACCESS_SOURCE);
   return { ...snapshot, store, port, workspaceId: scope.workspaceId, enabled };
 }

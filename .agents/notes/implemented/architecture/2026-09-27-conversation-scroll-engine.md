@@ -988,7 +988,7 @@ reproduces "Maximum update depth exceeded" without the pause and passes with it.
     `src/react/Virtualizer.tsx`;
   - `packages/shared/src/session-data/history-actions.ts`;
   - `apps/electron/src/renderer/src/warm-window-reveal.ts`;
-  - `packages/components/src/tailwind/index.css` (`.chat-scrollbar`).
+  - `packages/components/src/style/index.css` (`.chat-scrollbar`).
 - Executed probes (fixed row heights; not browser reproductions):
   - The author session's (`5d8fa2ca`) store-level probe used 100px keyed rows and a 300px viewport at offset 500, with no
     overscan. A same-offset scroll leaves the range at `[8, 10]` while the viewport shows

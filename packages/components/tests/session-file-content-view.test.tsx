@@ -770,11 +770,13 @@ describe('SessionFileContentView', () => {
     'opens exact Markdown session links with fileProvider=%s',
     async (withProvider) => {
       const uri = 'lody://session/preview-target?workspace=preview-workspace';
+      const actionUri = 'lody://settings/agents?machine=mac-1&create=codex';
+      const scheduleUri = 'lody://schedules?create=1';
       const previewSession = {
         ...session,
         project: { kind: 'github', repoFullName: 'example/preview', branch: 'main' },
       } satisfies SessionMeta;
-      const markdown = `[Target](${uri})\n\n[Legacy](session://legacy-target)\n\n[Guide](./guide.md)\n\n[Website](https://example.com/guide)`;
+      const markdown = `[Target](${uri})\n\n[Legacy](session://legacy-target)\n\n[Configure Codex](${actionUri})\n\n[New Schedule](${scheduleUri})\n\n[Blocked](lody://settings/agents?create=custom&command=sh)\n\n[Guide](./guide.md)\n\n[Website](https://example.com/guide)`;
       const provider = createFakeSessionFileProvider({
         files: [{ path: 'README.md', kind: 'text', sourceState: 'live-readonly' }],
         snapshots: { 'README.md': { kind: 'text', text: markdown } },
@@ -815,12 +817,26 @@ describe('SessionFileContentView', () => {
         await flushMicrotasks();
         const target = view.querySelector<HTMLElement>('[data-session-link="preview-target"]');
         const legacy = view.querySelector<HTMLElement>('[data-session-link="legacy-target"]');
+        const action = view.querySelector<HTMLElement>(`[data-action-link="${actionUri}"]`);
+        const schedule = view.querySelector<HTMLElement>(`[data-action-link="${scheduleUri}"]`);
         expect(target?.tagName).toBe('BUTTON');
         expect(legacy?.tagName).toBe('BUTTON');
+        expect(action?.tagName).toBe('BUTTON');
+        expect(schedule?.tagName).toBe('BUTTON');
+        expect(view.querySelector('[data-action-link*="command="]')).toBeNull();
         await act(async () => target!.click());
         expect(destinations).toEqual([uri]);
         await act(async () => legacy!.click());
         expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+        await act(async () => action!.click());
+        expect(destinations).toEqual([uri, 'lody://session/legacy-target', actionUri]);
+        await act(async () => schedule!.click());
+        expect(destinations).toEqual([
+          uri,
+          'lody://session/legacy-target',
+          actionUri,
+          scheduleUri,
+        ]);
 
         const guide = [...view.querySelectorAll('button')].find(
           (button) => button.textContent === 'Guide'
@@ -828,7 +844,12 @@ describe('SessionFileContentView', () => {
         expect(guide).toBeDefined();
         await act(async () => guide!.click());
         expect(vi.mocked(writeTextToClipboard).mock.lastCall?.[0]).toBe('./guide.md');
-        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+        expect(destinations).toEqual([
+          uri,
+          'lody://session/legacy-target',
+          actionUri,
+          scheduleUri,
+        ]);
         expect(
           view.querySelector('a[href="https://example.com/guide"]')?.getAttribute('target')
         ).toBe('_blank');
@@ -843,13 +864,21 @@ describe('SessionFileContentView', () => {
         );
         const inertTarget = view.querySelector<HTMLElement>('[data-session-link="preview-target"]');
         const inertLegacy = view.querySelector<HTMLElement>('[data-session-link="legacy-target"]');
+        const inertAction = view.querySelector<HTMLElement>(`[data-action-link="${actionUri}"]`);
         expect(inertTarget?.tagName).toBe('SPAN');
         expect(inertLegacy?.tagName).toBe('SPAN');
+        expect(inertAction?.tagName).toBe('SPAN');
         await act(async () => {
           inertTarget!.click();
           inertLegacy!.click();
+          inertAction!.click();
         });
-        expect(destinations).toEqual([uri, 'lody://session/legacy-target']);
+        expect(destinations).toEqual([
+          uri,
+          'lody://session/legacy-target',
+          actionUri,
+          scheduleUri,
+        ]);
       } finally {
         window.removeEventListener(SESSION_DEEP_LINK_EVENT, onDeepLink);
       }

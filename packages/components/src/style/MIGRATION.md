@@ -65,10 +65,9 @@ need to customize an owned part. Do not add global utility aliases or specificit
 patches to imitate the old utility layer.
 
 The application retains its existing CSS layer order. Product and Storybook
-contain no Tailwind compiler input or plugin. `tailwind/reset.css` owns browser
-normalization; `tailwind/theme-defaults.css` owns ordinary scale variables and
-native safe-area hooks. Neither generates utilities. The historical directory
-and stylesheet export names remain compatible with existing hosts.
+contain no Tailwind compiler input or plugin. `reset.css` owns browser
+normalization; `theme-defaults.css` owns ordinary scale variables and
+native safe-area hooks. Neither generates utilities.
 
 Audit dynamic class maps and helper defaults as well as JSX. The compiler-backed
 scanner was retired with its compiler after the final source snapshot reached
@@ -96,7 +95,7 @@ return <div {...withClassName(props, className)}>…</div>;
 ```
 
 `withClassName` is the existing helper in `lib/stylex.ts`. Alternatively, merge
-`props.className` with the caller's class using `clsx`. Never spread StyleX props
+`props.className` with the caller's class using `cn`. Never spread StyleX props
 and separately supply an unmerged `className`, in either order: one silently
 replaces the other. Combine style blocks in one `stylex.props` call rather than
 spreading several independently; later StyleX arguments resolve property conflicts.

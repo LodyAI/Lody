@@ -101,7 +101,7 @@ low-frequency families are action tools
   reminder), and `lody_help({command})` returns every action's description and schema,
   `lody_help({command, action})` one of them. The families are `lody_session_manage`
   (rename, archive, share, `pr_link`, `pr_unlink`, `pr_list`), `lody_schedule` (propose,
-  pause), `lody_agent_role` (create, update), `lody_operation` (get, batch, list) and
+  propose_edit, pause), `lody_agent_role` (create, update), `lody_operation` (get, batch, list) and
   `lody_catalog` (machines, projects, mcp_servers, agent_configs, agent_roles, schedules).
 - Reads never share a tool with writes, so clients that auto-approve `readOnlyHint` tools
   keep doing so: `lody_catalog`, `lody_operation` and `lody_help` are read-only, which is

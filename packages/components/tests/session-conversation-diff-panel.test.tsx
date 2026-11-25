@@ -1,11 +1,11 @@
 /** @vitest-environment jsdom */
 
-/** @vitest-environment jsdom */
-import { act, createElement } from 'react';
+import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FileDiff, SessionId } from '@lody/shared';
+import type { CodeCollabAllChangesScope, SessionId } from '@lody/shared';
+import { allChangesDiffScopeAtom } from '../src/atoms/settings';
 import { initI18n } from '../src/i18n';
 import type { SessionFileProvider } from '../src/lib/session-file-provider';
 
@@ -24,19 +24,6 @@ import {
   shouldOpenDiffFileByDefault,
   type SessionConversationDiffPanelProps,
 } from '../src/components/sessions/session-conversation-diff-panel';
-
-const checkpointFileDiff = (overrides: Partial<FileDiff> = {}): FileDiff => ({
-  filePath: 'docs/README.md',
-  add: 1,
-  del: 0,
-  cc: {
-    v: 1,
-    fileId: 't:000066',
-    opId: '1:89',
-    baseOpId: '2:89',
-  },
-  ...overrides,
-});
 
 describe('shouldOpenDiffFileByDefault', () => {
   it('opens only the focused file in both All Changes and turn diff modes', () => {
@@ -128,6 +115,7 @@ describe('SessionConversationDiffPanel All Changes scope', () => {
   let root: Root;
 
   beforeEach(async () => {
+    localStorage.clear();
     await initI18n('en');
     globalThis.ResizeObserver ??= class {
       observe() {}
@@ -144,10 +132,15 @@ describe('SessionConversationDiffPanel All Changes scope', () => {
     container.remove();
   });
 
-  const render = async (props: Partial<SessionConversationDiffPanelProps>) => {
+  const render = async (
+    props: Partial<SessionConversationDiffPanelProps> & { scope?: CodeCollabAllChangesScope }
+  ) => {
+    const { scope = 'branch', ...panelProps } = props;
+    const store = createStore();
+    store.set(allChangesDiffScopeAtom, scope);
     await act(async () => {
       root.render(
-        <Provider store={createStore()}>
+        <Provider store={store}>
           <TestCloudPlatformProvider>
             <SessionConversationDiffPanel
               sessionId={'session-1' as SessionId}
@@ -156,7 +149,7 @@ describe('SessionConversationDiffPanel All Changes scope', () => {
               filePaths={['committed.txt', 'worktree.txt']}
               fileProvider={makeProvider()}
               allChangesScopeSupported
-              {...props}
+              {...panelProps}
             />
           </TestCloudPlatformProvider>
         </Provider>
@@ -165,14 +158,14 @@ describe('SessionConversationDiffPanel All Changes scope', () => {
   };
 
   it('renders the uncommitted set and explains a focused committed-only file', async () => {
-    await render({ allChangesScope: 'uncommitted', fileProvider: makeProvider() });
+    await render({ scope: 'uncommitted', fileProvider: makeProvider() });
 
     expect(container.textContent).toContain('worktree.txt');
     expect(container.textContent).not.toContain('committed.txt');
     expect(container.textContent).toContain('HEAD · abcdef1');
 
     await render({
-      allChangesScope: 'uncommitted',
+      scope: 'uncommitted',
       focusFilePath: 'committed.txt',
       fileProvider: makeProvider(),
     });
@@ -180,10 +173,10 @@ describe('SessionConversationDiffPanel All Changes scope', () => {
   });
 
   it('hides the selector without capability and reports an explicit scope limitation', async () => {
-    await render({ allChangesScope: 'branch', allChangesScopeSupported: false });
+    await render({ scope: 'branch', allChangesScopeSupported: false });
     expect(container.textContent).not.toContain('Uncommitted');
 
-    await render({ allChangesScope: 'uncommitted', fileProvider: makeProvider(true) });
+    await render({ scope: 'uncommitted', fileProvider: makeProvider(true) });
     expect(container.textContent).toContain('no commits yet');
   });
 });

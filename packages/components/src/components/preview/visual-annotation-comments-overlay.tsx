@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { popup } from '@lody/ui/popup/popup.tokens.stylex';
@@ -182,7 +182,7 @@ export function VisualAnnotationCommentsOverlay({
   return (
     <div
       data-lody-visual-comment-overlay="true"
-      className={clsx(stylex.props(styles.root).className, className)}
+      className={cn(stylex.props(styles.root).className, className)}
       style={{ width: viewport.width, height: viewport.height }}
     >
       {visibleComments.map((comment, index) => {

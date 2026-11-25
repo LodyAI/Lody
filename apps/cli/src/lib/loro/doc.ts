@@ -113,6 +113,7 @@ import {
 } from './presence-legacy';
 import { CliMachineMonitorRuntime } from './machine-monitor';
 import { CliPromptSuggestions } from './prompt-suggestions';
+import { SqliteRepoMaintenanceLegacy } from './sqlite-repo-maintenance';
 import type { LodyPromptSuggestion } from 'acp-extension-core';
 import {
   attachAutoMarkLatestUserHistoryAsRead,
@@ -141,6 +142,7 @@ import {
   hasPersistedFlockRemoteState,
   createDocumentRemoteCursorStore,
   createCliIncompleteRecoveryStore,
+  createSqliteRepoMaintenanceStore,
   ProcessDocumentRemoteCursorStore,
   type DocumentCursorScope,
 } from './sqlite-repo-store';
@@ -415,6 +417,7 @@ export interface LoroDocumentManagerOptions {
   sqliteRepoStore?: CliSqliteRepoStore | null;
   /** LoroDoc Streams cursors for this process; see `DocumentCursorScope`. */
   documentRemoteCursorStore?: RemoteCursorStore | null;
+  documentCursorScope?: DocumentCursorScope;
   remoteStreamsAttached?: boolean;
   attachCloudEphemeralSinks?: boolean;
   encryptedWorkspace?: Pick<
@@ -487,6 +490,7 @@ export class LoroDocumentManager {
   private readonly localLoroDataPlaneServer: LocalLoroDataPlaneServerLegacy | null;
   private readonly sqliteRepoStore: CliSqliteRepoStore | null;
   private readonly documentRemoteCursorStore: RemoteCursorStore | null;
+  private readonly sqliteRepoMaintenance: SqliteRepoMaintenanceLegacy | null;
   private remoteStreamsAttached: boolean;
   private remoteStreamsGeneration: number;
   private machineExistenceWatcher: RepoWatchHandle | null = null;
@@ -768,6 +772,7 @@ export class LoroDocumentManager {
         localLoroDataPlaneServer,
         sqliteRepoStore: cliSqliteRepoStore,
         documentRemoteCursorStore,
+        documentCursorScope: options.documentCursorScope ?? 'process',
         remoteStreamsAttached: false,
         attachCloudEphemeralSinks: options.attachCloudEphemeralSinks,
         streamsTokens: options.streamsTokens ?? null,
@@ -919,6 +924,31 @@ export class LoroDocumentManager {
         void this.encryptedWorkspace?.refresh();
       }
     );
+    if (options.documentCursorScope === 'shared-durable' && this.sqliteRepoStore) {
+      this.sqliteRepoMaintenance = new SqliteRepoMaintenanceLegacy({
+        repo: this.repo,
+        store: createSqliteRepoMaintenanceStore(
+          this.sqliteRepoStore,
+          options.documentCursorScope,
+          this.encryptedWorkspace?.bucketId()
+        ),
+        logger: this.logger,
+        isDocActive: (docId) => {
+          const sessionId = getSessionIdFromRoomId(docId);
+          if (
+            sessionId &&
+            (this.sessions.has(sessionId) ||
+              this.pendingSessionDocs.has(sessionId) ||
+              this.sessionDocCleanup.has(sessionId))
+          ) {
+            return true;
+          }
+          return this.localDocRoomBridges.has(docId);
+        },
+      });
+    } else {
+      this.sqliteRepoMaintenance = null;
+    }
   }
 
   private setTransportStatus(status: TransportConnectionStatus): void {
@@ -2438,6 +2468,7 @@ export class LoroDocumentManager {
     }
     this.detachMachineFlockMetaRoomSyncedListener?.();
     this.detachMachineFlockMetaRoomSyncedListener = null;
+    await this.sqliteRepoMaintenance?.close();
     await this.machineFlockSync.cleanUp();
     await this.connectionRecovery.cleanUp();
     const attempt = async (scope: string, close: () => Promise<unknown>) => {

@@ -247,4 +247,43 @@ describe('local Session continuation', () => {
       expect(container.querySelector('output')?.textContent).toBe('0:true:false:false');
     }
   );
+  it('serializes rapid configure updates instead of dropping them and applies settings immediately', async () => {
+    let settings: Record<string, unknown> = { autoDeliver: false };
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const received: unknown[] = [];
+    automation.mockImplementation(async ({ command }) => {
+      if (command.type === 'list') return { type: 'list', waits: [] };
+      if (command.type === 'settings') return { type: 'settings', settings };
+      received.push(command.settings);
+      if (received.length === 1) await firstBlocked;
+      settings = { ...settings, ...command.settings };
+      return { type: 'settings', settings };
+    });
+    let latest!: ReturnType<typeof useLocalSessionContinuation>;
+    function View() {
+      latest = useLocalSessionContinuation(target, true);
+      return <output>{JSON.stringify(latest.autoDeliverOptions)}</output>;
+    }
+    await act(async () => root.render(<View />));
+    expect(container.textContent).toBe('null');
+
+    let firstPromise!: Promise<boolean>;
+    let secondPromise!: Promise<boolean>;
+    await act(async () => {
+      firstPromise = latest.setAutoDeliver({ fixCi: true, resolveConflicts: true, merge: false });
+      secondPromise = latest.setAutoDeliver({ fixCi: true, resolveConflicts: true, merge: true });
+    });
+    await act(async () => {
+      releaseFirst();
+      expect(await Promise.all([firstPromise, secondPromise])).toEqual([true, true]);
+    });
+    expect(received).toEqual([
+      { autoDeliver: { fixCi: true, resolveConflicts: true, merge: false } },
+      { autoDeliver: { fixCi: true, resolveConflicts: true, merge: true } },
+    ]);
+    expect(container.textContent).toBe('{"fixCi":true,"resolveConflicts":true,"merge":true}');
+  });
 });

@@ -21,7 +21,7 @@ import {
 
 import type { Logger } from '@/utils/logger';
 import { PresenceReplica } from './presence-replica';
-import { presencePlatformLayer } from '@/platform/presence';
+import { presencePlatformLayer, resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import {
   makeLoroStreamsTokenProvider,
   makeLoroStreamsTokenWebPorts,
@@ -934,4 +934,14 @@ describe('CLI presence WebSocket opt-in composition', () => {
       }
     }
   );
+
+  it('falls back to the compiled cloud default when runtime env is unset and lets runtime env override it', () => {
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, undefined, false)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, undefined, true)).toBe(true);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, '0', true)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, 'false', true)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, '1', false)).toBe(true);
+    expect(resolveCliLoroStreamsWebSocketEnabled(false, '1', true)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(true, '0', false)).toBe(true);
+  });
 });

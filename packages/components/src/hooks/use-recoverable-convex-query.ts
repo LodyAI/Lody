@@ -3,8 +3,11 @@ import * as ConvexReact from 'convex/react';
 import { getFunctionName, type FunctionReference } from 'convex/server';
 import { convexToJson, type Value } from 'convex/values';
 import { isConvexUnauthenticatedError } from '@lody/shared';
+import { redactedTelemetryException } from '@lody/platform/telemetry';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 import { isTransientConvexQueryError } from '@/lib/authed-convex-query';
+import { recordClientError } from '@/lib/client-log';
+import { deferredPostHog } from '@/lib/deferred-posthog';
 
 type QuerySnapshot = {
   authSessionId: string | null;
@@ -27,12 +30,30 @@ const querySources = new WeakMap<ConvexReact.ConvexReactClient, Map<string, Quer
 const getSkippedSnapshot = () => undefined;
 const subscribeSkipped = () => () => {};
 
+function reportCloudQueryError(queryName: string, error: Error) {
+  try {
+    recordClientError('cloud.query_error', error, { queryName });
+  } catch {
+    // Client logging is best-effort and must never disrupt query observation.
+  }
+  try {
+    const properties = redactedTelemetryException({ source: 'captureException' }, error);
+    const diagnostic = new Error(properties.error_code);
+    diagnostic.name = properties.error_type;
+    diagnostic.stack = undefined;
+    deferredPostHog.captureException(diagnostic, properties);
+  } catch {
+    // Analytics is side-effect-only: must never throw into product code.
+  }
+}
+
 /** One watch and retry budget per client/session/query, shared by all consumers.
  * Dropping just one hook's subscription cannot retry a query that other hooks
  * still watch: Convex deduplicates those subscriptions and retains the error. */
 function getQuerySource(
   client: ConvexReact.ConvexReactClient,
   key: string,
+  queryName: string,
   query: FunctionReference<'query'>,
   args: Record<string, Value>
 ): QuerySource {
@@ -63,6 +84,7 @@ function getQuerySource(
   let owners = 0;
   let serverFailure = false;
   let awaitingFreshResult = false;
+  let reportedError = false;
 
   function publish(value: unknown) {
     if (Object.is(result, value)) return;
@@ -113,13 +135,20 @@ function getQuerySource(
           scheduleRetry();
           return;
         }
+        if (!isConvexUnauthenticatedError(value) && !reportedError) {
+          reportedError = true;
+          reportCloudQueryError(queryName, value);
+        }
       } else if (value !== undefined && attempts > 0 && healthyTimer === undefined) {
         healthyTimer = setTimeout(() => {
           healthyTimer = undefined;
           attempts = 0;
         }, QUERY_HEALTHY_RESET_MS);
       }
-      if (value !== undefined && !(value instanceof Error)) serverFailure = false;
+      if (value !== undefined && !(value instanceof Error)) {
+        serverFailure = false;
+        reportedError = false;
+      }
       publish(value);
     };
     unsubscribe = watch.onUpdate(read);
@@ -138,6 +167,7 @@ function getQuerySource(
       retryTimer = healthyTimer = undefined;
       attempts = 0;
       serverFailure = true;
+      reportedError = false;
       pendingRetryDelay = QUERY_RETRY_DELAYS_MS[0];
       publish(undefined);
       scheduleRetry();
@@ -198,16 +228,15 @@ function matchesSnapshot(
 }
 
 /**
- * Recover auth expiry through the central supervisor and retry opaque server
- * failures before they reach a render boundary. Other failures still throw.
+ * Recover auth expiry through the central supervisor, retry opaque server
+ * failures, and contain persistent or structured backend errors as `undefined`
+ * so a cloud query failure never crashes the React render tree.
  */
 export function useRecoverableConvexQuery<Query extends FunctionReference<'query'>>(
   query: Query,
   ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
 ): Query['_returnType'] | undefined {
-  const result = useOptionalRecoverableConvexQuery(query, ...args);
-  if (result.error) throw result.error;
-  return result.data;
+  return useOptionalRecoverableConvexQuery(query, ...args).data;
 }
 
 export function useOptionalRecoverableConvexQuery<Query extends FunctionReference<'query'>>(
@@ -227,7 +256,8 @@ export function useOptionalRecoverableConvexQuery<Query extends FunctionReferenc
   const serializedArgs = JSON.stringify(convexToJson(argsObject));
   const queryKey = `${queryName}:${serializedArgs}`;
   const source = useMemo(
-    () => getQuerySource(client, JSON.stringify([authSessionId, queryKey]), query, argsObject),
+    () =>
+      getQuerySource(client, JSON.stringify([authSessionId, queryKey]), queryName, query, argsObject),
     // Match Convex's useQuery semantics: semantic argument equality owns the subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [client, authSessionId, queryKey]
@@ -288,10 +318,40 @@ export function useOptionalRecoverableConvexQuery<Query extends FunctionReferenc
 }
 
 /** Public queries must run before authentication, so they cannot use the
- * authenticated query gate above. Keep the direct Convex hook isolated here. */
+ * authenticated query gate above, but they still share bounded retry and
+ * non-throwing error containment so backend errors never crash render. */
+export function useOptionalPublicConvexQuery<Query extends FunctionReference<'query'>>(
+  query: Query,
+  ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
+): { data: Query['_returnType'] | undefined; error: Error | null; retry: () => void } {
+  const client = ConvexReact.useConvex();
+  const skip = args[0] === 'skip';
+  const argsObject = (args[0] === undefined || skip ? {} : args[0]) as Record<string, Value>;
+  const queryName = getFunctionName(query);
+  const serializedArgs = JSON.stringify(convexToJson(argsObject));
+  const queryKey = `${queryName}:${serializedArgs}`;
+  const source = useMemo(
+    () => getQuerySource(client, JSON.stringify(['__public__', queryKey]), queryName, query, argsObject),
+    // Match Convex's useQuery semantics: semantic argument equality owns the subscription.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, queryKey]
+  );
+  const result = useSyncExternalStore(
+    skip ? subscribeSkipped : source.subscribe,
+    skip ? getSkippedSnapshot : source.getSnapshot,
+    getSkippedSnapshot
+  ) as Query['_returnType'] | Error | undefined;
+  useEffect(() => source.retain(), [source]);
+
+  if (result instanceof Error) {
+    return { data: undefined, error: result, retry: source.retry };
+  }
+  return { data: result, error: null, retry: source.retry };
+}
+
 export function usePublicConvexQuery<Query extends FunctionReference<'query'>>(
   query: Query,
   ...args: ConvexReact.OptionalRestArgsOrSkip<Query>
 ): Query['_returnType'] | undefined {
-  return ConvexReact.useQuery(query, ...args);
+  return useOptionalPublicConvexQuery(query, ...args).data;
 }

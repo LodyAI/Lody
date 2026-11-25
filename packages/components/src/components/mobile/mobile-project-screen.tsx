@@ -22,7 +22,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
@@ -1393,7 +1393,7 @@ export function MobileProjectScreen({
            conversation list, not running through the header + pills.
            See the user-reported bug "scrollbar should be above the
            pills". */
-          {...withClassName(stylex.props(styles.shell), clsx('mobile-home-shell', backRevealClass))}
+          {...withClassName(stylex.props(styles.shell), cn('mobile-home-shell', backRevealClass))}
         >
           {filesTabNested ? null : (
             <MobileEdgeBackSwipeZone

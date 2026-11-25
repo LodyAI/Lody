@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -311,7 +311,7 @@ export function SessionFileCardLayout({
   fileName: string;
   /** With the name, picks the kind of page the sheet draws. */
   mimeType?: string;
-  subtitle: string;
+  subtitle?: string;
   actionIcon: ReactNode;
   isInteractive?: boolean;
   isMuted?: boolean;
@@ -329,7 +329,7 @@ export function SessionFileCardLayout({
   const Frame = inline ? 'span' : 'div';
   return (
     <Frame
-      className={clsx(
+      className={cn(
         stylex.props(
           stylex.defaultMarker(),
           card.root,
@@ -353,17 +353,19 @@ export function SessionFileCardLayout({
         />
         <span {...stylex.props(card.body)}>
           <span {...stylex.props(evidenceSurface.name, card.clip)}>{fileName}</span>
-          <span
-            {...stylex.props(
-              evidenceSurface.subtitle,
-              failed && evidenceSurface.failed,
-              card.clip,
-              card.figures
-            )}
-            title={subtitle}
-          >
-            {subtitle}
-          </span>
+          {subtitle ? (
+            <span
+              {...stylex.props(
+                evidenceSurface.subtitle,
+                failed && evidenceSurface.failed,
+                card.clip,
+                card.figures
+              )}
+              title={subtitle}
+            >
+              {subtitle}
+            </span>
+          ) : null}
         </span>
         {actionIcon ? (
           <span

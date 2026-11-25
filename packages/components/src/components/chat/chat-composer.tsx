@@ -81,6 +81,7 @@ import {
   text as textScale,
   space,
   control,
+  corner,
   duration,
   ease,
   radius,
@@ -88,6 +89,8 @@ import {
 import { colors, shadow, media } from '@lody/ui/tokens/colors.stylex';
 import { card } from '@lody/ui/card/card.tokens.stylex';
 import { field } from '@lody/ui/field/field.tokens.stylex';
+import { FileSheet } from '@/components/ai-gui/session-file-sheet';
+import { getSessionFileKind } from '@/lib/session-file-presentation';
 import { themeFontWeight, themeRadius, themeSpace } from '../../style/theme-scale.stylex';
 import {
   type ComposerInputElement,
@@ -98,7 +101,7 @@ import {
 } from '@/ui/mention/composer-input';
 
 const typography = stylex.create({
-  imageMarkup: { position: 'absolute', insetInlineStart: space[1], bottom: space[1] },
+  imageMarkup: { position: 'absolute', insetInlineStart: space[1], top: space[1] },
   prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
   sheetPrompt: { fontSize: textScale.headlineSize },
   helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
@@ -221,6 +224,7 @@ const styles = stylex.create({
   },
   attachmentStrip: {
     display: 'flex',
+    alignItems: 'flex-end',
     gap: themeSpace[2],
     overflowX: 'auto',
     paddingBottom: themeSpace[1],
@@ -230,6 +234,7 @@ const styles = stylex.create({
     flexShrink: 0,
     overflow: 'hidden',
     borderRadius: radius.medium,
+    cornerShape: corner.shape,
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: colors.wellBackground,
@@ -237,10 +242,9 @@ const styles = stylex.create({
   },
   imageCardMobile: { width: '104px', height: '104px' },
   imageCardDesktop: { width: themeSpace[20], height: themeSpace[20] },
-  imageCardFailed: { boxShadow: `0 0 0 2px ${colors.destructive}, ${shadow.inset}` },
+  imageCardFailed: { boxShadow: `inset 0 0 0 1.5px ${colors.destructive}, ${shadow.inset}` },
   imageButton: { width: '100%', height: '100%' },
   imagePreview: { width: '100%', height: '100%', objectFit: 'cover' },
-  imageBadge: { color: colors.secondaryLabel },
   imageProgress: {
     position: 'absolute',
     inset: 0,
@@ -255,6 +259,10 @@ const styles = stylex.create({
     position: 'absolute',
     insetInline: 0,
     bottom: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
     backgroundColor: media.scrim,
     paddingInline: themeSpace[1],
     paddingBlock: themeSpace[0.5],
@@ -272,56 +280,53 @@ const styles = stylex.create({
     position: 'relative',
     display: 'flex',
     flexShrink: 0,
-    flexDirection: 'column',
+    alignItems: 'center',
+    columnGap: '10px',
     overflow: 'hidden',
     borderRadius: radius.medium,
+    cornerShape: corner.shape,
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: colors.wellBackground,
     boxShadow: shadow.inset,
-    padding: themeSpace[2],
+    paddingBlock: space[2],
+    paddingInlineStart: space[2],
+    paddingInlineEnd: space[1.5],
   },
-  fileCardMobile: { width: '104px', height: '104px' },
-  fileCardDesktop: { width: themeSpace[20], minHeight: themeSpace[20] },
-  fileCardFailed: { boxShadow: `0 0 0 2px ${colors.destructive}, ${shadow.inset}` },
-  fileType: {
-    maxWidth: '64%',
+  fileCardMobile: { minWidth: '184px', maxWidth: '248px' },
+  fileCardDesktop: { minWidth: '176px', maxWidth: '240px' },
+  fileCardFailed: {
+    backgroundColor: `color-mix(in srgb, ${colors.wellBackground}, ${colors.destructive} 8%)`,
+    boxShadow: `inset 0 0 0 1.5px ${colors.destructive}, ${shadow.inset}`,
+  },
+  fileBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    gap: '2px',
+  },
+  fileName: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    textAlign: 'start',
     fontWeight: themeFontWeight.medium,
-    textTransform: 'uppercase',
-    letterSpacing: '0.025em',
-  },
-  fileTypeFailed: { color: colors.destructive },
-  fileTypeResting: { color: colors.secondaryLabel },
-  fileName: {
-    marginTop: themeSpace[1],
-    overflowWrap: 'break-word',
-    textAlign: 'left',
-    fontWeight: themeFontWeight.normal,
     color: colors.label,
   },
-  fileNameMobile: {
-    overflow: 'hidden',
-    display: '-webkit-box',
-    WebkitBoxOrient: 'vertical',
-    WebkitLineClamp: 3,
-  },
-  fileNameDesktop: {
-    overflow: 'hidden',
-    display: '-webkit-box',
-    WebkitBoxOrient: 'vertical',
-    WebkitLineClamp: 2,
-  },
-  fileRetry: { marginTop: 'auto', width: 'fit-content', maxWidth: '100%' },
+  fileRetry: { width: 'fit-content', maxWidth: '100%' },
   fileStatus: {
-    marginTop: 'auto',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    paddingTop: themeSpace[1],
+    fontVariantNumeric: 'tabular-nums',
     color: colors.secondaryLabel,
+  },
+  fileRemove: {
+    flexShrink: 0,
+    alignSelf: 'center',
   },
   fileProgressTrack: {
     position: 'absolute',
@@ -808,7 +813,6 @@ export function getChatComposerTextareaStyles({
           ? styles.textareaModal
           : [styles.textareaSession, isMobile ? styles.textareaMobile : styles.textareaDesktop],
   ];
-
 }
 
 /**
@@ -819,7 +823,7 @@ export function getChatComposerTextareaStyles({
 function getFileTypeLabel(name: string): string {
   const dot = name.lastIndexOf('.');
   if (dot <= 0 || dot === name.length - 1) {
-    return 'FILE';
+    return '';
   }
   const ext = name.slice(dot + 1).toUpperCase();
   return ext.length > 5 ? ext.slice(0, 5) : ext;
@@ -1575,8 +1579,7 @@ export function ChatComposer({
               ) : null}
               {imageItems.length > 0 || fileItems.length > 0 ? (
                 // Unified horizontal, scrollable attachment strip: image thumbnails
-                // and file cards share the same square-card shape and scroll
-                // sideways together (cards step up in size on mobile for touch).
+                // and file cards scroll sideways together along the composer baseline.
                 <div
                   className={[
                     'input-scrollbar',
@@ -1613,18 +1616,7 @@ export function ChatComposer({
                               alt={image.name}
                               {...stylex.props(styles.imagePreview)}
                             />
-                            {image.status === 'draft' ? (
-                              <span
-                                className={[
-                                  stylex.props(styles.imageBadge).className,
-                                  stylex.props(typography.caption).className,
-                                ]
-                                  .filter(Boolean)
-                                  .join(' ')}
-                              >
-                                {t('sessions.attachmentDraft')}
-                              </span>
-                            ) : image.status === 'uploading' ? (
+                            {image.status === 'uploading' ? (
                               <div
                                 {...stylex.props(styles.imageProgress)}
                                 style={{
@@ -1644,7 +1636,6 @@ export function ChatComposer({
                           variant="secondary"
                           size="mini"
                           icon
-
                           onClick={() => onImageRemove?.(image.id)}
                           aria-label={removeImageLabel}
                         >
@@ -1652,25 +1643,11 @@ export function ChatComposer({
                         </Button>
                       </div>
                       {image.status === 'draft' ? (
-                        <span
-                          className={[
-                            stylex.props(styles.imageBadge).className,
-                            stylex.props(typography.caption).className,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
+                        <span {...stylex.props(styles.imageProgressBar, typography.caption)}>
                           {t('sessions.attachmentDraft')}
                         </span>
                       ) : image.status === 'uploading' ? (
-                        <div
-                          className={[
-                            stylex.props(styles.imageProgressBar).className,
-                            stylex.props(typography.caption).className,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
+                        <div {...stylex.props(styles.imageProgressBar, typography.caption)}>
                           {image.progress}%
                         </div>
                       ) : null}
@@ -1706,106 +1683,87 @@ export function ChatComposer({
                       ) : null}
                     </div>
                   ))}
-                  {fileItems.map((file) => (
-                    <div
-                      key={file.id}
-                      title={file.status === 'failed' ? file.error || uploadFailedLabel : undefined}
-                      {...stylex.props(
-                        styles.fileCard,
-                        isMobile ? styles.fileCardMobile : styles.fileCardDesktop,
-                        file.status === 'failed' && styles.fileCardFailed
-                      )}
-                    >
-                      <span
-                        className={[
-                          stylex.props(styles.fileType).className,
-                          stylex.props(
-                            file.status === 'failed'
-                              ? styles.fileTypeFailed
-                              : styles.fileTypeResting
-                          ).className,
-                          stylex.props(isMobile ? typography.helper : typography.caption).className,
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                      >
-                        {getFileTypeLabel(file.name)}
-                      </span>
-                      <span
-                        className={[
-                          stylex.props(styles.fileName).className,
-                          stylex.props(isMobile ? styles.fileNameMobile : styles.fileNameDesktop)
-                            .className,
-                          stylex.props(typography.helper).className,
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                      >
-                        {file.name}
-                      </span>
-                      {file.status === 'failed' ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="mini"
-                          onClick={() => onFileRetry?.(file.id)}
-                          aria-label={retryUploadLabel}
-                          xstyle={[styles.fileRetry, typography.caption]}
-                        >
-                          <RefreshCw className={stylex.props(styles.glyph12).className} />
-                          <span {...stylex.props(styles.truncate)}>{uploadFailedShortLabel}</span>
-                        </Button>
-                      ) : (
-                        <span
-                          className={[
-                            stylex.props(styles.fileStatus).className,
-                            stylex.props(typography.caption).className,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
-                          {file.status === 'draft'
-                            ? t('sessions.attachmentDraft')
-                            : file.status === 'preparing'
-                              ? t('sessions.filePreparing', 'Preparing… {{progress}}%', {
-                                  progress: file.progress,
-                                })
-                              : file.status === 'uploading'
-                                ? `${file.progress}%`
-                                : file.status === 'verifying'
-                                  ? t('sessions.fileVerifying', 'Verifying…')
-                                  : file.sizeLabel}
-                        </span>
-                      )}
-                      {file.status === 'draft' ? (
-                        t('sessions.attachmentDraft')
-                      ) : file.status === 'preparing' ||
-                        file.status === 'uploading' ||
-                        file.status === 'verifying' ? (
-                        <div {...stylex.props(styles.fileProgressTrack)}>
-                          <div
-                            {...stylex.props(styles.fileProgressFill)}
-                            style={{
-                              width: `${Math.max(0, Math.min(100, file.progress))}%`,
-                            }}
-                          />
-                        </div>
-                      ) : null}
-                      <div {...stylex.props(styles.imageCorner)}>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="mini"
-                          icon
+                  {fileItems.map((file) => {
+                    const fileType = getFileTypeLabel(file.name);
+                    const isTransferring =
+                      file.status === 'preparing' ||
+                      file.status === 'uploading' ||
+                      file.status === 'verifying';
+                    const metaLabel =
+                      file.status === 'draft'
+                        ? [fileType, t('sessions.attachmentDraft')].filter(Boolean).join(' · ')
+                        : file.status === 'preparing'
+                          ? t('sessions.filePreparing', 'Preparing… {{progress}}%', {
+                              progress: file.progress,
+                            })
+                          : file.status === 'uploading'
+                            ? [fileType, `${file.progress}%`].filter(Boolean).join(' · ')
+                            : file.status === 'verifying'
+                              ? t('sessions.fileVerifying', 'Verifying…')
+                              : [fileType, file.sizeLabel].filter(Boolean).join(' · ');
 
-                          onClick={() => onFileRemove?.(file.id)}
-                          aria-label={removeAttachmentLabel}
-                        >
-                          <X className={stylex.props(styles.glyph12).className} />
-                        </Button>
+                    return (
+                      <div
+                        key={file.id}
+                        title={
+                          file.status === 'failed' ? file.error || uploadFailedLabel : file.name
+                        }
+                        {...stylex.props(
+                          styles.fileCard,
+                          isMobile ? styles.fileCardMobile : styles.fileCardDesktop,
+                          file.status === 'failed' && styles.fileCardFailed
+                        )}
+                      >
+                        <FileSheet kind={getSessionFileKind(file.name)} muted={isTransferring} />
+                        <div {...stylex.props(styles.fileBody)}>
+                          <span {...stylex.props(styles.fileName, typography.helper)}>
+                            {file.name}
+                          </span>
+                          {file.status === 'failed' ? (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="mini"
+                              onClick={() => onFileRetry?.(file.id)}
+                              aria-label={retryUploadLabel}
+                              xstyle={[styles.fileRetry, typography.caption]}
+                            >
+                              <RefreshCw className={stylex.props(styles.glyph12).className} />
+                              <span {...stylex.props(styles.truncate)}>
+                                {uploadFailedShortLabel}
+                              </span>
+                            </Button>
+                          ) : (
+                            <span {...stylex.props(styles.fileStatus, typography.caption)}>
+                              {metaLabel}
+                            </span>
+                          )}
+                        </div>
+                        <div {...stylex.props(styles.fileRemove)}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="mini"
+                            icon
+                            onClick={() => onFileRemove?.(file.id)}
+                            aria-label={removeAttachmentLabel}
+                          >
+                            <X className={stylex.props(styles.glyph12).className} />
+                          </Button>
+                        </div>
+                        {isTransferring ? (
+                          <div {...stylex.props(styles.fileProgressTrack)}>
+                            <div
+                              {...stylex.props(styles.fileProgressFill)}
+                              style={{
+                                width: `${Math.max(0, Math.min(100, file.progress))}%`,
+                              }}
+                            />
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : null}
 
@@ -1950,7 +1908,6 @@ export function ChatComposer({
                       mcp={mcp}
                       onScheduleSend={onScheduleSend}
                       scheduleDisabledReason={scheduleDisabledReason}
-                      commandsEnabled={commandsEnabled}
                     />
                     <div {...stylex.props(modalStyles.actions)}>{primaryAction}</div>
                   </div>
@@ -1979,7 +1936,6 @@ export function ChatComposer({
                     mcp={mcp}
                     onScheduleSend={onScheduleSend}
                     scheduleDisabledReason={scheduleDisabledReason}
-                    commandsEnabled={commandsEnabled}
                   />
 
                   {/* Single row only: long model names must shrink/truncate inside

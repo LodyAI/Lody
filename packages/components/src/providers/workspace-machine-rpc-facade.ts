@@ -33,6 +33,7 @@ import {
 } from '@lody/shared';
 import {
   SorbetCredentialsResultSchema,
+  SorbetHostSettingsResultSchema,
   SorbetProvidersResultSchema,
 } from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
@@ -57,6 +58,7 @@ import {
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
   SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION,
   SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
@@ -2511,9 +2513,57 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return result;
   };
 
+  /** Host-wide Sorbet defaults are machine-scoped: no configId, same owner gating. */
+  const requestLocalSorbetHostSettings = async (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/host-settings-get' }>,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/host-settings-update' }>,
+          'method' | 'params'
+        >
+  ) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    const local = await canUseLocalMachineRpc(machineId);
+    if (!local && targetRouter.getPlaneForMachine(machineId) !== 'cloud') {
+      throw new Error('Local Machine RPC is not available.');
+    }
+    const capability = local
+      ? MACHINE_PROTOCOL_CAPABILITIES.sorbetHostSettings
+      : 'sorbetHostSettingsRemote';
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        capability,
+        SORBET_HOST_SETTINGS_PROTOCOL_VERSION
+      )
+    ) {
+      throw new Error('Sorbet Host settings are unsupported on this machine.');
+    }
+    const rpcRequest = { ...request, machineId, workspaceId, timeoutMs: 35_000 };
+    let rawResult: unknown;
+    if (local) {
+      rawResult = await sendLocalMachineRpcRequest(rpcRequest);
+    } else {
+      if (!deps.requestEncryptedFeature)
+        throw new Error('Protected Sorbet Host settings transport unavailable.');
+      const response = await deps.requestEncryptedFeature(rpcRequest);
+      if (!response.ok) throw new Error(response.error);
+      rawResult = response.result;
+    }
+    const result = SorbetHostSettingsResultSchema.parse(rawResult);
+    if (result.type !== request.method)
+      throw new Error('Unexpected Sorbet Host settings response.');
+    return result;
+  };
+
   return {
     requestLocalSorbetCredentials,
     requestLocalSorbetProviders,
+    requestLocalSorbetHostSettings,
     requestSessionAutomationControl,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,

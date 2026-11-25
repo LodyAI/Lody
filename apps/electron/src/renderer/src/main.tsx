@@ -1,6 +1,7 @@
 import { installClientLog } from '@lody/components/lib/client-log'
 import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
 import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
+import { configureLoroWasmBudget } from '@lody/shared/loro-wasm-budget'
 import type { PreparedWindowTarget } from '@lody/shared/electron-ipc'
 import { observePreparedTarget, waitForTargetContentPainted } from './warm-window-reveal'
 import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
@@ -22,7 +23,7 @@ import {
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
 import { sidebarCollapsedAtom } from '@lody/components/atoms/sidebar-state'
-import '@lody/components/tailwind/index.css'
+import '@lody/components/style/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'
@@ -221,6 +222,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 try {
+  configureLoroWasmBudget()
   installAppIconBridge()
   // Resolve and persist the desktop's first-run language before React can
   // commit. AppInitializer keeps later changes synchronized; awaiting here

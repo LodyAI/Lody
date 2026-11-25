@@ -15,7 +15,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { TourStill, type TourStillDebugOptions } from './tour/tour-still';
 import { DEFAULT_TOUR_IDENTITY, type TourIdentity } from './tour/tour-fixtures';
 import type { TourAppTracks, TourConfigurationState } from './tour/tour-app';
@@ -560,7 +560,7 @@ function OnboardingShellSurface({
             }}
             data-onboarding-form={stepKey}
           >
-            <div {...scroller} className={clsx(scroller.className, 'scrollbar-pro')}>
+            <div {...scroller} className={cn(scroller.className, 'scrollbar-pro')}>
               <div {...column} className={column.className}>
                 {eyebrow == null ? null : (
                   <div {...stylex.props(onboardingShellSurface.eyebrow)}>{eyebrow}</div>

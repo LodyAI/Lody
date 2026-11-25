@@ -1,7 +1,7 @@
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Slot } from '@radix-ui/react-slot';
-import { clsx, type ClassValue } from 'clsx';
+import { cn, type ClassValue } from '../cn';
 
 const FOCUS = '0 0 0 3px color-mix(in oklab, hsl(var(--ring)) 50%, transparent)';
 const SMALL_SHADOW = '0 1px 2px 0 rgb(0 0 0 / 0.05)';
@@ -155,7 +155,7 @@ function buttonStyles(
   );
 }
 function buttonVariants(options: ButtonVariantOptions = {}) {
-  return clsx(buttonStyles(options).className, options.class, options.className);
+  return cn(buttonStyles(options).className, options.class, options.className);
 }
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -216,7 +216,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const sx = buttonStyles({ variant, size }, xstyle);
     return (
       <Comp
-        className={clsx(sx.className, className)}
+        className={cn(sx.className, className)}
         ref={ref}
         {...props}
         style={sx.style ? { ...sx.style, ...fieldStyle } : fieldStyle}
