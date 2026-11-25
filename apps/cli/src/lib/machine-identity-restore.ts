@@ -6,6 +6,7 @@ import type { MachineIdentityRestoreIntent } from '@lody/cloud-api';
 import { deriveConvexSiteUrl, normalizeBaseUrl } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
+import { isCustomLodyDataDir, syncMachineIdentityAnchor } from '@/utils/machine-identity-store';
 import {
   CLI_EXIT_CODE_RETRYABLE_STARTUP,
   CLI_EXIT_CODE_AUTH_FAILURE,
@@ -219,5 +220,8 @@ export async function applyPendingMachineIdentityRestore(
     )
   );
   await atomicWrite(path.join(root, 'machine-id'), intent.targetMachineId);
+  if (!isCustomLodyDataDir() && path.resolve(root) === path.resolve(getLodyDataDir())) {
+    syncMachineIdentityAnchor(intent.targetMachineId, { forceRefreshFingerprint: true });
+  }
   await fs.rename(file, path.join(backup, 'completed.json'));
 }

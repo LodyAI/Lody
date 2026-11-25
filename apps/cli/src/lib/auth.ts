@@ -12,10 +12,11 @@ import {
   getOrCreateStableMachineIdAsync,
   LODY_AUTH_SITE_URL,
   LODY_AUTH_URL,
+  persistMachineId,
   SITE_APP_BASE_PATH,
   SITE_URL,
 } from '@/utils/const';
-import { MACHINE_PAIRING_TOKEN_PREFIX } from '@lody/shared';
+import { MACHINE_PAIRING_TOKEN_PREFIX, type MachineId } from '@lody/shared';
 import { openBrowser } from '@/utils/open-browser';
 import { createAuthClient } from 'better-auth/client';
 import { apiKeyClient } from '@better-auth/api-key/client';
@@ -676,6 +677,8 @@ export class AuthClient {
       return { success: true, user: undefined };
     }
 
+    persistMachineId(existingAuth.machine.machineId as MachineId);
+
     // 获取配置文件路径
     const configPath = getConfigPath();
     try {
@@ -692,6 +695,8 @@ export class AuthClient {
     if (!existingAuth || existingAuth.token.trim() !== rejectedToken.trim()) {
       return 'not_current';
     }
+
+    persistMachineId(existingAuth.machine.machineId as MachineId);
 
     try {
       fs.unlinkSync(getConfigPath());
@@ -775,6 +780,7 @@ export async function saveAuthInfo(
   };
 
   writePrivateCredentialFile(configPath, JSON.stringify(authData, null, 2));
+  persistMachineId(machine.machineId as MachineId);
 }
 
 /**

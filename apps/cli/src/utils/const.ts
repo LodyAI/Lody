@@ -4,6 +4,12 @@ import crypto from 'crypto';
 import { MachineId } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { z } from 'zod';
+import { writePrivateCredentialFile } from '@/lib/private-credential-file';
+import {
+  isCustomLodyDataDir,
+  recoverMachineIdFromAnchorOrHardware,
+  syncMachineIdentityAnchor,
+} from './machine-identity-store';
 
 export let LODY_AUTH_URL = process.env.LODY_AUTH_URL;
 export let LODY_AUTH_SITE_URL = process.env.LODY_AUTH_SITE_URL;
@@ -71,28 +77,30 @@ function readCredentialMachineId(): MachineId | null {
   }
 }
 
-function persistMachineId(machineId: MachineId): MachineId {
-  try {
-    const machineIdPath = getMachineIdFilePath();
-    fs.mkdirSync(path.dirname(machineIdPath), { recursive: true });
-    fs.writeFileSync(machineIdPath, machineId, { encoding: 'utf-8', mode: 0o600 });
-    if (process.platform !== 'win32') {
-      try {
-        fs.chmodSync(machineIdPath, 0o600);
-      } catch {
-        // best effort
-      }
-    }
-    return machineId;
-  } catch {
+export function persistMachineId(machineId: MachineId): MachineId {
+  const trimmed = machineId.trim() as MachineId;
+  if (!trimmed) {
     return readPersistedMachineId() ?? machineId;
+  }
+  try {
+    if (readPersistedMachineId() !== trimmed) {
+      const machineIdPath = getMachineIdFilePath();
+      fs.mkdirSync(path.dirname(machineIdPath), { recursive: true, mode: 0o700 });
+      writePrivateCredentialFile(machineIdPath, trimmed);
+    }
+    if (!isCustomLodyDataDir()) {
+      syncMachineIdentityAnchor(trimmed);
+    }
+    return trimmed;
+  } catch {
+    return readPersistedMachineId() ?? trimmed;
   }
 }
 
 function createMachineId(machineId: MachineId): MachineId {
   try {
     const machineIdPath = getMachineIdFilePath();
-    fs.mkdirSync(path.dirname(machineIdPath), { recursive: true });
+    fs.mkdirSync(path.dirname(machineIdPath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(machineIdPath, machineId, {
       encoding: 'utf-8',
       mode: 0o600,
@@ -107,8 +115,8 @@ function createMachineId(machineId: MachineId): MachineId {
 
 /**
  * Returns the installation-scoped machine ID, migrating the credential-bound
- * identity or creating and persisting a UUID on first use. The historical
- * name is retained for callers.
+ * identity, recovering from the host-bound backup anchor / hardware fallback,
+ * or creating and persisting a UUID on first use.
  */
 export function getSystemMachineId(): MachineId | null {
   try {
@@ -116,12 +124,30 @@ export function getSystemMachineId(): MachineId | null {
     const credentialMachineId = readCredentialMachineId();
     // Cached auth is already the runtime's machine identity. Keep telemetry and future pairing
     // aligned with it, including when a buggy release created a conflicting UUID first.
-    if (credentialMachineId && credentialMachineId !== persisted) {
-      return persistMachineId(credentialMachineId);
+    if (credentialMachineId) {
+      if (credentialMachineId !== persisted) {
+        return persistMachineId(credentialMachineId);
+      }
+      if (!isCustomLodyDataDir()) {
+        syncMachineIdentityAnchor(credentialMachineId);
+      }
+      return credentialMachineId;
     }
-    if (persisted) return persisted;
+    if (persisted) {
+      if (!isCustomLodyDataDir()) {
+        syncMachineIdentityAnchor(persisted);
+      }
+      return persisted;
+    }
 
-    return createMachineId(crypto.randomUUID() as MachineId);
+    const candidate = !isCustomLodyDataDir()
+      ? (recoverMachineIdFromAnchorOrHardware()?.machineId ?? (crypto.randomUUID() as MachineId))
+      : (crypto.randomUUID() as MachineId);
+    const created = createMachineId(candidate);
+    if (!isCustomLodyDataDir()) {
+      syncMachineIdentityAnchor(created);
+    }
+    return created;
   } catch {
     return null;
   }
