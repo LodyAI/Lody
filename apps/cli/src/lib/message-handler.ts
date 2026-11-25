@@ -51,7 +51,8 @@ import {
 } from '@lody/shared';
 import { encodeSessionFilePath, resolveSessionPullRequests } from '@lody/shared';
 import { SessionAutomationAuthority } from '@/session/session-automation-authority';
-import type { SessionFileRoot } from '@lody/shared';
+import { isWorktreeSessionMeta, type SessionFileRoot } from '@lody/shared';
+import type { CodeCollabAllChangesPolicy } from '@/lib/code-collab/file-index-scan-core';
 import { resolveProjectFileRoots } from '@/session/worktree/project-member-access';
 import { worktreeGitLegacy } from '@/session/worktree/git-execution-legacy';
 import { resolveSessionFilePath } from '@lody/shared';
@@ -1065,7 +1066,9 @@ export class MessageHandler {
   private readonly preferredBaseBranch = this.configuredBaseBranch ?? 'main';
 
   /** Unlike `resolveGitHubProjectBranch`, never assumes `main` for a missing base. */
-  private resolveDiffBaseBranch(meta: SessionMeta | undefined): string | undefined {
+  private resolveDiffBaseBranch(
+    meta: { readonly baseBranch?: string; readonly project?: unknown } | undefined
+  ): string | undefined {
     return (
       meta?.baseBranch?.trim() || getProjectRefBranch(meta?.project) || this.configuredBaseBranch
     );
@@ -7729,14 +7732,27 @@ export class MessageHandler {
                 : 'permission_denied',
             message: 'Session file root is unavailable.',
           };
-        const allChangesBaseBranch = this.resolveDiffBaseBranch(ownerMeta);
+        const ownerScope =
+          ownerMeta ?? this.sessionManager.getSession(ownerSessionId)?.getExecutionScope?.();
+        const isWorktreeWorkspace =
+          rootId === 'main' &&
+          (ownerScope === undefined ? true : isWorktreeSessionMeta(ownerScope));
+        const diffBaseBranch = isWorktreeWorkspace
+          ? this.resolveDiffBaseBranch(ownerScope)
+          : undefined;
+        const allChanges: CodeCollabAllChangesPolicy = isWorktreeWorkspace
+          ? {
+              scope: 'branch',
+              ...(diffBaseBranch === undefined ? {} : { baseBranch: diffBaseBranch }),
+            }
+          : { scope: 'uncommitted' };
         return {
           ok: true,
           ownerSessionId,
           workspaceRoot: selected.absolutePath,
           fileRoots,
           projectRun: rootId === 'main' ? ownerMeta?.projectRun : undefined,
-          ...(allChangesBaseBranch === undefined ? {} : { allChangesBaseBranch }),
+          allChanges,
         };
       }
       if (resolved.error === 'session_not_found') {

@@ -14,8 +14,9 @@ import {
   computeAllChanges,
   computeProjectAllChanges,
   resolveProjectGitDirectory,
+  type CodeCollabAllChangesPolicy,
   type ProjectGitMember,
-  isInsideGitWorktree,
+  resolveGitDiffBase,
   joinWorkspacePath,
   pathSegmentComparisonKey,
   scanGitDirectoryEntries,
@@ -51,7 +52,7 @@ export type FileIndexFullStateWorkerInput = {
   readonly maxRawTextBytes: number;
   readonly entryBudget: number;
   readonly priorityDirectories?: readonly string[];
-  readonly preferredBaseBranch?: string;
+  readonly allChanges?: CodeCollabAllChangesPolicy;
   readonly providedAllChanges?: {
     readonly source: 'diff-store';
     readonly state: CodeCollabV2AllChangesState;
@@ -213,13 +214,17 @@ async function resolveFullStateAllChanges(input: FileIndexFullStateWorkerInput):
       allChangesMs: Date.now() - started,
     };
   }
-  if (!(await isInsideGitWorktree(input.workspaceRoot, input.signal))) {
+  const allChangesStartedAtMs = Date.now();
+  const resolvedBase = await resolveGitDiffBase(
+    input.workspaceRoot,
+    input.allChanges,
+    input.signal
+  );
+  if (!resolvedBase.ok) {
     return { status: 'needs-provided-all-changes', reason: 'not-git' };
   }
-
-  const allChangesStartedAtMs = Date.now();
   const allChanges = await computeAllChanges(input.workspaceRoot, {
-    preferredBaseBranch: input.preferredBaseBranch,
+    diffBase: resolvedBase.commit,
     signal: input.signal,
   });
   return {
