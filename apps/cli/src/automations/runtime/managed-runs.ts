@@ -1,10 +1,18 @@
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { Cause, Clock, Effect, Fiber, FiberMap, Option } from 'effect';
+import { Cause, Clock, Context, Effect, Fiber, FiberMap, Option } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 import { spawnProcess } from '@lody/shared/node/process';
-import type { AutomationResult, AutomationRunExit, AutomationWait } from '@lody/shared/automations';
+import type {
+  AutomationManagedRun,
+  AutomationResult,
+  AutomationRunExit,
+  AutomationWait,
+} from '@lody/shared/automations';
+import { getCachedLoginShellEnvSyncLegacy } from '@/agent/login-shell-env';
+import { automationCommandEnvironment, resolveAutomationCwd } from '../context/exec';
+import type { AutomationLedger } from '../storage/ledger';
 
 /** Output beyond this many bytes is dropped from the log; the tail keeps updating. */
 export const MANAGED_RUN_LOG_LIMIT_BYTES = 16 * 1024 * 1024;
@@ -29,6 +37,28 @@ export interface ManagedRuns {
   /** Interrupts the owner, which terminates the process tree, and joins it. */
   readonly stop: (id: string) => Effect.Effect<void>;
 }
+
+export class ManagedRunsService extends Context.Service<ManagedRunsService, ManagedRuns>()(
+  'lody/automations/ManagedRuns'
+) {}
+
+/** Tool lookup follows the login shell, as the Agent's own commands do; nothing else is inherited. */
+export const managedRunEnvironment = (): NodeJS.ProcessEnv => {
+  let shellPath: string | undefined;
+  try {
+    shellPath = getCachedLoginShellEnvSyncLegacy().PATH;
+  } catch {
+    shellPath = undefined;
+  }
+  const entries = [
+    ...new Set(
+      [shellPath, process.env.PATH]
+        .flatMap((value) => value?.split(path.delimiter) ?? [])
+        .filter(Boolean)
+    ),
+  ];
+  return automationCommandEnvironment(entries.length ? entries.join(path.delimiter) : undefined);
+};
 
 const pruneLogs = (directory: string, now: number) =>
   Effect.promise(async () => {
@@ -161,10 +191,9 @@ const formatDuration = (ms: number): string => {
 
 /** The continuation states only what the Host observed about the run. */
 export const managedRunResult = (
-  wait: Pick<AutomationWait, 'run'>,
+  run: AutomationManagedRun,
   exit: AutomationRunExit
 ): Exclude<AutomationResult, false> => {
-  const run = wait.run!;
   const command = [run.command, ...run.args].join(' ').slice(0, 1000);
   const durationMs = run.startedAt === undefined ? undefined : exit.endedAt - run.startedAt;
   const after = durationMs === undefined ? '' : ` after ${formatDuration(durationMs)}`;
@@ -191,3 +220,70 @@ export const managedRunResult = (
     },
   };
 };
+
+/** Evaluates one managed-run wait, claiming start before spawn and never restarting interrupted runs. */
+export const evaluateManagedRun = Effect.fn('Automations.evaluateRun')(function* (deps: {
+  ledger: AutomationLedger;
+  owner: ManagedRuns;
+  claimed: AutomationWait & { run: AutomationManagedRun };
+  authorizeAndResolveRoot: (
+    sessionId: string,
+    ownerUserId: string
+  ) => Promise<string | null | undefined>;
+}) {
+  const { ledger, owner, claimed, authorizeAndResolveRoot } = deps;
+  const latest = ledger.wait(claimed.id);
+  const run = latest?.run ?? claimed.run;
+  if (run.exit) return managedRunResult(run, run.exit);
+  if (owner.has(claimed.id)) return false as const;
+  const now = yield* Clock.currentTimeMillis;
+  if (run.startedAt !== undefined) {
+    // The owner that started it is gone without observing its exit. Never start it again.
+    const exit: AutomationRunExit = {
+      endedAt: now,
+      outcome: 'interrupted',
+      exitCode: null,
+      signal: null,
+      tail: '',
+      logTruncated: false,
+    };
+    ledger.recordRunExit(claimed.id, exit, now);
+    return managedRunResult(run, exit);
+  }
+  return yield* Effect.uninterruptible(
+    Effect.gen(function* () {
+      if (!ledger.claimRunStart(claimed.id, now)) return false as const;
+      const cwd = yield* Effect.tryPromise(() =>
+        authorizeAndResolveRoot(claimed.sessionId, claimed.ownerUserId)
+      ).pipe(
+        Effect.flatMap((root) =>
+          root
+            ? resolveAutomationCwd(root, run.cwd)
+            : Effect.fail(new Error('AUTOMATION_EXEC_WORKSPACE_UNAVAILABLE'))
+        ),
+        Effect.result
+      );
+      if (cwd._tag === 'Failure') {
+        const exit: AutomationRunExit = {
+          endedAt: now,
+          outcome: 'spawn_failed',
+          exitCode: null,
+          signal: null,
+          error: cwd.failure instanceof Error ? cwd.failure.message : 'Run could not start',
+          tail: '',
+          logTruncated: false,
+        };
+        ledger.recordRunExit(claimed.id, exit, now);
+        return managedRunResult(run, exit);
+      }
+      yield* owner.start(claimed.id, {
+        command: run.command,
+        args: run.args,
+        cwd: cwd.success,
+        env: { ...managedRunEnvironment(), ...run.env },
+        logPath: run.logPath,
+      });
+      return false as const;
+    })
+  );
+});

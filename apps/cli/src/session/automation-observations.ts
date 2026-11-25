@@ -68,4 +68,5 @@ export type AutomationObservationSink = {
     snapshot: RateLimitsSnapshot,
     source: 'query' | 'push'
   ): Promise<void>;
+  idle?(sessionId: SessionId): void;
 };
