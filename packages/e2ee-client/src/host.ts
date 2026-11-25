@@ -963,6 +963,9 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
    * the retained invitation qualifies, so a personal pairing identity never reads as one. */
   const retainedMember = (pairingOffer: PersonalPairingOffer) =>
     Effect.gen(function* () {
+      // No installation was ever created (e.g. a routing pin was written before identity
+      // preparation started): there is no signed request or claim to retain or corrupt.
+      if (!(yield* installations.read())) return null;
       const p = yield* prepareRetained(pairingOffer);
       const saved = yield* memberOriginal(p);
       if (!saved) return null;
@@ -1018,11 +1021,13 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     });
   /** Explicitly cancel a never-admitted pending member join on both the relay and local
    * journal, so the user can switch to another invitation without being locked out. */
-  const cancelMember = (pairingOffer: PersonalPairingOffer) =>
+  const cancelMember = (pairingOffer: PersonalPairingOffer, expectedRequestId?: string) =>
     Effect.gen(function* () {
       const found = yield* retainedMember(pairingOffer);
       if (!found) return { state: 'cancelled' as const };
       const { p, saved } = found;
+      if (expectedRequestId !== undefined && p.offer.pairingSessionId !== expectedRequestId)
+        return yield* fail('conflict');
       if (yield* pairings.load(key(p, 'approval'))) return { state: 'committed' as const };
       const port = platform.members;
       if (!port?.retire) return yield* fail('unsupported');
@@ -1065,7 +1070,8 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
     claimMember: (pairingOffer: PersonalPairingOffer, requestId: string) =>
       run(claimMember(pairingOffer, requestId)),
     /** Explicitly cancel a pre-CAS pending member join on the relay and local journal. */
-    cancelMember: (pairingOffer: PersonalPairingOffer) => run(cancelMember(pairingOffer)),
+    cancelMember: (pairingOffer: PersonalPairingOffer, expectedRequestId?: string) =>
+      run(cancelMember(pairingOffer, expectedRequestId)),
     /** The retained invitation behind an identity offer, or null for a personal pairing. */
     memberJoin: (pairingOffer: PersonalPairingOffer) =>
       run(

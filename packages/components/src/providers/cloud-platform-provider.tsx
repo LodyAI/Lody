@@ -271,7 +271,8 @@ export function CloudPlatformProvider({
               createMemberInvitation: (input) => native.createMemberInvitation(input),
               prepareMemberJoin: (offer) => native.prepareMemberJoin(offer),
               pendingMemberJoin: (workspaceId) => native.pendingMemberJoin(workspaceId),
-              cancelPendingMemberJoin: (workspaceId) => native.cancelPendingMemberJoin(workspaceId),
+              cancelPendingMemberJoin: (workspaceId, expectedRequestId) =>
+                native.cancelPendingMemberJoin(workspaceId, expectedRequestId),
               memberJoinRequests: (workspaceId) => native.memberJoinRequests(workspaceId),
               approveMemberJoin: (workspaceId, requestId, mode) =>
                 native.approveMemberJoin(workspaceId, requestId, mode),

@@ -169,6 +169,7 @@ export const refusalCode = (cause: unknown) => {
   const code = (cause as { data?: { code?: unknown } } | null)?.data?.code;
   return typeof code === 'string' &&
     (/^e2ee_[a-z0-9_-]{1,64}$/.test(code) ||
+      code === 'already_member' ||
       code === 'workspace_transfer_active_subscription' ||
       code === 'workspace_transfer_payment_required')
     ? code

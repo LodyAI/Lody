@@ -201,12 +201,11 @@ function JoinSession({
             setReady(true);
             setUnconfirmed(true);
           }
-        } else if (pending.joined) {
-          setOtherPending(null);
-          setRequest({ requestId: pending.requestId, state: 'committed' });
-          setReady(true);
-          setUnconfirmed(true);
-        } else {
+        } else if (!pending.joined) {
+          // Another un-admitted pending request exists for this workspace. Do not auto-restore
+          // a previously `joined` different offer: a removed member re-invited via a new link
+          // must verify live membership through `prepareMemberJoin` rather than being trapped
+          // waiting for keys on the old membership.
           setOtherPending({
             offer: pending.offer,
             requestId: pending.requestId,
@@ -314,29 +313,42 @@ function JoinSession({
       if (current()) setBusy(false);
     }
   };
+  const available = preview?.status === 'available' ? preview : null;
+  const pinMatches = Boolean(available && sameMemberOffer(available.offer, offer));
+  const native = Boolean(
+    runtime?.prepareMemberJoin && runtime.pendingMemberJoin && runtime.claimMemberJoin
+  );
+  const terminal = request && ['rejected', 'cancelled'].includes(request.state);
+  const canSubmitNewOffer = Boolean(
+    accountId &&
+      emailVerified &&
+      native &&
+      !recovering &&
+      !ready &&
+      !terminal &&
+      pinMatches &&
+      available?.matchesRecipient !== false
+  );
   const cancelPreviousAndAccept = async () => {
-    if (working.current || !runtime?.cancelPendingMemberJoin) return;
+    if (working.current || !runtime?.cancelPendingMemberJoin || !otherPending || !canSubmitNewOffer)
+      return;
     working.current = true;
     setBusy(true);
     setFailure(null);
     let proceed = false;
     try {
-      const retired = await runtime.cancelPendingMemberJoin(offer.workspaceId);
+      const retired = await runtime.cancelPendingMemberJoin(
+        offer.workspaceId,
+        otherPending.requestId
+      );
       if (!current()) return;
       if (retired.state === 'cancelled') {
         setOtherPending(null);
         proceed = true;
-      } else if (otherPending) {
+      } else {
         // The previous request is already admitting or committed: surface its live progress.
         setRequest({ requestId: otherPending.requestId, state: retired.state });
         setOtherPending(null);
-      } else {
-        setFailure({
-          disposition: 'reconcilable',
-          code: 'e2ee_original_join_pending',
-          messageKey: 'e2ee.actionable.previousJoinPending',
-          primaryAction: 'resume_existing_request',
-        });
       }
     } catch (cause) {
       if (current()) setFailure(classifyMemberJoinFailure(cause));
@@ -355,12 +367,6 @@ function JoinSession({
     });
     setOtherPending(null);
   };
-  const available = preview?.status === 'available' ? preview : null;
-  const pinMatches = Boolean(available && sameMemberOffer(available.offer, offer));
-  const native = Boolean(
-    runtime?.prepareMemberJoin && runtime.pendingMemberJoin && runtime.claimMemberJoin
-  );
-  const terminal = request && ['rejected', 'cancelled'].includes(request.state);
   let message = 'e2ee.team.joinHelp';
   if (loading || recovering || preview === undefined) message = 'e2ee.team.loading';
   else if (!accountId) message = 'e2ee.team.signInHelp';
@@ -403,9 +409,10 @@ function JoinSession({
                     if (request) setRetry((value) => value + 1);
                     void accept();
                   },
-                  cancel_previous_request: runtime?.cancelPendingMemberJoin
-                    ? () => void cancelPreviousAndAccept()
-                    : undefined,
+                  cancel_previous_request:
+                    canSubmitNewOffer && otherPending && runtime?.cancelPendingMemberJoin
+                      ? () => void cancelPreviousAndAccept()
+                      : undefined,
                   resume_existing_request: otherPending ? resumeExisting : undefined,
                   open_workspace: () =>
                     onWorkspaceRequested(available?.workspaceSlug ?? null, offer.workspaceId),

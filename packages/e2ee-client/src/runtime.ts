@@ -544,7 +544,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               return { ready: result.state === 'committed', state: result.state };
             })
           ),
-        cancelPendingMemberJoin: (id) =>
+        cancelPendingMemberJoin: (id, expectedRequestId) =>
           run(
             Effect.gen(function* () {
               yield* guard(id);
@@ -556,7 +556,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               });
               if (parsed.workspaceId !== workspaceId || parsed.genesisHash !== genesisHash)
                 return yield* fail('scope-mismatch');
-              return yield* host.cancelMember(parsed);
+              return yield* host.cancelMember(parsed, expectedRequestId);
             })
           ),
       } satisfies Pick<

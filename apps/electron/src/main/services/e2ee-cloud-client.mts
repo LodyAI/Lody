@@ -287,8 +287,11 @@ export class E2eeAccountPairingRefusedError extends BackendError {
   }
 }
 
-/** Member-invitation refusals an administrator acts on; only the mapped code leaves. */
-const memberInvitationRefusals = new Set(['e2ee_member_invitation_request_pending'])
+/** Member-invitation refusals an administrator or applicant acts on; only mapped codes leave. */
+const memberInvitationRefusals = new Set([
+  'e2ee_member_invitation_request_pending',
+  'already_member'
+])
 export class E2eeMemberInvitationRefusedError extends BackendError {
   constructor(readonly code: string) {
     super({ service: 'E2eeCloud', reason: 'unavailable' })

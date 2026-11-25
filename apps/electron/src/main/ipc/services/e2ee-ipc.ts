@@ -717,7 +717,7 @@ export class E2eeIpc extends ProductWindowIpcService {
     })
   }
   @IpcMethod()
-  async cancelPendingMemberJoin(workspaceId: string) {
+  async cancelPendingMemberJoin(workspaceId: string, expectedRequestId?: string) {
     sender()
     const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
     const scope = this.memberScope(workspaceId, identity)
@@ -741,6 +741,14 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw error
     }
     if (!pending) return { state: 'cancelled' }
+    if (expectedRequestId !== undefined) {
+      const actualRequestId = pending.keyPackageHex
+        ? Buffer.from(
+            decodeMemberKeyPackage(pending.keyPackageHex).request.requestId.toBytes()
+          ).toString('hex')
+        : null
+      if (actualRequestId !== expectedRequestId) throw new Error('e2ee_conflict')
+    }
     const retired = pending.keyPackageHex
       ? await Effect.runPromise(
           cloud.client.memberRetire({
@@ -847,7 +855,11 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
     const result = await Effect.runPromise(
       cloud.client.memberSubmit({ token: offer.token, keyPackageHex: original.keyPackageHex })
-    )
+    ).catch((error) => {
+      if ((error as { code?: unknown })?.code === 'already_member')
+        throw new Error('already_member')
+      throw error
+    })
     if (
       result.accountId !== cloud.accountId ||
       result.workspaceId !== offer.workspaceId ||
