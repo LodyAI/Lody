@@ -64,7 +64,7 @@ describe('createConversationSession backend seam', () => {
             workspaceId,
             machineId,
             sessionId,
-            replicaNamespace: 'refusal',
+            replicaNamespace: `refusal-${status}`,
             getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
             observeBinding: () => () => {},
             requestGrant: async () => {
@@ -300,7 +300,7 @@ describe('createConversationSession backend seam', () => {
               workspaceId,
               machineId,
               sessionId,
-              replicaNamespace: 'test',
+              replicaNamespace: startingState,
               getBinding: () => cachedBinding,
               observeBinding: (wake) => {
                 publicationWakes.add(wake);

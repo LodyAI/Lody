@@ -281,6 +281,7 @@ function routeRoostHistory(
   let failures = 0;
   let disposed = false;
   let cloudAllowed = true;
+  let ownerReadable = false;
   let lastStatus: RoostHistorySyncState | undefined;
   const observers = new Set<Observer>();
   const emitStatus = () => {
@@ -378,7 +379,8 @@ function routeRoostHistory(
   };
   const refresh = () => {
     if (disposed || !reader || switching) return;
-    if (reader === owner && !cloud.published() && (!observers.size || retry)) return;
+    if (reader === owner && !cloud.published() && (!ownerReadable || !observers.size || retry))
+      return;
     if (retry) clearTimeout(retry);
     retry = undefined;
     void refreshRoute();
@@ -435,8 +437,12 @@ function routeRoostHistory(
         if (!observers.has(observer))
           return pageWithSource(source, await source.readLatestDirectoryPage!(40));
         const observation = attach(observer, source);
-        if (source === owner) void refreshRoute();
-        return pageWithSource(source, await observation.initialPage!);
+        const page = await observation.initialPage!;
+        if (source === owner && reader === owner && observers.has(observer)) {
+          ownerReadable = true;
+          void refreshRoute();
+        }
+        return pageWithSource(source, page);
       });
       return {
         initialPage,
