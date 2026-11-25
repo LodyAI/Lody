@@ -1,6 +1,6 @@
 ---
 name: genui
-description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Use when a reply benefits from controls (sliders, switches, selects, buttons) or status chips instead of static text, or when a summary of instances, test results, release blockers, or options would be clearer with visual status markers. Read a reference file only for the component families you actually use.
+description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Use when a reply benefits from controls (sliders, switches, selects, buttons), status chips, or a wireframe/schematic (Mock nested-layout diagrams of windows, panels, architecture) instead of static text — or when a summary of instances, test results, release blockers, or options would be clearer with visual status markers. Reach for it when the user asks to draw, sketch, diagram, mock up, or visualise a layout or structure. Read a reference file only for the component families you actually use.
 ---
 
 # GenUI surface authoring
