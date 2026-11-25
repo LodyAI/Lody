@@ -14,6 +14,98 @@ import { isElectronRenderer } from '../lib/electron';
 import { isNativeAppShell } from '../lib/native-platform';
 
 export const WEB_COOKIE_CONSENT_KEY = 'lody:cookie-consent';
+export const WEB_COOKIE_CONSENT_REGION_COOKIE = 'lody-consent-region';
+
+const EUROPE_CONSENT_COUNTRIES = new Set([
+  'AT',
+  'BE',
+  'BG',
+  'CH',
+  'CY',
+  'CZ',
+  'DE',
+  'DK',
+  'EE',
+  'ES',
+  'FI',
+  'FR',
+  'GB',
+  'GR',
+  'HR',
+  'HU',
+  'IE',
+  'IS',
+  'IT',
+  'LI',
+  'LT',
+  'LU',
+  'LV',
+  'MT',
+  'NL',
+  'NO',
+  'PL',
+  'PT',
+  'RO',
+  'SE',
+  'SI',
+  'SK',
+]);
+
+const EUROPE_EXTRA_TIMEZONES = new Set([
+  'Arctic/Longyearbyen',
+  'Asia/Nicosia',
+  'Atlantic/Azores',
+  'Atlantic/Canary',
+  'Atlantic/Faeroe',
+  'Atlantic/Faroe',
+  'Atlantic/Madeira',
+  'Atlantic/Reykjavik',
+  'CET',
+  'EET',
+  'Eire',
+  'GB',
+  'GB-Eire',
+  'Iceland',
+  'MET',
+  'Poland',
+  'Portugal',
+  'WET',
+]);
+
+function readRegionCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  for (const part of document.cookie.split(';')) {
+    const [rawName, ...rest] = part.trim().split('=');
+    if (rawName === WEB_COOKIE_CONSENT_REGION_COOKIE) {
+      const rawValue = rest.join('=').trim();
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return rawValue;
+      }
+    }
+  }
+  return null;
+}
+
+export function requiresRegionalCookieConsent(): boolean {
+  const cookieValue = readRegionCookie();
+  if (cookieValue) {
+    const normalized = cookieValue.toUpperCase();
+    if (normalized === 'EEA' || normalized === 'EU' || normalized === 'EUROPE') return true;
+    if (normalized === 'OTHER' || normalized === 'ROW' || normalized === 'NONE') return false;
+    if (/^[A-Z]{2}$/.test(normalized)) return EUROPE_CONSENT_COUNTRIES.has(normalized);
+  }
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return (
+      typeof timeZone === 'string' &&
+      (timeZone.startsWith('Europe/') || EUROPE_EXTRA_TIMEZONES.has(timeZone))
+    );
+  } catch {
+    return false;
+  }
+}
 
 type CookieConsentDecision = 'granted' | 'denied';
 
@@ -103,7 +195,7 @@ export function WebCookieConsentBanner() {
 
   useEffect(() => {
     if (isElectronRenderer() || isNativeAppShell()) return;
-    setVisible(readWebCookieConsent() === null);
+    setVisible(readWebCookieConsent() === null && requiresRegionalCookieConsent());
   }, []);
 
   if (!visible) return null;

@@ -73,8 +73,13 @@ Chromium. There is no second legacy site tree.
 ## Local development
 
 The shared head in `src/routes/__root.tsx` configures Google Analytics with
-Consent Mode v2 (`analytics_storage: 'denied'` by default until accepted via
-`CookieConsentBanner`) after `window.load`.
+Consent Mode v2: `analytics_storage` defaults to `'denied'` for EEA/UK/CH
+regions and `'granted'` elsewhere (all advertising storage stays `'denied'`),
+with stored `'granted'` / `'denied'` decisions overriding defaults after
+`window.load`. `CookieConsentBanner` auto-prompts only in European consent
+regions (preferring an edge-set `lody-consent-region` cookie with `eea`,
+`other`, or an ISO-2 country code, falling back to European IANA time zones)
+and remains openable from the footer in all regions.
 
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.

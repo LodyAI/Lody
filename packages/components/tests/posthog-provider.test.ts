@@ -319,11 +319,7 @@ it('waits for cloud save before enabling desktop usage sharing and disables the 
   const renderRow = () =>
     act(async () =>
       root.render(
-        createElement(
-          PlatformContext.Provider,
-          { value: platform },
-          createElement(UsageSharingRow)
-        )
+        createElement(PlatformContext.Provider, { value: platform }, createElement(UsageSharingRow))
       )
     );
   const toggle = () => host.querySelector<HTMLButtonElement>('[role="switch"]')!;
@@ -415,10 +411,10 @@ it.each([true, false])(
   }
 );
 
-it('renders the web cookie consent banner once on web and updates gtag Consent Mode v2', async () => {
+it('renders the web cookie consent banner only in European consent regions and updates gtag on choice', async () => {
   const { createElement, act } = await import('react');
   const { createRoot } = await import('react-dom/client');
-  const { WebCookieConsentBanner, readWebCookieConsent } =
+  const { WebCookieConsentBanner, readWebCookieConsent, requiresRegionalCookieConsent } =
     await import('../src/components/web-cookie-consent-banner');
   const { initI18n } = await import('../src/i18n');
   await initI18n('en');
@@ -428,29 +424,42 @@ it('renders the web cookie consent banner once on web and updates gtag Consent M
   document.body.appendChild(mount);
   const root = createRoot(mount);
   try {
+    document.cookie = 'lody-consent-region=US; path=/';
+    expect(requiresRegionalCookieConsent()).toBe(false);
     await act(async () => root.render(createElement(WebCookieConsentBanner)));
-    const buttons = Array.from(mount.querySelectorAll<HTMLButtonElement>('button'));
-    expect(buttons.map((button) => button.textContent)).toEqual([
-      'Essential only',
-      'Accept analytics cookies',
-    ]);
-    await act(async () => buttons[1]!.click());
     expect(mount.querySelector('aside')).toBeNull();
-    expect(readWebCookieConsent()).toBe('granted');
-    expect(gtagCalls).toEqual([
-      [
-        'consent',
-        'update',
-        {
-          ad_storage: 'denied',
-          ad_user_data: 'denied',
-          ad_personalization: 'denied',
-          analytics_storage: 'granted',
-        },
-      ],
-    ]);
-  } finally {
     await act(async () => root.unmount());
+
+    const euRoot = createRoot(mount);
+    try {
+      document.cookie = 'lody-consent-region=DE; path=/';
+      expect(requiresRegionalCookieConsent()).toBe(true);
+      await act(async () => euRoot.render(createElement(WebCookieConsentBanner)));
+      const buttons = Array.from(mount.querySelectorAll<HTMLButtonElement>('button'));
+      expect(buttons.map((button) => button.textContent)).toEqual([
+        'Essential only',
+        'Accept analytics cookies',
+      ]);
+      await act(async () => buttons[1]!.click());
+      expect(mount.querySelector('aside')).toBeNull();
+      expect(readWebCookieConsent()).toBe('granted');
+      expect(gtagCalls).toEqual([
+        [
+          'consent',
+          'update',
+          {
+            ad_storage: 'denied',
+            ad_user_data: 'denied',
+            ad_personalization: 'denied',
+            analytics_storage: 'granted',
+          },
+        ],
+      ]);
+    } finally {
+      await act(async () => euRoot.unmount());
+    }
+  } finally {
+    document.cookie = 'lody-consent-region=; Max-Age=0; path=/';
     mount.remove();
     window.localStorage.clear();
     vi.unstubAllGlobals();

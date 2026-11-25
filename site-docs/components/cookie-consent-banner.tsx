@@ -2,7 +2,99 @@ import { useEffect, useState } from 'react';
 import { SiteAnchor } from './site-anchor';
 
 export const COOKIE_CONSENT_STORAGE_KEY = 'lody:cookie-consent';
+export const COOKIE_CONSENT_REGION_COOKIE = 'lody-consent-region';
 export const OPEN_COOKIE_CONSENT_EVENT = 'lody:open-cookie-consent';
+
+const EUROPE_CONSENT_COUNTRIES = new Set([
+  'AT',
+  'BE',
+  'BG',
+  'CH',
+  'CY',
+  'CZ',
+  'DE',
+  'DK',
+  'EE',
+  'ES',
+  'FI',
+  'FR',
+  'GB',
+  'GR',
+  'HR',
+  'HU',
+  'IE',
+  'IS',
+  'IT',
+  'LI',
+  'LT',
+  'LU',
+  'LV',
+  'MT',
+  'NL',
+  'NO',
+  'PL',
+  'PT',
+  'RO',
+  'SE',
+  'SI',
+  'SK',
+]);
+
+const EUROPE_EXTRA_TIMEZONES = new Set([
+  'Arctic/Longyearbyen',
+  'Asia/Nicosia',
+  'Atlantic/Azores',
+  'Atlantic/Canary',
+  'Atlantic/Faeroe',
+  'Atlantic/Faroe',
+  'Atlantic/Madeira',
+  'Atlantic/Reykjavik',
+  'CET',
+  'EET',
+  'Eire',
+  'GB',
+  'GB-Eire',
+  'Iceland',
+  'MET',
+  'Poland',
+  'Portugal',
+  'WET',
+]);
+
+function readRegionCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  for (const part of document.cookie.split(';')) {
+    const [rawName, ...rest] = part.trim().split('=');
+    if (rawName === COOKIE_CONSENT_REGION_COOKIE) {
+      const rawValue = rest.join('=').trim();
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return rawValue;
+      }
+    }
+  }
+  return null;
+}
+
+export function requiresRegionalCookieConsent(): boolean {
+  const cookieValue = readRegionCookie();
+  if (cookieValue) {
+    const normalized = cookieValue.toUpperCase();
+    if (normalized === 'EEA' || normalized === 'EU' || normalized === 'EUROPE') return true;
+    if (normalized === 'OTHER' || normalized === 'ROW' || normalized === 'NONE') return false;
+    if (/^[A-Z]{2}$/.test(normalized)) return EUROPE_CONSENT_COUNTRIES.has(normalized);
+  }
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return (
+      typeof timeZone === 'string' &&
+      (timeZone.startsWith('Europe/') || EUROPE_EXTRA_TIMEZONES.has(timeZone))
+    );
+  } catch {
+    return false;
+  }
+}
 
 export type CookieConsentDecision = 'granted' | 'denied';
 
@@ -65,7 +157,7 @@ export function CookieConsentBanner({ locale }: { locale: 'en' | 'zh' }) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    setVisible(readCookieConsent() === null);
+    setVisible(readCookieConsent() === null && requiresRegionalCookieConsent());
     const open = () => setVisible(true);
     window.addEventListener(OPEN_COOKIE_CONSENT_EVENT, open);
     return () => window.removeEventListener(OPEN_COOKIE_CONSENT_EVENT, open);
