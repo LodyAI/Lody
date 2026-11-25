@@ -1,10 +1,17 @@
 import {
   type AnalyticsOutcome,
   type AnalyticsSamplingTier,
+  isTelemetryCliType,
+  isTelemetryNativePlatform,
+  isTelemetryPlatform,
+  normalizeTelemetryAgentType,
   pickSampleRate,
   shouldSampleEvent,
+  type TelemetryNativePlatform,
+  type TelemetryPlatform,
 } from '@lody/shared';
 import { readNativeAppInfo } from './native-app-info';
+import { isNativeAppShell } from './native-platform';
 
 export { detectAppDeviceClass } from './device-class';
 export type { AppDeviceClass } from './device-class';
@@ -186,13 +193,52 @@ export function getDurationSinceMs(startMs: number): number | null {
   return roundMs(duration);
 }
 
+export function detectTelemetryPlatform(): {
+  platform: TelemetryPlatform;
+  native_platform?: TelemetryNativePlatform;
+} {
+  if (typeof window !== 'undefined' && window.__LODY_ELECTRON__) {
+    return { platform: 'electron' };
+  }
+  const nativePlatform = readNativeAppInfo().native_platform?.toLowerCase();
+  if (isTelemetryNativePlatform(nativePlatform)) {
+    return { platform: 'mobile', native_platform: nativePlatform };
+  }
+  if (isNativeAppShell()) {
+    return { platform: 'mobile' };
+  }
+  return { platform: 'web' };
+}
+
 export function sanitizePostHogProperties(
   properties: PostHogAnalyticsProperties | null | undefined
 ): PostHogAnalyticsProperties {
-  const userId = properties?.user_id;
-  return typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId)
-    ? { user_id: userId }
-    : {};
+  if (!properties) return {};
+  const safe: PostHogAnalyticsProperties = {};
+  const userId = properties.user_id;
+  if (typeof userId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(userId)) {
+    safe.user_id = userId;
+  }
+  if (isTelemetryPlatform(properties.platform)) {
+    safe.platform = properties.platform;
+  }
+  if (isTelemetryNativePlatform(properties.native_platform)) {
+    safe.native_platform = properties.native_platform;
+  }
+  if (isTelemetryCliType(properties.cli_type)) {
+    safe.cli_type = properties.cli_type;
+  }
+  const agentType = normalizeTelemetryAgentType(properties.agent_type);
+  if (agentType !== undefined) {
+    safe.agent_type = agentType;
+  }
+  if (typeof properties.is_new_user === 'boolean') {
+    safe.is_new_user = properties.is_new_user;
+  }
+  if (properties.outcome === 'success' || properties.outcome === 'failed') {
+    safe.outcome = properties.outcome;
+  }
+  return safe;
 }
 
 export function capturePostHogEvent(

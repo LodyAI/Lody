@@ -10,6 +10,8 @@ import {
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import {
+  clearPostHogLocalStorage,
+  markAccountUsagePromptDecided,
   markUsageOptOutPending,
   readDeviceUsageSharing,
   subscribeUsageSharing,
@@ -32,36 +34,60 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
     session.status === 'authenticated' ? { accountId: session.user.id } : 'skip'
   );
   const account = preference?.data;
+  const loadingAccount = authenticated && preference !== undefined && typeof account !== 'boolean';
   const save = useCloudMutation(cloudOperations.analytics.setUsageSharing);
   const device = useSyncExternalStore(subscribeUsageSharing, readDeviceUsageSharing, () => false);
   const [pending, setPending] = useState(false);
   const [retry, setRetry] = useState<boolean | null>(null);
-  const enabled = device && account !== false;
+  const enabled = loadingAccount ? false : device && account !== false;
   async function change(next: boolean) {
     setPending(true);
     setRetry(null);
     try {
-      // Stop this renderer immediately, including if the server is unreachable.
-      const results = await Promise.allSettled([
-        (async () => {
-          if (!next) writeDeviceUsageSharing(false);
-          if (authenticated) markUsageOptOutPending(session.user.id, !next);
-          else if (window.__LODY_ELECTRON__) markUsageOptOutPending('next-login', !next);
-        })(),
-        (async () => {
-          if (!window.__LODY_ELECTRON__) return;
-          const native = getIpcServices();
-          if (!native) throw new Error('Missing desktop bridge');
-          await native.app.setUsageSharingEnabled(next);
-        })(),
-        authenticated ? save({ enabled: next, accountId: session.user.id }) : undefined,
-      ]);
-      if (results.some((result) => result.status === 'rejected')) {
-        setRetry(next);
+      if (!next) {
+        // Opt-out fails closed: stop this renderer and desktop processes immediately,
+        // even if the server is temporarily unreachable.
+        const results = await Promise.allSettled([
+          (async () => {
+            clearPostHogLocalStorage();
+            writeDeviceUsageSharing(false);
+            if (authenticated) {
+              markAccountUsagePromptDecided(session.user.id);
+              markUsageOptOutPending(session.user.id, true);
+            } else if (window.__LODY_ELECTRON__) {
+              markUsageOptOutPending('next-login', true);
+            }
+          })(),
+          (async () => {
+            if (!window.__LODY_ELECTRON__) return;
+            const native = getIpcServices();
+            if (!native) throw new Error('Missing desktop bridge');
+            await native.app.setUsageSharingEnabled(false);
+          })(),
+          authenticated ? save({ enabled: false, accountId: session.user.id }) : undefined,
+        ]);
+        if (results.some((result) => result.status === 'rejected')) {
+          setRetry(false);
+          return;
+        }
+        if (authenticated) markUsageOptOutPending(session.user.id, false);
         return;
       }
-      if (authenticated) markUsageOptOutPending(session.user.id, false);
-      if (next) writeDeviceUsageSharing(true);
+
+      // Re-enabling waits for the cloud preference before enabling local desktop/renderer capture.
+      if (authenticated) {
+        await save({ enabled: true, accountId: session.user.id });
+        markUsageOptOutPending(session.user.id, false);
+        markAccountUsagePromptDecided(session.user.id);
+      } else if (window.__LODY_ELECTRON__) {
+        markUsageOptOutPending('next-login', false);
+      }
+      if (window.__LODY_ELECTRON__) {
+        const native = getIpcServices();
+        if (!native) throw new Error('Missing desktop bridge');
+        await native.app.setUsageSharingEnabled(true);
+      }
+      writeDeviceUsageSharing(true);
     } catch {
       setRetry(next);
     } finally {
@@ -76,7 +102,7 @@ function SharingPreference({ mobile }: { mobile: boolean }) {
       aria-label={label}
       aria-describedby={descriptionId}
       checked={enabled}
-      disabled={pending}
+      disabled={pending || loadingAccount}
       onCheckedChange={(value) => void change(value)}
     />
   );

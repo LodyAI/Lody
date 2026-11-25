@@ -1,8 +1,6 @@
 import { usageSharingAllowed } from './usage-sharing';
 import { isHandledShortcutTokenError } from './shortcut-token-attempt';
 import type posthogJsType from 'posthog-js';
-import { isElectronRenderer } from './electron';
-import { isNativeAppShell } from './native-platform';
 import { postHogPrivacy } from './posthog-privacy';
 
 export type PostHogClient = typeof posthogJsType;
@@ -84,15 +82,6 @@ function isEvictableEvent(call: DeferredCall): boolean {
   );
 }
 
-function normalizePageViewKey(navigationKey: string): string {
-  if (typeof window === 'undefined') return navigationKey;
-  try {
-    return new URL(navigationKey, window.location.href).href;
-  } catch {
-    return navigationKey;
-  }
-}
-
 const defaultScheduler: DeferredPostHogScheduler = {
   setTimeout: (handler, ms) => setTimeout(handler, ms),
   clearTimeout: (handle) => clearTimeout(handle),
@@ -159,8 +148,6 @@ export function createDeferredPostHogController(
   let idleHandle: IdleHandle | null = null;
   let queueDrainHandle: TimerHandle | null = null;
   let queueDraining = false;
-  let activePageViewKey: string | null = null;
-  let pageViewActive = false;
 
   const cancelInitializationSchedule = () => {
     if (timeoutHandle !== null) {
@@ -356,6 +343,16 @@ export function createDeferredPostHogController(
   };
 
   const enqueueOrInvoke = (method: DeferredMethod, args: unknown[]): unknown => {
+    if (method === 'reset') {
+      // Logout identity cleanup must run even when usage sharing is disabled so the
+      // previous user's persisted distinct_id never carries over to the next account.
+      queuedCalls.length = 0;
+      if (initialized || real().__loaded) {
+        initialized = true;
+        return invoke(method, args);
+      }
+      return undefined;
+    }
     if (disabled || (resolveClient && !usageSharingAllowed())) return undefined;
     if (method === 'captureException' && isHandledShortcutTokenError(args[0])) return undefined;
     // The privacy scrub applies only to the shared posthog-js SDK — the
@@ -431,8 +428,6 @@ export function createDeferredPostHogController(
         initializationFailed = false;
         automaticRetryAvailable = true;
         queuedCalls.length = 0;
-        activePageViewKey = null;
-        pageViewActive = false;
         cancelInitializationSchedule();
         cancelQueueDrain();
         queueDraining = false;
@@ -472,29 +467,14 @@ export function createDeferredPostHogController(
     },
     initializeNow,
     trackPageView(
-      navigationKey: string,
-      timestamp = new Date(),
-      { force = false }: { force?: boolean } = {}
+      _navigationKey: string,
+      _timestamp = new Date(),
+      _options: { force?: boolean } = {}
     ) {
-      // Native navigation already has product events; pageviews add recurring
-      // traffic for every session switch without useful page-level analysis.
-      if (isElectronRenderer() || isNativeAppShell()) return;
-      const normalizedKey = normalizePageViewKey(navigationKey);
-      if (disabled || (!force && pageViewActive && activePageViewKey === normalizedKey)) return;
-      activePageViewKey = normalizedKey;
-      pageViewActive = true;
-      enqueueOrInvoke('capture', ['$pageview', null, { timestamp, send_instantly: true }]);
+      // Pageview/pageleave browsing history is excluded from minimal product telemetry.
     },
-    flushForPageHide(timestamp = new Date()) {
+    flushForPageHide(_timestamp = new Date()) {
       if (disabled) return;
-      if (pageViewActive) {
-        pageViewActive = false;
-        enqueueOrInvoke('capture', [
-          '$pageleave',
-          null,
-          { timestamp, transport: 'sendBeacon', send_instantly: true },
-        ]);
-      }
       initializeNow({ flushSynchronously: true });
       if (!initialized && !real().__loaded) return;
       flushQueueSynchronously();

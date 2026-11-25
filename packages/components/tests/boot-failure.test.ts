@@ -114,6 +114,9 @@ describe('boot failure telemetry boundary', () => {
     const error = new Error('PRIVATE_MESSAGE');
     error.name = 'PRIVATE_PATH';
     captureBootFailedBeacon();
+    expect(bodies).toHaveLength(0);
+    window.localStorage.setItem('lody:usage-sharing', `on:${Date.now()}`);
+    captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
     const wire = await new Promise<string>((resolve) => {
       const reader = new FileReader();
@@ -121,12 +124,15 @@ describe('boot failure telemetry boundary', () => {
       reader.readAsText(bodies[0]!);
     });
     expect(wire).not.toContain('PRIVATE_');
-    expect(JSON.parse(wire).properties).toEqual({ $process_person_profile: false });
+    expect(JSON.parse(wire).properties).toEqual({
+      $process_person_profile: false,
+      platform: 'web',
+    });
     expect(collectBootDiagnostics(error).message).toContain('PRIVATE_MESSAGE');
     window.localStorage.setItem('lody:usage-sharing', 'off');
     captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);
-    window.localStorage.removeItem('lody:usage-sharing');
+    window.localStorage.setItem('lody:usage-sharing', `on:${Date.now()}`);
     vi.stubEnv('VITE_LODY_PLATFORM', 'local');
     captureBootFailedBeacon();
     expect(bodies).toHaveLength(1);

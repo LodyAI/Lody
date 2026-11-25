@@ -111,7 +111,7 @@ function postMobileBootFailedBeacon(): void {
   try {
     const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
     const key = env.VITE_PUBLIC_POSTHOG_KEY;
-    if (!usageSharingAllowed() || !key) return;
+    if (!usageSharingAllowed() || env.VITE_LODY_PLATFORM !== 'cloud' || !key) return;
     const host = env.VITE_PUBLIC_POSTHOG_HOST?.trim().replace(/\/$/, '');
     if (!host) return;
 
@@ -122,6 +122,7 @@ function postMobileBootFailedBeacon(): void {
       properties: {
         // Anonymous pre-auth beacon: do not create/mutate a person profile.
         $process_person_profile: false,
+        platform: 'mobile',
       },
     };
 

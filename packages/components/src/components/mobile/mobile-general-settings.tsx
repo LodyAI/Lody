@@ -1,4 +1,3 @@
-import { UsageSharingRow } from '@/components/settings/usage-sharing-row';
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -692,7 +691,6 @@ export function MobileGeneralSettings() {
         }
         lower={
           <>
-            <UsageSharingRow mobile />
             <MobileSettingsSection title={t('settings.general.sessions.title', 'Sessions')}>
               <MobileSettingsRowGroup>
                 <MobileSettingsRow

@@ -155,7 +155,16 @@ try {
       await page.waitForFunction(() => !!window.POSTHOG_OPTIONS);
       if (!negative) {
         const before = received.length;
-        const initialized = await page.evaluate(() => {
+        const initializedWeb = await page.evaluate(() => {
+          window.scheduleDeferredPostHogInitialization('synthetic-key', {
+            ...window.POSTHOG_OPTIONS,
+            api_host: location.origin,
+          });
+          window.dispatchEvent(new Event('pagehide'));
+          return !!window.posthog.__loaded;
+        });
+        assert.equal(initializedWeb, false);
+        const initializedElectron = await page.evaluate(() => {
           window.__LODY_ELECTRON__ = true;
           window.scheduleDeferredPostHogInitialization('synthetic-key', {
             ...window.POSTHOG_OPTIONS,
@@ -164,7 +173,7 @@ try {
           window.dispatchEvent(new Event('pagehide'));
           return !!window.posthog.__loaded;
         });
-        assert.equal(initialized, false);
+        assert.equal(initializedElectron, false);
         assert.equal(received.length, before);
         await page.evaluate(() => window.writeDeviceUsageSharing(true));
       }
@@ -205,15 +214,21 @@ try {
         page,
         () =>
           page.evaluate(() => {
+            window.posthog.capture('$pageview', { title: document.title }, { send_instantly: true });
             window.posthog.capture(
-              '$pageview',
-              { title: document.title },
+              'session/message_submit_requested',
+              { title: document.title, cli_type: 'builtin', agent_type: 'claude' },
               { send_instantly: true }
             );
           }),
-        '$pageview'
+        'session/message_submit_requested'
       );
       assert.ok(event.properties.$lib_version);
+      if (!negative) {
+        assert.equal(event.properties.platform, 'electron');
+        assert.equal(event.properties.cli_type, 'builtin');
+        assert.equal(event.properties.agent_type, 'claude');
+      }
       const err = await observe(
         page,
         () =>
@@ -246,28 +261,6 @@ try {
           window.boundary.recover();
           window.boundary.close();
         });
-        await page.clock.install();
-        await page.evaluate(async () => {
-          window.stuckProbe = window.createWorkspaceSyncStuckProbe();
-          await window.stuckProbe.render('runtime_missing');
-        });
-        await observe(
-          page,
-          async () => {
-            await page.clock.fastForward(30001);
-            await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-          },
-          'workspace/sync_stuck'
-        );
-        await observe(
-          page,
-          () =>
-            page.evaluate(async () => {
-              await window.stuckProbe.render(null);
-              window.dispatchEvent(new Event('pagehide'));
-            }),
-          'workspace/sync_stuck_resolved'
-        );
       }
       if (!negative) {
         const first = received.length;
@@ -281,9 +274,13 @@ try {
               window.posthog.captureException(new Error('SYNTHETIC_PRIVATE_DISABLED'));
               window.dispatchEvent(new Event('pagehide'));
               window.writeDeviceUsageSharing(true);
-              window.posthog.capture('session/open_in_ide_clicked', {}, { send_instantly: true });
+              window.posthog.capture(
+                'session/chat',
+                { cli_type: 'custom', agent_type: 'SYNTHETIC_PRIVATE_AGENT' },
+                { send_instantly: true }
+              );
             }),
-          'session/open_in_ide_clicked'
+          'session/chat'
         );
         const delivered = received
           .slice(first)
@@ -292,7 +289,8 @@ try {
         assert.ok(
           !delivered.includes('app/active') &&
             !delivered.includes('app/launch') &&
-            !delivered.includes('$exception')
+            !delivered.includes('$exception') &&
+            !delivered.includes('$pageview')
         );
         await page.evaluate(() => window.writeDeviceUsageSharing(false));
         await page.reload();

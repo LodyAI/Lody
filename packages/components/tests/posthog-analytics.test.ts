@@ -7,10 +7,15 @@ import {
 } from '../src/lib/posthog-analytics';
 
 describe('PostHog analytics helpers', () => {
-  it('removes sensitive event properties while keeping opaque analytics ids', () => {
+  it('removes sensitive event properties while keeping opaque ids and minimal distribution enums', () => {
     expect(
       sanitizePostHogProperties({
         user_id: 'user_123',
+        platform: 'electron',
+        cli_type: 'builtin',
+        agent_type: 'claude',
+        is_new_user: true,
+        outcome: 'success',
         workspace_id: 'workspace_123',
         $current_url: 'https://app.lody.ai/acme/session/session_123',
         $pathname: '/acme/session/session_123',
@@ -25,7 +30,24 @@ describe('PostHog analytics helpers', () => {
           ok: true,
         },
       })
-    ).toEqual({ user_id: 'user_123' });
+    ).toEqual({
+      user_id: 'user_123',
+      platform: 'electron',
+      cli_type: 'builtin',
+      agent_type: 'claude',
+      is_new_user: true,
+      outcome: 'success',
+    });
+
+    expect(
+      sanitizePostHogProperties({
+        cli_type: 'custom',
+        agent_type: 'my-private-internal-agent',
+      })
+    ).toEqual({
+      cli_type: 'custom',
+      agent_type: 'other',
+    });
   });
 
   it('keeps PostHog reserved transport keys out of the init property_denylist', () => {

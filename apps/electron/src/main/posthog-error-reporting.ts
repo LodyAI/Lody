@@ -88,6 +88,8 @@ export async function captureElectronMainException(
       properties: {
         $lib: 'lody-electron-main',
         $lib_version: app.getVersion(),
+        $process_person_profile: false,
+        platform: 'electron',
         $exception_list: redactedTelemetryException(context?.extra, error).$exception_list
       }
     })

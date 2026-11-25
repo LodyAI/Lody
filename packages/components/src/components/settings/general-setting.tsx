@@ -1,4 +1,3 @@
-import { UsageSharingRow } from './usage-sharing-row';
 import { useId, useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -853,7 +852,6 @@ export function GeneralSettingsComponent() {
 
         {/* Clear local cache stays last in General settings. */}
         <CompactSection title={t('settings.general.sections.advanced', 'Advanced')}>
-          <UsageSharingRow />
           <ExperimentalFeatureRows />
           <CompactRow
             label={t('settings.cache.clearCache.label')}

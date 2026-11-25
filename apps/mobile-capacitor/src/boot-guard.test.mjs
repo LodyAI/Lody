@@ -207,11 +207,15 @@ void test('pre-React failure beacon excludes an error name carrying private meta
     },
     '@lody/components/lib/native-app-info': { updateNativeAppInfo() {} },
   };
+  let platformEnv = 'cloud';
   const module = new vm.SourceTextModule(source, {
     context,
     initializeImportMeta(meta) {
       meta.env = {
         MODE: 'test',
+        get VITE_LODY_PLATFORM() {
+          return platformEnv;
+        },
         VITE_PUBLIC_POSTHOG_KEY: 'synthetic-key',
         VITE_PUBLIC_POSTHOG_HOST: 'http://127.0.0.1',
       };
@@ -236,9 +240,16 @@ void test('pre-React failure beacon excludes an error name carrying private meta
   assert.equal(beacons.length, 1);
   const wire = await beacons[0].text();
   assert.equal(wire.includes('PRIVATE_'), false);
-  assert.deepEqual(JSON.parse(wire).properties, { $process_person_profile: false });
+  assert.deepEqual(JSON.parse(wire).properties, {
+    $process_person_profile: false,
+    platform: 'mobile',
+  });
   assert.equal(visibleError, error, 'local copyable diagnostics retain the original');
   sharing = false;
+  module.namespace.showMobileBootFailure({}, error);
+  assert.equal(beacons.length, 1);
+  sharing = true;
+  platformEnv = 'local';
   module.namespace.showMobileBootFailure({}, error);
   assert.equal(beacons.length, 1);
 });

@@ -48,17 +48,26 @@ describe('CLI exception ingestion using the real SDK', () => {
     );
   });
 
-  it('discards queued CLI events across opt-out and resumes with new events only', async () => {
-    const { writeUsageSharing } = await import('@lody/shared/node/usage-sharing');
+  it('stays silent by default and follows unified account usage sharing sync', async () => {
+    const { syncAccountUsageSharing, writeUsageSharing } =
+      await import('@lody/shared/node/usage-sharing');
     const { captureCli, initCliAnalytics, flushCliAnalytics } =
       await import('../src/lib/analytics/posthog');
-    const { captureException } = await import('../src/instrument');
+    const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
     initCliAnalytics();
+    expect(isErrorReportingEnabled()).toBe(false);
+    captureCli('app/active');
+    await captureException(new Error('before-account-sync'));
+    await flushCliAnalytics();
+    expect(bodies).toEqual([]);
+
+    syncAccountUsageSharing(true);
+    expect(isErrorReportingEnabled()).toBe(true);
     captureCli('app/active');
     writeUsageSharing(false);
     await captureException(new Error('off'));
     captureCli('cli/diagnostic');
-    writeUsageSharing(true);
+    syncAccountUsageSharing(true);
     await flushCliAnalytics();
     expect(bodies).toEqual([]);
     captureCli('app/launch');
@@ -68,12 +77,15 @@ describe('CLI exception ingestion using the real SDK', () => {
 
   it('keeps the embedded desktop CLI silent until the desktop records an affirmative choice', async () => {
     process.env.LODY_REQUIRE_USAGE_SHARING_CHOICE = '1';
-    const { writeUsageSharing, desktopUsageChoice } =
+    const { syncAccountUsageSharing, writeUsageSharing, desktopUsageChoice } =
       await import('@lody/shared/node/usage-sharing');
     const { captureCli, initCliAnalytics, flushCliAnalytics } =
       await import('../src/lib/analytics/posthog');
     const { captureException } = await import('../src/instrument');
     initCliAnalytics();
+    expect(desktopUsageChoice()).toBeNull();
+    // Server default true must not override an unanswered desktop onboarding prompt.
+    syncAccountUsageSharing(true);
     expect(desktopUsageChoice()).toBeNull();
     captureCli('app/active');
     await captureException(new Error('before-choice'));
@@ -86,6 +98,8 @@ describe('CLI exception ingestion using the real SDK', () => {
   });
 
   it('sends only the fixed error vocabulary, excluding original errors and extra fields', async () => {
+    const { writeUsageSharing } = await import('@lody/shared/node/usage-sharing');
+    writeUsageSharing(true);
     const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
     expect(isErrorReportingEnabled()).toBe(true);
     await captureException(new TypeError('PRIVATE_ATTACHMENT_NAME'), {
@@ -106,25 +120,74 @@ describe('CLI exception ingestion using the real SDK', () => {
     expect(JSON.stringify(bodies)).toContain('redacted_exception');
   });
 
-  it('strips machine, command and error details from real CLI batches', async () => {
+  it('strips machine, command and error details from real CLI batches while retaining normalized agent provider', async () => {
+    const { writeUsageSharing } = await import('@lody/shared/node/usage-sharing');
+    writeUsageSharing(true);
     const { initCliAnalytics, captureCli, flushCliAnalytics } =
       await import('../src/lib/analytics/posthog');
     initCliAnalytics();
+    captureCli('managed_runtime/install_failed', { error_message: 'PRIVATE_DROPPED_EVENT' });
     captureCli(
-      'managed_runtime/install_failed',
+      'acp/agent_config_used',
       {
         machine_id: 'PRIVATE_MACHINE',
         error_message: 'PRIVATE_PATH',
+        cli_type: 'builtin',
+        agent_type: 'codex',
         nested: { command: 'PRIVATE_COMMAND' },
       },
-      { distinctId: 'PRIVATE_OVERRIDE' }
+      { tier: 'A', distinctId: 'PRIVATE_OVERRIDE' }
+    );
+    captureCli(
+      'acp/agent_config_used',
+      {
+        cli_type: 'custom',
+        agent_type: 'PRIVATE_CUSTOM_AGENT',
+      },
+      { tier: 'A' }
     );
     await flushCliAnalytics();
     expect(bodies).toHaveLength(1);
     expect(JSON.stringify(bodies)).not.toContain('PRIVATE_');
     expect(bodies[0]).toMatchObject({
-      batch: [{ event: 'managed_runtime/install_failed', properties: { $lib: 'lody-cli' } }],
+      batch: [
+        {
+          event: 'acp/agent_config_used',
+          properties: {
+            $lib: 'lody-cli',
+            $process_person_profile: false,
+            platform: 'cli',
+            cli_type: 'builtin',
+            agent_type: 'codex',
+          },
+        },
+        {
+          event: 'acp/agent_config_used',
+          properties: {
+            $lib: 'lody-cli',
+            $process_person_profile: false,
+            platform: 'cli',
+            cli_type: 'custom',
+            agent_type: 'other',
+          },
+        },
+      ],
     });
+  });
+
+  it('honors DO_NOT_TRACK=1 for standalone cloud CLI telemetry', async () => {
+    process.env.DO_NOT_TRACK = '1';
+    const { syncAccountUsageSharing } = await import('@lody/shared/node/usage-sharing');
+    syncAccountUsageSharing(true);
+    const { initCliAnalytics, captureCli, flushCliAnalytics } =
+      await import('../src/lib/analytics/posthog');
+    const { captureException, isErrorReportingEnabled } = await import('../src/instrument');
+    initCliAnalytics();
+    expect(isErrorReportingEnabled()).toBe(false);
+    captureCli('app/launch', {}, { tier: 'A' });
+    await captureException(new Error('PRIVATE_DNT'));
+    await flushCliAnalytics();
+    expect(bodies).toEqual([]);
   });
 
   it('keeps local OSS telemetry disabled despite inherited cloud variables', async () => {

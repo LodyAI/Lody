@@ -91,11 +91,11 @@ variable). It grants the same access as an interactive login for the workspaces 
 
 ## Product analytics
 
-Cloud desktop asks whether to share usage data once you sign in, finish onboarding and enter your workspace. Returning users who have completed onboarding see the prompt in their signed-in workspace if they have not chosen. Collection starts only after you select **Allow sharing**. Change your choice in Settings → General → **Share app usage data**. Turning it off stops analytics on this device, including its desktop CLI and daemon when they use the same installation directory. Signed-in changes also control account-side analytics.
+All cloud surfaces (desktop, web, mobile, and CLI) require explicit opt-in consent and follow one unified account-level switch. Desktop asks after you sign in and complete onboarding; web and mobile ask after your first sign-in. Collection starts only after you select **Allow sharing**. Change your choice anytime in Settings → About → **Share app usage data**. The unified switch propagates across desktop, web, mobile, account-side analytics, and signed-in cloud CLI processes.
 
-For a standalone cloud CLI, set `LODY_DISABLE_USAGE_SHARING=1` in its environment to disable its usage analytics.
+For any cloud CLI process, you can also set `LODY_DISABLE_USAGE_SHARING=1` (or `DO_NOT_TRACK=1`) in its environment as a local hard override to keep analytics disabled. Logging out of standalone CLI disables local CLI analytics immediately.
 
-Local builds disable PostHog. When a cloud CLI has analytics configured, it sends registered event names, event time, a random process identifier and library metadata. Automatic errors carry a fixed type and code. Command arguments, machine IDs, repository paths and error messages are excluded from these requests.
+Local builds disable PostHog. When a cloud CLI has analytics enabled, it sends only minimal registered event names, event time, a random process identifier, coarse `platform` / `cli_type` / normalized builtin `agent_type` metadata (`other` for custom agents), and library metadata without creating person profiles. Automatic errors carry a fixed type and code. Command arguments, machine IDs, repository paths, custom agent names and error messages are excluded from these requests.
 
 ## Daemon Mode
 
@@ -256,13 +256,13 @@ lody agent-role update ROLE_ID --name "Code reviewer" \
   --description "" --prompt-prefix "Focus on correctness" --session SESSION_ID
 ```
 
-| Option | Create | Update |
-| --- | --- | --- |
-| `--name <name>` | Required | Optional |
-| `--description <text>` | Optional | Optional; `""` clears it |
+| Option                   | Create   | Update                   |
+| ------------------------ | -------- | ------------------------ |
+| `--name <name>`          | Required | Optional                 |
+| `--description <text>`   | Optional | Optional; `""` clears it |
 | `--prompt-prefix <text>` | Optional | Optional; `""` clears it |
-| `--machine-id <id>` | Required | Not supported |
-| `--agent-config-id <id>` | Required | Not supported |
+| `--machine-id <id>`      | Required | Not supported            |
+| `--agent-config-id <id>` | Required | Not supported            |
 
 Updates require at least one field. Omitted fields stay unchanged. New Roles are private
 and use the bound Agent's default run configuration. Change model, permissions, sharing,
@@ -283,7 +283,6 @@ A create file contains `name`, `machineId`, `agentConfigId`, and optionally `des
 and `promptPrefix`. An update file contains only the changed `name`, `description`, or
 `promptPrefix`. `--file` cannot be combined with direct Role field options. For instructions
 stored in Markdown, pass `--prompt-prefix "$(cat reviewer.md)"` instead.
-
 
 `role.json`:
 
@@ -424,7 +423,6 @@ Exact flags:
 ```bash
 lody session chat --help
 ```
-
 
 ### Input attachments
 
@@ -670,7 +668,7 @@ Before you use them:
 | `lody agent-config list`                 | List configs in a workspace                  | `lody agent-config list --help`                 |
 | `lody agent-config show`                 | Show one config                              | `lody agent-config show --help`                 |
 | `lody agent-config create`               | Create a new config                          | `lody agent-config create --help`               |
-| `lody agent-config import-magpie` | Import local Magpie providers | `lody agent-config import-magpie --help` |
+| `lody agent-config import-magpie`        | Import local Magpie providers                | `lody agent-config import-magpie --help`        |
 | `lody agent-config update`               | Update an existing config                    | `lody agent-config update --help`               |
 | `lody agent-config delete`               | Delete a config                              | `lody agent-config delete --help`               |
 | `lody agent-config refresh-capabilities` | Refresh supported modes, models, and options | `lody agent-config refresh-capabilities --help` |

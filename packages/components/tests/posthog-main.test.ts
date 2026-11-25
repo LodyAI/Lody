@@ -67,6 +67,8 @@ it('sends a redacted main exception through the real SDK', async () => {
     batch: [
       {
         properties: {
+          $process_person_profile: false,
+          platform: 'electron',
           $exception_list: [{ type: 'RangeError', value: 'forbidden' }],
         },
       },

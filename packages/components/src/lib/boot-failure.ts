@@ -156,6 +156,14 @@ function postBootBeaconEvent(eventName: string): void {
     const config = getBootBeaconConfig();
     if (!config) return;
 
+    const platform =
+      typeof window !== 'undefined' && window.__LODY_ELECTRON__
+        ? 'electron'
+        : typeof window !== 'undefined' &&
+            (window as Window & { __LODY_NATIVE__?: boolean }).__LODY_NATIVE__
+          ? 'mobile'
+          : 'web';
+
     const payload = {
       api_key: config.key,
       event: eventName,
@@ -164,6 +172,7 @@ function postBootBeaconEvent(eventName: string): void {
         // $process_person_profile=false: these anonymous pre-auth beacons must
         // not create or mutate a person profile before the user is identified.
         $process_person_profile: false,
+        platform,
       },
     };
 
@@ -626,7 +635,6 @@ export function renderBootFailure(
       copyButton.textContent = copied ? copy.copied : copy.copy;
     };
     copyButton.addEventListener('click', () => {
-      postBootBeaconEvent('app/boot_failure_copy_clicked');
       copyButton.disabled = true;
       void copyToClipboard(diag.copyableText).then((ok) => {
         copyButton.disabled = false;
@@ -648,7 +656,6 @@ export function renderBootFailure(
 
   if (reloadButton) {
     reloadButton.addEventListener('click', () => {
-      postBootBeaconEvent('app/boot_failure_reload_clicked');
       recordClientLog('warn', 'boot.failure_reload_clicked');
       void flushClientLog();
       reloadButton.disabled = true;

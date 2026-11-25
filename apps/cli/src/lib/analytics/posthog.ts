@@ -1,7 +1,10 @@
 import { usageSharingRevision } from '@lody/shared/node/usage-sharing';
 import {
   getServerNow,
+  isAgentProviderTelemetryEvent,
   isPostHogProductEvent,
+  isTelemetryCliType,
+  normalizeTelemetryAgentType,
   shouldSampleEvent,
   type AnalyticsSamplingTier,
 } from '@lody/shared';
@@ -86,7 +89,7 @@ export function isCliAnalyticsEnabled(): boolean {
  */
 export function captureCli(
   eventName: string,
-  _properties?: Record<string, unknown>,
+  properties?: Record<string, unknown>,
   opts?: { tier?: AnalyticsSamplingTier; sampleRate?: number; distinctId?: string }
 ): void {
   try {
@@ -102,7 +105,21 @@ export function captureCli(
     if (!shouldSampleEvent(tier, opts?.sampleRate)) return;
 
     const serverNow = getServerNow();
-    const props = { $lib: 'lody-cli', $lib_version: pkg.version };
+    const props: Record<string, unknown> = {
+      $lib: 'lody-cli',
+      $lib_version: pkg.version,
+      $process_person_profile: false,
+      platform: 'cli',
+    };
+    if (isAgentProviderTelemetryEvent(eventName) && properties) {
+      if (isTelemetryCliType(properties.cli_type)) {
+        props.cli_type = properties.cli_type;
+      }
+      const agentType = normalizeTelemetryAgentType(properties.agent_type);
+      if (agentType !== undefined) {
+        props.agent_type = agentType;
+      }
+    }
 
     state.buffer.push({
       event: eventName,

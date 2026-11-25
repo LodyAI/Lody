@@ -25,7 +25,7 @@ import {
   themeRadius,
   themeSpace,
 } from '../style/theme-scale.stylex';
-import { usePostHog } from '@posthog/react';
+import { usePostHog } from '@/lib/posthog-context';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
 import {

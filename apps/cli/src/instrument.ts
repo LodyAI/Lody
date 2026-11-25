@@ -34,7 +34,6 @@ function resolveHost(): string {
 const runtimeEnv = getRuntimeEnv();
 const apiKey = resolveApiKey();
 const errorReportingEnabled = runtimeEnv !== 'dev' && !!apiKey;
-const distinctId = randomUUID();
 
 let client: PostHog | null = null;
 
@@ -73,10 +72,12 @@ export const captureException = (
     client ??= new PostHog(apiKey, { host: resolveHost(), fetchRetryCount: 0, flushAt: 1 });
     const pending = client.captureImmediate({
       event: '$exception',
-      distinctId,
+      distinctId: randomUUID(),
       properties: {
         $lib: 'lody-cli',
         $lib_version: packageVersion,
+        $process_person_profile: false,
+        platform: 'cli',
         $exception_list: redactedTelemetryException(context?.extra, error).$exception_list,
       },
     });

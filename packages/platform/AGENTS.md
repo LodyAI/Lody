@@ -31,13 +31,10 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 
 ## Telemetry privacy
 
-- Cloud Electron and its embedded CLI require an explicit device choice before collecting usage data. Other cloud surfaces retain their configured default. Honor opt-out before collection and delivery, including queued events, early boot reports and account-side analytics. Local composition always disables telemetry.
+- All cloud surfaces (desktop, web, mobile, and CLI) require explicit opt-in consent after sign-in and follow one unified account-level usage sharing switch. Honor opt-out before collection and delivery, including queued events, early boot reports, local PostHog storage, CLI daemons, and account-side analytics. Local composition always disables telemetry.
 
-- Disable session replay, DOM autocapture, network recording and person or workspace profile updates in every workspace.
-- Project analytics at the upload boundary, including queued requests. Allow fixed
-  event names, opaque identifiers, SDK/device/session metadata and fixed exception
-  categories. Drop application context, page titles and URLs, free text, stacks
-  and nested properties. User-submitted support reports have a separate delivery path.
+- Disable session replay, DOM autocapture, network recording, pageview/pageleave browsing capture, analytics cookies, and workspace or person profile property updates in every workspace.
+- Project analytics at the upload boundary, including queued requests. Allow only the minimal registered event set (message submissions, sign-ups, launches/active heartbeats, agent provider usage, boot failures, `$identify`, and `$exception`), opaque identifiers, coarse platform/OS/SDK metadata, fixed `cli_type` and normalized builtin `agent_type` (`other` for custom/registry), boolean `is_new_user` on OAuth return, and fixed exception categories. Drop application context, page titles and URLs, free text, stacks and nested properties. User-submitted support reports have a separate delivery path.
 
 ## Streams token capability
 

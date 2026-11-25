@@ -85,11 +85,11 @@ workspace 访问权限。
 
 ## 产品分析
 
-云版桌面会在登录、完成全部首次引导并进入工作区后询问是否分享使用数据。升级后尚未选择的用户会在登录并进入工作区后看到提示。只有选择「允许分享」才开始采集，之后可在「设置 → 通用 → 分享应用使用数据」中更改。关闭后，此设备停止采集使用数据，同一安装目录下的桌面 CLI 和后台进程也会遵守该选择。登录后保存的设置还会控制该账户的云端统计。
+所有云版客户端（桌面端、Web 端、移动端与 CLI）均需登录后明确同意，并统一受同一个账号级开关控制。桌面端会在登录并完成首次引导后询问，Web 端与移动端会在首次登录后询问；只有选择「允许分享」才开始采集，之后可随时在「设置 → 关于 → 分享应用使用数据」中更改。该统一开关会在桌面端、Web 端、移动端、云端统计以及已登录的云版 CLI 进程间保持一致。
 
-独立运行云版 CLI 时，可在该进程的环境中设置 `LODY_DISABLE_USAGE_SHARING=1` 关闭使用统计。
+在任意云版 CLI 进程中，仍可设置环境变量 `LODY_DISABLE_USAGE_SHARING=1`（或 `DO_NOT_TRACK=1`）作为本地强制关闭覆盖；独立 CLI 执行 `lody logout` 时也会立即停用本地统计。
 
-本地版关闭 PostHog。启用分析的云版 CLI 可以发送已登记的事件名、时间、进程随机标识和库信息。自动异常只保留固定类型和错误码。命令参数、机器 ID、仓库路径和错误原文都会在上传前过滤。
+本地版关闭 PostHog。启用分析的云版 CLI 仅发送精简后的已登记事件名、时间、进程随机标识、粗粒度平台与内置 Agent 类型枚举（自定义名称归为 `other`）和库信息，不创建用户画像。自动异常只保留固定类型和错误码。命令参数、机器 ID、仓库路径、自定义 Agent 名称和错误原文都会在上传前过滤。
 
 ## Daemon 模式
 
@@ -238,13 +238,13 @@ lody agent-role update ROLE_ID --name "代码审查员" \
   --description "" --prompt-prefix "新的默认指令" --session SESSION_ID
 ```
 
-| 参数 | 创建 | 更新 |
-| --- | --- | --- |
-| `--name <name>` | 必填 | 可选 |
-| `--description <text>` | 可选 | 可选；`""` 表示清空 |
+| 参数                     | 创建 | 更新                |
+| ------------------------ | ---- | ------------------- |
+| `--name <name>`          | 必填 | 可选                |
+| `--description <text>`   | 可选 | 可选；`""` 表示清空 |
 | `--prompt-prefix <text>` | 可选 | 可选；`""` 表示清空 |
-| `--machine-id <id>` | 必填 | 不支持 |
-| `--agent-config-id <id>` | 必填 | 不支持 |
+| `--machine-id <id>`      | 必填 | 不支持              |
+| `--agent-config-id <id>` | 必填 | 不支持              |
 
 更新至少传一个字段，省略的字段保持不变。新角色默认私有，使用所绑定 Agent 的默认运行配置。
 模型、权限、共享及其他设置仍可在角色编辑器中修改。
@@ -264,7 +264,6 @@ lody agent-role update ROLE_ID --file patch.json --session SESSION_ID
 `promptPrefix`。更新文件只包含要修改的 `name`、`description` 或 `promptPrefix`。
 `--file` 不能与角色字段参数混用。如果指令保存在 Markdown 中，可以直接传
 `--prompt-prefix "$(cat reviewer.md)"`。
-
 
 `role.json`:
 
@@ -397,7 +396,6 @@ LODY_SESSION_ID=<sessionId> lody session chat --prompt "继续处理上一个 pa
 ```bash
 lody session chat --help
 ```
-
 
 ### 输入附件
 
@@ -634,7 +632,7 @@ Agent config 命令对应 Web 端的[代理配置](/zh/docs/quickstart)。
 | `lody agent-config list`                 | 列出 workspace 中的 agent config           | `lody agent-config list --help`                 |
 | `lody agent-config show`                 | 查看单个 agent config                      | `lody agent-config show --help`                 |
 | `lody agent-config create`               | 创建新的 agent config                      | `lody agent-config create --help`               |
-| `lody agent-config import-magpie` | 导入本机 Magpie Provider | `lody agent-config import-magpie --help` |
+| `lody agent-config import-magpie`        | 导入本机 Magpie Provider                   | `lody agent-config import-magpie --help`        |
 | `lody agent-config update`               | 更新已有 agent config                      | `lody agent-config update --help`               |
 | `lody agent-config delete`               | 删除 agent config                          | `lody agent-config delete --help`               |
 | `lody agent-config refresh-capabilities` | 刷新支持的 modes、models 与 config options | `lody agent-config refresh-capabilities --help` |

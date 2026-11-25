@@ -7,9 +7,21 @@ function preferencePath(): string {
   return join(getLodyDataDir('cloud'), 'usage-sharing');
 }
 
-// The enabled revision also fences batches buffered before a disable/enable cycle.
+function isEnvUsageSharingDisabled(): boolean {
+  const disable = process.env.LODY_DISABLE_USAGE_SHARING?.trim().toLowerCase();
+  return disable === '1' || disable === 'true' || process.env.DO_NOT_TRACK?.trim() === '1';
+}
+
+function isDesktopSupervisedProcess(): boolean {
+  return (
+    process.env.LODY_REQUIRE_USAGE_SHARING_CHOICE === '1' ||
+    process.env.LODY_ELECTRON_BOOTSTRAP === '1' ||
+    !!process.versions.electron
+  );
+}
+
 function storedRevision(): string | null {
-  if (process.env.LODY_DISABLE_USAGE_SHARING === '1') return null;
+  if (isEnvUsageSharingDisabled()) return null;
   try {
     const choice = readFileSync(preferencePath(), 'utf8');
     return /^on:[0-9a-f-]{36}$/.test(choice) ? choice : null;
@@ -23,11 +35,7 @@ export function desktopUsageChoice(): boolean | null {
   return revision === 'default' ? null : revision !== null;
 }
 
-export function usageSharingRevision(
-  requireChoice = process.env.LODY_REQUIRE_USAGE_SHARING_CHOICE === '1' ||
-    process.env.LODY_ELECTRON_BOOTSTRAP === '1' ||
-    !!process.versions.electron
-): string | null {
+export function usageSharingRevision(requireChoice = true): string | null {
   const revision = storedRevision();
   return requireChoice && revision === 'default' ? null : revision;
 }
@@ -40,4 +48,16 @@ export function writeUsageSharing(enabled: boolean): void {
   const temporary = path + '.' + revision;
   writeFileSync(temporary, enabled ? 'on:' + revision : 'off', { mode: 0o600 });
   renameSync(temporary, path);
+}
+
+export function syncAccountUsageSharing(enabled: boolean): void {
+  if (isEnvUsageSharingDisabled()) return;
+  if (!enabled) {
+    writeUsageSharing(false);
+    return;
+  }
+  if (isDesktopSupervisedProcess() && desktopUsageChoice() === null) {
+    return;
+  }
+  writeUsageSharing(true);
 }

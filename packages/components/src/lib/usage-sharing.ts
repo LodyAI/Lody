@@ -1,5 +1,6 @@
 const key = 'lody:usage-sharing';
 const accountKey = 'lody:usage-sharing-account-blocked';
+const accountDecisionPrefix = 'lody:usage-sharing:account:';
 let sessionBlocked = false;
 let accountAllowed = true;
 
@@ -14,7 +15,45 @@ export function readDeviceUsageChoice(): boolean | null {
 }
 
 export function readDeviceUsageSharing(): boolean {
-  return readDeviceUsageChoice() ?? !window.__LODY_ELECTRON__;
+  return readDeviceUsageChoice() === true;
+}
+
+export function hasAccountUsagePromptDecision(accountId: string): boolean {
+  if (typeof window === 'undefined' || !accountId) return false;
+  try {
+    return window.localStorage.getItem(accountDecisionPrefix + accountId) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markAccountUsagePromptDecided(accountId: string): void {
+  if (typeof window === 'undefined' || !accountId) return;
+  try {
+    window.localStorage.setItem(accountDecisionPrefix + accountId, '1');
+  } catch {
+    // Ignore storage failures; in-memory state remains fail-closed.
+  } finally {
+    window.dispatchEvent(new Event(key));
+  }
+}
+
+export function clearPostHogLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const toRemove: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index);
+      if (storageKey && storageKey.startsWith('ph_')) {
+        toRemove.push(storageKey);
+      }
+    }
+    for (const storageKey of toRemove) {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Ignore unavailable storage.
+  }
 }
 
 export function usageSharingAllowed(): boolean {
@@ -32,7 +71,14 @@ export function setAccountUsageAllowed(allowed: boolean): void {
 
 export function subscribeUsageSharing(listener: () => void): () => void {
   const storage = (event: StorageEvent) => {
-    if (event.key === null || event.key === key) listener();
+    if (
+      event.key === null ||
+      event.key === key ||
+      event.key === accountKey ||
+      event.key.startsWith(accountDecisionPrefix)
+    ) {
+      listener();
+    }
   };
   window.addEventListener(key, listener);
   window.addEventListener('storage', storage);
@@ -45,6 +91,7 @@ export function subscribeUsageSharing(listener: () => void): () => void {
 export function writeDeviceUsageSharing(enabled: boolean): void {
   sessionBlocked = !enabled;
   try {
+    if (!enabled) clearPostHogLocalStorage();
     window.localStorage.setItem(key, enabled ? 'on:' + Date.now() : 'off');
     sessionBlocked = false;
   } catch (error) {

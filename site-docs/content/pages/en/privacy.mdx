@@ -5,10 +5,11 @@ description: How Lody collects, uses, and protects personal data.
 
 # Privacy Policy
 
-Last updated: March 1, 2026
+Last updated: November 25, 2026
 
 This Privacy Policy explains how LoroHub LLC ("Lody", "we", "us", or "our") collects, uses,
-stores, and protects information when you use our Services.
+stores, and protects information when you use our Services, including our website, web app,
+desktop app, mobile apps, and CLI.
 
 ## 1. Data Controller and Contact
 
@@ -21,13 +22,21 @@ Based on current product behavior, we collect the following categories of data:
 
 ### 2.1 Account and Authentication Data
 
-- GitHub third-party login information (such as account identifier, profile basics, and email
-  available from GitHub)
+- Account identifiers, profile basics, and email address provided via GitHub OAuth or email
+  authentication
+- Billing and subscription status metadata (payment card details are processed directly by Stripe
+  and are not stored by Lody)
 
-### 2.2 Device and Technical Data
+### 2.2 Device, Analytics, and Technical Data (Opt-In)
 
-- Device platform and operating system information
-- Basic technical diagnostics and usage metadata
+- When you explicitly allow usage sharing, we collect minimal product usage counts (such as
+  sign-ups, message submission counts, coarse platform/OS, and built-in agent provider category)
+  and redacted error categories. Conversation content, repository paths, URLs, page titles, custom
+  agent names, and raw error stacks are excluded from product analytics.
+- Product analytics resolves coarse country-level region before discarding raw client IP addresses
+  prior to storage.
+- On our public website, optional analytics cookies are disabled by default and enabled only after
+  you accept via the Cookie Consent Banner.
 
 ### 2.3 Service Logs
 
@@ -35,72 +44,103 @@ Based on current product behavior, we collect the following categories of data:
 
 ### 2.4 User Content
 
-- Conversation content and related workflow context you submit through the Services
+- Conversation content and related workflow context you submit through the Services (workspaces
+  with end-to-end encryption enabled keep conversation content encrypted on your devices)
 
-## 3. How We Use Information
+## 3. Lawful Bases for Processing (GDPR)
 
-We use information to:
+Where the EU/UK General Data Protection Regulation (GDPR) applies, we process personal data under
+the following lawful bases:
 
-- Authenticate users and protect account security
-- Provide core collaboration and code workflow features
-- Operate, maintain, troubleshoot, and improve the Services
-- Measure product usage and performance
-- Detect abuse, prevent attacks, and enforce Terms
-- Comply with legal obligations
+- **Contract performance (Art. 6(1)(b))**: authenticating your account, providing core workspace
+  and collaboration features, and managing paid subscriptions
+- **Consent (Art. 6(1)(a))**: optional product usage data sharing and optional website analytics
+  cookies; you may withdraw consent at any time without affecting prior lawful processing
+- **Legitimate interests (Art. 6(1)(f))**: securing the Services, preventing abuse, and diagnosing
+  operational outages
+- **Legal obligations (Art. 6(1)(c))**: tax, accounting, and compliance duties required by law
 
-## 4. Third-Party Services and Processing
+## 4. Cookies and Local Storage
 
-We use trusted service providers to run parts of the Services:
+- **Essential cookies and storage**: required to maintain sign-in sessions, theme/language settings,
+  and core app state.
+- **Website analytics cookies (optional)**: disabled by default on `lody.ai` (advertising and
+  ad-personalization storage remain disabled). Analytics cookies are set only if you accept in the
+  Cookie Consent Banner, and can be changed anytime via **Cookie settings** in the website footer.
+- **Product analytics storage**: Lody apps do not set product analytics cookies and do not
+  initialize product analytics until you sign in and opt in.
+
+## 5. Third-Party Services and Processing
+
+We use trusted service providers (sub-processors) to run parts of the Services:
 
 - Cloudflare Pages and Cloudflare R2 (hosting and storage)
 - Convex (backend infrastructure)
-- GitHub (third-party login integration)
-- Google Analytics (website analytics)
-- PostHog (product analytics)
-- Sentry (error monitoring)
+- GitHub (third-party login and repository integration)
+- Stripe (subscription billing and payment processing)
+- Google Analytics (optional public website analytics)
+- PostHog (opt-in minimal product analytics and redacted error reporting)
 
-These providers process data under their own terms and privacy policies.
+These providers process data under their own terms, privacy policies, and applicable data
+processing agreements (DPAs).
 
-## 5. Cross-Border Transfer
+## 6. Cross-Border Transfer
 
-Under current operations, we do not intentionally transfer your personal data across borders.
-If this changes, we will update this policy and implement appropriate safeguards.
+Our cloud infrastructure and service providers (including PostHog, Convex, Cloudflare, Stripe, and
+Google) may process data in the United States or other jurisdictions where they operate. Where
+required by GDPR or other applicable laws, we rely on recognized transfer mechanisms such as
+Standard Contractual Clauses (SCCs), the EU-U.S. Data Privacy Framework (DPF), vendor DPAs, and
+strict data minimization controls.
 
-## 6. Data Retention
+## 7. Data Retention
 
-- Data is stored until you request deletion or as needed for operational/legal purposes.
-- You may request data export and account/data deletion.
-- After deletion is requested and confirmed, data is permanently cleared within 30 days.
+- **Account and workspace data**: retained while your account remains active; permanently cleared
+  within 30 days after a confirmed deletion request.
+- **Product analytics (PostHog)**: minimal usage events are retained for up to 12 months (or
+  deleted earlier upon account deletion request); raw client IP addresses are discarded before
+  storage.
+- **Operational and security logs**: retained for up to 90 days unless longer retention is required
+  for security investigation or legal compliance.
+- **Billing records**: retained as required by applicable tax and accounting laws.
 
-## 7. Your Choices and Rights
+## 8. Your Choices and Rights
 
-You can:
+You have the right to:
 
-- Request a copy/export of your data
-- Request deletion of your data
-- Contact us to request corrections where applicable
+- **Control usage data sharing uniformly across your account**: choose whether to share usage data
+  after your first sign-in on desktop, web, or mobile, change the unified account-level switch
+  anytime in Settings → About → **Share app usage data** (applies across desktop, web, mobile,
+  and synced CLI), or override CLI telemetry via `LODY_DISABLE_USAGE_SHARING=1` or `DO_NOT_TRACK=1`
+- **Manage website cookies**: accept or reject optional analytics cookies via the Cookie Consent
+  Banner or **Cookie settings** in the website footer
+- **Access and export** a copy of your personal data (Art. 15 & Art. 20 data portability)
+- **Rectify** inaccurate personal data (Art. 16)
+- **Erase** your account and personal data (Art. 17)
+- **Restrict or object** to processing based on legitimate interests (Art. 18 & Art. 21)
+- **Withdraw consent** at any time for consent-based processing (Art. 7(3))
+- **Lodge a complaint** with your local data protection supervisory authority (Art. 77)
 
-To make a request, use the [Account and Data Deletion page](/account-deletion) or email
+To make a privacy request, use the [Account and Data Deletion page](/account-deletion) or email
 contact@lody.ai.
 
-## 8. Security
+## 9. Security
 
 We use reasonable technical and organizational safeguards to protect information.
 No system is perfectly secure, but we work to reduce risk and respond to incidents promptly.
 
-## 9. Children and Minors
+## 10. Children and Minors
 
-The Services are available to both individual and business users and do not set a fixed minimum
-age in this policy.
-If local law requires guardian consent for minors, users are responsible for ensuring valid consent
-before use.
+The Services are not directed to children under 16 years of age (or the minimum digital consent age
+required in your jurisdiction, where higher), and we do not knowingly collect personal data from
+them. If you believe a child has provided personal data without valid guardian consent, contact
+contact@lody.ai so we can delete it.
 
-## 10. Changes to This Privacy Policy
+## 11. Changes to This Privacy Policy
 
 We may update this Privacy Policy from time to time.
 When we make material changes, we will update the "Last updated" date and may provide additional
 notice.
 
-## 11. Contact
+## 12. Contact
 
 For privacy requests or questions, contact: contact@lody.ai

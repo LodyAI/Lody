@@ -75,6 +75,8 @@ function isResizeObserverLoopPostHogEvent(event: {
 export const POSTHOG_OPTIONS: PostHogOptions = {
   ...(POSTHOG_HOST ? { api_host: POSTHOG_HOST } : {}),
   defaults: '2026-01-30',
+  // Avoid setting analytics cookies on the domain; keep identity scoped to localStorage.
+  persistence: 'localStorage',
   loaded: (client) => {
     syncSdkUsageSharing(client, usageSharingAllowed());
   },

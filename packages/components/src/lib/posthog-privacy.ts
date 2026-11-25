@@ -1,7 +1,15 @@
 import { usageSharingAllowed, usageSharingSince } from './usage-sharing';
-import { isPostHogProductEvent } from '@lody/shared/analytics';
+import {
+  isAgentProviderTelemetryEvent,
+  isPostHogProductEvent,
+  isTelemetryCliType,
+  isTelemetryNativePlatform,
+  isTelemetryPlatform,
+  normalizeTelemetryAgentType,
+} from '@lody/shared/analytics';
 import type { PostHog } from 'posthog-js';
 import { redactedTelemetryException } from '@lody/platform/telemetry';
+import { detectTelemetryPlatform } from './posthog-analytics';
 
 type Event = {
   event: string;
@@ -11,9 +19,9 @@ type Event = {
   offset?: number;
 };
 
-// These PostHog properties describe the SDK, device and analytics session.
-// Never forward arbitrary $-prefixed fields: they include URLs, element text,
-// workspace groups, legacy person updates and replay/network payloads.
+// Minimal PostHog SDK/device fields required for ingestion and coarse platform/OS breakdown.
+// Never forward arbitrary $-prefixed fields (URLs, titles, element text, workspace groups,
+// screen/viewport/timezone fingerprints, legacy person updates, or replay/network payloads).
 const sdkFields = new Set([
   'token',
   'distinct_id',
@@ -26,31 +34,20 @@ const sdkFields = new Set([
   '$process_person_profile',
   '$lib',
   '$lib_version',
-  '$browser',
-  '$browser_version',
-  '$browser_language',
-  '$browser_language_prefix',
   '$device_type',
-  '$device',
-  '$device_model',
   '$os',
   '$os_version',
-  '$screen_width',
-  '$screen_height',
-  '$viewport_width',
-  '$viewport_height',
-  '$timezone',
-  '$timezone_offset',
-  '$geoip_disable',
 ]);
 
 function projectEvent(event: Event): Event | null {
   if (!usageSharingAllowed()) return null;
   if (
     !isPostHogProductEvent(event.event) &&
-    !['$identify', '$exception', '$pageview', '$pageleave'].includes(event.event)
-  )
+    event.event !== '$identify' &&
+    event.event !== '$exception'
+  ) {
     return null;
+  }
   const distinctId = event.properties?.distinct_id;
   const validId = (value: unknown) =>
     typeof value === 'string' && /^(?:\$device:)?[a-zA-Z0-9_-]{1,128}$/.test(value);
@@ -70,6 +67,38 @@ function projectEvent(event: Event): Event | null {
       properties[key] = value;
     }
   }
+
+  // Always attach coarse platform distribution ('web' | 'electron' | 'mobile' | 'cli').
+  const detectedPlatform = detectTelemetryPlatform();
+  properties.platform = isTelemetryPlatform(event.properties?.platform)
+    ? event.properties.platform
+    : detectedPlatform.platform;
+  const nativePlatform = isTelemetryNativePlatform(event.properties?.native_platform)
+    ? event.properties.native_platform
+    : detectedPlatform.native_platform;
+  if (properties.platform === 'mobile' && nativePlatform) {
+    properties.native_platform = nativePlatform;
+  }
+
+  if (isAgentProviderTelemetryEvent(event.event)) {
+    if (isTelemetryCliType(event.properties?.cli_type)) {
+      properties.cli_type = event.properties.cli_type;
+    }
+    const agentType = normalizeTelemetryAgentType(event.properties?.agent_type);
+    if (agentType !== undefined) {
+      properties.agent_type = agentType;
+    }
+  }
+
+  if (event.event === 'auth/oauth_returned') {
+    if (typeof event.properties?.is_new_user === 'boolean') {
+      properties.is_new_user = event.properties.is_new_user;
+    }
+    if (event.properties?.outcome === 'success' || event.properties?.outcome === 'failed') {
+      properties.outcome = event.properties.outcome;
+    }
+  }
+
   if (event.event === '$exception') {
     const first = event.properties?.$exception_list;
     const existing = Array.isArray(first) ? first[0]?.value : undefined;
