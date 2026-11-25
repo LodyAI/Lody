@@ -595,7 +595,7 @@ describe('Operation Inbox execution boundary', () => {
           ok: true,
           ownerSessionId: f.message.sessionId,
           workspaceRoot: root,
-          allChangesBaseBranch: 'main',
+          allChanges: { scope: 'branch', baseBranch: 'main' },
         }),
       });
       f.deps.turnFinalization.persistCodeCollabTurnDiffs = async (sessionId, turnId) => {

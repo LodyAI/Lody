@@ -238,7 +238,7 @@ import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
 import type { SemanticActionRouter } from '@/lib/commands/semantic-action-router';
-import { allChangesDiffScopeAtom, semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
+import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getBasename } from '@/lib';
 
 import {
@@ -1848,13 +1848,6 @@ const SessionDetail = ({
   const activeSessionMachineId = activeSession?.machineId ?? null;
   const { machine: sessionMachine, machineFlockRows } =
     useResolvedMachineMeta(activeSessionMachineId);
-  const allChangesDiffScope = useAtomValue(allChangesDiffScopeAtom);
-  const setAllChangesDiffScope = useSetAtom(allChangesDiffScopeAtom);
-  const allChangesScopeSupported = machineSupportsProtocolCapability(
-    sessionMachine,
-    MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope
-  );
-  const effectiveAllChangesDiffScope = allChangesScopeSupported ? allChangesDiffScope : 'branch';
   const { canForkSession, canForkSessionToWorktree } = useSessionForkCapabilities(
     activeSessionMachineId,
     sessionMachine?.acpCapabilities
@@ -2138,6 +2131,10 @@ const SessionDetail = ({
   );
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
+  const allChangesScopeSupported = machineSupportsProtocolCapability(
+    sessionMachine,
+    MACHINE_PROTOCOL_CAPABILITIES.codeCollabAllChangesScope
+  );
   const activeSessionProject = activeSession?.project;
   const activeSessionProjectKind = activeSessionProject?.kind ?? null;
   const activeSessionProjectRepoFullName =
@@ -6228,9 +6225,7 @@ const SessionDetail = ({
         focusComment={tab.focusComment}
         focusRequestSeq={tab.focusRequestSeq}
         mode={tab.mode ?? 'conversation'}
-        allChangesScope={effectiveAllChangesDiffScope}
         allChangesScopeSupported={allChangesScopeSupported}
-        onAllChangesScopeChange={setAllChangesDiffScope}
         refreshToken={(tab.mode ?? 'conversation') === 'base' ? allChangesRefreshToken : undefined}
         fileDiffs={(tab.mode ?? 'conversation') === 'base' ? [] : resolveTurnFileDiffs(tab.turnId)}
         fileDiffsPending={!sessionDiffReady}
@@ -6775,9 +6770,7 @@ const SessionDetail = ({
               focusComment={mobileDiffState.focusComment}
               focusRequestSeq={mobileDiffState.focusRequestSeq}
               mode={mobileDiffState.mode ?? 'conversation'}
-              allChangesScope={effectiveAllChangesDiffScope}
               allChangesScopeSupported={allChangesScopeSupported}
-              onAllChangesScopeChange={setAllChangesDiffScope}
               refreshToken={
                 (mobileDiffState.mode ?? 'conversation') === 'base'
                   ? allChangesRefreshToken

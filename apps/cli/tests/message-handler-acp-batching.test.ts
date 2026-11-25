@@ -2955,7 +2955,7 @@ describe('MessageHandler ACP batching', () => {
           ok: true,
           ownerSessionId: sessionId,
           workspaceRoot: '/tmp',
-          allChangesBaseBranch: 'main',
+          allChanges: { scope: 'branch', baseBranch: 'main' },
         })
         .mockRejectedValueOnce(new Error('transient persistence failure'))
         .mockResolvedValueOnce({ ok: false, code: 'workspace_unavailable' });
