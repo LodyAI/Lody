@@ -1229,6 +1229,7 @@ export function MachineAgentSettings({
       .map((item) => ({
         id: item.machine.id,
         name: item.machine.name || item.machine.id,
+        os: item.machine.os,
         isOwn: true,
         isOnline: presumedOnlineMachineIds.has(item.machine.id),
         cliVersion: item.machine.cliVersion,

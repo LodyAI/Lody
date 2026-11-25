@@ -26,10 +26,11 @@ const capabilities: Record<string, MachineLifecycleCapability> = {
 const machine = (
   id: string,
   name: string,
-  overrides: { isOnline?: boolean; running?: number } = {}
+  overrides: { isOnline?: boolean; os?: string; running?: number } = {}
 ) => ({
   id,
   name,
+  os: overrides.os ?? 'linux',
   isOwn: true,
   isOnline: overrides.isOnline ?? true,
   cliVersion: '1.4.0',
@@ -45,10 +46,10 @@ const meta = {
     onOpenChange: () => {},
     latestByChannel: { stable: '1.5.0' },
     machines: [
-      machine('studio-mac', 'Studio Mac', { running: 2 }),
+      machine('studio-mac', 'Studio Mac', { os: 'darwin', running: 2 }),
       machine('build-box', 'Build box'),
       machine('laptop', 'Laptop'),
-      machine('windows-pc', 'Windows PC'),
+      machine('windows-pc', 'Windows PC', { os: 'win32' }),
       machine('home-server', 'Home server', { isOnline: false }),
     ],
     probe: async (machineId: string) => ({ lifecycle: capabilities[machineId] ?? null }),
