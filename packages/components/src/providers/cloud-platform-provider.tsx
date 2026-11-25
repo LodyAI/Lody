@@ -271,6 +271,8 @@ export function CloudPlatformProvider({
               createMemberInvitation: (input) => native.createMemberInvitation(input),
               prepareMemberJoin: (offer) => native.prepareMemberJoin(offer),
               pendingMemberJoin: (workspaceId) => native.pendingMemberJoin(workspaceId),
+              cancelPendingMemberJoin: (workspaceId, expectedRequestId) =>
+                native.cancelPendingMemberJoin(workspaceId, expectedRequestId),
               memberJoinRequests: (workspaceId) => native.memberJoinRequests(workspaceId),
               approveMemberJoin: (workspaceId, requestId, mode) =>
                 native.approveMemberJoin(workspaceId, requestId, mode),
@@ -630,10 +632,7 @@ export function CloudPlatformProvider({
 
   return (
     <PlatformContext.Provider value={provider}>
-      <CloudWorkspaceBridge
-        organizationRef={organizationRef}
-        workspacesStore={workspacesStore}
-      />
+      <CloudWorkspaceBridge organizationRef={organizationRef} workspacesStore={workspacesStore} />
       <E2eeAutomaticPairingInbox
         key={session.data?.user.id ?? 'signed-out'}
         runtime={e2eeWorkspaces.runtime}

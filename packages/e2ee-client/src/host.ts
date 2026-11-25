@@ -963,6 +963,9 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
    * the retained invitation qualifies, so a personal pairing identity never reads as one. */
   const retainedMember = (pairingOffer: PersonalPairingOffer) =>
     Effect.gen(function* () {
+      // No installation was ever created (e.g. a routing pin was written before identity
+      // preparation started): there is no signed request or claim to retain or corrupt.
+      if (!(yield* installations.read())) return null;
       const p = yield* prepareRetained(pairingOffer);
       const saved = yield* memberOriginal(p);
       if (!saved) return null;
@@ -1016,6 +1019,47 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
       yield* acceptHistoryFor(p, pages);
       return { state: 'committed' as const };
     });
+  /** Explicitly cancel a never-admitted pending member join on both the relay and local
+   * journal, so the user can switch to another invitation without being locked out. */
+  const cancelMember = (pairingOffer: PersonalPairingOffer, expectedRequestId?: string) =>
+    Effect.gen(function* () {
+      const found = yield* retainedMember(pairingOffer);
+      if (!found) return { state: 'cancelled' as const };
+      const { p, saved } = found;
+      if (expectedRequestId !== undefined && p.offer.pairingSessionId !== expectedRequestId)
+        return yield* fail('conflict');
+      if (yield* pairings.load(key(p, 'approval'))) return { state: 'committed' as const };
+      const port = platform.members;
+      if (!port?.retire) return yield* fail('unsupported');
+      yield* guard;
+      const reply = yield* bounded(
+        port.retire({
+          token: saved.offer.token,
+          keyPackageHex: saved.keyPackageHex,
+          cancelPending: true,
+        })
+      );
+      yield* guard;
+      if (reply.state !== 'cancelled') return { state: reply.state };
+      const claimKey = key(p, 'claim');
+      const currentClaim = yield* pairings.load(claimKey);
+      if (currentClaim && !currentClaim.receipt) {
+        yield* pairings.compareAndSet(claimKey, currentClaim.revision, {
+          ...currentClaim,
+          revision: currentClaim.revision + 1,
+          receipt: encode({
+            version: 1,
+            accountId: claimKey.accountId,
+            workspaceId: claimKey.workspaceId,
+            genesisHash: toHex(claimKey.genesis.toBytes()),
+            pairingSessionId: claimKey.pairingSessionId,
+            requestHex: p.requestHex,
+            status: 'cancelled',
+          }),
+        });
+      }
+      return { state: 'cancelled' as const };
+    });
   return Object.freeze({
     close: () => close,
     /** Join a team from an independently transferred member invitation. Returns the
@@ -1025,6 +1069,9 @@ export const makePersonalDeviceHost = Effect.fnUntraced(function* () {
      * identity offer then opens the workspace like any approved pairing. */
     claimMember: (pairingOffer: PersonalPairingOffer, requestId: string) =>
       run(claimMember(pairingOffer, requestId)),
+    /** Explicitly cancel a pre-CAS pending member join on the relay and local journal. */
+    cancelMember: (pairingOffer: PersonalPairingOffer, expectedRequestId?: string) =>
+      run(cancelMember(pairingOffer, expectedRequestId)),
     /** The retained invitation behind an identity offer, or null for a personal pairing. */
     memberJoin: (pairingOffer: PersonalPairingOffer) =>
       run(

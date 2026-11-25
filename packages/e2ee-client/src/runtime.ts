@@ -544,9 +544,24 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               return { ready: result.state === 'committed', state: result.state };
             })
           ),
+        cancelPendingMemberJoin: (id, expectedRequestId) =>
+          run(
+            Effect.gen(function* () {
+              yield* guard(id);
+              const saved = yield* retained();
+              if (!saved) return { state: 'cancelled' };
+              const parsed = yield* Effect.try({
+                try: () => PersonalPairingOfferSchema.parse(saved),
+                catch: () => fail('corrupt'),
+              });
+              if (parsed.workspaceId !== workspaceId || parsed.genesisHash !== genesisHash)
+                return yield* fail('scope-mismatch');
+              return yield* host.cancelMember(parsed, expectedRequestId);
+            })
+          ),
       } satisfies Pick<
         E2eeWorkspaceRuntime,
-        'prepareMemberJoin' | 'pendingMemberJoin' | 'claimMemberJoin'
+        'prepareMemberJoin' | 'pendingMemberJoin' | 'claimMemberJoin' | 'cancelPendingMemberJoin'
       >)
     : {};
   const memberRuntime = host.capabilities.members

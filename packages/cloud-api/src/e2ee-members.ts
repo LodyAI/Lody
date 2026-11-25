@@ -46,7 +46,7 @@ export type E2eeMemberRequests = {
   createInvitation: E2eeDeviceAccess & { offer: E2eeMemberOffer; email?: string };
   preview: { token: string };
   submit: { token: string; keyPackageHex: string };
-  retire: { token: string; keyPackageHex: string };
+  retire: { token: string; keyPackageHex: string; cancelPending?: boolean };
   pending: E2eeDeviceAccess;
   read: E2eeDeviceAccess & { requestId: string };
   reject: E2eeDeviceAccess & { requestId: string };

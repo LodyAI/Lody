@@ -1,4 +1,6 @@
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { classifyPairingFailure, type E2eeActionableFailure } from '@/lib/e2ee-actionable-failure';
+import { E2eeActionableError } from '@/components/e2ee/e2ee-actionable-error';
 import { E2eeIdentityRecovery } from './e2ee-identity-recovery';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -99,6 +101,7 @@ function PersonalPairingSession({
 }) {
   const { t } = useTranslation();
   const [recoveryError, setRecoveryError] = useState('');
+  const [actionableFailure, setActionableFailure] = useState<E2eeActionableFailure | null>(null);
   const [custodyMessage, setCustodyMessage] = useState<string>();
   const [offer, setOffer] = useState<E2eePersonalPairingOffer | null>(null);
   const [input, setInput] = useState('');
@@ -184,6 +187,7 @@ function PersonalPairingSession({
           } else if ('failure' in recovered) {
             setJoining(recovered.pending);
             setRecoveryError(recovered.failure instanceof Error ? recovered.failure.message : '');
+            setActionableFailure(classifyPairingFailure(recovered.failure));
             setCustodyMessage(
               custodyFailureMessage(classifyE2eeControlFailure(recovered.failure).kind)
             );
@@ -198,6 +202,7 @@ function PersonalPairingSession({
         (error) => {
           if (cancelled) return;
           setRecoveryError(error instanceof Error ? error.message : '');
+          setActionableFailure(classifyPairingFailure(error));
           setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
           setPhase('error');
           setRecoveryTimes((times) => ({ ...times, finishedAt: new Date().toISOString() }));
@@ -214,11 +219,13 @@ function PersonalPairingSession({
     busy.current = true;
     setPhase('busy');
     setCustodyMessage(undefined);
+    setActionableFailure(null);
     try {
       await operation();
     } catch (error) {
       if (isLive()) {
         setRecoveryError(error instanceof Error ? error.message : '');
+        setActionableFailure(classifyPairingFailure(error));
         setCustodyMessage(custodyFailureMessage(classifyE2eeControlFailure(error).kind));
         setPhase('error');
       }
@@ -351,17 +358,48 @@ function PersonalPairingSession({
         data-recovery-finished-at={recoveryTimes.finishedAt}
       />
       {phase === 'error' && (
-        <E2eeIdentityRecovery
-          error={recoveryError}
-          runtime={runtime}
-          workspaceId={workspaceId}
-          onReset={() => {
-            setRecoveryError('');
-            setJoining(null);
-            setPhase('idle');
-            onJoined();
-          }}
-        />
+        <>
+          <E2eeIdentityRecovery
+            error={recoveryError}
+            runtime={runtime}
+            workspaceId={workspaceId}
+            onReset={() => {
+              setRecoveryError('');
+              setActionableFailure(null);
+              setJoining(null);
+              setPhase('idle');
+              onJoined();
+            }}
+          />
+          {actionableFailure && actionableFailure.primaryAction !== 'reset_identity' && (
+            <E2eeActionableError
+              failure={actionableFailure}
+              busy={recovering}
+              onAction={{
+                restart_pairing: () => {
+                  setActionableFailure(null);
+                  setRecoveryError('');
+                  setJoining(null);
+                  setOffer(null);
+                  setPreview(null);
+                  setPhase('idle');
+                },
+                retry_saved: () => {
+                  if (joining) void claim();
+                  else if (offer) void inspect();
+                  else {
+                    setActionableFailure(null);
+                    setPhase('idle');
+                  }
+                },
+                unlock_custody: () => {
+                  setActionableFailure(null);
+                  setPhase(joining ? 'waiting' : 'idle');
+                },
+              }}
+            />
+          )}
+        </>
       )}
       <Card.Header>
         <Card.Title>

@@ -4,6 +4,7 @@ import {
   bytesToHex,
   type VerifiedLedgerHistory,
 } from '@/lib/e2ee-ledger-history';
+import { classifyTeamAdminFailure } from '@/lib/e2ee-actionable-failure';
 import { e2eeErrorCode } from '@/lib/e2ee-admission-refusals';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -154,7 +155,8 @@ function TeamSession({
     try {
       await action();
     } catch (error) {
-      if (current())
+      if (current()) {
+        const classified = classifyTeamAdminFailure(error);
         setMessage(
           t(
             error instanceof MemberLimitReached
@@ -163,9 +165,16 @@ function TeamSession({
                   // An applicant of the unsigned invitation for this email is still waiting.
                   (e2eeErrorCode(error) === 'e2ee_member_invitation_request_pending'
                     ? 'e2ee.team.invitationRequestPending'
-                    : 'e2ee.team.retryOriginal'))
+                    : classified.messageKey))
           )
         );
+        if (
+          classified.disposition === 'reconcilable' &&
+          classified.primaryAction === 'refresh_state'
+        ) {
+          void refresh().catch(() => {});
+        }
+      }
     } finally {
       working.current = false;
       if (current()) setBusy(false);

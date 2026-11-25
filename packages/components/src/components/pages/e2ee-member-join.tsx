@@ -11,8 +11,13 @@ import { Check } from 'lucide-react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import {
+  classifyMemberJoinFailure,
+  type E2eeActionableFailure,
+} from '@/lib/e2ee-actionable-failure';
 import { desktopMemberJoinLink, sameMemberOffer } from '@/lib/e2ee-member-offer';
 import { attemptDesktopInviteHandoff } from '@/lib/desktop-invite-deep-link';
+import { E2eeActionableError } from '@/components/e2ee/e2ee-actionable-error';
 
 const styles = stylex.create({
   page: {
@@ -86,7 +91,8 @@ function JoinProgress(props: { current: number }) {
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   'prepareMemberJoin' | 'pendingMemberJoin' | 'claimMemberJoin'
->;
+> &
+  Partial<Pick<E2eeWorkspaceRuntime, 'cancelPendingMemberJoin'>>;
 type Props = {
   offer: E2eeMemberOffer;
   runtime?: Runtime;
@@ -159,13 +165,18 @@ function JoinSession({
 }: Props) {
   const { t } = useTranslation();
   const [request, setRequest] = useState<{ requestId: string; state: string } | null>(null);
+  const [otherPending, setOtherPending] = useState<{
+    offer: E2eeMemberOffer;
+    requestId: string;
+    joined?: boolean;
+  } | null>(null);
   const [ready, setReady] = useState(false);
   // A resumed join the host reports as already joined shows as joined at once; one claim
   // still runs to confirm it, and its answer replaces the hint.
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [recovering, setRecovering] = useState(Boolean(accountId && runtime?.pendingMemberJoin));
-  const [error, setError] = useState(false);
+  const [failure, setFailure] = useState<E2eeActionableFailure | null>(null);
   const [retry, setRetry] = useState(0);
   // The fast claim window ended while committed: say why the member is still waiting.
   const [slowWait, setSlowWait] = useState(false);
@@ -190,7 +201,9 @@ function JoinSession({
     void runtime
       .pendingMemberJoin(offer.workspaceId)
       .then((pending) => {
-        if (!disposed && pending?.requestId && sameMemberOffer(pending.offer, offer)) {
+        if (disposed || !pending?.requestId) return;
+        if (sameMemberOffer(pending.offer, offer)) {
+          setOtherPending(null);
           setRequest({
             requestId: pending.requestId,
             state: pending.joined ? 'committed' : 'pending',
@@ -199,10 +212,31 @@ function JoinSession({
             setReady(true);
             setUnconfirmed(true);
           }
+        } else if (!pending.joined) {
+          // Another un-admitted pending request exists for this workspace. Do not auto-restore
+          // a previously `joined` different offer: a removed member re-invited via a new link
+          // must verify live membership through `prepareMemberJoin` rather than being trapped
+          // waiting for keys on the old membership.
+          setOtherPending({
+            offer: pending.offer,
+            requestId: pending.requestId,
+            joined: pending.joined,
+          });
+          setFailure({
+            disposition: 'reconcilable',
+            code: 'e2ee_original_join_pending',
+            messageKey: 'e2ee.actionable.previousJoinPending',
+            primaryAction: runtime.cancelPendingMemberJoin
+              ? 'cancel_previous_request'
+              : 'resume_existing_request',
+            secondaryAction: runtime.cancelPendingMemberJoin
+              ? 'resume_existing_request'
+              : undefined,
+          });
         }
       })
-      .catch(() => {
-        if (!disposed) setError(true);
+      .catch((cause) => {
+        if (!disposed) setFailure(classifyMemberJoinFailure(cause));
       })
       .finally(() => {
         if (!disposed) setRecovering(false);
@@ -232,15 +266,15 @@ function JoinSession({
         );
         setReady(result.ready);
         setUnconfirmed(false);
-        setError(false);
+        setFailure(null);
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
         if (result.state === 'committed') {
           committedSince ??= Date.now();
           if (Date.now() - committedSince < KEY_WAIT_FAST_MS) delay = KEY_WAIT_INTERVAL_MS;
           else setSlowWait(true);
         }
-      } catch {
-        if (!disposed) setError(true);
+      } catch (cause) {
+        if (!disposed) setFailure(classifyMemberJoinFailure(cause));
       }
       if (!disposed) timer = setTimeout(() => void claim(), delay);
     };
@@ -260,16 +294,28 @@ function JoinSession({
     if (working.current || !runtime?.prepareMemberJoin) return;
     working.current = true;
     setBusy(true);
-    setError(false);
+    setFailure(null);
     try {
       const result = await runtime.prepareMemberJoin(offer);
-      if (current()) setRequest({ requestId: result.requestId, state: result.state });
-    } catch {
-      if (current()) setError(true);
+      if (current()) {
+        setOtherPending(null);
+        setRequest({ requestId: result.requestId, state: result.state });
+      }
+    } catch (cause) {
+      if (current()) setFailure(classifyMemberJoinFailure(cause));
       try {
         const pending = await runtime.pendingMemberJoin?.(offer.workspaceId);
-        if (current() && pending?.requestId && sameMemberOffer(pending.offer, offer))
-          setRequest({ requestId: pending.requestId, state: 'pending' });
+        if (current() && pending?.requestId) {
+          if (sameMemberOffer(pending.offer, offer)) {
+            setRequest({ requestId: pending.requestId, state: 'pending' });
+          } else {
+            setOtherPending({
+              offer: pending.offer,
+              requestId: pending.requestId,
+              joined: pending.joined,
+            });
+          }
+        }
       } catch {
         /* Keep saved originals and the first failure. */
       }
@@ -284,6 +330,54 @@ function JoinSession({
     runtime?.prepareMemberJoin && runtime.pendingMemberJoin && runtime.claimMemberJoin
   );
   const terminal = request && ['rejected', 'cancelled'].includes(request.state);
+  const canSubmitNewOffer = Boolean(
+    accountId &&
+      emailVerified &&
+      native &&
+      !recovering &&
+      !ready &&
+      !terminal &&
+      pinMatches &&
+      available?.matchesRecipient !== false
+  );
+  const cancelPreviousAndAccept = async () => {
+    if (working.current || !runtime?.cancelPendingMemberJoin || !otherPending || !canSubmitNewOffer)
+      return;
+    working.current = true;
+    setBusy(true);
+    setFailure(null);
+    let proceed = false;
+    try {
+      const retired = await runtime.cancelPendingMemberJoin(
+        offer.workspaceId,
+        otherPending.requestId
+      );
+      if (!current()) return;
+      if (retired.state === 'cancelled') {
+        setOtherPending(null);
+        proceed = true;
+      } else {
+        // The previous request is already admitting or committed: surface its live progress.
+        setRequest({ requestId: otherPending.requestId, state: retired.state });
+        setOtherPending(null);
+      }
+    } catch (cause) {
+      if (current()) setFailure(classifyMemberJoinFailure(cause));
+    } finally {
+      working.current = false;
+      if (current()) setBusy(false);
+    }
+    if (proceed) await accept();
+  };
+  const resumeExisting = () => {
+    if (!otherPending) return;
+    setFailure(null);
+    setRequest({
+      requestId: otherPending.requestId,
+      state: otherPending.joined ? 'committed' : 'pending',
+    });
+    setOtherPending(null);
+  };
   let message = 'e2ee.team.joinHelp';
   if (loading || recovering || (preview === undefined && !previewError)) message = 'e2ee.team.loading';
   else if (previewError && preview === undefined) message = 'e2ee.team.retryOriginal';
@@ -318,7 +412,29 @@ function JoinSession({
               />
             )}
             {email && <p>{email}</p>}
-            {error && <p role="status">{t('e2ee.team.retryOriginal')}</p>}
+            {failure && (
+              <E2eeActionableError
+                failure={failure}
+                busy={busy}
+                onAction={{
+                  retry_saved: () => {
+                    if (request) setRetry((value) => value + 1);
+                    void accept();
+                  },
+                  cancel_previous_request:
+                    canSubmitNewOffer && otherPending && runtime?.cancelPendingMemberJoin
+                      ? () => void cancelPreviousAndAccept()
+                      : undefined,
+                  resume_existing_request: otherPending ? resumeExisting : undefined,
+                  open_workspace: () =>
+                    onWorkspaceRequested(available?.workspaceSlug ?? null, offer.workspaceId),
+                  verify_email: onEmailVerificationRequested,
+                  unlock_custody: () => void accept(),
+                  refresh_state: () => setRetry((value) => value + 1),
+                  back_home: onHomeRequested,
+                }}
+              />
+            )}
             {slowWait && !ready && message === 'e2ee.team.waitingKey' && (
               <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
             )}

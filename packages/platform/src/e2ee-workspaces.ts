@@ -259,6 +259,12 @@ export interface E2eeWorkspaceRuntime
     requestId: string | null;
     joined?: boolean;
   } | null>;
+  /** Explicitly cancel this device's pre-CAS pending member join request so the user can
+   * switch to another invitation. An admitting or committed request is never cancelled. */
+  cancelPendingMemberJoin?(
+    workspaceId: string,
+    expectedRequestId?: string
+  ): Promise<{ state: string }>;
   memberJoinRequests?(
     workspaceId: string
   ): Promise<import('@lody/cloud-api').E2eeMemberReplies['pending']>;
