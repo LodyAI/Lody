@@ -264,6 +264,17 @@ const assertSerializableHistoryPayload = (
   }
 };
 
+// The native runtime bundles this bridge for older WebViews.
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function routeRoostHistory(
   owner: SessionHistoryReader,
   cloud: ReturnType<typeof createRoostHistoryReplica>,
@@ -391,7 +402,7 @@ function routeRoostHistory(
     if (ownerRecovery?.selection === selected) return ownerRecovery.result;
     if (cloud.syncStatus().phase === 'refused') return Promise.resolve('streams');
 
-    const result = Promise.withResolvers<RecoverySource>();
+    const result = createDeferred<RecoverySource>();
     let streamsAnswered = false;
     const resumeStreams = () => {
       streamsAnswered = true;
@@ -501,7 +512,7 @@ function routeRoostHistory(
   ): Promise<T | typeof sourceChanged> => {
     const signal = selected.invalidated.signal;
     if (signal.aborted) return sourceChanged;
-    const changed = Promise.withResolvers<typeof sourceChanged>();
+    const changed = createDeferred<typeof sourceChanged>();
     const invalidate = () => changed.resolve(sourceChanged);
     signal.addEventListener('abort', invalidate, { once: true });
     try {
