@@ -20,6 +20,21 @@ reduces the reader's scan cost:
   every coordinate — you never write x/y/w/h and it always comes out aligned.
   Do not hand-place `svg` rects for a layout; `svg` is only for shapes `Mock`
   cannot express (icons, annotations). Node→edge graphs → ```` ```mermaid ````.
+  Containers hold the leaves directly — a `Mock:Box` or `Mock:Cell` is already
+  a region; wrap it in another `Mock:Col`/`Mock:Row` only to nest a further
+  split.
+
+  ```genui
+  <Mock w={160} h={132}>
+    <Mock:Col>
+      <Mock:Cell h={15} tone="mid"/>
+      <Mock:Row>
+        <Mock:Cell w={33} tone="band"/>
+        <Mock:Box tone="faint" label="Webview" sub="Own UI" hint="postMessage"/>
+      </Mock:Row>
+    </Mock:Col>
+  </Mock>
+  ```
 
 ## Fence rules
 
