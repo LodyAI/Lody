@@ -2,6 +2,8 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
+const ALLOWED_PASSKEY_APP_IDS = new Set(['ai.lody.desktop', 'ai.lody.desktop.nightly'])
+
 /** No IO or package changes unless the owner explicitly selects this build. */
 export function passkeyPackagingPlan({
   enabled,
@@ -12,8 +14,8 @@ export function passkeyPackagingPlan({
   architectures
 }) {
   if (enabled !== '1') return undefined
-  if (!macPackaging || appId !== 'ai.lody.desktop') {
-    throw new Error('Passkeys require a macOS ai.lody.desktop build')
+  if (!macPackaging || !ALLOWED_PASSKEY_APP_IDS.has(appId)) {
+    throw new Error('Passkeys require a macOS ai.lody.desktop or ai.lody.desktop.nightly build')
   }
   if (!addonDirectory || !provisioningProfile) {
     throw new Error('Passkeys require LODY_PASSKEY_ADDON_DIR and LODY_PASSKEY_PROVISIONING_PROFILE')
@@ -24,6 +26,7 @@ export function passkeyPackagingPlan({
     )
   }
   return {
+    appId,
     addons: architectures.map((arch) => ({
       arch,
       file: path.resolve(addonDirectory, arch, 'passkey_bridge.node')
@@ -62,7 +65,7 @@ export function applyPasskeyPackaging({ config, plan, repoRoot, generatedDirecto
     JSON.stringify({
       ...base,
       'com.apple.developer.associated-domains': ['webcredentials:lody.ai'],
-      'com.apple.application-identifier': 'YTRMX32C99.ai.lody.desktop',
+      'com.apple.application-identifier': `YTRMX32C99.${plan.appId ?? 'ai.lody.desktop'}`,
       'com.apple.developer.team-identifier': 'YTRMX32C99'
     })
   )

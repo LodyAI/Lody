@@ -28,10 +28,10 @@ test('ordinary desktop builds do not read native inputs or change packaging', ()
     assert.deepEqual(config, before)
   }
 })
-test('passkey packages target only the associated cloud app and require every selected architecture', () => {
+test('passkey packages target only associated cloud macOS apps and require every selected architecture', () => {
   for (const change of [
     { macPackaging: false },
-    { appId: 'ai.lody.desktop.nightly' },
+    { appId: 'ai.lody.desktop.other' },
     { architectures: ['universal'] },
     { addonDirectory: undefined },
     { provisioningProfile: undefined }
@@ -39,12 +39,16 @@ test('passkey packages target only the associated cloud app and require every se
     assert.throws(() => passkeyPackagingPlan({ ...selection, ...change }))
   }
   const plan = passkeyPackagingPlan(selection)
+  assert.equal(plan.appId, 'ai.lody.desktop')
   assert.deepEqual(
     plan.addons.map(({ arch }) => arch),
     ['arm64', 'x64']
   )
   assert.equal(plan.resource.to, 'passkey_bridge.node')
   assert.equal(plan.resource.from, '/tmp/addons/${arch}/passkey_bridge.node')
+
+  const nightlyPlan = passkeyPackagingPlan({ ...selection, appId: 'ai.lody.desktop.nightly' })
+  assert.equal(nightlyPlan.appId, 'ai.lody.desktop.nightly')
 })
 for (const arch of ['arm64', 'x64'])
   test(

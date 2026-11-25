@@ -165,7 +165,12 @@ function parseCliArgs(argv) {
   const args = {}
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i]
-    if (token === '--plist' || token === '--cert-pem' || token === '--cert-der') {
+    if (
+      token === '--plist' ||
+      token === '--cert-pem' ||
+      token === '--cert-der' ||
+      token === '--app-id'
+    ) {
       const value = argv[i + 1]
       if (!value || value.startsWith('--')) {
         throw new Error(`Missing value for ${token}`)
@@ -195,7 +200,8 @@ function runCli(argv) {
 
   const result = verifyProvisioningProfileAgainstCertificates({
     plistXml,
-    signingCertificates
+    signingCertificates,
+    expectedAppId: args['app-id'] || EXPECTED_APP_ID
   })
   console.log(
     `Verified macOS Passkey provisioning profile matches signing certificate ${result.matchedFingerprint256} (serial=${result.matchedSerialNumber}, expires=${result.expirationDate.toISOString()})`

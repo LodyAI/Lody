@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="$(node -p "require('./apps/electron/package.json').version")"
+version="${LODY_PASSKEY_VERSION:-$(node -p "require('./apps/electron/package.json').version")}"
 if [[ -z "${version}" ]]; then
   echo "Could not resolve Electron version from apps/electron/package.json"
   exit 1
 fi
+
+expected_app_id="${LODY_PASSKEY_EXPECTED_APP_ID:-YTRMX32C99.ai.lody.desktop}"
+app_name="${LODY_PASSKEY_APP_NAME:-Lody}"
+archive_suffix="${LODY_PASSKEY_ARCHIVE_SUFFIX:-}"
 
 verify_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/macos-passkey-verify.XXXXXX")"
 trap 'rm -rf "${verify_dir}"' EXIT
@@ -16,7 +20,7 @@ for arch in arm64 x64; do
     macho_arch="x86_64"
   fi
 
-  archive="apps/electron/dist/Lody-${version}-${arch}.zip"
+  archive="apps/electron/dist/Lody-${version}-${arch}${archive_suffix}.zip"
   if [[ ! -f "${archive}" ]]; then
     echo "Missing macOS Electron archive: ${archive}"
     exit 1
@@ -26,9 +30,9 @@ for arch in arm64 x64; do
   mkdir -p "${extract_dir}"
   ditto -x -k "${archive}" "${extract_dir}"
 
-  app="${extract_dir}/Lody.app"
+  app="${extract_dir}/${app_name}.app"
   if [[ ! -d "${app}" ]]; then
-    echo "Missing Lody.app inside ${archive}"
+    echo "Missing ${app_name}.app inside ${archive}"
     exit 1
   fi
 
@@ -54,7 +58,10 @@ for arch in arm64 x64; do
     echo "Failed to decode Contents/embedded.provisionprofile in ${app}"
     exit 1
   fi
-  node .github/scripts/macos-passkey-profile.mjs --plist "${profile_plist}" --cert-der "${leaf_cert}"
+  node .github/scripts/macos-passkey-profile.mjs \
+    --plist "${profile_plist}" \
+    --cert-der "${leaf_cert}" \
+    --app-id "${expected_app_id}"
 
   addon="${app}/Contents/Resources/passkey_bridge.node"
   if [[ ! -f "${addon}" ]]; then
@@ -69,28 +76,28 @@ for arch in arm64 x64; do
 
   associated_domains="$(/usr/libexec/PlistBuddy -c 'Print com.apple.developer.associated-domains' "${app_ent}" 2>/dev/null || true)"
   if ! grep -qF 'webcredentials:lody.ai' <<< "${associated_domains}"; then
-    echo "Lody.app (${arch}) missing webcredentials:lody.ai in com.apple.developer.associated-domains"
+    echo "${app_name}.app (${arch}) missing webcredentials:lody.ai in com.apple.developer.associated-domains"
     exit 1
   fi
 
   app_id="$(/usr/libexec/PlistBuddy -c 'Print com.apple.application-identifier' "${app_ent}" 2>/dev/null || true)"
-  if [[ "${app_id}" != "YTRMX32C99.ai.lody.desktop" ]]; then
-    echo "Lody.app (${arch}) application-identifier mismatch: ${app_id:-empty}"
+  if [[ "${app_id}" != "${expected_app_id}" ]]; then
+    echo "${app_name}.app (${arch}) application-identifier mismatch: ${app_id:-empty} (expected ${expected_app_id})"
     exit 1
   fi
 
   team_id="$(/usr/libexec/PlistBuddy -c 'Print com.apple.developer.team-identifier' "${app_ent}" 2>/dev/null || true)"
   if [[ "${team_id}" != "YTRMX32C99" ]]; then
-    echo "Lody.app (${arch}) team-identifier mismatch: ${team_id:-empty}"
+    echo "${app_name}.app (${arch}) team-identifier mismatch: ${team_id:-empty}"
     exit 1
   fi
 
   if /usr/libexec/PlistBuddy -c 'Print com.apple.security.cs.disable-library-validation' "${app_ent}" >/dev/null 2>&1; then
-    echo "Lody.app (${arch}) unexpectedly has com.apple.security.cs.disable-library-validation"
+    echo "${app_name}.app (${arch}) unexpectedly has com.apple.security.cs.disable-library-validation"
     exit 1
   fi
 
-  helper="${app}/Contents/Frameworks/Lody Helper.app"
+  helper="${app}/Contents/Frameworks/${app_name} Helper.app"
   if [[ ! -d "${helper}" ]]; then
     echo "Missing helper bundle: ${helper}"
     exit 1
@@ -98,9 +105,9 @@ for arch in arm64 x64; do
   helper_ent="${verify_dir}/${arch}-helper-entitlements.plist"
   codesign -d --entitlements - --xml "${helper}" 2>/dev/null > "${helper_ent}"
   if /usr/libexec/PlistBuddy -c 'Print com.apple.developer.associated-domains' "${helper_ent}" >/dev/null 2>&1; then
-    echo "Lody Helper.app (${arch}) unexpectedly inherited com.apple.developer.associated-domains"
+    echo "${app_name} Helper.app (${arch}) unexpectedly inherited com.apple.developer.associated-domains"
     exit 1
   fi
 done
 
-echo "Verified signed macOS Passkey archives for arm64 and x64 (${version})"
+echo "Verified signed macOS Passkey archives for arm64 and x64 (${app_name} ${version})"
