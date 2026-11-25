@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use lody_acp::{ManagedArtifactInstaller, StdioAcpLauncher};
+use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
 use lody_app::ApplicationService;
 use lody_engine::{FlockProjectStore, RepoEngineClient, RoostHistoryStore};
 use lody_entry::{
@@ -8,13 +8,17 @@ use lody_entry::{
     serve_local_daemon, start_daemon_detached, stop_running_daemon, try_execute_via_live_daemon,
 };
 use lody_env::HostEnv;
-use lody_ports::{BackendPort, ManagedArtifactSource, PortResult, StorageLeaseMode};
+use lody_ports::{
+    BackendPort, MachineId, ManagedArtifactSource, PortErrorKind, PortResult, StorageLeaseMode,
+    StorageLeasePort,
+};
 use lody_runtime::{DaemonDependencies, DaemonRuntime};
-use lody_sqlite::{SqliteDataLayout, SqliteStore};
+use lody_sqlite::{FileStorageLease, SqliteDataLayout, SqliteStore};
 use lody_worktree::{GitWorktreeManager, LocalTurnDiffStore};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 const PUBLIC_RUNTIME_ARTIFACTS_URL: &str = "https://artifacts.lody.ai";
 
@@ -67,24 +71,56 @@ fn compose_runtime(
     backend: Option<Arc<dyn BackendPort>>,
     lease_mode: StorageLeaseMode,
 ) -> PortResult<DaemonRuntime> {
+    let locks_dir = host_env.locks_dir(&effective_data_dir);
+    let wait_timeout = match lease_mode {
+        StorageLeaseMode::OnlineHost => Duration::from_secs(10),
+        StorageLeaseMode::StorageOnly => Duration::from_secs(5),
+    };
+    let storage_lease = Arc::new(FileStorageLease::acquire(
+        &locks_dir,
+        lease_mode,
+        wait_timeout,
+    )?) as Arc<dyn StorageLeasePort>;
+
     let machine_id = ensure_machine_id(&effective_data_dir).map_err(|e| {
         lody_ports::PortError::new(lody_ports::PortErrorKind::Unavailable, e.to_string())
     })?;
     let artifact_source = resolve_artifact_source(host_env, backend.as_ref());
     let repos_root = effective_data_dir.join("repos");
+    let runtimes_root = effective_data_dir.join("runtimes");
+    let default_cwd = host_env
+        .home_dir
+        .clone()
+        .unwrap_or_else(|| effective_data_dir.clone());
+    let shell_command = host_env.shell_command();
+    let agent_base_env = host_env.agent_spawn_env();
+    let env_for_terminals = host_env.clone();
+
+    let diff_store = Arc::new(LocalTurnDiffStore::new(&effective_data_dir));
     let sqlite = Arc::new(SqliteStore::open(SqliteDataLayout::with_machine_id(
         effective_data_dir,
-        machine_id,
+        machine_id.clone(),
     ))?);
+
     Ok(DaemonRuntime::new(DaemonDependencies {
+        machine_id: MachineId(machine_id),
+        default_cwd,
+        shell_command,
+        agent_base_env,
+        terminal_env_builder: Arc::new(move |sid| env_for_terminals.sanitized_terminal_env(sid)),
         storage_lease_mode: lease_mode,
+        storage_lease: Some(storage_lease),
         engine: Arc::new(RepoEngineClient::new(None)),
         history: Arc::new(RoostHistoryStore),
         inbox: sqlite as Arc<dyn lody_ports::InboxStorePort>,
         projects: Arc::new(FlockProjectStore),
-        diff_store: Arc::new(LocalTurnDiffStore),
-        artifacts: Arc::new(ManagedArtifactInstaller::new(artifact_source)),
+        diff_store,
+        artifacts: Arc::new(ManagedArtifactInstaller::with_install_root(
+            artifact_source,
+            runtimes_root,
+        )),
         acp: Arc::new(StdioAcpLauncher::default()),
+        pty: Arc::new(PortablePtyManager::new()),
         worktree: Arc::new(GitWorktreeManager::new(repos_root)),
         backend,
     }))
@@ -166,6 +202,7 @@ fn main() -> ExitCode {
                 let res = serve_local_daemon(
                     &effective_data_dir,
                     &home_dir,
+                    host_env.platform.namespace(),
                     env!("CARGO_PKG_VERSION"),
                     svc,
                 )
@@ -194,11 +231,29 @@ fn main() -> ExitCode {
             }
             let runtime = match compose_runtime(
                 &host_env,
-                effective_data_dir,
+                effective_data_dir.clone(),
                 backend,
                 StorageLeaseMode::StorageOnly,
             ) {
                 Ok(rt) => rt,
+                Err(err) if err.kind == PortErrorKind::Conflict => {
+                    if let Some(live_result) =
+                        try_execute_via_live_daemon(&effective_data_dir, &action)
+                    {
+                        return match live_result {
+                            Ok(out) => {
+                                println!("{out}");
+                                ExitCode::SUCCESS
+                            }
+                            Err(e) => {
+                                eprintln!("{e}");
+                                ExitCode::FAILURE
+                            }
+                        };
+                    }
+                    eprintln!("{err}");
+                    return ExitCode::FAILURE;
+                }
                 Err(err) => {
                     eprintln!("{err}");
                     return ExitCode::FAILURE;

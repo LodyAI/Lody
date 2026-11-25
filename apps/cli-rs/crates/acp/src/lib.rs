@@ -1,26 +1,180 @@
 #![forbid(unsafe_code)]
 
+pub mod pty;
+
 use lody_ports::{
     AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec,
     ArtifactRegistryPort, InstalledArtifact, ManagedArtifactSource, PermissionDecision, PortError,
     PortErrorKind, PortResult, SteerVerdict,
 };
+pub use pty::PortablePtyManager;
+use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt::Write as _;
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtifactManifestEntry {
+    executable_rel_path: String,
+    sha256: String,
+    download_url: Option<String>,
+}
+
+fn sha256_bytes_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        let _ = write!(hex, "{b:02x}");
+    }
+    hex
+}
+
 pub struct ManagedArtifactInstaller {
     source: ManagedArtifactSource,
+    install_root: PathBuf,
 }
 
 impl ManagedArtifactInstaller {
     pub fn new(source: ManagedArtifactSource) -> Self {
-        Self { source }
+        Self::with_install_root(source, PathBuf::from(".lody-oss/runtimes"))
+    }
+
+    pub fn with_install_root(
+        source: ManagedArtifactSource,
+        install_root: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            source,
+            install_root: install_root.into(),
+        }
+    }
+
+    fn verify_existing_file(path: &Path, expected_sha256: &str) -> PortResult<bool> {
+        let Ok(bytes) = fs::read(path) else {
+            return Ok(false);
+        };
+        Ok(sha256_bytes_hex(&bytes).eq_ignore_ascii_case(expected_sha256))
+    }
+
+    fn mark_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o755));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+        }
+    }
+
+    fn fetch_remote_artifact(
+        &self,
+        base_url: &str,
+        artifact_id: &str,
+        version: &str,
+    ) -> PortResult<InstalledArtifact> {
+        let trimmed = base_url.trim_end_matches('/');
+        let manifest_url = format!("{trimmed}/{artifact_id}/{version}/manifest.json");
+        let install_dir = self.install_root.join(artifact_id).join(version);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+
+        rt.block_on(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+
+            let resp = client
+                .get(&manifest_url)
+                .send()
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(PortError::new(
+                    PortErrorKind::Unavailable,
+                    format!("artifact manifest HTTP {}", resp.status()),
+                ));
+            }
+            let manifest: ArtifactManifestEntry = resp
+                .json()
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+
+            let dest = install_dir.join(&manifest.executable_rel_path);
+            if Self::verify_existing_file(&dest, &manifest.sha256)? {
+                return Ok(InstalledArtifact {
+                    artifact_id: artifact_id.to_string(),
+                    version: version.to_string(),
+                    executable_path: dest,
+                    sha256_hex: manifest.sha256.to_ascii_lowercase(),
+                });
+            }
+
+            let dl_url = manifest.download_url.unwrap_or_else(|| {
+                format!(
+                    "{trimmed}/{artifact_id}/{version}/{}",
+                    manifest.executable_rel_path
+                )
+            });
+            let bin_resp = client
+                .get(&dl_url)
+                .send()
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+            if !bin_resp.status().is_success() {
+                return Err(PortError::new(
+                    PortErrorKind::Unavailable,
+                    format!("artifact binary HTTP {}", bin_resp.status()),
+                ));
+            }
+            let bytes = bin_resp
+                .bytes()
+                .await
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+            let actual_sha = sha256_bytes_hex(&bytes);
+            if !actual_sha.eq_ignore_ascii_case(&manifest.sha256) {
+                return Err(PortError::new(
+                    PortErrorKind::Conflict,
+                    format!(
+                        "artifact '{artifact_id}' SHA-256 mismatch: expected {}, got {actual_sha}",
+                        manifest.sha256
+                    ),
+                ));
+            }
+
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+            }
+            let tmp = dest.with_extension("download.tmp");
+            fs::write(&tmp, &bytes)
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+            Self::mark_executable(&tmp);
+            fs::rename(&tmp, &dest)
+                .map_err(|e| PortError::new(PortErrorKind::Unavailable, e.to_string()))?;
+
+            Ok(InstalledArtifact {
+                artifact_id: artifact_id.to_string(),
+                version: version.to_string(),
+                executable_path: dest,
+                sha256_hex: actual_sha,
+            })
+        })
     }
 }
 
@@ -29,14 +183,36 @@ impl ArtifactRegistryPort for ManagedArtifactInstaller {
         &self.source
     }
 
-    fn ensure_installed(&self, artifact_id: &str, _version: &str) -> PortResult<InstalledArtifact> {
-        if matches!(self.source, ManagedArtifactSource::Disabled) {
-            return Err(PortError::capability_unavailable("managedRuntimeArtifacts"));
+    fn ensure_installed(&self, artifact_id: &str, version: &str) -> PortResult<InstalledArtifact> {
+        match &self.source {
+            ManagedArtifactSource::Disabled => {
+                Err(PortError::capability_unavailable("managedRuntimeArtifacts"))
+            }
+            ManagedArtifactSource::OfflineBundle { bundle_dir } => {
+                let version_dir = bundle_dir.join(artifact_id).join(version);
+                let manifest_raw = fs::read_to_string(version_dir.join("manifest.json"))
+                    .map_err(|e| PortError::new(PortErrorKind::NotFound, e.to_string()))?;
+                let manifest: ArtifactManifestEntry = serde_json::from_str(&manifest_raw)
+                    .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+                let exe_path = version_dir.join(&manifest.executable_rel_path);
+                if !Self::verify_existing_file(&exe_path, &manifest.sha256)? {
+                    return Err(PortError::new(
+                        PortErrorKind::Conflict,
+                        format!("offline bundle SHA-256 verification failed for '{artifact_id}'"),
+                    ));
+                }
+                Ok(InstalledArtifact {
+                    artifact_id: artifact_id.to_string(),
+                    version: version.to_string(),
+                    executable_path: exe_path,
+                    sha256_hex: manifest.sha256.to_ascii_lowercase(),
+                })
+            }
+            ManagedArtifactSource::PublicDefault { base_url }
+            | ManagedArtifactSource::Mirror { base_url } => {
+                self.fetch_remote_artifact(base_url, artifact_id, version)
+            }
         }
-        Err(PortError::new(
-            PortErrorKind::Unavailable,
-            format!("managed artifact installer not yet wired for '{artifact_id}'"),
-        ))
     }
 }
 
@@ -242,10 +418,16 @@ impl StdioAcpSession {
                 .mcp_mounts
                 .iter()
                 .map(|m| {
+                    let headers: Vec<Value> = m
+                        .headers
+                        .iter()
+                        .map(|h| json!({ "name": h.name, "value": h.value }))
+                        .collect();
                     json!({
                         "name": m.name,
                         "type": "http",
                         "url": m.transport_url,
+                        "headers": headers,
                     })
                 })
                 .collect();

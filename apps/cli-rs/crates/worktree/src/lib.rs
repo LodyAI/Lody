@@ -1,12 +1,25 @@
 #![forbid(unsafe_code)]
 
+pub mod scan;
+pub mod turn_diff;
+
 use lody_ports::{
-    DiffStorePort, LocalProjectId, PortError, PortErrorKind, PortResult, SessionId,
-    TurnDiffSummary, TurnId, WorktreeLease, WorktreePort,
+    LocalProjectId, PortError, PortErrorKind, PortResult, ScannedFileIndex, SessionId,
+    WorktreeLease, WorktreePort,
+};
+pub use scan::{
+    CODE_COLLAB_IGNORED_DIRECTORY_NAMES, CODE_COLLAB_MAX_INDEX_BYTES,
+    CODE_COLLAB_MAX_INDEX_ENTRIES, is_ignored_directory_name, scan_directory_parallel,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+pub use turn_diff::{
+    CODEC_GZIP, CODEC_RAW, CODEC_ZSTD, LocalTurnDiffStore, ReconstructedSnapshotPair,
+    SqliteTurnDiffStore, TURN_DIFF_APPLICATION_ID, TURN_DIFF_SCHEMA_VERSION, TrackedLatestText,
+    TurnDiffGcStats, TurnDiffIntegrityStats, TurnDiffStoreConfig, compress_chunk,
+    compute_line_diff_counts, decompress_chunk, safe_workspace_segment, workspace_diff_db_path,
+};
 
 pub struct GitWorktreeManager {
     repos_root: PathBuf,
@@ -163,30 +176,12 @@ impl WorktreePort for GitWorktreeManager {
         }
         Ok(())
     }
-}
 
-#[derive(Default)]
-pub struct LocalTurnDiffStore;
-
-impl DiffStorePort for LocalTurnDiffStore {
-    fn capture_turn_snapshot(
-        &self,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-        _workdir: &Path,
-    ) -> PortResult<TurnDiffSummary> {
-        Ok(TurnDiffSummary {
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-            files: Vec::new(),
-        })
-    }
-
-    fn read_turn_diff(
-        &self,
-        _session_id: &SessionId,
-        _turn_id: &TurnId,
-    ) -> PortResult<Option<TurnDiffSummary>> {
-        Ok(None)
+    fn scan_project_files(&self, root: &Path) -> PortResult<ScannedFileIndex> {
+        scan_directory_parallel(
+            root,
+            CODE_COLLAB_MAX_INDEX_ENTRIES,
+            CODE_COLLAB_MAX_INDEX_BYTES,
+        )
     }
 }

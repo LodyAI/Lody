@@ -1,6 +1,11 @@
-use lody_acp::StdioAcpLauncher;
-use lody_ports::{AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSpawnSpec};
+use lody_acp::{ManagedArtifactInstaller, PortablePtyManager, StdioAcpLauncher};
+use lody_ports::{
+    AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSpawnSpec, ArtifactRegistryPort,
+    ManagedArtifactSource, PortErrorKind, PtyPort, SessionId, TERMINAL_MAX_PER_SESSION,
+    TerminalOpenSpec,
+};
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, mpsc};
@@ -76,4 +81,60 @@ fn explicit_termination_suppresses_spurious_crash_while_unexpected_exit_surfaces
         }
     }
     assert!(saw_in_flight_crash);
+}
+
+#[test]
+fn pty_cap_never_exceeds_max_per_session_and_offline_bundle_rejects_sha256_mismatch() {
+    let temp = tempfile::tempdir().unwrap();
+    let bundle_dir = temp.path().join("bundle");
+    let pkg_dir = bundle_dir.join("claude-acp").join("1.0.0");
+    fs::create_dir_all(&pkg_dir).unwrap();
+    fs::write(pkg_dir.join("adapter.js"), "tampered binary").unwrap();
+    fs::write(
+        pkg_dir.join("manifest.json"),
+        r#"{"executableRelPath":"adapter.js","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}"#,
+    )
+    .unwrap();
+
+    let installer =
+        ManagedArtifactInstaller::new(ManagedArtifactSource::OfflineBundle { bundle_dir });
+    let err = installer
+        .ensure_installed("claude-acp", "1.0.0")
+        .unwrap_err();
+    assert_eq!(err.kind, PortErrorKind::Conflict);
+
+    #[cfg(unix)]
+    {
+        let pty = PortablePtyManager::new();
+        let sid = SessionId("sess-pty-cap".to_string());
+        for _ in 0..TERMINAL_MAX_PER_SESSION {
+            pty.open_terminal(TerminalOpenSpec {
+                session_id: sid.clone(),
+                cwd: temp.path().to_path_buf(),
+                cols: 80,
+                rows: 24,
+                shell_program: "/bin/sh".to_string(),
+                shell_args: vec!["-c".to_string(), "read _line".to_string()],
+                env: BTreeMap::new(),
+            })
+            .expect("within per-session PTY bound");
+        }
+
+        let ninth = pty
+            .open_terminal(TerminalOpenSpec {
+                session_id: sid.clone(),
+                cwd: temp.path().to_path_buf(),
+                cols: 80,
+                rows: 24,
+                shell_program: "/bin/sh".to_string(),
+                shell_args: vec!["-c".to_string(), "read _line".to_string()],
+                env: BTreeMap::new(),
+            })
+            .unwrap_err();
+        assert_eq!(ninth.kind, PortErrorKind::Conflict);
+        assert!(ninth.message.starts_with("terminal_limit_exceeded:"));
+
+        pty.close_session_terminals(&sid);
+        assert!(pty.list_session_terminals(&sid).is_empty());
+    }
 }

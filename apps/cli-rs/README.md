@@ -10,11 +10,11 @@ Rust CLI (`lody`), execution daemon (`lodyd`), and black-box business conformanc
 - `crates/kernel` (`lody-kernel`) — Pure deterministic session, turn, and unified-inbox state machines; zero I/O, zero clock, zero async runtime.
 - `crates/app` (`lody-app`) — Single application command/query interface and caller authorization shared across CLI, MCP, local IPC, and remote RPC.
 - `crates/runtime` (`lody-runtime`) — Actor supervision, resource leases, and execution of `lody-kernel` actions against `lody-ports`.
-- `crates/entry` (`lody-entry`) — Protocol projections: CLI commands, `mcp-stdio`, local IPC (`lody-mux.sock` and `legacy_ipc_compat`), and remote RPC/MCP HTTP.
-- `crates/sqlite` (`lody-sqlite`) — Single-owner SQLite pools preserving existing filenames (`operations.sqlite3`, `schedules.sqlite`, `pr-poller-state.sqlite3`, `automations/<workspace>.sqlite`).
-- `crates/acp` (`lody-acp`) — `ACP over stdio` client, process-group / JobObject containment, and external managed adapter launcher.
-- `crates/worktree` (`lody-worktree`) — Git worktrees, branch observation, credential broker, FastCDC turn snapshots, and parallel file scanning.
-- `crates/engine` (`lody-engine`) — Client adapter for the standalone `loro-repo-engine` process plus coexisting Roost history storage.
+- `crates/entry` (`lody-entry`) — Protocol projections: CLI commands, `mcp-stdio`, local IPC (`probe`, `control`, and `terminal.sock` NDJSON PTY server), in-process Streamable HTTP MCP server (`/mcp`), and remote RPC.
+- `crates/sqlite` (`lody-sqlite`) — Cross-process `FileStorageLease` (`fd-lock` + yield handoff) and single-owner SQLite pools preserving existing filenames (`operations.sqlite3`, `schedules.sqlite`, `pr-poller-state.sqlite3`, `automations/<workspace>.sqlite`).
+- `crates/acp` (`lody-acp`) — `ACP over stdio` client, process-group containment, `portable-pty` session terminal manager, and SHA-256 verified managed runtime artifact installer (`reqwest` + offline bundle).
+- `crates/worktree` (`lody-worktree`) — Git worktrees, `LTD1` v2 FastCDC + `gzip`/`zstd` content-addressed `TurnDiffStore`, and `.gitignore`-aware parallel file tree scanning (`ignore`).
+- `crates/engine` (`lody-engine`) — Clean `Unavailable` port stubs awaiting the standalone `loro-repo-engine` process, Flock project catalog, and Roost history storage.
 - `crates/backend` (`lody-backend`) — Connected and self-hosted implementations (`BackendProfile` auto-discovery, OIDC/CA, negotiated upload, artifact registry, SCM/tunnel, E2EE ledger/custody, Iroh).
 - `crates/scripted-acp` (`lody-scripted-acp`) — Pure-Rust deterministic `ACP over stdio` agent double with explicit file barriers.
 - `crates/conformance` (`lody-conformance`) — Black-box business behavior harness for single-target runs, A/B baseline-vs-candidate comparison, and shared-directory handoff (`Node -> Rust -> Node`).

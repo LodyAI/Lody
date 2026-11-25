@@ -7,6 +7,7 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+fd-lock.workspace = true
 lody-ports.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

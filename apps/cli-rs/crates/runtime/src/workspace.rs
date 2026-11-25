@@ -11,6 +11,7 @@ pub enum DetachDisposition {
     Absent,
     JoinedInFlight(Arc<Notify>),
     Started {
+        session_ids: Vec<SessionId>,
         sessions: Vec<SessionHandle>,
         notify: Arc<Notify>,
     },
@@ -87,8 +88,17 @@ impl FleetWorkspaceTable {
         }
         let notify = Arc::new(Notify::new());
         mount.detach_notify = Some(Arc::clone(&notify));
-        let sessions = mount.sessions.drain().map(|(_, h)| h).collect();
-        DetachDisposition::Started { sessions, notify }
+        let mut session_ids = Vec::with_capacity(mount.sessions.len());
+        let mut sessions = Vec::with_capacity(mount.sessions.len());
+        for (sid, handle) in mount.sessions.drain() {
+            session_ids.push(sid);
+            sessions.push(handle);
+        }
+        DetachDisposition::Started {
+            session_ids,
+            sessions,
+            notify,
+        }
     }
 
     pub fn finish_detach(&mut self, workspace_id: &WorkspaceId) {
@@ -113,6 +123,20 @@ impl FleetWorkspaceTable {
                 .then(|| m.sessions.get(session_id).cloned())
                 .flatten()
         })
+    }
+
+    pub fn find_session_by_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Option<(WorkspaceId, SessionHandle)> {
+        for (ws_id, mount) in &self.mounts {
+            if !mount.is_draining()
+                && let Some(handle) = mount.sessions.get(session_id)
+            {
+                return Some((ws_id.clone(), handle.clone()));
+            }
+        }
+        None
     }
 
     pub fn remove_session(

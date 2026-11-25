@@ -1,8 +1,11 @@
 use lody_ports::{
-    AdmissionVerdict, AdmittedTurnInput, InboxCategory, InboxStorePort, SessionId, TurnId, UserId,
-    WorkspaceId,
+    AdmissionVerdict, AdmittedTurnInput, InboxCategory, InboxStorePort, PortErrorKind, SessionId,
+    StorageLeaseMode, StorageLeasePort, TurnId, UserId, WorkspaceId,
 };
-use lody_sqlite::{SqliteDataLayout, SqliteStore};
+use lody_sqlite::{FileStorageLease, SqliteDataLayout, SqliteStore};
+use std::sync::{Arc, Barrier};
+use std::thread;
+use std::time::Duration;
 
 #[test]
 fn duplicate_admission_pause_gate_and_frozen_turn_config_persist_across_reopen() {
@@ -64,4 +67,73 @@ fn duplicate_admission_pause_gate_and_frozen_turn_config_persist_across_reopen()
     assert_eq!(second.turn_id.0, "t_auto");
     assert_eq!(second.adapter_id, "codex");
     assert!(reopened.claim_next_runnable(&ws, &sid).unwrap().is_none());
+}
+
+#[test]
+fn storage_lease_prevents_concurrent_owners_and_signals_storage_only_to_yield() {
+    let dir = tempfile::tempdir().unwrap();
+    let locks_dir = dir.path().join("locks");
+
+    let storage_only = FileStorageLease::acquire(
+        &locks_dir,
+        StorageLeaseMode::StorageOnly,
+        Duration::from_secs(1),
+    )
+    .expect("acquire storage-only lease");
+    assert!(!storage_only.yield_requested());
+
+    let locks_for_online = locks_dir.clone();
+    let entered = Arc::new(Barrier::new(2));
+    let entered_bg = Arc::clone(&entered);
+
+    let online_join = thread::spawn(move || {
+        entered_bg.wait();
+        FileStorageLease::acquire(
+            &locks_for_online,
+            StorageLeaseMode::OnlineHost,
+            Duration::from_secs(5),
+        )
+    });
+
+    entered.wait();
+    while !storage_only.yield_requested() {
+        thread::yield_now();
+    }
+    assert!(storage_only.yield_requested());
+    drop(storage_only);
+
+    let online_lease = online_join
+        .join()
+        .expect("online thread")
+        .expect("online host lease acquired after storage-only yield");
+    assert_eq!(online_lease.mode(), StorageLeaseMode::OnlineHost);
+
+    let dup_online = FileStorageLease::acquire(
+        &locks_dir,
+        StorageLeaseMode::OnlineHost,
+        Duration::from_millis(50),
+    );
+    assert_eq!(
+        dup_online.err().map(|e| e.kind),
+        Some(PortErrorKind::Conflict)
+    );
+
+    let blocked_oneshot = FileStorageLease::acquire(
+        &locks_dir,
+        StorageLeaseMode::StorageOnly,
+        Duration::from_millis(50),
+    );
+    assert_eq!(
+        blocked_oneshot.err().map(|e| e.kind),
+        Some(PortErrorKind::Conflict)
+    );
+
+    drop(online_lease);
+
+    let after_release = FileStorageLease::acquire(
+        &locks_dir,
+        StorageLeaseMode::StorageOnly,
+        Duration::from_secs(1),
+    );
+    assert!(after_release.is_ok());
 }

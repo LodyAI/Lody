@@ -132,6 +132,7 @@ impl GoalControlState {
 pub enum ChildRejectReason {
     MaxDepthExceeded,
     DuplicateChildId,
+    CollaborationStopped,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

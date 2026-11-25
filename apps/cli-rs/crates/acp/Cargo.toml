@@ -8,8 +8,12 @@ license.workspace = true
 
 [dependencies]
 lody-ports.workspace = true
+portable-pty.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -7,7 +7,13 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+fastcdc.workspace = true
+flate2.workspace = true
+ignore.workspace = true
 lody-ports.workspace = true
+rusqlite.workspace = true
+sha2.workspace = true
+zstd.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

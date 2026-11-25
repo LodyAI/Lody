@@ -49,6 +49,9 @@ pub enum PromptDirective {
         barrier_dir: PathBuf,
     },
     McpInfo,
+    McpDelegate {
+        child_prompt: String,
+    },
     Crash,
 }
 
@@ -93,6 +96,11 @@ pub fn parse_prompt_directive(prompt_text: &str) -> PromptDirective {
     if directive == "MCP_INFO" {
         return PromptDirective::McpInfo;
     }
+    if let Some(rest) = directive.strip_prefix("MCP_DELEGATE:") {
+        return PromptDirective::McpDelegate {
+            child_prompt: rest.to_string(),
+        };
+    }
     if directive == "CRASH" {
         return PromptDirective::Crash;
     }
@@ -110,7 +118,20 @@ fn extract_last_tag(text: &str, prefix: &str) -> Option<String> {
     let mut rest = text;
     while let Some(start) = rest.find(prefix) {
         let after = &rest[start + prefix.len()..];
-        if let Some(end) = after.find(']') {
+        let mut depth = 1usize;
+        let mut end_idx = None;
+        for (idx, ch) in after.char_indices() {
+            if ch == '[' {
+                depth += 1;
+            } else if ch == ']' {
+                depth -= 1;
+                if depth == 0 {
+                    end_idx = Some(idx);
+                    break;
+                }
+            }
+        }
+        if let Some(end) = end_idx {
             found = Some(after[..end].to_string());
             rest = &after[end + 1..];
         } else {
@@ -442,6 +463,7 @@ fn process_requests<W: Write>(
                     PromptDirective::Permission { .. } => "permission",
                     PromptDirective::Hold { .. } => "hold",
                     PromptDirective::McpInfo => "mcp-info",
+                    PromptDirective::McpDelegate { .. } => "mcp-delegate",
                     PromptDirective::Crash => "crash",
                 };
                 recorder.record(RecordedAcpEvent {
@@ -542,6 +564,43 @@ fn process_requests<W: Write>(
                             &id,
                             &session_id,
                             "mcp-info",
+                            marker,
+                            "end_turn",
+                        )?;
+                    }
+                    PromptDirective::McpDelegate { child_prompt } => {
+                        let mcp_entry = sessions
+                            .lock()
+                            .unwrap()
+                            .get(&session_id)
+                            .and_then(|s| s.mcp_servers.as_array()?.first().cloned());
+                        let outcome_str = match mcp_entry {
+                            Some(entry) => {
+                                invoke_loopback_mcp_session_create(&entry, &child_prompt)
+                            }
+                            None => "err:no_mcp_server".to_string(),
+                        };
+                        recorder.record(RecordedAcpEvent {
+                            pid,
+                            event: "mcp-delegate".to_string(),
+                            session_id: Some(session_id.clone()),
+                            mode: Some("mcp-delegate".to_string()),
+                            marker: marker.clone(),
+                            outcome: Some(outcome_str.clone()),
+                            stop_reason: None,
+                        });
+                        emit_text_chunk(
+                            writer,
+                            &session_id,
+                            &format!("MCP delegate result: {outcome_str}"),
+                        )?;
+                        finish_prompt(
+                            writer,
+                            recorder,
+                            pid,
+                            &id,
+                            &session_id,
+                            "mcp-delegate",
                             marker,
                             "end_turn",
                         )?;
@@ -782,6 +841,88 @@ fn send_error<W: Write>(
             "error": { "code": code, "message": message }
         }),
     )
+}
+
+fn invoke_loopback_mcp_session_create(mcp_entry: &Value, child_prompt: &str) -> String {
+    use std::io::Read as _;
+    use std::net::TcpStream;
+
+    let Some(url) = mcp_entry.get("url").and_then(Value::as_str) else {
+        return "err:missing_url".to_string();
+    };
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    let (host_port, path) = match rest.split_once('/') {
+        Some((hp, p)) => (hp, format!("/{p}")),
+        None => (rest, "/mcp".to_string()),
+    };
+
+    let Ok(mut stream) = TcpStream::connect(host_port) else {
+        return "err:connect_failed".to_string();
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    let body = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "lody_session_create",
+            "arguments": {
+                "prompt": child_prompt,
+            }
+        }
+    }))
+    .unwrap_or_default();
+
+    let mut req = format!(
+        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    if let Some(headers) = mcp_entry.get("headers").and_then(Value::as_array) {
+        for h in headers {
+            if let (Some(k), Some(v)) = (
+                h.get("name").and_then(Value::as_str),
+                h.get("value").and_then(Value::as_str),
+            ) {
+                req.push_str(&format!("{k}: {v}\r\n"));
+            }
+        }
+    }
+    req.push_str("\r\n");
+
+    if stream.write_all(req.as_bytes()).is_err() || stream.write_all(&body).is_err() {
+        return "err:write_failed".to_string();
+    }
+    let _ = stream.flush();
+
+    let mut resp_bytes = Vec::new();
+    let _ = stream.read_to_end(&mut resp_bytes);
+    let resp_str = String::from_utf8_lossy(&resp_bytes);
+    let Some((_, payload_part)) = resp_str.split_once("\r\n\r\n") else {
+        return "err:invalid_http".to_string();
+    };
+    let Ok(rpc_json) = serde_json::from_str::<Value>(payload_part.trim()) else {
+        return format!("err:non_json:{}", payload_part.trim());
+    };
+    let is_err = rpc_json
+        .get("result")
+        .and_then(|r| r.get("isError"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let text = rpc_json
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|c| c.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if is_err {
+        format!("rejected:{text}")
+    } else {
+        format!("accepted:{text}")
+    }
 }
 
 #[cfg(test)]

@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 
+pub mod lease;
+
+pub use lease::FileStorageLease;
 use lody_ports::{
-    AdmissionVerdict, AdmittedTurnInput, CustomCommandSpec, InboxCategory, InboxStorePort,
-    PortError, PortErrorKind, PortResult, SessionId, SubmissionStage, TurnId, UserId, WorkspaceId,
+    AdmissionVerdict, AdmittedTurnInput, CustomCommandSpec, DelegatedResultRecord, InboxCategory,
+    InboxStorePort, PortError, PortErrorKind, PortResult, SessionId, SubmissionStage, TurnId,
+    UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -387,6 +391,35 @@ impl InboxStorePort for SqliteStore {
         )
         .map_err(map_sql_err)?;
         Ok(())
+    }
+
+    fn record_delegated_result(&self, record: &DelegatedResultRecord) -> PortResult<bool> {
+        let completion_json = serde_json::to_string(&serde_json::json!({
+            "childSessionId": record.child_session_id.0,
+            "succeeded": record.succeeded,
+            "summaryPreview": record.summary_preview,
+        }))
+        .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))?;
+
+        let conn = self.conn.lock().expect("sqlite lock");
+        let inserted = conn
+            .execute(
+                "INSERT OR IGNORE INTO inbox_results
+                 (workspace_id, session_id, user_id, operation_id, operation_kind, source_turn_id,
+                  chain_depth, completion_json, automatic_eligible, consumed)
+                 VALUES (?1, ?2, ?3, ?4, 'session_create', ?5, ?6, ?7, 1, 0)",
+                params![
+                    &record.workspace_id.0,
+                    &record.parent_session_id.0,
+                    &record.user_id.0,
+                    &record.operation_id,
+                    record.source_turn_id.as_ref().map(|t| t.0.as_str()),
+                    i64::from(record.chain_depth),
+                    &completion_json,
+                ],
+            )
+            .map_err(map_sql_err)?;
+        Ok(inserted > 0)
     }
 
     fn erase_workspace_inbox(&self, workspace_id: &WorkspaceId) -> PortResult<()> {

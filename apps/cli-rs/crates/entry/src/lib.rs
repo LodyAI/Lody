@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 pub mod ipc;
+pub mod mcp_http;
+pub mod terminal;
 
 use clap::{Parser, Subcommand};
 pub use ipc::{
@@ -9,12 +11,19 @@ pub use ipc::{
 };
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, PortError, PortErrorKind, PortResult,
-    SessionId, VerifiedPrincipal, WorkspaceId,
+    SessionId, TurnId, VerifiedPrincipal, WorkspaceId,
+};
+pub use mcp_http::{
+    MCP_HTTP_MACHINE_ID_HEADER, MCP_HTTP_SESSION_ID_HEADER, MCP_HTTP_WORKDIR_B64_HEADER,
+    MCP_HTTP_WORKSPACE_ID_HEADER, McpRequestContext, find_peer_uid_in_proc_net_tcp,
+    ip_to_proc_net_hexes, parse_mcp_context_headers, start_mcp_http_server,
+    timing_safe_token_equal,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+pub use terminal::{resolve_terminal_socket_path, start_local_terminal_server};
 
 #[derive(Debug, Parser)]
 #[command(name = "lody", disable_version_flag = true)]
@@ -69,6 +78,11 @@ enum ProjectSubcommand {
         #[arg(long)]
         json: bool,
     },
+    Scan {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -77,6 +91,12 @@ enum SessionSubcommand {
         session_id: String,
         #[arg(long)]
         offline: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Diff {
+        session_id: String,
+        turn_id: String,
         #[arg(long)]
         json: bool,
     },
@@ -107,9 +127,18 @@ pub enum OneShotAction {
     ProjectList {
         json: bool,
     },
+    ProjectScan {
+        path: PathBuf,
+        json: bool,
+    },
     SessionHistory {
         session_id: String,
         offline: bool,
+        json: bool,
+    },
+    SessionDiff {
+        session_id: String,
+        turn_id: String,
         json: bool,
     },
     SessionArchive {
@@ -154,6 +183,12 @@ pub fn parse_cli_args(args: &[String]) -> Result<DispatchPlan, String> {
             ProjectSubcommand::List { json } => {
                 Ok(DispatchPlan::OneShot(OneShotAction::ProjectList { json }))
             }
+            ProjectSubcommand::Scan { path, json } => {
+                Ok(DispatchPlan::OneShot(OneShotAction::ProjectScan {
+                    path,
+                    json,
+                }))
+            }
         },
         Some(CliCommand::Session { action }) => match action {
             SessionSubcommand::History {
@@ -163,6 +198,15 @@ pub fn parse_cli_args(args: &[String]) -> Result<DispatchPlan, String> {
             } => Ok(DispatchPlan::OneShot(OneShotAction::SessionHistory {
                 session_id,
                 offline,
+                json,
+            })),
+            SessionSubcommand::Diff {
+                session_id,
+                turn_id,
+                json,
+            } => Ok(DispatchPlan::OneShot(OneShotAction::SessionDiff {
+                session_id,
+                turn_id,
                 json,
             })),
             SessionSubcommand::Archive { session_id, json } => {
@@ -274,6 +318,27 @@ pub fn try_execute_via_live_daemon(
                 Err(e) => Err(e.to_string()),
             })
         }
+        OneShotAction::SessionDiff {
+            session_id,
+            turn_id,
+            ..
+        } => {
+            let res = send_unix_http(
+                control,
+                "POST",
+                "/session-control",
+                tok,
+                Some(&json!({
+                    "type": "session/turn_diff",
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                })),
+            );
+            Some(match res {
+                Ok((_, body)) => extract_first_ndjson_response(&body),
+                Err(e) => Err(e.to_string()),
+            })
+        }
         OneShotAction::SessionArchive { session_id, .. } => {
             let res = send_unix_http(
                 control,
@@ -369,6 +434,11 @@ pub fn execute_offline_oneshot(
             serde_json::to_string(&resp)
                 .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))
         }
+        OneShotAction::ProjectScan { path, .. } => {
+            let resp = service.query(&caller, AppQuery::ScanProjectFiles { root_path: path })?;
+            serde_json::to_string(&resp)
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))
+        }
         OneShotAction::SessionHistory { session_id, .. } => {
             let resp = service.query(
                 &caller,
@@ -387,6 +457,22 @@ pub fn execute_offline_oneshot(
                     "unexpected history response",
                 ))
             }
+        }
+        OneShotAction::SessionDiff {
+            session_id,
+            turn_id,
+            ..
+        } => {
+            let resp = service.query(
+                &caller,
+                AppQuery::GetTurnDiff {
+                    workspace_id: WorkspaceId("local".to_string()),
+                    session_id: SessionId(session_id),
+                    turn_id: TurnId(turn_id),
+                },
+            )?;
+            serde_json::to_string(&resp)
+                .map_err(|e| PortError::new(PortErrorKind::Internal, e.to_string()))
         }
         OneShotAction::SessionArchive { session_id, .. } => {
             let _ = service.execute(

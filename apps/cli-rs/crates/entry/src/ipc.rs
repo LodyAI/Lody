@@ -570,6 +570,32 @@ async fn handle_session_control(
                 Err(e) => ndjson_error(&e.to_string()).into_response(),
             }
         }
+        "session/turn_diff" => {
+            let turn_id = TurnId(
+                payload
+                    .get("turnId")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+            );
+            let q = AppQuery::GetTurnDiff {
+                workspace_id,
+                session_id,
+                turn_id,
+            };
+            let res = tokio::task::spawn_blocking(move || service.query(&caller, q)).await;
+            match res {
+                Ok(Ok(AppResponse::TurnDiff { diff })) => ndjson_frames(&[json!({
+                    "type": "session/turn_diff_response",
+                    "sessionId": session_id_str,
+                    "diff": diff,
+                })])
+                .into_response(),
+                Ok(Ok(_)) => ndjson_error("unexpected query response").into_response(),
+                Ok(Err(e)) => ndjson_error(&e.to_string()).into_response(),
+                Err(e) => ndjson_error(&e.to_string()).into_response(),
+            }
+        }
         other => {
             ndjson_error(&format!("unsupported session control type '{other}'")).into_response()
         }
@@ -580,6 +606,7 @@ async fn handle_session_control(
 pub async fn serve_local_daemon(
     data_dir: &Path,
     home_dir: &Path,
+    namespace: &str,
     version: &str,
     service: Arc<dyn ApplicationService>,
 ) -> PortResult<()> {
@@ -612,6 +639,22 @@ pub async fn serve_local_daemon(
     let _ = fs::set_permissions(&probe_path, fs::Permissions::from_mode(0o600));
     let _ = fs::set_permissions(&control_path, fs::Permissions::from_mode(0o600));
 
+    let shutdown = Arc::new(Notify::new());
+    let (_mcp_ep, mcp_task) = crate::mcp_http::start_mcp_http_server(
+        Arc::clone(&service),
+        &machine_id,
+        version,
+        Arc::clone(&shutdown),
+    )
+    .await?;
+    let (_term_sock, term_task) = crate::terminal::start_local_terminal_server(
+        data_dir,
+        namespace,
+        Arc::clone(&service),
+        Arc::clone(&shutdown),
+    )
+    .await?;
+
     let token = generate_ipc_token(data_dir);
     let meta = DaemonRunMetadata {
         pid: my_pid,
@@ -633,7 +676,6 @@ pub async fn serve_local_daemon(
         lody_app::PortError::new(lody_app::PortErrorKind::Unavailable, e.to_string())
     })?;
 
-    let shutdown = Arc::new(Notify::new());
     let shared = Arc::new(ServerState {
         service,
         machine_id,
@@ -672,7 +714,7 @@ pub async fn serve_local_daemon(
             control_shutdown.notified().await;
         });
 
-    let _ = tokio::join!(probe_srv, control_srv);
+    let _ = tokio::join!(probe_srv, control_srv, mcp_task, term_task);
 
     let svc_for_drain = Arc::clone(&shared.service);
     let _ = tokio::task::spawn_blocking(move || svc_for_drain.drain_for_shutdown()).await;
@@ -689,6 +731,7 @@ pub async fn serve_local_daemon(
 pub async fn serve_local_daemon(
     _data_dir: &Path,
     _home_dir: &Path,
+    _namespace: &str,
     _version: &str,
     _service: Arc<dyn ApplicationService>,
 ) -> PortResult<()> {

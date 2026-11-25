@@ -199,9 +199,11 @@ struct NoopDiff;
 impl DiffStorePort for NoopDiff {
     fn capture_turn_snapshot(
         &self,
+        _: &WorkspaceId,
         sid: &SessionId,
         tid: &TurnId,
         _: &Path,
+        _: i64,
     ) -> PortResult<TurnDiffSummary> {
         Ok(TurnDiffSummary {
             session_id: sid.clone(),
@@ -209,7 +211,13 @@ impl DiffStorePort for NoopDiff {
             files: Vec::new(),
         })
     }
-    fn read_turn_diff(&self, _: &SessionId, _: &TurnId) -> PortResult<Option<TurnDiffSummary>> {
+    fn read_turn_diff(
+        &self,
+        _: &WorkspaceId,
+        _: &SessionId,
+        _: &TurnId,
+        _: i64,
+    ) -> PortResult<Option<TurnDiffSummary>> {
         Ok(None)
     }
 }
@@ -315,7 +323,13 @@ fn build_test_runtime(
 ) -> DaemonRuntime {
     DaemonRuntime::with_settling_timeout(
         DaemonDependencies {
+            machine_id: lody_app::MachineId("m_test".to_string()),
+            default_cwd: std::path::PathBuf::from("."),
+            shell_command: ("/bin/sh".to_string(), Vec::new()),
+            agent_base_env: std::collections::BTreeMap::new(),
+            terminal_env_builder: Arc::new(|_| std::collections::BTreeMap::new()),
             storage_lease_mode: StorageLeaseMode::OnlineHost,
+            storage_lease: None,
             engine: Arc::new(TestEngine),
             history,
             inbox: Arc::new(MemoryInbox::default()),
@@ -323,6 +337,7 @@ fn build_test_runtime(
             diff_store: Arc::new(NoopDiff),
             artifacts: Arc::new(NoopArtifacts(ManagedArtifactSource::Disabled)),
             acp: Arc::new(FakeAcpLauncher { cancel_calls }),
+            pty: Arc::new(lody_ports::UnavailablePtyPort),
             worktree: Arc::new(NoopWorktree),
             backend: None,
         },
@@ -578,6 +593,138 @@ async fn detaching_and_erasing_one_workspace_preserves_sibling_workspace_and_rej
         panic!("expected history");
     };
     assert_eq!(turns_b.len(), 1);
+
+    runtime.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn child_delegation_rejects_when_stopped_or_over_depth_and_delivers_receipt_to_parent() {
+    let history = Arc::new(MemoryHistory::default());
+    let runtime = build_test_runtime(Arc::new(AtomicUsize::new(0)), Arc::clone(&history));
+    let caller = VerifiedPrincipal::LocalHost {
+        caller_pid: Some(1),
+        account_id: None,
+    };
+    let ws = WorkspaceId("ws_del".to_string());
+    let parent_sid = SessionId("s_parent".to_string());
+
+    runtime
+        .execute_async(
+            &caller,
+            AppCommand::CreateSession {
+                workspace_id: ws.clone(),
+                session_id: parent_sid.clone(),
+                turn_id: TurnId("t_parent_1".to_string()),
+                local_project_id: None,
+                use_worktree: false,
+                adapter_id: "ok".to_string(),
+                custom_acp: None,
+                prompt: "parent".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let parent_handle = runtime.session_handle(&ws, &parent_sid).unwrap();
+    wait_for_running_or_idle(&parent_handle, true).await;
+
+    let child_sid = SessionId("s_child_1".to_string());
+    runtime
+        .execute_async(
+            &caller,
+            AppCommand::DelegateChildSession {
+                workspace_id: ws.clone(),
+                parent_session_id: parent_sid.clone(),
+                child_session_id: child_sid.clone(),
+                turn_id: TurnId("t_child_1".to_string()),
+                operation_id: Some("op_child_1".to_string()),
+                adapter_id: "ok".to_string(),
+                custom_acp: None,
+                prompt: "child task".to_string(),
+            },
+        )
+        .await
+        .expect("depth-1 child delegation admitted");
+
+    let grandchild_err = runtime
+        .execute_async(
+            &caller,
+            AppCommand::DelegateChildSession {
+                workspace_id: ws.clone(),
+                parent_session_id: child_sid.clone(),
+                child_session_id: SessionId("s_grandchild".to_string()),
+                turn_id: TurnId("t_gc".to_string()),
+                operation_id: Some("op_gc".to_string()),
+                adapter_id: "ok".to_string(),
+                custom_acp: None,
+                prompt: "grandchild".to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(grandchild_err.kind, PortErrorKind::Forbidden);
+
+    parent_handle
+        .send_event(KernelEvent::AgentOutputChunk {
+            generation: Generation(1),
+            text: "parent done".to_string(),
+        })
+        .await
+        .unwrap();
+    parent_handle
+        .send_event(KernelEvent::AgentPromptFinished {
+            generation: Generation(1),
+        })
+        .await
+        .unwrap();
+    wait_for_running_or_idle(&parent_handle, false).await;
+
+    let child_handle = runtime.session_handle(&ws, &child_sid).unwrap();
+    wait_for_running_or_idle(&child_handle, true).await;
+    child_handle
+        .send_event(KernelEvent::AgentOutputChunk {
+            generation: Generation(1),
+            text: "child summary output".to_string(),
+        })
+        .await
+        .unwrap();
+    child_handle
+        .send_event(KernelEvent::AgentPromptFinished {
+            generation: Generation(1),
+        })
+        .await
+        .unwrap();
+
+    wait_for_running_or_idle(&parent_handle, true).await;
+
+    runtime
+        .execute_async(
+            &caller,
+            AppCommand::CancelSession {
+                workspace_id: ws.clone(),
+                session_id: parent_sid.clone(),
+                pause_inbox: true,
+            },
+        )
+        .await
+        .unwrap();
+
+    let stopped_err = runtime
+        .execute_async(
+            &caller,
+            AppCommand::DelegateChildSession {
+                workspace_id: ws.clone(),
+                parent_session_id: parent_sid.clone(),
+                child_session_id: SessionId("s_child_blocked".to_string()),
+                turn_id: TurnId("t_blocked".to_string()),
+                operation_id: Some("op_blocked".to_string()),
+                adapter_id: "ok".to_string(),
+                custom_acp: None,
+                prompt: "blocked by stop".to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(stopped_err.kind, PortErrorKind::Forbidden);
 
     runtime.shutdown().await;
 }

@@ -72,10 +72,10 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）+ 双通道控制优先 <code>SessionActor</code>。</p>
+        <p>单进程单 Fleet 内嵌 <code>FleetWorkspaceTable</code>（多 Workspace 动态挂载、防降级拦截、无锁排空卸载与单工作区擦除）、双通道控制优先 <code>SessionActor</code>、跨会话子任务委派与回执自动唤醒。</p>
       </td>
       <td>
-        <p>本机存储锁让位（<code>StorageLease</code> 文件锁）、内嵌 <code>rquickjs</code> 求值与 Schedule 定时调度器。</p>
+        <p>内嵌 <code>rquickjs</code> 求值与 Schedule 定时调度器。</p>
       </td>
     </tr>
     <tr>
@@ -86,10 +86,10 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p><code>clap</code> CLI（<code>daemon start/stop/run/status</code>、<code>project add/list</code>、<code>session history/archive</code>）+ <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code> NDJSON 流，在线自动转发保单写者）。</p>
+        <p><code>clap</code> CLI + <code>axum</code> 本地 Unix Socket（<code>probe</code> &amp; <code>control</code> NDJSON 流）+ 进程内 Streamable HTTP MCP Server（<code>/mcp</code> 令牌/上下文头/Linux 四元组 UID 校验）+ <code>terminal.sock</code> PTY 服务。</p>
       </td>
       <td>
-        <p>新 <code>lody-mux.sock</code> 多路复用协议、进程内内置 MCP HTTP Server、<code>terminal.sock</code> PTY 服务与远端 Machine RPC 网关。</p>
+        <p>新 <code>lody-mux.sock</code> 多路复用协议与远端 Machine RPC 网关。</p>
       </td>
     </tr>
     <tr>
@@ -100,10 +100,10 @@
         <p><b>主干已通</b></p>
       </td>
       <td>
-        <p><code>rusqlite</code> bundled WAL 单写收件箱/项目/历史与工作区擦除；<code>ACP over stdio</code> 握手/流式/权限/PGID 进程组；<code>git worktree add/remove</code> 隔离。</p>
+        <p><code>FileStorageLease</code>（<code>fd-lock</code> 让位锁）与 <code>operations.sqlite3</code> 收件箱/回执；<code>ACP over stdio</code> + <code>portable-pty</code> + 受管制品 SHA-256 下载/离线包校验；Git Worktree + <code>LTD1</code> v2 FastCDC <code>TurnDiffStore</code>（<code>gzip/zstd</code>）+ <code>.gitignore</code> 并行目录扫描。</p>
       </td>
       <td>
-        <p><code>schedules.sqlite</code> 与 <code>automations</code> 分库读写；受管运行时制品 SHA-256 下载器；FastCDC <code>TurnDiffStore</code> 与并行文件树扫描。</p>
+        <p><code>schedules.sqlite</code> 与 <code>automations</code> 分库读写。</p>
       </td>
     </tr>
     <tr>

@@ -22,8 +22,10 @@ pub use error::{PortError, PortErrorKind, PortResult};
 pub use execution::{
     AcpEventSink, AcpInboundEvent, AcpLauncherPort, AcpSessionPort, AcpSpawnSpec,
     ArtifactRegistryPort, CustomCommandSpec, InstalledArtifact, ManagedArtifactSource,
-    McpServerMount, PermissionDecision, PtyPort, PtySpawnSpec, SteerVerdict, WorktreeLease,
-    WorktreePort,
+    McpHttpHeader, McpServerMount, PermissionDecision, PtyPort, ScannedFileEntry, ScannedFileIndex,
+    SteerVerdict, TERMINAL_MAX_PER_SESSION, TerminalAttachReplay, TerminalEventSink,
+    TerminalOpenOutcome, TerminalOpenSpec, TerminalOutboundEvent, TerminalSnapshot,
+    UnavailablePtyPort, WorktreeLease, WorktreePort,
 };
 pub use identity::{
     CapabilitySet, LocalProjectId, MachineId, PlatformCapability, ProfileId, SessionId, TurnId,
@@ -31,7 +33,7 @@ pub use identity::{
 };
 pub use storage::{
     AdmissionVerdict, AdmittedTurnInput, AutomationProgramRecord, AutomationStorePort,
-    DiffFileEntry, DiffStorePort, InboxCategory, InboxStorePort, LocalProjectRecord,
-    ProjectStorePort, ScheduleRecord, ScheduleStorePort, StorageLeaseMode, StorageLeasePort,
-    SubmissionStage, TurnDiffSummary,
+    DelegatedResultRecord, DiffFileEntry, DiffStorePort, InboxCategory, InboxStorePort,
+    LocalProjectRecord, ProjectStorePort, ScheduleRecord, ScheduleStorePort, StorageLeaseMode,
+    StorageLeasePort, SubmissionStage, TurnDiffCompression, TurnDiffEventInput, TurnDiffSummary,
 };

@@ -4,27 +4,42 @@
 pub mod actor;
 pub mod workspace;
 
-pub use actor::{ControlCommand, SessionHandle, SessionSpawnOptions, spawn_session_actor};
+pub use actor::{
+    ChildAdmissionGrant, ControlCommand, ParentDelegationTarget, SessionHandle,
+    SessionSpawnOptions, spawn_session_actor,
+};
 use lody_app::{
     AppCommand, AppQuery, AppResponse, ApplicationService, AttachedWorkspaceView, CapabilitySet,
-    CustomCommandSpec, DaemonStatusView, HistoryTurnRecord, LocalProjectId, PortError,
-    PortErrorKind, PortResult, ProfileId, SessionId, StorageLeaseMode, TurnId, UserId,
-    VerifiedPrincipal, WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
+    CustomCommandSpec, DaemonStatusView, HistoryTurnRecord, LocalProjectId, MachineId,
+    McpHttpEndpointConfig, PortError, PortErrorKind, PortResult, ProfileId, SessionId,
+    SessionRuntimeStatus, StorageLeaseMode, TerminalEventSink, TurnId, UserId, VerifiedPrincipal,
+    WorkspaceId, WorkspaceSecurityMode, enforce_command_policy,
 };
-use lody_kernel::{FrozenTurnInvocation, TurnSourceKind};
+use lody_kernel::{ChildRejectReason, FrozenTurnInvocation, SessionPhase, TurnSourceKind};
 use lody_ports::{
     AcpLauncherPort, AdmittedTurnInput, ArtifactRegistryPort, BackendPort, DiffStorePort,
-    EnginePort, HistoryPort, InboxCategory, InboxStorePort, ProjectStorePort, WorktreePort,
+    EnginePort, HistoryPort, InboxCategory, InboxStorePort, ProjectStorePort, PtyPort,
+    StorageLeasePort, TerminalOpenSpec, WorktreePort,
 };
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 pub use workspace::{DetachDisposition, FleetWorkspaceTable, WorkspaceMount};
 
 const DEFAULT_SETTLING_TIMEOUT: Duration = Duration::from_secs(5);
 
+pub type TerminalEnvBuilder = dyn Fn(&str) -> BTreeMap<String, String> + Send + Sync;
+
 pub struct DaemonDependencies {
+    pub machine_id: MachineId,
+    pub default_cwd: PathBuf,
+    pub shell_command: (String, Vec<String>),
+    pub agent_base_env: BTreeMap<String, String>,
+    pub terminal_env_builder: Arc<TerminalEnvBuilder>,
     pub storage_lease_mode: StorageLeaseMode,
+    pub storage_lease: Option<Arc<dyn StorageLeasePort>>,
     pub engine: Arc<dyn EnginePort>,
     pub history: Arc<dyn HistoryPort>,
     pub inbox: Arc<dyn InboxStorePort>,
@@ -32,16 +47,34 @@ pub struct DaemonDependencies {
     pub diff_store: Arc<dyn DiffStorePort>,
     pub artifacts: Arc<dyn ArtifactRegistryPort>,
     pub acp: Arc<dyn AcpLauncherPort>,
+    pub pty: Arc<dyn PtyPort>,
     pub worktree: Arc<dyn WorktreePort>,
     pub backend: Option<Arc<dyn BackendPort>>,
 }
 
 pub struct DaemonRuntime {
     deps: Arc<DaemonDependencies>,
+    mcp_endpoint: Arc<RwLock<Option<McpHttpEndpointConfig>>>,
     acp_start_semaphore: Arc<Semaphore>,
     workspaces: RwLock<FleetWorkspaceTable>,
     settling_timeout: Duration,
     owned_tokio: Option<tokio::runtime::Runtime>,
+}
+
+fn current_epoch_ms_i64() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+fn ignore_unwired(res: PortResult<()>) -> PortResult<()> {
+    match res {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind == PortErrorKind::Unavailable => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 impl DaemonRuntime {
@@ -59,6 +92,7 @@ impl DaemonRuntime {
         });
         Self {
             deps: Arc::new(deps),
+            mcp_endpoint: Arc::new(RwLock::new(None)),
             acp_start_semaphore: Arc::new(Semaphore::new(max_starts)),
             workspaces: RwLock::new(FleetWorkspaceTable::default()),
             settling_timeout,
@@ -88,6 +122,23 @@ impl DaemonRuntime {
             .get_session(workspace_id, session_id)
     }
 
+    fn resolve_workspace_mode(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> PortResult<WorkspaceSecurityMode> {
+        match self.deps.engine.read_workspace_security_mode(workspace_id) {
+            Ok(mode) => Ok(mode),
+            Err(err)
+                if err.kind == PortErrorKind::Unavailable
+                    && !self.deps.engine.is_connected()
+                    && workspace_id.0 == "local" =>
+            {
+                Ok(WorkspaceSecurityMode::Plaintext)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     pub fn attach_workspace(
         &self,
         workspace_id: &WorkspaceId,
@@ -95,10 +146,7 @@ impl DaemonRuntime {
     ) -> PortResult<AttachedWorkspaceView> {
         let mode = match explicit_mode {
             Some(m) => m,
-            None => self
-                .deps
-                .engine
-                .read_workspace_security_mode(workspace_id)?,
+            None => self.resolve_workspace_mode(workspace_id)?,
         };
         self.workspaces
             .write()
@@ -121,7 +169,8 @@ impl DaemonRuntime {
             DetachDisposition::Absent => {
                 if erase_local_state {
                     self.deps.inbox.erase_workspace_inbox(workspace_id)?;
-                    self.deps.history.erase_workspace_turns(workspace_id)?;
+                    self.deps.diff_store.erase_workspace_diffs(workspace_id)?;
+                    ignore_unwired(self.deps.history.erase_workspace_turns(workspace_id))?;
                 }
                 Ok(0)
             }
@@ -129,8 +178,15 @@ impl DaemonRuntime {
                 notify.notified().await;
                 Ok(0)
             }
-            DetachDisposition::Started { sessions, notify } => {
+            DetachDisposition::Started {
+                session_ids,
+                sessions,
+                notify,
+            } => {
                 let drained = sessions.len();
+                for sid in &session_ids {
+                    self.deps.pty.close_session_terminals(sid);
+                }
                 for handle in sessions {
                     handle.shutdown().await;
                 }
@@ -139,7 +195,10 @@ impl DaemonRuntime {
                     self.deps
                         .inbox
                         .erase_workspace_inbox(workspace_id)
-                        .and_then(|()| self.deps.history.erase_workspace_turns(workspace_id))
+                        .and_then(|()| self.deps.diff_store.erase_workspace_diffs(workspace_id))
+                        .and_then(|()| {
+                            ignore_unwired(self.deps.history.erase_workspace_turns(workspace_id))
+                        })
                 } else {
                     Ok(())
                 };
@@ -156,26 +215,33 @@ impl DaemonRuntime {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn ensure_session_actor(
         &self,
         workspace_id: &WorkspaceId,
         session_id: &SessionId,
         depth: u8,
         local_project_id: Option<LocalProjectId>,
+        explicit_project_root: Option<PathBuf>,
         use_worktree: bool,
         custom_acp: Option<CustomCommandSpec>,
+        parent_delegation: Option<ParentDelegationTarget>,
     ) -> PortResult<SessionHandle> {
         if let Some(existing) = self.session_handle(workspace_id, session_id) {
             return Ok(existing);
         }
 
-        let engine_mode = self
-            .deps
-            .engine
-            .read_workspace_security_mode(workspace_id)?;
-        let project_root = match &local_project_id {
-            Some(pid) => self.deps.projects.get_project(pid)?.map(|r| r.root_path),
-            None => None,
+        let engine_mode = self.resolve_workspace_mode(workspace_id)?;
+        let project_root = match explicit_project_root {
+            Some(explicit) => Some(explicit),
+            None => match &local_project_id {
+                Some(pid) => match self.deps.projects.get_project(pid) {
+                    Ok(opt) => opt.map(|r| r.root_path),
+                    Err(err) if err.kind == PortErrorKind::Unavailable => None,
+                    Err(err) => return Err(err),
+                },
+                None => None,
+            },
         };
 
         let mut guard = self.workspaces.write().expect("workspaces lock");
@@ -196,9 +262,11 @@ impl DaemonRuntime {
                 project_root,
                 use_worktree,
                 custom_acp,
+                parent_delegation,
                 settling_timeout: self.settling_timeout,
             },
             Arc::clone(&self.deps),
+            Arc::clone(&self.mcp_endpoint),
             Arc::clone(&self.acp_start_semaphore),
         );
         mount.sessions.insert(session_id.clone(), handle.clone());
@@ -243,9 +311,11 @@ impl DaemonRuntime {
         turn_id: TurnId,
         depth: u8,
         local_project_id: Option<LocalProjectId>,
+        explicit_project_root: Option<PathBuf>,
         use_worktree: bool,
         adapter_id: String,
         custom_acp: Option<CustomCommandSpec>,
+        parent_delegation: Option<ParentDelegationTarget>,
         prompt: String,
     ) -> PortResult<AppResponse> {
         let requester = Self::verified_requester(caller);
@@ -265,22 +335,27 @@ impl DaemonRuntime {
             signed_intent_verified,
         })?;
 
-        if !self
+        match self
             .deps
             .history
-            .is_user_turn_durable(&workspace_id, &session_id, &turn_id)?
+            .is_user_turn_durable(&workspace_id, &session_id, &turn_id)
         {
-            self.deps.history.upsert_turn_record(
-                &workspace_id,
-                &session_id,
-                &HistoryTurnRecord {
-                    turn_id: turn_id.clone(),
-                    author_user_id: Some(requester),
-                    user_prompt: prompt,
-                    assistant_blocks: Vec::new(),
-                    outcome: None,
-                },
-            )?;
+            Ok(false) => {
+                ignore_unwired(self.deps.history.upsert_turn_record(
+                    &workspace_id,
+                    &session_id,
+                    &HistoryTurnRecord {
+                        turn_id: turn_id.clone(),
+                        author_user_id: Some(requester),
+                        user_prompt: prompt,
+                        assistant_blocks: Vec::new(),
+                        outcome: None,
+                    },
+                ))?;
+            }
+            Ok(true) => {}
+            Err(err) if err.kind == PortErrorKind::Unavailable => {}
+            Err(err) => return Err(err),
         }
 
         let handle = self.ensure_session_actor(
@@ -288,8 +363,10 @@ impl DaemonRuntime {
             &session_id,
             depth,
             local_project_id,
+            explicit_project_root,
             use_worktree,
             custom_acp,
+            parent_delegation,
         )?;
         handle.wake_inbox().await?;
 
@@ -297,6 +374,21 @@ impl DaemonRuntime {
             session_id,
             turn_id,
         })
+    }
+
+    async fn resolve_terminal_cwd(&self, session_id: &SessionId) -> PathBuf {
+        let handle_opt = self
+            .workspaces
+            .read()
+            .expect("workspaces lock")
+            .find_session_by_id(session_id)
+            .map(|(_, h)| h);
+        if let Some(handle) = handle_opt
+            && let Ok(Some(dir)) = handle.inspect_workdir().await
+        {
+            return dir;
+        }
+        self.deps.default_cwd.clone()
     }
 
     pub async fn execute_async(
@@ -358,9 +450,11 @@ impl DaemonRuntime {
                     turn_id,
                     0,
                     local_project_id,
+                    None,
                     use_worktree,
                     adapter_id,
                     custom_acp,
+                    None,
                     prompt,
                 )
                 .await
@@ -384,9 +478,11 @@ impl DaemonRuntime {
                     turn_id,
                     0,
                     None,
+                    None,
                     false,
                     adapter_id,
                     custom_acp,
+                    None,
                     prompt,
                 )
                 .await
@@ -437,22 +533,70 @@ impl DaemonRuntime {
             }
             AppCommand::DelegateChildSession {
                 workspace_id,
+                parent_session_id,
                 child_session_id,
                 turn_id,
+                operation_id,
                 adapter_id,
+                custom_acp,
                 prompt,
-                ..
             } => {
+                let parent_handle = self
+                    .session_handle(&workspace_id, &parent_session_id)
+                    .ok_or_else(|| {
+                        PortError::new(
+                            PortErrorKind::NotFound,
+                            format!("parent session '{}' is not active", parent_session_id.0),
+                        )
+                    })?;
+
+                let grant = match parent_handle
+                    .admit_child_delegation(child_session_id.0.clone())
+                    .await?
+                {
+                    Ok(g) => g,
+                    Err(ChildRejectReason::MaxDepthExceeded) => {
+                        return Err(PortError::new(
+                            PortErrorKind::Forbidden,
+                            "child session delegation exceeded MAX_CHILD_DELEGATION_DEPTH",
+                        ));
+                    }
+                    Err(ChildRejectReason::CollaborationStopped) => {
+                        return Err(PortError::new(
+                            PortErrorKind::Forbidden,
+                            "collaborationStopped barrier blocks child delegation",
+                        ));
+                    }
+                    Err(ChildRejectReason::DuplicateChildId) => {
+                        return Err(PortError::new(
+                            PortErrorKind::Conflict,
+                            format!("duplicate child session id '{}'", child_session_id.0),
+                        ));
+                    }
+                };
+
+                let effective_custom = custom_acp.or(grant.inherited_custom_acp);
+                let resolved_op_id =
+                    operation_id.unwrap_or_else(|| format!("op:{}", child_session_id.0));
+                let target = ParentDelegationTarget {
+                    parent_handle,
+                    parent_session_id,
+                    operation_id: resolved_op_id,
+                    source_turn_id: grant.active_turn_id,
+                };
+
                 self.admit_turn_and_wake(
                     caller,
                     workspace_id,
                     child_session_id,
                     turn_id,
-                    1,
+                    grant.child_depth,
                     None,
+                    grant.inherited_project_root,
                     false,
                     adapter_id,
-                    None,
+                    effective_custom,
+                    Some(target),
                     prompt,
                 )
                 .await
@@ -461,6 +605,7 @@ impl DaemonRuntime {
                 workspace_id,
                 session_id,
             } => {
+                self.deps.pty.close_session_terminals(&session_id);
                 let removed = self
                     .workspaces
                     .write()
@@ -471,6 +616,53 @@ impl DaemonRuntime {
                 }
                 Ok(AppResponse::SessionArchived { session_id })
             }
+            AppCommand::TerminalOpen {
+                session_id,
+                cols,
+                rows,
+            } => {
+                let cwd = self.resolve_terminal_cwd(&session_id).await;
+                let (shell_program, shell_args) = self.deps.shell_command.clone();
+                let env = (self.deps.terminal_env_builder)(&session_id.0);
+                let out = self.deps.pty.open_terminal(TerminalOpenSpec {
+                    session_id,
+                    cwd,
+                    cols,
+                    rows,
+                    shell_program,
+                    shell_args,
+                    env,
+                })?;
+                Ok(AppResponse::TerminalOpened(out))
+            }
+            AppCommand::TerminalAttach {
+                terminal_id,
+                cols,
+                rows,
+            } => {
+                let replay = self.deps.pty.attach_terminal(&terminal_id, cols, rows)?;
+                Ok(AppResponse::TerminalAttached(replay))
+            }
+            AppCommand::TerminalInput { terminal_id, data } => {
+                self.deps.pty.write_terminal_input(&terminal_id, &data)?;
+                Ok(AppResponse::TerminalAck)
+            }
+            AppCommand::TerminalResize {
+                terminal_id,
+                cols,
+                rows,
+            } => {
+                self.deps.pty.resize_terminal(&terminal_id, cols, rows)?;
+                Ok(AppResponse::TerminalAck)
+            }
+            AppCommand::TerminalClose { terminal_id } => {
+                self.deps.pty.close_terminal(&terminal_id)?;
+                Ok(AppResponse::TerminalAck)
+            }
+            AppCommand::TerminalCloseSession { session_id } => {
+                self.deps.pty.close_session_terminals(&session_id);
+                Ok(AppResponse::TerminalAck)
+            }
         }
     }
 
@@ -479,10 +671,63 @@ impl DaemonRuntime {
         caller: &VerifiedPrincipal,
         query: AppQuery,
     ) -> PortResult<AppResponse> {
+        if let AppQuery::GetSessionStatuses {
+            workspace_id,
+            session_ids,
+        } = query
+        {
+            let mut statuses = Vec::with_capacity(session_ids.len());
+            for sid in session_ids {
+                if let Some(handle) = self.session_handle(&workspace_id, &sid)
+                    && let Ok(phase) = handle.inspect_phase().await
+                {
+                    let (exec_state, phase_str, active_turn_id) = match phase {
+                        SessionPhase::Idle { .. } => ("idle", "idle", None),
+                        SessionPhase::Preparing { invocation, .. } => {
+                            ("busy", "initializing", Some(TurnId(invocation.turn_id)))
+                        }
+                        SessionPhase::Running(running) => {
+                            let p = if running.pending_permissions.is_empty() {
+                                "running"
+                            } else {
+                                "waiting_permission"
+                            };
+                            ("busy", p, Some(TurnId(running.invocation.turn_id)))
+                        }
+                        SessionPhase::Settling { invocation, .. } => {
+                            ("busy", "settling", Some(TurnId(invocation.turn_id)))
+                        }
+                        SessionPhase::EditAndResendBarrier {
+                            replacement_invocation,
+                            ..
+                        } => (
+                            "busy",
+                            "initializing",
+                            Some(TurnId(replacement_invocation.turn_id)),
+                        ),
+                    };
+                    statuses.push(SessionRuntimeStatus {
+                        session_id: sid,
+                        execution_state: exec_state.to_string(),
+                        phase: phase_str.to_string(),
+                        active_turn_id,
+                    });
+                } else {
+                    statuses.push(SessionRuntimeStatus {
+                        session_id: sid,
+                        execution_state: "idle".to_string(),
+                        phase: "idle".to_string(),
+                        active_turn_id: None,
+                    });
+                }
+            }
+            return Ok(AppResponse::SessionStatuses { statuses });
+        }
         self.query_sync(caller, query)
     }
 
     pub async fn shutdown(&self) {
+        self.deps.pty.close_all_terminals();
         let handles = self
             .workspaces
             .write()
@@ -503,11 +748,16 @@ impl DaemonRuntime {
                     ),
                     None => (ProfileId::local_default(), None),
                 };
+                let lease_mode = self
+                    .deps
+                    .storage_lease
+                    .as_ref()
+                    .map_or(self.deps.storage_lease_mode, |l| l.mode());
                 Ok(AppResponse::DaemonStatus(DaemonStatusView {
                     connected: self.is_connected_composition(),
                     active_profile_id,
                     server_origin,
-                    storage_lease_mode: self.deps.storage_lease_mode,
+                    storage_lease_mode: lease_mode,
                     capabilities: self.capabilities(),
                 }))
             }
@@ -526,6 +776,18 @@ impl DaemonRuntime {
             AppQuery::ListSessions { .. } => Ok(AppResponse::SessionsListed {
                 sessions: Vec::new(),
             }),
+            AppQuery::GetSessionStatuses { session_ids, .. } => {
+                let statuses = session_ids
+                    .into_iter()
+                    .map(|session_id| SessionRuntimeStatus {
+                        session_id,
+                        execution_state: "idle".to_string(),
+                        phase: "idle".to_string(),
+                        active_turn_id: None,
+                    })
+                    .collect();
+                Ok(AppResponse::SessionStatuses { statuses })
+            }
             AppQuery::GetSessionHistory {
                 workspace_id,
                 session_id,
@@ -540,11 +802,28 @@ impl DaemonRuntime {
                 Ok(AppResponse::SessionHistory { turns })
             }
             AppQuery::GetTurnDiff {
+                workspace_id,
                 session_id,
                 turn_id,
             } => {
-                let diff = self.deps.diff_store.read_turn_diff(&session_id, &turn_id)?;
+                let diff = self.deps.diff_store.read_turn_diff(
+                    &workspace_id,
+                    &session_id,
+                    &turn_id,
+                    current_epoch_ms_i64(),
+                )?;
                 Ok(AppResponse::TurnDiff { diff })
+            }
+            AppQuery::ScanProjectFiles { root_path } => {
+                let index = self.deps.worktree.scan_project_files(&root_path)?;
+                Ok(AppResponse::ProjectFilesScanned { index })
+            }
+            AppQuery::ListTerminals { session_id } => {
+                let terminals = self.deps.pty.list_session_terminals(&session_id);
+                Ok(AppResponse::TerminalsListed {
+                    session_id,
+                    terminals,
+                })
             }
         }
     }
@@ -565,7 +844,25 @@ impl ApplicationService for DaemonRuntime {
     }
 
     fn query(&self, caller: &VerifiedPrincipal, query: AppQuery) -> PortResult<AppResponse> {
-        self.query_sync(caller, query)
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(|| handle.block_on(self.query_async(caller, query)))
+        } else if let Some(rt) = &self.owned_tokio {
+            rt.block_on(self.query_async(caller, query))
+        } else {
+            self.query_sync(caller, query)
+        }
+    }
+
+    fn set_mcp_http_endpoint(&self, endpoint: McpHttpEndpointConfig) {
+        *self.mcp_endpoint.write().expect("mcp endpoint lock") = Some(endpoint);
+    }
+
+    fn register_terminal_sink(&self, sink_id: u64, sink: Arc<dyn TerminalEventSink>) {
+        self.deps.pty.register_sink(sink_id, sink);
+    }
+
+    fn unregister_terminal_sink(&self, sink_id: u64) {
+        self.deps.pty.unregister_sink(sink_id);
     }
 
     fn drain_for_shutdown(&self) {

@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
-use crate::error::PortResult;
+use crate::error::{PortError, PortErrorKind, PortResult};
 use crate::identity::{LocalProjectId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+pub const TERMINAL_MAX_PER_SESSION: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -30,10 +32,17 @@ pub trait ArtifactRegistryPort: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpHttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerMount {
     pub name: String,
     pub transport_url: String,
     pub bearer_token: Option<String>,
+    pub headers: Vec<McpHttpHeader>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +131,19 @@ pub struct WorktreeLease {
     pub worktree_path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScannedFileEntry {
+    pub relative_path: String,
+    pub is_directory: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScannedFileIndex {
+    pub entries: Vec<ScannedFileEntry>,
+    pub truncated: bool,
+    pub estimated_bytes: usize,
+}
+
 pub trait WorktreePort: Send + Sync {
     fn supports_git_worktree(&self) -> bool;
     fn acquire_worktree(
@@ -132,18 +154,141 @@ pub trait WorktreePort: Send + Sync {
         base_branch: Option<&str>,
     ) -> PortResult<WorktreeLease>;
     fn release_worktree(&self, lease: &WorktreeLease) -> PortResult<()>;
+    fn scan_project_files(&self, _root: &Path) -> PortResult<ScannedFileIndex> {
+        Ok(ScannedFileIndex {
+            entries: Vec::new(),
+            truncated: false,
+            estimated_bytes: 2,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PtySpawnSpec {
-    pub pty_id: String,
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSnapshot {
+    pub terminal_id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalOpenSpec {
+    pub session_id: SessionId,
     pub cwd: PathBuf,
     pub cols: u16,
     pub rows: u16,
+    pub shell_program: String,
+    pub shell_args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOpenOutcome {
+    pub terminal_id: String,
+    pub cwd: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalAttachReplay {
+    pub title: String,
+    pub scrollback: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TerminalOutboundEvent {
+    #[serde(rename_all = "camelCase")]
+    Data {
+        terminal_id: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        replay: Option<bool>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Title { terminal_id: String, title: String },
+    #[serde(rename_all = "camelCase")]
+    Exit {
+        terminal_id: String,
+        exit_code: i32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signal: Option<String>,
+    },
+}
+
+pub trait TerminalEventSink: Send + Sync {
+    fn on_terminal_event(&self, event: TerminalOutboundEvent);
 }
 
 pub trait PtyPort: Send + Sync {
-    fn open_pty(&self, spec: &PtySpawnSpec) -> PortResult<()>;
-    fn resize_pty(&self, pty_id: &str, cols: u16, rows: u16) -> PortResult<()>;
-    fn close_pty(&self, pty_id: &str) -> PortResult<()>;
+    fn list_session_terminals(&self, session_id: &SessionId) -> Vec<TerminalSnapshot>;
+    fn open_terminal(&self, spec: TerminalOpenSpec) -> PortResult<TerminalOpenOutcome>;
+    fn attach_terminal(
+        &self,
+        terminal_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> PortResult<TerminalAttachReplay>;
+    fn write_terminal_input(&self, terminal_id: &str, data: &str) -> PortResult<()>;
+    fn resize_terminal(&self, terminal_id: &str, cols: u16, rows: u16) -> PortResult<()>;
+    fn close_terminal(&self, terminal_id: &str) -> PortResult<()>;
+    fn close_session_terminals(&self, session_id: &SessionId);
+    fn close_all_terminals(&self);
+    fn register_sink(&self, sink_id: u64, sink: Arc<dyn TerminalEventSink>);
+    fn unregister_sink(&self, sink_id: u64);
+}
+
+#[derive(Default)]
+pub struct UnavailablePtyPort;
+
+impl PtyPort for UnavailablePtyPort {
+    fn list_session_terminals(&self, _session_id: &SessionId) -> Vec<TerminalSnapshot> {
+        Vec::new()
+    }
+
+    fn open_terminal(&self, _spec: TerminalOpenSpec) -> PortResult<TerminalOpenOutcome> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "terminal_error: PTY service unavailable",
+        ))
+    }
+
+    fn attach_terminal(
+        &self,
+        _terminal_id: &str,
+        _cols: u16,
+        _rows: u16,
+    ) -> PortResult<TerminalAttachReplay> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "terminal_error: PTY service unavailable",
+        ))
+    }
+
+    fn write_terminal_input(&self, _terminal_id: &str, _data: &str) -> PortResult<()> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "terminal_error: PTY service unavailable",
+        ))
+    }
+
+    fn resize_terminal(&self, _terminal_id: &str, _cols: u16, _rows: u16) -> PortResult<()> {
+        Err(PortError::new(
+            PortErrorKind::Unavailable,
+            "terminal_error: PTY service unavailable",
+        ))
+    }
+
+    fn close_terminal(&self, _terminal_id: &str) -> PortResult<()> {
+        Ok(())
+    }
+
+    fn close_session_terminals(&self, _session_id: &SessionId) {}
+
+    fn close_all_terminals(&self) {}
+
+    fn register_sink(&self, _sink_id: u64, _sink: Arc<dyn TerminalEventSink>) {}
+
+    fn unregister_sink(&self, _sink_id: u64) {}
 }

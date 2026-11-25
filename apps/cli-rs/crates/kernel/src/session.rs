@@ -944,18 +944,25 @@ pub fn step(mut state: SessionState, event: KernelEvent) -> (SessionState, Vec<K
             }
         }
         KernelEvent::RequestChildSessionCreate { child_session_id } => {
-            match state.child_delegation.try_admit_child(&child_session_id) {
-                Ok(child_depth) => {
-                    actions.push(KernelAction::ChildSessionAdmitted {
-                        child_session_id,
-                        child_depth,
-                    });
-                }
-                Err(reason) => {
-                    actions.push(KernelAction::ChildSessionRejected {
-                        child_session_id,
-                        reason,
-                    });
+            if state.inbox.paused {
+                actions.push(KernelAction::ChildSessionRejected {
+                    child_session_id,
+                    reason: ChildRejectReason::CollaborationStopped,
+                });
+            } else {
+                match state.child_delegation.try_admit_child(&child_session_id) {
+                    Ok(child_depth) => {
+                        actions.push(KernelAction::ChildSessionAdmitted {
+                            child_session_id,
+                            child_depth,
+                        });
+                    }
+                    Err(reason) => {
+                        actions.push(KernelAction::ChildSessionRejected {
+                            child_session_id,
+                            reason,
+                        });
+                    }
                 }
             }
         }
