@@ -2346,6 +2346,7 @@
   "sessions.historySync.retrying": "History read failed, retrying",
   "sessions.historySync.refused": "Cloud history unavailable (HTTP {{status}})",
   "sessions.historySync.denied": "Cloud history access denied",
+  "sessions.historySync.openFailed": "Could not open the conversation history",
   "sessions.historySync.previous": "Showing the previous version while the new one publishes",
   "sessions.usage.context": "Context",
   "sessions.usage.compacting": "Compacting",

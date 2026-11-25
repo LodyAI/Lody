@@ -2346,6 +2346,7 @@
   "sessions.historySync.retrying": "历史读取失败，正在重试",
   "sessions.historySync.refused": "无法读取云端历史（HTTP {{status}}）",
   "sessions.historySync.denied": "云端历史访问被拒绝",
+  "sessions.historySync.openFailed": "无法打开会话历史",
   "sessions.historySync.previous": "新版待发布，当前显示上一版",
   "sessions.usage.context": "上下文",
   "sessions.usage.compacting": "压缩中",
