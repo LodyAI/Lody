@@ -307,6 +307,11 @@ serialize intake across tabs before each tab reloads shared hints. The Native
 Inbox and Replay transactions own durability. Unknown application envelopes are
 skipped. Storage and admission failures retain the previous event cursor.
 
+Directory metadata reads project scalar rows from one local observation.
+When older history is missing, the reader fetches it in bounded windows and
+allows live intake between fetches. Once the needed data is local, the read
+keeps its pages together across live updates.
+
 A cursor from a replaced branch resolves against the active branch. On the
 owner read path, a verified checkpoint interval repairs the retained window
 without rereading its tail. If the interval is no longer available, a bounded

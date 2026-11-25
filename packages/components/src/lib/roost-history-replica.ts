@@ -916,6 +916,14 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     return result;
   };
 
+  const fillBranch = async (replica: Replica) => {
+    if (!replica.meta.bootstrapped) return await fetchOlder(replica);
+    const prefixes = await completePrefixes(replica);
+    if (prefixes.bytesFetched) return;
+    if (replica.meta.reachedStart) throw new Error('Published Roost history is incomplete');
+    await fetchOlder(replica);
+  };
+
   const history: SessionHistoryReader = {
     count: () => {
       assertLive();
@@ -983,19 +991,42 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     readOlderDirectoryPage: (cursor, limit) =>
       run(async () => await older(await open(), cursor, limit)),
     readMetadata: async () => {
-      let current = await run(async () => await latest(await open()));
-      const pages = [current.rows];
-      while (current.cursor) {
-        const preceding = current;
-        current = await run(async () => await older(await open(), preceding.cursor!, PAGE_SIZE));
-        if (
-          current.checkpoint !== preceding.checkpoint ||
-          current.startPosition + current.rows.length !== preceding.startPosition
-        )
-          throw new Error('Roost history observation was superseded');
-        pages.push(current.rows);
+      for (;;) {
+        const metadata = await run(async () => {
+          const replica = await open();
+          return await network(replica, async () => {
+            // Keep local directory reads together so this reader's live intake
+            // cannot advance the view between pages. Retain only scalar rows.
+            const checkpoint = await replica.history.observedEventCursor();
+            const pages: SessionDirectoryRow[][] = [];
+            let before: ActiveBranchPageCursor | undefined;
+            do {
+              assertLive();
+              const page = await replica.history.readActiveBranchPage(options.sessionId, {
+                ...(before ? { before } : { latest: true }),
+                limit: PAGE_SIZE,
+              });
+              if (!page.complete || (page.state.revision === 0n && !replica.meta.reachedStart)) {
+                // Release the reader between bounded history fetches.
+                await fillBranch(replica);
+                return;
+              }
+              pages.push(
+                project(page.messages).map((entry, index) =>
+                  createRoostDirectoryRow(page.startPosition + index, entry)
+                )
+              );
+              before = page.cursor ?? undefined;
+            } while (before);
+            // A separate reader may have imported frames without Web Locks.
+            if ((await replica.stream.eventsAfter(checkpoint, 1)).length) return;
+            return await readSessionHistoryMetadata({
+              readDirectory: () => pages.reverse().flat(),
+            });
+          });
+        });
+        if (metadata) return metadata;
       }
-      return await readSessionHistoryMetadata({ readDirectory: () => pages.reverse().flat() });
     },
     readAll: () =>
       run(async () => {
@@ -1056,19 +1087,12 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   };
 
   const readComplete = async (replica: Replica, exclusive = false): Promise<SessionEntry[]> => {
-    const fill = async () => {
-      const prefixes = await completePrefixes(replica);
-      if (!prefixes.bytesFetched) {
-        if (replica.meta.reachedStart) throw new Error('Published Roost history is incomplete');
-        await fetchOlder(replica);
-      }
-    };
     for (;;) {
       assertLive();
       const branch = await replica.history.readActiveBranch(options.sessionId);
       if (branch.complete) return structuredClone(project(branch.messages));
-      if (exclusive) await fill();
-      else await network(replica, fill);
+      if (exclusive) await fillBranch(replica);
+      else await network(replica, () => fillBranch(replica));
     }
   };
 

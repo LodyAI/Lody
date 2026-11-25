@@ -84,11 +84,12 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
-  it.each(['published', 'publication notice', 'grant 503', 'HEAD 503'])(
+  it.each(['published', 'append during metadata', 'publication notice', 'grant 503', 'HEAD 503'])(
     'opens Roost on the correct reader and resumes Streams with its owner offline (%s)',
     { timeout: 30_000 },
     async (startingState) => {
-      const alreadyPublished = startingState === 'published';
+      const appendDuringMetadata = startingState === 'append during metadata';
+      const alreadyPublished = startingState === 'published' || appendDuringMetadata;
       const discovering = startingState === 'grant 503' || startingState === 'HEAD 503';
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
@@ -148,7 +149,15 @@ describe('createConversationSession backend seam', () => {
             record.kind === 'found' ? [record.turn.turnId] : []
           )
         );
-      const accepted = await append(turn);
+      let accepted = await append(turn);
+      const precedingIds = [turn.id];
+      if (appendDuringMetadata) {
+        for (let index = 1; index < 42; index++) {
+          const id = `synthetic-turn-${index}`;
+          accepted = await append({ ...turn, id }, accepted);
+          precedingIds.push(id);
+        }
+      }
       const bytes = await exportHistory();
       await append(reply, accepted);
       const incremental = await exportHistory();
@@ -220,13 +229,16 @@ describe('createConversationSession backend seam', () => {
             },
           });
         const offset = read.searchParams.get('offset');
-        if (offset === startOffset) {
-          if (!read.searchParams.has('live')) return Promise.resolve(next(null, startOffset));
+        if (offset === startOffset && !read.searchParams.has('live'))
+          return Promise.resolve(
+            headOffset === tail ? next(new Uint8Array(incremental), tail) : next(null, startOffset)
+          );
+        if (offset === startOffset && !appendDuringMetadata) {
           requestsToTail++;
           headOffset = tail;
           return Promise.resolve(next(new Uint8Array(incremental), tail));
         }
-        if (offset === tail) {
+        if (offset === tail || (appendDuringMetadata && offset === startOffset)) {
           if (!read.searchParams.has('live')) return Promise.resolve(next(null, tail));
           const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
           return new Promise<Response>((_resolve, reject) => {
@@ -240,6 +252,7 @@ describe('createConversationSession backend seam', () => {
       };
       let cachedBinding: typeof binding | undefined = alreadyPublished ? binding : undefined;
       const publicationWakes = new Set<() => void>();
+      let replica: ReturnType<typeof createRoostHistoryReplica>;
       const open = (
         requestGrant: () => Promise<{
           binding: typeof binding;
@@ -258,7 +271,7 @@ describe('createConversationSession backend seam', () => {
             if (active) switched.resolve();
           },
           cloudHistory: () =>
-            createRoostHistoryReplica({
+            (replica = createRoostHistoryReplica({
               workspaceId,
               machineId,
               sessionId,
@@ -273,7 +286,7 @@ describe('createConversationSession backend seam', () => {
                 if ('checkpoint' in state && JSON.parse(state.checkpoint)[2] === tail)
                   applied.resolve();
               },
-            }),
+            })),
           requestHistoryRead: owner,
           requestHistoryWrite: offline,
         })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
@@ -342,6 +355,36 @@ describe('createConversationSession backend seam', () => {
           return;
         }
         const page = await observation.initialPage;
+        if (appendDuringMetadata) {
+          expect(page.startPosition).toBe(2);
+          const readPage = LodyHistory.prototype.readActiveBranchPage;
+          let intake: Promise<void> | undefined;
+          const spy = vi
+            .spyOn(LodyHistory.prototype, 'readActiveBranchPage')
+            .mockImplementation(async function (this: LodyHistory, ...args) {
+              const page = await readPage.apply(this, args);
+              if (args[1]?.latest && headOffset === startOffset) {
+                headOffset = tail;
+                intake = replica.catchUp();
+                void intake.catch(() => {});
+              }
+              return page;
+            });
+          try {
+            const metadata = await first.history.readMetadata!();
+            expect(metadata.map((row) => row.id)).toEqual(precedingIds);
+            expect(intake).toBeDefined();
+            await intake;
+            expect((await first.history.readMetadata!()).map((row) => row.id)).toEqual([
+              ...precedingIds,
+              reply.id,
+            ]);
+          } finally {
+            spy.mockRestore();
+            observation.unsubscribe();
+          }
+          return;
+        }
         expect(page.rows).toMatchObject([{ turnId: turn.id }]);
         expect(await first.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
         if (!alreadyPublished) {
@@ -368,10 +411,8 @@ describe('createConversationSession backend seam', () => {
         observation.unsubscribe();
       } finally {
         first.dispose();
-        if (discovering) {
-          vi.useRealTimers();
-          vi.unstubAllGlobals();
-        }
+        if (discovering) vi.useRealTimers();
+        if (discovering || appendDuringMetadata) vi.unstubAllGlobals();
       }
       cachedBinding = binding;
       const reopened = open(offline);
