@@ -268,25 +268,38 @@ export const startCommand = new Command('start')
     const providedAuth = options.auth?.trim();
 
     const cliDetectionStartedAt = Date.now();
-    const cliAvailability = {
-      kimi: hasBuiltinAgentCredentials('kimi') && 'configured',
-      antigravity: 'managed-runtime',
-      pi: 'managed-runtime',
-      grok: hasBuiltinAgentCredentials('grok') && 'configured',
-      devin: 'managed-runtime',
-      claude: checkClaude(),
-      codex: checkCodex(),
-    };
-    logger.debug(
-      `[startup] CLI credential detection durationMs=${Date.now() - cliDetectionStartedAt}`
-    );
-    logCliDetectionResults(logger, cliAvailability);
-    captureAgentServiceEvent('agent_service_cli_detection', {
-      kimi_available: Boolean(cliAvailability.kimi),
-      grok_available: Boolean(cliAvailability.grok),
-      claude_available: Boolean(cliAvailability.claude),
-      codex_available: Boolean(cliAvailability.codex),
-    });
+    const shouldProbeExternalClis = !electronManaged || Boolean(options.cliTypes?.length);
+    const cliAvailability = shouldProbeExternalClis
+      ? {
+          kimi: hasBuiltinAgentCredentials('kimi') && ('configured' as const),
+          antigravity: 'managed-runtime' as const,
+          pi: 'managed-runtime' as const,
+          grok: hasBuiltinAgentCredentials('grok') && ('configured' as const),
+          devin: 'managed-runtime' as const,
+          claude: checkClaude(),
+          codex: checkCodex(),
+        }
+      : {
+          kimi: false as const,
+          antigravity: false as const,
+          pi: false as const,
+          grok: false as const,
+          devin: false as const,
+          claude: false as const,
+          codex: false as const,
+        };
+    if (shouldProbeExternalClis) {
+      logger.debug(
+        `[startup] CLI credential detection durationMs=${Date.now() - cliDetectionStartedAt}`
+      );
+      logCliDetectionResults(logger, cliAvailability);
+      captureAgentServiceEvent('agent_service_cli_detection', {
+        kimi_available: Boolean(cliAvailability.kimi),
+        grok_available: Boolean(cliAvailability.grok),
+        claude_available: Boolean(cliAvailability.claude),
+        codex_available: Boolean(cliAvailability.codex),
+      });
+    }
 
     // Electron can persist the browser session token before the host-managed
     // user id is hydrated. Resolve the user from Better Auth directly so we
@@ -671,6 +684,7 @@ async function startAgentService(
     fleet = new LodyFleet({
       logger,
       builtinAgentConfigCliTypes,
+      ensureDefaultSorbetAgent: Boolean(supervisorIdentity),
       cliToken: token,
       userId,
       machineId: machineId as MachineId,

@@ -537,6 +537,49 @@ describe('Lody.registerAgent', () => {
     // bail out of the whole loop.
     expect(createAgentConfig).toHaveBeenCalledWith('builtin', 'codex', 'machine-1', 'Codex');
   });
+
+  it('auto-registers bundled Lody Agent (sorbet) with permission_mode="ask" when ensureDefaultSorbetAgent is enabled', async () => {
+    const createAgentConfig = vi.fn(async () => 'sorbet-config-id');
+    const documentManager = {
+      hasCompletedInitialMetaSync: vi.fn(() => true),
+      syncMachineFlockDoc: vi.fn(async () => true),
+      getBuiltinAgentOptOuts: vi.fn(async () => new Set()),
+      hasAgentConfig: vi.fn(async () => false),
+      createAgentConfig,
+    } as unknown as LoroDocumentManager;
+
+    const { Lody } = await import('../src/lib/lody');
+    const lody = new Lody(
+      {
+        logger: createSilentLogger(),
+        ensureDefaultSorbetAgent: true,
+        workspaceId: 'workspace-1',
+        token: 'token',
+        userId: 'user-1',
+        machineId: 'machine-1',
+        machineName: 'machine-name',
+        cloudPort: createTestCloudPort(),
+        memoryPressure: {} as never,
+        machineLifecycleCapability: {
+          launchMode: 'foreground',
+          canRemoteRestart: false,
+          canRemoteUpgrade: false,
+          reason: 'not_daemon',
+        },
+      },
+      documentManager
+    );
+
+    await lody.registerAgent([]);
+
+    expect(createAgentConfig).toHaveBeenCalledWith(
+      'builtin',
+      'sorbet',
+      'machine-1',
+      'Lody Agent',
+      { configOptionValues: { permission_mode: 'ask' } }
+    );
+  });
 });
 
 describe('Lody workspace cloud-port composition', () => {

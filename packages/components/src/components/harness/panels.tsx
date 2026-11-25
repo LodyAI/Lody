@@ -20,7 +20,9 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  X,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Input, Select } from '@lody/ui';
 
 import { getServerNow, type WorkspaceMcpServerMeta } from '@lody/shared';
@@ -30,6 +32,12 @@ import {
   useWorkspaceMcpCatalog,
   useWorkspaceMcpCatalogActions,
 } from '@/hooks/use-workspace-mcp-catalog';
+import { ConnectModelSheet } from '@/components/onboarding/shared/connect-model-sheet';
+import { flatSurface } from '@/components/onboarding/shared/flat-surface.stylex';
+import {
+  ProviderBrandIcon,
+  formatConnectionSourceBadge,
+} from '@/components/onboarding/shared/provider-brand-icon';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 
 import {
@@ -118,8 +126,99 @@ const PROVIDER_GROUPS: { kind: ProviderKind; label: string; hint: string }[] = [
 ];
 
 export function ProvidersPanel() {
+  const { t } = useTranslation();
   const state = useHarness();
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const { machine } = useHarnessMachine();
   const [adding, setAdding] = useState(false);
+  const [connectingMore, setConnectingMore] = useState(false);
+
+  const isLocalDevice = !localMachineId || !machine || machine.id === localMachineId;
+  const customIdSet = new Set(state.customs.map((c) => c.id));
+  const connectedStandard = Object.values(state.credentials).filter(
+    (cred) => !customIdSet.has(cred.provider)
+  );
+  const hasAnyConnection = connectedStandard.length > 0 || state.customs.length > 0;
+
+  if (isLocalDevice) {
+    return (
+      <div {...stylex.props(parts.panel, flatSurface.settingsAdaptiveScope)}>
+        {!hasAnyConnection ? (
+          <ConnectModelSheet
+            showHeader={false}
+            onConnected={() => {
+              void sorbet.refresh();
+              void sorbet.reprobe().catch(() => undefined);
+            }}
+          />
+        ) : (
+          <>
+            <section {...stylex.props(ps.plugroup)}>
+              <header {...stylex.props(ps.plugroupHead)}>
+                <h4 {...stylex.props(ps.plugroupTitle)}>
+                  {t('onboarding.settings.connectedTitle', { defaultValue: 'Connected' })}
+                </h4>
+                <span style={{ marginInlineStart: 'auto' }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setConnectingMore((open) => !open)}
+                  >
+                    {connectingMore ? <X size={13} /> : <Plus size={13} />}
+                    {connectingMore
+                      ? t('common.close', { defaultValue: 'Close' })
+                      : t('onboarding.settings.connectAction', { defaultValue: 'Connect' })}
+                  </Button>
+                </span>
+              </header>
+
+              <AnimatePresence initial={false}>
+                {connectingMore ? (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ overflow: 'hidden', paddingBottom: '0.75rem' }}
+                  >
+                    <ConnectModelSheet
+                      showHeader={false}
+                      onConnected={() => {
+                        setConnectingMore(false);
+                        void sorbet.refresh();
+                        void sorbet.reprobe().catch(() => undefined);
+                      }}
+                    />
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+
+              <div {...stylex.props(parts.list)}>
+                {connectedStandard.map((cred, index) => (
+                  <ConnectedCredentialRow
+                    key={cred.provider}
+                    credential={cred}
+                    ruled={index > 0}
+                  />
+                ))}
+                {state.customs.map((custom, index) => (
+                  <CustomRow
+                    key={custom.id}
+                    custom={custom}
+                    ruled={index > 0 || connectedStandard.length > 0}
+                  />
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+        <p {...stylex.props(parts.footnote)}>
+          <Lock size={12} {...stylex.props(parts.footnoteGlyph)} />
+          Credentials stay in Sorbet’s store on the selected machine; Lody never stores the secret.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div {...stylex.props(parts.panel)}>
@@ -167,6 +266,72 @@ export function ProvidersPanel() {
         <Lock size={12} {...stylex.props(parts.footnoteGlyph)} />
         Credentials stay in Sorbet’s store on the selected machine; Lody never stores the secret.
       </p>
+    </div>
+  );
+}
+
+function ConnectedCredentialRow({
+  credential,
+  ruled,
+}: {
+  credential: import('./store').Credential;
+  ruled: boolean;
+}) {
+  const { t } = useTranslation();
+  const state = useHarness();
+  const [pending, setPending] = useState(false);
+  const catalogueProvider = PROVIDERS.find((p) => p.id === credential.provider);
+  const displayName =
+    catalogueProvider?.name ??
+    (credential.provider === 'openai-codex'
+      ? 'ChatGPT'
+      : credential.provider === 'github-copilot'
+        ? 'GitHub Copilot'
+        : credential.provider.charAt(0).toUpperCase() + credential.provider.slice(1));
+
+  const modelCount = state.models.filter((m) => m.providerId === credential.provider).length;
+  const sourceBadge = formatConnectionSourceBadge(
+    credential.source ?? (credential.method === 'oauth' ? { kind: 'oauth' } : { kind: 'api_key' }),
+    t
+  );
+
+  return (
+    <div {...stylex.props(parts.prov, ruled && parts.listRuled, parts.provConnected)}>
+      {catalogueProvider ? (
+        <ProviderMark provider={catalogueProvider} />
+      ) : (
+        <ProviderBrandIcon providerId={credential.provider} size={20} />
+      )}
+      <div {...stylex.props(parts.provText)}>
+        <div {...stylex.props(parts.provName)}>
+          {displayName}
+          <span {...stylex.props(parts.tag, parts.tagOk)}>
+            <DrawnCheck size={10} />
+            {sourceBadge}
+          </span>
+        </div>
+        {modelCount > 0 ? (
+          <div {...stylex.props(parts.provSub)}>
+            {modelCount} {modelCount === 1 ? 'model' : 'models'} available
+          </div>
+        ) : null}
+      </div>
+
+      <div {...stylex.props(parts.provActions)}>
+        <button
+          type="button"
+          {...stylex.props(parts.iconBtn)}
+          aria-label={`Disconnect ${displayName}`}
+          title="Disconnect"
+          disabled={pending}
+          onClick={() => {
+            setPending(true);
+            sorbet.disconnect(credential.provider).finally(() => setPending(false));
+          }}
+        >
+          <LogOut size={13} />
+        </button>
+      </div>
     </div>
   );
 }

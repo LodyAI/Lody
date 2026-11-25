@@ -101,7 +101,7 @@ export function describeDesktopLoginFailure(
 
 type Dependencies = {
   channel?: 'stable' | 'nightly'
-  openBrowser: (query: Record<string, string>) => Promise<void>
+  openBrowser: (query: Record<string, string>) => Promise<string | void>
   exchange: (
     body: { token: string; state: string; code_verifier: string },
     signal: AbortSignal
@@ -118,6 +118,7 @@ export class DesktopLogin {
     revision: 0,
     attemptId: null,
     phase: 'idle',
+    authorizationUrl: null,
     session: null,
     error: null,
     errorDetail: null
@@ -176,20 +177,33 @@ export class DesktopLogin {
       controller: new AbortController()
     }
     this.attempt = attempt
-    this.update({ attemptId: randomUUID(), phase: 'waiting', error: null, errorDetail: null })
+    this.update({
+      attemptId: randomUUID(),
+      phase: 'waiting',
+      authorizationUrl: null,
+      error: null,
+      errorDetail: null
+    })
     this.timer = setTimeout(() => {
       if (this.attempt !== attempt) return
       attempt.verifier = ''
       this.update({ phase: 'error', error: 'authorization_expired', errorDetail: null })
     }, 300_000)
     try {
-      await this.dependencies.openBrowser({
+      const openedUrl = await this.dependencies.openBrowser({
         client_id: 'electron',
         desktop_channel: this.dependencies.channel ?? 'stable',
         state: attempt.state,
         code_challenge: createHash('sha256').update(attempt.verifier).digest('base64url'),
         code_challenge_method: 'S256'
       })
+      if (
+        typeof openedUrl === 'string' &&
+        this.attempt === attempt &&
+        this.snapshot.phase === 'waiting'
+      ) {
+        this.update({ authorizationUrl: openedUrl })
+      }
     } catch (error) {
       if (this.attempt !== attempt || this.snapshot.phase !== 'waiting') return
       this.clearTimer()
@@ -285,7 +299,14 @@ export class DesktopLogin {
     this.clearTimer()
     this.attempt?.controller.abort()
     this.attempt = null
-    this.update({ attemptId: null, phase: 'idle', session: null, error: null, errorDetail: null })
+    this.update({
+      attemptId: null,
+      phase: 'idle',
+      authorizationUrl: null,
+      session: null,
+      error: null,
+      errorDetail: null
+    })
   }
 }
 

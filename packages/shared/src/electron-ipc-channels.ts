@@ -6,6 +6,7 @@ import type { TerminalDataEvent, TerminalExitEvent, TerminalTitleEvent } from '.
 import type {
   ElectronCliState,
   ElectronLoginState,
+  ElectronSorbetOAuthState,
   ElectronLocalSessionControlResponseEvent,
   ElectronPublicBrowserState,
   ElectronPublicBrowserInteraction,
@@ -34,6 +35,7 @@ export type IpcPushMap = {
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
   'app.deepLink': string;
   'auth.loginState': ElectronLoginState;
+  'onboardingSorbet.authState': ElectronSorbetOAuthState;
   'app.menuAction': string;
   'app.fullscreen': boolean;
   'app.nativeTheme': 'light' | 'dark';
@@ -79,6 +81,7 @@ export const IPC_PUSH_CHANNELS = {
   sessionControlResponse: 'sessionControl.response',
   appDeepLink: 'app.deepLink',
   authLoginState: 'auth.loginState',
+  onboardingSorbetAuthState: 'onboardingSorbet.authState',
   appMenuAction: 'app.menuAction',
   appFullscreen: 'app.fullscreen',
   appNativeTheme: 'app.nativeTheme',

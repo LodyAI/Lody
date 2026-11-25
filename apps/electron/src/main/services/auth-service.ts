@@ -434,7 +434,9 @@ export class AuthService {
         }
         const url = new URL('/login', import.meta.env.VITE_SITE_URL || 'https://lody.ai')
         url.search = new URLSearchParams(query).toString()
-        await shell.openExternal(url.toString(), { activate: true })
+        const targetUrl = url.toString()
+        await shell.openExternal(targetUrl, { activate: true })
+        return targetUrl
       },
       exchange: async (body, signal) =>
         await this.enqueueAuthOperation(async () => {
@@ -480,6 +482,10 @@ export class AuthService {
     if (this.login.getState().phase === 'exchanging') return
     this.authGeneration += 1
     await this.login.start()
+  }
+
+  cancelLogin(): void {
+    this.login.cancel()
   }
   // The desktop renderer holds the working Better Auth session token in its own
   // localStorage (lody_auth_token) and passes it as a bearer on every auth IPC.

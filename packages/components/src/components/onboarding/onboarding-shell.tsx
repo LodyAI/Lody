@@ -31,49 +31,30 @@ import { onboardingShellSurface } from './onboarding-shell.surface';
 // happen to put the form beside the product, but the next step is free to move
 // both of them somewhere else as configuration becomes a real conversation.
 
-const STEP_SHOWS_SESSION: Partial<Record<OnboardingStepKey, boolean>> = {
-  // Sign-in is the first thing asked of the user, and it sends them out of the
-  // app to do it. Showing what is on the other side is the whole argument for
-  // going.
-  login: true,
-  workspace: true,
-  providers: true,
-  projects: true,
-  firstTask: true,
-  summary: true,
-  // The panel IS the preview: picking a theme sets the global theme and picking
-  // a language changes i18n, so the real window re-renders under both. Nothing
-  // else on this screen has to show anything.
-  appearance: true,
+export type OnboardingShellStepKey = OnboardingStepKey | 'invite';
+
+const STEP_SHOWS_SESSION: Partial<Record<OnboardingShellStepKey, boolean>> = {
+  arrive: true,
+  account: true,
+  model: true,
+  start: true,
 };
 
 /**
  * Each shot names a real DOM anchor in TourApp. The enclosing viewport below
  * decides where that shot appears on the onboarding stage.
  */
-const STEP_FRAME: Partial<Record<OnboardingStepKey, CameraShot>> = {
-  login: { anchor: 'window', padding: 42, focusX: 0.73, focusY: 0.52 },
-  workspace: {
-    anchor: 'sidebar',
-    zoom: 1.8,
-    padding: 76,
-    focusX: 0.27,
-    focusY: 0.88,
-  },
-  providers: {
+const STEP_FRAME: Partial<Record<OnboardingShellStepKey, CameraShot>> = {
+  arrive: { anchor: 'window', padding: 42, focusX: 0.72, focusY: 0.51 },
+  account: { anchor: 'window', padding: 42, focusX: 0.73, focusY: 0.52 },
+  model: {
     anchor: 'composer.run-config',
     padding: 80,
     maxScale: 1.8,
     focusX: 0.72,
     focusY: 0.56,
   },
-  // Picking a project is about a list on the LEFT, so this is the one step that
-  // earns a move. Frames the real sidebar node rather than a hand-written
-  // rectangle, so it stays correct when that column changes.
-  projects: { anchor: 'sidebar', padding: 54, maxScale: 1.6, focusX: 0.72, focusY: 0.53 },
-  firstTask: { anchor: 'composer', padding: 70, maxScale: 1.5, focusX: 0.7, focusY: 0.67 },
-  summary: { anchor: 'window', padding: 42, focusX: 0.72, focusY: 0.51 },
-  appearance: { anchor: 'window', padding: 42, focusX: 0.28, focusY: 0.51 },
+  start: { anchor: 'composer', padding: 70, maxScale: 1.5, focusX: 0.7, focusY: 0.67 },
 };
 
 interface FormPose {
@@ -116,8 +97,19 @@ const VEIL_MASK: Record<StageComposition['veil'], string> = {
  * full-stage context layer. That preserves the camera without making a small
  * window solve an impossible two-column layout.
  */
-const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
-  login: {
+const STEP_COMPOSITION: Record<OnboardingShellStepKey, StageComposition> = {
+  arrive: {
+    form: {
+      left: '7%',
+      top: '16%',
+      bottom: '11%',
+      width: 'min(430px, 38%)',
+      edge: 'left',
+    },
+    cameraOpacity: 0.5,
+    veil: 'left',
+  },
+  account: {
     form: {
       left: '7%',
       top: '16%',
@@ -128,18 +120,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
     cameraOpacity: 0.65,
     veil: 'left',
   },
-  workspace: {
-    form: {
-      left: 'calc(93.5% - min(455px, 39%))',
-      top: '10%',
-      bottom: '8%',
-      width: 'min(455px, 39%)',
-      edge: 'right',
-    },
-    cameraOpacity: 0.65,
-    veil: 'right',
-  },
-  providers: {
+  model: {
     form: {
       left: '6.5%',
       top: '10%',
@@ -150,18 +131,7 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
     cameraOpacity: 0.6,
     veil: 'left',
   },
-  projects: {
-    form: {
-      left: '6.5%',
-      top: '11%',
-      bottom: '8%',
-      width: 'min(455px, 39%)',
-      edge: 'left',
-    },
-    cameraOpacity: 0.55,
-    veil: 'left',
-  },
-  firstTask: {
+  start: {
     form: {
       left: '6.5%',
       top: '13%',
@@ -171,50 +141,6 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
     },
     cameraOpacity: 0.6,
     veil: 'left',
-  },
-  summary: {
-    form: {
-      left: '8%',
-      top: '18%',
-      bottom: '14%',
-      width: 'min(460px, 42%)',
-      edge: 'left',
-    },
-    cameraOpacity: 0.48,
-    veil: 'left',
-  },
-  language: {
-    form: {
-      left: 'calc(93% - min(450px, 40%))',
-      top: '13%',
-      bottom: '10%',
-      width: 'min(450px, 40%)',
-      edge: 'right',
-    },
-    cameraOpacity: 0.5,
-    veil: 'right',
-  },
-  theme: {
-    form: {
-      left: 'calc(93% - min(450px, 40%))',
-      top: '13%',
-      bottom: '10%',
-      width: 'min(450px, 40%)',
-      edge: 'right',
-    },
-    cameraOpacity: 0.5,
-    veil: 'right',
-  },
-  appearance: {
-    form: {
-      left: 'calc(93% - min(450px, 40%))',
-      top: '13%',
-      bottom: '10%',
-      width: 'min(450px, 40%)',
-      edge: 'right',
-    },
-    cameraOpacity: 0.5,
-    veil: 'right',
   },
   invite: {
     form: {
@@ -229,8 +155,16 @@ const STEP_COMPOSITION: Partial<Record<OnboardingStepKey, StageComposition>> = {
   },
 };
 
-const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurationState>> = {
-  login: {
+const STEP_CONFIGURATION_STATE: Record<OnboardingShellStepKey, TourConfigurationState> = {
+  arrive: {
+    step: 'appearance',
+    workspaceStatus: 'ready',
+    agentStatus: 'missing',
+    projectStatus: 'missing',
+    promptValue: '',
+    conversationStatus: 'empty',
+  },
+  account: {
     step: 'login',
     workspaceStatus: 'ready',
     agentStatus: 'ready',
@@ -238,15 +172,7 @@ const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurat
     promptValue: '',
     conversationStatus: 'empty',
   },
-  workspace: {
-    step: 'workspace',
-    workspaceStatus: 'missing',
-    agentStatus: 'ready',
-    projectStatus: 'ready',
-    promptValue: '',
-    conversationStatus: 'empty',
-  },
-  providers: {
+  model: {
     step: 'providers',
     workspaceStatus: 'ready',
     agentStatus: 'missing',
@@ -254,51 +180,11 @@ const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurat
     promptValue: '',
     conversationStatus: 'empty',
   },
-  projects: {
-    step: 'projects',
-    workspaceStatus: 'ready',
-    agentStatus: 'ready',
-    projectStatus: 'missing',
-    promptValue: '',
-    conversationStatus: 'empty',
-  },
-  firstTask: {
+  start: {
     step: 'firstTask',
     workspaceStatus: 'ready',
     agentStatus: 'ready',
     projectStatus: 'ready',
-    promptValue: '',
-    conversationStatus: 'empty',
-  },
-  summary: {
-    step: 'summary',
-    workspaceStatus: 'ready',
-    agentStatus: 'ready',
-    projectStatus: 'ready',
-    promptValue: '',
-    conversationStatus: 'running',
-  },
-  language: {
-    step: 'appearance',
-    workspaceStatus: 'ready',
-    agentStatus: 'missing',
-    projectStatus: 'missing',
-    promptValue: '',
-    conversationStatus: 'empty',
-  },
-  theme: {
-    step: 'appearance',
-    workspaceStatus: 'ready',
-    agentStatus: 'missing',
-    projectStatus: 'missing',
-    promptValue: '',
-    conversationStatus: 'empty',
-  },
-  appearance: {
-    step: 'appearance',
-    workspaceStatus: 'ready',
-    agentStatus: 'missing',
-    projectStatus: 'missing',
     promptValue: '',
     conversationStatus: 'empty',
   },
@@ -314,7 +200,7 @@ const STEP_CONFIGURATION_STATE: Partial<Record<OnboardingStepKey, TourConfigurat
 
 export interface OnboardingShellProps {
   /** Step in the flow — drives the eyebrow counter and the panel's palette. */
-  stepKey: OnboardingStepKey;
+  stepKey: OnboardingShellStepKey;
   /**
    * Optional override for the eyebrow text. Falls back to the localised
    * "Step X of Y" label so callers don't have to repeat the count.
@@ -442,16 +328,12 @@ function OnboardingShellSurface({
     () => ({ ...DEFAULT_TOUR_IDENTITY, ...previewIdentity }),
     [previewIdentity]
   );
-  const composition = STEP_COMPOSITION[stepKey] ?? STEP_COMPOSITION.appearance!;
+  const composition = STEP_COMPOSITION[stepKey];
   const debug = useAtomValue(onboardingDebugAtom);
   const baseShot = previewShot ?? STEP_FRAME[stepKey] ?? { anchor: 'window', padding: 26 };
   const shot = import.meta.env.DEV ? applyOnboardingDebugShot(baseShot, debug) : baseShot;
-  const previewStep =
-    stepKey === 'ceremony' || stepKey === 'language' || stepKey === 'theme'
-      ? 'appearance'
-      : stepKey;
-  const baseConfigurationState =
-    STEP_CONFIGURATION_STATE[stepKey] ?? STEP_CONFIGURATION_STATE.appearance!;
+  const baseConfigurationState = STEP_CONFIGURATION_STATE[stepKey];
+  const previewStep = baseConfigurationState.step;
   // Direction is a small spatial cue; opacity carries the step change. Keep
   // this distance fixed so a wider form never travels farther than a narrow one.
   const formOffsetX = composition.form.edge === 'left' ? -72 : 72;

@@ -190,6 +190,7 @@ function keepsEncryptedMode(
 export class LodyFleet {
   private readonly logger: Logger;
   private readonly builtinAgentConfigCliTypes: CliType[];
+  private readonly ensureDefaultSorbetAgent: boolean;
   private readonly supportRegistryAgentTypes: string[];
   private readonly cliToken: string;
   private readonly userId: string;
@@ -279,6 +280,7 @@ export class LodyFleet {
   constructor(options: {
     logger: Logger;
     builtinAgentConfigCliTypes: CliType[];
+    ensureDefaultSorbetAgent?: boolean;
     supportRegistryAgentTypes?: string[];
     cliToken: string;
     userId: string;
@@ -300,6 +302,7 @@ export class LodyFleet {
   }) {
     this.logger = options.logger;
     this.builtinAgentConfigCliTypes = options.builtinAgentConfigCliTypes;
+    this.ensureDefaultSorbetAgent = options.ensureDefaultSorbetAgent === true;
     this.supportRegistryAgentTypes = options.supportRegistryAgentTypes ?? [];
     this.cliToken = options.cliToken;
     this.userId = options.userId;
@@ -1252,6 +1255,7 @@ export class LodyFleet {
             else await owner.cleanup();
           },
           builtinAgentConfigCliTypes: this.builtinAgentConfigCliTypes,
+          ensureDefaultSorbetAgent: this.ensureDefaultSorbetAgent,
           supportRegistryAgentTypes: this.supportRegistryAgentTypes,
           workspaceId: workspace.id as WorkspaceId,
           remoteAutomation: {

@@ -2,12 +2,10 @@ import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Button } from '@lody/ui/button';
 import { OnboardingBackdrop, OnboardingShell } from '@/components/onboarding';
+
 const storyLayoutStyles = stylex.create({
   canvas: {
     borderRadius: 'var(--radius-md)',
-    borderStyle: 'dashed',
-    borderWidth: '1px',
-    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
     padding: 'calc(var(--spacing) * 8)',
     textAlign: 'center',
     fontSize: 'var(--text-sm)',
@@ -19,24 +17,20 @@ const storyLayoutStyles = stylex.create({
 const storyLayout = stylex.create({
   frame: {
     position: 'relative',
-    'min-height': '640px',
+    minHeight: '640px',
     width: '100%',
   },
   row: {
     position: 'relative',
-    'z-index': '10',
+    zIndex: '10',
     display: 'flex',
-    'min-height': '640px',
-    'align-items': 'center',
-    'justify-content': 'center',
+    minHeight: '640px',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 'calc(var(--spacing) * 8)',
   },
 });
 
-/**
- * Wraps the shell in the same backdrop the overlay uses so stories preview
- * the production look-and-feel rather than the bare card.
- */
 function OnboardingShellPreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
     <div {...stylex.props(storyLayout.frame)}>
@@ -65,44 +59,39 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const NarrowSingleAction: Story = {
+export const AccountStep: Story = {
   args: {
-    stepKey: 'language',
-    title: 'Choose your language',
-    description: 'You can switch this anytime from settings.',
-    primaryAction: <Button size="large">Next</Button>,
+    stepKey: 'account',
+    title: 'Ready to set off',
+    description: 'Once signed in, your tasks keep running across every device.',
+    primaryAction: <Button size="large">Continue</Button>,
     children: <div {...stylex.props(storyLayoutStyles.canvas)}>Body slot</div>,
   },
 };
 
-export const WideWithBackAndNext: Story = {
+export const ModelStep: Story = {
   args: {
-    stepKey: 'providers',
+    stepKey: 'model',
     size: 'wide',
-    title: 'Connect a coding agent',
-    description: 'Test at least one provider so we know your credentials work.',
+    title: 'Connect a model',
+    description: 'Lody Agent thinks with it. Pick one way — only needed once.',
     secondaryAction: (
       <Button variant="ghost" size="large">
-        Back
+        Later
       </Button>
     ),
-    primaryAction: <Button size="large">Next</Button>,
+    primaryAction: <Button size="large">Continue</Button>,
     children: <div {...stylex.props(storyLayoutStyles.canvas)}>Body slot — wide</div>,
   },
 };
 
-export const ProjectsStep: Story = {
+export const StartStep: Story = {
   args: {
-    stepKey: 'projects',
+    stepKey: 'start',
     size: 'wide',
-    title: 'Pick a project to start with',
-    description: 'Add at least one project so Lody knows where to work.',
-    secondaryAction: (
-      <Button variant="ghost" size="large">
-        Back
-      </Button>
-    ),
-    primaryAction: <Button size="large">Finish</Button>,
+    title: 'Where should we start?',
+    description: 'Start with or without a project.',
+    primaryAction: <Button size="large">Start</Button>,
     children: <div {...stylex.props(storyLayoutStyles.canvas)}>Body slot</div>,
   },
 };

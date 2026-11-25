@@ -59,14 +59,16 @@ shared label, so equal model names do not hide different model IDs.
 
 ## Lody Agent setup
 
-The Lody Agent page exposes saved connections and custom endpoints while the
-initial setup is awaiting authentication, using the pending config on the target
-machine. Completing authentication lets the daemon resume verification; only a
-successful verification publishes the Agent config. Runtime preparation and
-verification do not mount connection-management probes. Selecting a sign-in method
-opens a dialog for its progress, input and errors. Each custom endpoint retains an
-API key action while the advertised-method cache refreshes; the daemon validates
-the selected method against the agent before requesting credentials.
+Settings > Lody Agent opens directly into its configuration tabs (`Model sources`,
+`Default model`, `Plugins`, `Permissions` and `Devices`) without a standalone
+first-run wizard. On the local machine, `Model sources` embeds the shared
+`ConnectModelSheet` (`packages/components/src/components/onboarding/shared/connect-model-sheet.tsx`)
+when no providers are connected, and reuses the same sheet when adding another
+provider. Non-secret connection provenance (`oauth`, `imported` from Claude Code /
+Codex / shell environment, or `api_key` with last-4 suffix) lives in
+`<LodyDataDir>/sorbet-connection-sources.json` while secrets remain owned by Sorbet's
+`<LodyDataDir>/sorbet` store. See the
+[onboarding and model connection reorganization decision](../../../../../.agents/notes/implemented/feature/2026-11-25-onboarding-reorganization.md).
 
 Connection management uses the target machine’s local capabilities for same-machine
 IPC and its remote capabilities for encrypted workspace RPC. A remote machine in a

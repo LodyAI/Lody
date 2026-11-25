@@ -1,49 +1,48 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { LayoutGroup } from 'framer-motion';
+import { useAtom } from 'jotai';
 import { usePlatformCapability } from '@lody/platform/react';
-import type { AgentConfigMeta, ManagedBuiltinAgentType, ProviderSetupTask } from '@lody/shared';
 import {
   desktopOnboardingDraftAtom,
   desktopOnboardingPhaseAtom,
-  type DesktopOnboardingProviderSelection,
+  normalizeDesktopOnboardingPhase,
+  type DesktopOnboardingAccountChip,
   type DesktopOnboardingResumePhase,
 } from '@/atoms/onboarding';
-import {
-  cmdRetryProviderSetupAtom,
-  getAllAgentConfigAtom,
-  getAllProviderSetupsAtom,
-} from '@/atoms/agents';
-import { localMachineIdAtom } from '@/atoms/local-probe';
-import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
-import { getDesktopOnboardingSteps, OnboardingStepsProvider } from './onboarding-steps';
-import { OnboardingCeremony } from './ceremony/ceremony';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 import { useOnboardingAudio } from './ceremony/use-onboarding-audio';
-import { OnboardingShellHost } from './onboarding-shell';
-import { LoginScreen } from './screens/login-screen';
-import { WorkspaceScreen } from './screens/workspace-screen';
-import { ProvidersScreen } from './screens/providers-screen';
-import { ProjectsScreen } from './screens/projects-screen';
-import { FirstTaskScreen } from './screens/first-task-screen';
-import { SummaryScreen } from './screens/summary-screen';
-import { useOnboardingBuiltinRuntimePrefetch } from './use-onboarding-builtin-runtime-prefetch';
 import {
   useOnboardingAnalytics,
   type DesktopOnboardingTraceProperties,
 } from './onboarding-analytics';
-import { WindowDragStrip } from '@/ui/window-drag-region';
+import { OnboardingChipRail } from './onboarding-chip-rail';
+import { getDesktopOnboardingSteps, OnboardingStepsProvider } from './onboarding-steps';
+import { AccountScreen } from './screens/account-screen';
+import { ContinuousEditorialStage } from './screens/arrive-screen';
+import { ModelScreen } from './screens/model-screen';
+import { StartScreen } from './screens/start-screen';
+import { flatSurface } from './shared/flat-surface.stylex';
+import {
+  useSorbetOnboardingController,
+  type ConnectedModelPayload,
+} from './shared/sorbet-onboarding-controller';
 
 const styles = stylex.create({
   dragStrip: { zIndex: 30 },
   overlay: {
     position: 'fixed',
-    inset: 'calc(var(--spacing) * 0)',
+    inset: 0,
     zIndex: 40,
     overflow: 'hidden',
-    backgroundColor: '#f7f5f2',
-    color: 'var(--color-slate-950)',
+    backgroundColor: '#FAF9F6',
+    color: '#141413',
   },
-  screen: { position: 'absolute', inset: 'calc(var(--spacing) * 0)', zIndex: 10 },
+  screen: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 10,
+  },
 });
 
 export type DesktopOnboardingCompletion = {
@@ -54,40 +53,22 @@ export type DesktopOnboardingCompletion = {
   sourceStepDurationMs?: number | null;
 };
 
-export function resolveDesktopOnboardingSummaryAgent(
-  provider: DesktopOnboardingProviderSelection | null,
-  providerSetups: readonly ProviderSetupTask[],
-  agentConfigs: readonly AgentConfigMeta[]
-): {
-  state: 'ready' | 'preparing' | 'failed' | 'missing';
-  name: string | undefined;
-} {
-  if (provider?.kind === 'agentConfig') {
-    const publishedConfig = agentConfigs.find((config) => config.id === provider.agentConfigId);
-    return publishedConfig
-      ? { state: 'ready', name: publishedConfig.name }
-      : { state: 'missing', name: provider.agentName };
-  }
-  if (provider?.kind !== 'providerSetup') return { state: 'missing', name: undefined };
-
-  const publishedConfig = agentConfigs.find((config) => config.id === provider.providerSetupId);
-  if (publishedConfig) return { state: 'ready', name: publishedConfig.name };
-  const setup = providerSetups.find((candidate) => candidate.id === provider.providerSetupId);
-  if (!setup) return { state: 'missing', name: provider.agentName };
-  return {
-    state: setup.status === 'failed' ? 'failed' : 'preparing',
-    name: provider.agentName,
-  };
-}
-
 export function resolveDesktopOnboardingPhase(
-  phase: DesktopOnboardingResumePhase | null,
-  input: { cloudAccount: boolean; multiWorkspace: boolean; hasAgent: boolean; hasProject: boolean }
+  rawPhase: string | null | undefined,
+  input: {
+    cloudAccount: boolean;
+    needsModel: boolean;
+    revisitingStep?: 'account' | 'model' | null;
+  }
 ): DesktopOnboardingResumePhase {
-  if (!phase) return 'ceremony';
-  if (phase === 'login' && !input.cloudAccount) return 'providers';
-  if (phase === 'workspace' && !input.multiWorkspace) return 'providers';
-  if (phase === 'firstTask' && (!input.hasAgent || !input.hasProject)) return 'projects';
+  const phase = normalizeDesktopOnboardingPhase(rawPhase);
+  if (!phase) return 'arrive';
+  if (phase === 'account' && !input.cloudAccount) {
+    return input.needsModel ? 'model' : 'start';
+  }
+  if (phase === 'model' && !input.needsModel && input.revisitingStep !== 'model') {
+    return 'start';
+  }
   return phase;
 }
 
@@ -101,35 +82,59 @@ export function OnboardingOverlay({
   const multiWorkspace = usePlatformCapability('multiWorkspace');
   const [persistedPhase, setPersistedPhase] = useAtom(desktopOnboardingPhaseAtom);
   const [draft, setDraft] = useAtom(desktopOnboardingDraftAtom);
-  const [preferredBuiltinRuntime, setPreferredBuiltinRuntime] =
-    useState<ManagedBuiltinAgentType | null>(null);
+  const [revisitingStep, setRevisitingStep] = useState<'account' | 'model' | null>(null);
+  const [exitingToProduct, setExitingToProduct] = useState(false);
+
   const onboardingAudio = useOnboardingAudio();
-  const analytics = useOnboardingAnalytics();
   const { stop: stopOnboardingAudio } = onboardingAudio;
-  const audioHandoffStoppedRef = useRef(false);
-  const providerSetupTraceRef = useRef<string | null>(null);
-  useOnboardingBuiltinRuntimePrefetch(preferredBuiltinRuntime);
+  const analytics = useOnboardingAnalytics();
+  const sorbetController = useSorbetOnboardingController();
+
+  // Compute `needsModel` from Sorbet's own ArrivalProbe upfront (§2 & §4) and lock
+  // the initial step list once probed so step count never jumps mid-flow.
+  const [lockedNeedsModel, setLockedNeedsModel] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (lockedNeedsModel === null && sorbetController.probe !== null) {
+      setLockedNeedsModel(sorbetController.probe.model.kind === 'none');
+    }
+  }, [lockedNeedsModel, sorbetController.probe]);
+
+  const needsModel =
+    lockedNeedsModel ?? (sorbetController.probe?.model.kind !== 'ready' && !draft.modelChip);
+
+  // Hydrate top-rail modelChip when Sorbet already had credentials on ArrivalProbe!
+  useEffect(() => {
+    if (sorbetController.probe?.model.kind === 'ready' && !draft.modelChip) {
+      const ready = sorbetController.probe.model;
+      setDraft((prev) => ({
+        ...prev,
+        modelChip: {
+          providerId: ready.provider,
+          providerName: ready.providerName,
+          modelSelector: ready.model,
+          modelName: ready.modelName,
+          source: ready.source,
+        },
+      }));
+    }
+  }, [draft.modelChip, setDraft, sorbetController.probe]);
 
   const steps = useMemo(
-    () => getDesktopOnboardingSteps({ cloudAccount, multiWorkspace }),
-    [cloudAccount, multiWorkspace]
+    () => getDesktopOnboardingSteps({ cloudAccount, needsModel }),
+    [cloudAccount, needsModel]
   );
+
   const phase = resolveDesktopOnboardingPhase(persistedPhase, {
     cloudAccount,
-    multiWorkspace,
-    hasAgent: draft.provider?.kind === 'agentConfig',
-    hasProject: draft.project !== null,
+    needsModel,
+    revisitingStep,
   });
-  const visibleSteps = useMemo(
-    () =>
-      phase === 'summary' || draft.provider?.kind === 'providerSetup'
-        ? steps.map((step) => (step === 'firstTask' ? 'summary' : step))
-        : steps,
-    [draft.provider?.kind, phase, steps]
-  );
+
   const stepStartedAtRef = useRef(analytics.now());
   const flowStartedCapturedRef = useRef(false);
   const viewedPhaseRef = useRef<DesktopOnboardingResumePhase | null>(null);
+  const audioStoppedRef = useRef(false);
+
   const captureStepExit = useCallback(
     (
       action: 'continue' | 'back' | 'skip' | 'authenticated' | 'complete',
@@ -146,55 +151,19 @@ export function OnboardingOverlay({
     },
     [analytics, phase]
   );
+
   const advanceTo = useCallback(
     (
       next: DesktopOnboardingResumePhase,
       action: 'continue' | 'back' | 'skip' | 'authenticated' = 'continue',
       properties?: DesktopOnboardingTraceProperties
     ) => {
+      setRevisitingStep(null);
       captureStepExit(action, next, properties);
       setPersistedPhase(next);
     },
     [captureStepExit, setPersistedPhase]
   );
-  const goAfterCeremony = useCallback(
-    () =>
-      advanceTo(cloudAccount ? 'login' : multiWorkspace ? 'workspace' : 'providers', 'continue'),
-    [advanceTo, cloudAccount, multiWorkspace]
-  );
-  const goAfterLogin = useCallback(
-    () => advanceTo(multiWorkspace ? 'workspace' : 'providers', 'authenticated'),
-    [advanceTo, multiWorkspace]
-  );
-  const goBeforeProviders = useCallback(
-    () => advanceTo(multiWorkspace ? 'workspace' : cloudAccount ? 'login' : 'ceremony', 'back'),
-    [advanceTo, cloudAccount, multiWorkspace]
-  );
-
-  // The summary must tell the truth about a pending setup: a failed task is
-  // not "still progressing", and a deleted one is no longer pending at all.
-  // A successful setup is REPLACED by a published AgentConfig under the same
-  // id, so the config check must come first or success reads as "missing".
-  const providerSetups = useAtomValue(getAllProviderSetupsAtom);
-  const agentConfigs = useAtomValue(getAllAgentConfigAtom);
-  const retryProviderSetup = useSetAtom(cmdRetryProviderSetupAtom);
-  const selectedSetupId =
-    draft.provider?.kind === 'providerSetup' ? draft.provider.providerSetupId : null;
-  const localMachineId = useAtomValue(localMachineIdAtom);
-  const selectedSetupMachineIds = useMemo(
-    () => (selectedSetupId !== null && localMachineId !== null ? [localMachineId] : []),
-    [localMachineId, selectedSetupId]
-  );
-  useMachineFlockAgentConfigsForMachineIds(selectedSetupMachineIds);
-  const summaryAgent = resolveDesktopOnboardingSummaryAgent(
-    draft.provider,
-    providerSetups,
-    agentConfigs
-  );
-  const failedProviderSetup =
-    selectedSetupId === null
-      ? undefined
-      : providerSetups.find((setup) => setup.id === selectedSetupId && setup.status === 'failed');
 
   useEffect(() => {
     if (!flowStartedCapturedRef.current) {
@@ -206,212 +175,226 @@ export function OnboardingOverlay({
           resumed: persistedPhase !== null,
           cloud_account: cloudAccount,
           multi_workspace: multiWorkspace,
+          needs_model: needsModel,
         }
       );
     }
     if (viewedPhaseRef.current === phase) return;
     viewedPhaseRef.current = phase;
     stepStartedAtRef.current = analytics.now();
-    const stepIndex = visibleSteps.indexOf(phase);
+    const stepIndex = steps.indexOf(phase);
     analytics.capture('onboarding/step_viewed', {
       step: phase,
       step_index: stepIndex === -1 ? null : stepIndex + 1,
-      step_count: visibleSteps.length,
-      provider_selection_kind: draft.provider?.kind ?? 'none',
+      step_count: steps.length,
+      has_model: Boolean(draft.modelChip || sorbetController.probe?.model.kind === 'ready'),
       project_kind: draft.project?.kind ?? 'none',
-      agent_state: phase === 'summary' ? summaryAgent.state : undefined,
     });
   }, [
     analytics,
     cloudAccount,
+    draft.modelChip,
     draft.project?.kind,
-    draft.provider?.kind,
     multiWorkspace,
+    needsModel,
     persistedPhase,
     phase,
-    summaryAgent.state,
-    visibleSteps,
+    sorbetController.probe?.model.kind,
+    steps,
   ]);
 
+  // Fade out the procedural Ceremony score once leaving `arrive` + `account`.
   useEffect(() => {
-    if (selectedSetupId === null) {
-      providerSetupTraceRef.current = null;
+    if (phase === 'arrive') {
+      audioStoppedRef.current = false;
       return;
     }
-    const traceKey = `${selectedSetupId}:${summaryAgent.state}:${failedProviderSetup?.attempt ?? 0}`;
-    if (providerSetupTraceRef.current === traceKey) return;
-    providerSetupTraceRef.current = traceKey;
-    if (summaryAgent.state === 'preparing') {
-      analytics.capture('onboarding/operation_started', {
-        step: phase,
-        operation: 'agent_setup',
-        attempt: failedProviderSetup?.attempt ?? null,
-      });
-      return;
+    if (phase !== 'account' && !audioStoppedRef.current) {
+      audioStoppedRef.current = true;
+      stopOnboardingAudio(2.4);
     }
-    if (summaryAgent.state === 'ready') {
-      analytics.capture('onboarding/operation_succeeded', {
-        step: phase,
-        operation: 'agent_setup',
-      });
-      return;
-    }
-    if (failedProviderSetup) {
-      console.error('[onboarding] Agent setup failed:', {
-        id: failedProviderSetup.id,
-        machineId: failedProviderSetup.machineId,
-        agentName: failedProviderSetup.config.name,
-        failureCode: failedProviderSetup.failureCode,
-        attempt: failedProviderSetup.attempt,
-      });
-      analytics.capture('onboarding/operation_failed', {
-        step: phase,
-        operation: 'agent_setup',
-        failure_code: failedProviderSetup.failureCode ?? 'agent_setup_failed',
-        attempt: failedProviderSetup.attempt,
-        retryable: true,
-      });
-      return;
-    }
-    analytics.capture('onboarding/operation_failed', {
-      step: phase,
-      operation: 'agent_setup',
-      failure_code: 'agent_setup_missing',
-      retryable: false,
-    });
-  }, [analytics, failedProviderSetup, phase, selectedSetupId, summaryAgent.state]);
+  }, [phase, stopOnboardingAudio]);
 
-  const completeOnboarding = useCallback(
-    async (entryPoint: NonNullable<DesktopOnboardingCompletion['entryPoint']>) => {
-      return onCompleted({
+  // `Esc` returns to the previous editable step (`account` or `model`) per §6.3.
+  useEffect(() => {
+    if (phase === 'arrive' || exitingToProduct) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"], [role="listbox"], [role="menu"]')) return;
+
+      if (phase === 'start') {
+        if (needsModel || draft.modelChip) {
+          event.preventDefault();
+          setRevisitingStep('model');
+          captureStepExit('back', 'model');
+          setPersistedPhase('model');
+          return;
+        }
+        if (cloudAccount) {
+          event.preventDefault();
+          setRevisitingStep('account');
+          captureStepExit('back', 'account');
+          setPersistedPhase('account');
+        }
+      } else if (phase === 'model' && cloudAccount) {
+        event.preventDefault();
+        setRevisitingStep('account');
+        captureStepExit('back', 'account');
+        setPersistedPhase('account');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    captureStepExit,
+    cloudAccount,
+    draft.modelChip,
+    exitingToProduct,
+    needsModel,
+    phase,
+    setPersistedPhase,
+  ]);
+
+  const handleFinishArrive = useCallback(() => {
+    const next: DesktopOnboardingResumePhase = cloudAccount
+      ? 'account'
+      : needsModel
+        ? 'model'
+        : 'start';
+    advanceTo(next, 'continue');
+  }, [advanceTo, cloudAccount, needsModel]);
+
+  const handleAccountCompleted = useCallback(
+    (chip: DesktopOnboardingAccountChip) => {
+      setDraft((prev) => ({ ...prev, accountChip: chip }));
+      const hasModelNow =
+        Boolean(draft.modelChip) || sorbetController.probe?.model.kind === 'ready';
+      const next: DesktopOnboardingResumePhase =
+        needsModel && !hasModelNow ? 'model' : 'start';
+      advanceTo(next, 'authenticated', { has_workspace: true });
+    },
+    [advanceTo, draft.modelChip, needsModel, setDraft, sorbetController.probe?.model.kind]
+  );
+
+  const handleModelConnected = useCallback(
+    (payload: ConnectedModelPayload) => {
+      setDraft((prev) => ({
+        ...prev,
+        modelChip: {
+          providerId: payload.providerId,
+          providerName: payload.providerName,
+          modelSelector: payload.modelSelector,
+          modelName: payload.modelName,
+          source: payload.source,
+        },
+        agentConfigId: null,
+      }));
+    },
+    [setDraft]
+  );
+
+  const handleSelectChipPhase = useCallback(
+    (targetPhase: 'account' | 'model') => {
+      if (targetPhase === phase) return;
+      setRevisitingStep(targetPhase);
+      captureStepExit('back', targetPhase);
+      setPersistedPhase(targetPhase);
+    },
+    [captureStepExit, phase, setPersistedPhase]
+  );
+
+  const finishProductEntry = useCallback(
+    async (
+      entryPoint: NonNullable<DesktopOnboardingCompletion['entryPoint']>,
+      sessionId?: string
+    ): Promise<boolean> => {
+      stopOnboardingAudio(0.6);
+      const ok = await onCompleted({
+        ...(sessionId ? { sessionId } : {}),
+        ...(draft.accountChip?.workspaceSlug
+          ? { workspaceSlug: draft.accountChip.workspaceSlug }
+          : {}),
         entryPoint,
         sourceStep: phase,
         sourceStepDurationMs: analytics.durationSince(stepStartedAtRef.current),
       });
+      if (!ok) {
+        setExitingToProduct(false);
+      }
+      return ok;
     },
-    [analytics, onCompleted, phase]
+    [analytics, draft.accountChip?.workspaceSlug, onCompleted, phase, stopOnboardingAudio]
   );
 
-  useEffect(() => {
-    if (phase === 'ceremony') {
-      audioHandoffStoppedRef.current = false;
-      return undefined;
-    }
-    if (audioHandoffStoppedRef.current) return undefined;
-    audioHandoffStoppedRef.current = true;
-    stopOnboardingAudio(3.2);
-    return undefined;
-  }, [phase, stopOnboardingAudio]);
-
-  const screens: Record<DesktopOnboardingResumePhase, ReactNode> = {
-    ceremony: (
-      <OnboardingCeremony
-        key="ceremony"
-        audio={onboardingAudio}
-        playing
-        onFinish={goAfterCeremony}
-      />
-    ),
-    login: (
-      <LoginScreen key="login" onBack={() => advanceTo('ceremony', 'back')} onNext={goAfterLogin} />
-    ),
-    workspace: (
-      <WorkspaceScreen
-        key="workspace"
-        onBack={() => advanceTo(cloudAccount ? 'login' : 'ceremony', 'back')}
-        onNext={() => advanceTo('providers')}
-      />
-    ),
-    providers: (
-      <ProvidersScreen
-        key="providers"
-        onBack={goBeforeProviders}
-        onSkip={() => {
-          setDraft({ provider: null, project: null });
-          advanceTo('summary', 'skip', { provider_selection_kind: 'none' });
-        }}
-        onNext={(provider) => {
-          setDraft({ provider, project: null });
-          advanceTo('projects', 'continue', { provider_selection_kind: provider.kind });
-        }}
-        onManagedRuntimeSelected={setPreferredBuiltinRuntime}
-      />
-    ),
-    projects: (
-      <ProjectsScreen
-        key="projects"
-        onBack={() => advanceTo('providers', 'back')}
-        onSkip={() => {
-          setDraft((previous) => ({ ...previous, project: null }));
-          advanceTo('summary', 'skip', { project_kind: 'none' });
-        }}
-        onComplete={(project) => {
-          setDraft((previous) => ({ ...previous, project }));
-          advanceTo(
-            project.kind === 'local' && draft.provider?.kind === 'agentConfig'
-              ? 'firstTask'
-              : 'summary',
-            'continue',
-            { project_kind: project.kind }
-          );
-        }}
-      />
-    ),
-    firstTask:
-      draft.provider?.kind === 'agentConfig' && draft.project ? (
-        <FirstTaskScreen
-          key="firstTask"
-          agentConfigId={draft.provider.agentConfigId}
-          project={draft.project}
-          onBack={() => advanceTo('projects', 'back')}
-          onAgentConfigChange={(config) => {
-            setDraft((previous) => ({
-              ...previous,
-              provider: {
-                kind: 'agentConfig',
-                agentConfigId: config.id,
-                agentName: config.name,
-              },
-            }));
-          }}
-          onSkip={() => {
-            void completeOnboarding('first_task_skip');
-          }}
-          onContinue={() => {
-            return completeOnboarding('first_task');
-          }}
-        />
-      ) : null,
-    summary: (
-      <SummaryScreen
-        key="summary"
-        agentState={summaryAgent.state}
-        agentName={summaryAgent.name}
-        agentFailureCode={failedProviderSetup?.failureCode}
-        projectName={draft.project?.name}
-        onRetryAgent={
-          failedProviderSetup ? () => retryProviderSetup(failedProviderSetup.id) : undefined
-        }
-        onBack={() => advanceTo(draft.project ? 'projects' : 'providers', 'back')}
-        onComplete={() => {
-          void completeOnboarding('summary');
-        }}
-      />
-    ),
-  };
-
   return (
-    <OnboardingStepsProvider steps={visibleSteps}>
-      <div {...stylex.props(styles.overlay)}>
-        <WindowDragStrip xstyle={styles.dragStrip} />
-        {phase === 'ceremony' ? (
-          <div {...stylex.props(styles.screen)}>{screens[phase]}</div>
-        ) : (
+    <OnboardingStepsProvider steps={steps}>
+      <LayoutGroup id="lody-onboarding-stage">
+        <div {...stylex.props(styles.overlay, flatSurface.onboardingLightScope)}>
+          <WindowDragStrip xstyle={styles.dragStrip} />
+
+          <OnboardingChipRail
+            currentPhase={phase}
+            accountChip={draft.accountChip}
+            modelChip={draft.modelChip}
+            exitingToProduct={exitingToProduct}
+            onSelectPhase={handleSelectChipPhase}
+          />
+
           <div {...stylex.props(styles.screen)}>
-            <OnboardingShellHost>{screens[phase]}</OnboardingShellHost>
+            {phase === 'arrive' || phase === 'account' ? (
+              <ContinuousEditorialStage
+                mode={phase}
+                audio={onboardingAudio}
+                onFinishArrive={handleFinishArrive}
+                accountContent={
+                  phase === 'account' ? (
+                    <AccountScreen
+                      revisiting={revisitingStep === 'account'}
+                      onCompleted={handleAccountCompleted}
+                    />
+                  ) : null
+                }
+              />
+            ) : phase === 'model' ? (
+              <ModelScreen
+                onConnected={(payload, method) => {
+                  handleModelConnected(payload);
+                  advanceTo('start', 'continue', {
+                    connection_method: method,
+                    has_model: true,
+                  });
+                }}
+                onSkip={() => {
+                  advanceTo('start', 'skip', {
+                    connection_method: 'skip',
+                    has_model: false,
+                  });
+                }}
+              />
+            ) : (
+              <StartScreen
+                project={draft.project}
+                modelChip={draft.modelChip}
+                selectedAgentConfigId={draft.agentConfigId}
+                exitingToProduct={exitingToProduct}
+                onProjectChange={(project) =>
+                  setDraft((prev) => ({ ...prev, project }))
+                }
+                onModelConnected={handleModelConnected}
+                onAgentConfigChange={(agentConfigId) =>
+                  setDraft((prev) => ({ ...prev, agentConfigId }))
+                }
+                onBeginExitTransition={() => setExitingToProduct(true)}
+                onEnterWithSession={(sessionId) =>
+                  finishProductEntry('first_task', sessionId)
+                }
+                onExploreFirst={() => finishProductEntry('first_task_skip')}
+              />
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      </LayoutGroup>
     </OnboardingStepsProvider>
   );
 }

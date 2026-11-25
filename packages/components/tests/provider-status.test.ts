@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ACP_CAPABILITY_CACHE_VERSION,
-  getAcpCapabilityCacheKey,
-  type AcpCapabilityCacheEntry,
   type AgentConfigId,
-  type MachineViewMeta,
-  type MachineAcpBinaryProgressMessage,
   type MachineId,
   machineFlockKeys,
   serializeMachineFlockKey,
@@ -14,11 +9,6 @@ import {
   type MachineFlockScanRow,
   type WorkspaceId,
 } from '@lody/shared';
-import { resolveInitialOnboardingProviderStatus } from '../src/components/onboarding/provider-status';
-import {
-  createProviderTestRunRegistry,
-  providerTestActivityFromProgress,
-} from '../src/components/onboarding/provider-test-state';
 import { createStore } from 'jotai';
 import {
   cmdCreateProviderSetupAtom,
@@ -33,102 +23,6 @@ import {
 } from '../src/atoms/machine-flock';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
-
-describe('provider-status', () => {
-  const config = {
-    id: 'builtin-kimi' as AgentConfigId,
-    cliType: 'builtin' as const,
-    agentType: 'kimi',
-  };
-
-  const runtimeEntry: AcpCapabilityCacheEntry = {
-    cliType: 'builtin',
-    agentType: 'kimi',
-    cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
-    provenance: 'runtime',
-    sourceVersion: 'builtin-kimi:0.29.0',
-    modes: [],
-    models: [],
-    configOptions: [],
-    availableCommands: [],
-    fetchedAt: 1,
-  };
-
-  function capabilities(
-    entry: AcpCapabilityCacheEntry,
-    targetConfig: typeof config = config
-  ): MachineViewMeta['acpCapabilities'] {
-    return { [getAcpCapabilityCacheKey(targetConfig.id)]: entry };
-  }
-
-  describe('resolveInitialOnboardingProviderStatus', () => {
-    it('does not treat missing or static capabilities as verified', () => {
-      expect(resolveInitialOnboardingProviderStatus(config, undefined)).toBe('untested');
-      expect(
-        resolveInitialOnboardingProviderStatus(
-          config,
-          capabilities({ ...runtimeEntry, provenance: undefined })
-        )
-      ).toBe('untested');
-    });
-
-    it('treats parsed runtime probes as verified across cache versions', () => {
-      expect(resolveInitialOnboardingProviderStatus(config, capabilities(runtimeEntry))).toBe(
-        'passed'
-      );
-      expect(
-        resolveInitialOnboardingProviderStatus(
-          config,
-          capabilities({ ...runtimeEntry, cacheVersion: ACP_CAPABILITY_CACHE_VERSION - 1 })
-        )
-      ).toBe('passed');
-    });
-  });
-});
-
-describe('provider-test-state', () => {
-  const configId = 'provider-1' as AgentConfigId;
-
-  function progress(
-    status: MachineAcpBinaryProgressMessage['status'],
-    percent?: number
-  ): MachineAcpBinaryProgressMessage {
-    return {
-      type: 'machine/acp-binary-progress',
-      machineId: 'machine-1' as MachineId,
-      agentType: 'kimi',
-      status,
-      percent,
-    };
-  }
-
-  describe('providerTestActivityFromProgress', () => {
-    it('does not present a runtime that already failed as still checking', () => {
-      for (const status of ['error', 'unsupported-platform', 'incompatible-host'] as const) {
-        expect(providerTestActivityFromProgress(progress(status))).toEqual({
-          phase: 'runtime-failed',
-        });
-      }
-    });
-  });
-
-  describe('createProviderTestRunRegistry', () => {
-    it('detaches without aborting, so leaving the step does not cancel the work', () => {
-      // Leaving the provider step must stop the screen committing a result it can
-      // no longer show, and nothing more. The machine drops a refresh once its
-      // last consumer leaves, so aborting here would make "continue" quietly mean
-      // "abandon this agent" — the opposite of what the UI offers at that moment.
-      const registry = createProviderTestRunRegistry();
-      const detached = registry.start(configId);
-
-      registry.detachAll();
-
-      expect(detached.signal.aborted).toBe(false);
-      expect(registry.isCurrent(configId, detached)).toBe(false);
-      expect(registry.finish(configId, detached)).toBe(false);
-    });
-  });
-});
 
 describe('provider-setup-writer', () => {
   function createDeferred(): { promise: Promise<void>; resolve: () => void } {

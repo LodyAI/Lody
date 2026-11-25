@@ -41,6 +41,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { useRefreshMachineAcpCapabilities } from '@/hooks/use-refresh-machine-acp-capabilities';
+import { getIpcServices } from '@/lib/electron-ipc-client';
 
 import { useHarnessDevices } from './machines';
 import { harness, type EndpointProtocol, type HarnessState } from './store';
@@ -236,17 +237,24 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
       // coherent generation after a machine switch.
       let credentials: HarnessState['credentials'] | null = null;
       try {
-        const result = await runtime.requestLocalSorbetCredentials(target.machineId, {
-          method: 'sorbet/credentials-list',
-          params: { configId: target.configId },
-        });
+        const isLocalTarget = target.machineId === localMachineId;
+        const [result, localSources] = await Promise.all([
+          runtime.requestLocalSorbetCredentials(target.machineId, {
+            method: 'sorbet/credentials-list',
+            params: { configId: target.configId },
+          }),
+          isLocalTarget
+            ? Promise.resolve(getIpcServices()?.onboardingSorbet.listConnectionSources()).catch(
+                () => undefined
+              )
+            : Promise.resolve(undefined),
+        ]);
         if (result.type === 'sorbet/credentials-list') {
           credentials = {};
           for (const credential of result.credentials) {
+            const recordedSource = localSources?.[credential.providerId];
             credentials[credential.providerId] = {
               provider: credential.providerId,
-              // The wire name is `api_key`; anything that is not oauth or
-              // local is a stored secret, so the row can say "API key".
               method: wireMethod(credential.type),
               account:
                 credential.type === 'oauth'
@@ -255,6 +263,9 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
                     ? 'Local'
                     : 'API key',
               addedAt: Date.now(),
+              source:
+                recordedSource ??
+                (credential.type === 'oauth' ? { kind: 'oauth' } : { kind: 'api_key' }),
             };
           }
         }

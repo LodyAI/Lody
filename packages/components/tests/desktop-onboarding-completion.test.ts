@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { enterDesktopProduct } from '../src/components/onboarding/desktop-onboarding-completion';
-import type { AgentConfigId, MachineId, ProviderSetupTask } from '@lody/shared';
-import { resolveDesktopOnboardingSummaryAgent } from '../src/components/onboarding/onboarding-overlay';
-import { getFirstTaskPrimaryAction } from '../src/components/onboarding/first-task-primary-action';
+import { getDesktopOnboardingSteps } from '../src/components/onboarding/onboarding-steps';
+import { resolveDesktopOnboardingPhase } from '../src/components/onboarding/onboarding-overlay';
+import { normalizeDesktopOnboardingPhase } from '../src/atoms/onboarding';
 
 describe('desktop-onboarding-completion', () => {
   function deferred<T>() {
@@ -133,98 +133,62 @@ describe('desktop-onboarding-completion', () => {
       }
     );
   });
-});
 
-describe('onboarding-summary-agent', () => {
-  const machineId = 'machine-1' as MachineId;
-  const setupId = 'setup-1' as AgentConfigId;
-  const provider = {
-    kind: 'providerSetup' as const,
-    providerSetupId: setupId,
-    agentName: 'Draft Agent',
-  };
-
-  function setup(status: ProviderSetupTask['status']): ProviderSetupTask {
-    return {
-      v: 1,
-      id: setupId,
-      machineId,
-      config: {
-        id: setupId,
-        machineId,
-        name: 'Draft Agent',
-        cliType: 'builtin',
-        agentType: 'codex',
-        env: {},
-      },
-      status,
-      attempt: 1,
-      createdAt: 1,
-      updatedAt: 1,
-    };
-  }
-
-  describe('resolveDesktopOnboardingSummaryAgent', () => {
-    it('requires the selected AgentConfig to still be published', () => {
-      const selectedConfig = {
-        kind: 'agentConfig' as const,
-        agentConfigId: setupId,
-        agentName: 'Draft Agent',
-      };
-      expect(resolveDesktopOnboardingSummaryAgent(selectedConfig, [], [])).toEqual({
-        state: 'missing',
-        name: 'Draft Agent',
-      });
-      expect(
-        resolveDesktopOnboardingSummaryAgent(selectedConfig, [], [setup('verifying').config])
-      ).toEqual({
-        state: 'ready',
-        name: 'Draft Agent',
-      });
-    });
-  });
-});
-
-describe('first-task-primary-action', () => {
-  describe('getFirstTaskPrimaryAction', () => {
-    it('runs the first task when every Session prerequisite is ready', () => {
-      expect(
-        getFirstTaskPrimaryAction({
-          canStartFirstTask: true,
-          hasPrompt: true,
-          startRequested: false,
-        })
-      ).toEqual({ kind: 'run', disabled: false, loading: false });
+  describe('step matrix & phase resolution', () => {
+    it('computes the exact 4-case platform x ArrivalProbe matrix upfront', () => {
+      expect(getDesktopOnboardingSteps({ cloudAccount: true, needsModel: true })).toEqual([
+        'arrive',
+        'account',
+        'model',
+        'start',
+      ]);
+      expect(getDesktopOnboardingSteps({ cloudAccount: true, needsModel: false })).toEqual([
+        'arrive',
+        'account',
+        'start',
+      ]);
+      expect(getDesktopOnboardingSteps({ cloudAccount: false, needsModel: true })).toEqual([
+        'arrive',
+        'model',
+        'start',
+      ]);
+      expect(getDesktopOnboardingSteps({ cloudAccount: false, needsModel: false })).toEqual([
+        'arrive',
+        'start',
+      ]);
     });
 
-    it('enters Lody instead of disabling an unavailable first task', () => {
-      expect(
-        getFirstTaskPrimaryAction({
-          canStartFirstTask: false,
-          hasPrompt: true,
-          startRequested: false,
-        })
-      ).toEqual({ kind: 'enter', disabled: false, loading: false });
-    });
+    it('migrates legacy persisted phase names cleanly and skips account/model when inapplicable', () => {
+      expect(normalizeDesktopOnboardingPhase('ceremony')).toBe('arrive');
+      expect(normalizeDesktopOnboardingPhase('login')).toBe('account');
+      expect(normalizeDesktopOnboardingPhase('workspace')).toBe('account');
+      expect(normalizeDesktopOnboardingPhase('providers')).toBe('model');
+      expect(normalizeDesktopOnboardingPhase('projects')).toBe('start');
+      expect(normalizeDesktopOnboardingPhase('firstTask')).toBe('start');
+      expect(normalizeDesktopOnboardingPhase('summary')).toBe('start');
 
-    it('offers entry after background Session creation was requested', () => {
       expect(
-        getFirstTaskPrimaryAction({
-          canStartFirstTask: true,
-          hasPrompt: true,
-          startRequested: true,
+        resolveDesktopOnboardingPhase('account', {
+          cloudAccount: false,
+          needsModel: true,
         })
-      ).toEqual({ kind: 'enter', disabled: false, loading: false });
-    });
+      ).toBe('model');
 
-    it('enters Lody instead of disabling the final action for an empty task', () => {
       expect(
-        getFirstTaskPrimaryAction({
-          canStartFirstTask: true,
-          hasPrompt: false,
-          startRequested: false,
+        resolveDesktopOnboardingPhase('model', {
+          cloudAccount: true,
+          needsModel: false,
         })
-      ).toEqual({ kind: 'enter', disabled: false, loading: false });
+      ).toBe('start');
+
+      // Clicking the top-rail model chip explicitly revisits `model` even when `needsModel` was false.
+      expect(
+        resolveDesktopOnboardingPhase('model', {
+          cloudAccount: true,
+          needsModel: false,
+          revisitingStep: 'model',
+        })
+      ).toBe('model');
     });
   });
 });

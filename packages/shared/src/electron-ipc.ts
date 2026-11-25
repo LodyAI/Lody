@@ -450,6 +450,7 @@ export type ElectronLoginState = {
   revision: number;
   attemptId: string | null;
   phase: 'idle' | 'waiting' | 'exchanging' | 'authenticated' | 'error';
+  authorizationUrl?: string | null;
   session: ElectronAuthCallbackSession | null;
   error:
     | 'browser_open_failed'
@@ -918,4 +919,5 @@ export function bindingToElectronAccelerator(binding: string | null | undefined)
   return [...modifiers, key].join('+');
 }
 
+export * from './onboarding-sorbet';
 export * from './electron-ipc-channels';

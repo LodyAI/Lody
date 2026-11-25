@@ -37,6 +37,7 @@ export interface Credential {
   method: AuthMethod;
   account: string;
   addedAt: number;
+  source?: import('@lody/shared/electron-ipc').SorbetConnectionSource;
 }
 
 /** The wire protocols a user-defined endpoint can speak. */
@@ -111,7 +112,7 @@ const DEFAULT_PROFILE: HarnessConfig = {
   subModel: '',
   effort: 'medium',
   fallback: true,
-  autonomy: 'smart',
+  autonomy: 'ask',
   fsScope: 'workspace',
   network: 'allowlist',
   guarded: ['push', 'delete', 'send', 'spend', 'deploy'],
@@ -128,7 +129,7 @@ const initial = (): HarnessState => ({
   status: 'loading',
   profile: DEFAULT_PROFILE,
   overrides: {},
-  setupDone: false,
+  setupDone: true,
   setupStep: 0,
 });
 

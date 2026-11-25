@@ -21,7 +21,13 @@ import {
   useOnboardingAnalytics,
   type DesktopOnboardingTraceProperties,
 } from '../src/components/onboarding/onboarding-analytics';
-import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
+import { ModelScreen } from '../src/components/onboarding/screens/model-screen';
+import {
+  EMPTY_ARRIVAL_PROBE,
+  IDLE_SORBET_OAUTH_STATE,
+  SorbetOnboardingControllerProvider,
+  type SorbetOnboardingController,
+} from '../src/components/onboarding/shared/sorbet-onboarding-controller';
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM } from './test-platform';
 
@@ -29,22 +35,40 @@ function AnalyticsProbe() {
   const analytics = useOnboardingAnalytics();
   useEffect(() => {
     analytics.capture('onboarding/operation_failed', {
-      step: 'workspace',
+      step: 'account',
       operation: 'workspace_create',
       failure_code: 'workspace_create_failed',
       name: 'Private Workspace',
       message: 'raw backend detail',
+      api_key: 'sk-ant-secret-must-never-leak',
     } as unknown as DesktopOnboardingTraceProperties);
   }, [analytics]);
   return null;
 }
 
-function findButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((item) =>
-    item.textContent?.includes(label)
-  );
-  if (!button) throw new Error(`Expected button containing "${label}"`);
-  return button;
+function makeTestController(): SorbetOnboardingController {
+  return {
+    probe: EMPTY_ARRIVAL_PROBE,
+    probeLoading: false,
+    oauthState: IDLE_SORBET_OAUTH_STATE,
+    refreshProbe: async () => EMPTY_ARRIVAL_PROBE,
+    startOAuth: async () => IDLE_SORBET_OAUTH_STATE,
+    cancelOAuth: async () => undefined,
+    describeImport: async (source) => ({ source, systemPromptKind: 'none' }),
+    runImport: async (req) => ({ status: 'not_found', source: req.source }),
+    connectApiKey: async ({ providerId }) => ({
+      ok: true,
+      providerId,
+      providerName: 'Claude',
+      modelSelector: 'anthropic/claude-sonnet-4-5',
+      modelName: 'Sonnet 4.5',
+      source: { kind: 'api_key', last4: 'a3f9' },
+      models: [],
+    }),
+    connectCustomProvider: async () => ({ ok: false, code: 'unknown' }),
+    disconnectProvider: async () => undefined,
+    applyDefaultModelSelection: async () => undefined,
+  };
 }
 
 describe('desktop onboarding analytics', () => {
@@ -67,7 +91,7 @@ describe('desktop onboarding analytics', () => {
     mocks.capture.mockReset();
   });
 
-  it('captures fixed trace fields and strips user-authored or raw-error properties', async () => {
+  it('captures fixed trace fields and strips secrets, user-authored names, and raw errors', async () => {
     const platform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
       capabilities: CLOUD_PLATFORM_CAPABILITIES,
@@ -85,14 +109,14 @@ describe('desktop onboarding analytics', () => {
     expect(mocks.capture).toHaveBeenCalledOnce();
     expect(mocks.capture).toHaveBeenCalledWith('onboarding/operation_failed', {
       flow_id: expect.any(String),
-      flow_schema_version: 1,
-      step: 'workspace',
+      flow_schema_version: 2,
+      step: 'account',
       operation: 'workspace_create',
       failure_code: 'workspace_create_failed',
     });
   });
 
-  it('does not capture or persist a flow id when telemetry is unavailable', async () => {
+  it('does not capture or persist a flow id when telemetry is unavailable (OSS local)', async () => {
     const platform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
       capabilities: LOCAL_PLATFORM_CAPABILITIES,
@@ -111,8 +135,8 @@ describe('desktop onboarding analytics', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
-  it('links a failed Summary retry to its started attempt without raw error detail', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('records model skip distribution without leaking secrets', async () => {
+    const onSkip = vi.fn();
     const platform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
       capabilities: CLOUD_PLATFORM_CAPABILITIES,
@@ -121,35 +145,29 @@ describe('desktop onboarding analytics', () => {
       root.render(
         <PlatformContext.Provider value={platform}>
           <OnboardingAnalyticsProvider>
-            <SummaryScreen
-              agentState="failed"
-              agentFailureCode="runtime_install_failed"
-              onBack={vi.fn()}
-              onComplete={vi.fn()}
-              onRetryAgent={vi.fn(() => Promise.reject(new Error('private machine detail')))}
-            />
+            <SorbetOnboardingControllerProvider value={makeTestController()}>
+              <ModelScreen onConnected={vi.fn()} onSkip={onSkip} />
+            </SorbetOnboardingControllerProvider>
           </OnboardingAnalyticsProvider>
         </PlatformContext.Provider>
       );
     });
+
+    const skipBtn = container.querySelector(
+      '[data-testid="onboarding-model-skip"]'
+    ) as HTMLButtonElement;
+    expect(skipBtn).not.toBeNull();
     await act(async () => {
-      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
+      skipBtn.click();
     });
 
-    const retryEvents = mocks.capture.mock.calls.filter(
-      ([, properties]) => properties.operation === 'agent_setup_retry_request'
+    expect(onSkip).toHaveBeenCalledOnce();
+    expect(mocks.capture).toHaveBeenCalledWith(
+      'onboarding/operation_succeeded',
+      expect.objectContaining({
+        step: 'model',
+        connection_method: 'skip',
+      })
     );
-    expect(retryEvents.map(([event]) => event)).toEqual([
-      'onboarding/operation_started',
-      'onboarding/operation_failed',
-    ]);
-    expect(retryEvents[1]?.[1]).toMatchObject({
-      failure_code: 'agent_setup_retry_failed',
-      retryable: true,
-    });
-    expect(retryEvents[1]?.[1]).not.toHaveProperty('message');
-    expect(retryEvents[1]?.[1].flow_id).toBe(retryEvents[0]?.[1].flow_id);
   });
 });

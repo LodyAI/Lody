@@ -1,14 +1,10 @@
 /*
  * Harness surface: the body of Settings → Lody Agent.
  *
- * It has three lives, chosen by state rather than by route:
- *   1. no device   → the overview *is* pairing; nothing else is possible yet
- *   2. paired      → the setup wizard, which writes the shared profile
- *   3. configured  → overview and pages, scoped to the profile or one device
- *
- * The settings pane owns the frame, the page title and the close affordance, so
- * this surface draws no chrome of its own: its navigation sits inside the pane,
- * under the pane's header, and the device switcher rides at the top of it.
+ * The standalone first-run wizard is retired (§7): Settings → Lody Agent opens
+ * directly as an ordinary flat settings surface (`Providers` / `Models` /
+ * `Plugins` / `Permissions` / `Devices`), embedding `ConnectModelSheet` in its
+ * empty state and reusing the same sheet when adding another model source.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -25,29 +21,19 @@ import { PairPanel, type PairPhase } from './pair';
 import { DeviceGlyph, Kbd, StatusDot, soft, spring } from './primitives';
 import { parts } from './parts';
 import { Settings, type HarnessPage, type HarnessStage } from './settings';
-import { Setup } from './setup';
 import { SorbetBridge } from './sorbet';
 import { useSessionDefaults } from './session-defaults';
-import { harness, useHarness } from './store';
 import { shell } from './shell.styles';
 
 export type { HarnessPage } from './settings';
 
 export function Harness() {
-  const state = useHarness();
   const { devices } = useHarnessDevices();
   const [page, setPage] = useState<HarnessPage>('providers');
   const [pairing, setPairing] = useState(false);
-  const [setupOpen, setSetupOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const stage: HarnessStage = !devices.length ? 'empty' : !state.setupDone ? 'setup' : 'settings';
-
-  // Pairing a device opens the wizard once; dismissing it leaves the reminder
-  // on the overview instead of reopening on every render.
-  useEffect(() => {
-    if (stage === 'setup') setSetupOpen(true);
-  }, [stage]);
+  const stage: HarnessStage = !devices.length ? 'empty' : 'settings';
 
   // "P" pairs a device from anywhere once the first one exists.
   useEffect(() => {
@@ -76,15 +62,8 @@ export function Harness() {
   return (
     <SorbetBridge>
       <div {...stylex.props(shell.surface)}>
-        {/*
-         * Which device the surface is scoped to is a page-level target, so it
-         * sits in the settings pane's own header beside the page title — not in
-         * the harness's tab row, where it competed with the pages.
-         */}
         <SettingsPageActions>
           {devices.length ? (
-            // The switcher sits outside the harness surface; its menu draws with
-            // the sheet's own tokens because they are module-scoped, not inherited.
             <div>
               <DeviceSwitcher onPair={() => setPairing(true)} onManage={() => setPage('devices')} />
             </div>
@@ -96,22 +75,13 @@ export function Harness() {
         </SettingsPageActions>
 
         <div {...stylex.props(shell.body)}>
-          {stage === 'setup' && setupOpen ? (
-            <SetupPage
-              onSkip={() => {
-                harness.finish();
-                setSetupOpen(false);
-              }}
-            />
-          ) : (
-            <Settings
-              stage={stage}
-              page={page}
-              onPage={setPage}
-              onPair={() => setPairing(true)}
-              renderEmpty={() => <Empty />}
-            />
-          )}
+          <Settings
+            stage={stage}
+            page={page}
+            onPage={setPage}
+            onPair={() => setPairing(true)}
+            renderEmpty={() => <Empty />}
+          />
         </div>
 
         <PairSheet
@@ -301,8 +271,7 @@ function Empty() {
         >
           <h1 {...stylex.props(shell.emptyTitle)}>Where should your agent run?</h1>
           <p {...stylex.props(shell.emptyLede)}>
-            Pair a machine and {BRAND} sets up the harness on it — providers, models, plugins and
-            permissions. About two minutes. You can add more devices later.
+            Pair a machine and {BRAND} sets up Lody Agent on it. You can add more devices later.
           </p>
         </motion.div>
         <PairPanel onMethod={onMethod} onPhase={onPhase} />
@@ -330,8 +299,6 @@ function PairSheet({
     return () => window.removeEventListener('keydown', esc);
   }, [open, onClose]);
 
-  // The sheet covers the window, so it mounts on `body`: inside the settings
-  // dialog it would be clipped by the dialog's own box.
   return createPortal(
     <AnimatePresence>
       {open ? (
@@ -377,18 +344,5 @@ function PairSheet({
       ) : null}
     </AnimatePresence>,
     document.body
-  );
-}
-
-/**
- * The first-run wizard, drawn as the page itself: the setup sheet's own three
- * columns — where you are, the one decision, the path and the file it writes —
- * with its dashed guides, not a card inside a dialog card.
- */
-function SetupPage({ onSkip }: { onSkip: () => void }) {
-  return (
-    <div {...stylex.props(shell.setupPage)}>
-      <Setup onSkip={onSkip} />
-    </div>
   );
 }

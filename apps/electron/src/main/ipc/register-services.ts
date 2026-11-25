@@ -13,6 +13,7 @@ import { LocalProjectsIpc } from './services/local-projects-ipc'
 import { LoroIpc } from './services/loro-ipc'
 import { MachineRpcIpc } from './services/machine-rpc-ipc'
 import { NotificationsIpc } from './services/notifications-ipc'
+import { OnboardingSorbetIpc } from './services/onboarding-sorbet-ipc'
 import { PublicBrowserIpc } from './services/public-browser-ipc'
 import { SessionControlIpc } from './services/session-control-ipc'
 import { StorageGuardIpc } from './services/storage-guard-ipc'
@@ -36,6 +37,7 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   LoroIpc,
   MachineRpcIpc,
   NotificationsIpc,
+  OnboardingSorbetIpc,
   PublicBrowserIpc,
   SessionControlIpc,
   StorageGuardIpc,

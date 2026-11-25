@@ -2205,7 +2205,8 @@ export class LoroDocumentManager {
     cliType: AgentConfigCliType,
     agentType: AgentType,
     machineId: MachineId,
-    name?: string
+    name?: string,
+    sessionDefaults?: AgentConfigMeta['sessionDefaults']
   ): Promise<AgentConfigId> {
     const agentConfigId = uuidv4() as AgentConfigId;
     await upsertMachineAgentConfig(
@@ -2219,6 +2220,7 @@ export class LoroDocumentManager {
         cliType,
         agentType,
         env: {},
+        ...(sessionDefaults ? { sessionDefaults } : {}),
       } satisfies AgentConfigMeta,
       { sync: this, reason: 'agent-config-upsert' }
     );

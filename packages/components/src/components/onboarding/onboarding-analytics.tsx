@@ -9,7 +9,6 @@ import {
 } from '@/lib/posthog-analytics';
 import type {
   DesktopOnboardingProjectSelection,
-  DesktopOnboardingProviderSelection,
   DesktopOnboardingResumePhase,
 } from '@/atoms/onboarding';
 
@@ -29,22 +28,16 @@ export type DesktopOnboardingAnalyticsEvent =
   | 'onboarding/completion_failed'
   | 'onboarding/persistence_failed';
 
-type OnboardingOperation =
-  | 'agent_config_create'
-  | 'agent_config_delete'
-  | 'agent_config_update'
-  | 'agent_setup'
-  | 'agent_setup_cancel'
-  | 'agent_setup_create'
-  | 'agent_setup_retry_request'
-  | 'agent_test'
+export type OnboardingOperation =
+  | 'arrival_probe'
   | 'browser_sign_in'
   | 'first_session_create'
   | 'first_session_dispatch'
-  | 'github_install'
-  | 'local_agent_recovery'
-  | 'local_agent_restart'
   | 'local_project_import'
+  | 'model_connect_oauth'
+  | 'model_connect_import'
+  | 'model_connect_api_key'
+  | 'model_connect_custom'
   | 'session_check'
   | 'slug_availability_check'
   | 'slug_availability_retry_request'
@@ -54,32 +47,35 @@ type OnboardingOperation =
   | 'workspace_slug_repair'
   | 'workspace_switch';
 
+export type OnboardingModelConnectionMethod =
+  | 'oauth'
+  | 'import_claude_code'
+  | 'import_codex'
+  | 'import_env'
+  | 'api_key'
+  | 'custom'
+  | 'skip';
+
 export interface DesktopOnboardingTraceProperties {
   action?: 'authenticated' | 'back' | 'complete' | 'continue' | 'skip';
-  agent_state?: 'failed' | 'missing' | 'preparing' | 'ready';
   attempt?: number | null;
   available?: boolean;
   cloud_account?: boolean;
+  connection_method?: OnboardingModelConnectionMethod;
   destination?: 'root' | 'session' | 'workspace_chat';
   duration_ms?: number | null;
   entry_point?: 'first_task' | 'first_task_skip' | 'summary' | 'unknown';
   failure_code?: string;
+  has_model?: boolean;
   has_session?: boolean;
   has_workspace?: boolean;
   initial_step?: DesktopOnboardingResumePhase;
   multi_workspace?: boolean;
+  needs_model?: boolean;
   next_step?: DesktopOnboardingResumePhase | 'product';
   operation?: OnboardingOperation;
   project_kind?: DesktopOnboardingProjectSelection['kind'] | 'none';
-  provider_selection_kind?: DesktopOnboardingProviderSelection['kind'] | 'none';
-  result?:
-    | 'cancelled'
-    | 'current_window'
-    | 'degraded_empty_model_catalog'
-    | 'external_browser'
-    | 'imported'
-    | 'needs_auth'
-    | 'passed';
+  result?: 'cancelled' | 'imported' | 'not_found' | 'oauth_conflict' | 'passed';
   resumed?: boolean;
   retryable?: boolean;
   step?: DesktopOnboardingResumePhase | 'unknown';
@@ -160,7 +156,7 @@ export function OnboardingAnalyticsProvider({ children }: { children: ReactNode 
       try {
         capturePostHogEvent(postHog, event, {
           flow_id: flowId,
-          flow_schema_version: 1,
+          flow_schema_version: 2,
           ...properties,
         });
       } catch (error) {

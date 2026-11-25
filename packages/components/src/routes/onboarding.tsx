@@ -3,15 +3,21 @@ import { createFileRoute, Navigate, useNavigate } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { toast } from '@/lib/toast';
-import { desktopOnboardingDraftAtom, desktopOnboardingPhaseAtom } from '@/atoms/onboarding';
+import {
+  EMPTY_DESKTOP_ONBOARDING_DRAFT,
+  desktopOnboardingDraftAtom,
+  desktopOnboardingPhaseAtom,
+} from '@/atoms/onboarding';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { OnboardingOverlay, type DesktopOnboardingCompletion } from '@/components/onboarding';
 import { enterDesktopProduct } from '@/components/onboarding/desktop-onboarding-completion';
+import { useOnboardingReducedMotion } from '@/components/onboarding/motion-tokens';
 import {
   OnboardingAnalyticsProvider,
   useOnboardingAnalytics,
   type DesktopOnboardingTraceProperties,
 } from '@/components/onboarding/onboarding-analytics';
+import { runOnboardingToAppTransition } from '@/components/onboarding/onboarding-handoff';
 import { useOnboardingThemeLifecycle } from '@/components/onboarding/use-onboarding-theme-lifecycle';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
@@ -35,6 +41,7 @@ function DesktopOnboardingExperience() {
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const setPhase = useSetAtom(desktopOnboardingPhaseAtom);
   const setDraft = useSetAtom(desktopOnboardingDraftAtom);
+  const reducedMotion = useOnboardingReducedMotion();
   const inFlightCompletion = useRef<Promise<boolean> | null>(null);
   const completionAttempt = useRef(0);
   const completeThemeLifecycle = useOnboardingThemeLifecycle();
@@ -42,8 +49,6 @@ function DesktopOnboardingExperience() {
 
   const complete = useCallback(
     (completion: DesktopOnboardingCompletion): Promise<boolean> => {
-      // Concurrent triggers (double click, Skip racing Run) share one attempt;
-      // a settled attempt clears the ref so a failure stays retryable.
       if (inFlightCompletion.current) return inFlightCompletion.current;
       const targetWorkspace = completion.workspaceSlug ?? workspaceSlug;
       const destination = completion.sessionId
@@ -62,25 +67,26 @@ function DesktopOnboardingExperience() {
       analytics.capture('onboarding/completion_started', eventProperties);
       const attempt = enterDesktopProduct({
         persistCompletion: () => getIpcServices()?.app.completeOnboarding(),
-        navigate: async () => {
-          if (targetWorkspace && completion.sessionId) {
-            await navigate({
-              to: '/$workspaceName/sessions/$sessionId',
-              params: { workspaceName: targetWorkspace, sessionId: completion.sessionId },
-              replace: true,
-            });
-            return;
-          }
-          if (targetWorkspace) {
-            await navigate({
-              to: '/$workspaceName/chat',
-              params: { workspaceName: targetWorkspace },
-              replace: true,
-            });
-            return;
-          }
-          await navigate({ to: '/', replace: true });
-        },
+        navigate: () =>
+          runOnboardingToAppTransition(async () => {
+            if (targetWorkspace && completion.sessionId) {
+              await navigate({
+                to: '/$workspaceName/sessions/$sessionId',
+                params: { workspaceName: targetWorkspace, sessionId: completion.sessionId },
+                replace: true,
+              });
+              return;
+            }
+            if (targetWorkspace) {
+              await navigate({
+                to: '/$workspaceName/chat',
+                params: { workspaceName: targetWorkspace },
+                replace: true,
+              });
+              return;
+            }
+            await navigate({ to: '/', replace: true });
+          }, reducedMotion),
         onProductEntered: () => {
           completeThemeLifecycle();
           analytics.capture('onboarding/step_exited', {
@@ -102,7 +108,7 @@ function DesktopOnboardingExperience() {
           });
           analytics.clearFlow();
           setPhase(null);
-          setDraft({ provider: null, project: null });
+          setDraft(EMPTY_DESKTOP_ONBOARDING_DRAFT);
         },
         onPersistenceFailure: (error) => {
           console.error('Failed to persist desktop onboarding completion', error);
@@ -133,7 +139,16 @@ function DesktopOnboardingExperience() {
       inFlightCompletion.current = attempt;
       return attempt;
     },
-    [analytics, completeThemeLifecycle, navigate, setDraft, setPhase, t, workspaceSlug]
+    [
+      analytics,
+      completeThemeLifecycle,
+      navigate,
+      reducedMotion,
+      setDraft,
+      setPhase,
+      t,
+      workspaceSlug,
+    ]
   );
 
   return <OnboardingOverlay onCompleted={complete} />;

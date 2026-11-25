@@ -1,32 +1,26 @@
 import { createContext, createElement, useContext, type ReactNode } from 'react';
 
-const ALL_ONBOARDING_STEPS = [
-  'ceremony',
-  'login',
-  'language',
-  'theme',
-  'appearance',
-  'workspace',
-  'invite',
-  'providers',
-  'projects',
-  'firstTask',
-  'summary',
-] as const;
+export const ALL_ONBOARDING_STEPS = ['arrive', 'account', 'model', 'start'] as const;
 
 export type OnboardingStepKey = (typeof ALL_ONBOARDING_STEPS)[number];
 
+/**
+ * Resolves the exact Desktop Onboarding step path upfront (§2):
+ *
+ * - Cloud · no Sorbet credentials: `['arrive', 'account', 'model', 'start']`
+ * - Cloud · Sorbet has credentials: `['arrive', 'account', 'start']`
+ * - OSS local · no Sorbet credentials: `['arrive', 'model', 'start']`
+ * - OSS local · Sorbet has credentials: `['arrive', 'start']`
+ */
 export function getDesktopOnboardingSteps(input: {
   cloudAccount: boolean;
-  multiWorkspace: boolean;
+  needsModel: boolean;
 }): readonly OnboardingStepKey[] {
   return [
-    'ceremony',
-    ...(input.cloudAccount ? (['login'] as const) : []),
-    ...(input.multiWorkspace ? (['workspace'] as const) : []),
-    'providers',
-    'projects',
-    'firstTask',
+    'arrive',
+    ...(input.cloudAccount ? (['account'] as const) : []),
+    ...(input.needsModel ? (['model'] as const) : []),
+    'start',
   ];
 }
 
@@ -40,6 +34,10 @@ export function OnboardingStepsProvider({
   children: ReactNode;
 }) {
   return createElement(OnboardingStepsContext.Provider, { value: steps }, children);
+}
+
+export function useOnboardingSteps(): readonly OnboardingStepKey[] {
+  return useContext(OnboardingStepsContext);
 }
 
 export function useOnboardingStepPosition(step: OnboardingStepKey): {

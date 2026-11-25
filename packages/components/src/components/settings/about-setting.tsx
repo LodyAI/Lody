@@ -278,7 +278,12 @@ function DevbarSettingsControls() {
     setRestartPending(true);
     setRestartFailed(false);
     setOnboardingPhase(null);
-    setOnboardingDraft({ provider: null, project: null });
+    setOnboardingDraft({
+      accountChip: null,
+      modelChip: null,
+      project: null,
+      agentConfigId: null,
+    });
     clearDesktopOnboardingFlowId();
     try {
       const result = await app.restartOnboarding();
