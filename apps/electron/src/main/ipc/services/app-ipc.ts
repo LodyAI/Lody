@@ -12,8 +12,8 @@ import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../..
 import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
-import { parseTodayWindowTarget } from '../../today-window-target'
-import { isTodayWindow, openTodayWindow } from '../../today-windows'
+import { isValidTodayWorkspace, parseTodayWindowTarget } from '../../today-window-target'
+import { isTodayWindow, openTodayWindow, setActiveTodayWorkspace } from '../../today-windows'
 import { openLinkInMainWindow } from '../../window'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
@@ -205,6 +205,25 @@ export class AppIpc extends ProductWindowIpcService {
   async openTodayWindow(raw: { workspace: string; member?: string; date?: string }) {
     assertProductWindowSender(getIpcContext().event)
     openTodayWindow(parseTodayWindowTarget(raw))
+  }
+
+  /**
+   * Syncs whether the Today experiment is enabled and the active workspace slug
+   * so the OS-level toggle shortcut only registers while the experiment is on
+   * and knows which workspace to open.
+   */
+  @IpcMethod()
+  async syncTodayShortcutState(raw: { enabled: boolean; workspace?: string | null }) {
+    assertProductWindowSender(getIpcContext().event)
+    if (!raw || typeof raw !== 'object' || typeof raw.enabled !== 'boolean') {
+      throw new Error('Invalid Today shortcut state')
+    }
+    const workspace = raw.workspace ?? null
+    if (workspace !== null && !isValidTodayWorkspace(workspace)) {
+      throw new Error('Invalid Today workspace')
+    }
+    setActiveTodayWorkspace(workspace)
+    getIpcServiceDeps().globalShortcutsService.setShortcutEnabled('today.toggleWindow', raw.enabled)
   }
 
   /** The Today window's pin: keep it above every other window. */
