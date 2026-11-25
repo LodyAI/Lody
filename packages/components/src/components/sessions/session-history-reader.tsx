@@ -25,7 +25,6 @@ import {
   getSessionRoomId,
   resolveProjectGitHubRepo,
   resolveSessionHistoryBackendKind,
-  roostCloudHistoryBinding,
   type RoostHistorySyncState,
   type SessionId,
   type SessionMeta,
@@ -334,13 +333,12 @@ export function SessionHistoryReader({
   const children = useAtomValue(childSessionsAtomFamily(rootSessionId));
   const backend = meta ? resolveSessionHistoryBackendKind(meta) : null;
   const onlineStatus = useMachineOnlineStatus(meta?.machineId);
-  const publishedCloudHistory =
+  const canReadThroughStreams =
     backend === 'roost' &&
     runtime?.cloudStreamsEnabled &&
-    runtime.contentMode !== 'e2ee' &&
-    roostCloudHistoryBinding(meta ?? undefined);
+    runtime.contentMode === 'plaintext';
   const machineUnavailable =
-    backend === 'roost' && onlineStatus === 'offline' && !publishedCloudHistory;
+    backend === 'roost' && onlineStatus === 'offline' && !canReadThroughStreams;
   const { history, historySync, ready, synced, loadError } = useSessionDoc(sessionId, {
     enabled: !!backend && !machineUnavailable,
   });
@@ -514,8 +512,8 @@ export function SessionHistoryReader({
         historySync={ownedHistory ? historySync : undefined}
         ready={historyReady}
         onCopy={exportAllowed && historyReady && ownedHistory?.turnCount ? copy : undefined}
-        requiresMachine={machineUnavailable || (!!loadError && !publishedCloudHistory)}
-        historyOpenFailed={!!loadError && Boolean(publishedCloudHistory)}
+        requiresMachine={machineUnavailable || (!!loadError && !canReadThroughStreams)}
+        historyOpenFailed={!!loadError && !!canReadThroughStreams}
         onBack={onMobileBack}
         nativeApp={nativeApp}
         reserveMacTrafficLightInset={!nativeApp && isMacOSElectronRenderer() && !fullscreen}

@@ -291,21 +291,21 @@ foreground and every 30s while the page is visible. [Decision](../notes/implemen
 
 ## Published Roost history
 
-The conversation keeps one reader while the owning machine serves unpublished
-history and the Streams replica prepares its first readable window. An
-exact-session probe can discover publication before its metadata arrives. The
-conversation status shows the selected reader, authorized pending publication,
-retry or refusal, and whether Streams is still serving a prior publication.
-An observed conversation retries a temporary Streams catch-up failure and
-rechecks an unconfirmed publication. If the Streams request returns HTTP 503,
-the conversation can read from the owning machine after a fresh machine RPC
-admits the exact session. Streams retries continue during machine admission.
-A readable Streams window resumes the current read as soon as it is ready.
-Changing sources wakes pending reads and expires the previous selection's
-replies and paging cursors. The status shows the machine source while Streams
-recovers after a switch. A refusal for a known binding ends that reader.
-Electron reads its own machine through local session control. A shared
-snapshot catches up to an observed Streams tail before detaching the history.
+A remote plaintext Roost session starts by requesting an exact-session Streams
+grant. Metadata publication fields wake the reader. The grant authorizes and
+identifies the replica, including when those fields have yet to arrive. The
+server reports pending publication separately from an access refusal. Pending
+publication or temporary transport failure lets the owning machine admit a fresh
+exact-session read. An access refusal ends the read route.
+
+During machine admission and while the machine serves history, Streams can
+prepare a window at a captured tail independently. The route switches when
+that window is readable. Changing sources wakes waiting reads and expires
+replies and paging cursors from the previous selection. The status shows the
+selected source, pending publication, retry or refusal, and whether a prior
+publication is still being served. Electron reads its own machine through
+local session control. A shared snapshot catches up to an observed Streams tail
+before detaching the history.
 
 The Streams replica drains persisted SDK receipts before exposing an applied
 position. Its initial live cursor comes from the observed history window. It

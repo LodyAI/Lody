@@ -235,7 +235,7 @@ async function selectCopy() {
   );
 }
 
-it('opens published read-only Roost history and shows its source while the owner is offline', async () => {
+it.each([true, false])('opens published read-only Roost history with an offline owner (publication hint: %s)', async (hint) => {
   const runtime = store.get(runtimeAtom)!;
   const admission = store.get(workspaceContentModeAtom)!;
   store.set(runtimeAtom, { ...runtime, contentMode: 'plaintext', cloudStreamsEnabled: true });
@@ -250,8 +250,7 @@ it('opens published read-only Roost history and shows its source while the owner
     [roomId]: {
       ...metadata[roomId]!,
       historyBackend: 'roost',
-      roostCloudGeneration: 'root',
-      roostCloudAuthor: 'A'.repeat(43),
+      ...(hint && { roostCloudGeneration: 'root', roostCloudAuthor: 'A'.repeat(43) }),
     },
   });
   machineStatus = 'offline';

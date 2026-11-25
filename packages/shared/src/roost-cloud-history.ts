@@ -66,6 +66,13 @@ export class RoostCloudHistoryRequestError extends Error {
   }
 }
 
+export class RoostCloudHistoryTransportError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('Roost history transport is unavailable', options);
+    this.name = 'RoostCloudHistoryTransportError';
+  }
+}
+
 export type RoostCloudHistoryTarget = {
   workspaceId: WorkspaceId;
   machineId: string;

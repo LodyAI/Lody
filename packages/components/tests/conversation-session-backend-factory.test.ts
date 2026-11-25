@@ -37,9 +37,15 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
-  it.each([401, 403, 404, 410])(
-    'keeps a cloud refusal terminal for published Roost history (HTTP %s)',
-    async (status) => {
+  it.each([
+    { status: 401, hint: true },
+    { status: 403, hint: true },
+    { status: 403, hint: false },
+    { status: 404, hint: true },
+    { status: 410, hint: true },
+  ])(
+    'keeps a cloud refusal terminal (HTTP $status, publication hint: $hint)',
+    async ({ status, hint }) => {
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
       const workspaceId = 'workspace' as WorkspaceId;
@@ -65,7 +71,8 @@ describe('createConversationSession backend seam', () => {
             machineId,
             sessionId,
             replicaNamespace: `refusal-${status}`,
-            getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
+            getBinding: () =>
+              hint ? { generation: 'root', ownerPublicKey: 'A'.repeat(43) } : undefined,
             observeBinding: () => () => {},
             requestGrant: async () => {
               requests++;
@@ -160,13 +167,13 @@ describe('createConversationSession backend seam', () => {
 
   it.each([
     'published',
+    'published without a hint',
     'append during metadata',
     'earlier metadata changes',
     'publication notice',
     'publication without notice',
-    'grant 403 before publication',
     'grant 503',
-    'HEAD 503',
+    'Streams reverse read 503',
     'published grant 503',
     'published grant 503 then refusal',
     'published grant 503 then Streams recovers first',
@@ -206,11 +213,9 @@ describe('createConversationSession backend seam', () => {
         closing ||
         startingState === 'published grant 503 then Streams recovers first';
       const cloudOutage = liveOutage || startingState.startsWith('published grant 503');
-      const alreadyPublished = startingState === 'published' || updateDuringMetadata || cloudOutage;
-      let cloudUnavailable = cloudOutage && !liveOutage;
-      const discovering = ['grant 403 before publication', 'grant 503', 'HEAD 503'].includes(
-        startingState
-      );
+      const alreadyPublished = startingState.startsWith('published') || updateDuringMetadata;
+      const discovering = ['grant 503', 'Streams reverse read 503'].includes(startingState);
+      let cloudUnavailable = (cloudOutage && !liveOutage) || discovering;
       const pendingWithoutNotice = startingState === 'publication without notice';
       let awaitingPublication = !alreadyPublished && !discovering;
       vi.stubGlobal('indexedDB', new IDBFactory());
@@ -309,7 +314,7 @@ describe('createConversationSession backend seam', () => {
       let usedOwnerDuringOutage = false;
       let requestsToTail = 0;
       let headOffset = startOffset;
-      let failHead = startingState === 'HEAD 503';
+      let failHead = false;
       vi.stubGlobal('fetch', (input: string | Request, init?: RequestInit) => {
         const read = new URL(input instanceof Request ? input.url : input);
         const { pathname, origin } = new URL(url);
@@ -330,6 +335,8 @@ describe('createConversationSession backend seam', () => {
           );
         }
         if (read.searchParams.get('direction') === 'backward') {
+          if (startingState === 'Streams reverse read 503' && cloudUnavailable)
+            return Promise.resolve(new Response(null, { status: 503 }));
           return Promise.resolve(
             new Response(new Uint8Array(bytes), {
               headers: {
@@ -371,12 +378,12 @@ describe('createConversationSession backend seam', () => {
           return Promise.resolve(
             headOffset === tail ? next(new Uint8Array(incremental), tail) : next(null, startOffset)
           );
-        if (offset === startOffset && !updateDuringMetadata) {
+        if (offset === startOffset && !updateDuringMetadata && !discovering) {
           requestsToTail++;
           headOffset = tail;
           return Promise.resolve(next(new Uint8Array(incremental), tail));
         }
-        if (offset === tail || (updateDuringMetadata && offset === startOffset)) {
+        if (offset === tail || ((updateDuringMetadata || discovering) && offset === startOffset)) {
           if (!read.searchParams.has('live')) return Promise.resolve(next(null, tail));
           const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
           return new Promise<Response>((_resolve, reject) => {
@@ -388,7 +395,8 @@ describe('createConversationSession backend seam', () => {
       const offline = async (): Promise<never> => {
         throw new Error('Synthetic owner is offline');
       };
-      let cachedBinding: typeof binding | undefined = alreadyPublished ? binding : undefined;
+      let cachedBinding: typeof binding | undefined =
+        alreadyPublished && startingState !== 'published without a hint' ? binding : undefined;
       const publicationWakes = new Set<() => void>();
       let replica: ReturnType<typeof createRoostHistoryReplica>;
       let sync: RoostHistorySyncState | undefined;
@@ -404,7 +412,6 @@ describe('createConversationSession backend seam', () => {
           machineId,
           onCloudHistoryRoute: (active) => {
             if (active) {
-              switched.resolve();
               if (usedOwnerDuringOutage) recovered.resolve();
             } else if (cloudOutage) {
               if (usedOwnerDuringOutage) returnedToOwner.resolve();
@@ -414,6 +421,7 @@ describe('createConversationSession backend seam', () => {
           onHistorySync: (next) => {
             sync = next;
             if (next.phase === 'pending') reportedPending.resolve();
+            if (next.source === 'streams' && next.phase === 'ready') switched.resolve();
             if (next.source === 'machine' && next.httpStatus === 503) machineReading.resolve();
           },
           cloudHistory: () =>
@@ -489,14 +497,13 @@ describe('createConversationSession backend seam', () => {
         return ownerReply.promise;
       };
       let readGrants = 0;
-      const first = open(
-        async () => {
+      const requestGrant = async () => {
           readGrants++;
-          if (startingState === 'grant 403 before publication' && readGrants === 1)
-            throw new RoostCloudHistoryRequestError(403);
-          if (startingState === 'grant 503' && readGrants === 1)
-            throw new RoostCloudHistoryRequestError(503);
-          if (cloudUnavailable && (!withoutObserver || readGrants === 1))
+          if (
+            cloudUnavailable &&
+            startingState !== 'Streams reverse read 503' &&
+            (!withoutObserver || readGrants === 1)
+          )
             throw new RoostCloudHistoryRequestError(503);
           if (
             startingState === 'published grant 503 then refusal' ||
@@ -504,16 +511,18 @@ describe('createConversationSession backend seam', () => {
             refuseDuringPage
           )
             throw new RoostCloudHistoryRequestError(403);
-          if (awaitingPublication) return { state: 'pending' };
+          if (awaitingPublication) return { state: 'pending' } as const;
           return {
-            state: 'published',
+            state: 'published' as const,
             newerVersionPending: startingState === 'publication notice',
             binding,
             streamUrl: url,
             token: 'synthetic-read-grant',
             expiresIn: 60,
           };
-        },
+      };
+      const first = open(
+        requestGrant,
         discovering ? timedOut : alreadyPublished && !cloudOutage ? offline : requestOwner
       );
       if (discovering || pendingWithoutNotice || cloudOutage)
@@ -580,7 +589,7 @@ describe('createConversationSession backend seam', () => {
             } else if (oldCursor) {
               await expect(request).rejects.toThrow('Roost history source changed');
               failHead = true;
-              await expect(replica.catchUp()).rejects.toMatchObject({ status: 503 });
+              await expect(replica.prepareLatestWindow()).rejects.toMatchObject({ status: 503 });
               await returnedToOwner.promise;
               const latest = await first.history.readLatestDirectoryPage!(40);
               expect(latest.cursor).toBeTruthy();
@@ -648,7 +657,8 @@ describe('createConversationSession backend seam', () => {
           await expect(observation.initialPage).rejects.toMatchObject({
             failure: { source: 'transport', code: 'response_timeout' },
           });
-          expect(sync).toMatchObject({ source: 'machine', phase: 'retrying' });
+          expect(sync).toMatchObject({ source: 'streams', phase: 'retrying' });
+          cloudUnavailable = false;
           await vi.advanceTimersByTimeAsync(1_000);
           await switched.promise;
           await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
@@ -668,7 +678,7 @@ describe('createConversationSession backend seam', () => {
               const page = await readPage.apply(this, args);
               if (args[1]?.latest && headOffset === startOffset) {
                 headOffset = tail;
-                intake = replica.catchUp();
+                intake = replica.prepareLatestWindow();
                 void intake.catch(() => {});
               }
               if (args[1]?.before && intake) olderPageTotal ??= page.totalCount;
@@ -706,8 +716,8 @@ describe('createConversationSession backend seam', () => {
           if (pendingWithoutNotice) {
             await vi.advanceTimersByTimeAsync(1_000);
             await switched.promise;
-            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
-              rows: [{ turnId: turn.id }],
+            await expect(first.history.readTurn(turn.id)).resolves.toMatchObject({
+              state: 'ready', turn,
             });
             expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
             observation.unsubscribe();
@@ -747,7 +757,7 @@ describe('createConversationSession backend seam', () => {
           vi.unstubAllGlobals();
       }
       cachedBinding = binding;
-      const reopened = open(offline);
+      const reopened = open(requestGrant);
       try {
         const page = await reopened.history.readLatestDirectoryPage?.(40);
         expect(page?.rows).toMatchObject([{ turnId: turn.id }, { turnId: reply.id }]);

@@ -4,6 +4,7 @@ import {
   type PreviewControlIntent,
   type PreviewControlProof,
   RoostCloudHistoryRequestError,
+  RoostCloudHistoryTransportError,
   roostCloudHistoryReadResultSchema,
   type RoostCloudHistoryTarget,
 } from '@lody/shared';
@@ -16,11 +17,15 @@ export async function getRoostCloudHistoryReadGrant(
 ) {
   const baseUrl = requireCloudAuthBaseUrl('teamSharing');
   if (!sessionToken) throw new RoostCloudHistoryRequestError(401);
-  const response = await fetch(new URL('/api/session-history/roost-read-grant', baseUrl), {
+  const url = new URL('/api/session-history/roost-read-grant', baseUrl);
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
     body: JSON.stringify(target),
     signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+  }).catch((cause: unknown) => {
+    signal.throwIfAborted();
+    throw new RoostCloudHistoryTransportError({ cause });
   });
   if (!response.ok) throw new RoostCloudHistoryRequestError(response.status);
   return roostCloudHistoryReadResultSchema.parse(await response.json());

@@ -10,7 +10,10 @@ import {
 import {
   Executor,
   HistoryReader,
+  HistoryError,
   Link,
+  LinkError,
+  TransportError,
   RemoteRegistry,
   StreamsTransport,
   linkLimitsForSync,
@@ -24,6 +27,7 @@ import {
   roostHistoryAuthorKey,
   RoostCloudHistoryPendingError,
   RoostCloudHistoryRequestError,
+  RoostCloudHistoryTransportError,
   roostCloudHistoryBindingSchema,
   type RoostCloudHistoryBinding,
   type RoostCloudHistoryReadResult,
@@ -65,6 +69,18 @@ const MAX_WINDOW_BYTES = 64 * 1024 * 1024;
 const byteOffset = (value: string | undefined) =>
   value !== undefined && /^\d+$/.test(value) ? BigInt(value) : undefined;
 
+export function canReadRoostHistoryFromOwnerAfter(error: unknown): boolean {
+  if ((error instanceof HistoryError || error instanceof LinkError) && error.code === 'transport')
+    error = error.cause;
+  return (
+    error instanceof RoostCloudHistoryPendingError ||
+    error instanceof RoostCloudHistoryTransportError ||
+    (error instanceof RoostCloudHistoryRequestError && error.retryable) ||
+    (error instanceof TransportError && error.code === 'unavailable') ||
+    (error instanceof Error && error.name === 'TimeoutError')
+  );
+}
+
 function failStreamRead(error: StreamError): never {
   const { context } = error;
   if (
@@ -75,7 +91,9 @@ function failStreamRead(error: StreamError): never {
   const status = ('status' in error ? error.status : undefined) ?? context?.status;
   if (status !== undefined && status >= 400 && status < 600)
     throw new RoostCloudHistoryRequestError(status);
-  throw new Error('Roost cloud history stream is unavailable');
+  if (error.code === 'network_error' || error.code === 'timeout')
+    throw new RoostCloudHistoryTransportError();
+  throw new Error('Roost cloud history stream returned an invalid response');
 }
 
 async function acquireDatabase(name: string): Promise<DatabaseLease> {
@@ -211,11 +229,11 @@ export type RoostHistoryReplicaOptions = {
  * this reader never manufactures an identity, outbox, or remote acknowledgement. */
 export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): {
   history: SessionHistoryReader;
-  published(): boolean;
   watchPublication(listener: () => void): () => void;
   syncStatus(): RoostCloudSyncState;
+  canRecoverFromOwner(): boolean;
   watchSyncStatus(listener: () => void): () => void;
-  catchUp(): Promise<void>;
+  prepareLatestWindow(): Promise<void>;
   readPublishedSnapshot(): Promise<SessionEntry[]>;
   refresh(): void;
   dispose(): void;
@@ -247,20 +265,31 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   let terminal: RoostCloudHistoryRequestError | undefined;
   let readDeadline: AbortSignal | undefined;
   let status: RoostCloudSyncState = { phase: 'idle' };
+  let readFailure: unknown;
 
   const report = (
     phase: RoostCloudSyncState['phase'],
     httpStatus?: number,
-    newerVersionPending = status.newerVersionPending
+    newerVersionPending = status.newerVersionPending,
+    failure?: unknown
   ) => {
+    if (abort.signal.aborted) return;
+    const ownerRecoveryChanged =
+      canReadRoostHistoryFromOwnerAfter(readFailure) !==
+      canReadRoostHistoryFromOwnerAfter(failure);
+    readFailure = failure;
     if (
-      abort.signal.aborted ||
-      (status.phase === phase &&
-        status.httpStatus === httpStatus &&
-        status.newerVersionPending === newerVersionPending)
+      !ownerRecoveryChanged &&
+      status.phase === phase &&
+      status.httpStatus === httpStatus &&
+      status.newerVersionPending === newerVersionPending
     )
       return;
-    status = { phase, httpStatus, newerVersionPending };
+    status = {
+      phase,
+      ...(httpStatus !== undefined && { httpStatus }),
+      ...(newerVersionPending !== undefined && { newerVersionPending }),
+    };
     for (const listener of statusListeners) listener();
   };
 
@@ -289,20 +318,18 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     stopOnRefusal(error);
     if (terminal) return;
     if (error instanceof RoostCloudHistoryPendingError) {
-      report('pending', undefined, false);
+      report('pending', undefined, false, error);
       return;
     }
-    const requestError =
-      error instanceof Error && error.cause instanceof RoostCloudHistoryRequestError
-        ? error.cause
-        : error;
     report(
       'retrying',
-      requestError instanceof RoostCloudHistoryRequestError ? requestError.status : undefined
+      error instanceof RoostCloudHistoryRequestError ? error.status : undefined,
+      undefined,
+      error
     );
   };
-  const requestGrant = async (known: boolean): Promise<PublishedGrant> => {
-    if (status.phase === 'idle' || status.phase === 'refused') report('checking');
+  const requestGrant = async (): Promise<PublishedGrant> => {
+    if (status.phase === 'idle') report('checking');
     const signal = readDeadline ? AbortSignal.any([abort.signal, readDeadline]) : abort.signal;
     try {
       const result = await options.requestGrant(signal);
@@ -310,8 +337,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       if (result.state === 'pending') throw new RoostCloudHistoryPendingError();
       return result;
     } catch (error) {
-      if (!known && error instanceof RoostCloudHistoryRequestError && error.status === 403)
-        throw new Error('Roost history publication could not be confirmed', { cause: error });
+      reportFailure(error);
       throw error;
     }
   };
@@ -355,13 +381,12 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
   const open = (): Promise<Replica> => {
     if (!opened) {
       opened = (async () => {
-        let binding = observedBinding ?? options.getBinding();
-        let initialGrant: PublishedGrant | undefined;
-        if (!binding) {
-          initialGrant = await requestGrant(false);
-          binding = observedBinding = initialGrant.binding;
-          report('syncing', undefined, initialGrant.newerVersionPending);
-        }
+        // Metadata hints can wake this reader, but only a live session grant
+        // identifies the replica that this reader may expose.
+        forceGrant = false;
+        const initialGrant = await requestGrant();
+        const binding = observedBinding = initialGrant.binding;
+        report('syncing', undefined, initialGrant.newerVersionPending);
         assertLive();
         const name =
           'lody-roost-replica-' +
@@ -395,12 +420,10 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
             history,
             meta,
             eventCursor: await history.observedEventCursor(),
-            ...(initialGrant && {
-              grant: {
-                value: initialGrant,
-                expires: Date.now() + (initialGrant.expiresIn - 5) * 1_000,
-              },
-            }),
+            grant: {
+              value: initialGrant,
+              expires: Date.now() + (initialGrant.expiresIn - 5) * 1_000,
+            },
           };
           if (meta.remoteId) {
             await network(replica, async () => {
@@ -463,7 +486,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     const cached = replica.grant;
     if (!refresh && !forceGrant && cached && Date.now() < cached.expires) return cached.value;
     forceGrant = false;
-    const value = await requestGrant(true);
+    const value = await requestGrant();
     assertLive();
     observedBinding = value.binding;
     if (!sameBinding(replica.meta.binding, value.binding)) {
@@ -707,30 +730,34 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     return report.upToDate;
   };
 
+  const withReadDeadline = async <T>(operation: () => Promise<T>): Promise<T> => {
+    stopWaiting();
+    readDeadline = AbortSignal.timeout(20_000);
+    try {
+      return await operation();
+    } catch (error) {
+      reportFailure(error);
+      throw error;
+    } finally {
+      readDeadline = undefined;
+      schedule();
+    }
+  };
   const atPublishedTail = async <T>(operation: (replica: Replica) => Promise<T>) =>
-    run(async () => {
-      stopWaiting();
-      readDeadline = AbortSignal.timeout(20_000);
-      try {
-        const replica = await open();
-        return await network(replica, async () => {
-          await connect(replica);
-          const head = await replica.streamClient!.head({ signal: readDeadline });
-          if (!head.ok) failStreamRead(head.result);
-          const targetOffset = byteOffset(head.result.nextOffset);
-          while (!(await syncForward(replica, targetOffset))) assertLive();
-          const result = await operation(replica);
-          report('ready');
-          return result;
-        });
-      } catch (error) {
-        reportFailure(error);
-        throw error;
-      } finally {
-        readDeadline = undefined;
-        schedule();
-      }
-    });
+    run(() => withReadDeadline(async () => {
+      const replica = await open();
+      return await network(replica, async () => {
+        await connect(replica);
+        const head = await replica.streamClient!.head({ signal: readDeadline });
+        if (!head.ok) failStreamRead(head.result);
+        const targetOffset = byteOffset(head.result.nextOffset);
+        while (!(await syncForward(replica, targetOffset))) assertLive();
+        const result = await operation(replica);
+        report('ready');
+        options.onSyncState?.({ checkpoint: checkpoint(replica) });
+        return result;
+      });
+    }));
 
   const waitAtTail = (replica: Replica) => {
     const waiter = new AbortController();
@@ -889,8 +916,11 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
 
   const page = async (
     replica: Replica,
-    input: { latest?: boolean; before?: ActiveBranchPageCursor; limit: number }
+    input: { latest?: boolean; before?: ActiveBranchPageCursor; limit: number },
+    exclusive = false
   ): Promise<SessionHistoryDirectoryPage> => {
+    const readRemote = <T>(operation: () => Promise<T>) =>
+      exclusive ? operation() : network(replica, operation);
     for (;;) {
       assertLive();
       const result = await replica.history.readActiveBranchPage(options.sessionId, input);
@@ -899,12 +929,12 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         return remember(replica, result);
       }
       if (!replica.meta.bootstrapped) {
-        await network(replica, async () => await fetchOlder(replica));
+        await readRemote(() => fetchOlder(replica));
         continue;
       }
-      const prefixes = await network(replica, async () => await completePrefixes(replica));
+      const prefixes = await readRemote(() => completePrefixes(replica));
       if (prefixes.bytesFetched > 0) continue;
-      await network(replica, async () => await fetchOlder(replica));
+      await readRemote(() => fetchOlder(replica));
     }
   };
 
@@ -1053,6 +1083,9 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     return pages.reverse().flat();
   };
 
+  const readLatestWindow = (limit = PAGE_SIZE) =>
+    run(() => withReadDeadline(async () => latest(await open(), limit)));
+
   const history: SessionHistoryReader = {
     count: () => {
       assertLive();
@@ -1116,7 +1149,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         return result;
       });
     },
-    readLatestDirectoryPage: (limit) => run(async () => await latest(await open(), limit)),
+    readLatestDirectoryPage: readLatestWindow,
     readOlderDirectoryPage: (cursor, limit) =>
       run(async () => await older(await open(), cursor, limit)),
     readMetadata: async () => {
@@ -1166,8 +1199,7 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
       }),
     observe: (listener) => {
       listeners.add(listener);
-      const initialPage = run(async () => await latest(await open()));
-      void initialPage.finally(() => schedule()).catch(() => {});
+      const initialPage = readLatestWindow();
       return {
         initialPage,
         initial: initialPage.then((value) => value.rows),
@@ -1199,7 +1231,6 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
     const changed = current ? !hint || !sameBinding(current, hint) : hint !== undefined;
     if (!changed) return;
     hint = current;
-    if (current) terminal = undefined;
     forceGrant = true;
     for (const listener of publicationListeners) listener();
     schedule();
@@ -1210,17 +1241,20 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
 
   return {
     history,
-    published: () => hint !== undefined || observedBinding !== undefined,
     watchPublication(listener) {
       publicationListeners.add(listener);
       return () => publicationListeners.delete(listener);
     },
     syncStatus: () => status,
+    canRecoverFromOwner: () => canReadRoostHistoryFromOwnerAfter(readFailure),
     watchSyncStatus(listener) {
       statusListeners.add(listener);
       return () => statusListeners.delete(listener);
     },
-    catchUp: () => atPublishedTail(async () => {}),
+    prepareLatestWindow: () =>
+      atPublishedTail(async (replica) => {
+        await page(replica, { latest: true, limit: PAGE_SIZE }, true);
+      }),
     readPublishedSnapshot: () => atPublishedTail((replica) => readComplete(replica, true)),
     refresh: () => schedule(),
     dispose: () => {
