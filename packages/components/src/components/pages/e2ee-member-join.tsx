@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { useCloudQueryState, usePlatform } from '@lody/platform/react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
@@ -95,6 +95,8 @@ type Props = {
   emailVerified?: boolean;
   loading?: boolean;
   preview?: E2eeMemberReplies['preview'];
+  previewError?: boolean;
+  onRetryPreview?: () => void;
   onSignInRequested: () => void;
   onEmailVerificationRequested: () => void;
   onWorkspaceRequested: (workspaceSlug: string | null, workspaceId?: string) => void;
@@ -117,7 +119,11 @@ export function E2eeMemberJoinSurface(
 ) {
   const platform = usePlatform();
   const session = useStableSession();
-  const preview = useCloudQuery(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
+  const {
+    data: preview,
+    error: previewError,
+    retry: retryPreview,
+  } = useCloudQueryState(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
   const sessionLoading = session.isPending || session.isRetrying || session.isOptimistic;
   return (
     <E2eeMemberJoin
@@ -128,6 +134,8 @@ export function E2eeMemberJoinSurface(
       emailVerified={session.isOptimistic ? undefined : session.data?.user.emailVerified}
       loading={sessionLoading}
       preview={preview}
+      previewError={Boolean(previewError)}
+      onRetryPreview={retryPreview}
     />
   );
 }
@@ -141,6 +149,8 @@ function JoinSession({
   email,
   emailVerified,
   preview,
+  previewError,
+  onRetryPreview,
   loading,
   onSignInRequested,
   onEmailVerificationRequested,
@@ -275,7 +285,8 @@ function JoinSession({
   );
   const terminal = request && ['rejected', 'cancelled'].includes(request.state);
   let message = 'e2ee.team.joinHelp';
-  if (loading || recovering || preview === undefined) message = 'e2ee.team.loading';
+  if (loading || recovering || (preview === undefined && !previewError)) message = 'e2ee.team.loading';
+  else if (previewError && preview === undefined) message = 'e2ee.team.retryOriginal';
   else if (!accountId) message = 'e2ee.team.signInHelp';
   else if (!emailVerified) message = 'e2ee.team.verifyHelp';
   else if (!native) message = runtime ? 'e2ee.team.joinUpgrade' : 'e2ee.team.desktopRequired';
@@ -312,7 +323,10 @@ function JoinSession({
               <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
             )}
             <div {...stylex.props(styles.actions)}>
-              {!accountId && !loading && (
+              {previewError && preview === undefined && onRetryPreview && (
+                <Button onClick={onRetryPreview}>{t('e2ee.team.retry')}</Button>
+              )}
+              {!accountId && !loading && !previewError && (
                 <Button onClick={onSignInRequested}>{t('e2ee.team.signIn')}</Button>
               )}
               {!loading && accountId && !emailVerified && (

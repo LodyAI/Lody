@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   token: 'open-token',
   navigate: vi.fn(),
   query: vi.fn(),
+  queryError: null as Error | null,
+  retry: vi.fn(),
   submit: vi.fn(),
   session: null as null | {
     user: { id?: string; email: string; emailVerified?: boolean };
@@ -34,6 +36,11 @@ vi.mock('@lody/platform/react', () => ({
   usePlatform: () => ({ e2eeWorkspaces: undefined }),
   useCloudMutation: () => mocks.submit,
   useCloudQuery: (...args: unknown[]) => mocks.query(...args),
+  useCloudQueryState: (...args: unknown[]) => ({
+    data: mocks.queryError ? undefined : mocks.query(...args),
+    error: mocks.queryError,
+    retry: mocks.retry,
+  }),
   usePlatformCapability: () => true,
 }));
 
@@ -58,6 +65,7 @@ import { WorkspaceJoinRequestRoute } from '../src/routes/join/$token';
 describe('WorkspaceJoinRequestRoute', () => {
   afterEach(() => {
     vi.clearAllMocks();
+    mocks.queryError = null;
     mocks.session = null;
     mocks.sessionFlags = { isPending: false, isRetrying: false, isOptimistic: false };
     mocks.token = 'open-token';
@@ -191,6 +199,28 @@ describe('WorkspaceJoinRequestRoute', () => {
     expect(mocks.signOutWithoutRedirect.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.navigate.mock.invocationCallOrder[0]
     );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('shows an error state with retry when the join-link preview query fails', async () => {
+    await initI18n('en');
+    mocks.queryError = new Error('backend unavailable');
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<WorkspaceJoinRequestRoute />);
+    });
+
+    const retryButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Retry'
+    );
+    expect(retryButton).toBeTruthy();
+    await act(async () => retryButton!.click());
+    expect(mocks.retry).toHaveBeenCalledOnce();
 
     await act(async () => root.unmount());
     container.remove();

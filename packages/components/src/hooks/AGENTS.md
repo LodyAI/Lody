@@ -27,10 +27,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 - Native iOS layout follows observed document width during folds; other hosts use
   window width.
-- Authenticated cloud queries share one subscription/retry budget per client,
-  session and arguments. Retry only opaque server failures; show loading, not stale
-  access rows, then throw on exhaustion. Auth recovery stays separate; crash recovery
-  is user initiated. [Implementation](README.md#cloud-query-recovery).
+- Cloud queries (authenticated and public) share one subscription/retry budget per
+  client, session and arguments. Retry only opaque server failures; return `undefined`
+  and report once on exhaustion or structured errors — never throw into render. Surfaces
+  needing explicit error/retry UI read `useCloudQueryState`. Auth recovery stays
+  separate. [Implementation](README.md#cloud-query-recovery).
 
 - Cloud auth recovery has a per-session budget and per-attempt deadline; loading or
   visibility changes never reset it. Exhaustion requires explicit retry or sign-in.
