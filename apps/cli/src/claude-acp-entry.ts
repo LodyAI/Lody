@@ -4,6 +4,8 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { installAcpAdapterHttpProxySupport } from './utils/acp-http-proxy';
 
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 function normalizeClaudeConfigDirEnv(raw: string | undefined): void {
   if (raw === undefined) return;
   const trimmed = raw.trim();

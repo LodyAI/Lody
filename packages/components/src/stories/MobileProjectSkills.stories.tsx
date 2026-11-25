@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type CSSProperties } from 'react';
@@ -284,7 +284,7 @@ function SheetFrame({
                 transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
                 {...stylex.props(skillsStory.sheet)}
               >
-                <div className={clsx(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
+                <div className={cn(stylex.props(storyLayout.canvas).className, 'scrollbar-pro')}>
                   <SkillDetailContent skill={detail.skill} scope={detail.scope} />
                 </div>
               </motion.div>

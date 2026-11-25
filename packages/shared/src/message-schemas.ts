@@ -2644,6 +2644,7 @@ export const LocalProjectListSkillsRequestSchema = z
 export const LocalProjectListGlobalSkillsRequestSchema = z
   .object({
     type: z.literal('local-project/list-global-skills'),
+    magpieGatewayUrl: z.string().refine(isMagpieGatewayUrl).optional(),
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     knownFingerprint: SharedOptionalStringSchema,
@@ -3753,6 +3754,26 @@ export const ScheduleProposalMetaSchema = z.object({
   proposedBy: MessageItemActorSchema.optional(),
 });
 
+/** The fields an agent may propose to change; an absent field keeps its value. */
+export const ScheduleEditProposalPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    prompt: z.string().min(1).max(32768).optional(),
+    rule: ScheduleProposalRuleSchema.optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((field) => field !== undefined), 'Empty patch');
+
+export const ScheduleEditProposalMetaSchema = z.object({
+  proposalId: SharedTrimmedNonEmptyStringSchema,
+  scheduleId: SharedTrimmedNonEmptyStringSchema,
+  title: z.string().trim().min(1).max(200),
+  patch: ScheduleEditProposalPatchSchema,
+  baseActivityId: SharedStringSchema,
+  outcome: z.enum(['applied', 'dismissed']).optional(),
+  proposedBy: MessageItemActorSchema.optional(),
+});
+
 export const ChatFailedReasonSchema = z.enum([
   'session_archived',
   'agent_type_mismatch',
@@ -4020,6 +4041,11 @@ export const SystemNoticeSchema = z.discriminatedUnion('name', [
     type: z.literal('system_notice'),
     name: z.literal('schedule_proposal'),
     meta: ScheduleProposalMetaSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('system_notice'),
+    name: z.literal('schedule_edit_proposal'),
+    meta: ScheduleEditProposalMetaSchema.optional(),
   }),
   z.object({
     type: z.literal('system_notice'),

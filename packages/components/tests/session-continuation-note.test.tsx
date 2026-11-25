@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionContinuationNote } from '../src/components/sessions/session-continuation-note';
+import { SessionAutoDeliveryNote } from '../src/components/sessions/session-auto-delivery';
 import type { SessionContinuationView } from '../src/components/sessions/session-continuation';
 import { createTestI18n, withTestI18n } from './test-i18n';
 
@@ -85,5 +86,61 @@ describe('SessionContinuationNote', () => {
     expect(container.textContent).toContain('正在确认是否送达');
     expect(container.textContent).not.toContain('完成');
     expect(container.textContent).not.toContain('已继续');
+  });
+
+  it('renders Auto delivery with the shared automation nudge when stalled by a stopped session', () => {
+    const onResume = vi.fn();
+    const onTurnOff = vi.fn();
+    act(() => {
+      root.render(
+        withTestI18n(
+          <SessionAutoDeliveryNote
+            status={{ state: 'stalled', reason: 'stopped', updatedAt: NOW }}
+            now={NOW}
+            onResume={onResume}
+            onTurnOff={onTurnOff}
+          />,
+          testI18n
+        )
+      );
+    });
+
+    expect(container.textContent).toContain('停住了，等你：stopped');
+    const resume = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '恢复会话'
+    );
+    expect(resume).toBeDefined();
+    act(() => {
+      resume?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders Auto delivery as the shared automation note chip with an inline action', () => {
+    const onTurnOff = vi.fn();
+    act(() => {
+      root.render(
+        withTestI18n(
+          <SessionAutoDeliveryNote
+            status={{ state: 'fix', attempt: 2, updatedAt: NOW }}
+            now={NOW}
+            onTurnOff={onTurnOff}
+          />,
+          testI18n
+        )
+      );
+    });
+
+    const note = container.querySelector('[data-auto-delivery-state="fix"]');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('修复 CI 中');
+    const turnOff = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Turn off'
+    );
+    expect(turnOff).toBeDefined();
+    act(() => {
+      turnOff?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onTurnOff).toHaveBeenCalledTimes(1);
   });
 });

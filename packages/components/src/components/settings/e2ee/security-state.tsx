@@ -1,6 +1,6 @@
 import { notifyE2eeLedgerChanged } from '../../../providers/e2ee-runtime-notifications';
 import { useEffect, useRef, useState } from 'react';
-import { atom, useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePlatformSession, usePlatform } from '@lody/platform/react';
 import type { E2eeManagementState, E2eeWorkspaceRuntime } from '@lody/platform';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,9 @@ import { LODY_APP_INFO_UPDATED_EVENT } from '@/lib/native-app-info';
 import { recordClientError } from '@/lib/client-log';
 import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 const refreshAtom = atom(0);
+const snapshotAtom = atom<
+  { key: string; data?: E2eeManagementState; isError: boolean } | undefined
+>(undefined);
 const styles = stylex.create({
   icon: { position: 'relative', display: 'inline-flex', width: '100%', height: '100%' },
   dot: {
@@ -46,11 +49,10 @@ export function useSecurityState() {
       : session.status !== 'unauthenticated' || session.uncertain;
   const workspaceId = encrypted && matchesAccount ? mode!.workspaceId : null;
   const key = JSON.stringify([mode?.accountId, workspaceId]);
-  const [snapshot, setSnapshot] = useState<{
-    key: string;
-    data?: E2eeManagementState;
-    isError: boolean;
-  }>();
+  const [snapshot, setSnapshot] = useAtom(snapshotAtom);
+  useEffect(() => {
+    if (!encrypted || !matchesAccount) setSnapshot(undefined);
+  }, [encrypted, matchesAccount, setSnapshot]);
   useEffect(() => {
     if (!workspaceId || !mode?.accountId || !native?.managementState) {
       loadRef.current = undefined;
@@ -121,9 +123,10 @@ export function useSecurityState() {
     handledRevisionRef.current = revision;
     void loadRef.current?.(false);
   }, [revision]);
+  const matchesSnapshot = encrypted && snapshot?.key === key;
   const state = {
-    data: encrypted && snapshot?.key === key ? snapshot.data : undefined,
-    isError: encrypted && snapshot?.key === key ? snapshot.isError : false,
+    data: matchesSnapshot ? snapshot.data : undefined,
+    isError: matchesSnapshot ? snapshot.isError : false,
     refetch: async () => {
       bump((n) => {
         const next = n + 1;

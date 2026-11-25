@@ -13,6 +13,7 @@ import { dialogLayout, styles as detailStyles } from './subagent-task-detail.sty
 import { SubagentTaskDetail } from './subagent-task-detail';
 import {
   actorOf,
+  configurationLabelOf,
   durationOf,
   groupOf,
   isRunning,
@@ -53,13 +54,10 @@ function SubagentTaskRow({
   const state = stateOf(task);
   const running = isRunning(task);
   const duration = durationOf(task);
+  const configuration = configurationLabelOf(task, t);
   const latest = latestActionOf(task, t);
   const tone = SETTLED_TONE[state];
 
-  // The trailing word answers the question a reader has of a task in that state:
-  // how long so far, how long it took, or how it ended when that was not well.
-  // What it is doing is the second line's job, so the time never gives way to a
-  // tool name.
   const meta = running ? (
     typeof task.startedAtEpochSeconds === 'number' ? (
       <LiveElapsed startedAtEpochSeconds={task.startedAtEpochSeconds} />
@@ -74,7 +72,7 @@ function SubagentTaskRow({
     <button
       type="button"
       aria-haspopup="dialog"
-      aria-label={task.description ? `${actor} · ${task.description}` : actor}
+      aria-label={[actor, task.description, configuration].filter(Boolean).join(' · ')}
       data-subagent-task-id={task.taskId}
       onClick={() => onOpen(task.taskId)}
       {...stylex.props(styles.row, depth === 1 && styles.depth1, depth >= 2 && styles.depth2)}
@@ -94,6 +92,7 @@ function SubagentTaskRow({
           <span {...stylex.props(styles.meta, tone === 'danger' && styles.danger)}>{meta}</span>
         ) : null}
       </span>
+      {configuration ? <span {...stylex.props(styles.configuration)}>{configuration}</span> : null}
       {latest ? (
         <span data-subagent-latest-action="" {...stylex.props(styles.latest)}>
           {latest}
@@ -196,13 +195,10 @@ export const SubagentTaskPanel = ({
     for (const task of tasks) (groupOf(task) === 'tasks' ? others : subagents).push(task);
     return { subagents, tasks: others };
   }, [tasks]);
-  // Subagents first; a tab the reader chose stays chosen as the tasks change.
   const [group, setGroup] = useState<TaskGroup>('subagents');
   const runningCount = useMemo(() => tasks.filter(isRunning).length, [tasks]);
   const hasRunning = runningCount > 0;
   const [userExpanded, setUserExpanded] = useState(false);
-  // One dialog for the group, pointed at a task id rather than a snapshot, so
-  // an open dialog follows the run as its item is replaced in history.
   const [open, setOpen] = useState(false);
   // The dialog keeps the last task it showed while it animates closed.
   const [shownTaskId, setShownTaskId] = useState<string | null>(null);
@@ -216,14 +212,10 @@ export const SubagentTaskPanel = ({
 
   if (tasks.length === 0) return null;
 
-  // While work is in flight the group stays open (live status). Once every task
-  // has settled it folds to its summary line, which opens it again.
   const expanded = hasRunning || userExpanded;
-  // Tabs only when there is something to tell apart: one kind stays one list.
   const grouped = groups.subagents.length > 0 && groups.tasks.length > 0;
   const canToggle = !hasRunning;
 
-  // Background-ness is stated once in the summary rather than badged per row.
   const backgroundCount = tasks.filter((task) => task.isBackgrounded).length;
   const allBackground = backgroundCount === tasks.length;
   const headerLabel = allBackground

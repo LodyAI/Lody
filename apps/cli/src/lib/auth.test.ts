@@ -87,6 +87,8 @@ beforeEach(() => {
   authMocks.spinner.succeed.mockClear();
   tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-auth-test-'));
   process.env.HOME = tempHome;
+  delete process.env.XDG_STATE_HOME;
+  delete process.env.LOCALAPPDATA;
   process.env.LODY_AUTH_URL = 'https://convex.example.com';
   process.env.LODY_AUTH_SITE_URL = 'https://auth.example.com';
   loadEnv();
@@ -224,7 +226,7 @@ describe('credential file security', () => {
       expect(observedPublication).toBe(true);
       expect(fs.statSync(getConfigPath()).mode & 0o777).toBe(0o600);
       expect(JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')).token).toBe('new-token');
-      expect(fs.readdirSync(root)).toEqual(['credentials.json']);
+      expect(fs.readdirSync(root).sort()).toEqual(['credentials.json', 'machine-id']);
     }
   );
 
@@ -251,7 +253,7 @@ describe('credential file security', () => {
       expect(fs.statSync(root).mode & 0o777).toBe(0o755);
       expect(fs.statSync(path.dirname(root)).mode & 0o777).toBe(0o755);
       expect(JSON.parse(fs.readFileSync(getConfigPath(), 'utf8')).token).toBe('old-token');
-      expect(fs.readdirSync(root)).toEqual(['credentials.json']);
+      expect(fs.readdirSync(root).sort()).toEqual(['credentials.json', 'machine-id']);
     }
   );
 });
@@ -269,6 +271,31 @@ describe('AuthClient rejected credential cleanup', () => {
 
     expect(authClient.clearRejectedToken('new-token')).toBe('cleared');
     expect(fs.existsSync(getConfigPath())).toBe(false);
+  });
+
+  it('persists machine-id before removing credentials on logout and rejected token cleanup', async () => {
+    const root = path.join(tempHome as string, 'preserve-id-data');
+    process.env.LODY_DATA_DIR = root;
+    const machineIdPath = path.join(root, 'machine-id');
+    const authClient = new AuthClient(createTestLogger());
+    const user = { id: 'user-1', email: 'user@example.com' };
+    const machine = { machineId: 'preserved-machine-id', machineName: 'test-machine' };
+
+    await saveAuthInfo('token-1', user, machine);
+    expect(fs.readFileSync(machineIdPath, 'utf8')).toBe('preserved-machine-id');
+
+    // Simulate missing machine-id file prior to logout.
+    fs.rmSync(machineIdPath, { force: true });
+    expect(authClient.logout().success).toBe(true);
+    expect(fs.existsSync(getConfigPath())).toBe(false);
+    expect(fs.readFileSync(machineIdPath, 'utf8')).toBe('preserved-machine-id');
+
+    // Simulate missing machine-id file prior to clearRejectedToken.
+    await saveAuthInfo('token-2', user, machine);
+    fs.rmSync(machineIdPath, { force: true });
+    expect(authClient.clearRejectedToken('token-2')).toBe('cleared');
+    expect(fs.existsSync(getConfigPath())).toBe(false);
+    expect(fs.readFileSync(machineIdPath, 'utf8')).toBe('preserved-machine-id');
   });
 });
 

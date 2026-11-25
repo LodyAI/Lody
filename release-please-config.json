@@ -4,7 +4,11 @@
     {
       "type": "linked-versions",
       "groupName": "lody-clients",
-      "components": ["lody-cli", "lody-electron", "lody-mobile"]
+      "components": [
+        "lody-cli",
+        "lody-electron",
+        "lody-mobile"
+      ]
     }
   ],
   "packages": {
@@ -131,5 +135,6 @@
         }
       ]
     }
-  }
+  },
+  "group-pull-request-title-pattern": "chore: release ${version} [risk:high]"
 }

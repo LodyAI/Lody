@@ -73,7 +73,7 @@ device scale factor 乘进 layout zoom，所以 DPR 2 下每个 `<svg>` 的 effe
   `animate-spin` 落在 `<svg>` 上。
 - `AgentReadinessMark` 把静态轨道环和确定态填充留在同一个 `<svg>` 里；不定态弧线单独
   一个 `<svg>`，放进绝对定位的 `<span class="agent-readiness-orbit">`。
-- `tailwind/index.css` 里其它无限动画（`agent-activity-dot-pulse`、`animate-badge-pulse`、
+- `style/index.css` 里其它无限动画（`agent-activity-dot-pulse`、`animate-badge-pulse`、
   `animate-progress-sweep`）本就作用在 HTML 元素上，未改动。`svg.animate-spin` 基础规则
   保留作为漏网之鱼的兜底。
 - 规则已写入 `packages/components/src/ui/AGENTS.md`。

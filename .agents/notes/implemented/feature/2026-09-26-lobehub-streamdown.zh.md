@@ -19,7 +19,7 @@ UI，流式文本按原始分块直接出现。现改为 `@lobehub/streamdown`�
   会把整个回合的每个词包进 span，因此从未启用。
 - 它提供的许多东西已被覆盖：Mermaid 全屏和平移缩放画布被关闭
   （[手势记录](../bug-fix/2026-09-09-mermaid-diagram-gestures.zh.md)），
-  `tailwind/index.css` 用 `!important` 对抗它的工具类。
+  `style/index.css` 用 `!important` 对抗它的工具类。
 
 ## 决定
 

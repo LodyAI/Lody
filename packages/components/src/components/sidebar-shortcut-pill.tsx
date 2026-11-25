@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { atom, useAtomValue } from 'jotai';
 import { ArrowBigUp, ChevronUp, Command, Option, type LucideIcon } from 'lucide-react';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   MAX_SIDEBAR_SHORTCUT_SLOTS,
   SIDEBAR_SHORTCUT_SLOTS,
@@ -62,8 +62,8 @@ const styles = stylex.create({
   },
   animated: {
     animationName: { default: pillFadeIn, [REDUCED_MOTION]: 'none' },
-    animationDuration: duration.fast,
-    animationTimingFunction: ease.standard,
+    animationDuration: duration.slow,
+    animationTimingFunction: 'cubic-bezier(0.42, 0, 1, 1)',
   },
   icon: {
     width: '11px',

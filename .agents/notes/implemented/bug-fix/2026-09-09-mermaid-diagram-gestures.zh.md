@@ -58,7 +58,7 @@ Streamdown 的画布是从外部被中和，而不是被移除，因为该包没
 `computeAnchoredScrollCorrection` 是纯函数，并就可逆性、档位边界与锚定点做了单元测试。
 
 该文件中全部 16 个测试通过，`tests/markdown*` 中的 105 个也通过，`packages/components` 类型检查通过。
-三处 CSS 覆盖会编译为 `!important` 声明，通过对 `src/tailwind/index.css` 运行 Tailwind CLI 验证。
+三处 CSS 覆盖会编译为 `!important` 声明，通过对 `src/style/index.css` 运行 Tailwind CLI 验证。
 
 Chromium 通过 Playwright 针对本地 Storybook 驱动真实的 `MermaidStyleReview` story，并为该 story 加了
 滚动容器，因为 Storybook 预览会裁掉自身溢出。修复后，图上 300px 的滚轮使该容器滚动 300px——与旁边散文上

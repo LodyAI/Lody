@@ -1689,6 +1689,92 @@ describe('SessionDispatchWatcher', () => {
     expect(history[0]?.status).toBe('failed');
   });
 
+  it('settles a finished Inbox input whose processingUserMsgId survived an interrupt instead of re-selecting it (#2994)', async () => {
+    /** An interrupt wrote finished=1 on the input (InboxSqlite.activate), but
+     * processingUserMsgId survived in session meta. Path 3 in
+     * findNextDispatchableUserTurn re-selects the turn every cycle; the watcher
+     * candidate scan must stamp it failed and clear the claim so it is no
+     * longer dispatchable — never dispatch it again. */
+    const continueSession = vi.fn(async () => {});
+    const startSession = vi.fn(async () => {});
+    const cancelSession = vi.fn(async () => ({ success: true }));
+    const sessionId = 'session-finished-input' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+      latestUserMsgId: 'turn-interrupted',
+      processingUserMsgId: 'turn-interrupted',
+    };
+    let history: SessionHistoryInput[] = [
+      createPendingUserTurn('turn-interrupted', 'interrupted input'),
+    ];
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      Object.assign(sessionMeta, patch);
+    });
+
+    const sessionDoc = withHistoryPort({
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => sessionMeta),
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    });
+
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
+        upsertDocMeta,
+      },
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        isInboxInputCanceled: () => false,
+        /** finished=1, canceled=0 — the input ended, it was not canceled. */
+        isInboxInputEnded: () => true,
+        continueSession,
+        startSession,
+        cancelSession,
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await runMaybeHandleSession(watcher, sessionId);
+    await flushMicrotasks();
+
+    /** The turn is stamped failed, the claim is cleared, and dispatch does not
+     * re-select it — the interrupt retry loop is broken. */
+    expect(history[0]?.status).toBe('failed');
+    expect(upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        processingUserMsgId: undefined,
+        lastFailedUserMsgId: 'turn-interrupted',
+      })
+    );
+    expect(sessionMeta.processingUserMsgId).toBeUndefined();
+    expect(startSession).not.toHaveBeenCalled();
+    expect(continueSession).not.toHaveBeenCalled();
+  });
+
   it('marks a pending turn failed when backend machine access denies it', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});

@@ -9,11 +9,12 @@ import {
   type StreamsRoomIdentity,
 } from 'loro-repo/transport/streams';
 import {
-  StreamsCrdt,
+  type StreamsCrdt,
   type PayloadProtectionOptions,
   type CrdtAdapter,
   type JsonObject as Version,
 } from '@loro-dev/streams-crdt';
+import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
 import { StreamsClient, type Result, type StreamError } from '@loro-dev/streams-client';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
@@ -225,7 +226,7 @@ export async function openMigrationTarget(
       retry: { maxAttempts: 0 },
     });
   const make = (id: string, adapter: CrdtAdapter<Version>, signal?: AbortSignal) => {
-    const stream = new StreamsCrdt({
+    const stream = createStreamsCrdt({
       streamUrl: urlFor(id),
       adapter,
       auth: provider.createAuthCallback(),
@@ -237,7 +238,8 @@ export async function openMigrationTarget(
       snapshotUpload: content.mode === 'protected' ? content.snapshotUpload : undefined,
       e2ee: protectionFor(id),
       payloadProtectionRequired: content.mode === 'protected',
-      shardUrls: getLoroStreamsShardUrls(baseUrl, provider.getShardHostSuffix()),
+      webSocket: 'disabled',
+      shardUrls: getLoroStreamsShardUrls(baseUrl, provider.getShardHostSuffix()) ?? 'disabled',
     });
     streams.add(stream);
     return stream;

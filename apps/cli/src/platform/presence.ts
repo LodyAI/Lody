@@ -24,6 +24,17 @@ import type { Logger } from '@/utils/logger';
 import { createPresenceWebSocketAuthLegacy } from '@/lib/loro/presence-legacy';
 import { formatSafeLogFields } from './logger';
 
+declare const __LODY_LORO_STREAMS_WS_DEFAULT__: boolean | undefined;
+
+export const resolveCliLoroStreamsWebSocketEnabled = (
+  explicit: boolean | undefined,
+  environment: string | undefined,
+  buildDefault: boolean = typeof __LODY_LORO_STREAMS_WS_DEFAULT__ === 'boolean'
+    ? __LODY_LORO_STREAMS_WS_DEFAULT__
+    : false
+): boolean =>
+  isLoroStreamsWebSocketEnabled(explicit, environment ?? (buildDefault ? '1' : undefined));
+
 /** Published SDK owns all network tasks; this layer only supplies capabilities and safe local logs. */
 export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetch({ logger })) =>
   Layer.merge(
@@ -74,7 +85,7 @@ export const presencePlatformLayer = (logger: Logger, fetchImpl = getCliHttpFetc
             })
           ),
           ...loroStreamsWebSocketOptions(
-            isLoroStreamsWebSocketEnabled(
+            resolveCliLoroStreamsWebSocketEnabled(
               options.webSocketEnabled,
               process.env.LODY_LORO_STREAMS_WS_ENABLED
             ),

@@ -33,13 +33,8 @@ import { CliAvailability, resolveCliTypesSelection } from './start-options';
 import { CliRuntimeStateReporter } from '@/lib/cli-runtime-state';
 import { formatErrorMessage } from '@/utils/format-error';
 import { createStartShutdownController } from './start-shutdown';
-import {
-  LODY_AUTH_SITE_URL,
-  LODY_AUTH_URL,
-  LODY_SERVER_URL,
-  SITE_URL,
-  getOrCreateStableMachineIdAsync,
-} from '@/utils/const';
+import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL, SITE_URL } from '@/utils/const';
+import { getOrCreateMachineId } from '@/lib/machine-identity';
 import {
   applyLocalPlatformEnv,
   getCliPlatformKind,
@@ -396,7 +391,7 @@ export const startCommand = new Command('start')
 
     if (options.pairedWorkspace) {
       const { loadCliE2eeMachineBootstrapLegacy } = await import('@/lib/e2ee/workspace-legacy');
-      machineId = await getOrCreateStableMachineIdAsync();
+      machineId = getOrCreateMachineId();
       const paired = await loadCliE2eeMachineBootstrapLegacy(options.pairedWorkspace, machineId);
       token = '';
       userId = paired.bootstrap.accountId;
@@ -409,7 +404,7 @@ export const startCommand = new Command('start')
       const localIdentity = await loadOrCreateLocalIdentity(logger);
       token = '';
       userId = localIdentity.userId;
-      machineId = await getOrCreateStableMachineIdAsync();
+      machineId = getOrCreateMachineId();
       machineName = defaultMachineName;
       authMethod = 'local_platform';
     } else if (providedAuth) {

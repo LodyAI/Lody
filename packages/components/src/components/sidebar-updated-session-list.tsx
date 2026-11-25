@@ -1,6 +1,9 @@
 import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
-import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { clsx } from 'clsx';
+import {
+  corner as uiCorner,
+  radius as uiRadius,
+  text as uiText,
+} from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
@@ -599,6 +602,25 @@ const defaultLabels: SidebarUpdatedSessionListLabels = {
   emptyDescription: 'Start a chat or open a worktree to see it here.',
 };
 
+/**
+ * Which segments an item's second line renders under the current context
+ * toggles. The row height and the first child's tree connector both size
+ * themselves from this, so the conditions live in one place. The returned
+ * flags ignore nesting: `UpdatedItemRow` drops them for nested children,
+ * while the connector asks about the opener, which is never nested.
+ */
+function updatedItemMetaLines(
+  item: SidebarUpdatedItem,
+  showProjectContext: boolean,
+  showBranchContext: boolean
+): { project: boolean; branch: boolean; meta: boolean } {
+  const branchName = typeof item.branchName === 'string' ? item.branchName.trim() : '';
+  const project = showProjectContext;
+  const branch =
+    showBranchContext && (item.kind === 'github' || item.isWorktree === true) && branchName !== '';
+  return { project, branch, meta: project || branch };
+}
+
 export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList({
   items,
   now,
@@ -787,7 +809,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
     return (
       <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <div className={clsx(stylex.props(updatedStyles.emptyCard).className, className)}>
+        <div className={cn(stylex.props(updatedStyles.emptyCard).className, className)}>
           <div {...stylex.props(updatedStyles.emptyTitle)}>{merged.emptyTitle}</div>
           <div {...stylex.props(updatedStyles.emptyDescription)}>{merged.emptyDescription}</div>
         </div>
@@ -798,7 +820,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   return (
     <Tooltip.Provider>
       <div
-        className={clsx(stylex.props(updatedStyles.listStack).className, className)}
+        className={cn(stylex.props(updatedStyles.listStack).className, className)}
         data-pin-section={
           pinSectionId === undefined ? undefined : (pinSectionId ?? DEFAULT_PIN_SECTION_KEY)
         }
@@ -818,7 +840,10 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
             return (
               <div
                 key={bucket.key}
-                className={cn('group', stylex.props(bucketStyles.group, collapsed && bucketStyles.folded).className)}
+                className={cn(
+                  'group',
+                  stylex.props(bucketStyles.group, collapsed && bucketStyles.folded).className
+                )}
               >
                 <SidebarFocusDndContainer
                   items={bucket.items}
@@ -832,7 +857,9 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       // drop section, not a margin outside it: a release just below
                       // the last row still lands at the end of Focus.
                       className={
-                        stylex.props(!collapsed && bucketIndex < buckets.length - 1 && bucketStyles.sectionGap).className
+                        stylex.props(
+                          !collapsed && bucketIndex < buckets.length - 1 && bucketStyles.sectionGap
+                        ).className
                       }
                       items={orderedFocusItems}
                       now={now}
@@ -886,9 +913,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           const headerLabel = showBucketCount ? (
             <span {...stylex.props(themeStyles.row)}>
               <span>{bucketLabels[bucket.key]}</span>
-              <span {...stylex.props(themeStyles.hint)}>
-                {bucket.items.length}
-              </span>
+              <span {...stylex.props(themeStyles.hint)}>{bucket.items.length}</span>
             </span>
           ) : (
             bucketLabels[bucket.key]
@@ -907,7 +932,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
           return (
             <div
               key={bucket.key}
-              className={clsx(
+              className={cn(
                 'group',
                 stylex.props(updatedStyles.bucket, collapsed && updatedStyles.collapsedBucket)
                   .className
@@ -931,7 +956,10 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                 <div
                   ref={pinDrag?.rowsRef}
                   data-pin-rows={pinDrag ? '' : undefined}
-                  className={cn(SIDEBAR_ROW_LIST_CLASS, stylex.props(pinDrag && bucketStyles.positioned).className)}
+                  className={cn(
+                    SIDEBAR_ROW_LIST_CLASS,
+                    stylex.props(pinDrag && bucketStyles.positioned).className
+                  )}
                   style={pinDrag?.rowsStyle}
                 >
                   {(() => {
@@ -943,11 +971,17 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                         handleToggleOpenedBySessions(node.item.id)
                       );
                       const prevNode = visibleNodes[nodeIndex - 1];
+                      // The tall connector climbs the opener's meta line, so it must
+                      // follow the opener row's real height, not the list-level toggles.
+                      const openerShowsMetaLine =
+                        prevNode?.depth === 0 &&
+                        updatedItemMetaLines(prevNode.item, showProjectContext, showBranchContext)
+                          .meta;
                       const treeSlot: SessionRowOpenedByTreeSlot | undefined =
-                        openedByTree?.kind === 'child' && (showProjectContext || showBranchContext)
+                        openedByTree?.kind === 'child' && openerShowsMetaLine
                           ? {
                               ...openedByTree,
-                              isFirstChild: prevNode?.depth === 0,
+                              isFirstChild: true,
                               tallOpener: true,
                             }
                           : openedByTree;
@@ -999,10 +1033,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                     if (!pinDrag) return visibleNodes.map(renderNode);
                     if (pinSectionId === FOCUS_SECTION_DND_KEY && visibleNodes.length === 0) {
                       return (
-                        <div
-                          data-status-focus-empty=""
-                          {...stylex.props(themeStyles.row2)}
-                        >
+                        <div data-status-focus-empty="" {...stylex.props(themeStyles.row2)}>
                           {t('sidebar.status.focusEmptyDrop', 'Drag a conversation here to focus')}
                         </div>
                       );
@@ -1042,10 +1073,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       aria-label={showMoreLabel}
                       onClick={() => onShowMore?.(bucket.key)}
                     >
-                      <span
-                        {...stylex.props(updatedStyles.showMoreIcon)}
-                        aria-hidden="true"
-                      />
+                      <span {...stylex.props(updatedStyles.showMoreIcon)} aria-hidden="true" />
                       <span>{showMoreLabel}</span>
                     </button>
                   ) : null}
@@ -1057,12 +1085,8 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                       aria-label={showLessLabel}
                       onClick={() => onShowLess?.(bucket.key)}
                     >
-                      <span
-                        {...stylex.props(updatedStyles.showMoreIcon)}
-                        aria-hidden="true"
-                      />
+                      <span {...stylex.props(updatedStyles.showMoreIcon)} aria-hidden="true" />
                       <span>{showLessLabel}</span>
-
                     </button>
                   ) : null}
                 </div>
@@ -1114,13 +1138,13 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   return (
     <div
       data-sidebar-updated-project={item.kind}
-      className={clsx(
+      className={cn(
         stylex.props(updatedStyles.projectLine, sidebarSurface.meta).className,
         SIDEBAR_CAPTION_TEXT_CLASS
       )}
     >
       <span
-        className={clsx(
+        className={cn(
           stylex.props(
             updatedStyles.projectMark,
             isGithub ? updatedStyles.githubMark : updatedStyles.smallMark
@@ -1331,14 +1355,11 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       : undefined;
 
   const isNestedChild = openedByTree?.kind === 'child';
-  const showProjectLine = showProjectContext && !isNestedChild;
-  // The branch rides on the same second line as the project segment; nested
-  // children skip it like the project context does.
-  const showBranchLine =
-    showBranchContext &&
-    (item.kind === 'github' || item.isWorktree === true) &&
-    Boolean(branchName) &&
-    !isNestedChild;
+  // Nested children skip the meta line. `updatedItemMetaLines` owns the
+  // conditions so the first child's connector sizes from the opener's height.
+  const metaLines = updatedItemMetaLines(item, showProjectContext, showBranchContext);
+  const showProjectLine = metaLines.project && !isNestedChild;
+  const showBranchLine = metaLines.branch && !isNestedChild;
   const showMetaLine = showProjectLine || showBranchLine;
   const projectLabel = showProjectLine ? resolveUpdatedItemProjectLabel(item) : null;
   const titleNode = (
@@ -1381,7 +1402,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             }
           : undefined
       }
-      className={clsx(
+      className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
@@ -1438,26 +1459,24 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       ) : null}
 
       <div
-        className={clsx(
+        className={cn(
           stylex.props(updatedStyles.rowBody, isMobile && updatedStyles.mobileRowBody).className,
           SIDEBAR_ROW_TEXT_CLASS
         )}
       >
-        <div
-          className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
-        >
+        <div className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}>
           <SessionRowLeadingSlot openedByTree={openedByTree} />
         </div>
         {item.owner ? (
           <span
-            className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+            className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
           >
             <SessionRowAuthorAvatar author={item.owner} />
           </span>
         ) : null}
         {showPinnedIcon && item.isPinned ? (
           <span
-            className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
+            className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
           >
             <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
           </span>
@@ -1469,7 +1488,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           }
         >
           <div
-            className={clsx(
+            className={cn(
               stylex.props(updatedStyles.titleLine).className,
               SIDEBAR_ROW_LINE_CLASS,
               SIDEBAR_ROW_TEXT_CLASS
@@ -1489,7 +1508,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           {showMetaLine ? (
             <div
               data-sidebar-session-meta=""
-              className={clsx(
+              className={cn(
                 stylex.props(updatedStyles.metaLine, sidebarSurface.meta).className,
                 SIDEBAR_CAPTION_TEXT_CLASS
               )}
@@ -1500,9 +1519,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           ) : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <div
-          className={clsx(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}
-        >
+        <div className={cn(stylex.props(updatedStyles.lineSlot).className, SIDEBAR_ROW_LINE_CLASS)}>
           <SidebarRowEndSlot
             sessionId={item.id}
             selected={showSelectedState}
@@ -1518,7 +1535,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
               isMobile ||
               (item.kind === 'local' && item.isWorktree) ? (
                 <span
-                  className={clsx(
+                  className={cn(
                     stylex.props(
                       updatedStyles.restMetrics,
                       sidebarSurface.faint,
@@ -1677,9 +1694,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   >
                     <span {...stylex.props(themeStyles.row3)}>
                       <span>{label}</span>
-                      <span {...stylex.props(themeStyles.hint2)}>
-                        {preset.countdown}
-                      </span>
+                      <span {...stylex.props(themeStyles.hint2)}>{preset.countdown}</span>
                     </span>
                   </ContextMenu.Item>
                 );
@@ -2355,18 +2370,49 @@ function DraggablePinnedRowSlot({ id, drag, gutter, children }: PinnedRowSlotPro
 
 const themeStyles = stylex.create({
   row: { display: 'inline-flex', alignItems: 'center', gap: themeSpace[1.5] },
-  hint: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontWeight: 400, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
-  row2: { display: 'flex', minHeight: themeSpace[10], alignItems: 'center', justifyContent: 'center', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: themeSpace[3], paddingBlock: themeSpace[2], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  hint: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    fontWeight: 400,
+    fontVariantNumeric: 'tabular-nums',
+    color: uiColors.secondaryLabel,
+  },
+  row2: {
+    display: 'flex',
+    minHeight: themeSpace[10],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: uiRadius.small,
+    cornerShape: uiCorner.shape,
+    boxShadow: uiShadow.card,
+    backgroundColor: uiColors.elevatedBackground,
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[2],
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
   glyph: { height: themeSpace[3], width: themeSpace[3], flexShrink: 0 },
   glyph2: { height: themeSpace[3.5], width: themeSpace[3.5] },
   glyph3: { minWidth: '180px' },
   glyph4: { minWidth: '200px' },
-  row3: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: themeSpace[4] },
-  hint2: { fontSize: uiText.captionSize, lineHeight: uiText.captionLeading, fontVariantNumeric: 'tabular-nums', color: uiColors.secondaryLabel },
+  row3: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: themeSpace[4],
+  },
+  hint2: {
+    fontSize: uiText.captionSize,
+    lineHeight: uiText.captionLeading,
+    fontVariantNumeric: 'tabular-nums',
+    color: uiColors.secondaryLabel,
+  },
 });
 
 const bucketStyles = stylex.create({
- sectionGap: { paddingBottom: themeSpace[4] },
+  sectionGap: { paddingBottom: themeSpace[4] },
   group: { display: 'flex', flexDirection: 'column', gap: themeSpace[0.5] },
   folded: { marginBottom: { default: themeSpace[1], ':last-child': 0 } },
   positioned: { position: 'relative' },

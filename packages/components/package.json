@@ -19,6 +19,10 @@
       "import": "./src/components/pages/workspace-join-request-surface.tsx",
       "types": "./src/components/pages/workspace-join-request-surface.tsx"
     },
+    "./style/theme-scale.stylex": {
+      "import": "./src/style/theme-scale.stylex.ts",
+      "types": "./src/style/theme-scale.stylex.ts"
+    },
     "./atoms/*": {
       "import": "./src/atoms/*.{ts,tsx}",
       "types": "./src/atoms/*.{ts,tsx}"
@@ -31,8 +35,8 @@
       "import": "./src/providers/*.{ts,tsx}",
       "types": "./src/providers/*.{ts,tsx}"
     },
-    "./tailwind": "./src/tailwind/index.css",
-    "./tailwind/index.css": "./src/tailwind/index.css",
+    "./style": "./src/style/index.css",
+    "./style/index.css": "./src/style/index.css",
     "./ui/*": {
       "import": "./src/ui/*.{ts,tsx}",
       "types": "./src/ui/*.{ts,tsx}"
@@ -101,6 +105,7 @@
     "@lobehub/streamdown": "^1.4.0",
     "@lody/cloud-api": "workspace:*",
     "@lody/e2ee-core": "workspace:*",
+    "@lody/genui": "workspace:*",
     "@lody/loro-streams-rpc": "workspace:*",
     "@lody/platform": "workspace:*",
     "@lody/shared": "workspace:*",
@@ -137,7 +142,6 @@
     "better-auth": "catalog:",
     "better-auth-capacitor": "catalog:",
     "broadcast-channel": "^7.0.0",
-    "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "convex": "catalog:",
     "date-fns": "^4.1.0",
@@ -229,7 +233,6 @@
     "fflate": "0.8.3",
     "jsdom": "^26.1.0",
     "oxfmt": "^0.65.0",
-    "postcss": "8.5.6",
     "react-router-dom": "^7.10.1",
     "storybook": "^10.6.2",
     "typescript": "catalog:",

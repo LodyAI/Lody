@@ -42,6 +42,7 @@ import {
   classifyCliSpawnReason,
   resolveAcpLauncher,
 } from '@/agent/acp-analytics';
+import { resolveElectronRunAsNodeEnv } from '@/electron-bootstrap-env';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
 import { getCachedLoginShellEnvSyncLegacy, getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import { mergeLoginShellEnv, withDefaultAcpPathEntries } from '@/agent/setting';
@@ -611,6 +612,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           finalEnv[key] = configEnv[key];
       }
     }
+    /** Desktop launches the CLI under ELECTRON_RUN_AS_NODE; agents are normal Node processes and must not inherit it. agent-client.ts/pi-extensions.ts read process.env directly, so this stays last. */
+    delete finalEnv.ELECTRON_RUN_AS_NODE;
     return finalEnv;
   }
 
@@ -703,7 +706,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         });
         agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
-          env: startupEnv,
+          env: resolveElectronRunAsNodeEnv(executable.command, startupEnv),
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         agentProcessHandle.onExit(() => {

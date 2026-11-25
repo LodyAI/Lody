@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, MessageSquareReply } from 'lucide-react';
@@ -306,7 +306,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
                 </Dialog.Description>
                 <Dialog.Title
                   fontWeight="var(--font-weight-medium)"
-                  className={clsx(stylex.props(styles.dialogTitle).className)}
+                  className={cn(stylex.props(styles.dialogTitle).className)}
                   title={title}
                 >
                   {title}

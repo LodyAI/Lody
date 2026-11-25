@@ -20,10 +20,9 @@ vi.mock('../src/lib/native-platform', () => ({
   isNativeAppShell: () => runtime.native,
   isNativeIOSAppShell: () => runtime.native && runtime.ios,
 }));
-vi.mock('../src/lib/utils', async () => {
-  const { clsx } = await import('clsx');
-  return { cn: clsx };
-});
+vi.mock('../src/lib/utils', () => ({
+  cn: (...inputs: (string | false | null | undefined)[]) => inputs.filter(Boolean).join(' '),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -55,12 +54,21 @@ afterEach(() => {
 
 function renderDrawer(
   repositionInputs = true,
-  bottomPadding?: DrawerContentProps['bottomPadding']
+  options?: {
+    bottomPadding?: DrawerContentProps['bottomPadding'];
+    nativeKeyboardInset?: boolean;
+    contentRef?: React.Ref<HTMLDivElement>;
+  }
 ) {
   act(() => {
     root.render(
       <Drawer direction="right" open modal={false} repositionInputs={repositionInputs}>
-        <DrawerContent aria-describedby={undefined} bottomPadding={bottomPadding}>
+        <DrawerContent
+          ref={options?.contentRef}
+          aria-describedby={undefined}
+          bottomPadding={options?.bottomPadding}
+          nativeKeyboardInset={options?.nativeKeyboardInset}
+        >
           <DrawerTitle>Conversation</DrawerTitle>
           <textarea aria-label="Message" />
         </DrawerContent>
@@ -76,12 +84,19 @@ function renderDrawer(
   return drawer;
 }
 
+function flushFrame() {
+  act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+}
+
 function resize(layoutHeight: number, visualHeight: number, eventTarget: EventTarget = viewport) {
   act(() => {
     vi.stubGlobal('innerHeight', layoutHeight);
     viewport.height = visualHeight;
     eventTarget.dispatchEvent(new Event('resize'));
   });
+  flushFrame();
 }
 
 describe('drawer floating controls', () => {
@@ -283,15 +298,77 @@ describe('native side-drawer keyboard layout', () => {
   });
 
   it.each([undefined, 'safeArea'] as const)(
-    'restores CSS sizing after the keyboard hides with bottomPadding=%s and input still focused',
+    'keeps outer drawer full-viewport via paddingBottom and restores after keyboard hides (bottomPadding=%s)',
     (bottomPadding) => {
-      const drawer = renderDrawer(true, bottomPadding);
+      const contentRef = { current: null as HTMLDivElement | null };
+      const drawer = renderDrawer(true, { bottomPadding, contentRef });
+      expect(contentRef.current).toBe(drawer);
       expect(drawer.hasAttribute('bottomPadding')).toBe(false);
+      expect(drawer.style.bottom).toBe('');
+      expect(drawer.style.paddingBottom).toBe(
+        bottomPadding === 'safeArea'
+          ? 'max(1.25rem, var(--safe-area-bottom, 0px), var(--lody-drawer-viewport-bottom, 0px))'
+          : 'var(--lody-drawer-viewport-bottom, 0px)'
+      );
       resize(480, 480);
       resize(800, 800);
       expect(document.activeElement).toBe(drawer.querySelector('textarea'));
       expect(drawer.style.height).toBe('');
-      expect(drawer.style.bottom).toBe('0px');
+      expect(drawer.style.bottom).toBe('');
+      expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe('0px');
+    }
+  );
+
+  it('coalesces paired visualViewport and window resize events in one animation frame without flashing a transient inset', () => {
+    const drawer = renderDrawer(true);
+    const setPropertySpy = vi.spyOn(drawer.style, 'setProperty');
+    act(() => {
+      viewport.height = 480;
+      viewport.dispatchEvent(new Event('resize'));
+      vi.stubGlobal('innerHeight', 480);
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(setPropertySpy).not.toHaveBeenCalled();
+    flushFrame();
+    expect(setPropertySpy).toHaveBeenCalledTimes(1);
+    expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe('0px');
+    expect(drawer.style.bottom).toBe('');
+  });
+
+  it('tracks overlay keyboards via paddingBottom, rounds subpixel values, and ignores pinch zoom', () => {
+    const drawer = renderDrawer(true);
+    resize(800, 479.6);
+    expect(drawer.style.bottom).toBe('');
+    expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe('320px');
+
+    act(() => {
+      viewport.scale = 1.5;
+      viewport.dispatchEvent(new Event('resize'));
+    });
+    flushFrame();
+    expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe('0px');
+
+    act(() => {
+      viewport.scale = 1;
+      viewport.height = 800;
+      viewport.dispatchEvent(new Event('resize'));
+    });
+    flushFrame();
+    expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe('0px');
+  });
+
+  it.each([undefined, 'safeArea'] as const)(
+    'applies native iOS keyboard inset via paddingBottom without cropping bottom (bottomPadding=%s)',
+    (bottomPadding) => {
+      runtime.ios = true;
+      const drawer = renderDrawer(true, { bottomPadding, nativeKeyboardInset: true });
+      expect(drawer.style.bottom).toBe('');
+      expect(drawer.style.paddingBottom).toBe(
+        bottomPadding === 'safeArea'
+          ? 'max(1.25rem, var(--safe-area-bottom, 0px), var(--native-keyboard-height, 0px))'
+          : 'var(--native-keyboard-height, 0px)'
+      );
+      expect(drawer.style.getPropertyValue('--lody-drawer-viewport-bottom')).toBe('');
     }
   );
 });

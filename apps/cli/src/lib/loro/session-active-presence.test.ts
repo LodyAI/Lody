@@ -256,6 +256,58 @@ describe('native session presence leases', () => {
       })
     )
   );
+
+  it.effect(
+    'publishes running presence for bounded late stream activity, refreshes on updates, and clears on expiry, turn start, explicit clear, or retire',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const h = yield* harness({ intervalMs: 3_000, lateStreamActivityTtlMs: 4_000 });
+          h.owner.noteLateActivity(sessionId);
+          expect(h.writes).toEqual([]);
+          expect(h.owner.hasLateActivity(sessionId)).toBe(true);
+          expect(h.owner.getStatus(sessionId)).toEqual({ type: 'running' });
+          expect(h.owner.activeSessionCount()).toBe(1);
+
+          yield* TestClock.adjust(1_000);
+          expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+          expect(h.writes).toHaveLength(1);
+
+          yield* TestClock.adjust(2_000);
+          h.owner.noteLateActivity(sessionId);
+          yield* TestClock.adjust(2_000);
+          expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+
+          yield* TestClock.adjust(2_000);
+          expect(h.entries.has(sessionId)).toBe(false);
+          expect(h.owner.hasLateActivity(sessionId)).toBe(false);
+          expect(h.owner.getStatus(sessionId)).toBeNull();
+          expect(h.owner.activeSessionCount()).toBe(0);
+
+          h.owner.noteLateActivity(sessionId);
+          yield* TestClock.adjust(1_000);
+          expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+          h.owner.clearLateActivity(sessionId);
+          yield* TestClock.adjust(1_000);
+          expect(h.entries.has(sessionId)).toBe(false);
+
+          h.owner.noteLateActivity(sessionId);
+          const turn = yield* Scope.make();
+          yield* Scope.provide(h.owner.hold(sessionId, 'thinking'), turn);
+          yield* close(turn);
+          expect(h.entries.has(sessionId)).toBe(false);
+
+          h.owner.noteLateActivity(sessionId);
+          yield* TestClock.adjust(1_000);
+          expect(h.entries.get(sessionId)).toEqual({ type: 'running' });
+          h.owner.retire();
+          expect(h.entries.has(sessionId)).toBe(false);
+          h.owner.noteLateActivity(sessionId);
+          yield* TestClock.adjust(2_000);
+          expect(h.entries.has(sessionId)).toBe(false);
+        })
+      )
+  );
 });
 
 describe('Legacy entry ownership', () => {

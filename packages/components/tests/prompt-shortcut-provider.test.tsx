@@ -347,6 +347,35 @@ describe('PromptShortcutProvider lifecycle', () => {
     expect(current?.workspaceId).toBe('workspace-a');
     expect(container.textContent).toBe('workspace-a');
   });
+
+  it('passes independent workspace webSocketAuth that keeps refreshing after provider auth-session disposal', async () => {
+    const grantSpy = vi.fn(async (opts?: { forceRefresh?: boolean }) => ({
+      token: opts?.forceRefresh ? 'ws-fresh-token' : 'ws-cached-token',
+      gatewayBaseUrl: 'https://gateway.test',
+    }));
+    fixture.runtime = {
+      streamsWebSocketEnabled: true,
+      getWorkspaceStreamsGrant: grantSpy,
+    };
+
+    await render();
+    expect(fixture.syncOptions?.webSocketEnabled).toBe(true);
+    const webSocketAuth = fixture.syncOptions?.webSocketAuth;
+    expect(webSocketAuth).toBeTypeOf('function');
+
+    fixture.auth.authSessionId = 'session-b';
+    await render();
+
+    await expect(webSocketAuth!({ reason: 'request' })).resolves.toBe('ws-cached-token');
+    await expect(
+      webSocketAuth!({ reason: 'renew', previousToken: 'ws-cached-token' })
+    ).resolves.toBe('ws-fresh-token');
+    await expect(webSocketAuth!({ reason: 'reauth' })).resolves.toBe('ws-fresh-token');
+    expect(grantSpy).toHaveBeenNthCalledWith(1, { forceRefresh: false });
+    expect(grantSpy).toHaveBeenNthCalledWith(2, { forceRefresh: false });
+    expect(grantSpy).toHaveBeenNthCalledWith(3, { forceRefresh: true });
+    expect(grantSpy).toHaveBeenNthCalledWith(4, { forceRefresh: true });
+  });
 });
 
 describe('Shortcut token attempt ownership', () => {

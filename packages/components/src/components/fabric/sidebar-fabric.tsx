@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 
 import type { FabricRecipe } from './fabric-recipe';
@@ -189,7 +189,7 @@ export function SidebarFabricBackdrop({
   if (!recipe || !light) return null;
   const layerProps = stylex.props(styles.layer, xstyle);
   return (
-    <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
+    <div aria-hidden {...layerProps} className={cn(layerProps.className, className)}>
       <FabricSimulator recipe={recipe} light={light} xstyle={[styles.canvas, canvasXstyle]} />
     </div>
   );
@@ -216,7 +216,7 @@ export function SidebarFabricBand({
   if (!recipe || !light) return null;
   const layerProps = stylex.props(styles.layer, xstyle);
   return (
-    <div aria-hidden {...layerProps} className={clsx(layerProps.className, className)}>
+    <div aria-hidden {...layerProps} className={cn(layerProps.className, className)}>
       <FabricSimulator
         recipe={recipe}
         light={light}

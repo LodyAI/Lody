@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { scopedConversationTheme } from '@/components/ai-gui/conversation.tokens.stylex';
 import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
@@ -246,7 +246,7 @@ const CODE_SCOPE = 'lody-chat-share-card';
  * than derived: it is absolutely positioned against the code block while this
  * padding sits on the `pre` inside the block's and the body's own insets, so the
  * arithmetic is not local to either file. A label that changes height in
- * src/tailwind/index.css changes this.
+ * src/style/index.css changes this.
  */
 const CODE_LABEL_CLEARANCE = '1.5rem';
 
@@ -318,7 +318,7 @@ export function ChatShareCard({
   const signOffOnMat = backdrop !== 'none' && matPx >= MIN_SIGN_OFF_MAT;
   // Injects the scoped theme rules before first paint; idempotent no-op after.
   ensureShareThemeScopes();
-  const themeScopeClass = clsx(
+  const themeScopeClass = cn(
     theme === 'light' ? 'light-scope' : 'dark-scope',
     stylex.props(
       theme === 'light' ? productLightPalette : productDarkPalette,
@@ -348,7 +348,7 @@ export function ChatShareCard({
         ) : null}
 
         <div
-          className={clsx(
+          className={cn(
             CODE_SCOPE,
             stylex.props(layout.gutter, title ? layout.afterTitle : layout.top, layout.bottom)
               .className
@@ -414,12 +414,12 @@ export function ChatShareCard({
   // destination.
   const rootProps = stylex.props(styles.root);
   if (backdrop === 'none') {
-    return <div className={clsx(themeScopeClass, rootProps.className, className)}>{card}</div>;
+    return <div className={cn(themeScopeClass, rootProps.className, className)}>{card}</div>;
   }
 
   return (
     <div
-      className={clsx(themeScopeClass, rootProps.className, className)}
+      className={cn(themeScopeClass, rootProps.className, className)}
       style={{ ...CHAT_SHARE_BACKDROP_STYLES[backdrop], padding: matPx }}
     >
       {card}

@@ -845,7 +845,7 @@ export class E2eeIpc extends ProductWindowIpcService {
   async approveMemberJoin(workspaceId: string, requestId: string, mode: 'automatic' | 'explicit') {
     const id = sender()
     const scope = this.memberScope(workspaceId)
-    if (mode !== 'automatic' && mode !== 'explicit') throw new Error('e2ee_invalid-input')
+    if (mode !== 'explicit') throw new Error('e2ee_invalid-input')
     const access = await this.memberAccess(workspaceId, id, scope)
     const cloud = await desktopE2eeCloudClient()
     if (cloud.accountId !== access.accountId) throw new Error('e2ee_account_mismatch')
@@ -855,15 +855,9 @@ export class E2eeIpc extends ProductWindowIpcService {
     )
     if (material.workspaceId !== workspaceId || material.requestId !== requestId)
       throw new Error('e2ee_conflict')
-    // `source` is a relay label: automatic admission is decided by the host, which verifies
-    // the invitation's endorsement against its own ledger before signing.
     const pending = await scope((owner) =>
       owner.accountId === access.accountId && owner.readers.get(workspaceId)?.has(id)
-        ? owner.host.prepareMemberAdmission(
-            workspaceId,
-            material.keyPackageHex,
-            mode === 'automatic' ? { offer: material.offer, now: Date.now() } : undefined
-          )
+        ? owner.host.prepareMemberAdmission(workspaceId, material.keyPackageHex)
         : Effect.fail(new Error('e2ee_account_mismatch'))
     )
     let primary: unknown

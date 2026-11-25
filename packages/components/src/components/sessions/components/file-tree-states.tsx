@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeColors } from '../../../style/theme-colors.stylex';
 import { themeFontWeight, themeRadius, themeSpace } from '../../../style/theme-scale.stylex';
 import { Skeleton } from '@lody/ui/skeleton';
@@ -103,7 +103,7 @@ export function FileTreeSkeleton({ className }: { className?: string }) {
       aria-busy="true"
       aria-live="polite"
       {...rootProps}
-      className={clsx(rootProps.className, className)}
+      className={cn(rootProps.className, className)}
     >
       <span {...stylex.props(styles.visuallyHidden)}>Loading files…</span>
       {SKELETON_ROWS.map((row, index) => (

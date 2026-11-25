@@ -30,8 +30,8 @@ The Duo entry checks the selected SDK before the standard production build,
 sync and open steps.
 
 The iOS publishing toolchain update selects `xcode-27` and Xcode 27.1 in
-[PR #3888](https://github.com/loro-dev/lody/pull/3888). Nightly iOS uses
-`publish-ios.yml`. See the [implementation note](notes/2026-10-27-iphone-duo.md).
+[PR #3888](https://github.com/loro-dev/lody/pull/3888). Nightly iOS builds the native client with
+[`publish-ios-native.yml`](../../.github/workflows/publish-ios-native.yml). See the [implementation note](notes/2026-10-27-iphone-duo.md).
 
 ## CI release versioning
 
@@ -44,8 +44,8 @@ largest build number for the selected prerelease version.
 
 ## Build compatibility
 
-- The minimum deployment target is **iOS / iPadOS 16.4**, matching the
-  Tailwind CSS 4 browser floor. Keep the Xcode project, App, notification service,
+- The minimum deployment target is **iOS / iPadOS 16.4**, matching the Vite
+  `safari16.4` JS/CSS target. Keep the Xcode project, App, notification service,
   widget targets (Debug and Release), and `ios/App/Podfile` aligned. A native
   deployment target does not provide missing JavaScript APIs; follow the
   [mobile compatibility rules](AGENTS.md#minimum-ios-compatibility) for WebView

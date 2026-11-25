@@ -12,6 +12,8 @@ Translation: current
 | 用途               | 地址                                                                  |
 | ------------------ | --------------------------------------------------------------------- |
 | 会话（所有版本）   | `lody://session/<sessionId>?workspace=<workspaceId>`                  |
+| 设置面板           | `lody://settings/<tab>?…`                                             |
+| 定时任务面板       | `lody://schedules?…`                                                  |
 | Today 页面（实验） | `lody://today/<编码后的 userId>/<YYYY-MM-DD>?workspace=<workspaceId>` |
 | Stable 新登录回调  | `ai.lody.stable://auth/callback#token=…`                              |
 | Nightly 登录回调   | `ai.lody.nightly://auth/callback#token=…`                             |
@@ -25,6 +27,8 @@ workspace 使用稳定 ID；UI 解析为当前 slug。复制、mention 和 Markd
 认证不走资源路由。新 Stable 登录显式传 stable channel 并返回 `ai.lody.stable`；Nightly 仍返回 `ai.lody.nightly`。未带 channel 的旧浏览器调用仍生成旧 `lody` 回调，Stable 保留接收兼容。非 Stable 版本把公共协议的旧认证、邀请、GitHub 安装、checkout 和 machine-connect 路由转发到 Stable 专属别名，不在本版本交换凭据。没有处理程序、交接失败或未知路由时显示不含敏感信息的错误。`chat/new` 和 [Magpie Provider 导入](magpie-provider-import.zh.md) 留在系统选择的安装中。Provider 导入只暂存待确认的请求，不授予写入权限。OSS 保留 `lody-oss` 私有入口，不启动云认证。
 
 Today 页面链接指向某成员某一天的大纲（[Today](today-outline.zh.md)）。用户段是 userId 的 `encodeURIComponent` 形式；与会话链接不同，它允许 `%XX`，因为本地 id 含 `:`；只接受规范编码，保证一页只有一个链接。它像会话链接一样在应用内打开，不跨桌面通道转交。
+
+设置（`lody://settings/<tab>`）和定时任务（`lody://schedules`）动作链接使用封闭参数表打开应用内界面或拉起初始新建/编辑表单：可选 `workspace`、`agents`（`create=<内置|预设|custom|registry:id>` 或 `config=<id>`，可选 `machine`）、`agent-roles`（`create=1` 或 `role=<id>`，可选 `machine`）、`mcp`（`create=1` 或 `server=<id>`）、`projects`（`add=local` 配可选 `machine`、`add=group`，或 `repo=<owner/name>` / `local=<id>&machine=<id>` 配可选 `page`）、`prompt-shortcuts`（`create=1`）、`machines`/`memory`（可选 `machine`）、其余已知设置页以及 `schedules`（`create=1` 或 `schedule=<id>`）。动作链接绝不携带凭据、环境变量、命令、URL 或提示词正文，绝不直接写入或自动打开加密控制台与破坏性弹窗；目标条目不可用时退回父级页面，在只读分享页保持不可点击，并像会话链接一样跨桌面通道转交。
 
 ## 分发与访问
 

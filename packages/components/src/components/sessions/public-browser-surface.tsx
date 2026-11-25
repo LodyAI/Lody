@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Globe2, ShieldAlert } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
 import type { ElectronPublicBrowserBounds, ElectronPublicBrowserState } from '@lody/shared';
 
@@ -322,7 +322,7 @@ export function PublicBrowserSurface({
   if (!electron) {
     const fallbackProps = stylex.props(styles.fallback);
     return (
-      <div {...fallbackProps} className={clsx(fallbackProps.className, className)}>
+      <div {...fallbackProps} className={cn(fallbackProps.className, className)}>
         <div {...stylex.props(styles.fallbackCard)}>
           <ShieldAlert {...stylex.props(styles.fallbackGlyph)} />
           <p {...stylex.props(styles.fallbackTitle)}>
@@ -342,7 +342,7 @@ export function PublicBrowserSurface({
     <div
       ref={hostRef}
       {...hostProps}
-      className={clsx(hostProps.className, className)}
+      className={cn(hostProps.className, className)}
       data-public-browser-surface
     >
       {phase === 'loading' ? (

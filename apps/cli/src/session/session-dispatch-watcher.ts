@@ -3371,9 +3371,11 @@ export class SessionDispatchWatcher {
               );
             });
         }
-        if (
+        const awaitingStart =
           entry.role === 'user' &&
-          ['pending', 'seen', 'prepared', 'pending_apply'].includes(entry.status ?? '') &&
+          ['pending', 'seen', 'prepared', 'pending_apply'].includes(entry.status ?? '');
+        if (
+          awaitingStart &&
           (pausedQueueIds.has(entry.id) ||
             this.deps.executionService.isInboxInputCanceled?.(meta.id, entry.id))
         ) {
@@ -3388,6 +3390,26 @@ export class SessionDispatchWatcher {
           });
           entry.status = 'canceled';
           canceledInput = true;
+        } else if (
+          awaitingStart &&
+          this.deps.executionService.isInboxInputEnded?.(meta.id, entry.id)
+        ) {
+          /** The ended input is never admitted again; settle the turn so a surviving processingUserMsgId cannot keep Path 3 re-selecting it. */
+          await backend.applyHistoryAction({
+            kind: 'user-status',
+            turnId: entry.id,
+            status: 'failed',
+          });
+          entry.status = 'failed';
+          canceledInput = true;
+          if (meta.processingUserMsgId === entry.id) {
+            await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(meta.id), {
+              lastHandledUserMsgId: entry.id,
+              lastFailedUserMsgId: entry.id,
+              processingUserMsgId: undefined,
+            });
+            meta.processingUserMsgId = undefined;
+          }
         }
       }
       const observedPreferred = preferred;

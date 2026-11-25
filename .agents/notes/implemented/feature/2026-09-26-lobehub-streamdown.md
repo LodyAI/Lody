@@ -24,7 +24,7 @@ code in exchange for smooth streaming and a static path with no animation cost.
 - Much of what it provided was already overridden: the Mermaid full-screen and
   pan/zoom canvas were disabled
   ([gesture note](../bug-fix/2026-09-09-mermaid-diagram-gestures.md)), and
-  `tailwind/index.css` fought its utility classes with `!important`.
+  `style/index.css` fought its utility classes with `!important`.
 
 ## Decision
 

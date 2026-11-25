@@ -5,11 +5,10 @@ import {
   type StreamsRoomIdentity,
 } from 'loro-repo/transport/streams';
 import {
-  StreamsCrdt,
   type CrdtAdapter,
   type JsonObject,
-  type TransportSubscription,
   type PayloadProtectionProvider,
+  type TransportSubscription,
 } from '@loro-dev/streams-crdt';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
@@ -19,6 +18,11 @@ import {
   getLoroStreamsShardUrls,
   LORO_STREAMS_BUCKET_ID,
 } from '../loro-streams-routing';
+import {
+  loroStreamsWebSocketOptions,
+  type LoroStreamsWebSocketOptions,
+} from '../loro-streams-websocket';
+import { createStreamsCrdt } from '../streams-crdt-factory';
 import { getShortcutResourceStreamId, type ShortcutResource } from './access';
 import { PromptShortcutError } from './model';
 import { ShortcutLifetime } from './lifetime';
@@ -70,11 +74,14 @@ export class ShortcutSyncTransportError extends Error {
   }
 }
 
+let nextInstancePoolId = 0;
+
 /**
  * Each live room has one CRDT/transport/lease per access mode, independent of React consumers.
  */
 export class PromptShortcutSync {
   private readonly lifetime = new ShortcutLifetime();
+  private readonly instancePoolId = ++nextInstancePoolId;
   private rooms = new Map<
     string,
     { refs: number; write: boolean; opening: Promise<ShortcutSyncRoom> }
@@ -92,6 +99,10 @@ export class PromptShortcutSync {
         force?: boolean
       ) => Promise<ShortcutStreamGrant>;
       now: () => number;
+      workspaceId?: string;
+      webSocketEnabled?: boolean;
+      webSocketAuth?: LoroStreamsWebSocketOptions['auth'];
+      shardHostSuffix?: string;
     }
   ) {}
 
@@ -160,7 +171,7 @@ export class PromptShortcutSync {
     if (!bucketId || (content.mode === 'protected' && bucketId === LORO_STREAMS_BUCKET_ID))
       throw new PromptShortcutError('forbidden', 'Encrypted shortcut bucket unavailable');
     const gatewayBaseUrl = grant.gatewayBaseUrl;
-    const shardHostSuffix = grant.shardHostSuffix;
+    const shardHostSuffix = grant.shardHostSuffix ?? this.options.shardHostSuffix;
     let provider: PayloadProtectionProvider | undefined;
     if (content.mode === 'protected') {
       const room: StreamsRoomIdentity =
@@ -204,7 +215,8 @@ export class PromptShortcutSync {
           grant.streamId !== streamId ||
           grant.gatewayBaseUrl !== gatewayBaseUrl ||
           (content.mode === 'protected' &&
-            (grant.bucketId !== bucketId || grant.shardHostSuffix !== shardHostSuffix))
+            (grant.bucketId !== bucketId ||
+              (grant.shardHostSuffix ?? this.options.shardHostSuffix) !== shardHostSuffix))
         ) {
           throw new PromptShortcutError('forbidden', 'Stream grant changed its resource');
         }
@@ -223,12 +235,33 @@ export class PromptShortcutSync {
         'doc' in lease
           ? this.options.repo.persistDocNow(streamId, lease.doc)
           : this.options.repo.persistFlockDocNow(streamId, lease.flock);
-      const transport = new StreamsCrdt({
+      const isWorkspaceRoom =
+        resource.kind === 'workspace-index' || resource.kind === 'workspace-body';
+      const authPoolBase =
+        this.options.workspaceId ??
+        (resource.kind === 'workspace-index' ? resource.workspaceId : '');
+      const authPoolKey = this.options.webSocketAuth
+        ? authPoolBase
+        : authPoolBase
+          ? `${authPoolBase}:shortcut:${this.instancePoolId}`
+          : `shortcut:${this.instancePoolId}`;
+      const { webSocket } = loroStreamsWebSocketOptions(
+        this.options.webSocketEnabled === true && resource.kind === 'workspace-index',
+        gatewayBaseUrl,
+        authPoolKey,
+        this.options.webSocketAuth
+      );
+      const shardUrls = isWorkspaceRoom
+        ? (getLoroStreamsShardUrls(gatewayBaseUrl, shardHostSuffix) ?? 'disabled')
+        : 'disabled';
+      const transport = createStreamsCrdt({
         streamUrl: createLoroStreamUrl({
           baseUrl: gatewayBaseUrl,
           bucketId,
           streamId,
         }),
+        webSocket: webSocket ?? 'disabled',
+        shardUrls,
         ...(content.mode === 'protected'
           ? {
               e2ee: {
@@ -239,9 +272,6 @@ export class PromptShortcutSync {
               payloadProtectionRequired: true,
               snapshotCodec: content.snapshotCodec,
               snapshotUpload: write ? content.snapshotUpload : { canUpload: async () => false },
-              ...(shardHostSuffix
-                ? { shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, shardHostSuffix) }
-                : {}),
             }
           : {}),
         adapter: write ? adapter : readonlyShortcutAdapter(adapter),
@@ -282,7 +312,11 @@ export class PromptShortcutSync {
             const result = await transport.join();
             if (!result.ok) throw toTransportError(result.error);
             subscription = result.value;
-            if (closed) subscription.unsubscribe();
+            if (closed) {
+              subscription.unsubscribe();
+              return;
+            }
+            await persist();
           })().catch((error: unknown) => {
             joining = undefined;
             throw error;

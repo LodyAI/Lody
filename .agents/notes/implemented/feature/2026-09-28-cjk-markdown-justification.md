@@ -19,7 +19,7 @@ introducing a large trailing gap.
 
 - `MarkdownRenderer` extracts text from each rendered paragraph and adds the
   `markdown-cjk-paragraph` class when that paragraph contains Han characters.
-- `tailwind/index.css` applies `text-align: justify`, `text-justify: auto`, and
+- `style/index.css` applies `text-align: justify`, `text-justify: auto`, and
   `text-align-last: start` only to marked top-level paragraphs.
 - The detection is intentionally content-based instead of tied to the interface
   locale: an English UI can receive a Chinese answer, and a Chinese UI can receive

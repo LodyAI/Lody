@@ -124,18 +124,20 @@ export function classifyFailureReason(notice: {
   reason?: string;
   message?: string;
 }): LodyFailureReason {
+  const reason = notice.reason;
+  if (reason) {
+    if (CONTEXT_OVERFLOW_REASON_CODES.has(reason)) return 'context_overflow';
+    if (USAGE_LIMIT_REASON_CODES.has(reason)) return 'usage_limit';
+    if (CANCELLED_REASON_CODES.has(reason)) return 'cancelled';
+    if (PERMISSION_REASON_CODES.has(reason)) return 'permission_denied';
+    if (AGENT_CRASH_REASON_CODES.has(reason)) return 'agent_crash';
+    if (!MODEL_ERROR_REASON_CODES.has(reason)) return 'unknown';
+  }
   const message = notice.message ?? '';
   if (CONTEXT_OVERFLOW_PATTERNS.some((pattern) => pattern.test(message))) return 'context_overflow';
   if (USAGE_LIMIT_PATTERNS.some((pattern) => pattern.test(message))) return 'usage_limit';
   if (PERMISSION_PATTERNS.some((pattern) => pattern.test(message))) return 'permission_denied';
-  const reason = notice.reason;
-  if (!reason) return 'unknown';
-  if (CONTEXT_OVERFLOW_REASON_CODES.has(reason)) return 'context_overflow';
-  if (USAGE_LIMIT_REASON_CODES.has(reason)) return 'usage_limit';
-  if (CANCELLED_REASON_CODES.has(reason)) return 'cancelled';
-  if (PERMISSION_REASON_CODES.has(reason)) return 'permission_denied';
-  if (MODEL_ERROR_REASON_CODES.has(reason)) return 'model_error';
-  if (AGENT_CRASH_REASON_CODES.has(reason)) return 'agent_crash';
+  if (reason) return 'model_error';
   return 'unknown';
 }
 

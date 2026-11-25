@@ -2248,12 +2248,19 @@ export const SessionChatInputArea = memo(
       () =>
         !isArchived && session.cliType && session.agentType
           ? {
+              magpieGatewayUrl: quotaConfig?.magpieGatewayUrl,
               cliType: session.cliType,
               agentType: session.agentType,
               machineId: session.machineId,
             }
           : undefined,
-      [isArchived, session.agentType, session.cliType, session.machineId]
+      [
+        quotaConfig?.magpieGatewayUrl,
+        isArchived,
+        session.agentType,
+        session.cliType,
+        session.machineId,
+      ]
     );
     const { expand: expandPromptMentions } = useMentionPromptExpansion({
       source: isArchived ? undefined : mentionSource,
@@ -2483,7 +2490,6 @@ export const SessionChatInputArea = memo(
           modeOptions={modeOptions}
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
-          commandsEnabled={commandsEnabled}
         />
         {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton

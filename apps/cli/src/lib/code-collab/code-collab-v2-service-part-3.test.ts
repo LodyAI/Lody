@@ -6,6 +6,7 @@ import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  collectPublishedSharedStates,
   digestText,
   entryPaths,
   execFileAsync,
@@ -581,5 +582,168 @@ describe('CodeCollabV2Service All Changes scope', () => {
         await diffStore.close();
       }
     });
+  });
+
+  it('tracks only uncommitted changes across file-index, stats, manifest, and diffs when default policy is uncommitted', async () => {
+    await withWorkspace(async (workspaceRoot) => {
+      await initGitRepoWithCommit(workspaceRoot);
+      await writeFile(path.join(workspaceRoot, 'base.txt'), 'base\n');
+      await writeFile(path.join(workspaceRoot, 'gone.txt'), 'bye\n');
+      await gitCommitAll(workspaceRoot, 'base');
+      await execFileAsync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], {
+        cwd: workspaceRoot,
+      });
+      await execFileAsync('git', ['checkout', '-b', 'feature'], { cwd: workspaceRoot });
+      await writeFile(path.join(workspaceRoot, 'committed.txt'), 'branch commit\n');
+      await gitCommitAll(workspaceRoot, 'branch commit');
+      const headBefore = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+
+      await writeFile(path.join(workspaceRoot, 'staged.txt'), 'staged\n');
+      await execFileAsync('git', ['add', 'staged.txt'], { cwd: workspaceRoot });
+      await writeFile(path.join(workspaceRoot, 'base.txt'), 'base\nunstaged\n');
+      await writeFile(path.join(workspaceRoot, 'untracked.txt'), 'untracked\n');
+      await rm(path.join(workspaceRoot, 'gone.txt'));
+
+      const collected = collectPublishedSharedStates();
+      const resetFlags: Array<boolean | undefined> = [];
+      const service = new CodeCollabV2Service({
+        resolveWorkspace: async () => ({
+          ok: true,
+          ownerSessionId: SESSION_ID,
+          workspaceRoot,
+          allChanges: { scope: 'uncommitted' },
+        }),
+        publishFileIndex: async (publication) => {
+          resetFlags.push(publication.resetDiffGenerations);
+          await collected.publishFileIndex(publication);
+        },
+      });
+      try {
+        await service.refreshSharedState(SESSION_ID, { forcePublish: true });
+        const firstPublished = collected.published.at(-1);
+        expect(Object.keys(firstPublished?.allChanges ?? {}).toSorted()).toEqual([
+          'base.txt',
+          'gone.txt',
+          'staged.txt',
+          'untracked.txt',
+        ]);
+        expect(firstPublished?.allChanges['committed.txt']).toBeUndefined();
+        expect(firstPublished?.allChangesDiffStats).toEqual({
+          files: 4,
+          allChange: { add: 3, del: 1 },
+        });
+
+        const batch = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+        expect(batch).toMatchObject({ status: 'ok', base: headBefore });
+        expect(entryPaths(batch)).toEqual(['base.txt', 'gone.txt', 'staged.txt', 'untracked.txt']);
+
+        const manifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+        expect(manifest.status).toBe('ok');
+        if (manifest.status !== 'ok') throw new Error('Expected manifest.');
+        expect(manifest.base).toBe(headBefore);
+        expect(manifest.entries.map((entry) => entry.path).toSorted()).toEqual([
+          'base.txt',
+          'gone.txt',
+          'staged.txt',
+          'untracked.txt',
+        ]);
+
+        expect(
+          await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'committed.txt' })
+        ).toMatchObject({
+          status: 'unavailable',
+          reason: 'not_changed',
+          message: 'This file has no uncommitted changes.',
+        });
+
+        resetFlags.length = 0;
+        await execFileAsync('git', ['update-ref', 'refs/remotes/origin/main', headBefore], {
+          cwd: workspaceRoot,
+        });
+        await service.refreshSharedState(SESSION_ID, { forcePublish: true });
+        expect(resetFlags.at(-1)).toBe(false);
+
+        await gitCommitAll(workspaceRoot, 'commit local work');
+        const headAfter = await gitText(workspaceRoot, 'rev-parse', 'HEAD');
+        await service.refreshSharedState(SESSION_ID, { forcePublish: true });
+        expect(resetFlags.at(-1)).toBe(true);
+        expect(collected.published.at(-1)?.allChanges).toEqual({});
+        expect(collected.published.at(-1)?.allChangesDiffStats).toEqual({
+          files: 0,
+          allChange: { add: 0, del: 0 },
+        });
+        const afterBatch = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+        expect(afterBatch).toMatchObject({ status: 'ok', base: headAfter });
+        expect(entryPaths(afterBatch)).toEqual([]);
+      } finally {
+        service.dispose();
+      }
+    });
+  });
+
+  it('preserves diff-store fallback outside Git and in unborn Git repos when default policy is uncommitted', async () => {
+    for (const mode of ['non-git', 'unborn'] as const) {
+      await withWorkspace(async (workspaceRoot) => {
+        if (mode === 'unborn') {
+          await execFileAsync('git', ['init'], { cwd: workspaceRoot });
+        }
+        await writeFile(path.join(workspaceRoot, 'note.txt'), 'before\nafter\n');
+        const diffStore = new CodeCollabV2DiffStore('workspace-v2', {
+          dbPath: path.join(workspaceRoot, 'diff-store.sqlite3'),
+        });
+        try {
+          const nowMs = Date.now();
+          await diffStore.recordTurnDiffs({
+            workspaceRoot,
+            ownerSessionId: SESSION_ID,
+            turnId: `turn-${mode}`,
+            capturedAtMs: nowMs,
+            recordedAtMs: nowMs,
+            events: [
+              {
+                path: path.join(workspaceRoot, 'note.txt'),
+                oldText: 'before\n',
+                newText: 'before\nafter\n',
+              },
+            ],
+          });
+          const collected = collectPublishedSharedStates();
+          const service = new CodeCollabV2Service({
+            resolveWorkspace: async () => ({
+              ok: true,
+              ownerSessionId: SESSION_ID,
+              workspaceRoot,
+              allChanges: { scope: 'uncommitted' },
+            }),
+            diffStore,
+            publishFileIndex: collected.publishFileIndex,
+          });
+          try {
+            await service.refreshSharedState(SESSION_ID, { forcePublish: true });
+            expect(collected.published.at(-1)?.allChanges).toEqual({
+              'note.txt': { diff: [1, 0] },
+            });
+            const batch = await service.openAllChangesDiff({ sessionId: SESSION_ID });
+            expect(batch).toMatchObject({ status: 'ok', base: 'diff-store' });
+            expect(entryPaths(batch)).toEqual(['note.txt']);
+            const manifest = await service.openDiffManifest({ sessionId: SESSION_ID });
+            expect(manifest).toMatchObject({ status: 'ok', base: 'diff-store' });
+            expect(
+              await service.openCurrentDiff({ sessionId: SESSION_ID, path: 'note.txt' })
+            ).toMatchObject({ status: 'ok', path: 'note.txt', add: 1, del: 0 });
+            expect(
+              await service.openAllChangesDiff({ sessionId: SESSION_ID, scope: 'uncommitted' })
+            ).toMatchObject({
+              status: 'unavailable',
+              reason: mode === 'non-git' ? 'not_a_git_worktree' : 'no_commits',
+            });
+          } finally {
+            service.dispose();
+          }
+        } finally {
+          await diffStore.close();
+        }
+      });
+    }
   });
 });

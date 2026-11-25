@@ -1,5 +1,8 @@
 import { text } from '@lody/ui/tokens/scales.stylex';
-import { sidebarSectionHeaderMarker, sidebarSectionMenuMarker } from './sidebar-section-markers.stylex';
+import {
+  sidebarSectionHeaderMarker,
+  sidebarSectionMenuMarker,
+} from './sidebar-section-markers.stylex';
 import { sidebar } from './sidebar.tokens.stylex';
 import {
   useId,
@@ -59,11 +62,10 @@ import { useStableNow } from '@/hooks/use-stable-now';
 import { formatCompactRelativeTime, type RelativeTimeValue } from '@/lib/format-relative-time';
 import { SidebarShortcutPill, useSidebarRowShortcut } from './sidebar-shortcut-pill';
 import { sidebarSurface } from './sidebar-surface';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
 import { themeColors } from '../style/theme-colors.stylex';
 import { themeDuration, themeEasing, themeRadius, themeSpace } from '../style/theme-scale.stylex';
-
 
 const sendSpin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
 
@@ -74,14 +76,44 @@ const rowParts = stylex.create({
   sectionEnd: { display: 'flex', flexShrink: 0, alignItems: 'center', marginRight: themeSpace[2] },
   sectionEndAction: { gap: themeSpace[1] },
   sectionEndMark: { marginRight: '9px' },
-  sectionMenu: { position: 'relative', display: 'flex', height: themeSpace[5], width: themeSpace[5], flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
-  sectionMenuWide: { width: themeSpace[6] },
-  sectionActivity: { display: 'inline-flex', alignItems: 'center', transitionProperty: 'opacity', transitionDuration: themeDuration[100] },
-  sectionActivityHide: {
-    opacity: { default: 1, [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 0, [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]: 0 },
-    pointerEvents: { default: 'auto', [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'none', [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]: 'none' },
+  sectionMenu: {
+    position: 'relative',
+    display: 'flex',
+    height: themeSpace[5],
+    width: themeSpace[5],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  sectionMenuOverlay: { position: 'absolute', inset: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  sectionMenuWide: { width: themeSpace[6] },
+  sectionActivity: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    transitionProperty: 'opacity',
+    transitionDuration: themeDuration[100],
+  },
+  sectionActivityHide: {
+    opacity: {
+      default: 1,
+      [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 0,
+      [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]:
+        0,
+    },
+    pointerEvents: {
+      default: 'auto',
+      [stylex.when.ancestor(':hover', sidebarSectionHeaderMarker)]: 'none',
+      [stylex.when.ancestor(':has(:focus-visible, [data-popup-open])', sidebarSectionMenuMarker)]:
+        'none',
+    },
+  },
+  sectionMenuOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   menuButton: {
     display: 'flex',
@@ -497,7 +529,7 @@ function MaskedPrCiIcon({
       viewBox="0 0 16 16"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={clsx(stylex.props(rowParts.prIcon).className, className)}
+      className={cn(stylex.props(rowParts.prIcon).className, className)}
       data-pr-ci-verdict={verdict}
       aria-hidden="true"
     >
@@ -563,7 +595,10 @@ export function SessionSendProgressRing({
   };
   return (
     <span
-{...withClassName(stylex.props(rowParts.sendRing, !known && rowParts.sendSpinning, xstyle), className)}
+      {...withClassName(
+        stylex.props(rowParts.sendRing, !known && rowParts.sendSpinning, xstyle),
+        className
+      )}
 
       data-session-send-ring={known ? 'determinate' : 'indeterminate'}
     >
@@ -700,9 +735,8 @@ export function SessionRowStatusIndicator({
       data-session-pr-merge-phase={prMergePhase ?? undefined}
       role={label ? 'img' : undefined}
       aria-label={label}
-title={label}
+      title={label}
       {...stylex.props(rowParts.statusMark)}
-
     >
       {icon}
     </div>
@@ -791,7 +825,7 @@ export function SidebarSessionTitleText({
 }) {
   const isUnsent = useSessionUnsentNewConversation(sessionId);
   return (
-    <span className={clsx(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
+    <span className={cn(className, isUnsent && !selected && SIDEBAR_UNSENT_TITLE_CLASS)}>
       {children}
     </span>
   );
@@ -863,7 +897,7 @@ export function SessionPrIcon({
         VerdictIcon={VerdictIcon}
         baseToneClassName={toneClassName}
         verdict={verdict}
-        className={clsx(
+        className={cn(
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
           compact && stylex.props(rowParts.fullPr).className,
           prStatus === 'merged' && stylex.props(rowParts.mergedPr).className,
@@ -872,7 +906,7 @@ export function SessionPrIcon({
       />
     ) : (
       <BaseIcon
-        className={clsx(
+        className={cn(
           stylex.props(compact ? rowParts.smallPr : rowParts.fullPr, rowParts.shrink).className,
           compact && SIDEBAR_PR_ICON_COMPACT_CLASS,
           toneClassName,
@@ -1022,7 +1056,7 @@ export function SessionRowOpenedByMenuItems({
  * layout and paint for rows scrolled out of the sidebar: a full-app restyle
  * measured 25ms before and 8.6ms after. Rows must keep drawing inside their own
  * box (focus rings are `ring-inset`), because the property also applies paint
- * containment. The rule lives in `tailwind/index.css` (`sidebar-row-list`).
+ * containment. The rule lives in `style/index.css` (`sidebar-row-list`).
  */
 export const SIDEBAR_ROW_LIST_CLASS = `${stylex.props(rowParts.rowList).className} sidebar-row-list`;
 
@@ -1106,7 +1140,7 @@ export function SessionRowMenuButton({
           })
         );
       }}
-      className={clsx(stylex.props(rowParts.menuButton).className, revealClassName)}
+      className={cn(stylex.props(rowParts.menuButton).className, revealClassName)}
     >
       <MoreHorizontal {...stylex.props(rowParts.fullPr)} />
     </button>
@@ -1184,7 +1218,7 @@ export function SidebarRowActionButton({
               event.stopPropagation();
               onConfirm();
             }}
-            className={clsx(stylex.props(rowParts.actionButton).className, revealClassName)}
+            className={cn(stylex.props(rowParts.actionButton).className, revealClassName)}
           >
             {icon}
           </button>
@@ -1309,7 +1343,7 @@ export function SidebarRowEndSlot({
         // actions and a folded group's mark centre their 14px icons in, so it
         // lines up with both instead of sitting 3px right of them.
         <span
-          className={clsx(
+          className={cn(
             stylex.props(
               rowParts.rest,
               showStatus && rowParts.restStatus,
@@ -1543,7 +1577,7 @@ export function GitHubOwnerIcon({
       src={getGitHubOwnerAvatarUrl(ownerHandle)}
       alt=""
       aria-hidden="true"
-      className={clsx(stylex.props(rowParts.ownerAvatar).className, className)}
+      className={cn(stylex.props(rowParts.ownerAvatar).className, className)}
       style={style}
       crossOrigin={crossOrigin}
       onLoad={onImageLoad}
@@ -1588,7 +1622,7 @@ export const SIDEBAR_ROW_TEXT_CLASS = stylex.props(sidebarTypography.row).classN
 export const SIDEBAR_CAPTION_TEXT_CLASS = stylex.props(sidebarTypography.caption).className;
 export const SIDEBAR_HELPER_TEXT_CLASS = stylex.props(sidebarTypography.group).className;
 export const SIDEBAR_CONTROL_TEXT_CLASS = stylex.props(sidebarTypography.control).className;
-export const SIDEBAR_GROUP_LABEL_CLASS = clsx(
+export const SIDEBAR_GROUP_LABEL_CLASS = cn(
   stylex.props(sidebarTypography.groupLabel).className,
   SIDEBAR_GROUP_LABEL_COLOR_CLASS
 );
@@ -1630,7 +1664,7 @@ export function SidebarSessionMetaLine({
   return (
     <div
       data-sidebar-session-meta=""
-      className={clsx(
+      className={cn(
         stylex.props(rowParts.metaLine).className,
         SIDEBAR_CAPTION_TEXT_CLASS,
         stylex.props(sidebarSurface.meta).className
@@ -1710,7 +1744,7 @@ export function SidebarSectionHeader({
             }
           : undefined
       }
-      className={clsx(
+      className={cn(
         stylex.props(rowParts.sectionButton, canToggle ? rowParts.clickable : rowParts.inert)
           .className,
         SIDEBAR_GROUP_LABEL_CLASS,
@@ -1721,7 +1755,7 @@ export function SidebarSectionHeader({
       <span {...stylex.props(rowParts.clipped)}>{label}</span>
       {canToggle ? (
         <ChevronDown
-          className={clsx(
+          className={cn(
             stylex.props(
               rowParts.sectionChevron,
               (collapsed || isMobile) && rowParts.visibleChevron,
@@ -1739,20 +1773,39 @@ export function SidebarSectionHeader({
     </div>
   );
   return (
-    <div data-sidebar-section-header="" {...withClassName(stylex.props(rowParts.treeRow, rowParts.treeFocus, sidebarSectionHeaderMarker), 'group')}>
+    <div
+      data-sidebar-section-header=""
+      {...withClassName(
+        stylex.props(rowParts.treeRow, rowParts.treeFocus, sidebarSectionHeaderMarker),
+        'group'
+      )}
+    >
       {wrapToggle ? wrapToggle(toggle) : toggle}
       {menu || trailingActivityMark || action ? (
         <div
-          {...stylex.props(rowParts.sectionEnd, Boolean(action) && rowParts.sectionEndAction, !action && (overlayMenuOnHover || trailingActivityMark) && rowParts.sectionEndMark)}
+          {...stylex.props(
+            rowParts.sectionEnd,
+            Boolean(action) && rowParts.sectionEndAction,
+            !action && (overlayMenuOnHover || trailingActivityMark) && rowParts.sectionEndMark
+          )}
         >
           {overlayMenuOnHover ? (
             <span
-              data-sidebar-section-menu="" {...stylex.props(rowParts.sectionMenu, Boolean(action) && rowParts.sectionMenuWide, sidebarSectionMenuMarker)}
+              data-sidebar-section-menu=""
+              {...stylex.props(
+                rowParts.sectionMenu,
+                Boolean(action) && rowParts.sectionMenuWide,
+                sidebarSectionMenuMarker
+              )}
             >
               {trailingActivityMark ? (
                 <span
                   onClick={canToggle ? handleToggle : undefined}
-                  {...stylex.props(rowParts.sectionActivity, canToggle && rowParts.clickable, rowParts.sectionActivityHide)}
+                  {...stylex.props(
+                    rowParts.sectionActivity,
+                    canToggle && rowParts.clickable,
+                    rowParts.sectionActivityHide
+                  )}
                 >
                   {trailingActivityMark}
                 </span>
@@ -1775,7 +1828,6 @@ export function SidebarSectionHeader({
           {action}
         </div>
       ) : null}
-
     </div>
   );
 }
@@ -1800,12 +1852,12 @@ export function SidebarListSkeleton({
 }) {
   return (
     <div
-      className={clsx(stylex.props(rowParts.listStack, xstyle).className, className)}
+      className={cn(stylex.props(rowParts.listStack, xstyle).className, className)}
       style={stylex.props(rowParts.listStack, xstyle).style}
       data-sidebar-loading-skeleton=""
     >
-      <div className={clsx(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>
-        <div className={clsx('group', stylex.props(rowParts.skeletonHeaderRow).className)}>
+      <div className={cn(stylex.props(rowParts.skeletonSection).className, sectionClassName)}>
+        <div className={cn('group', stylex.props(rowParts.skeletonHeaderRow).className)}>
           <div {...stylex.props(rowParts.skeletonHeader)}>
             {showHeaderIcon ? (
               <span {...stylex.props(rowParts.skeletonIconBox)}>

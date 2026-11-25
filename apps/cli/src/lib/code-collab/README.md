@@ -27,19 +27,26 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   stay retryable per file; turn evidence never queries current Git state.
   Whole-list manifests return descriptors and statistics. Remote patches are prepared
   by single-file reads when a viewer opens that file.
-  Ordinary Git All Changes uses the owner base; non-Git uses local diff evidence only when a
-  trustworthy base exists. It owns in-memory file-index state replacement and Flock
-  publish even when the scan itself ran in a worker. Full comparison totals, before
+  Ordinary Git All Changes uses the workspace `CodeCollabAllChangesPolicy`; non-Git and
+  unborn repositories use local diff evidence only when a trustworthy base exists. It owns
+  in-memory file-index state replacement and Flock publish even when the scan itself ran in
+  a worker. Local `code-collab/get-file-index` scans/builds the initial tree and All Changes
+  snapshot without awaiting Flock publication, then queues a force-reconcile of that fresh
+  in-memory state so a stale durable file-index Flock repairs in the background while Flock
+  remains the replication and renderer-invalidation path. Full comparison totals, before
   index trimming, feed `WorkspaceGitService.publishDiffStats` for all Sessions and
   Project Members; identical indexes do not suppress requested statistics reconciliation.
   [Statistics ownership](../../../../../.agents/notes/implemented/architecture/2026-11-14-workspace-diff-stat-ownership.md)
   explains the shared workspace meaning and why Git finalization cannot replace it.
-- `file-index-scan-core.ts` — shared scan and Git merge-base resolution. Tracking
-  lookup normalizes qualified local owner refs using `git/git-diff-base.ts`.
-  An owner without a recorded base (a direct
-  local checkout) compares against the remote default branch (`origin/HEAD`) before
-  `main`/`master`, so an abandoned `main` cannot turn repository history into session
-  changes. Batch diffs pin the resolved commit for their list and inline snapshots;
+- `file-index-scan-core.ts` — shared scan, `CodeCollabAllChangesPolicy`, and Git diff-base
+  resolution (`resolveGitDiffBase` and `resolveGitDiffBaseVersion`). Worktree Sessions
+  receive `{ scope: 'branch', baseBranch? }` and resolve `merge-base(baseRef, HEAD)` via
+  `git/git-diff-base.ts` (falling back to `origin/HEAD` before `main`/`master` when no base
+  is recorded). Non-worktree Sessions (direct local checkouts, plain chats, and extra
+  `additional`/`link` roots) receive `{ scope: 'uncommitted' }` from `message-handler.ts`
+  and compare directly against `HEAD` (still falling back to `diff-store` outside Git or
+  before the first commit), so committed branch history never appears as session changes.
+  Batch diffs and manifests pin the resolved commit once for their list and inline snapshots;
   refreshed refs take effect on the next read.
 - `code-collab-v2-diff-store.ts` / `turn-diff-store-worker.ts` — CLI adapter and the
   mandatory production Worker for local ACP turn evidence. The adapter returns
@@ -52,8 +59,8 @@ See the [decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-21-c
   Terminal-only edits remain visible in current All Changes. See the
   [turn evidence decision](../../../../../.agents/notes/implemented/architecture/2026-10-31-remote-diff-transport.md#sources-and-authority).
 - `file-index-scan-worker.ts` / `file-index-scan-pool.ts` — off-main-thread directory
-  scanning and full file-index state refresh. For Git worktrees the worker computes
-  Git-backed All Changes; for non-Git/no-Git workspaces it first requests
+  scanning and full file-index state refresh. For Git worktrees with a resolved commit the
+  worker computes Git-backed All Changes; for non-Git or unborn workspaces it requests
   service-provided All Changes, then `code-collab-v2-service.ts` supplies diff-store
   state for the second worker call.
 - `workspace-watch-coordinator.ts` / `workspace-watch-worker.ts` /

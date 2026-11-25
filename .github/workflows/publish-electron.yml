@@ -215,6 +215,14 @@ jobs:
           SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: node apps/electron/sparkle-signing.mjs key-pair
+      - name: Prepare macOS Passkey credentials and native addons
+        if: matrix.target == 'mac' && github.ref_name == 'release'
+        env:
+          MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: bash .github/scripts/prepare-macos-passkey.sh
       - name: Build Electron package (${{ matrix.target }})
         env:
           CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
@@ -232,6 +240,10 @@ jobs:
           else
             corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
           fi
+      - name: Verify signed macOS Passkey archives (production)
+        if: matrix.target == 'mac' && github.ref_name == 'release'
+        shell: bash
+        run: bash .github/scripts/verify-macos-passkey-archive.sh
       - name: Generate signed Sparkle appcast and deltas (staging)
         if: matrix.target == 'mac' && github.ref_name != 'release'
         uses: ./.github/actions/generate-sparkle-appcast
@@ -340,7 +352,11 @@ jobs:
           APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
         if: always() && matrix.target == 'mac'
         shell: bash
-        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8" \
+            "${RUNNER_TEMP}/macos-passkey.provisionprofile" \
+            "${RUNNER_TEMP}/macos-passkey.provisionprofile.plist"
     needs:
       - validate-target
   upload-electron-to-r2:

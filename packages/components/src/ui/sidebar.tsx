@@ -15,7 +15,7 @@ import {
 } from '../style/theme-scale.stylex';
 
 import { useIsMobile } from '@/hooks/use-mobile';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { field } from '@lody/ui/field/field.tokens.stylex';
@@ -576,7 +576,7 @@ function SidebarProvider({
               ...style,
             } as React.CSSProperties
           }
-          className={clsx(stylex.props(styles.wrapper, xstyle).className, className)}
+          className={cn(stylex.props(styles.wrapper, xstyle).className, className)}
           {...props}
         >
           {children}
@@ -606,7 +606,7 @@ function Sidebar({
     return (
       <div
         data-slot="sidebar"
-        className={clsx(stylex.props(styles.uncollapsed, xstyle).className, className)}
+        className={cn(stylex.props(styles.uncollapsed, xstyle).className, className)}
         {...props}
       >
         {children}
@@ -675,7 +675,7 @@ function Sidebar({
       />
       <div
         data-slot="sidebar-container"
-        className={clsx(
+        className={cn(
           stylex.props(
             styles.container,
             side === 'left' ? styles.leading : styles.trailing,
@@ -720,7 +720,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       variant="ghost"
       size="small"
       icon
-      className={clsx(className)}
+      className={cn(className)}
       onClick={(event) => {
         onClick?.(event);
         toggleSidebar();
@@ -748,7 +748,7 @@ function SidebarRail({
       tabIndex={-1}
       onClick={toggleSidebar}
       title="Toggle Sidebar"
-      className={clsx(stylex.props(styles.rail, styles.railOffcanvas, xstyle).className, className)}
+      className={cn(stylex.props(styles.rail, styles.railOffcanvas, xstyle).className, className)}
       {...props}
     />
   );
@@ -762,7 +762,7 @@ function SidebarInset({
   return (
     <main
       data-slot="sidebar-inset"
-      className={clsx(stylex.props(styles.inset, xstyle).className, className)}
+      className={cn(stylex.props(styles.inset, xstyle).className, className)}
       {...props}
     />
   );
@@ -790,7 +790,7 @@ function SidebarHeader({
     <div
       data-slot="sidebar-header"
       data-sidebar="header"
-      className={clsx(stylex.props(styles.stack, xstyle).className, className)}
+      className={cn(stylex.props(styles.stack, xstyle).className, className)}
       {...props}
     />
   );
@@ -805,7 +805,7 @@ function SidebarFooter({
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={clsx(stylex.props(styles.stack, xstyle).className, className)}
+      className={cn(stylex.props(styles.stack, xstyle).className, className)}
       {...props}
     />
   );
@@ -832,7 +832,7 @@ function SidebarContent({
     <div
       data-slot="sidebar-content"
       data-sidebar="content"
-      className={clsx(stylex.props(styles.content, xstyle).className, className)}
+      className={cn(stylex.props(styles.content, xstyle).className, className)}
       {...props}
     />
   );
@@ -847,7 +847,7 @@ function SidebarGroup({
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={clsx(stylex.props(styles.group, xstyle).className, className)}
+      className={cn(stylex.props(styles.group, xstyle).className, className)}
       {...props}
     />
   );
@@ -865,7 +865,7 @@ function SidebarGroupLabel({
     <Comp
       data-slot="sidebar-group-label"
       data-sidebar="group-label"
-      className={clsx(
+      className={cn(
         stylex.props(styles.label, styles.focus, styles.glyphs, xstyle).className,
         className
       )}
@@ -886,7 +886,7 @@ function SidebarGroupAction({
     <Comp
       data-slot="sidebar-group-action"
       data-sidebar="group-action"
-      className={clsx(
+      className={cn(
         stylex.props(styles.action, styles.groupAction, styles.focus, styles.glyphs, xstyle)
           .className,
         className
@@ -905,7 +905,7 @@ function SidebarGroupContent({
     <div
       data-slot="sidebar-group-content"
       data-sidebar="group-content"
-      className={clsx(stylex.props(styles.groupContent, xstyle).className, className)}
+      className={cn(stylex.props(styles.groupContent, xstyle).className, className)}
       {...props}
     />
   );
@@ -920,7 +920,7 @@ function SidebarMenu({
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={clsx(stylex.props(styles.menu, xstyle).className, className)}
+      className={cn(stylex.props(styles.menu, xstyle).className, className)}
       {...props}
     />
   );
@@ -935,7 +935,7 @@ function SidebarMenuItem({
     <li
       data-slot="sidebar-menu-item"
       data-sidebar="menu-item"
-      className={clsx(stylex.props(styles.relative, xstyle).className, className)}
+      className={cn(stylex.props(styles.relative, xstyle).className, className)}
       {...props}
     />
   );
@@ -967,7 +967,7 @@ function SidebarMenuButton({
       data-sidebar="menu-button"
       data-size={size}
       data-active={isActive}
-      className={clsx(
+      className={cn(
         stylex.props(
           styles.menuButton,
           styles.focus,
@@ -1031,7 +1031,7 @@ function SidebarMenuAction({
     <Comp
       data-slot="sidebar-menu-action"
       data-sidebar="menu-action"
-      className={clsx(
+      className={cn(
         stylex.props(
           styles.action,
           styles.menuAction,
@@ -1056,7 +1056,7 @@ function SidebarMenuBadge({
     <div
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
-      className={clsx(stylex.props(styles.badge, styles.menuPosition, xstyle).className, className)}
+      className={cn(stylex.props(styles.badge, styles.menuPosition, xstyle).className, className)}
       {...props}
     />
   );
@@ -1080,7 +1080,7 @@ function SidebarMenuSkeleton({
     <div
       data-slot="sidebar-menu-skeleton"
       data-sidebar="menu-skeleton"
-      className={clsx(stylex.props(styles.skeleton, xstyle).className, className)}
+      className={cn(stylex.props(styles.skeleton, xstyle).className, className)}
       {...props}
     >
       {showIcon && <Skeleton width={16} height={16} data-sidebar="menu-skeleton-icon" />}
@@ -1107,7 +1107,7 @@ function SidebarMenuSub({
     <ul
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
-      className={clsx(stylex.props(styles.sub, xstyle).className, className)}
+      className={cn(stylex.props(styles.sub, xstyle).className, className)}
       {...props}
     />
   );
@@ -1122,7 +1122,7 @@ function SidebarMenuSubItem({
     <li
       data-slot="sidebar-menu-sub-item"
       data-sidebar="menu-sub-item"
-      className={clsx(stylex.props(styles.relative, xstyle).className, className)}
+      className={cn(stylex.props(styles.relative, xstyle).className, className)}
       {...props}
     />
   );
@@ -1149,7 +1149,7 @@ function SidebarMenuSubButton({
       data-sidebar="menu-sub-button"
       data-size={size}
       data-active={isActive}
-      className={clsx(
+      className={cn(
         stylex.props(
           styles.subButton,
           styles.focus,

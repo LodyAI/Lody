@@ -236,18 +236,16 @@ export function E2eeSecurityPanel({
       <CompactSection title={t('e2ee.security.title')}>
         <CompactRow
           leading={
-            <Glyph tone={state ? 'secure' : 'attention'}>
-              {state ? <ShieldCheck size={16} /> : <ShieldQuestion size={16} />}
+            <Glyph tone={cardOpensConsole ? 'attention' : 'secure'}>
+              {cardOpensConsole ? <ShieldQuestion size={16} /> : <ShieldCheck size={16} />}
             </Glyph>
           }
-          label={t(
-            state || cardOpensConsole ? 'e2ee.security.current' : 'e2ee.security.identityMissing'
-          )}
+          label={t('e2ee.security.current')}
         >
           {/* The primary step leads, so a wrapped row on a phone never strands the
               help icon in the glyph column. */}
           {/* Adding a device is the everyday task; everything else is one step further. */}
-          {onOpenConsole && state && (
+          {onOpenConsole && !cardOpensConsole && (
             <Button
               data-testid="e2ee-security-add-device"
               disabled={busy}
@@ -257,15 +255,11 @@ export function E2eeSecurityPanel({
             </Button>
           )}
           {onOpenConsole && !cardOpensConsole && (
-            <Button
-              variant={state ? 'secondary' : 'primary'}
-              disabled={busy}
-              onClick={() => onOpenConsole()}
-            >
+            <Button variant="secondary" disabled={busy} onClick={() => onOpenConsole()}>
               {t('e2ee.security.openConsole')}
             </Button>
           )}
-          {state && (
+          {!cardOpensConsole && (
             <Tooltip.Root>
               <Tooltip.Trigger
                 render={

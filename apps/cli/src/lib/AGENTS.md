@@ -11,6 +11,8 @@ Credential JSON publication creates an exclusive 0600 temporary file and atomica
 replaces its destination on POSIX. New state roots use 0700; existing custom
 directories keep their permissions. Windows retains direct file writes.
 
+Before changing `machine-identity.ts`, `credentials-file.ts`, or `machine-identity-restore.ts`, read the [machine identity rules](../../../../.agents/docs/cli-lib-machine-identity.md): resolution precedence, default-dir anchor isolation, probe failure containment, telemetry read-only ordering, and offline/online restore boundaries.
+
 ## Composition and transports
 
 - Encrypted local RPC allows iOS simulators; `session/dispatch-turn` stays blocked.
@@ -102,8 +104,8 @@ never pushed to renderers as local room health.
   cached sample once pressure appears; re-check briefly before failing a turn; bound
   evictions per call. The threshold is a safety MARGIN, not "what a turn needs".
   [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md). Idle counts
-  native work: never clean `running`, cap background waits. Post-turn output resets
-  it only for `sessionActivity` agents.
+  native work: never clean `running`, cap background waits. Visible post-turn output
+  resets idle and pulses presence.
   Eligibility read failures retain only that session; foreground reclamation waits at most 10s.
   Candidates include every cached Session doc (`combineGCSessionSources`): an untracked
   doc idles from its last hand-out, unloads with status preserved, and GC checks peek

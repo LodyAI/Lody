@@ -64,15 +64,26 @@ import {
 } from '../src/components/onboarding/onboarding-overlay';
 
 import { getDesktopOnboardingSteps } from '../src/components/onboarding/onboarding-steps';
+import { LoginScreen } from '../src/components/onboarding/screens/login-screen';
 import { ProjectsScreen } from '../src/components/onboarding/screens/projects-screen';
 import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
 import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
 import { initI18n } from '../src/i18n';
 import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
 import { PlatformContext } from '@lody/platform/react';
-import { createStaticStore, type CloudApi } from '@lody/platform';
+import {
+  createStaticStore,
+  createStore as createPlatformStore,
+  type CloudApi,
+  type PlatformSessionState,
+} from '@lody/platform';
 import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
-import { userAtom } from '../src/atoms';
+import {
+  electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
+  electronLoginPhaseAtom,
+  userAtom,
+} from '../src/atoms';
 import { ErrorBoundary } from '../src/components/error-boundary';
 
 const workspaceId = 'workspace-1' as WorkspaceId;
@@ -489,5 +500,79 @@ describe('desktop onboarding flow', () => {
       await Promise.resolve();
     });
     expect(retry).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces main-process browser sign-in failures during onboarding and stays retryable while waiting', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const sessionState = createPlatformStore<PlatformSessionState>({ status: 'unauthenticated' });
+    const detail = 'safeStorage.isEncryptionAvailable() returned false';
+    const signInSocial = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(async () => {
+        store.set(electronLoginPhaseAtom, 'error');
+        store.set(electronLoginErrorAtom, 'secure_storage_unavailable');
+        store.set(electronLoginErrorDetailAtom, detail);
+      })
+      .mockImplementationOnce(async () => {
+        sessionState.set({ status: 'loading' });
+        store.set(electronLoginPhaseAtom, 'waiting');
+        store.set(electronLoginErrorAtom, null);
+        store.set(electronLoginErrorDetailAtom, null);
+      });
+    const base = createRootRoute({ component: Outlet });
+    const router = createRouter({
+      history: createMemoryHistory({ initialEntries: ['/onboarding'] }),
+      context: { authClient: { signIn: { social: signInSocial } } },
+      routeTree: base.addChildren([
+        createRoute({
+          getParentRoute: () => base,
+          path: '/onboarding',
+          component: () => <LoginScreen onBack={vi.fn()} onNext={vi.fn()} />,
+        }),
+      ]),
+    });
+
+    await act(async () => {
+      await router.load();
+      root?.render(
+        <PlatformContext.Provider value={{ ...TEST_CLOUD_PLATFORM, session: sessionState }}>
+          <Provider store={store}>
+            <RouterProvider router={router} />
+          </Provider>
+        </PlatformContext.Provider>
+      );
+    });
+
+    await act(async () => {
+      findButton(container, 'Continue in browser').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const alertText = container.querySelector('[role="alert"]')?.textContent;
+    expect(alertText).toContain(
+      "Lody can't save your sign-in because this system's secure storage is unavailable."
+    );
+    expect(alertText).toContain(`Details: ${detail}`);
+    expect(container.textContent).not.toContain('Complete sign-in in the browser to continue.');
+    expect(consoleError).toHaveBeenCalledWith(
+      '[onboarding] Failed to sign in with browser:',
+      'secure_storage_unavailable',
+      detail
+    );
+    const retryButton = findButton(container, 'Continue in browser');
+    expect(retryButton.disabled).toBe(false);
+
+    await act(async () => {
+      retryButton.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(signInSocial).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).toContain('Complete sign-in in the browser to continue.');
+    expect(findButton(container, 'Open browser again').disabled).toBe(false);
+    expect(findButton(container, 'Back').disabled).toBe(false);
   });
 });

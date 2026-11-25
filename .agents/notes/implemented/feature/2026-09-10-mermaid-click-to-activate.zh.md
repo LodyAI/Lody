@@ -56,7 +56,7 @@ Chromium 通过 Playwright 驱动真实的 `MermaidStyleReview` story。静息�
 对本次改动的评审发现了四个缺陷与一条过时注释；它们都在同一个 pull request 中修复，上文未查明的成因
 现在也已定位。
 
-描边的样式表规则被 `tailwind/index.css` 中全局的
+描边的样式表规则被 `style/index.css` 中全局的
 `*:focus, *:focus-visible { outline: none !important }` 压过——激活会聚焦该图，而特异性赢不过
 `important`。因此内联 `important` 是必要的，而不只是权宜之计。曾尝试把描边移回样式表，在找到那条规则
 之前于 Chromium 中复现了失败（`outline: 0px none`）。静息态的 `zoom-in` 光标同样并非无法解释：它来自

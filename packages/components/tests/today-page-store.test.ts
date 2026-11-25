@@ -238,19 +238,27 @@ describe('Today page store', () => {
 describe('Today page store cache', () => {
   function cacheHarness(
     registeredIds: string[] = [],
-    options: { failRegisteredCheck?: boolean } = {}
+    options: {
+      failRegisteredCheck?: boolean;
+      beforeOpen?: (id: string) => Promise<void>;
+    } = {}
   ) {
     const opened: string[] = [];
     const unloaded: string[] = [];
+    const joined: string[] = [];
     const meta = new Map<string, unknown>(registeredIds.map((id) => [id, {}]));
     let listener: ((event: { docId: string; exists: boolean }) => void) | undefined;
     const cache = createTodayPageStoreCache({
       repo: {
         openDoc: async (id) => {
+          await options.beforeOpen?.(id);
           opened.push(id);
           return {
             doc: new LoroDoc(),
-            joinRoom: async () => ({ room: { unsubscribe: () => {} }, synced: Promise.resolve() }),
+            joinRoom: async () => {
+              joined.push(id);
+              return { room: { unsubscribe: () => {} }, synced: Promise.resolve() };
+            },
           };
         },
         isRegistered: async (id) => {
@@ -280,9 +288,16 @@ describe('Today page store cache', () => {
     });
     return {
       cache,
+      meta,
       opened,
       unloaded,
-      emit: (docId: string, exists = true) => listener?.({ docId, exists }),
+      joined,
+      isObserving: () => listener !== undefined,
+      emit: (docId: string, exists = true) => {
+        if (exists) meta.set(docId, {});
+        else meta.delete(docId);
+        listener?.({ docId, exists });
+      },
     };
   }
 
@@ -333,5 +348,48 @@ describe('Today page store cache', () => {
     await flush();
     expect(h.unloaded).toEqual([day('2026-11-18')]);
     expect(h.cache.peek(day('2026-11-20'))).toBeDefined();
+  });
+
+  it('joins a page whose peer registration arrived while openDoc was in flight', async () => {
+    let finishOpen = () => {};
+    const opening = new Promise<void>((resolve) => {
+      finishOpen = resolve;
+    });
+    const h = cacheHarness([], { beforeOpen: () => opening });
+    const target = day('2026-11-24');
+    const stop = h.cache.observeDates('u1', () => {});
+    const pending = h.cache.acquire(target);
+    h.emit(target, true);
+    finishOpen();
+    await pending;
+    await flush();
+    expect(h.joined).toEqual([target]);
+    stop();
+  });
+
+  it('joins a held page registered by a peer even when no date observer is mounted', async () => {
+    const h = cacheHarness();
+    const target = day('2026-11-24');
+    await h.cache.acquire(target);
+    await flush();
+    expect(h.joined).toEqual([]);
+    h.emit(target, true);
+    await flush();
+    expect(h.joined).toEqual([target]);
+    h.cache.releaseRef(target);
+    expect(h.isObserving()).toBe(false);
+  });
+
+  it('joins a warm idle page registered while no observer was active upon re-acquire', async () => {
+    const h = cacheHarness();
+    const target = day('2026-11-24');
+    await h.cache.acquire(target);
+    h.cache.releaseRef(target);
+    expect(h.isObserving()).toBe(false);
+    h.meta.set(target, {});
+    await h.cache.acquire(target);
+    await flush();
+    expect(h.joined).toEqual([target]);
+    h.cache.releaseRef(target);
   });
 });

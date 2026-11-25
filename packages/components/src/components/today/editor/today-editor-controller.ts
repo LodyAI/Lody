@@ -6,6 +6,7 @@ import {
   COMMAND_PRIORITY_HIGH,
   COPY_COMMAND,
   CUT_COMMAND,
+  DRAGSTART_COMMAND,
   KEY_DOWN_COMMAND,
   PASTE_COMMAND,
   REDO_COMMAND,
@@ -200,6 +201,14 @@ export class TodayEditorController {
       this.editor.registerCommand(
         KEY_DOWN_COMMAND,
         (event) => this.onKeyDown(event),
+        COMMAND_PRIORITY_HIGH
+      ),
+      // A mention chip drags its conversation out (`TodaySessionMention`); the editor
+      // must not write its text selection into that transfer as a text drag source.
+      this.editor.registerCommand(
+        DRAGSTART_COMMAND,
+        (event) =>
+          event.target instanceof Element && event.target.closest('[data-today-mention]') !== null,
         COMMAND_PRIORITY_HIGH
       ),
       this.editor.registerCommand(

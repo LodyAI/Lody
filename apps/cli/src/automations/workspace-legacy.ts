@@ -260,23 +260,30 @@ export async function createAutomationWorkspaceLegacy(options: {
         return { value: 'unknown', reason: `condition_unsupported:${spec.kind}` };
     }
   };
-  const recheck = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
+  const recheckAdmission = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
     const authorization = await actions.authorize(receipt);
-    if (authorization.value !== 'yes') return authorization;
+    if (authorization.value !== 'yes' || authorization.reason === 'archive_already_committed')
+      return authorization;
     if (receipt.intent.guard) {
       const guard = await condition(receipt.intent.guard, receipt);
       if (guard.value !== 'yes') return { ...guard, reason: `guard:${guard.reason}` };
     }
+    return { value: 'yes', reason: 'authorized' };
+  };
+  const recheck = async (receipt: AutomationReceipt): Promise<ConditionObservation> => {
+    const admission = await recheckAdmission(receipt);
+    if (admission.value !== 'yes' || admission.reason === 'archive_already_committed')
+      return admission;
     if (receipt.intent.condition && !['queued', 'running', 'unknown'].includes(receipt.state)) {
       const predicate = await condition(receipt.intent.condition, receipt);
       if (predicate.value !== 'yes') return predicate;
     }
-    return { value: 'yes', reason: 'authorized' };
+    return admission;
   };
   const actions = new AutomationSessionActionsLegacy({
     ...options,
     ledger,
-    condition: recheck,
+    admission: recheckAdmission,
     capacity: (bindingId, modelId, receipt) =>
       condition(
         {
@@ -418,7 +425,16 @@ export async function createAutomationWorkspaceLegacy(options: {
       )
     );
   const deliveryStatusKey = (status: Omit<SessionAutoDelivery, 'updatedAt'> | null | undefined) =>
-    status ? JSON.stringify([status.state, status.attempt, status.reason, status.prUrl]) : '';
+    status
+      ? JSON.stringify([
+          status.state,
+          status.attempt,
+          status.reason,
+          status.prUrl,
+          status.prIndex,
+          status.prTotal,
+        ])
+      : '';
   /** Auto delivery reads observations already in this ledger and the Session metadata. */
   const advanceDeliveries = async (now: number) => {
     for (const rule of ledger.rules()) {
@@ -452,10 +468,11 @@ export async function createAutomationWorkspaceLegacy(options: {
             step: decision.step?.step,
             ...(pr
               ? {
+                  provider: pr.provider,
                   head: pr.headSha,
                   status: pr.status,
-                  ci: pr.ciState,
-                  merge: pr.mergeState,
+                  checks: pr.checks,
+                  mergeability: pr.mergeability,
                   observedAt: pr.observedAt,
                 }
               : {}),
@@ -732,7 +749,11 @@ export async function createAutomationWorkspaceLegacy(options: {
             for (const receipt of lastStep
               ? ledger.eventReceipts(DELIVERY_EVENT_SOURCE, lastStep.eventId)
               : [])
-              if (['accepted', 'waiting', 'resolved', 'blocked'].includes(receipt.state))
+              if (
+                ['accepted', 'waiting', 'resolved', 'blocked', 'submitting', 'queued'].includes(
+                  receipt.state
+                )
+              )
                 await runtime.runPromise(service.cancel(receipt.id));
           }
           await runtime.runPromise(service.wake);
@@ -824,6 +845,20 @@ export async function createAutomationWorkspaceLegacy(options: {
         ),
       workflowObservationOwners: () =>
         ledger.wantsReadSessions('github.workflowRuns') as Set<SessionId>,
+      deliveryObservationOwners: () => {
+        const owners = new Set<SessionId>();
+        for (const rule of ledger.rules()) {
+          if (
+            rule.enabled &&
+            rule.scope.sessionId &&
+            rule.handler.kind === 'policy' &&
+            rule.handler.policy === 'auto-deliver' &&
+            rule.ownerMachineId === auth.machineId
+          )
+            owners.add(rule.scope.sessionId as SessionId);
+        }
+        return owners;
+      },
       recordWorkflowObservations: ((meta, repository, headSha, runs, gap, observedAt) =>
         observe(async () => {
           observeWorkflows(ledger, meta, repository, headSha, runs, gap, observedAt);

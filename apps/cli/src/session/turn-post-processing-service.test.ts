@@ -411,7 +411,7 @@ describe('TurnPostProcessingService', () => {
         ok: true,
         ownerSessionId: sessionId,
         workspaceRoot: root,
-        allChangesBaseBranch: 'main',
+        allChanges: { scope: 'branch', baseBranch: 'main' },
       }),
       publishFileIndex: async (state) => {
         if (state.persistAllChangesDiffStats) await workspace.publishDiffStats(state);

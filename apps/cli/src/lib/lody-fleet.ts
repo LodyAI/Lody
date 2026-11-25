@@ -1356,6 +1356,11 @@ export class LodyFleet {
           logger: workspaceLogger,
           workflowObservationOwners: () =>
             this.runtimes.get(workspace.id)?.automations?.workflowObservationOwners() ?? new Set(),
+          deliveryObservationOwners: () =>
+            this.runtimes.get(workspace.id)?.automations?.deliveryObservationOwners() ?? new Set(),
+          onPullRequestMetaWritten: async () => {
+            await this.runtimes.get(workspace.id)?.automations?.wake();
+          },
           recordWorkflowObservations: async (...args) => {
             await this.runtimes.get(workspace.id)?.automations?.recordWorkflowObservations(...args);
           },
@@ -2949,6 +2954,7 @@ export class LodyFleet {
           ok: true,
           type: 'local-project/list-global-skills',
           result: await this.localProjectControlService.listGlobalSkills({
+            magpieGatewayUrl: message.magpieGatewayUrl,
             knownFingerprint: message.knownFingerprint,
           }),
         };

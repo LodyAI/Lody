@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   useCallback,
   useEffect,
@@ -375,7 +375,7 @@ export function SwipeActionRow({
             <button
               key={action.key}
               type="button"
-              className={clsx(
+              className={cn(
                 stylex.props(
                   styles.action,
                   isDragging ? styles.dragColors : styles.actionTransition,

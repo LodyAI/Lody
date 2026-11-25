@@ -228,7 +228,7 @@ export function computeMobileHint(error: unknown): string {
 
 /**
  * Styled, copy/reload-capable boot-failure UI for the Capacitor shell. Reuses
- * the shared pure-DOM renderer (no React/Tailwind dependency) so it works even
+ * the shared pure-DOM renderer (no React/stylesheet dependency) so it works even
  * when the app bundle has failed to mount. Registered with the inline boot guard
  * in index.html, which calls it on any unrecoverable boot failure.
  */

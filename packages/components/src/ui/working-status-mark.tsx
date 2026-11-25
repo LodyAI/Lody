@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { themeSpace } from '../style/theme-scale.stylex';
 
@@ -65,7 +65,7 @@ export function WorkingStatusMark({ working, unread, className, xstyle }: Workin
   }
   if (unread) {
     const sx = stylex.props(styles.unread, xstyle);
-    return <span data-session-unread-dot="" {...sx} className={clsx(sx.className, className)} />;
+    return <span data-session-unread-dot="" {...sx} className={cn(sx.className, className)} />;
   }
   return null;
 }

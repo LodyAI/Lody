@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 
 const styles = stylex.create({
   root: {
@@ -11,5 +11,5 @@ const styles = stylex.create({
 });
 
 export function OnboardingBackdrop({ className }: { className?: string }) {
-  return <div aria-hidden className={clsx(stylex.props(styles.root).className, className)} />;
+  return <div aria-hidden className={cn(stylex.props(styles.root).className, className)} />;
 }

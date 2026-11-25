@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
@@ -187,7 +187,7 @@ function TableGallery({ width }: { width: number }) {
   return (
     // The preview pins html/body/#storybook-root at overflow:hidden to match
     // production, so the gallery owns its own scroller.
-    <div className={clsx(stylex.props(storyLayout.stack).className, 'scrollbar-pro')}>
+    <div className={cn(stylex.props(storyLayout.stack).className, 'scrollbar-pro')}>
       {SCENARIOS.map(([title, markdown]) => (
         <section key={title} {...stylex.props(storyLayout.stack2)}>
           <div {...stylex.props(storyLayoutStyles.caption)}>{title}</div>

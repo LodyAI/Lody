@@ -3,6 +3,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { magpieProfileDirectory } from '../agent/magpie-profile';
 import { LocalProjectControlService } from './local-project-control-service';
 import type { Logger } from '../utils/logger';
 
@@ -41,6 +43,51 @@ async function createDirectorySymlink(targetPath: string, linkPath: string): Pro
 }
 
 describe('LocalProjectControlService file browsing security', () => {
+  it('scans just the two Codex entries for the requested Magpie gateway', async () => {
+    const homePath = await createTempProject();
+    vi.stubEnv('LODY_DATA_DIR', join(homePath, '.lody-test'));
+    const service = new LocalProjectControlService(createLogger());
+    const gateway = 'http://127.0.0.1:3425';
+    try {
+      for (const name of ['magpie-skills', 'magpie-setup', 'personal']) {
+        const dir = join(homePath, '.codex/skills', name);
+        await mkdir(dir, { recursive: true });
+        await writeFile(join(dir, 'SKILL.md'), `---\nname: ${name}\n---\nSynthetic.`);
+      }
+      const normal = await service.listGlobalSkills({ homePath });
+      expect(normal.groups).toEqual([]);
+      const scoped = await service.listGlobalSkills({
+        homePath,
+        magpieGatewayUrl: gateway,
+        knownFingerprint: normal.contentFingerprint,
+      });
+      expect(
+        scoped.groups.flatMap((group) => group.skills.map((skill) => skill.absolutePath))
+      ).toEqual(
+        ['magpie-setup', 'magpie-skills'].map((name) =>
+          join(homePath, '.codex/skills', name, 'SKILL.md')
+        )
+      );
+      const profile = magpieProfileDirectory(
+        join(getLodyDataDir(undefined, homePath), 'magpie'),
+        gateway,
+        'codex'
+      );
+      const local = join(profile, 'skills', 'magpie-setup');
+      await mkdir(local, { recursive: true });
+      await writeFile(join(local, 'SKILL.md'), 'Profile-specific setup.');
+      const changed = await service.listGlobalSkills({
+        homePath,
+        magpieGatewayUrl: gateway,
+        knownFingerprint: scoped.contentFingerprint,
+      });
+      expect(changed.groups[0]?.skills[0]?.absolutePath).toBe(join(local, 'SKILL.md'));
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(homePath, { recursive: true, force: true });
+    }
+  });
+
   it('blocks direct .git directory browsing and file reads', async () => {
     const rootPath = await createTempProject();
     try {

@@ -82,7 +82,7 @@ and unit-tested for reversibility, notch bounding, and the anchored point.
 
 All 16 tests in that file pass, as do the 105 in `tests/markdown*`, and
 `packages/components` typechecks. The three CSS overrides compile to `!important`
-declarations, checked by running the Tailwind CLI over `src/tailwind/index.css`.
+declarations, checked by running the Tailwind CLI over `src/style/index.css`.
 
 Chromium drove the real `MermaidStyleReview` story through Playwright against a
 local Storybook, with the story given a scroll container because the Storybook

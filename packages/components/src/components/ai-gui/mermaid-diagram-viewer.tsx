@@ -12,7 +12,7 @@ import { Maximize, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeSpace } from '../../style/theme-scale.stylex';
 import { WINDOW_CAPTION_CLEAR_TOP } from '@/ui/window-drag-region';
 
@@ -26,7 +26,7 @@ import { WINDOW_CAPTION_CLEAR_TOP } from '@/ui/window-drag-region';
  * recurring here:
  *
  * 1. Controls sit in a bar padded by the `--safe-area-*` variables (the same
- *    ones `tailwind/index.css` maps to `env(safe-area-inset-*)`), never at a
+ *    ones `style/index.css` maps to `env(safe-area-inset-*)`), never at a
  *    fixed offset from the viewport edge. Its top also clears the Windows
  *    caption-button strip, which the OS draws above every web layer.
  * 2. There is always more than one exit: the close button, a click anywhere
@@ -773,7 +773,7 @@ function OpenMermaidDiagramViewer({
       <div
         ref={scrollRef}
         data-testid="mermaid-diagram-viewer-surface"
-        className={clsx('scrollbar-pro', stylex.props(styles.surface).className)}
+        className={cn('scrollbar-pro', stylex.props(styles.surface).className)}
         style={{
           paddingBottom: SAFE_AREA_BOTTOM,
           paddingLeft: SAFE_AREA_LEFT,

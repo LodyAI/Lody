@@ -398,6 +398,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       type: 'local-project/list-global-skills',
       machineId: remoteMachineId,
       workspaceId,
+      magpieGatewayUrl: 'http://127.0.0.1:3425',
       knownFingerprint: 'fp',
     });
     expect(sent).toEqual([

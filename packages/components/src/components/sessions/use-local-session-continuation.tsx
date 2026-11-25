@@ -93,6 +93,8 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
+  const inFlightRef = useRef(0);
+  const sendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
   const workspaceId = target?.workspaceId;
   const machineId = target?.machineId;
@@ -163,46 +165,73 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
 
   const current = target && snapshot?.key === key ? snapshot : null;
   const send = useCallback(
-    async (
+    (
       command: { type: 'cancel'; id: string } | { type: 'configure'; settings: AutomationSettings }
-    ) => {
-      if (!target || busy) return;
+    ): Promise<boolean> => {
+      if (!target) return Promise.resolve(false);
+      const targetKey = key;
+      inFlightRef.current += 1;
       setBusy(true);
-      try {
-        const result = await execute(command);
-        if (result.type !== (command.type === 'cancel' ? 'cancel' : 'settings')) {
-          throw new Error('Invalid automation response');
+      let resolveResult!: (ok: boolean) => void;
+      const done = new Promise<boolean>((resolve) => {
+        resolveResult = resolve;
+      });
+      const run = async () => {
+        let ok = false;
+        try {
+          if (currentKey.current !== targetKey) return;
+          const result = await execute(command);
+          if (result.type !== (command.type === 'cancel' ? 'cancel' : 'settings')) {
+            throw new Error('Invalid automation response');
+          }
+          ok = true;
+          if (currentKey.current === targetKey && result.type === 'settings') {
+            setSnapshot((previous) => {
+              const sameTarget = previous?.key === targetKey ? previous : null;
+              return {
+                key: targetKey,
+                views: sameTarget?.views ?? [],
+                settings: result.settings,
+                listError: sameTarget?.listError ?? false,
+                settingsUnavailable: false,
+              };
+            });
+          }
+        } catch {
+          if (currentKey.current === targetKey) {
+            setSnapshot((previous) =>
+              previous?.key === targetKey
+                ? {
+                    ...previous,
+                    ...(command.type === 'cancel'
+                      ? { listError: true }
+                      : { settingsUnavailable: true }),
+                  }
+                : previous
+            );
+            toast.error(
+              command.type === 'cancel'
+                ? t(
+                    'sessions.continuation.cancelUnknown',
+                    'Could not confirm whether the wait was cancelled. Checking again…'
+                  )
+                : t(
+                    'sessions.continuation.settingsUnknown',
+                    'Could not confirm whether the setting was saved. Checking again…'
+                  )
+            );
+          }
+        } finally {
+          inFlightRef.current = Math.max(0, inFlightRef.current - 1);
+          if (inFlightRef.current === 0) setBusy(false);
+          if (currentKey.current === targetKey && (!ok || command.type === 'cancel')) refresh();
+          resolveResult(ok);
         }
-      } catch {
-        if (currentKey.current === key) {
-          setSnapshot((previous) =>
-            previous?.key === key
-              ? {
-                  ...previous,
-                  ...(command.type === 'cancel'
-                    ? { listError: true }
-                    : { settingsUnavailable: true }),
-                }
-              : previous
-          );
-          toast.error(
-            command.type === 'cancel'
-              ? t(
-                  'sessions.continuation.cancelUnknown',
-                  'Could not confirm whether the wait was cancelled. Checking again…'
-                )
-              : t(
-                  'sessions.continuation.settingsUnknown',
-                  'Could not confirm whether the setting was saved. Checking again…'
-                )
-          );
-        }
-      } finally {
-        if (currentKey.current === key) refresh();
-        setBusy(false);
-      }
+      };
+      sendQueueRef.current = sendQueueRef.current.then(run, run);
+      return done;
     },
-    [target, busy, refresh, execute, t, key]
+    [target, refresh, execute, t, key]
   );
   const value: SessionContinuationTweaksValue | null = current?.settings
     ? {
@@ -216,7 +245,8 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
     typeof current?.settings?.autoDeliver === 'object' ? current.settings.autoDeliver : null;
   /** Starts, retunes or (with `false`) stops Auto delivery; the Host keeps its progress. */
   const setAutoDeliver = useCallback(
-    (setting: AutoDeliverOptions | false) => void send({ type: 'configure', settings: { autoDeliver: setting } }),
+    (setting: AutoDeliverOptions | false) =>
+      send({ type: 'configure', settings: { autoDeliver: setting } }),
     [send]
   );
   const setTweak = useCallback(
@@ -233,7 +263,7 @@ export function useLocalSessionContinuation(requestedTarget: Target | null, visi
               ? deliver
               : DEFAULT_AUTO_DELIVER_OPTIONS
             : checked;
-      void send({ type: 'configure', settings: { [name]: setting } });
+      return send({ type: 'configure', settings: { [name]: setting } });
     },
     [current, send]
   );

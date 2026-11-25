@@ -309,6 +309,27 @@ export const isCodeCollabFileIndexSignalFlockDocId = (value: string): boolean =>
   const parts = value.split(':');
   return parts.length === 3 && parts[1] === LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT;
 };
+export const parseCodeCollabFileIndexFlockDocId = (
+  value: string
+): { workspaceId: WorkspaceId; sessionId: SessionId; kind: 'index' | 'signal' } | null => {
+  const parts = value.split(':');
+  if (parts.length !== 3 || !parts[0] || !parts[2]) return null;
+  if (parts[1] === LORO_CODE_COLLAB_FILE_INDEX_STREAM_SEGMENT) {
+    return {
+      workspaceId: parts[0] as WorkspaceId,
+      sessionId: parts[2] as SessionId,
+      kind: 'index',
+    };
+  }
+  if (parts[1] === LORO_CODE_COLLAB_FILE_INDEX_SIGNAL_STREAM_SEGMENT) {
+    return {
+      workspaceId: parts[0] as WorkspaceId,
+      sessionId: parts[2] as SessionId,
+      kind: 'signal',
+    };
+  }
+  return null;
+};
 export const getLoroStreamIdForDocId = (workspaceId: WorkspaceId, docId: string): string => {
   if (docId.startsWith(SCHEDULE_DOC_PREFIX)) {
     return getLoroScheduleStreamId(workspaceId, docId.slice(SCHEDULE_DOC_PREFIX.length));

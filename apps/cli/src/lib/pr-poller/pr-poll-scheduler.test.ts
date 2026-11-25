@@ -121,7 +121,11 @@ class FakeWorkspace {
   hostedAssociation = true;
   automationHooks: Pick<
     PrPollerWorkspaceHandle,
-    'workflowObservationOwners' | 'recordObservations' | 'recordWorkflowObservations'
+    | 'workflowObservationOwners'
+    | 'deliveryObservationOwners'
+    | 'onPullRequestMetaWritten'
+    | 'recordObservations'
+    | 'recordWorkflowObservations'
   > = {};
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
@@ -410,6 +414,50 @@ describe('PrPollScheduler', () => {
     const before = demandCalls;
     await advance(60_000);
     expect(demandCalls - before).toBeLessThanOrEqual(4);
+  });
+
+  it('keeps auto-delivery sessions in the high lane and notifies after meta writes', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    const sessionId = sid('s1');
+    workspace.metas.set(
+      sessionId,
+      makeMeta({
+        id: sessionId,
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        lastMessageAt: now - config.activityWindowMs - 60_000,
+        branchName: 'feat/auto-deliver',
+      })
+    );
+    let metaWritten = 0;
+    workspace.automationHooks = {
+      deliveryObservationOwners: () => new Set([sessionId]),
+      onPullRequestMetaWritten: () => {
+        metaWritten += 1;
+      },
+    };
+    const pr = observation(42, { headRefName: 'feat/auto-deliver' });
+    clientHandler = async (query) => ({
+      kind: 'success',
+      batch: {
+        pullRequests: query.statusAliases.map(({ prNumber }) => ({
+          prNumber,
+          pr: observation(prNumber, { headRefName: 'feat/auto-deliver' }),
+          ok: true,
+        })),
+        discoveries: query.discoveryAliases.map(({ branch }) => ({
+          branch,
+          prs: [pr],
+          ok: true,
+        })),
+        rateLimit: { cost: 1, remaining: 4999, limit: 5000, resetAtMs: null },
+      },
+    });
+    await startWith([workspace]);
+    expect(calls().length).toBeGreaterThanOrEqual(1);
+    expect(metaWritten).toBe(1);
+    const afterDiscovery = calls().length;
+    await advance(config.highIntervalMs);
+    expect(calls().length).toBeGreaterThan(afterDiscovery);
   });
 
   it('a new viewer promotes a stale session without waiting for the low cadence', async () => {

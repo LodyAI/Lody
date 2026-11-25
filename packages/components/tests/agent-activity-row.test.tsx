@@ -336,7 +336,6 @@ describe('live agent status', () => {
 
   const openTurnInfo = async () => {
     const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
-    // Row overlays mount once their row is armed by a pointer entry.
     await act(async () => {
       info!
         .closest('[data-virtual-index]')!
@@ -589,8 +588,6 @@ describe('live agent status', () => {
     );
     // Token usage alone is enough to offer the turn details.
     const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
-    // Row overlays mount once their row is armed by a pointer entry, as in the
-    // app; arming remounts the trigger, so click the live one.
     await act(async () => {
       info!
         .closest('[data-virtual-index]')!
@@ -614,5 +611,47 @@ describe('live agent status', () => {
     expect(value('Cost estimate')?.textContent).toBe('$0.0182');
     expect(value('Cost estimate')?.getAttribute('title')).toContain('not an invoice');
     expect(document.body.textContent).not.toContain('No configuration recorded');
+  });
+
+  it('keeps a live-expanded thought group open when the turn completes, without snapping the outer group shut on inner collapse', async () => {
+    const turnId = 'assistant-turn-live-thought';
+    const thought = { type: 'thought' as const, text: 'Investigating scroll anchor state.' };
+    const work = [thought, toolCall('t-live')];
+
+    await render(liveTurn(work, { id: turnId, finished: false }), { label: 'Thinking' });
+    const disclosureButtons = () => [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        'button[data-conversation-disclosure="group"]'
+      ),
+    ];
+    const groupButton = () =>
+      disclosureButtons().find((btn) => btn.textContent?.includes('Ran 1 command'))!;
+    expect(groupButton().getAttribute('aria-expanded')).toBe('false');
+
+    await act(async () => groupButton().click());
+    expect(groupButton().getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Investigating scroll anchor state.');
+
+    await render(
+      liveTurn([...work, { type: 'text' as const, text: 'All fixed.' }], {
+        id: turnId,
+        finished: true,
+      }),
+      { label: 'Done' }
+    );
+    const workedButton = () =>
+      disclosureButtons().find((btn) => btn.textContent?.includes('Finished working'))!;
+    expect(workedButton().getAttribute('aria-expanded')).toBe('true');
+    expect(groupButton().getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('Investigating scroll anchor state.');
+    expect(container.textContent).toContain('All fixed.');
+
+    await act(async () => groupButton().click());
+    expect(workedButton().getAttribute('aria-expanded')).toBe('true');
+    expect(groupButton().getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).not.toContain('Investigating scroll anchor state.');
+
+    await act(async () => workedButton().click());
+    expect(workedButton().getAttribute('aria-expanded')).toBe('false');
   });
 });
