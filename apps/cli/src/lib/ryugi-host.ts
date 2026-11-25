@@ -170,9 +170,7 @@ function writeFileAtomicallyIfChanged(filePath: string, content: string): void {
     if (fs.readFileSync(filePath, 'utf8') === content) {
       return;
     }
-  } catch {
-    // Missing or unreadable target file; proceed to write.
-  }
+  } catch {}
 
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -188,19 +186,11 @@ function writeFileAtomicallyIfChanged(filePath: string, content: string): void {
   } catch (error) {
     try {
       fs.unlinkSync(tmpPath);
-    } catch {
-      // Preserve the original rename error.
-    }
+    } catch {}
     throw error;
   }
 }
 
-/**
- * Generates Lody's managed Ryugi custom-host file under `<dataDir>/ryugi/hosts.json`
- * and returns its absolute path for `RYUGI_HOSTS_CONFIG`, or `undefined` when
- * injection must be skipped (Windows, disabled, invalid session ID, or conflict
- * with a user-defined host). Never modifies the user's Ryugi configuration file.
- */
 export function prepareRyugiHostsConfigSync(
   sessionEnv: NodeJS.ProcessEnv,
   options: ResolveRyugiHostsConfigOptions = {}
@@ -236,8 +226,6 @@ export function prepareRyugiHostsConfigSync(
   const userConfig = readJsonObjectReadOnly(userConfigPath);
   const userHosts = isPlainObject(userConfig.hosts) ? userConfig.hosts : {};
 
-  // Respect any user-defined `lody` host and avoid Ryugi's ambiguous-host error
-  // whenever an existing user host already matches a variable present in this env.
   for (const [hostName, entry] of Object.entries(userHosts)) {
     if (!isValidRyugiHostName(hostName) || RYUGI_BUILTIN_HOSTS.has(hostName)) continue;
     if (!isPlainObject(entry)) continue;

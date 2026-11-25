@@ -141,9 +141,7 @@ function buildTerminalEnv(sessionId: string): NodeJS.ProcessEnv {
     if (ryugiHostsConfig) {
       merged[RYUGI_HOSTS_CONFIG_ENV] = ryugiHostsConfig;
     }
-  } catch {
-    // Best-effort: never block opening a human terminal if the hosts file cannot be written.
-  }
+  } catch {}
   return merged;
 }
 

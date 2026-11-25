@@ -33,7 +33,6 @@ export type SessionInboxDeliverDeps = {
   isStartupSyncPending(): boolean;
 };
 
-/** Format a 64-char SHA-256 hex digest into an RFC 4122 v5-shaped UUID. */
 export function deterministicTurnIdFromDigest(hexDigest: string): string {
   const bytes = Buffer.from(hexDigest.slice(0, 32), 'hex');
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
@@ -70,13 +69,6 @@ function defaultLabelForSource(source: SessionInboxDeliverRequest['source']): st
   }
 }
 
-/**
- * Enqueues an external host message into a target Session's message queue as
- * the machine-owner principal, returning the Ryugi receipt disposition:
- * - `queued`: accepted into the Session queue (or already queued/promoted for the same dedupeKey)
- * - `retry`: transient condition (syncing, unconfirmed access, unavailable signing)
- * - `unsubscribe`: terminal condition (archived, deleted, not found, denied, stopped)
- */
 export async function deliverSessionInboxMessage(
   request: SessionInboxDeliverRequest,
   deps: SessionInboxDeliverDeps
@@ -147,8 +139,6 @@ export async function deliverSessionInboxMessage(
     operationId = `${request.source}:${userTurnId}`;
   }
 
-  // Idempotent retry handling: if this event was already promoted or queued,
-  // re-signal the queue when still pending and acknowledge without duplicating.
   const [promotion, prior, queue] = await Promise.all([
     backend.getQueuePromotionRecord(operationId),
     backend.readTurn(userTurnId),

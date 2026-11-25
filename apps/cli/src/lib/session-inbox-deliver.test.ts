@@ -169,7 +169,6 @@ describe('deliverSessionInboxMessage', () => {
     expect(meta?.messageQueueUpdatedAt).toBeGreaterThan(0);
     expect(meta?.messageQueueUpdateVersion?.updatedAt).toBe(meta?.messageQueueUpdatedAt);
 
-    // Retry while still queued deduplicates cleanly without creating a second queue row.
     const retryQueued = await deliverSessionInboxMessage(
       {
         source: 'ryugi',
@@ -188,7 +187,6 @@ describe('deliverSessionInboxMessage', () => {
     });
     expect(await fixture.sessionDoc.getMessageQueue()).toHaveLength(1);
 
-    // Simulate promotion into history and verify retry after promotion also deduplicates.
     const backend = await createSessionBackend(fixture.sessionDoc);
     await fixture.sessionDoc.sessionData.commands.appendTurn({
       id: first.userTurnId,
