@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId } from '@lody/shared';
+import { getInstallationProfile, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
   createMachineIdentityStore,
   deriveDeterministicMachineId,
@@ -30,16 +31,24 @@ function useIsolatedDataDir(): string {
   return dataDir;
 }
 
-function useTemporaryHome(): { homeDir: string; dataDir: string; stateDir: string } {
+function useTemporaryHome(): {
+  homeDir: string;
+  dataDir: string;
+  stateDir: string;
+  namespace: string;
+  anchorPath: string;
+} {
   const homeDir = makeTempDir('lody-home-');
-  const dataDir = path.join(homeDir, '.lody');
   const stateDir = path.join(homeDir, 'state');
   vi.stubEnv('LODY_DATA_DIR', '');
   vi.stubEnv('HOME', homeDir);
   vi.stubEnv('USERPROFILE', homeDir);
   vi.stubEnv('XDG_STATE_HOME', stateDir);
   vi.stubEnv('LOCALAPPDATA', stateDir);
-  return { homeDir, dataDir, stateDir };
+  const { namespace } = getInstallationProfile();
+  const dataDir = getLodyDataDir();
+  const anchorPath = path.join(stateDir, namespace, 'machine-identity.json');
+  return { homeDir, dataDir, stateDir, namespace, anchorPath };
 }
 
 function writeCredentials(dataDir: string, machineId: string): void {
@@ -75,15 +84,16 @@ describe('machine identity pure helpers', () => {
 
     expect(
       parseWindowsMachineGuid(
-        'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\n    MachineGuid    REG_SZ    1A2B3C4D-5E6F-7081-92A3-B4C5D6E7F809\n'
+        'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n' +
+          '    MachineGuid    REG_SZ    A1B2C3D4-E5F6-7890-ABCD-EF0123456789\r\n'
       )
-    ).toBe('1a2b3c4d-5e6f-7081-92a3-b4c5d6e7f809');
+    ).toBe('a1b2c3d4-e5f6-7890-abcd-ef0123456789');
     expect(
       parseWindowsMachineGuid('    MachineGuid    REG_SZ    00000000-0000-0000-0000-000000000000')
     ).toBeNull();
   });
 
-  it('resolves Linux /etc/machine-id with dbus fallback and skips container environments', () => {
+  it('resolves Linux machine-id with systemd preference and skips containers', () => {
     expect(
       resolveLinuxMachineId(
         (filePath) =>
@@ -102,6 +112,14 @@ describe('machine identity pure helpers', () => {
 
     expect(
       resolveLinuxMachineId(
+        (filePath) =>
+          filePath === '/etc/machine-id' ? '00000000000000000000000000000000\n' : 'uninitialized\n',
+        () => false
+      )
+    ).toBeNull();
+
+    expect(
+      resolveLinuxMachineId(
         () => '0123456789abcdef0123456789abcdef\n',
         (filePath) => filePath === '/.dockerenv'
       )
@@ -115,7 +133,7 @@ describe('machine identity pure helpers', () => {
     ).toBeNull();
   });
 
-  it('derives stable RFC 4122 UUIDv5 isolated by namespace and OS user', () => {
+  it('derives deterministic RFC 4122 UUIDv5 scoped by namespace and OS user', () => {
     const uuidV5Pattern = /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
     const first = deriveDeterministicMachineId({
       namespace: 'lody',
@@ -150,11 +168,9 @@ describe('machine identity persistence and recovery', () => {
     const dataDir = useIsolatedDataDir();
     const machineIdPath = path.join(dataDir, 'machine-id');
 
-    // Read-only lookup creates nothing on a fresh dir.
     expect(readExistingMachineId(dataDir)).toBeNull();
     expect(fs.existsSync(machineIdPath)).toBe(false);
 
-    // Invalid credentials are ignored; first creation writes a random UUIDv4.
     fs.writeFileSync(
       path.join(dataDir, 'credentials.json'),
       JSON.stringify({ machine: { machineName: 'Test', machineId: 'invalid-shape-id' } })
@@ -165,12 +181,10 @@ describe('machine identity persistence and recovery', () => {
     );
     expect(getOrCreateMachineId()).toBe(created);
 
-    // Valid credentials win and repair a conflicting machine-id file.
     writeCredentials(dataDir, 'legacy-machine-id');
     expect(getSystemMachineId()).toBe('legacy-machine-id');
     expect(fs.readFileSync(machineIdPath, 'utf8')).toBe('legacy-machine-id');
 
-    // A 0-byte machine-id file without credentials is repaired instead of drifting per call.
     fs.rmSync(path.join(dataDir, 'credentials.json'), { force: true });
     fs.writeFileSync(machineIdPath, '   ');
     const repaired = getSystemMachineId();
@@ -191,15 +205,13 @@ describe('machine identity persistence and recovery', () => {
     expect(getSystemMachineId()).toBe('persisted-machine-id');
     expect(fs.readFileSync(machineIdPath, 'utf8')).toBe('persisted-machine-id');
 
-    // Unreadable machine-id (directory in its place) still resolves valid credentials.
     fs.rmSync(machineIdPath, { force: true });
     fs.mkdirSync(machineIdPath);
     expect(getSystemMachineId()).toBe('legacy-machine-id');
   });
 
   it('keeps LODY_DATA_DIR completely isolated from the host anchor', () => {
-    const { stateDir } = useTemporaryHome();
-    const anchorPath = path.join(stateDir, 'lody', 'machine-identity.json');
+    const { anchorPath } = useTemporaryHome();
     fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
     fs.writeFileSync(
       anchorPath,
@@ -218,11 +230,9 @@ describe('machine identity persistence and recovery', () => {
     expect(fs.readFileSync(anchorPath, 'utf8')).toBe(beforeAnchor);
   });
 
-  it('preserves legacy ID across ~/.lody deletion, rejects migrated anchors, skips warm probes, and never caches transient failures', () => {
-    const { dataDir, stateDir } = useTemporaryHome();
-    const anchorPath = path.join(stateDir, 'lody', 'machine-identity.json');
+  it('preserves legacy ID across data-dir deletion, rejects migrated anchors, skips warm probes, and never caches transient failures', () => {
+    const { dataDir, stateDir, namespace, anchorPath } = useTemporaryHome();
 
-    // 1. Transient probe failure is never cached: first attempt skips anchor, second succeeds.
     let attempt = 0;
     const probeHostA = vi.fn((): HardwareProbeResult => {
       attempt += 1;
@@ -249,7 +259,6 @@ describe('machine identity persistence and recovery', () => {
       expect(fs.statSync(anchorPath).mode & 0o777).toBe(0o600);
     }
 
-    // 2. Warm-path hit on a fresh store instance skips probing hardware altogether.
     const warmProbe = vi.fn((): HardwareProbeResult => ({
       kind: 'ok',
       id: 'AAAAAAAA-1111-2222-3333-444444444444',
@@ -262,12 +271,10 @@ describe('machine identity persistence and recovery', () => {
     expect(warmStore.getSystemMachineId()).toBe('legacy-random-v4-id');
     expect(warmProbe).not.toHaveBeenCalled();
 
-    // 3. Deleting ~/.lody alone recovers the exact legacy UUID from the matching host anchor.
     fs.rmSync(dataDir, { recursive: true, force: true });
     expect(hostAStore.getSystemMachineId()).toBe('legacy-random-v4-id');
     expect(fs.readFileSync(path.join(dataDir, 'machine-id'), 'utf8')).toBe('legacy-random-v4-id');
 
-    // 4. Migrating the anchor to a different host rejects the old ID and derives Host B's UUIDv5.
     fs.rmSync(dataDir, { recursive: true, force: true });
     const hostBStore = createMachineIdentityStore({
       platform: 'darwin',
@@ -278,13 +285,12 @@ describe('machine identity persistence and recovery', () => {
     expect(hostBId).not.toBe('legacy-random-v4-id');
     expect(hostBId).toBe(
       deriveDeterministicMachineId({
-        namespace: 'lody',
+        namespace,
         userIdentity: 'alice',
         rawHardwareId: 'bbbbbbbb-1111-2222-3333-444444444444',
       })
     );
 
-    // 5. Full wipe (both ~/.lody and stateDir deleted) derives the exact same UUIDv5 deterministically.
     fs.rmSync(dataDir, { recursive: true, force: true });
     fs.rmSync(stateDir, { recursive: true, force: true });
     expect(hostBStore.getSystemMachineId()).toBe(hostBId);
@@ -308,15 +314,13 @@ describe('machine identity persistence and recovery', () => {
     expect(store.getSystemMachineId()).toBe('existing-id');
   });
 
-  it('round-trips on the real host OS across ~/.lody wipe and full wipe', () => {
-    const { dataDir, stateDir } = useTemporaryHome();
+  it('round-trips on the real host OS across data-dir wipe and full wipe', () => {
+    const { dataDir, stateDir, anchorPath } = useTemporaryHome();
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(path.join(dataDir, 'machine-id'), 'legacy-pre-upgrade-uuid');
 
     expect(getSystemMachineId()).toBe('legacy-pre-upgrade-uuid');
 
-    // If running inside a container without a host hardware ID, skip the hardware-backed assertions.
-    const anchorPath = path.join(stateDir, 'lody', 'machine-identity.json');
     if (!fs.existsSync(anchorPath)) {
       return;
     }

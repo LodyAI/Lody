@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getInstallationProfile, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { acquireLocalCliHostLease } from '@lody/shared/node/local-cli-host-lease';
 import { readAnchorMachineId } from '@/lib/machine-identity';
 import { restoreLocalMachineId } from '@/lib/machine-identity-restore';
@@ -37,9 +38,9 @@ async function useIsolatedDefaultHome(): Promise<{
   homeDir: string;
   dataDir: string;
   stateDir: string;
+  anchorPath: string;
 }> {
   const homeDir = makeTempDir('lody-restore-home-');
-  const dataDir = path.join(homeDir, '.lody');
   const stateDir = path.join(homeDir, 'state');
   vi.stubEnv('LODY_DATA_DIR', '');
   vi.stubEnv('HOME', homeDir);
@@ -55,7 +56,13 @@ async function useIsolatedDefaultHome(): Promise<{
   } else {
     vi.stubEnv('LODY_E2E_LOCAL_CLI_HOST_PORT', String(await reserveUnusedPort()));
   }
-  return { homeDir, dataDir, stateDir };
+  const dataDir = getLodyDataDir();
+  const anchorPath = path.join(
+    stateDir,
+    getInstallationProfile().namespace,
+    'machine-identity.json'
+  );
+  return { homeDir, dataDir, stateDir, anchorPath };
 }
 
 function writeCredentials(dataDir: string, machineId: string): void {
@@ -112,7 +119,7 @@ describe('machine restore-id', () => {
   });
 
   it('backs up existing state, atomically updates machine-id, credentials.json, and anchor, and is idempotent', async () => {
-    const { dataDir, stateDir } = await useIsolatedDefaultHome();
+    const { dataDir, anchorPath } = await useIsolatedDefaultHome();
     writeCredentials(dataDir, 'new-machine-id');
     fs.writeFileSync(path.join(dataDir, 'machine-id'), 'new-machine-id');
 
@@ -128,7 +135,6 @@ describe('machine restore-id', () => {
     expect(result.backupDir).toBeTruthy();
     expect(path.basename(result.backupDir ?? '')).toMatch(/^manual-\d{8}-\d{6}-[0-9a-f]{4}$/);
 
-    // Updated files preserve unrelated fields.
     expect(fs.readFileSync(path.join(dataDir, 'machine-id'), 'utf8')).toBe('old-machine-id');
     const updatedCreds = JSON.parse(
       fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8')
@@ -145,7 +151,6 @@ describe('machine restore-id', () => {
       extraTopLevel: true,
     });
 
-    // Backups hold prior contents with owner-only permissions.
     const backupDir = result.backupDir ?? '';
     expect(fs.readFileSync(path.join(backupDir, 'machine-id'), 'utf8')).toBe('new-machine-id');
     expect(
@@ -153,7 +158,6 @@ describe('machine restore-id', () => {
         .machineId
     ).toBe('new-machine-id');
 
-    const anchorPath = path.join(stateDir, 'lody', 'machine-identity.json');
     if (result.anchorUpdated) {
       expect(readAnchorMachineId()).toBe('old-machine-id');
       if (process.platform !== 'win32') {
@@ -167,7 +171,6 @@ describe('machine restore-id', () => {
       expect(fs.statSync(path.join(backupDir, 'credentials.json')).mode & 0o777).toBe(0o600);
     }
 
-    // Repeat invocation is a strict no-op with no extra backup.
     const repeat = await restoreLocalMachineId('old-machine-id');
     expect(repeat).toEqual({
       ok: true,

@@ -288,11 +288,6 @@ function formatBackupTimestamp(date: Date): string {
   ].join('');
 }
 
-/**
- * Offline recovery for reinstalling or restoring a known previous machine ID.
- * Refuses while a local host lease is active on the default data dir, backs up
- * prior files, and atomically updates `credentials.json`, `machine-id`, and anchor.
- */
 export async function restoreLocalMachineId(
   targetMachineIdInput: string
 ): Promise<RestoreLocalMachineIdResult> {

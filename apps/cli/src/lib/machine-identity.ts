@@ -54,10 +54,6 @@ export function getMachineIdFilePath(dataDir: string = getLodyDataDir()): string
   return path.join(dataDir, MACHINE_ID_FILE_NAME);
 }
 
-/**
- * Anchor and hardware-derived recovery apply only to the default installation
- * data dir; `LODY_DATA_DIR` and custom roots stay fully isolated from host state.
- */
 export function isDefaultLodyDataDir(dataDir: string = getLodyDataDir()): boolean {
   return (
     !process.env.LODY_DATA_DIR?.trim() && path.resolve(dataDir) === path.resolve(getLodyDataDir())
@@ -67,7 +63,7 @@ export function isDefaultLodyDataDir(dataDir: string = getLodyDataDir()): boolea
 function normalizeHardwareId(raw: string | null): RawHardwareId | null {
   if (!raw) return null;
   const normalized = raw.trim().toLowerCase();
-  if (!normalized) return null;
+  if (!normalized || normalized === 'uninitialized') return null;
   const stripped = normalized.replace(/-/g, '');
   if (!stripped || /^0+$/.test(stripped)) return null;
   return normalized as RawHardwareId;
@@ -184,9 +180,7 @@ function resolveUserIdentity(explicit?: string): string {
   try {
     const username = os.userInfo().username.trim();
     if (username) return username.toLowerCase();
-  } catch {
-    // Fall back to environment or home directory when passwd lookup is unavailable.
-  }
+  } catch {}
   const fallback = process.env.USER?.trim() || process.env.USERNAME?.trim() || os.homedir();
   return fallback.trim().toLowerCase();
 }
@@ -240,9 +234,7 @@ function createMachineIdFile(candidate: MachineId, dataDir: string): MachineId {
     // Repair a pre-existing 0-byte or whitespace-only `machine-id` file instead of drifting per run.
     try {
       writePrivateCredentialFile(machineIdPath, candidate);
-    } catch {
-      // best effort
-    }
+    } catch {}
     return readPersistedMachineId(dataDir) ?? candidate;
   }
 }
