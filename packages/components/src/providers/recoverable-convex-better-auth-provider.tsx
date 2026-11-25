@@ -47,7 +47,9 @@ export function RecoverableConvexBetterAuthProvider({
 
       url.searchParams.delete('ott');
       window.history.replaceState({}, '', url);
-      const result = await authClient.crossDomain.oneTimeToken.verify({ token });
+      const verifyOneTimeToken = authClient.crossDomain?.oneTimeToken?.verify;
+      if (!verifyOneTimeToken) return;
+      const result = await verifyOneTimeToken({ token });
       const session = result.data?.session;
       if (!session) return;
 
