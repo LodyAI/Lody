@@ -1,14 +1,30 @@
 ---
 name: genui
-description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Use when a reply benefits from controls (sliders, switches, selects, buttons) instead of static text. Read a reference file only for the component families you actually use.
+description: Author `genui` fenced blocks — declarative, stateful, interactive UI inside chat answers — or inline catalog tags in ordinary markdown. Use when a reply benefits from controls (sliders, switches, selects, buttons) or status chips instead of static text, or when a summary of instances, test results, release blockers, or options would be clearer with visual status markers. Read a reference file only for the component families you actually use.
 ---
 
 # GenUI surface authoring
 
-Use ordinary Markdown for prose, lists, and tables. Embed a static `Icon` or
-`Badge` directly in that Markdown. Use a fenced `genui` block for cards, other
-catalog layouts, controls, and values that depend on state. Put every control
-and display that shares state in the same fence, even across several cards.
+## Choosing the form
+
+Default to ordinary Markdown prose. Reach for genui only when it materially
+reduces the reader's scan cost:
+
+- **Inline `Icon` / `Badge`** — status words inside sentences or table cells.
+  Use for real state (running/degraded/pending), not decoration. Keep it
+  sparing: one badge per distinct status, not one per word.
+- **Fenced `genui` + `Card`** — when the reader needs a bounded panel that
+  groups related controls or side-by-side option comparisons. Never wrap
+  plain prose in a card.
+- **Interactive controls** — only when the reader can act on the UI itself
+  (a slider to preview a value, a button to trigger the next step). For
+  static data, plain markdown tables are usually clearer.
+
+A single reply often mixes all three: lead with prose, drop inline badges
+where status matters, add a fenced card only for the part that benefits from
+a bounded comparison or interaction.
+
+## Fence rules
 
 Use a `<Card>` wrapper when the request calls for a card, with its
 `<Column>` or `<Row>` inside. Preserve requested state slot names, exact
@@ -55,6 +71,18 @@ closes, so declare state before any markup that reads it.
   `onValueChange` state as strings, and convert at the point of calculation
   with `Number(value)`. Write array totals as
   `items.reduce((sum, item) => sum + item, 0)`.
+
+## Common mistakes
+
+- `<strong>` / `<em>` / `<b>` / `<i>` inside `Text` or `Badge` — unknown tags
+  render as literal `<strong>` text plus a diagnostic. Use a template literal
+  or `Heading` instead.
+- Multiple `Badge` tags in one sentence for emphasis. Badges mark real state,
+  not decoration.
+- Wrapping prose paragraphs in `Card`. Cards are for bounded control groups
+  or comparisons only.
+- Nesting markup inside an inline `Badge` label — it prevents the pair from
+  rendering. Escape Markdown punctuation instead.
 
 ## Inline catalog tags (no fence)
 
