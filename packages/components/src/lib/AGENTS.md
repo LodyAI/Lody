@@ -7,6 +7,7 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 - Encrypted sends refuse a host-verified machine withdrawal before any write. [Gate](../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#sender-withdrawal-gate).
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.
+- Roost machine reads during a Streams outage require fresh owner authorization. A known Streams refusal ends that read route.
 
 - Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
 

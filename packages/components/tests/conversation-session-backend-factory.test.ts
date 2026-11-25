@@ -37,7 +37,7 @@ import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/
 import type { SessionDataChange } from '@lody/shared/session-data';
 
 describe('createConversationSession backend seam', () => {
-  it.each([403, 404, 410])(
+  it.each([401, 403, 404, 410])(
     'keeps a cloud refusal terminal for published Roost history (HTTP %s)',
     async (status) => {
       vi.stubGlobal('indexedDB', new IDBFactory());
@@ -89,6 +89,75 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
+  it('does not open a cached machine page when cloud authorization is unavailable and the machine denies access', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+    const workspaceId = 'workspace' as WorkspaceId;
+    const machineId = 'machine' as MachineId;
+    const sessionId = 'denied-owner-cache' as SessionId;
+    const cache = createRoostHistoryCache(
+      JSON.stringify(['local', workspaceId, machineId, sessionId])
+    );
+    const oldTurn: SessionHistoryInput = {
+      id: 'previously-authorized',
+      role: 'user',
+      timestamp: '2026-11-01T00:00:00Z',
+      items: [{ type: 'text', text: 'Previously readable history' }],
+    };
+    const doc = new LoroDoc();
+    let sync: RoostHistorySyncState | undefined;
+    const data = createRemoteRoostSessionDataFactory({
+      workspaceId,
+      machineId,
+      requestHistoryRead: async () => ({
+        type: 'session/history-read_response',
+        sessionId,
+        success: false,
+        error: 'session_history_read_denied',
+      }),
+      requestHistoryWrite: async () => {
+        throw new Error('Unexpected history write');
+      },
+      onHistorySync: (next) => {
+        sync = next;
+      },
+      cloudHistory: () =>
+        createRoostHistoryReplica({
+          workspaceId,
+          machineId,
+          sessionId,
+          replicaNamespace: 'denied-owner-cache',
+          getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
+          observeBinding: () => () => {},
+          requestGrant: async () => {
+            throw new RoostCloudHistoryRequestError(503);
+          },
+        }),
+    })({ doc, sessionId, backendKind: 'roost' });
+    try {
+      await cache.acceptPage(
+        {
+          rows: [createRoostDirectoryRow(0, oldTurn)],
+          startPosition: 0,
+          totalCount: 1,
+          hasMoreOlder: false,
+          cursor: null,
+        },
+        [oldTurn],
+        1
+      );
+      await expect(data.history.readLatestDirectoryPage!(40)).rejects.toMatchObject({
+        name: 'RoostHistoryError',
+      });
+      expect(sync?.source).toBe('streams');
+    } finally {
+      data.dispose();
+      cache.dispose();
+      doc.free();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([
     'published',
     'append during metadata',
@@ -98,6 +167,9 @@ describe('createConversationSession backend seam', () => {
     'grant 403 before publication',
     'grant 503',
     'HEAD 503',
+    'published grant 503',
+    'published grant 503 then refusal',
+    'published live 503',
   ])(
     'opens Roost on the correct reader and resumes Streams with its owner offline (%s)',
     { timeout: 30_000 },
@@ -105,7 +177,10 @@ describe('createConversationSession backend seam', () => {
       const appendDuringMetadata = startingState === 'append during metadata';
       const editDuringMetadata = startingState === 'earlier metadata changes';
       const updateDuringMetadata = appendDuringMetadata || editDuringMetadata;
-      const alreadyPublished = startingState === 'published' || updateDuringMetadata;
+      const liveOutage = startingState === 'published live 503';
+      const cloudOutage = liveOutage || startingState.startsWith('published grant 503');
+      const alreadyPublished = startingState === 'published' || updateDuringMetadata || cloudOutage;
+      let cloudUnavailable = cloudOutage && !liveOutage;
       const discovering = ['grant 403 before publication', 'grant 503', 'HEAD 503'].includes(
         startingState
       );
@@ -198,6 +273,12 @@ describe('createConversationSession backend seam', () => {
       const tail = String(bytes.length + incremental.length);
       const applied = Promise.withResolvers<void>();
       const switched = Promise.withResolvers<void>();
+      const recovered = Promise.withResolvers<void>();
+      const readingLive = Promise.withResolvers<void>();
+      const breakLive = Promise.withResolvers<void>();
+      const machineReading = Promise.withResolvers<void>();
+      let liveReadFailed = false;
+      let usedOwnerDuringOutage = false;
       let requestsToTail = 0;
       let headOffset = startOffset;
       let failHead = startingState === 'HEAD 503';
@@ -253,6 +334,11 @@ describe('createConversationSession backend seam', () => {
             },
           });
         const offset = read.searchParams.get('offset');
+        if (liveOutage && !liveReadFailed && read.searchParams.has('live')) {
+          liveReadFailed = true;
+          readingLive.resolve();
+          return breakLive.promise.then(() => new Response(null, { status: 503 }));
+        }
         if (offset === startOffset && !read.searchParams.has('live'))
           return Promise.resolve(
             headOffset === tail ? next(new Uint8Array(incremental), tail) : next(null, startOffset)
@@ -289,11 +375,17 @@ describe('createConversationSession backend seam', () => {
           workspaceId,
           machineId,
           onCloudHistoryRoute: (active) => {
-            if (active) switched.resolve();
+            if (active) {
+              switched.resolve();
+              if (usedOwnerDuringOutage) recovered.resolve();
+            } else if (cloudOutage) {
+              usedOwnerDuringOutage = true;
+            }
           },
           onHistorySync: (next) => {
             sync = next;
             if (next.phase === 'pending') reportedPending.resolve();
+            if (next.source === 'machine' && next.httpStatus === 503) machineReading.resolve();
           },
           cloudHistory: () =>
             (replica = createRoostHistoryReplica({
@@ -338,15 +430,17 @@ describe('createConversationSession backend seam', () => {
         historyCount: 1,
         historyRevision: 1,
         result:
-          query.kind === 'readLatestPage'
-            ? {
-                startPosition: 0,
-                totalCount: 1,
-                hasMoreOlder: false,
-                cursor: null,
-                rows: [createRoostDirectoryRow(0, turn)],
-              }
-            : { state: 'ready', turn },
+          query.kind === 'count'
+            ? 1
+            : query.kind === 'readLatestPage'
+              ? {
+                  startPosition: 0,
+                  totalCount: 1,
+                  hasMoreOlder: false,
+                  cursor: null,
+                  rows: [createRoostDirectoryRow(0, turn)],
+                }
+              : { state: 'ready', turn },
         pageTurns: [turn],
       });
       let readGrants = 0;
@@ -357,6 +451,9 @@ describe('createConversationSession backend seam', () => {
             throw new RoostCloudHistoryRequestError(403);
           if (startingState === 'grant 503' && readGrants === 1)
             throw new RoostCloudHistoryRequestError(503);
+          if (cloudUnavailable) throw new RoostCloudHistoryRequestError(503);
+          if (startingState === 'published grant 503 then refusal')
+            throw new RoostCloudHistoryRequestError(403);
           if (awaitingPublication) return { state: 'pending' };
           return {
             state: 'published',
@@ -367,14 +464,46 @@ describe('createConversationSession backend seam', () => {
             expiresIn: 60,
           };
         },
-        discovering ? timedOut : alreadyPublished ? offline : ownerRead
+        discovering ? timedOut : alreadyPublished && !cloudOutage ? offline : ownerRead
       );
-      if (discovering || pendingWithoutNotice)
+      if (discovering || pendingWithoutNotice || cloudOutage)
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
         const observation = first.history.observe(() => {});
+        void observation.initial.catch(() => {});
+        if (cloudOutage) {
+          await expect(observation.initialPage).resolves.toMatchObject({
+            rows: [{ turnId: turn.id }],
+          });
+          if (liveOutage) {
+            await vi.advanceTimersByTimeAsync(0);
+            await readingLive.promise;
+            expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+            breakLive.resolve();
+            await machineReading.promise;
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+          }
+          expect(sync).toMatchObject({ source: 'machine', phase: 'retrying', httpStatus: 503 });
+          cloudUnavailable = false;
+          await vi.advanceTimersByTimeAsync(1_000);
+          await recovered.promise;
+          if (startingState === 'published grant 503 then refusal') {
+            await expect(first.history.readLatestDirectoryPage!(40)).rejects.toMatchObject({
+              status: 403,
+            });
+            expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: 403 });
+          } else {
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+            expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+          }
+          observation.unsubscribe();
+          return;
+        }
         if (discovering) {
-          void observation.initial.catch(() => {});
           await expect(observation.initialPage).rejects.toMatchObject({
             failure: { source: 'transport', code: 'response_timeout' },
           });
@@ -470,8 +599,9 @@ describe('createConversationSession backend seam', () => {
         observation.unsubscribe();
       } finally {
         first.dispose();
-        if (discovering || pendingWithoutNotice) vi.useRealTimers();
-        if (discovering || pendingWithoutNotice || updateDuringMetadata) vi.unstubAllGlobals();
+        if (discovering || pendingWithoutNotice || cloudOutage) vi.useRealTimers();
+        if (discovering || pendingWithoutNotice || updateDuringMetadata || cloudOutage)
+          vi.unstubAllGlobals();
       }
       cachedBinding = binding;
       const reopened = open(offline);
