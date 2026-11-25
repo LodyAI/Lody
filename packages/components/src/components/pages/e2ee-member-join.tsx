@@ -124,14 +124,15 @@ export function E2eeMemberJoinSurface(
     error: previewError,
     retry: retryPreview,
   } = useCloudQueryState(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
+  const sessionLoading = session.isPending || session.isRetrying || session.isOptimistic;
   return (
     <E2eeMemberJoin
       {...props}
       runtime={platform.e2eeWorkspaces?.runtime}
       accountId={session.data?.user.id ?? null}
       email={session.data?.user.email}
-      emailVerified={session.data?.user.emailVerified}
-      loading={session.isPending}
+      emailVerified={session.isOptimistic ? undefined : session.data?.user.emailVerified}
+      loading={sessionLoading}
       preview={preview}
       previewError={Boolean(previewError)}
       onRetryPreview={retryPreview}
@@ -311,7 +312,7 @@ function JoinSession({
             )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
-            {accountId && emailVerified && native && (pinMatches || request) && !terminal && (
+            {!loading && accountId && emailVerified && native && (pinMatches || request) && !terminal && (
               <JoinProgress
                 current={ready ? 4 : request?.state === 'committed' ? 2 : request ? 1 : 0}
               />
@@ -328,15 +329,16 @@ function JoinSession({
               {!accountId && !loading && !previewError && (
                 <Button onClick={onSignInRequested}>{t('e2ee.team.signIn')}</Button>
               )}
-              {accountId && !emailVerified && (
+              {!loading && accountId && !emailVerified && (
                 <Button onClick={onEmailVerificationRequested}>{t('e2ee.team.verify')}</Button>
               )}
-              {accountId && emailVerified && !native && !runtime && (
+              {!loading && accountId && emailVerified && !native && !runtime && (
                 <Button onClick={() => attemptDesktopInviteHandoff(desktopMemberJoinLink(offer))}>
                   {t('e2ee.team.openDesktop')}
                 </Button>
               )}
-              {accountId &&
+              {!loading &&
+                accountId &&
                 emailVerified &&
                 native &&
                 !recovering &&
@@ -353,7 +355,7 @@ function JoinSession({
                     {t(offer.mode === 'email' ? 'e2ee.team.accept' : 'e2ee.team.submit')}
                   </Button>
                 )}
-              {request && !ready && !terminal && (
+              {!loading && request && !ready && !terminal && (
                 <Button
                   disabled={busy}
                   onClick={() => {
@@ -364,7 +366,7 @@ function JoinSession({
                   {t('e2ee.team.retry')}
                 </Button>
               )}
-              {ready && (
+              {!loading && ready && (
                 <Button
                   onClick={() =>
                     onWorkspaceRequested(available?.workspaceSlug ?? null, offer.workspaceId)
@@ -373,11 +375,16 @@ function JoinSession({
                   {t('e2ee.team.openWorkspace')}
                 </Button>
               )}
-              {available?.matchesRecipient === false && !request && (
-                <Button variant="secondary" onClick={onEmailVerificationRequested}>
-                  {t('e2ee.team.switchAccount')}
-                </Button>
-              )}
+              {!loading &&
+                !recovering &&
+                accountId &&
+                emailVerified &&
+                available?.matchesRecipient === false &&
+                !request && (
+                  <Button variant="secondary" onClick={onEmailVerificationRequested}>
+                    {t('e2ee.team.switchAccount')}
+                  </Button>
+                )}
               <Button variant="secondary" onClick={onHomeRequested}>
                 {t('e2ee.team.home')}
               </Button>
