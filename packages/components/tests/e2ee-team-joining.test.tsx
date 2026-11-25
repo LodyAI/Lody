@@ -830,4 +830,34 @@ describe('encrypted team joining', () => {
     expect(parseMemberOffer(data, offer.token)).toEqual(offer);
     expect(parseMemberOffer(data, '99'.repeat(32))).toBeNull();
   });
+  it('hides sign-out verification and switch-account actions while session hydration is loading', async () => {
+    const onEmailVerificationRequested = vi.fn();
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        accountId="account"
+        email="a@synthetic.test"
+        emailVerified={undefined}
+        loading={true}
+        preview={{
+          status: 'available',
+          offer,
+          workspaceName: 'Team',
+          workspaceSlug: 'team',
+          recipientEmailMasked: 'b***@synthetic.test',
+          matchesRecipient: false,
+        }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={onEmailVerificationRequested}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.team.loading');
+    expect(button('e2ee.team.verify')).toBeUndefined();
+    expect(button('e2ee.team.switchAccount')).toBeUndefined();
+    expect(button('e2ee.team.signIn')).toBeUndefined();
+    expect(onEmailVerificationRequested).not.toHaveBeenCalled();
+  });
 });

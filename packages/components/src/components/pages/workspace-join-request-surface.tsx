@@ -32,7 +32,12 @@ function OrdinaryWorkspaceJoinRequestSurface({
   onHomeRequested,
 }: WorkspaceJoinRequestSurfaceProps) {
   const { t } = useTranslation();
-  const { data: session, isPending: sessionPending } = useStableSession();
+  const {
+    data: session,
+    isPending: sessionPending,
+    isRetrying: sessionRetrying,
+    isOptimistic: sessionOptimistic,
+  } = useStableSession();
   const joinRequestsAvailable = usePlatformCapability('teamSharing');
   const preview = useCloudQuery(cloudOperations.workspaceJoinRequests.getLinkPreview, { token });
   const submitRequest = useCloudMutation(cloudOperations.workspaceJoinRequests.submitRequest);
@@ -50,7 +55,7 @@ function OrdinaryWorkspaceJoinRequestSurface({
   else if (available?.viewer?.request?.status === 'approved') state = 'approved';
   else if (available?.viewer?.request?.status === 'rejected') state = 'rejected';
   else if (available?.viewer) state = 'form';
-  if (sessionPending) state = 'loading';
+  if (sessionPending || sessionRetrying || sessionOptimistic) state = 'loading';
   if (submitting) state = 'submitting';
   if (errorMessage) state = 'error';
 
