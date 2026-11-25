@@ -162,9 +162,12 @@ runs:
         node apps/electron/sparkle-signing.mjs proof \
           --archive "${ARCHIVE_DIR}.tools/signing-proof.bin" \
           --signature-file "${ARCHIVE_DIR}.tools/signing-proof.txt"
+        # Retain current + 6 prior versions per branch to match electron-sparkle-updater's
+        # default SUDeltaChainHistory=6 window without downloading extra base zips.
         # Report CPU time and peak memory to distinguish computation from I/O pressure.
         /usr/bin/time -l "${ARCHIVE_DIR}.tools/bin/generate_appcast" \
           --verbose \
+          --maximum-versions 7 \
           --delta-compression "${DELTA_COMPRESSION}" \
           --ed-key-file "${key_file}" \
           --download-url-prefix "${DOWNLOAD_URL_PREFIX}" \
