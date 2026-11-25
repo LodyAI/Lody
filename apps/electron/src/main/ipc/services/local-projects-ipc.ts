@@ -25,6 +25,10 @@ import type { LocalProjectHistoryProvider, LocalProjectId } from '@lody/shared/p
 import { formatUnknownError } from '../../utils'
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { sendLocalProjectControl } from '../local-project-dispatch'
+import {
+  discoverRecentLocalRepos,
+  inspectLocalRepoPromptHints
+} from '../../services/local-repo-discovery'
 
 const SESSION_FILE_SEND_LOCAL_MAX_COUNT = 8
 const SESSION_FILE_SEND_LOCAL_MAX_SIZE_BYTES = 100 * 1024 * 1024
@@ -299,6 +303,16 @@ export class LocalProjectsIpc extends ProductWindowIpcService {
       return { error: 'Local CLI daemon is unavailable. Run `npx lody start`.' }
     }
     return { rootPath: selectedPath, machineId }
+  }
+
+  @IpcMethod()
+  async discoverRecentRepos() {
+    return await discoverRecentLocalRepos()
+  }
+
+  @IpcMethod()
+  async inspectRepoPromptHints(rootPath: string) {
+    return await inspectLocalRepoPromptHints(rootPath)
   }
 
   @IpcMethod()

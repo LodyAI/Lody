@@ -63,6 +63,7 @@ interface LodyOptions {
   };
   logger: Logger;
   builtinAgentConfigCliTypes?: CliType[];
+  ensureDefaultSorbetAgent?: boolean;
   supportRegistryAgentTypes?: string[];
   workspaceId: WorkspaceId;
   contentMode?: string;
@@ -531,7 +532,8 @@ export class Lody {
   }
 
   private async ensureBuiltinAgentConfigs(cliTypes: CliType[]): Promise<boolean> {
-    if (cliTypes.length === 0) {
+    const ensureSorbet = this.options.ensureDefaultSorbetAgent === true;
+    if (!ensureSorbet && cliTypes.length === 0) {
       return true;
     }
     const syncedMachineFlock = await this.documentManager.syncMachineFlockDoc(this.machineId, {
@@ -544,12 +546,41 @@ export class Lody {
       return false;
     }
 
-    // "Not in the list" cannot tell "never created" from "just removed by the user".
-    // Removal intent lives in this set; skipping it adds a removed provider back on
-    // every startup.
+    let completed = true;
+    if (ensureSorbet) {
+      try {
+        const hasSorbet = await this.documentManager.hasAgentConfig(
+          'builtin',
+          'sorbet',
+          this.machineId
+        );
+        if (!hasSorbet) {
+          await this.documentManager.createAgentConfig(
+            'builtin',
+            'sorbet',
+            this.machineId,
+            'Lody Agent',
+            {
+              configOptionValues: {
+                permission_mode: 'ask',
+              },
+            }
+          );
+        }
+      } catch (error) {
+        completed = false;
+        this.logger.debug(
+          `[agent-config] Builtin sorbet registration failed: ${formatErrorMessage(error)}`
+        );
+      }
+    }
+
+    if (cliTypes.length === 0) {
+      return completed;
+    }
+
     const optedOut = await this.documentManager.getBuiltinAgentOptOuts(this.machineId);
 
-    let completed = true;
     for (const cliType of cliTypes) {
       try {
         const builtinRuntime = getManagedBuiltinRuntimeByAgentType(cliType);

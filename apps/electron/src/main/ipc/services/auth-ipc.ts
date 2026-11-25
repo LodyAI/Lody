@@ -29,6 +29,12 @@ export class AuthIpc extends ProductWindowIpcService {
   }
 
   @IpcMethod()
+  cancelLogin() {
+    assertAuthSender()
+    getIpcServiceDeps().authService.cancelLogin()
+  }
+
+  @IpcMethod()
   getLoginState() {
     assertAuthSender()
     return getIpcServiceDeps().authService.login.getState()

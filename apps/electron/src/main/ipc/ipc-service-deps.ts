@@ -6,6 +6,7 @@ import type { CliService } from '../services/cli-service'
 import type { GlobalShortcutsService } from '../services/global-shortcuts-service'
 import type { LoroDataPlaneRelay } from '../services/loro-data-plane-relay'
 import type { NotificationService } from '../services/notification-service'
+import type { OnboardingSorbetService } from '../services/onboarding-sorbet-service'
 import type { PublicBrowserService } from '../services/public-browser-service'
 import type { StorageGuard } from '../services/storage-guard'
 import type { TerminalRelay } from '../services/terminal-relay'
@@ -16,6 +17,7 @@ export type IpcServiceDeps = {
   cliService: CliService
   appUpdaterService: AppUpdaterService
   authService: AuthService
+  onboardingSorbetService: OnboardingSorbetService
   notificationService: NotificationService
   terminalRelay: TerminalRelay
   publicBrowserService: PublicBrowserService

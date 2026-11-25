@@ -59,8 +59,8 @@ export interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { id: 'providers', label: 'Providers', icon: KeyRound },
-  { id: 'models', label: 'Models', icon: Boxes },
+  { id: 'providers', label: 'Model sources', icon: KeyRound },
+  { id: 'models', label: 'Default model', icon: Boxes },
   { id: 'plugins', label: 'Plugins', icon: Blocks },
   { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
   { id: 'devices', label: 'Devices', icon: MonitorSmartphone },
@@ -70,10 +70,9 @@ const NAV: NavItem[] = [
 const SCOPED = new Set(['models', 'permissions']);
 
 /**
- * The pairing/empty and setup states a harness page can be in. `settings` is
- * the ordinary state: a paired device whose setup is done.
+ * The pairing/empty and active settings states of Lody Agent.
  */
-export type HarnessStage = 'empty' | 'setup' | 'settings';
+export type HarnessStage = 'empty' | 'settings';
 
 export function Settings({
   stage,
@@ -165,14 +164,17 @@ export function Settings({
             ) : page === 'devices' ? (
               <Devices onPair={onPair} />
             ) : page === 'providers' ? (
-              <Section title="Providers" hint="Which agents and endpoints sign requests.">
+              <Section
+                title="Model sources"
+                hint="Connected subscriptions, imported credentials, and API keys."
+              >
                 <ProvidersStatus />
                 <ProvidersPanel />
               </Section>
             ) : page === 'models' ? (
               <Section
-                title="Models"
-                hint="Which model plays which role, and what happens when one is unavailable."
+                title="Default model"
+                hint="Which model new conversations start with, and reasoning defaults."
               >
                 <ModelsPanel scope={scope} />
               </Section>

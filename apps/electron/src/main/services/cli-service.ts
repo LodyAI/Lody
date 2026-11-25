@@ -240,6 +240,14 @@ function traceEmbeddedCliProcess(
 
 type CliRunOptions = {
   envOverrides?: NodeJS.ProcessEnv
+  /** When false, skip reading the user login shell (`$SHELL -ilc env`). */
+  includeShellEnv?: boolean
+  /** Optional payload written to stdin and immediately closed. */
+  stdinInput?: string
+  /** Stream stdout chunks as they arrive (for JSONL progress streams). */
+  onStdoutChunk?: (chunk: string) => void
+  /** Omit stdout/stderr/command text from the diagnostic output buffer. */
+  suppressOutputLog?: boolean
   maxOldSpaceMiB?: number
   signal?: AbortSignal
   supervisorControl?: {
@@ -1113,6 +1121,12 @@ export class CliService {
     return await prepared.spawn().result
   }
 
+  async spawnBundled(args: string[], options?: CliRunOptions): Promise<LaunchHandle> {
+    const prepared = await this.prepareBundledCli(args, options)
+    throwIfAborted(options?.signal)
+    return prepared.spawn()
+  }
+
   /** Retained only for `getOutputBacklog`; no renderer subscribes to CLI output. */
   private recordCliOutput(event: CliOutputEvent): void {
     this.cliOutputBuffer.push(event)
@@ -1133,11 +1147,13 @@ export class CliService {
   ): LaunchHandle {
     throwIfAborted(options?.signal)
     const runId = randomUUID()
-    this.recordCliOutput({
-      runId,
-      stream: 'meta',
-      chunk: `$ ${formatCommandForDisplay(command, args)}\n`
-    })
+    if (!options?.suppressOutputLog) {
+      this.recordCliOutput({
+        runId,
+        stream: 'meta',
+        chunk: `$ ${formatCommandForDisplay(command, args)}\n`
+      })
+    }
 
     const processHandle = startProcessLegacy(
       {
@@ -1150,6 +1166,11 @@ export class CliService {
     )
     const { child } = processHandle
     this.trackedCliChildren.set(child, processHandle)
+    if (options?.stdinInput !== undefined && child.stdin) {
+      child.stdin.end(options.stdinInput, 'utf8')
+    } else if (child.stdin) {
+      child.stdin.end()
+    }
     options?.onSpawn?.(child)
 
     const result = new Promise<CliRunResult>((resolvePromise, reject) => {
@@ -1160,13 +1181,18 @@ export class CliService {
       child.stdout?.on('data', (chunk) => {
         const text = String(chunk)
         stdout = appendOutputTail(stdout, text)
-        this.recordCliOutput({ runId, stream: 'stdout', chunk: text })
+        options?.onStdoutChunk?.(text)
+        if (!options?.suppressOutputLog) {
+          this.recordCliOutput({ runId, stream: 'stdout', chunk: text })
+        }
       })
 
       child.stderr?.on('data', (chunk) => {
         const text = String(chunk)
         stderr = appendOutputTail(stderr, text)
-        this.recordCliOutput({ runId, stream: 'stderr', chunk: text })
+        if (!options?.suppressOutputLog) {
+          this.recordCliOutput({ runId, stream: 'stderr', chunk: text })
+        }
       })
 
       child.once('error', (error) => {
@@ -1243,12 +1269,14 @@ export class CliService {
       )
     }
 
-    const shellEnv = await getUserShellEnvCachedLegacy()
+    const shellEnv = options?.includeShellEnv === false ? null : await getUserShellEnvCachedLegacy()
     throwIfAborted(options?.signal)
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       ...(shellEnv ?? {}),
       ...(options?.envOverrides ?? {}),
+      LODY_DATA_DIR,
+      LODY_PLATFORM: mainPlatformKind,
       ELECTRON_RUN_AS_NODE: '1'
     }
     delete env.LODY_DAEMON_SUPERVISED
@@ -1270,7 +1298,11 @@ export class CliService {
             {
               env,
               windowsHide: true,
-              ...(options?.supervisorControl ? { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] } : {})
+              ...(options?.supervisorControl
+                ? { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }
+                : options?.stdinInput !== undefined
+                  ? { stdio: ['pipe', 'pipe', 'pipe'] }
+                  : { stdio: ['ignore', 'pipe', 'pipe'] })
             },
             options
           ),

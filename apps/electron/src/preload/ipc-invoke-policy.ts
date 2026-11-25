@@ -9,6 +9,7 @@ export const IPC_INVOKE_SERVICE_GROUPS = [
   'loro',
   'machineRpc',
   'notifications',
+  'onboardingSorbet',
   'publicBrowser',
   'sessionControl',
   'storageGuard',

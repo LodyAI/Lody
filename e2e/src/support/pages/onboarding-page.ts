@@ -71,12 +71,15 @@ export class OnboardingPage {
   }
 
   async skipConfigurationAndEnterProduct(): Promise<void> {
-    await this.openAgentConfiguration();
-    await this.page.getByRole('button', { name: /^(Skip for now|稍后再配置)$/u }).click();
-    await expect(
-      this.page.getByRole('heading', { name: /^(Explore Lody|探索 Lody)$/u })
-    ).toBeVisible();
-    await this.page.getByRole('button', { name: /^(Enter Lody|进入 Lody)$/u }).click();
+    await this.openModelOrStartStep();
+    const skipModel = this.page.getByTestId('onboarding-model-skip');
+    if (await skipModel.isVisible()) {
+      await skipModel.click();
+    }
+    await expect(this.page.getByTestId('onboarding-start-screen')).toBeVisible({
+      timeout: 30_000,
+    });
+    await this.page.getByTestId('onboarding-explore-first').click();
     await expect(this.page.locator('#chat-prompt')).toBeVisible({ timeout: 60_000 });
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u);
   }
@@ -148,12 +151,15 @@ export class OnboardingPage {
     return workspaceId;
   }
 
-  async openAgentConfiguration(): Promise<void> {
-    // The intro can finish while local bootstrap is pending. Its final CTA stays
-    // available, whereas the transient Skip intro button may already be gone.
-    await this.page.getByRole('button', { name: /^(Configure Lody|开始配置)$/u }).click();
+  async openModelOrStartStep(): Promise<void> {
+    const arriveSkip = this.page.getByTestId('onboarding-arrive-skip');
+    if (await arriveSkip.isVisible()) {
+      await arriveSkip.click();
+    }
     await expect(
-      this.page.getByRole('heading', { name: /^(Connect a coding agent|连接一个编码 Agent)$/u })
-    ).toBeVisible();
+      this.page
+        .getByTestId('onboarding-model-screen')
+        .or(this.page.getByTestId('onboarding-start-screen'))
+    ).toBeVisible({ timeout: 30_000 });
   }
 }

@@ -33,6 +33,7 @@ export const ELECTRON_TEST_GROUPS = [
       'src/main/desktop-startup.test.mjs',
       'src/main/services/desktop-exclusion.test.mjs',
       'src/main/ipc/ipc-channel-list.test.mjs',
+      'src/main/services/local-repo-discovery.test.mjs',
       'src/main/services/local-file-resource.test.mjs',
       'src/main/services/local-html-preview.test.mjs',
       'src/main/services/local-path-launcher-core.test.mjs',

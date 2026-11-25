@@ -1,578 +1,498 @@
 // @vitest-environment jsdom
-import { getFunctionName } from 'convex/server';
 import {
-  createRouter,
+  createMemoryHistory,
   createRootRoute,
   createRoute,
-  createMemoryHistory,
+  createRouter,
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router';
-
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MotionGlobalConfig } from 'framer-motion';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId, ProviderSetupTask, WorkspaceId } from '@lody/shared';
-
-const mocks = vi.hoisted(() => ({
-  personalAuthorization: 'authorized',
-  createGitHubInstallState: vi.fn(),
-  getCliState: vi.fn(),
-  onCliState: vi.fn(),
-  openExternalUrl: vi.fn(),
-  selectLocalProjectDirectory: vi.fn(),
-  useVisibleLocalProjects: vi.fn(),
-}));
-
-vi.mock('convex/react', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('convex/react')>()),
-  useAction: () => mocks.createGitHubInstallState,
-}));
-
-vi.mock('../src/hooks/use-recoverable-convex-query', () => ({
-  usePublicConvexQuery: () => undefined,
-  useRecoverableConvexQuery: (ref: unknown) =>
-    getFunctionName(ref as never) === 'github:getPersonalOperationSettings'
-      ? { enabled: false, authorization: { state: mocks.personalAuthorization } }
-      : [],
-}));
-
-vi.mock('../src/hooks/use-authenticated-convex', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/hooks/use-authenticated-convex')>();
-  return {
-    ...actual,
-    useAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
-    useOptionalAuthenticatedConvex: () => ({ isAuthenticated: true, isLoading: false }),
-  };
-});
-
-vi.mock('../src/hooks/use-visible-local-projects', () => ({
-  useVisibleLocalProjects: mocks.useVisibleLocalProjects,
-}));
-
-vi.mock('../src/lib/native-browser', () => ({
-  openExternalUrl: mocks.openExternalUrl,
-}));
-
-import { localCliStartingAtom, localProbeResultAtom } from '../src/atoms/local-probe';
-import { runtimeAtom } from '../src/atoms/runtime';
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
-  OnboardingOverlay,
-  resolveDesktopOnboardingPhase,
-} from '../src/components/onboarding/onboarding-overlay';
-
-import { getDesktopOnboardingSteps } from '../src/components/onboarding/onboarding-steps';
-import { LoginScreen } from '../src/components/onboarding/screens/login-screen';
-import { ProjectsScreen } from '../src/components/onboarding/screens/projects-screen';
-import { ProvidersScreenView } from '../src/components/onboarding/screens/providers-screen';
-import { SummaryScreen } from '../src/components/onboarding/screens/summary-screen';
-import { initI18n } from '../src/i18n';
-import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
-import { PlatformContext } from '@lody/platform/react';
-import {
+  CLOUD_PLATFORM_CAPABILITIES,
+  LOCAL_PLATFORM_CAPABILITIES,
   createStaticStore,
-  createStore as createPlatformStore,
-  type CloudApi,
+  type PlatformProvider,
   type PlatformSessionState,
 } from '@lody/platform';
-import { workspaceContentModeAtom } from '../src/atoms/workspace-content-mode';
+import { PlatformContext } from '@lody/platform/react';
+import type { WorkspaceId } from '@lody/shared';
+
 import {
-  electronLoginErrorAtom,
-  electronLoginErrorDetailAtom,
-  electronLoginPhaseAtom,
-  userAtom,
-} from '../src/atoms';
-import { ErrorBoundary } from '../src/components/error-boundary';
+  EMPTY_DESKTOP_ONBOARDING_DRAFT,
+  desktopOnboardingDraftAtom,
+  desktopOnboardingPhaseAtom,
+} from '../src/atoms/onboarding';
+import {
+  ConnectModelSheet,
+  EMPTY_ARRIVAL_PROBE,
+  IDLE_SORBET_OAUTH_STATE,
+  OnboardingOverlay,
+  SorbetOnboardingControllerProvider,
+  StartScreen,
+  buildStaticSuggestionPills,
+  detectProviderFromApiKeyPrefix,
+  type SorbetOnboardingController,
+} from '../src/components/onboarding';
+import { initI18n } from '../src/i18n';
+import { TEST_CLOUD_PLATFORM } from './test-platform';
 
-const workspaceId = 'workspace-1' as WorkspaceId;
-const machineId = 'machine-1' as MachineId;
+// ResizeObserver stub for ChatComposer measurement in jsdom.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (!('ResizeObserver' in globalThis)) {
+  (globalThis as { ResizeObserver?: unknown }).ResizeObserver = ResizeObserverStub;
+}
 
-function installElectronWindowIpc() {
-  mocks.getCliState.mockReturnValue(new Promise(() => undefined));
-  mocks.onCliState.mockReturnValue(() => undefined);
-
-  Object.defineProperty(window, '__LODY_ELECTRON__', { configurable: true, value: true });
-  Object.defineProperty(window, 'ipc', {
-    configurable: true,
-    value: {
-      invoke: async (channel: string, ...args: unknown[]) => {
-        if (channel === 'cli.getState') return mocks.getCliState();
-        if (channel === 'localProjects.selectDirectory') {
-          return mocks.selectLocalProjectDirectory(...args);
-        }
-        throw new Error(`unexpected invoke ${channel}`);
-      },
-      on: (channel: string, listener: (payload: unknown) => void) => {
-        if (channel === 'cli.state') return mocks.onCliState(listener);
-        return () => {};
-      },
-      send: () => {},
+function makeController(
+  overrides: Partial<SorbetOnboardingController> = {}
+): SorbetOnboardingController {
+  return {
+    probe: EMPTY_ARRIVAL_PROBE,
+    probeLoading: false,
+    oauthState: IDLE_SORBET_OAUTH_STATE,
+    refreshProbe: async () => EMPTY_ARRIVAL_PROBE,
+    startOAuth: async ({ providerId, providerName }) => ({
+      ...IDLE_SORBET_OAUTH_STATE,
+      revision: 1,
+      attemptId: 'attempt-1',
+      providerId,
+      providerName: providerName ?? providerId,
+      phase: 'waiting',
+      authorizationUrl: 'https://auth.example.com/oauth',
+    }),
+    cancelOAuth: async () => undefined,
+    describeImport: async (source) => ({
+      source,
+      systemPromptKind: source === 'claude-code' ? 'macos-keychain' : 'none',
+    }),
+    runImport: async (req) => ({ status: 'not_found', source: req.source }),
+    connectApiKey: async ({ providerId, apiKey }) => {
+      if (apiKey.includes('bad')) {
+        return { ok: false, code: 'invalid_key' };
+      }
+      return {
+        ok: true,
+        providerId,
+        providerName: providerId === 'anthropic' ? 'Claude' : 'OpenAI',
+        modelSelector: `${providerId}/recommended-model`,
+        modelName: 'Recommended Model',
+        source: { kind: 'api_key', last4: apiKey.slice(-4) },
+        models: [],
+      };
     },
+    connectCustomProvider: async () => ({ ok: false, code: 'unknown' }),
+    disconnectProvider: async () => undefined,
+    applyDefaultModelSelection: async () => undefined,
+    ...overrides,
+  };
+}
+
+function mountInRouter(
+  ui: React.ReactNode,
+  options: { store: Store; platform: PlatformProvider }
+) {
+  const rootRoute = createRootRoute({
+    component: () => <Outlet />,
   });
-}
-
-function uninstallElectronWindowIpc() {
-  delete window.__LODY_ELECTRON__;
-  delete window.ipc;
-}
-
-function findButton(container: HTMLElement, label: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((item) =>
-    item.textContent?.includes(label)
+  const indexRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/',
+    component: () => <>{ui}</>,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([indexRoute]),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  });
+  return (
+    <Provider store={options.store}>
+      <PlatformContext.Provider value={options.platform}>
+        <RouterProvider router={router} />
+      </PlatformContext.Provider>
+    </Provider>
   );
-  if (!button) throw new Error(`Expected button containing "${label}"`);
-  return button;
 }
 
-describe('desktop onboarding flow', () => {
-  let root: Root | undefined;
+describe('reorganized desktop onboarding flow', () => {
   let container: HTMLDivElement;
+  let root: Root;
   let store: Store;
+  const originalMatchMedia = window.matchMedia;
 
   beforeEach(async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    await initI18n('en');
-    localStorage.clear();
-    mocks.personalAuthorization = 'authorized';
-    mocks.createGitHubInstallState.mockResolvedValue({ state: 'github-state-1' });
-    mocks.openExternalUrl.mockResolvedValue(true);
-    mocks.useVisibleLocalProjects.mockReturnValue({ projects: new Map() });
-    installElectronWindowIpc();
-
-    store = createStore();
-    store.set(currentWorkspaceIdAtom, workspaceId);
-    store.set(currentWorkspaceSlugAtom, 'workspace-1');
-    store.set(userAtom, { id: 'account' } as never);
-    store.set(workspaceContentModeAtom, {
-      accountId: 'account',
-      workspaceId,
-      workspaceSlug: 'workspace-1',
-      descriptor: { workspaceId, contentMode: 'plaintext', contentModeVersion: 1 },
+    MotionGlobalConfig.skipAnimations = true;
+    window.scrollTo = () => {};
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
     });
-    store.set(runtimeAtom, {
-      workspaceId,
-      workspaceSlug: 'workspace-1',
-      getMachineAcpBinaryProgress: () => null,
-      subscribeMachineAcpBinaryProgress: () => () => undefined,
-    } as never);
+    vi.useFakeTimers();
+    await initI18n('en');
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    store = createStore();
+    store.set(desktopOnboardingPhaseAtom, null);
+    store.set(desktopOnboardingDraftAtom, EMPTY_DESKTOP_ONBOARDING_DRAFT);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
   });
 
   afterEach(() => {
-    act(() => root?.unmount());
+    act(() => root.unmount());
     container.remove();
-    document.body.innerHTML = '';
-    uninstallElectronWindowIpc();
-    vi.clearAllMocks();
-  });
-
-  it('renders the welcome step without waiting for the Electron CLI bootstrap', async () => {
-    await act(async () => {
-      root?.render(
-        <TestCloudPlatformProvider>
-          <Provider store={store}>
-            <OnboardingOverlay onCompleted={vi.fn()} />
-          </Provider>
-        </TestCloudPlatformProvider>
-      );
+    MotionGlobalConfig.skipAnimations = false;
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: originalMatchMedia,
     });
-
-    expect(container.textContent).toContain('Stay in the flow.');
-    expect(container.querySelector('img')).not.toBeNull();
-    expect(container.textContent).not.toContain('Preparing your workspace');
-    expect(mocks.getCliState).not.toHaveBeenCalled();
+    delete (window as { ipc?: unknown }).ipc;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it('derives steps and repairs stale phases from platform capabilities', () => {
-    expect(getDesktopOnboardingSteps({ cloudAccount: false, multiWorkspace: false })).toEqual([
-      'ceremony',
-      'providers',
-      'projects',
-      'firstTask',
-    ]);
-    expect(getDesktopOnboardingSteps({ cloudAccount: true, multiWorkspace: true })).toEqual([
-      'ceremony',
-      'login',
-      'workspace',
-      'providers',
-      'projects',
-      'firstTask',
-    ]);
-    expect(
-      resolveDesktopOnboardingPhase('login', {
-        cloudAccount: false,
-        multiWorkspace: false,
-        hasAgent: false,
-        hasProject: false,
-      })
-    ).toBe('providers');
-    expect(
-      resolveDesktopOnboardingPhase('firstTask', {
-        cloudAccount: false,
-        multiWorkspace: false,
-        hasAgent: true,
-        hasProject: false,
-      })
-    ).toBe('projects');
-  });
+  it('auto-advances Arrive beats 1-3 every 2.4s, pauses on hover, and skips directly to Model on OSS local', async () => {
+    const localPlatform: PlatformProvider = {
+      ...TEST_CLOUD_PLATFORM,
+      capabilities: LOCAL_PLATFORM_CAPABILITIES,
+    };
+    const controller = makeController();
 
-  it.each(['unknown', 'provisional'] as const)(
-    'restores projects with %s mode without querying refused GitHub catalogs',
-    async (state) => {
-      store.set(userAtom, { id: 'account' } as never);
-      store.set(
-        workspaceContentModeAtom,
-        state === 'unknown'
-          ? null
-          : { accountId: 'account', workspaceId, workspaceSlug: 'workspace-1', descriptor: null }
-      );
-      const platform = {
-        ...TEST_CLOUD_PLATFORM,
-        workspaces: {
-          ...TEST_CLOUD_PLATFORM.workspaces,
-          state: createStaticStore({
-            status: 'ready',
-            workspaces: [
-              { id: workspaceId, slug: 'workspace-1', name: 'Unmarked workspace', role: 'owner' },
-            ],
-          } as never),
-        },
-        cloudApi: {
-          ...TEST_CLOUD_PLATFORM.cloudApi!,
-          useMutation: () => async () => {
-            throw new Error('unexpected cloud mutation');
-          },
-          useAction: () => async () => {
-            throw new Error('unexpected cloud action');
-          },
-          useQuery: ((_operation, args) => {
-            if (args !== 'skip') throw new Error('e2ee_control_only');
-            return undefined;
-          }) as CloudApi['useQuery'],
-        },
-      };
-      await act(async () =>
-        root?.render(
-          <PlatformContext.Provider value={platform}>
-            <Provider store={store}>
-              <ErrorBoundary
-                fallbackRender={({ error }) => <output role="alert">{String(error)}</output>}
-              >
-                <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
-              </ErrorBoundary>
-            </Provider>
-          </PlatformContext.Provider>
+    await act(async () => {
+      root.render(
+        mountInRouter(
+          <SorbetOnboardingControllerProvider value={controller}>
+            <OnboardingOverlay onCompleted={async () => true} />
+          </SorbetOnboardingControllerProvider>,
+          { store, platform: localPlatform }
         )
       );
-      expect(container.querySelector('[role="alert"]')).toBeNull();
-      expect(container.textContent).toContain('Loading your repositories');
-      expect(findButton(container, 'Connect a GitHub repository').disabled).toBe(true);
-    }
-  );
-
-  it('keeps local projects and Back available when restored encrypted projects offer control/pairing', async () => {
-    store.set(workspaceContentModeAtom, {
-      accountId: 'account',
-      workspaceId,
-      workspaceSlug: 'workspace-1',
-      descriptor: {
-        workspaceId,
-        contentMode: 'e2ee',
-        contentModeVersion: 1,
-        activation: 'control-only',
-        genesisHash: 'ab'.repeat(32),
-        cryptoOrgId: 'ab'.repeat(32),
-      },
     });
-    store.set(localProbeResultAtom, { ok: true, machineId } as never);
-    mocks.useVisibleLocalProjects.mockReturnValue({
-      projects: new Map([
-        [
-          'machine-1:local',
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(container.querySelector('[data-testid="onboarding-arrive-stage"]')).not.toBeNull();
+    expect(container.textContent).toContain('Stay in the flow.');
+
+    // Beat 1 -> Beat 2 after 2.4s (+ AnimatePresence exit/enter)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2450);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+    });
+    expect(container.textContent).toContain('Step away with confidence.');
+
+    // Hovering pauses auto-advance
+    const stage = container.querySelector('[data-testid="onboarding-arrive-stage"]')!;
+    await act(async () => {
+      stage.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(container.textContent).toContain('Step away with confidence.');
+
+    // Skip button jumps straight to `Model` on OSS local when Sorbet has no credentials
+    const skipBtn = container.querySelector(
+      '[data-testid="onboarding-arrive-skip"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      skipBtn.click();
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(container.querySelector('[data-testid="onboarding-model-screen"]')).not.toBeNull();
+  });
+
+  it('skips Model step automatically when ArrivalProbe reports Sorbet already has credentials', async () => {
+    const localPlatform: PlatformProvider = {
+      ...TEST_CLOUD_PLATFORM,
+      capabilities: LOCAL_PLATFORM_CAPABILITIES,
+    };
+    const readyController = makeController({
+      probe: {
+        model: {
+          kind: 'ready',
+          provider: 'anthropic',
+          providerName: 'Claude',
+          model: 'anthropic/claude-sonnet-4-5',
+          modelName: 'Sonnet 4.5',
+          source: { kind: 'oauth' },
+        },
+        methods: EMPTY_ARRIVAL_PROBE.methods,
+        connectedProviders: [
           {
-            key: 'machine-1:local',
-            machineId,
-            project: { id: 'local', name: 'Kept local project', rootPath: '/synthetic/local' },
-            machine: { name: 'Local' },
+            providerId: 'anthropic',
+            providerName: 'Claude',
+            authType: 'oauth',
+            source: { kind: 'oauth' },
           },
         ],
-      ]),
+        models: [
+          {
+            selector: 'anthropic/claude-sonnet-4-5',
+            providerId: 'anthropic',
+            modelId: 'claude-sonnet-4-5',
+            displayName: 'Sonnet 4.5',
+          },
+        ],
+      },
     });
-    const back = vi.fn();
-    const platform = {
+
+    await act(async () => {
+      root.render(
+        mountInRouter(
+          <SorbetOnboardingControllerProvider value={readyController}>
+            <OnboardingOverlay onCompleted={async () => true} />
+          </SorbetOnboardingControllerProvider>,
+          { store, platform: localPlatform }
+        )
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    const skipArrive = container.querySelector(
+      '[data-testid="onboarding-arrive-skip"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      skipArrive.click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    // Directly enters `Start`, skipping `Model`, with `Claude · Subscription` chip in the top rail!
+    expect(container.querySelector('[data-testid="onboarding-start-screen"]')).not.toBeNull();
+    const modelChip = container.querySelector('[data-testid="onboarding-chip-model"]');
+    expect(modelChip?.textContent).toContain('Claude');
+  });
+
+  it('auto-selects a single workspace on Account and flies the account chip to OnboardingChipRail', async () => {
+    store.set(desktopOnboardingPhaseAtom, 'account');
+    const setActive = vi.fn(async () => undefined);
+    const cloudPlatform: PlatformProvider = {
       ...TEST_CLOUD_PLATFORM,
-      cloudApi: {
-        ...TEST_CLOUD_PLATFORM.cloudApi!,
-        useMutation: () => async () => {
-          throw new Error('unexpected mutation');
-        },
-        useAction: () => async () => {
-          throw new Error('unexpected action');
-        },
-        useQuery: ((_operation, args) => {
-          if (args !== 'skip') throw new Error('e2ee_control_only');
-          return undefined;
-        }) as CloudApi['useQuery'],
+      capabilities: CLOUD_PLATFORM_CAPABILITIES,
+      identity: {
+        ...TEST_CLOUD_PLATFORM.identity,
+        session: createStaticStore<PlatformSessionState>({
+          status: 'authenticated',
+          user: { id: 'u-1', name: 'wibus', email: 'wibus@example.com' },
+        }),
+      },
+      workspaces: {
+        ...TEST_CLOUD_PLATFORM.workspaces,
+        state: createStaticStore({
+          status: 'ready' as const,
+          activeWorkspaceId: 'ws-1' as WorkspaceId,
+          workspaces: [
+            {
+              id: 'ws-1' as WorkspaceId,
+              name: 'Personal',
+              slug: 'personal',
+              role: 'owner',
+            },
+          ],
+        }),
+        setActive,
       },
     };
-    const base = createRootRoute({ component: Outlet });
-    const router = createRouter({
-      history: createMemoryHistory({ initialEntries: ['/onboarding'] }),
-      routeTree: base.addChildren([
-        createRoute({
-          getParentRoute: () => base,
-          path: '/onboarding',
-          component: () => <ProjectsScreen onBack={back} onSkip={vi.fn()} onComplete={vi.fn()} />,
-        }),
-        createRoute({
-          getParentRoute: () => base,
-          path: '/workspace/e2ee/$workspaceId',
-          component: () => <p>Control and pairing</p>,
-        }),
-      ]),
-    });
+
     await act(async () => {
-      await router.load();
-      root?.render(
-        <PlatformContext.Provider value={platform}>
-          <Provider store={store}>
-            <RouterProvider router={router} />
-          </Provider>
-        </PlatformContext.Provider>
+      root.render(
+        mountInRouter(
+          <SorbetOnboardingControllerProvider value={makeController()}>
+            <OnboardingOverlay onCompleted={async () => true} />
+          </SorbetOnboardingControllerProvider>,
+          { store, platform: cloudPlatform }
+        )
       );
     });
-    expect(container.textContent).toContain('Kept local project');
-    expect(findButton(container, 'Connect a GitHub repository').disabled).toBe(true);
-    await act(async () => findButton(container, 'Back').click());
-    expect(back).toHaveBeenCalledOnce();
-    const control = container.querySelector<HTMLAnchorElement>('a[href*="/workspace/e2ee/"]');
-    expect(control).not.toBeNull();
-    const pathname = window.location.pathname;
     await act(async () => {
-      control!.click();
-      await router.load();
+      await vi.advanceTimersByTimeAsync(50);
     });
-    expect(router.state.location.pathname).toBe('/workspace/e2ee/workspace-1');
-    expect(window.location.pathname).toBe(pathname);
-    expect(container.textContent).toContain('Control and pairing');
-  });
-
-  it('guides missing personal GitHub authorization to settings before starting App installation', async () => {
-    mocks.personalAuthorization = 'missing';
-    await act(async () =>
-      root?.render(
-        <TestCloudPlatformProvider>
-          <Provider store={store}>
-            <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
-          </Provider>
-        </TestCloudPlatformProvider>
-      )
-    );
-    await act(async () => findButton(container, 'Connect a GitHub repository').click());
-    expect(mocks.openExternalUrl.mock.calls.at(-1)?.[0]).toContain(
-      '/workspace-1/settings/github?github_install_error=authorization_required'
-    );
-    expect(mocks.createGitHubInstallState).not.toHaveBeenCalled();
-  });
-
-  it('keeps GitHub available while the local agent is not ready', async () => {
-    store.set(localProbeResultAtom, null);
-    store.set(localCliStartingAtom, false);
     await act(async () => {
-      root?.render(
-        <TestCloudPlatformProvider>
-          <Provider store={store}>
-            <ProjectsScreen onBack={vi.fn()} onSkip={vi.fn()} onComplete={vi.fn()} />
-          </Provider>
-        </TestCloudPlatformProvider>
+      await vi.advanceTimersByTimeAsync(50);
+    });
+
+    // Single workspace auto-advances to `model` and populates `wibus · Personal` chip!
+    expect(container.querySelector('[data-testid="onboarding-model-screen"]')).not.toBeNull();
+    const accountChip = container.querySelector('[data-testid="onboarding-chip-account"]');
+    expect(accountChip?.textContent).toContain('wibus');
+    expect(accountChip?.textContent).toContain('Personal');
+  });
+
+  it('ConnectModelSheet performs zero import reads until confirmed, pre-discloses macOS Keychain, and masks API keys after 600ms', async () => {
+    const runImport = vi.fn<SorbetOnboardingController['runImport']>(async () => ({
+      status: 'oauth_conflict',
+      source: 'claude-code',
+      providerId: 'anthropic',
+      providerName: 'Claude',
+    }));
+    const startOAuth = vi.fn(makeController().startOAuth);
+    const controller = makeController({ runImport, startOAuth });
+    const onConnected = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <SorbetOnboardingControllerProvider value={controller}>
+          <ConnectModelSheet showHeader onConnected={onConnected} />
+        </SorbetOnboardingControllerProvider>
       );
     });
 
-    expect(findButton(container, 'Add a local project').disabled).toBe(true);
-    const githubButton = findButton(container, 'Connect a GitHub repository');
-    expect(githubButton.disabled).toBe(false);
+    // Zero upfront import calls on mount!
+    expect(runImport).not.toHaveBeenCalled();
+
+    // Expanding Claude Code discloses macOS Keychain prompt before reading anything
     await act(async () => {
-      githubButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      (container.querySelector('[data-testid="import-row-claude-code"]') as HTMLElement).click();
+      await vi.advanceTimersByTimeAsync(20);
     });
-    expect(mocks.createGitHubInstallState).toHaveBeenCalledWith({
-      workspaceId,
-      workspaceSlug: 'workspace-1',
-      returnTarget: 'desktop',
+    expect(runImport).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Keychain');
+
+    // Confirming import runs `runImport` and offers 1-click OAuth re-login on rotating token conflict
+    await act(async () => {
+      (
+        container.querySelector('[data-testid="confirm-import-claude-code"]') as HTMLElement
+      ).click();
+      await vi.advanceTimersByTimeAsync(20);
     });
+    expect(runImport).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('rotate');
+
+    await act(async () => {
+      (
+        container.querySelector('[data-testid="import-relogin-oauth-claude-code"]') as HTMLElement
+      ).click();
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(startOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: 'anthropic' })
+    );
+
+    // Prefix detection + 600ms API key masking
+    expect(detectProviderFromApiKeyPrefix('sk-ant-api03-1234567890abcd')?.providerId).toBe(
+      'anthropic'
+    );
+    await act(async () => {
+      (container.querySelector('[data-testid="expand-paste-api-key"]') as HTMLElement).click();
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    const input = container.querySelector('[data-testid="api-key-input"]') as HTMLInputElement;
+    await act(async () => {
+      input.blur();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'sk-ant-api03-valid-key-99ef');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(650);
+    });
+    expect(input.value).toBe('••••••••••••99ef');
   });
 
-  it('keeps a pending setup distinct from a completed AgentConfig', async () => {
-    const onNext = vi.fn();
-    const setup: ProviderSetupTask = {
-      v: 1,
-      id: 'setup-1' as ProviderSetupTask['id'],
-      machineId,
-      config: {
-        id: 'setup-1' as ProviderSetupTask['id'],
-        machineId,
-        name: 'Codex',
-        description: undefined,
-        cliType: 'builtin',
-        agentType: 'codex',
-        env: {},
-        prompt: '',
+  it('StartScreen scans repos lazily only when Project popover opens and adapts static suggestion pills', async () => {
+    const discoverRecentRepos = vi.fn(async () => [
+      { name: 'lody', rootPath: '/Users/dev/code/lody', mtimeMs: Date.now() },
+    ]);
+    Object.defineProperty(window, 'ipc', {
+      configurable: true,
+      value: {
+        invoke: async (channel: string) => {
+          if (channel === 'localProjects.discoverRecentRepos') return discoverRecentRepos();
+          if (channel === 'localProjects.inspectRepoPromptHints') {
+            return { hasTests: true, isDirty: true, hasTodos: true };
+          }
+          return null;
+        },
+        on: () => () => undefined,
+        send: () => undefined,
       },
-      status: 'preparing-runtime',
-      attempt: 1,
-      createdAt: 10,
-      updatedAt: 20,
+    });
+
+    const exploreFirst = vi.fn(async () => true);
+    const localPlatform: PlatformProvider = {
+      ...TEST_CLOUD_PLATFORM,
+      capabilities: LOCAL_PLATFORM_CAPABILITIES,
     };
 
     await act(async () => {
-      root?.render(
-        <ProvidersScreenView
-          configs={[]}
-          setups={[setup]}
-          testStatuses={{}}
-          selectedProviderId={setup.id}
-          noLocalMachine={false}
-          localMachineId={machineId}
-          onEdit={vi.fn()}
-          onTest={vi.fn()}
-          onDelete={vi.fn()}
-          onAdd={vi.fn()}
-          onBack={vi.fn()}
-          onSkip={vi.fn()}
-          onNext={onNext}
-        />
+      root.render(
+        mountInRouter(
+          <SorbetOnboardingControllerProvider value={makeController()}>
+            <StartScreen
+              project={null}
+              modelChip={null}
+              selectedAgentConfigId={null}
+              exitingToProduct={false}
+              onProjectChange={vi.fn()}
+              onModelConnected={vi.fn()}
+              onAgentConfigChange={vi.fn()}
+              onBeginExitTransition={vi.fn()}
+              onEnterWithSession={async () => true}
+              onExploreFirst={exploreFirst}
+            />
+          </SorbetOnboardingControllerProvider>,
+          { store, platform: localPlatform }
+        )
       );
     });
-
-    expect(findButton(container, 'Working').disabled).toBe(true);
-
     await act(async () => {
-      findButton(container, 'Next').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(20);
     });
-    expect(onNext).toHaveBeenCalledWith({
-      kind: 'providerSetup',
-      providerSetupId: setup.id,
-      agentName: setup.config.name,
-    });
-  });
 
-  it('keeps failed Agent setup retryable from Summary with investigation detail', async () => {
-    const retry = vi
-      .fn<() => Promise<void>>()
-      .mockRejectedValueOnce(new Error('machine is offline'))
-      .mockResolvedValueOnce(undefined);
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Repo scan has NOT run before opening the Project popover!
+    expect(discoverRecentRepos).not.toHaveBeenCalled();
+    // Amber "Connect model" chip is visible when model was skipped
+    expect(container.querySelector('[data-testid="onboarding-connect-model-chip"]')).not.toBeNull();
+    // Real ChatComposer `#chat-prompt` is mounted and editable
+    expect(container.querySelector('#chat-prompt')).not.toBeNull();
 
+    // Opening Project popover triggers lazy repo discovery while `Open folder…` is immediately present
     await act(async () => {
-      root?.render(
-        <SummaryScreen
-          agentState="failed"
-          agentName="Codex"
-          agentFailureCode="runtime-install-failed"
-          onBack={vi.fn()}
-          onComplete={vi.fn()}
-          onRetryAgent={retry}
-        />
-      );
+      (container.querySelector('[data-testid="onboarding-project-chip"]') as HTMLElement).click();
+      await vi.advanceTimersByTimeAsync(20);
     });
+    expect(discoverRecentRepos).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-testid="onboarding-open-folder"]')).not.toBeNull();
 
-    expect(container.textContent).toContain(
-      'Lody could not download the Agent runtime. Check your connection and try again.'
+    // Static suggestion pills adapt deterministically without LLM calls
+    const noProjectPills = buildStaticSuggestionPills(false, null, (_k, opts) =>
+      String(opts?.defaultValue ?? '')
     );
-    expect(container.textContent).not.toContain('runtime-install-failed');
-    await act(async () => {
-      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(container.textContent).toContain('machine is offline');
-    expect(consoleError).toHaveBeenCalledWith(
-      '[onboarding] Failed to retry Agent setup from Summary:',
-      expect.any(Error)
+    expect(noProjectPills).toHaveLength(3);
+    const repoPills = buildStaticSuggestionPills(
+      true,
+      { hasTests: true, isDirty: true, hasTodos: true },
+      (_k, opts) => String(opts?.defaultValue ?? '')
     );
-    expect(findButton(container, 'Retry').disabled).toBe(false);
-
-    await act(async () => {
-      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(retry).toHaveBeenCalledTimes(2);
-  });
-
-  it('surfaces main-process browser sign-in failures during onboarding and stays retryable while waiting', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const sessionState = createPlatformStore<PlatformSessionState>({ status: 'unauthenticated' });
-    const detail = 'safeStorage.isEncryptionAvailable() returned false';
-    const signInSocial = vi
-      .fn<() => Promise<void>>()
-      .mockImplementationOnce(async () => {
-        store.set(electronLoginPhaseAtom, 'error');
-        store.set(electronLoginErrorAtom, 'secure_storage_unavailable');
-        store.set(electronLoginErrorDetailAtom, detail);
-      })
-      .mockImplementationOnce(async () => {
-        sessionState.set({ status: 'loading' });
-        store.set(electronLoginPhaseAtom, 'waiting');
-        store.set(electronLoginErrorAtom, null);
-        store.set(electronLoginErrorDetailAtom, null);
-      });
-    const base = createRootRoute({ component: Outlet });
-    const router = createRouter({
-      history: createMemoryHistory({ initialEntries: ['/onboarding'] }),
-      context: { authClient: { signIn: { social: signInSocial } } },
-      routeTree: base.addChildren([
-        createRoute({
-          getParentRoute: () => base,
-          path: '/onboarding',
-          component: () => <LoginScreen onBack={vi.fn()} onNext={vi.fn()} />,
-        }),
-      ]),
-    });
-
-    await act(async () => {
-      await router.load();
-      root?.render(
-        <PlatformContext.Provider value={{ ...TEST_CLOUD_PLATFORM, session: sessionState }}>
-          <Provider store={store}>
-            <RouterProvider router={router} />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
-
-    await act(async () => {
-      findButton(container, 'Continue in browser').click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    const alertText = container.querySelector('[role="alert"]')?.textContent;
-    expect(alertText).toContain(
-      "Lody can't save your sign-in because this system's secure storage is unavailable."
-    );
-    expect(alertText).toContain(`Details: ${detail}`);
-    expect(container.textContent).not.toContain('Complete sign-in in the browser to continue.');
-    expect(consoleError).toHaveBeenCalledWith(
-      '[onboarding] Failed to sign in with browser:',
-      'secure_storage_unavailable',
-      detail
-    );
-    const retryButton = findButton(container, 'Continue in browser');
-    expect(retryButton.disabled).toBe(false);
-
-    await act(async () => {
-      retryButton.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(signInSocial).toHaveBeenCalledTimes(2);
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(container.textContent).toContain('Complete sign-in in the browser to continue.');
-    expect(findButton(container, 'Open browser again').disabled).toBe(false);
-    expect(findButton(container, 'Back').disabled).toBe(false);
+    expect(repoPills).toEqual([
+      'Walk through how this repository is structured',
+      'Run the test suite and fix any failures',
+      'Review my uncommitted changes',
+    ]);
   });
 });

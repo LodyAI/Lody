@@ -56,6 +56,7 @@ import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
 import { LoroDataPlaneRelay } from './services/loro-data-plane-relay'
 import { NotificationService } from './services/notification-service'
+import { OnboardingSorbetService } from './services/onboarding-sorbet-service'
 import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
@@ -238,6 +239,11 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         }
       },
       () => {
+        const mainWin = getMainWindow()
+        if (mainWin && !mainWin.isDestroyed()) {
+          if (mainWin.isMinimized()) mainWin.restore()
+          mainWin.focus()
+        }
         void cliService.restartAutoStart().catch(() => console.warn('[Auth] CLI restart failed'))
       }
     )
@@ -274,6 +280,22 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       })
     })
     const notificationService = new NotificationService(() => getMainWindow())
+    const onboardingSorbetService = new OnboardingSorbetService({
+      cliService,
+      publishAuthState: (state) => {
+        for (const window of productWindows) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            try {
+              window.webContents.send(IPC_PUSH_CHANNELS.onboardingSorbetAuthState, state)
+            } catch {
+              console.warn('[OnboardingSorbet] Auth state delivery failed')
+            }
+          }
+        }
+      },
+      focusMainWindow: () => getMainWindow()
+    })
+    void onboardingSorbetService.probeArrival().catch(() => undefined)
     const windowsTrayService = new WindowsTrayService({
       iconPath: icon,
       productName: PRODUCT_NAME,
@@ -327,6 +349,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       cliService,
       appUpdaterService,
       authService,
+      onboardingSorbetService,
       notificationService,
       terminalRelay,
       publicBrowserService,

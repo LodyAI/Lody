@@ -13,6 +13,7 @@ import type {
 
 export type { SorbetHostSettings, SorbetHostSettingsUpdate };
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { removeConnectionSource } from '@/lib/sorbet-onboarding-control';
 
 /** Resolve identity on the local machine; persisted launch fields never reach this operation. */
 export function createSorbetCredentialsHandler(
@@ -49,6 +50,7 @@ export function createSorbetCredentialsHandler(
       const control = await openSorbetControl({ dataDirectory, signal });
       try {
         await control.credentials.logout(providerId, { signal });
+        removeConnectionSource(providerId, dataDirectory);
       } finally {
         await control.close();
       }
