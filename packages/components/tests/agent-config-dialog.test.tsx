@@ -797,6 +797,23 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Antigravity');
   });
 
+  it.each([
+    { cliType: 'registry', agentType: 'antigravity-acp' },
+    { cliType: 'builtin', agentType: 'antigravity' },
+  ] as const)('shows the Antigravity header icon when editing $agentType', async (identity) => {
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig({ name: 'Antigravity', ...identity }) },
+      createMachine('Workstation')
+    );
+
+    const pickerGlyph = getOptionByText('Antigravity').querySelector('svg path')?.getAttribute('d');
+    expect(pickerGlyph).toBeTruthy();
+    const heading = document.querySelector('header h2');
+    expect(heading?.textContent).toBe('Edit Antigravity');
+    const headerGlyph = heading?.parentElement?.previousElementSibling?.querySelector('svg path');
+    expect(headerGlyph?.getAttribute('d')).toBe(pickerGlyph);
+  });
+
   it('saves the Antigravity skip-permissions launch choice only on capable machines', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
     const mode: AgentConfigDialogMode = {
