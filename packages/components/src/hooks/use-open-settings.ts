@@ -107,6 +107,21 @@ export function useOpenSettings() {
         case 'lody-agent':
           void router.navigate({ to: '/$workspaceName/settings/lody-agent', params });
           return;
+        case 'memory':
+          void router.navigate({ to: '/$workspaceName/settings/memory', params });
+          return;
+        case 'mcp':
+          void router.navigate({ to: '/$workspaceName/settings/mcp', params });
+          return;
+        case 'prompt-shortcuts':
+          void router.navigate({ to: '/$workspaceName/settings/prompt-shortcuts', params });
+          return;
+        case 'shares':
+          void router.navigate({ to: '/$workspaceName/settings/shares', params });
+          return;
+        case 'data':
+          void router.navigate({ to: '/$workspaceName/settings/data', params });
+          return;
         case 'github':
           void router.navigate({ to: '/$workspaceName/settings/github', params });
           return;

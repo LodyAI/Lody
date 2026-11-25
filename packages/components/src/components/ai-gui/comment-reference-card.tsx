@@ -3,7 +3,7 @@
 import type { CommentReferencePayload } from '@lody/shared';
 import { truncateCommentBody } from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { FileIcon } from '@/components/icons/file-icons';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
@@ -91,7 +91,7 @@ export function CommentReferenceCard({ reference, onClick, className }: CommentR
     <button
       type="button"
       onClick={onClick}
-      className={clsx(
+      className={cn(
         stylex.props(styles.card, onClick ? styles.cardInteractive : styles.cardStatic).className,
         className
       )}

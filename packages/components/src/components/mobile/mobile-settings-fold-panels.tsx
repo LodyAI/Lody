@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useMobileSettingsFold } from './mobile-settings-fold-context';
 
 /** Keep both panel subtrees mounted as the device folds or the keyboard appears. */
@@ -34,7 +34,7 @@ export function MobileSettingsFoldPanels({
       <div
         data-settings-fold-lower
         {...lowerProps}
-        className={clsx(lowerProps.className, fold && lowerClassName)}
+        className={cn(lowerProps.className, fold && lowerClassName)}
       >
         {lower}
       </div>

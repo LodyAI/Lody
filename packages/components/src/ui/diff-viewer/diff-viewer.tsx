@@ -30,7 +30,7 @@ import { FileIcon } from '@/components/icons/file-icons';
 import { getSessionDiffErrorMessage } from '@/lib/session-diff-diagnostics';
 import { getDiffPerfNow, isDiffPerfEnabled, logDiffPerfDurationLazy } from '@/lib/diff-perf';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DEFAULT_VSCODE_DIFF_THEME_FALLBACK } from '@/lib/vscode-theme';
 import { parseDiffInWorker, parseDiffTextSourceInWorker } from '@/lib/diff-parse-worker';
@@ -1323,7 +1323,7 @@ function DiffViewerImpl({
       ref={diffHostRef}
       onPointerDownCapture={() => setKeepContentMounted(true)}
       onFocusCapture={() => setKeepContentMounted(true)}
-      className={clsx('lody-pierre-diff', stylex.props(styles.diffHost).className)}
+      className={cn('lody-pierre-diff', stylex.props(styles.diffHost).className)}
       style={pierreDiffHostStyle}
       data-text-selectable
     >
@@ -1336,7 +1336,7 @@ function DiffViewerImpl({
     return (
       <div
         ref={containerRef}
-        className={clsx(stylex.props(styles.headerless, xstyle).className, className)}
+        className={cn(stylex.props(styles.headerless, xstyle).className, className)}
         style={stylex.props(styles.headerless, xstyle).style}
       >
         {diffContentContainer}
@@ -1357,7 +1357,7 @@ function DiffViewerImpl({
         open={isControlledOpen ? open : undefined}
         onOpenChange={handleOpenChange}
         defaultOpen={isControlledOpen ? undefined : defaultOpen}
-        className={clsx(stylex.props(styles.chrome, xstyle).className, className)}
+        className={cn(stylex.props(styles.chrome, xstyle).className, className)}
         style={stylex.props(styles.chrome, xstyle).style}
       >
         {renderHeader({ fileName, path, additions, deletions, CollapseToggle })}

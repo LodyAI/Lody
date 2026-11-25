@@ -42,7 +42,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkMath from 'remark-math';
-import { Check, Copy, MessagesSquare } from 'lucide-react';
+import { CalendarClock, Check, Copy, MessagesSquare, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_CONVERSATION_FONT_SIZE, inlineMathEnabledAtom } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
@@ -60,7 +60,7 @@ import {
   normalizeTexMathDelimiters,
   remarkSingleDollarTextMath,
 } from '@/lib/markdown-single-dollar-math';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { themeColors } from '../../style/theme-colors.stylex';
 import {
   themeDuration,
@@ -71,9 +71,19 @@ import {
   themeSpace,
 } from '../../style/theme-scale.stylex';
 import { usePrLinkInterceptor } from './pr-link-context';
-import { parseSessionLinkHref, useSessionLinkNavigator } from './session-link-context';
+import {
+  parseAppActionLinkHref,
+  parseSessionLinkHref,
+  useAppActionLinkNavigator,
+  useSessionLinkNavigator,
+} from './session-link-context';
 import { useCoordinatorConversation } from '@/components/project-mode/coordinator-conversation';
-import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  buildAppActionLink,
+  parseSessionLink,
+  type AppActionLink,
+  type SessionLink,
+} from '@lody/shared/session-link';
 import {
   SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME,
   SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
@@ -697,7 +707,7 @@ function MarkdownSessionLink({
         data-session-link={sessionId}
         style={stylex.props(xstyle).style}
         title={title}
-        className={clsx(
+        className={cn(
           SESSION_LINK_CHIP_CLASS_NAME,
           stylex.props(markdownStyles.sessionChip, xstyle).className
         )}
@@ -712,7 +722,7 @@ function MarkdownSessionLink({
       data-session-link={sessionId}
       style={stylex.props(xstyle).style}
       title={title}
-      className={clsx(
+      className={cn(
         SESSION_LINK_CHIP_CLASS_NAME,
         stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive, xstyle)
           .className
@@ -724,6 +734,55 @@ function MarkdownSessionLink({
           tabSessionId: target.tabSessionId as SessionId | undefined,
         })
       }
+    >
+      {body}
+    </button>
+  );
+}
+
+function MarkdownActionLink({
+  target,
+  children,
+  inert,
+}: {
+  target: AppActionLink;
+  children: ReactNode;
+  inert: boolean;
+}) {
+  const navigate = useAppActionLinkNavigator();
+  const canonicalHref = buildAppActionLink(target);
+  const title = markdownLinkText(children).trim() || canonicalHref;
+  const Icon = target.kind === 'schedules' ? CalendarClock : SlidersHorizontal;
+  const body = (
+    <>
+      <Icon {...stylex.props(markdownStyles.emLinkGlyph)} aria-hidden="true" />
+      <span {...stylex.props(markdownStyles.emText)}>{title}</span>
+    </>
+  );
+  if (!navigate || inert) {
+    return (
+      <span
+        data-action-link={canonicalHref}
+        title={title}
+        className={cn(
+          SESSION_LINK_CHIP_CLASS_NAME,
+          stylex.props(markdownStyles.sessionChip).className
+        )}
+      >
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-action-link={canonicalHref}
+      title={title}
+      className={cn(
+        SESSION_LINK_CHIP_CLASS_NAME,
+        stylex.props(markdownStyles.sessionChip, markdownStyles.sessionChipInteractive).className
+      )}
+      onClick={() => navigate(target)}
     >
       {body}
     </button>
@@ -1212,7 +1271,9 @@ const StreamingMarkdown = lazy<ComponentType<StreamdownProps>>(() =>
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
 const markdownUrlTransform: UrlTransform = (value) =>
-  isMarkdownAgentFileHref(value) || parseSessionLinkHref(value)
+  isMarkdownAgentFileHref(value) ||
+  parseSessionLinkHref(value) ||
+  parseAppActionLinkHref(value) !== null
     ? value
     : defaultUrlTransform(value);
 
@@ -1662,6 +1723,14 @@ const createMarkdownComponents = ({
         </MarkdownSessionLink>
       );
     }
+    const linkedAction = parseAppActionLinkHref(href);
+    if (linkedAction) {
+      return (
+        <MarkdownActionLink target={linkedAction} inert={readonly}>
+          {children}
+        </MarkdownActionLink>
+      );
+    }
     // Workspace resource links are display-only in a publication, not a second
     // download API. Ordinary article/GitHub links remain explicit external navigation.
     if (readonly && href && isWorkspaceResourceHref(href)) {
@@ -1702,7 +1771,7 @@ const createMarkdownComponents = ({
           rel={rel}
           {...rest}
           style={{ ...stylex.props(partStyles?.referenceChip).style, ...rest.style }}
-          className={clsx(
+          className={cn(
             rest.className,
             'markdown-reference-chip',
             stylex.props(
@@ -1832,7 +1901,7 @@ function SizedMarkdownImage(props: MarkdownImageProps) {
       // With `height: auto`, these reserve the image's aspect ratio before it loads.
       width={outcome?.width ?? rest.width}
       height={outcome?.height ?? rest.height}
-      className={clsx(stylex.props(markdownStyles.image).className, rest.className)}
+      className={cn(stylex.props(markdownStyles.image).className, rest.className)}
       onLoad={(event) => {
         const image = event.currentTarget;
         if (key !== undefined && image.naturalWidth > 0) {
@@ -2137,7 +2206,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         if (match.resultId) {
           mark.dataset.searchResultId = match.resultId;
         }
-        mark.className = clsx(
+        mark.className = cn(
           SEARCH_HIGHLIGHT_MARK_CLASS_NAME,
           match.isActive && SEARCH_HIGHLIGHT_ACTIVE_MARK_CLASS_NAME
         );
@@ -2175,7 +2244,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             markdownDescendants.content,
             (compact || muted) && markdownStyles.muted
           ),
-          clsx('markdown-renderer', className)
+          cn('markdown-renderer', className)
         )}
         style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}

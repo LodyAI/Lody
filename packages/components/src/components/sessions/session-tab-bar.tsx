@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space, radius } from '@lody/ui/tokens/scales.stylex';
@@ -488,7 +488,7 @@ function TabContent({
             }
           : undefined
       }
-      className={clsx(
+      className={cn(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -621,7 +621,7 @@ function DraftTabContent({
       data-id={`draft-tab:${draft.id}`}
       data-scope-item="row"
       aria-label={label}
-      className={clsx(
+      className={cn(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -704,7 +704,7 @@ function ViewerTabContent({
       data-id={`viewer-tab:${tab.id}`}
       data-scope-item="row"
       aria-label={saveStateLabel ? `${tab.label}, ${saveStateLabel}` : tab.label}
-      className={clsx(
+      className={cn(
         stylex.props(
           stylex.defaultMarker(),
           styles.tab,
@@ -1012,7 +1012,7 @@ export const SessionTabBar = memo(function SessionTabBar({
   const newTabButton = showNewTabButton ? (
     <button
       type="button"
-      className={clsx(stylex.props(styles.barAction).className, WINDOW_DRAG_EXEMPT_CLASS)}
+      className={cn(stylex.props(styles.barAction).className, WINDOW_DRAG_EXEMPT_CLASS)}
       onClick={() => {
         void onNewTab();
       }}
@@ -1024,7 +1024,7 @@ export const SessionTabBar = memo(function SessionTabBar({
 
   return (
     <div
-      className={clsx(
+      className={cn(
         SESSION_PAGE_CONTAINER_CLASS,
         stylex.props(styles.bar).className,
         windowDragClass,
@@ -1033,7 +1033,7 @@ export const SessionTabBar = memo(function SessionTabBar({
     >
       {leftSlot ? (
         <div
-          className={clsx(
+          className={cn(
             stylex.props(styles.leadingSlot, !soloTab && styles.leadingSlotRegular).className,
             WINDOW_DRAG_EXEMPT_CLASS
           )}
@@ -1116,9 +1116,7 @@ export const SessionTabBar = memo(function SessionTabBar({
       </AdaptiveTabStrip>
       {/* Pinned right cluster: new-tab, then the archived-tabs history (only
           when closed tabs exist), then the caller's toolbar ("…" etc.). */}
-      <div
-        className={clsx(stylex.props(styles.trailingCluster).className, WINDOW_DRAG_EXEMPT_CLASS)}
-      >
+      <div className={cn(stylex.props(styles.trailingCluster).className, WINDOW_DRAG_EXEMPT_CLASS)}>
         {newTabButton}
         {showArchivedTabs && archivedChildSessions.length > 0 && onTabRestore && (
           <ClosedTabsPopover
@@ -1160,7 +1158,7 @@ export function ClosedTabsPopover({
               render={
                 <button
                   type="button"
-                  className={clsx(
+                  className={cn(
                     stylex.props(styles.barAction, styles.barActionRelative).className,
                     WINDOW_DRAG_EXEMPT_CLASS
                   )}

@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as MentionPrimitive from './mention/index';
 import * as React from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -116,7 +116,7 @@ function MentionLabel({
   return (
     <MentionPrimitive.Label
       data-slot="mention-label"
-      className={clsx(label.className, className)}
+      className={cn(label.className, className)}
       style={{ ...label.style, ...style }}
       {...props}
     />

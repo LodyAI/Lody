@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -15,7 +15,7 @@ import {
   type AgentRoleAvailability,
   type MachineId,
 } from '@lody/shared';
-import { userAtom, settingsSelectedMachineIdAtom } from '@/atoms';
+import { settingsActionIntentAtom, settingsSelectedMachineIdAtom, userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -161,6 +161,30 @@ export function AgentRolesSetting() {
         targetMachineId && getAgentRoleTarget(role, targetMachineId) ? targetMachineId : undefined
       )
     );
+
+  const [actionIntent, setActionIntent] = useAtom(settingsActionIntentAtom);
+  useEffect(() => {
+    if (!actionIntent || actionIntent.action.tab !== 'agent-roles') return;
+    const act = actionIntent.action;
+    if (!act.create && !act.roleId) {
+      setActionIntent(null);
+      return;
+    }
+    if (act.create) {
+      if (!synced && machines.size === 0) return;
+      setActionIntent(null);
+      openAdd();
+      return;
+    }
+    if (act.roleId) {
+      const role = roles.find((item) => item.id === act.roleId);
+      if (!role && !synced) return;
+      setActionIntent(null);
+      if (role && canManageAgentRole(role, currentUserId)) {
+        openEdit(role);
+      }
+    }
+  });
 
   const confirmRemoval = async () => {
     if (!pendingRemoval) return;

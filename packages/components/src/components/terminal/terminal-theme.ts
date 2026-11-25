@@ -1,7 +1,7 @@
 import type { ITheme } from '@xterm/xterm';
 
 // Bridges the shared theme system (CSS custom properties declared in
-// tailwind/index.css) into the color/font shapes xterm.js needs. xterm renders to
+// style/index.css) into the color/font shapes xterm.js needs. xterm renders to
 // canvas and cannot consume `var(--x)` directly, so we resolve the `--terminal-*`
 // fields to concrete colors at runtime and re-read them whenever the theme changes.
 //
@@ -35,7 +35,7 @@ const TERMINAL_COLOR_VARS = {
 } as const satisfies Partial<Record<keyof ITheme, string>>;
 
 // Used only if `--font-terminal` is somehow unset (it is always defined in
-// tailwind/index.css); keeps xterm monospace rather than falling back to serif.
+// style/index.css); keeps xterm monospace rather than falling back to serif.
 const FALLBACK_TERMINAL_FONT =
   'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
@@ -55,9 +55,7 @@ export function buildTerminalTheme(host: HTMLElement): ITheme {
   host.appendChild(probe);
   try {
     const theme: ITheme = {};
-    for (const key of Object.keys(TERMINAL_COLOR_VARS) as Array<
-      keyof typeof TERMINAL_COLOR_VARS
-    >) {
+    for (const key of Object.keys(TERMINAL_COLOR_VARS) as Array<keyof typeof TERMINAL_COLOR_VARS>) {
       probe.style.setProperty('color', `var(${TERMINAL_COLOR_VARS[key]})`);
       const resolved = getComputedStyle(probe).color;
       if (resolved) {

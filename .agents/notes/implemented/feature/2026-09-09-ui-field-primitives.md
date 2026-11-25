@@ -127,7 +127,7 @@ rule mentions is a separate question this change does not settle.
 
 ## Discovered defect: the shell suppresses every outline ring
 
-`packages/components/src/tailwind/index.css` ends its base layer with
+`packages/components/src/style/index.css` ends its base layer with
 `*:focus, *:focus-visible { outline: none !important; }`. Layer order is
 `theme, base, stylex, components, utilities`, and for `!important` declarations
 layer priority is reversed, so no ordering lets a StyleX rule win. Measured in

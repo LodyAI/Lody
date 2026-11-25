@@ -8,7 +8,7 @@ import { GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft } f
 import type { LucideIcon } from 'lucide-react';
 import type React from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { useTranslation } from 'react-i18next';
 import {
   themeDuration,
@@ -141,7 +141,7 @@ export const PullRequestBadge = ({
   );
   const iconProps = stylex.props(size === 'sm' ? styles.iconSm : styles.iconMd, iconXstyle);
 
-  const sharedClassName = clsx(badgeProps.className, className);
+  const sharedClassName = cn(badgeProps.className, className);
 
   const content = (
     <>

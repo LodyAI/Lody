@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { usePostHog } from '@/lib/posthog-context';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Popover } from '@/ui/armed-overlays';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
@@ -313,7 +313,7 @@ const OutlineTick = memo(function OutlineTick({
         // The hit area spans the whole track and one full pitch of height; only
         // the inner line is visible. Focus shows on the line (via the group),
         // never as a ring around the invisible hit box.
-        className={clsx('group/tick', stylex.props(styles.tickButton).className)}
+        className={cn('group/tick', stylex.props(styles.tickButton).className)}
         style={{ height: TICK_PITCH }}
       >
         <span aria-hidden="true" style={{ width }} {...stylex.props(styles.tickLine)} />
@@ -703,7 +703,7 @@ export function ConversationOutlineRail({
       // Low contrast at rest so the rail reads as a margin marker, not chrome;
       // the whole strip lifts together on hover so a single tick never has to
       // be found before it becomes visible.
-      className={clsx('group/rail', stylex.props(styles.rail).className, className)}
+      className={cn('group/rail', stylex.props(styles.rail).className, className)}
       style={{ width: RAIL_WIDTH }}
     >
       <div

@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { type ReactNode } from 'react';
 
 import { useSessionMentionDropZone } from '@/hooks/use-session-mention-drag';
@@ -42,7 +42,7 @@ export function SessionMentionDropLayer({
 
   return (
     <div
-      className={clsx(stylex.props(styles.layer).className, className)}
+      className={cn(stylex.props(styles.layer).className, className)}
       data-session-mention-drop-layer=""
       ref={pointerDropRef}
       {...dropZone.handlers}

@@ -10,7 +10,7 @@ import { ChevronsUpDown } from 'lucide-react';
 import { Fragment, type ReactNode } from 'react';
 
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { Spinner } from '@lody/ui/spinner';
 import { field } from '@lody/ui/field/field.tokens.stylex';
 import { control, text } from '@lody/ui/tokens/scales.stylex';
@@ -70,7 +70,7 @@ export function MobileNativeSelect<T extends string = string>({
 
   const rootProps = stylex.props(styles.root, (disabled || loading) && styles.disabled, xstyle);
   return (
-    <div {...rootProps} className={clsx(rootProps.className, className)}>
+    <div {...rootProps} className={cn(rootProps.className, className)}>
       <span {...stylex.props(styles.value)}>
         {loading ? (
           <>

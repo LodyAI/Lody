@@ -1,7 +1,7 @@
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { SIDEBAR_ROW_LINE_CLASS, sidebarSurface } from './sidebar-surface';
 import { themeColors } from '../style/theme-colors.stylex';
@@ -1015,7 +1015,7 @@ function SessionRowTime({
   const now = useStableNow();
   const relativeTime = formatCompactRelativeTime(latestMessageAt, now);
   return (
-    <span className={clsx(stylex.props(rowStyles.time).className, className)}>
+    <span className={cn(stylex.props(rowStyles.time).className, className)}>
       <span {...stylex.props(rowStyles.timeValue)}>{relativeTime}</span>
     </span>
   );
@@ -1297,11 +1297,11 @@ const SessionGroupRow = memo(function SessionGroupRow({
   const isUnsent = useSessionUnsentNewConversation(session.sessionId);
   const renderTitle = (extraClassName?: string) => (
     <span
-      className={clsx('sidebar-session-title-clip', stylex.props(rowStyles.titleClip).className)}
+      className={cn('sidebar-session-title-clip', stylex.props(rowStyles.titleClip).className)}
       data-sidebar-title-clip
     >
       <span
-        className={clsx(
+        className={cn(
           'sidebar-session-title',
           stylex.props(rowStyles.title).className,
           isUnsent && !showSelectedState && SIDEBAR_UNSENT_TITLE_CLASS,
@@ -1313,7 +1313,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
       </span>
     </span>
   );
-  const lineBoxClassName = clsx(stylex.props(rowStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS);
+  const lineBoxClassName = cn(stylex.props(rowStyles.lineBox).className, SIDEBAR_ROW_LINE_CLASS);
   const handleAnchorClick = useAnchor
     ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
         if (openSessionOnModifiedClick(event, session.sessionId)) return;
@@ -1390,7 +1390,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
               title: session.title,
             })
       }
-      className={clsx(
+      className={cn(
         'group',
         // A desktop repo row is two lines (title, then branch and time); chats,
         // nested children and every mobile row stay one. The rest of the metadata (repo /
@@ -1615,7 +1615,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         </div>
         <div {...stylex.props(showMetaLine ? rowStyles.metaColumn : rowStyles.contents)}>
           <div
-            className={clsx(
+            className={cn(
               // Body role: conversation titles match prose in every organize mode.
               stylex.props(rowStyles.titleRow).className,
               SIDEBAR_ROW_TEXT_CLASS,
@@ -1655,14 +1655,14 @@ const SessionGroupRow = memo(function SessionGroupRow({
             restIcon={
               isChatSession ? (
                 <span
-                  className={clsx(
+                  className={cn(
                     stylex.props(rowStyles.endRow).className,
                     useAnchor && stylex.props(rowStyles.endRowRaised).className
                   )}
                 >
                   <SessionRowTime
                     latestMessageAt={session.latestMessageAt}
-                    className={clsx(
+                    className={cn(
                       SIDEBAR_CAPTION_TEXT_CLASS,
                       stylex.props(rowStyles.muted).className
                     )}
@@ -1670,7 +1670,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
                 </span>
               ) : hasPr || showMergeablePill || isMobile ? (
                 <span
-                  className={clsx(
+                  className={cn(
                     SIDEBAR_CAPTION_TEXT_CLASS,
                     stylex.props(rowStyles.endRowMeta).className,
                     useAnchor && stylex.props(rowStyles.endRowRaised).className
@@ -1987,7 +1987,7 @@ function ProjectGroupHeaderRow({
       data-scope-item="row"
       data-sidebar-group-key={group.key}
       data-menu-open={menuOpen ? '' : undefined}
-      className={clsx(
+      className={cn(
         'group',
         stylex.props(
           rowStyles.projectHeader,
@@ -2018,7 +2018,7 @@ function ProjectGroupHeaderRow({
       >
         <Folders
           aria-hidden="true"
-          className={clsx(
+          className={cn(
             stylex.props(
               rowStyles.projectGlyph,
               isMobile ? rowStyles.hidden : rowStyles.projectFolderDesktop
@@ -2027,7 +2027,7 @@ function ProjectGroupHeaderRow({
         />
         <ChevronDown
           aria-hidden="true"
-          className={clsx(
+          className={cn(
             stylex.props(
               rowStyles.projectGlyph,
               rowStyles.projectChevron,
@@ -2043,7 +2043,7 @@ function ProjectGroupHeaderRow({
           {showMenu ? (
             <button
               type="button"
-              className={clsx(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
+              className={cn(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
               aria-label={t('sessions.moreActions', 'More actions')}
               onClick={(event) => {
                 // Open the row's own right-click menu from a left click.
@@ -2085,7 +2085,7 @@ function ProjectGroupHeaderRow({
   );
 
   return (
-    <div className={clsx('group', stylex.props(rowStyles.projectHeaderWrap).className)}>
+    <div className={cn('group', stylex.props(rowStyles.projectHeaderWrap).className)}>
       {showMenu ? (
         <ContextMenu.Root onOpenChange={setMenuOpen}>
           <ContextMenu.Trigger render={row} />
@@ -2260,7 +2260,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   const headerBaseColorClass = isGroupLabel ? SIDEBAR_GROUP_LABEL_COLOR_CLASS : undefined;
   const headerTypographyClass = isGroupLabel
     ? SIDEBAR_GROUP_LABEL_CLASS
-    : clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(rowStyles.repoMedium).className);
+    : cn(SIDEBAR_ROW_TEXT_CLASS, stylex.props(rowStyles.repoMedium).className);
 
   return (
     <div
@@ -2305,7 +2305,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
       ) : (
         <div
           data-session-list-group
-          className={clsx(
+          className={cn(
             'group',
             stylex.props(
               stylex.defaultMarker(),
@@ -2323,7 +2323,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 data-scope-item="row"
                 data-sidebar-group-key={group.key}
                 data-menu-open={repoMenuOpen ? '' : undefined}
-                className={clsx(
+                className={cn(
                   stylex.props(
                     rowStyles.groupHeader,
                     isGroupLabel
@@ -2421,7 +2421,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 {repoMenuEnabled ? (
                   <button
                     type="button"
-                    className={clsx(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
+                    className={cn(SIDEBAR_HOVER_ACTION_CLASS, SIDEBAR_MENU_TRIGGER_OPEN_CLASS)}
                     aria-label={moreActionsLabel}
                     onClick={(event) => {
                       // Open the row's own right-click menu from a left click.
@@ -2527,7 +2527,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
               data-id={`show-more:${group.key}`}
               data-scope-item="row"
               data-sidebar-show-more={group.key}
-              className={clsx(
+              className={cn(
                 // Same height as a conversation row (3px padding + 1px borders + 18px line).
                 SIDEBAR_CAPTION_TEXT_CLASS,
                 stylex.props(rowStyles.showMore).className
@@ -2551,7 +2551,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
             >
               <span {...stylex.props(rowStyles.toggleBox)} aria-hidden="true" />
               <span>{showLessLabel}</span>
-
             </button>
           )}
         </div>
@@ -2591,7 +2590,7 @@ const SortableProjectGroupSection = memo(function SortableProjectGroupSection({
     <button
       type="button"
       ref={setActivatorNodeRef}
-      className={clsx(
+      className={cn(
         SIDEBAR_HOVER_ACTION_CLASS,
         stylex.props(rowStyles.projectDragHandle).className
       )}
@@ -2887,7 +2886,7 @@ export const SessionList = memo(function SessionList({
     <Tooltip.Provider>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-          <div className={clsx(stylex.props(rowStyles.listStack).className, className)}>
+          <div className={cn(stylex.props(rowStyles.listStack).className, className)}>
             {groups.map((group, groupIndex) => {
               const revealedRows = resolvedRevealedRowsByGroup[group.key] ?? 0;
               const groupHeaderAction = groupIndex === 0 ? headerAction : undefined;

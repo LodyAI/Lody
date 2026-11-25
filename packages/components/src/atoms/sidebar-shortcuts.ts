@@ -10,7 +10,7 @@ export type SidebarSessionShortcut = {
 };
 
 export const MAX_SIDEBAR_SHORTCUT_SLOTS = 9;
-export const SIDEBAR_SHORTCUT_HOLD_DELAY_MS = 150;
+export const SIDEBAR_SHORTCUT_HOLD_DELAY_MS = 750;
 
 /**
  * Whether the primary modifier key (`Command` on macOS, `Control` on

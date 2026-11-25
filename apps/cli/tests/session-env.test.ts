@@ -94,6 +94,41 @@ describe('Session buildShellEnv', () => {
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 
+  it('preserves ELECTRON_RUN_AS_NODE only when Session.createAgent spawns process.execPath', async () => {
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '1');
+    const captured: Array<{ command: string; env: NodeJS.ProcessEnv }> = [];
+    const reachedSandbox = new Error('reached-sandbox');
+    const spawn = vi.fn(
+      async (command: string, _args: string[], options?: { env?: NodeJS.ProcessEnv }) => {
+        captured.push({ command, env: { ...options?.env } });
+        throw reachedSandbox;
+      }
+    );
+    const session = new Session(createConfig(), createSilentLogger());
+    (session as unknown as { sandbox: { spawn: typeof spawn } }).sandbox = { spawn };
+
+    const baseCallbacks = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      args: ['codex-acp.js'],
+      onUpdateMessage: () => {},
+      onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' as const } }),
+      onComplete: () => {},
+      onError: () => {},
+    } as unknown as CreateAgentConfig;
+
+    await expect(
+      session.createAgent({ ...baseCallbacks, command: process.execPath })
+    ).rejects.toBe(reachedSandbox);
+    await expect(
+      session.createAgent({ ...baseCallbacks, command: '/usr/local/bin/custom-agent' })
+    ).rejects.toBe(reachedSandbox);
+
+    expect(captured).toHaveLength(2);
+    expect(captured[0]?.env.ELECTRON_RUN_AS_NODE).toBe('1');
+    expect(captured[1]?.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+
   it.each([undefined, 'opener-session-3'])(
     'keeps independent identity separate from inherited values with opener %s',
     (openedBySessionId) => {

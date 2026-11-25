@@ -12,7 +12,7 @@ Translation: current
 ## 决策
 
 - `MarkdownRenderer` 提取每个渲染段落的文本，包含汉字时添加 `markdown-cjk-paragraph` 类。
-- `tailwind/index.css` 只对标记过的顶层段落使用 `text-align: justify`、`text-justify: auto` 和 `text-align-last: start`。
+- `style/index.css` 只对标记过的顶层段落使用 `text-align: justify`、`text-justify: auto` 和 `text-align-last: start`。
 - 判断依据是内容而不是界面语言：英文界面也可能收到中文回复，中文界面也可能收到英文回复。
 
 ## 替代方案

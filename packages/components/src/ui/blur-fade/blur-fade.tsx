@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import styles from './fade.module.css';
 
 export type FadeProps = {
@@ -21,7 +21,7 @@ export const Fade = React.forwardRef<HTMLDivElement, FadeProps>(function Fade(
     <div
       ref={ref}
       aria-hidden
-      className={clsx(styles.root, className)}
+      className={cn(styles.root, className)}
       data-side={side}
       style={
         {

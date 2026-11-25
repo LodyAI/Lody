@@ -1004,3 +1004,45 @@ describe('agy quota failure isolation', () => {
     }
   });
 });
+
+describe('spawnAcpProcess ELECTRON_RUN_AS_NODE handling', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('preserves ELECTRON_RUN_AS_NODE when spawning process.execPath and strips it for other commands', () => {
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', '1');
+    const captured: Array<{ command: string; env: NodeJS.ProcessEnv | undefined }> = [];
+    const spawnImpl = ((
+      command: string,
+      _args: readonly string[],
+      options?: { env?: NodeJS.ProcessEnv }
+    ) => {
+      captured.push({ command, env: options?.env ? { ...options.env } : undefined });
+      return new EventEmitter() as unknown as ChildProcess;
+    }) as NonNullable<Parameters<typeof spawnAcpProcess>[0]['spawnImpl']>;
+
+    spawnAcpProcess({
+      cliType: 'builtin',
+      agentType: 'codex',
+      workdir: os.tmpdir(),
+      env: {},
+      command: process.execPath,
+      args: ['codex-acp.js'],
+      spawnImpl,
+    });
+    spawnAcpProcess({
+      cliType: 'builtin',
+      agentType: 'antigravity',
+      workdir: os.tmpdir(),
+      env: { ELECTRON_RUN_AS_NODE: '1' },
+      command: '/selected/agy',
+      args: ['acp'],
+      spawnImpl,
+    });
+
+    expect(captured).toHaveLength(2);
+    expect(captured[0]?.env?.ELECTRON_RUN_AS_NODE).toBe('1');
+    expect(captured[1]?.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+});

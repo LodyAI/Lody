@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   ArrowRight,
   Brain,
@@ -353,7 +353,7 @@ export function AgentRoleDetailPane({
   const scrollProps = stylex.props(styles.scroll);
 
   return (
-    <div {...paneProps} className={clsx(paneProps.className, className)}>
+    <div {...paneProps} className={cn(paneProps.className, className)}>
       <header {...stylex.props(styles.header)}>
         <span {...stylex.props(styles.emoji)} aria-hidden="true">
           {getAgentRoleEmoji(role)}
@@ -380,7 +380,7 @@ export function AgentRoleDetailPane({
 
       {/* Only the values scroll. The header says WHICH Role and the footer is
           how to change it — both stay put however long the instruction runs. */}
-      <div {...scrollProps} className={clsx(scrollProps.className, 'scrollbar-pro')}>
+      <div {...scrollProps} className={cn(scrollProps.className, 'scrollbar-pro')}>
         <dl {...stylex.props(styles.list)}>
           {modelId ? (
             <DetailRow

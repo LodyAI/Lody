@@ -44,8 +44,8 @@ largest build number for the selected prerelease version.
 
 ## Build compatibility
 
-- The minimum deployment target is **iOS / iPadOS 16.4**, matching the
-  Tailwind CSS 4 browser floor. Keep the Xcode project, App, notification service,
+- The minimum deployment target is **iOS / iPadOS 16.4**, matching the Vite
+  `safari16.4` JS/CSS target. Keep the Xcode project, App, notification service,
   widget targets (Debug and Release), and `ios/App/Podfile` aligned. A native
   deployment target does not provide missing JavaScript APIs; follow the
   [mobile compatibility rules](AGENTS.md#minimum-ios-compatibility) for WebView

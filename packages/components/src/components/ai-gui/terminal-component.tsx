@@ -11,7 +11,7 @@ import Anser from 'anser';
 import { Terminal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { text as textScale } from '@lody/ui/tokens/scales.stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { conversationPanelStyles } from './conversation-panel';
 import {
   createVSCodeTerminalTheme,
@@ -251,7 +251,7 @@ export const TerminalComponent = memo(function TerminalComponent({
     <>
       <Terminal {...stylex.props(styles.glyph)} />
       <div
-        className={clsx(
+        className={cn(
           stylex.props(typography.caption).className,
           stylex.props(typography.title).className
         )}
@@ -263,7 +263,7 @@ export const TerminalComponent = memo(function TerminalComponent({
 
   return (
     <div
-      className={clsx(
+      className={cn(
         stylex.props(styles.root, showBorder && conversationPanelStyles.frame, xstyle).className,
         className
       )}
@@ -311,7 +311,7 @@ export const TerminalComponent = memo(function TerminalComponent({
           <div {...stylex.props(styles.body)}>
             {shouldRenderInput ? (
               <div
-                className={clsx(
+                className={cn(
                   'font-terminal',
                   stylex.props(styles.commandRow, hasOutput && styles.commandRowRule).className
                 )}
@@ -323,7 +323,7 @@ export const TerminalComponent = memo(function TerminalComponent({
                   $
                 </span>
                 <pre
-                  className={clsx(
+                  className={cn(
                     'scrollbar-pro',
                     'font-terminal',
                     stylex.props(styles.commandText).className
@@ -338,12 +338,12 @@ export const TerminalComponent = memo(function TerminalComponent({
             {hasOutput ? (
               <div
                 ref={outputRef}
-                className={clsx(
+                className={cn(
                   stylex.props(styles.outputFrame).className,
                   shouldUseFullOutput
                     ? null
                     : shouldUseScrollOutput || isFocused
-                      ? clsx(
+                      ? cn(
                           'scrollbar-pro',
                           stylex.props(styles.outputScroll).className,
                           shouldUseScrollOutput
@@ -360,7 +360,7 @@ export const TerminalComponent = memo(function TerminalComponent({
                 }}
               >
                 <pre
-                  className={clsx('font-terminal', stylex.props(styles.outputText).className)}
+                  className={cn('font-terminal', stylex.props(styles.outputText).className)}
                   style={terminalTextFontSizeStyle(fontSize)}
                 >
                   {renderAnsiToReactNodes({ value: outputTextForDisplay, terminalTheme })}

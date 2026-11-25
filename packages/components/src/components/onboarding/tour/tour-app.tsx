@@ -39,7 +39,7 @@ const TerminalDock = lazy(() =>
 );
 import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { StableSessionContext } from '@/hooks/useStableSession';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   DEFAULT_TOUR_IDENTITY,
   TOUR_ANNOTATION_ANCHOR,
@@ -529,7 +529,7 @@ function TourWindow({
     <div
       data-tour-anchor="window"
       {...windowProps}
-      className={clsx(windowProps.className, className)}
+      className={cn(windowProps.className, className)}
     >
       {/* Window chrome. The tour is a WINDOW on a desk, not a fullscreen slab:
           nobody runs their editor fullscreen, and a frameless rectangle reads

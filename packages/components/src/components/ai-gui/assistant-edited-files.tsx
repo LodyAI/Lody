@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 
 import { evidenceSurface } from './surface';
@@ -108,7 +108,8 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    backgroundColor: { default: null,
+    backgroundColor: {
+      default: null,
       '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 0.45)' },
       ':focus-visible': 'hsl(var(--hover) / 0.45)',
     },
@@ -133,7 +134,8 @@ const styles = stylex.create({
       'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: themeDuration[150],
     transitionTimingFunction: themeEasing['in-out'],
-    backgroundColor: { default: null,
+    backgroundColor: {
+      default: null,
       '@media (hover: hover)': { ':hover': 'hsl(var(--hover) / 0.45)' },
       ':focus-visible': 'hsl(var(--hover) / 0.45)',
     },
@@ -205,14 +207,14 @@ const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
 
   if (add === 0 && del === 0) {
     return (
-      <span className={clsx(stylex.props(styles.changed).className, CHANGED_CLASS)}>
+      <span className={cn(stylex.props(styles.changed).className, CHANGED_CLASS)}>
         {t('sessions.editedFiles.changed', 'Changed')}
       </span>
     );
   }
 
   return (
-    <span className={clsx(stylex.props(styles.figures).className, FIGURE_CLASS)}>
+    <span className={cn(stylex.props(styles.figures).className, FIGURE_CLASS)}>
       <span
         className={
           add === undefined ? FIGURE_UNKNOWN_CLASS : stylex.props(styles.addition).className
@@ -262,13 +264,13 @@ export function AssistantEditedFiles({
   const isSingleFile = uniqueFiles.length === 1;
 
   return (
-    <div className={clsx(stylex.props(styles.root).className, className)}>
+    <div className={cn(stylex.props(styles.root).className, className)}>
       <div {...stylex.props(styles.card, cardXstyle)}>
         {/* Multi-file only: summary bar. Single-file cards skip it so we
             don't stack "Edited 1 file" on top of the lone file row. */}
         {!isSingleFile ? (
           <div {...stylex.props(styles.summary)}>
-            <span className={clsx(stylex.props(styles.summaryText).className, CAPTION_CLASS)}>
+            <span className={cn(stylex.props(styles.summaryText).className, CAPTION_CLASS)}>
               {t('sessions.editedFiles.summary', {
                 count: uniqueFiles.length,
                 defaultValue: 'Edited {{count}} files',
@@ -282,10 +284,10 @@ export function AssistantEditedFiles({
             const { directory, name } = splitFilePath(file.filePath);
             const content = (
               <>
-                <span className={clsx(stylex.props(styles.name).className, NAME_CLASS)}>
+                <span className={cn(stylex.props(styles.name).className, NAME_CLASS)}>
                   <span>{name}</span>
                   {directory ? (
-                    <span className={clsx(stylex.props(styles.directory).className, DETAIL_CLASS)}>
+                    <span className={cn(stylex.props(styles.directory).className, DETAIL_CLASS)}>
                       {directory}
                     </span>
                   ) : null}

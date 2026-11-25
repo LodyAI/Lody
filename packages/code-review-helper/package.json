@@ -58,7 +58,6 @@
     "@radix-ui/react-tooltip": "^1.2.7",
     "@stylexjs/stylex": "0.19.0",
     "@vitejs/plugin-react": "catalog:",
-    "clsx": "^2.1.1",
     "commander": "^12.1.0",
     "lucide-react": "catalog:",
     "react": "catalog:",

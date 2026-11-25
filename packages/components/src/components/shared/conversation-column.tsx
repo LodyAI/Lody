@@ -1,7 +1,7 @@
 import type { HTMLAttributes } from 'react';
 import { useAtomValue } from 'jotai';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 
 import { conversationWideModeAtom } from '@/atoms/settings';
 import { conversationColumnStyles as column } from '@/lib/conversation-layout';
@@ -25,7 +25,7 @@ export function ConversationColumn({
   return (
     <div
       data-slot="conversation-column"
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />

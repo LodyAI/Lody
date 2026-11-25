@@ -91,7 +91,7 @@ will-change-transform">` around the icon, which fills the span with
 - `AgentReadinessMark` keeps the static track and the determinate fill in one
   `<svg>`; the indeterminate arc gets its own `<svg>` inside an absolutely
   positioned `<span class="agent-readiness-orbit">`.
-- The other infinite animations in `tailwind/index.css`
+- The other infinite animations in `style/index.css`
   (`agent-activity-dot-pulse`, `animate-badge-pulse`, `animate-progress-sweep`)
   already target HTML elements and are unchanged. The `svg.animate-spin` base
   rule stays as a safety net for strays.

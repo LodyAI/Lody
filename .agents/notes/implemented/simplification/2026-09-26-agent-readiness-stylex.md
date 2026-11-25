@@ -31,7 +31,7 @@ rules inside the mark when that caller is migrated in the follow-up layer. The
 default tile keeps the 40% wash. External `className` remains available for
 caller layout.
 
-The orbit keyframes moved from `tailwind/index.css` into the component. The
+The orbit keyframes moved from `style/index.css` into the component. The
 indeterminate SVG still sits inside an animated HTML span, preserving the Retina
 compositing constraint explained in the
 [spinner decision](../bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).

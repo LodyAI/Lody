@@ -1119,7 +1119,7 @@ const READING_ANSWER = [
 
 const READING_FILE_DIFFS = [
   { filePath: 'packages/components/src/lib/conversation-layout.ts', add: 4, del: 3 },
-  { filePath: 'packages/components/src/tailwind/index.css', add: 38, del: 2 },
+  { filePath: 'packages/components/src/style/index.css', add: 38, del: 2 },
   { filePath: 'packages/components/src/atoms/settings.ts', add: 6, del: 3 },
   { filePath: 'packages/components/src/components/ai-gui/markdown-table.tsx', add: 12, del: 4 },
   { filePath: 'docs/reading-guide.md', add: 8, del: 1 },
@@ -1130,7 +1130,7 @@ const READING_DIFF_TEXT: Record<string, { oldText: string; newText: string }> = 
     oldText: 'export const readingWidth = 640;\n',
     newText: 'export const readingWidth = 768;\n',
   },
-  'packages/components/src/tailwind/index.css': {
+  'packages/components/src/style/index.css': {
     oldText: '.reading-column { max-width: 40rem; }\n',
     newText: '.reading-column { max-width: 48rem; }\n',
   },

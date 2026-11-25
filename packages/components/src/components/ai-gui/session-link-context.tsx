@@ -1,8 +1,13 @@
 'use client';
 
 import { createContext, useContext, type ReactNode } from 'react';
-import { openSessionDeepLink } from '@/lib/session-deep-link';
-import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import { openAppActionDeepLink, openSessionDeepLink } from '@/lib/session-deep-link';
+import {
+  parseAppActionLink,
+  parseSessionLink,
+  type AppActionLink,
+  type SessionLink,
+} from '@lody/shared/session-link';
 import type { SessionId } from '@lody/shared';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 
@@ -13,6 +18,11 @@ export function parseSessionLinkHref(href: string): SessionId | null {
   return (parseSessionLink(href)?.sessionId as SessionId | undefined) ?? null;
 }
 
+export function parseAppActionLinkHref(href: string): AppActionLink | null {
+  if (!href.includes('://')) return null;
+  return parseAppActionLink(href);
+}
+
 /**
  * Opens a Session named by a Markdown resource link. Absent outside a live
  * Session workspace (share pages, settings), where the link renders inert.
@@ -20,6 +30,8 @@ export function parseSessionLinkHref(href: string): SessionId | null {
 const SessionLinkContext = createContext<
   ((target: SessionNavigationTarget & Pick<SessionLink, 'workspaceId'>) => void) | null
 >(null);
+
+const AppActionLinkContext = createContext<((target: AppActionLink) => void) | null>(null);
 
 export function SessionLinkProvider({
   enabled,
@@ -34,11 +46,17 @@ export function SessionLinkProvider({
   // Ordinary related-session navigation may instead restore the last active tab.
   return (
     <SessionLinkContext.Provider value={enabled ? (onNavigate ?? openSessionDeepLink) : null}>
-      {children}
+      <AppActionLinkContext.Provider value={enabled ? openAppActionDeepLink : null}>
+        {children}
+      </AppActionLinkContext.Provider>
     </SessionLinkContext.Provider>
   );
 }
 
 export function useSessionLinkNavigator() {
   return useContext(SessionLinkContext);
+}
+
+export function useAppActionLinkNavigator() {
+  return useContext(AppActionLinkContext);
 }

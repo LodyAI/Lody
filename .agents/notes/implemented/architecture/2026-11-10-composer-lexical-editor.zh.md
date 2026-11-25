@@ -26,7 +26,7 @@ Translation: current
 - **与 textarea 对齐**：
   - CSS 给它 textarea 的 UA 盒模型：inline-block、pre-wrap、`overflow: auto`。
   - 高度为 `rows` 行加内边距，工具类仍可覆盖尺寸。
-  - 调用方的 `placeholder:` 工具类通过 `tailwind/index.css` 里的 `placeholder` 变体，同样作用于编辑器的占位符。没有这类工具类时，从一个样式相同的 textarea 复制浏览器默认的占位符颜色。WebKit 读不到 `::placeholder` 的样式，所以在 WebKit 上不复制，使用 CSS 默认值。
+  - 调用方的 `placeholder:` 工具类通过 `style/index.css` 里的 `placeholder` 变体，同样作用于编辑器的占位符。没有这类工具类时，从一个样式相同的 textarea 复制浏览器默认的占位符颜色。WebKit 读不到 `::placeholder` 的样式，所以在 WebKit 上不复制，使用 CSS 默认值。
   - 渲染 chip 的地方关闭拼写检查。普通文字使用系统选区颜色；原子引用使用相同的系统选区背景色与文字色，不加边框、阴影或圆角，并抑制内部文字重复的浏览器选区着色。
   - 程序或键盘聚焦保留原光标，指针聚焦按点击位置放光标。
   - 首次内容在元素挂载时写入，所以父组件的 layout effect 量到的是已填好内容的编辑器，和 textarea 一样。

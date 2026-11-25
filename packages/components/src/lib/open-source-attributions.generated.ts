@@ -4,7 +4,7 @@ import type { OpenSourceAttributionBundle } from './open-source-attributions';
 // Do not edit manually.
 export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-04T04:51:01.134Z",
+  "generatedAt": "2026-11-24T13:01:10.448Z",
   "entries": [
     {
       "id": "bundled-theme-ayu",
@@ -38,6 +38,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
         "Catppuccin Latte"
       ],
       "noticePath": "packages/components/src/lib/vscode-theme/bundled/themes/catppuccin/LICENSE"
+    },
+    {
+      "id": "compiled-curve25519-dalek",
+      "kind": "vendored",
+      "scope": "compiled-webassembly",
+      "name": "curve25519-dalek and subtle",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/dalek-cryptography/curve25519-dalek",
+      "author": "Isis Lovecruft, Henry de Valence and dalek-cryptography contributors",
+      "description": "Compiled into the strict Ed25519 WebAssembly verifier of @lody/e2ee-core.",
+      "assets": [
+        "curve25519-dalek 4.1.3",
+        "subtle 2.6.1"
+      ],
+      "noticePath": "packages/e2ee-core/wasm/ed25519-strict/licenses/BSD-3-Clause.txt"
     },
     {
       "id": "bundled-theme-dracula",
@@ -117,6 +132,27 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
         "Rosé Pine Dawn (no italics)"
       ],
       "noticePath": "packages/components/src/lib/vscode-theme/bundled/themes/rose-pine/LICENSE"
+    },
+    {
+      "id": "compiled-rustcrypto-sha2",
+      "kind": "vendored",
+      "scope": "compiled-webassembly",
+      "name": "RustCrypto SHA-2 and support crates",
+      "license": "MIT",
+      "homepage": "https://github.com/RustCrypto/hashes",
+      "author": "RustCrypto Developers and crate authors",
+      "description": "Compiled into the strict Ed25519 WebAssembly verifier of @lody/e2ee-core.",
+      "assets": [
+        "sha2 0.10.9",
+        "digest 0.10.7",
+        "block-buffer 0.10.4",
+        "crypto-common 0.1.7",
+        "cpufeatures 0.2.17",
+        "generic-array 0.14.7",
+        "typenum 1.20.1",
+        "cfg-if 1.0.5"
+      ],
+      "noticePath": "packages/e2ee-core/wasm/ed25519-strict/licenses/MIT.txt"
     },
     {
       "id": "bundled-theme-tokyo-night",
@@ -231,31 +267,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "noticePath": "packages/components/src/components/icons/file-icons/LICENSE"
     },
     {
-      "id": "pkg-emojibase-data-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "emojibase-data",
-      "license": "MIT",
-      "homepage": "https://emojibase.dev",
-      "author": "Miles Johnson",
-      "description": "Aggregated emoji, shortcode, and emoticon data.",
-      "versions": [
-        "17.0.0"
-      ]
-    },
-    {
-      "id": "pkg-frimousse-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "frimousse",
-      "license": "MIT",
-      "homepage": "https://frimousse.liveblocks.io",
-      "description": "A lightweight, unstyled, and composable emoji picker for React.",
-      "versions": [
-        "0.3.0"
-      ]
-    },
-    {
       "id": "pkg-agentclientprotocol-sdk-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
@@ -265,20 +276,101 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Zed Industries",
       "description": "The Agent Client Protocol (ACP) is a protocol that standardizes communication between *code editors* (interactive programs for viewing and editing source code) and *coding agents* (programs that use generative AI to autonomously modify code).",
       "versions": [
-        "0.25.0"
+        "1.3.0",
+        "1.4.0",
+        "1.5.0",
+        "1.9.0",
+        "2.5.0"
       ]
     },
     {
-      "id": "pkg-antfu-install-pkg-mit",
+      "id": "pkg-anthropic-ai-claude-agent-sdk-unknown",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@antfu/install-pkg",
-      "license": "MIT",
-      "homepage": "https://github.com/antfu/install-pkg#readme",
-      "author": "Anthony Fu",
-      "description": "Install package programmatically.",
+      "name": "@anthropic-ai/claude-agent-sdk",
+      "license": "Unknown",
+      "homepage": "https://github.com/anthropics/claude-agent-sdk-typescript",
+      "author": "Anthropic",
+      "description": "SDK for building AI agents with Claude Code's capabilities. Programmatically interact with Claude to build autonomous agents that can understand codebases, edit files, and execute workflows.",
       "versions": [
-        "1.1.0"
+        "0.3.327"
+      ]
+    },
+    {
+      "id": "pkg-anthropic-ai-claude-agent-sdk-linux-arm64-unknown",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@anthropic-ai/claude-agent-sdk-linux-arm64",
+      "license": "Unknown",
+      "homepage": "https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-arm64",
+      "description": "Native CLI binary for @anthropic-ai/claude-agent-sdk on linux-arm64",
+      "versions": [
+        "0.3.327"
+      ]
+    },
+    {
+      "id": "pkg-anthropic-ai-sdk-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@anthropic-ai/sdk",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/anthropics/anthropic-sdk-typescript#readme",
+      "author": "Anthropic",
+      "description": "The official TypeScript library for the Anthropic API",
+      "versions": [
+        "1.7.0"
+      ]
+    },
+    {
+      "id": "pkg-anthropic-ai-sdk-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@anthropic-ai/sdk",
+      "license": "MIT",
+      "homepage": "https://github.com/anthropics/anthropic-sdk-typescript#readme",
+      "author": "Anthropic",
+      "description": "The official TypeScript library for the Anthropic API",
+      "versions": [
+        "0.129.0"
+      ]
+    },
+    {
+      "id": "pkg-aria-ui-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aria-ui/core",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/aria-ui#readme",
+      "author": "ocavue",
+      "description": "A framework for building light-DOM-based web components",
+      "versions": [
+        "0.2.1"
+      ]
+    },
+    {
+      "id": "pkg-aria-ui-elements-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aria-ui/elements",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/aria-ui#readme",
+      "author": "ocavue",
+      "description": "Unstyled Light-DOM-Only Web Components",
+      "versions": [
+        "0.1.12"
+      ]
+    },
+    {
+      "id": "pkg-aria-ui-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aria-ui/utils",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/aria-ui#readme",
+      "author": "ocavue",
+      "description": "Utility functions for aria-ui",
+      "versions": [
+        "0.1.7"
       ]
     },
     {
@@ -318,6 +410,250 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-aws-sdk-client-bedrock-runtime-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/client-bedrock-runtime",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/clients/client-bedrock-runtime",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS SDK for JavaScript Bedrock Runtime Client for Node.js, Browser and React Native",
+      "versions": [
+        "3.1127.0"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-core-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/core",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/core",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "Core functions & classes shared by multiple AWS SDK clients.",
+      "versions": [
+        "3.981.0"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-env-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-env",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-env",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that sources credentials from known environment variables",
+      "versions": [
+        "3.972.84"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-http-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-http",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-http",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider for containers and HTTP sources",
+      "versions": [
+        "3.972.86"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-ini-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-ini",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-ini",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that sources credentials from ~/.aws/credentials and ~/.aws/config",
+      "versions": [
+        "3.973.30"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-login-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-login",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-login",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that sources credentials from aws login cached tokens",
+      "versions": [
+        "3.972.92"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-node-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-node",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-node",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that sources credentials from a Node.JS environment.",
+      "versions": [
+        "3.972.97"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-process-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-process",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-process",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that sources credential_process from ~/.aws/credentials and ~/.aws/config",
+      "versions": [
+        "3.972.84"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-sso-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-sso",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-sso",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that exchanges a resolved SSO login token file for temporary AWS credentials",
+      "versions": [
+        "3.973.28"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-credential-provider-web-identity-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/credential-provider-web-identity",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/credential-provider-web-identity",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that calls STS assumeRole for temporary AWS credentials",
+      "versions": [
+        "3.972.90"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-eventstream-handler-node-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/eventstream-handler-node",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/eventstream-handler-node",
+      "author": "AWS SDK for JavaScript Team",
+      "versions": [
+        "3.972.42"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-middleware-eventstream-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/middleware-eventstream",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/middleware-eventstream",
+      "author": "AWS SDK for JavaScript Team",
+      "versions": [
+        "3.972.38"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-middleware-websocket-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/middleware-websocket",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/middleware-websocket",
+      "author": "AWS SDK for JavaScript Team",
+      "versions": [
+        "3.972.66"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-nested-clients-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/nested-clients",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages/nested-clients",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "Nested clients for AWS SDK packages.",
+      "versions": [
+        "3.998.3"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-signature-v4-multi-region-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/signature-v4-multi-region",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages/signature-v4-multi-region",
+      "author": "AWS SDK for JavaScript Team",
+      "versions": [
+        "3.996.52"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-token-providers-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/token-providers",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages/token-providers",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "A collection of token providers",
+      "versions": [
+        "3.1127.0",
+        "3.1166.0"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-types-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/types",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/types",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "Types for the AWS SDK",
+      "versions": [
+        "3.975.1"
+      ]
+    },
+    {
+      "id": "pkg-aws-sdk-xml-builder-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws-sdk/xml-builder",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/aws/aws-sdk-js-v3/tree/main/packages-internal/xml-builder",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "XML utilities for the AWS SDK",
+      "versions": [
+        "3.972.43"
+      ]
+    },
+    {
+      "id": "pkg-aws-lambda-invoke-store-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@aws/lambda-invoke-store",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/awslabs/aws-lambda-invoke-store",
+      "author": "Amazon Web Services",
+      "description": "Invoke scoped data storage for AWS Lambda Node.js Runtime Environment",
+      "versions": [
+        "0.3.0"
+      ]
+    },
+    {
       "id": "pkg-babel-code-frame-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -327,7 +663,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Generate errors that contain a code frame that point to source locations.",
       "versions": [
-        "7.29.0"
+        "7.27.1",
+        "7.29.0",
+        "7.29.7"
       ]
     },
     {
@@ -340,7 +678,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "The compat-data to determine required Babel plugins",
       "versions": [
-        "7.29.0"
+        "7.29.0",
+        "7.29.7"
       ]
     },
     {
@@ -353,7 +692,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Babel compiler core.",
       "versions": [
-        "7.29.0"
+        "7.29.0",
+        "7.29.7"
       ]
     },
     {
@@ -366,7 +706,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Turns an AST into code.",
       "versions": [
-        "7.29.1"
+        "7.29.1",
+        "7.29.8"
       ]
     },
     {
@@ -379,7 +720,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Helper functions on Babel compilation targets",
       "versions": [
-        "7.28.6"
+        "7.28.6",
+        "7.29.7"
       ]
     },
     {
@@ -392,7 +734,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "A collection of JavaScript globals for Babel internal usage",
       "versions": [
-        "7.28.0"
+        "7.28.0",
+        "7.29.7"
       ]
     },
     {
@@ -405,7 +748,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Babel helper functions for inserting module loads",
       "versions": [
-        "7.28.6"
+        "7.28.6",
+        "7.29.7"
       ]
     },
     {
@@ -418,7 +762,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Babel helper functions for implementing ES6 module transformations",
       "versions": [
-        "7.28.6"
+        "7.28.6",
+        "7.29.7"
       ]
     },
     {
@@ -444,7 +789,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "A utility package to parse strings",
       "versions": [
-        "7.27.1"
+        "7.27.1",
+        "7.29.7",
+        "7.29.14"
       ]
     },
     {
@@ -457,7 +804,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Validate identifier/keywords name",
       "versions": [
-        "7.28.5"
+        "7.28.5",
+        "7.29.7"
       ]
     },
     {
@@ -470,7 +818,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Validate plugin/preset options",
       "versions": [
-        "7.27.1"
+        "7.27.1",
+        "7.29.7"
       ]
     },
     {
@@ -483,7 +832,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Collection of helper functions used by Babel transforms.",
       "versions": [
-        "7.28.6"
+        "7.28.6",
+        "7.29.7"
       ]
     },
     {
@@ -496,7 +846,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "A JavaScript parser",
       "versions": [
-        "7.29.0"
+        "7.29.0",
+        "7.29.9",
+        "7.29.14"
       ]
     },
     {
@@ -535,7 +887,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "babel's modular runtime helpers",
       "versions": [
-        "7.28.6"
+        "7.28.6",
+        "7.29.2"
       ]
     },
     {
@@ -548,7 +901,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Generate an AST from a string template.",
       "versions": [
-        "7.28.6"
+        "7.28.6",
+        "7.29.7"
       ]
     },
     {
@@ -561,7 +915,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "The Babel Traverse module maintains the overall tree state, and is responsible for replacing, removing, and adding nodes",
       "versions": [
-        "7.29.0"
+        "7.29.0",
+        "7.29.8"
       ]
     },
     {
@@ -574,7 +929,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The Babel Team",
       "description": "Babel Types is a Lodash-esque utility library for AST nodes",
       "versions": [
-        "7.29.0"
+        "7.29.0",
+        "7.29.8",
+        "7.29.14"
       ]
     },
     {
@@ -590,15 +947,44 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-better-auth-api-key-mit",
+      "id": "pkg-base-ui-react-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@better-auth/api-key",
+      "name": "@base-ui/react",
       "license": "MIT",
-      "homepage": "https://www.better-auth.com/docs/plugins/api-key",
-      "description": "API Key plugin for Better Auth.",
+      "homepage": "https://base-ui.com",
+      "author": "MUI Team",
+      "description": "Base UI is a library of headless ('unstyled') React components and low-level hooks. You gain complete control over your app's CSS and accessibility features.",
       "versions": [
-        "1.5.5"
+        "1.6.0",
+        "1.7.0"
+      ]
+    },
+    {
+      "id": "pkg-base-ui-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@base-ui/utils",
+      "license": "MIT",
+      "homepage": "https://github.com/mui/base-ui#readme",
+      "author": "MUI Team",
+      "description": "A collection of React utility functions for Base UI.",
+      "versions": [
+        "0.3.1",
+        "0.3.2"
+      ]
+    },
+    {
+      "id": "pkg-bcoe-v8-coverage-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@bcoe/v8-coverage",
+      "license": "MIT",
+      "homepage": "https://github.com/bcoe/v8-coverage#readme",
+      "author": "Charles Samborski",
+      "description": "Helper functions for V8 coverage files.",
+      "versions": [
+        "1.0.2"
       ]
     },
     {
@@ -610,7 +996,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com",
       "description": "The most comprehensive authentication framework for TypeScript.",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -622,7 +1008,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com/docs/adapters/drizzle",
       "description": "Drizzle adapter for Better Auth",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -634,7 +1020,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com/docs/integrations/electron",
       "description": "Better Auth integration for Electron applications.",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -646,7 +1032,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com/docs/adapters/kysely",
       "description": "Kysely adapter for Better Auth",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -658,7 +1044,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com",
       "description": "Memory adapter for Better Auth",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -670,7 +1056,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com/docs/adapters/mongodb",
       "description": "Mongo adapter for Better Auth",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -682,7 +1068,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com/docs/adapters/prisma",
       "description": "Prisma adapter for Better Auth",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -694,7 +1080,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.better-auth.com",
       "description": "Telemetry package for Better Auth",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -707,7 +1093,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Bereket Engida",
       "description": "A collection of utilities for better-auth",
       "versions": [
-        "0.3.1"
+        "0.4.2"
       ]
     },
     {
@@ -716,9 +1102,10 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@better-fetch/fetch",
       "license": "MIT",
-      "homepage": "https://www.npmjs.com/package/@better-fetch/fetch",
+      "homepage": "https://github.com/better-auth/better-fetch#readme",
       "versions": [
-        "1.1.21"
+        "1.1.21",
+        "1.3.1"
       ]
     },
     {
@@ -733,18 +1120,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-braintree-sanitize-url-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@braintree/sanitize-url",
-      "license": "MIT",
-      "homepage": "https://github.com/braintree/sanitize-url#readme",
-      "description": "A url sanitizer",
-      "versions": [
-        "7.1.2"
-      ]
-    },
-    {
       "id": "pkg-capacitor-android-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -754,7 +1129,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ionic Team",
       "description": "Capacitor: Cross-platform apps with JavaScript and the web",
       "versions": [
-        "8.2.0"
+        "8.6.2"
       ]
     },
     {
@@ -793,7 +1168,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ionic",
       "description": "The Camera API provides the ability to take a photo with the camera or choose an existing one from the photo album.",
       "versions": [
-        "8.2.0"
+        "8.2.6"
+      ]
+    },
+    {
+      "id": "pkg-capacitor-clipboard-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@capacitor/clipboard",
+      "license": "MIT",
+      "homepage": "https://github.com/ionic-team/capacitor-plugins#readme",
+      "author": "Ionic",
+      "description": "The Clipboard API enables copy and pasting to/from the system clipboard.",
+      "versions": [
+        "8.0.1"
       ]
     },
     {
@@ -806,7 +1194,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ionic Team",
       "description": "Capacitor: Cross-platform apps with JavaScript and the web",
       "versions": [
-        "8.4.1"
+        "8.6.2"
+      ]
+    },
+    {
+      "id": "pkg-capacitor-device-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@capacitor/device",
+      "license": "MIT",
+      "homepage": "https://github.com/ionic-team/capacitor-plugins#readme",
+      "author": "Ionic",
+      "description": "The Device API exposes internal information about the device, such as the model and operating system version, along with user information such as unique ids.",
+      "versions": [
+        "8.0.3"
       ]
     },
     {
@@ -832,7 +1233,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ionic Team",
       "description": "Capacitor: Cross-platform apps with JavaScript and the web",
       "versions": [
-        "8.2.0"
+        "8.6.2"
       ]
     },
     {
@@ -845,7 +1246,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ionic",
       "description": "The Keyboard API provides keyboard display and visibility control, along with event tracking when the keyboard shows and hides.",
       "versions": [
-        "8.0.3"
+        "8.0.6"
       ]
     },
     {
@@ -859,6 +1260,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "The Preferences API provides a simple key/value persistent store for lightweight data.",
       "versions": [
         "8.0.1"
+      ]
+    },
+    {
+      "id": "pkg-capacitor-push-notifications-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@capacitor/push-notifications",
+      "license": "MIT",
+      "homepage": "https://github.com/ionic-team/capacitor-plugins#readme",
+      "author": "Ionic",
+      "description": "The Push Notifications API provides access to native push notifications.",
+      "versions": [
+        "8.1.3"
       ]
     },
     {
@@ -884,7 +1298,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ionic",
       "description": "The Splash Screen API provides methods for showing or hiding a Splash image.",
       "versions": [
-        "8.0.1"
+        "8.0.2"
       ]
     },
     {
@@ -896,6 +1310,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.npmjs.com/package/@capacitor/synapse",
       "versions": [
         "1.0.4"
+      ]
+    },
+    {
+      "id": "pkg-chenglou-pretext-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@chenglou/pretext",
+      "license": "MIT",
+      "homepage": "https://github.com/chenglou/pretext#readme",
+      "description": "Fast, accurate & comprehensive text measurement & layout",
+      "versions": [
+        "0.0.8"
       ]
     },
     {
@@ -932,8 +1358,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Shahar Soel",
       "description": "Type Signatures and API Website for Chevrotain",
       "versions": [
-        "10.5.0",
-        "11.1.2"
+        "10.5.0"
       ]
     },
     {
@@ -950,16 +1375,391 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-cloudflare-workers-types-mit-or-apache-2-0",
+      "id": "pkg-clack-core-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@cloudflare/workers-types",
-      "license": "MIT OR Apache-2.0",
-      "homepage": "https://github.com/cloudflare/workerd#readme",
-      "author": "Cloudflare Workers DevProd Team",
-      "description": "TypeScript typings for Cloudflare Workers",
+      "name": "@clack/core",
+      "license": "MIT",
+      "homepage": "https://github.com/natemoo-re/clack/tree/main/packages/core#readme",
+      "author": "Nate Moore",
       "versions": [
-        "4.20260317.1"
+        "0.4.1"
+      ]
+    },
+    {
+      "id": "pkg-clack-prompts-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@clack/prompts",
+      "license": "MIT",
+      "homepage": "https://github.com/natemoo-re/clack/tree/main/packages/prompts#readme",
+      "author": "Nate Moore",
+      "versions": [
+        "0.9.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-autocomplete-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/autocomplete",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/autocomplete",
+      "author": "Marijn Haverbeke",
+      "description": "Autocompletion for the CodeMirror code editor",
+      "versions": [
+        "6.20.3"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-angular-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-angular",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-angular#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Angular Template language support for the CodeMirror code editor",
+      "versions": [
+        "0.1.4"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-cpp-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-cpp",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-cpp#readme",
+      "author": "Marijn Haverbeke",
+      "description": "C++ language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.3"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-css-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-css",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-css#readme",
+      "author": "Marijn Haverbeke",
+      "description": "CSS language support for the CodeMirror code editor",
+      "versions": [
+        "6.3.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-go-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-go",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-go#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Go language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-html-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-html",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-html#readme",
+      "author": "Marijn Haverbeke",
+      "description": "HTML language support for the CodeMirror code editor",
+      "versions": [
+        "6.4.11"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-java-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-java",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-java#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Java language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-javascript-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-javascript",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-javascript#readme",
+      "author": "Marijn Haverbeke",
+      "description": "JavaScript language support for the CodeMirror code editor",
+      "versions": [
+        "6.2.5"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-jinja-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-jinja",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/lang-jinja",
+      "author": "Marijn Haverbeke",
+      "description": "Jinja template support for the CodeMirror code editor",
+      "versions": [
+        "6.0.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-json-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-json",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-json#readme",
+      "author": "Marijn Haverbeke",
+      "description": "JSON language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-less-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-less",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-less#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Less support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-liquid-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-liquid",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-liquid#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Liquid template support for the CodeMirror code editor",
+      "versions": [
+        "6.3.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-markdown-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-markdown",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/lang-markdown",
+      "author": "Marijn Haverbeke",
+      "description": "Markdown language support for the CodeMirror code editor",
+      "versions": [
+        "6.5.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-php-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-php",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-php#readme",
+      "author": "Marijn Haverbeke",
+      "description": "PHP language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-python-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-python",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-python#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Python language support for the CodeMirror code editor",
+      "versions": [
+        "6.2.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-rust-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-rust",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-rust#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Rust language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-sass-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-sass",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-sass#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Sass/SCSS language support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-sql-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-sql",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-sql#readme",
+      "author": "Marijn Haverbeke",
+      "description": "SQL language support for the CodeMirror code editor",
+      "versions": [
+        "6.10.0"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-vue-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-vue",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-vue#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Vue template support for the CodeMirror code editor",
+      "versions": [
+        "0.1.3"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-wast-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-wast",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-wast#readme",
+      "author": "Marijn Haverbeke",
+      "description": "WebAssembly Text Format support for the CodeMirror code editor",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-xml-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-xml",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-xml#readme",
+      "author": "Marijn Haverbeke",
+      "description": "XML language support for the CodeMirror code editor",
+      "versions": [
+        "6.1.0"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lang-yaml-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lang-yaml",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/lang-yaml#readme",
+      "author": "Marijn Haverbeke",
+      "description": "YAML language support for the CodeMirror code editor",
+      "versions": [
+        "6.1.3"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-language-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/language",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/language",
+      "author": "Marijn Haverbeke",
+      "description": "Language support infrastructure for the CodeMirror code editor",
+      "versions": [
+        "6.12.4"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-language-data-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/language-data",
+      "license": "MIT",
+      "homepage": "https://github.com/codemirror/language-data#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Language metadata and dynamic loading for the CodeMirror code editor",
+      "versions": [
+        "6.5.2"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-legacy-modes-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/legacy-modes",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/legacy-modes",
+      "author": "Marijn Haverbeke",
+      "description": "Collection of ported legacy language modes for the CodeMirror code editor",
+      "versions": [
+        "6.5.3"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-lint-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/lint",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/lint",
+      "author": "Marijn Haverbeke",
+      "description": "Linting support for the CodeMirror code editor",
+      "versions": [
+        "6.9.7"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-state-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/state",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/state",
+      "author": "Marijn Haverbeke",
+      "description": "Editor state data structures for the CodeMirror code editor",
+      "versions": [
+        "6.7.1"
+      ]
+    },
+    {
+      "id": "pkg-codemirror-view-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@codemirror/view",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@codemirror/view",
+      "author": "Marijn Haverbeke",
+      "description": "DOM view component for the CodeMirror code editor",
+      "versions": [
+        "6.43.6"
       ]
     },
     {
@@ -971,19 +1771,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/get-convex/better-auth#readme",
       "description": "A Better Auth component for Convex.",
       "versions": [
-        "0.11.2"
-      ]
-    },
-    {
-      "id": "pkg-convex-dev-migrations-apache-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@convex-dev/migrations",
-      "license": "Apache-2.0",
-      "homepage": "https://github.com/get-convex/migrations#readme",
-      "description": "A migrations component for Convex. Define, run, and track your database migrations. Run from a CLI or Convex server function.",
-      "versions": [
-        "0.3.1"
+        "0.12.5"
       ]
     },
     {
@@ -1060,6 +1848,162 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-devframes-agentic-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/agentic",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Agent-surface implementation for devframe: installing it next to devframe enables the MCP adapter (devframe/adapters/mcp) and the devframe connect gateway.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-hub-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/hub",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Hub layer that orchestrates devframe docks, terminals, messages, and commands on any host.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-hub-ui-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/hub-ui",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Reference UI for the devframe hub, providing the floating dock and standalone viewer.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-json-render-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/json-render",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Protocol layer for describing devframe views as JSON that any renderer can display.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-json-render-ui-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/json-render-ui",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Vue renderer for devframe views described as JSON.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-plugin-a11y-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/plugin-a11y",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Built-in devframe that audits the user app with axe and highlights accessibility issues in the page.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-plugin-a11y-assets-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/plugin-a11y--assets",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Prebuilt browser assets (SPA) for @devframes/plugin-a11y, served on demand through devframe's remote-assets back-proxy.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-plugin-inspect-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/plugin-inspect",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Devframe plugin that inspects the RPC registry, shared state, and agent surface of a connection.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-plugin-inspect-assets-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/plugin-inspect--assets",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Prebuilt browser assets (SPA) for @devframes/plugin-inspect, served on demand through devframe's remote-assets back-proxy.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-plugin-terminals-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/plugin-terminals",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Devframe plugin providing terminal panels for streamed output and interactive PTY shells.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-plugin-terminals-assets-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/plugin-terminals--assets",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Prebuilt browser assets (SPA) for @devframes/plugin-terminals, served on demand through devframe's remote-assets back-proxy.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-devframes-vite-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@devframes/vite",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Vite plugin for mounting a devframe inside any Vite-based host (Astro, SolidStart, Nuxt, plain Vite apps).",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
       "id": "pkg-diceui-shared-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -1123,6 +2067,69 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-dukelib-sheets-wasm-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@dukelib/sheets-wasm",
+      "license": "MIT",
+      "homepage": "https://github.com/guseggert/duke-sheets#readme",
+      "description": "WebAssembly bindings for duke-sheets - high-performance Excel library",
+      "versions": [
+        "0.1.23"
+      ]
+    },
+    {
+      "id": "pkg-earendil-works-pi-ai-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@earendil-works/pi-ai",
+      "license": "MIT",
+      "homepage": "https://github.com/earendil-works/pi#readme",
+      "author": "Mario Zechner",
+      "description": "Unified LLM API with automatic model discovery and provider configuration",
+      "versions": [
+        "1.6.0"
+      ]
+    },
+    {
+      "id": "pkg-earendil-works-pi-schema-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@earendil-works/pi-schema",
+      "license": "MIT",
+      "homepage": "https://github.com/earendil-works/pi#readme",
+      "author": "Earendil Works",
+      "description": "JSON Schema validation without eval: drafts 2020-12 and 7, compiled into plain closures",
+      "versions": [
+        "1.6.0"
+      ]
+    },
+    {
+      "id": "pkg-earendil-works-pi-telemetry-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@earendil-works/pi-telemetry",
+      "license": "MIT",
+      "homepage": "https://github.com/earendil-works/pi#readme",
+      "author": "Mario Zechner",
+      "description": "Vendor-neutral telemetry contracts and typed schema utilities for pi",
+      "versions": [
+        "1.6.0"
+      ]
+    },
+    {
+      "id": "pkg-effect-platform-node-shared-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@effect/platform-node-shared",
+      "license": "MIT",
+      "homepage": "https://effect.website",
+      "description": "Unified interfaces for common platform-specific services",
+      "versions": [
+        "4.0.2"
+      ]
+    },
+    {
       "id": "pkg-electric-sql-pglite-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
@@ -1162,16 +2169,15 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-electron-toolkit-preload-mit",
+      "id": "pkg-electron-internal-extract-zip-bsd-2-clause",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@electron-toolkit/preload",
-      "license": "MIT",
-      "homepage": "https://github.com/alex8088/electron-toolkit/tree/master/packages/preload#readme",
-      "author": "Alex Wei",
-      "description": "Toolkit for electron preload scripts.",
+      "name": "@electron-internal/extract-zip",
+      "license": "BSD-2-Clause",
+      "homepage": "https://github.com/electron/extract-zip#readme",
+      "description": "Fast, safe, native zip extraction for Node.js. Drop-in replacement for extract-zip.",
       "versions": [
-        "3.0.2"
+        "1.0.5"
       ]
     },
     {
@@ -1197,7 +2203,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Samuel Attard",
       "description": "Utility for downloading artifacts from different versions of Electron",
       "versions": [
-        "2.0.3"
+        "5.1.0"
       ]
     },
     {
@@ -1225,16 +2231,52 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-esbuild-linux-x64-mit",
+      "id": "pkg-esbuild-linux-arm64-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@esbuild/linux-x64",
+      "name": "@esbuild/linux-arm64",
       "license": "MIT",
       "homepage": "https://github.com/evanw/esbuild#readme",
-      "description": "The Linux 64-bit binary for esbuild, a JavaScript bundler.",
+      "description": "The Linux ARM 64-bit binary for esbuild, a JavaScript bundler.",
       "versions": [
-        "0.25.12",
-        "0.27.0"
+        "0.27.0",
+        "0.28.2"
+      ]
+    },
+    {
+      "id": "pkg-extend-ai-react-docx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@extend-ai/react-docx",
+      "license": "MIT",
+      "homepage": "https://github.com/extend-hq/react-docx#readme",
+      "description": "React components/hooks for DOCX viewing",
+      "versions": [
+        "0.9.2"
+      ]
+    },
+    {
+      "id": "pkg-extend-ai-react-pptx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@extend-ai/react-pptx",
+      "license": "MIT",
+      "homepage": "https://github.com/extend-hq/react-pptx#readme",
+      "description": "Browser-native, virtualized React viewer for PowerPoint PPT and PPTX files",
+      "versions": [
+        "0.2.1"
+      ]
+    },
+    {
+      "id": "pkg-extend-ai-react-xlsx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@extend-ai/react-xlsx",
+      "license": "MIT",
+      "homepage": "https://github.com/extend-hq/react-xlsx#readme",
+      "description": "React components and hooks for viewing XLSX workbooks",
+      "versions": [
+        "0.16.5"
       ]
     },
     {
@@ -1247,7 +2289,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "atomiks",
       "description": "Positioning library for floating elements: tooltips, popovers, dropdowns, and more",
       "versions": [
-        "1.7.4"
+        "1.7.4",
+        "1.8.0"
       ]
     },
     {
@@ -1260,7 +2303,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "atomiks",
       "description": "Floating UI for the web",
       "versions": [
-        "1.7.5"
+        "1.7.5",
+        "1.8.0"
       ]
     },
     {
@@ -1286,7 +2330,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "atomiks",
       "description": "Floating UI for React DOM",
       "versions": [
-        "2.1.7"
+        "2.1.7",
+        "2.1.9"
       ]
     },
     {
@@ -1299,7 +2344,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "atomiks",
       "description": "Utilities for Floating UI",
       "versions": [
-        "0.2.10"
+        "0.2.10",
+        "0.2.12"
       ]
     },
     {
@@ -1326,6 +2372,43 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Self-host the JetBrains Mono font in a neatly bundled NPM package.",
       "versions": [
         "5.2.8"
+      ]
+    },
+    {
+      "id": "pkg-fumadocs-base-ui-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@fumadocs/base-ui",
+      "license": "MIT",
+      "homepage": "https://fumadocs.dev",
+      "author": "Fuma Nama",
+      "description": "The Base UI version of Fumadocs UI",
+      "versions": [
+        "16.8.12"
+      ]
+    },
+    {
+      "id": "pkg-fumadocs-tailwind-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@fumadocs/tailwind",
+      "license": "MIT",
+      "homepage": "https://fumadocs.dev",
+      "author": "Fuma Nama",
+      "description": "The Tailwind CSS utils for Fumadocs UI.",
+      "versions": [
+        "0.0.5"
+      ]
+    },
+    {
+      "id": "pkg-google-genai-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@google/genai",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/googleapis/js-genai#readme",
+      "versions": [
+        "2.32.0"
       ]
     },
     {
@@ -1365,7 +2448,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Yusuke Wada",
       "description": "Node.js Adapter for Hono",
       "versions": [
-        "1.19.9"
+        "1.19.9",
+        "1.19.14"
       ]
     },
     {
@@ -1382,29 +2466,81 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-iconify-types-mit",
+      "id": "pkg-hpke-chacha20poly1305-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@iconify/types",
+      "name": "@hpke/chacha20poly1305",
       "license": "MIT",
-      "homepage": "https://github.com/iconify/iconify",
-      "author": "Vjacheslav Trushkin",
-      "description": "Types for Iconify data",
+      "homepage": "https://github.com/dajiaji/hpke-js/tree/main/packages/chacha20poly1305#readme",
+      "author": "Ajitomi Daisuke",
+      "description": "A Hybrid Public Key Encryption (HPKE) module extension for ChaCha20/Poly1305",
       "versions": [
-        "2.0.0"
+        "1.8.0"
       ]
     },
     {
-      "id": "pkg-iconify-utils-mit",
+      "id": "pkg-hpke-common-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@iconify/utils",
+      "name": "@hpke/common",
       "license": "MIT",
-      "homepage": "https://iconify.design/docs/libraries/utils/",
-      "author": "Vjacheslav Trushkin",
-      "description": "Common functions for working with Iconify icon sets used by various packages.",
+      "homepage": "https://github.com/dajiaji/hpke-js/tree/main/common#readme",
+      "author": "Ajitomi Daisuke",
+      "description": "A Hybrid Public Key Encryption (HPKE) internal-use common module for @hpke family modules.",
       "versions": [
-        "3.1.3"
+        "1.10.1"
+      ]
+    },
+    {
+      "id": "pkg-hpke-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@hpke/core",
+      "license": "MIT",
+      "homepage": "https://github.com/dajiaji/hpke-js/tree/main/core#readme",
+      "author": "Ajitomi Daisuke",
+      "description": "A Hybrid Public Key Encryption (HPKE) core module for various JavaScript runtimes",
+      "versions": [
+        "1.9.0"
+      ]
+    },
+    {
+      "id": "pkg-hpke-dhkem-x25519-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@hpke/dhkem-x25519",
+      "license": "MIT",
+      "homepage": "https://github.com/dajiaji/hpke-js#readme",
+      "author": "Ajitomi Daisuke",
+      "description": "A Hybrid Public Key Encryption (HPKE) module extension for X25519",
+      "versions": [
+        "1.7.0"
+      ]
+    },
+    {
+      "id": "pkg-ipld-dag-cbor-apache-2-0-or-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@ipld/dag-cbor",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/ipld/js-dag-cbor#readme",
+      "author": "Rod",
+      "description": "JS implementation of DAG-CBOR",
+      "versions": [
+        "10.0.2"
+      ]
+    },
+    {
+      "id": "pkg-isaacs-fs-minipass-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@isaacs/fs-minipass",
+      "license": "ISC",
+      "homepage": "https://github.com/npm/fs-minipass#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "fs read and write streams based on minipass",
+      "versions": [
+        "4.0.1"
       ]
     },
     {
@@ -1469,7 +2605,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Justin Ridgewell",
       "description": "Encode/decode sourcemap mappings",
       "versions": [
-        "1.5.5"
+        "1.6.0"
       ]
     },
     {
@@ -1499,6 +2635,384 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-json-render-core-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@json-render/core",
+      "license": "Apache-2.0",
+      "homepage": "https://json-render.dev",
+      "description": "JSON becomes real things. Define your catalog, register your components, let AI generate.",
+      "versions": [
+        "0.20.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-clipboard-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/clipboard",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package provides the copy/paste functionality for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-dragon-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/dragon",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package contains compatibility with Dragon NaturallySpeaking accessibility tools.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-extension-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/extension",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package provides the extension functionality for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-history-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/history",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package contains selection history helpers for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-html-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/html",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package contains HTML helpers and functionality for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-internal-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/internal",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "Internal Lexical utilities shared across packages. Do not import directly; no semver guarantees apply to its API.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-list-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/list",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package provides the list feature for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-plain-text-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/plain-text",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package contains plain text helpers for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-selection-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/selection",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package contains utilities and helpers for handling Lexical selection.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lexical-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lexical/utils",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "This package contains misc utilities for Lexical.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
+      "id": "pkg-lezer-common-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/common",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/common#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Syntax tree data structure and parser interfaces for the lezer parser",
+      "versions": [
+        "1.5.2"
+      ]
+    },
+    {
+      "id": "pkg-lezer-cpp-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/cpp",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@lezer/cpp",
+      "author": "Marijn Haverbeke",
+      "description": "lezer-based C++ grammar",
+      "versions": [
+        "1.1.6"
+      ]
+    },
+    {
+      "id": "pkg-lezer-css-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/css",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@lezer/css",
+      "author": "Marijn Haverbeke",
+      "description": "lezer-based CSS grammar",
+      "versions": [
+        "1.3.4"
+      ]
+    },
+    {
+      "id": "pkg-lezer-go-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/go",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/go#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Lezer-based Go grammar",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
+      "id": "pkg-lezer-highlight-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/highlight",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/highlight#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Highlighting system for Lezer parse trees",
+      "versions": [
+        "1.2.3"
+      ]
+    },
+    {
+      "id": "pkg-lezer-html-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/html",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/html#readme",
+      "author": "Marijn Haverbeke",
+      "description": "lezer-based HTML grammar",
+      "versions": [
+        "1.3.13"
+      ]
+    },
+    {
+      "id": "pkg-lezer-java-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/java",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/java#readme",
+      "author": "Marijn Haverbeke",
+      "description": "lezer-based Java grammar",
+      "versions": [
+        "1.1.3"
+      ]
+    },
+    {
+      "id": "pkg-lezer-javascript-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/javascript",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/javascript#readme",
+      "author": "Marijn Haverbeke",
+      "description": "lezer-based JavaScript grammar",
+      "versions": [
+        "1.5.4"
+      ]
+    },
+    {
+      "id": "pkg-lezer-json-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/json",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/json#readme",
+      "author": "Arun Srinivasan",
+      "description": "lezer-based JSON grammar",
+      "versions": [
+        "1.0.3"
+      ]
+    },
+    {
+      "id": "pkg-lezer-lr-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/lr",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@lezer/lr",
+      "author": "Marijn Haverbeke",
+      "description": "Incremental parser",
+      "versions": [
+        "1.4.10"
+      ]
+    },
+    {
+      "id": "pkg-lezer-markdown-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/markdown",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@lezer/markdown",
+      "author": "Marijn Haverbeke",
+      "description": "Incremental Markdown parser that consumes and emits Lezer trees",
+      "versions": [
+        "1.7.2"
+      ]
+    },
+    {
+      "id": "pkg-lezer-php-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/php",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/php#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Lezer-based PHP grammar",
+      "versions": [
+        "1.0.5"
+      ]
+    },
+    {
+      "id": "pkg-lezer-python-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/python",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/@lezer/python",
+      "author": "Marijn Haverbeke",
+      "description": "Lezer-based Python grammar",
+      "versions": [
+        "1.1.19"
+      ]
+    },
+    {
+      "id": "pkg-lezer-rust-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/rust",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/rust#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Lezer-based Rust grammar",
+      "versions": [
+        "1.0.2"
+      ]
+    },
+    {
+      "id": "pkg-lezer-sass-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/sass",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/sass#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Lezer-based Sass/SCSS grammar",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "id": "pkg-lezer-xml-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/xml",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/xml#readme",
+      "author": "Marijn Haverbeke",
+      "description": "lezer-based XML grammar",
+      "versions": [
+        "1.0.6"
+      ]
+    },
+    {
+      "id": "pkg-lezer-yaml-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lezer/yaml",
+      "license": "MIT",
+      "homepage": "https://github.com/lezer-parser/yaml#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Lezer-based YAML grammar",
+      "versions": [
+        "1.0.4"
+      ]
+    },
+    {
+      "id": "pkg-lit-labs-ssr-dom-shim-bsd-3-clause",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lit-labs/ssr-dom-shim",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/lit/lit/tree/main/packages/labs/ssr-dom-shim",
+      "author": "Google LLC",
+      "description": "DOM shim for Lit Server Side Rendering (SSR)",
+      "versions": [
+        "1.6.0"
+      ]
+    },
+    {
+      "id": "pkg-lobehub-streamdown-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lobehub/streamdown",
+      "license": "MIT",
+      "homepage": "https://streamdown.lobehub.com",
+      "description": "Headless streaming markdown engine for React: block splitting, smooth reveal, per-char fade animation and LLM output preprocessing",
+      "versions": [
+        "1.4.0"
+      ]
+    },
+    {
       "id": "pkg-loro-dev-flock-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -1520,7 +3034,44 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://www.npmjs.com/package/@loro-dev/flock-wasm",
       "description": "WASM bindings for flock-rs.",
       "versions": [
-        "0.4.1"
+        "0.5.0"
+      ]
+    },
+    {
+      "id": "pkg-loro-dev-roost-node-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@loro-dev/roost-node",
+      "license": "MIT",
+      "homepage": "https://github.com/loro-dev/roost#readme",
+      "description": "Experimental worker-owned Node-API bindings for Loro Roost",
+      "versions": [
+        "0.3.1"
+      ]
+    },
+    {
+      "id": "pkg-loro-dev-roost-node-linux-arm64-gnu-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@loro-dev/roost-node-linux-arm64-gnu",
+      "license": "MIT",
+      "homepage": "https://github.com/loro-dev/roost#readme",
+      "description": "Experimental worker-owned Node-API bindings for Loro Roost (linux-arm64-gnu)",
+      "versions": [
+        "0.3.1"
+      ]
+    },
+    {
+      "id": "pkg-loro-dev-sqlite-riverrun-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@loro-dev/sqlite-riverrun",
+      "license": "MIT",
+      "homepage": "https://streams.loro.dev",
+      "author": "Loro Team",
+      "description": "Single-node SQLite-backed Durable Streams dev server for local CRDT development.",
+      "versions": [
+        "0.3.0"
       ]
     },
     {
@@ -1533,7 +3084,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Loro Team",
       "description": "Stream-scoped Durable Streams client for TypeScript.",
       "versions": [
-        "0.6.1"
+        "0.15.0"
       ]
     },
     {
@@ -1546,20 +3097,143 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Loro Team",
       "description": "Transport/runtime layer for synchronizing CRDT state over Durable Streams.",
       "versions": [
-        "0.14.1"
+        "0.24.0"
       ]
     },
     {
-      "id": "pkg-mermaid-js-parser-mit",
+      "id": "pkg-lydell-node-pty-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@mermaid-js/parser",
+      "name": "@lydell/node-pty",
       "license": "MIT",
-      "homepage": "https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme",
-      "author": "Yokozuna59",
-      "description": "MermaidJS parser",
+      "homepage": "https://github.com/lydell/node-pty#readme",
+      "author": "Simon Lydell",
+      "description": "Smaller distribution of node-pty.",
       "versions": [
-        "1.1.1"
+        "1.2.0-beta.14"
+      ]
+    },
+    {
+      "id": "pkg-lydell-node-pty-linux-arm64-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@lydell/node-pty-linux-arm64",
+      "license": "MIT",
+      "homepage": "https://github.com/lydell/node-pty#readme",
+      "description": "The node-pty package, stripped down only for linux-arm64.",
+      "versions": [
+        "1.2.0-beta.14"
+      ]
+    },
+    {
+      "id": "pkg-marijn-find-cluster-break-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@marijn/find-cluster-break",
+      "license": "MIT",
+      "homepage": "https://code.haverbeke.berlin/marijn/find-cluster-break",
+      "author": "Marijn Haverbeke",
+      "description": "Find the position of grapheme cluster breaks in a string",
+      "versions": [
+        "1.0.3"
+      ]
+    },
+    {
+      "id": "pkg-mdx-js-mdx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@mdx-js/mdx",
+      "license": "MIT",
+      "homepage": "https://mdxjs.com",
+      "author": "John Otander",
+      "description": "MDX compiler",
+      "versions": [
+        "3.1.1"
+      ]
+    },
+    {
+      "id": "pkg-meowdown-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@meowdown/core",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/meowdown#readme",
+      "versions": [
+        "0.59.0"
+      ]
+    },
+    {
+      "id": "pkg-meowdown-markdown-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@meowdown/markdown",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/meowdown#readme",
+      "versions": [
+        "0.59.0"
+      ]
+    },
+    {
+      "id": "pkg-meowdown-react-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@meowdown/react",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/meowdown#readme",
+      "versions": [
+        "0.59.0"
+      ]
+    },
+    {
+      "id": "pkg-modelcontextprotocol-client-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@modelcontextprotocol/client",
+      "license": "MIT",
+      "homepage": "https://modelcontextprotocol.io",
+      "author": "Anthropic, PBC",
+      "description": "Model Context Protocol implementation for TypeScript - Client package",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-modelcontextprotocol-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@modelcontextprotocol/core",
+      "license": "MIT",
+      "homepage": "https://modelcontextprotocol.io",
+      "author": "Anthropic, PBC",
+      "description": "Model Context Protocol for TypeScript — public Zod schemas (spec + OAuth/OpenID)",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-modelcontextprotocol-sdk-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@modelcontextprotocol/sdk",
+      "license": "MIT",
+      "homepage": "https://modelcontextprotocol.io",
+      "author": "Anthropic, PBC",
+      "description": "Model Context Protocol implementation for TypeScript",
+      "versions": [
+        "1.29.0"
+      ]
+    },
+    {
+      "id": "pkg-modelcontextprotocol-server-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@modelcontextprotocol/server",
+      "license": "MIT",
+      "homepage": "https://modelcontextprotocol.io",
+      "author": "Anthropic, PBC",
+      "description": "Model Context Protocol implementation for TypeScript - Server package",
+      "versions": [
+        "2.0.0"
       ]
     },
     {
@@ -1572,7 +3246,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Dmitry Tsvettsikh",
       "description": "SASLprep: Stringprep Profile for User Names and Passwords, rfc4013",
       "versions": [
-        "1.4.8"
+        "1.6.3"
       ]
     },
     {
@@ -1589,6 +3263,54 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-napi-rs-canvas-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@napi-rs/canvas",
+      "license": "MIT",
+      "homepage": "https://github.com/Brooooooklyn/canvas#readme",
+      "description": "Canvas for Node.js with skia backend",
+      "versions": [
+        "1.0.9"
+      ]
+    },
+    {
+      "id": "pkg-napi-rs-canvas-linux-arm64-gnu-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@napi-rs/canvas-linux-arm64-gnu",
+      "license": "MIT",
+      "homepage": "https://github.com/Brooooooklyn/canvas#readme",
+      "description": "Canvas for Node.js with skia backend",
+      "versions": [
+        "1.0.9"
+      ]
+    },
+    {
+      "id": "pkg-napi-rs-keyring-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@napi-rs/keyring",
+      "license": "MIT",
+      "homepage": "https://github.com/Brooooooklyn/keyring-node#readme",
+      "description": "https://github.com/hwchen/keyring-rs Node.js binding via https://napi.rs",
+      "versions": [
+        "2.1.0"
+      ]
+    },
+    {
+      "id": "pkg-napi-rs-keyring-linux-arm64-gnu-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@napi-rs/keyring-linux-arm64-gnu",
+      "license": "MIT",
+      "homepage": "https://github.com/Brooooooklyn/keyring-node#readme",
+      "description": "https://github.com/hwchen/keyring-rs Node.js binding via https://napi.rs",
+      "versions": [
+        "2.1.0"
+      ]
+    },
+    {
       "id": "pkg-noble-ciphers-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -1602,6 +3324,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-noble-ed25519-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@noble/ed25519",
+      "license": "MIT",
+      "homepage": "https://paulmillr.com/noble/",
+      "author": "Paul Miller",
+      "description": "Fastest 5KB JS implementation of ed25519 EDDSA signatures compliant with RFC8032, FIPS 186-5 & ZIP215",
+      "versions": [
+        "3.2.0"
+      ]
+    },
+    {
       "id": "pkg-noble-hashes-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -1611,292 +3346,98 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Paul Miller",
       "description": "Audited & minimal 0-dependency JS implementation of SHA, RIPEMD, BLAKE, HMAC, HKDF, PBKDF & Scrypt",
       "versions": [
-        "2.0.1"
+        "2.2.0"
       ]
     },
     {
-      "id": "pkg-octokit-app-mit",
+      "id": "pkg-number-flow-react-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/app",
+      "name": "@number-flow/react",
       "license": "MIT",
-      "homepage": "https://github.com/octokit/app.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub Apps toolset for Node.js",
+      "homepage": "https://number-flow.barvian.me",
+      "author": "Maxwell Barvian",
+      "description": "A component to transition and format numbers.",
       "versions": [
-        "16.1.2"
+        "0.6.2"
       ]
     },
     {
-      "id": "pkg-octokit-auth-app-mit",
+      "id": "pkg-ocavue-utils-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/auth-app",
+      "name": "@ocavue/utils",
       "license": "MIT",
-      "homepage": "https://github.com/octokit/auth-app.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub App authentication for JavaScript",
+      "homepage": "https://github.com/ocavue/utils#readme",
+      "author": "ocavue",
+      "description": "A collection of utility functions for the browser and other environments",
       "versions": [
-        "8.2.0"
+        "1.7.0"
       ]
     },
     {
-      "id": "pkg-octokit-auth-oauth-app-mit",
+      "id": "pkg-oozcitak-dom-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/auth-oauth-app",
+      "name": "@oozcitak/dom",
       "license": "MIT",
-      "homepage": "https://github.com/octokit/auth-oauth-app.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub OAuth App authentication for JavaScript",
+      "homepage": "http://github.com/oozcitak/dom",
+      "author": "Ozgur Ozcitak",
+      "description": "A modern DOM implementation",
       "versions": [
-        "9.0.3"
+        "2.0.2"
       ]
     },
     {
-      "id": "pkg-octokit-auth-oauth-device-mit",
+      "id": "pkg-oozcitak-infra-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/auth-oauth-device",
+      "name": "@oozcitak/infra",
       "license": "MIT",
-      "homepage": "https://github.com/octokit/auth-oauth-device.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub OAuth Device authentication strategy for JavaScript",
+      "homepage": "http://github.com/oozcitak/infra",
+      "author": "Ozgur Ozcitak",
+      "description": "An implementation of the Infra Living Standard",
       "versions": [
-        "8.0.3"
+        "2.0.2"
       ]
     },
     {
-      "id": "pkg-octokit-auth-oauth-user-mit",
+      "id": "pkg-oozcitak-url-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/auth-oauth-user",
+      "name": "@oozcitak/url",
       "license": "MIT",
-      "homepage": "https://github.com/octokit/auth-oauth-user.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Octokit authentication strategy for OAuth clients",
+      "homepage": "http://github.com/oozcitak/url",
+      "author": "Ozgur Ozcitak",
+      "description": "An implementation of the URL Living Standard",
       "versions": [
-        "6.0.2"
+        "3.0.0"
       ]
     },
     {
-      "id": "pkg-octokit-auth-token-mit",
+      "id": "pkg-oozcitak-util-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/auth-token",
+      "name": "@oozcitak/util",
       "license": "MIT",
-      "homepage": "https://github.com/octokit/auth-token.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub API token authentication for browsers and Node.js",
+      "homepage": "http://github.com/oozcitak/util",
+      "author": "Ozgur Ozcitak",
+      "description": "Utility functions",
       "versions": [
-        "6.0.0"
+        "10.0.0"
       ]
     },
     {
-      "id": "pkg-octokit-auth-unauthenticated-mit",
+      "id": "pkg-openai-codex-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@octokit/auth-unauthenticated",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/auth-unauthenticated.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub API token authentication for browsers and Node.js",
+      "name": "@openai/codex",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/openai/codex#readme",
+      "description": "Codex CLI is a coding agent from OpenAI that runs locally on your computer.",
       "versions": [
-        "7.0.3"
-      ]
-    },
-    {
-      "id": "pkg-octokit-core-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/core",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/core.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Extendable client for GitHub's REST & GraphQL APIs",
-      "versions": [
-        "7.0.6"
-      ]
-    },
-    {
-      "id": "pkg-octokit-endpoint-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/endpoint",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/endpoint.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Turns REST API endpoints into generic request options",
-      "versions": [
-        "11.0.2"
-      ]
-    },
-    {
-      "id": "pkg-octokit-graphql-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/graphql",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/graphql.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub GraphQL API client for browsers and Node",
-      "versions": [
-        "9.0.3"
-      ]
-    },
-    {
-      "id": "pkg-octokit-oauth-app-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/oauth-app",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/oauth-app.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub OAuth toolset for Node.js",
-      "versions": [
-        "8.0.3"
-      ]
-    },
-    {
-      "id": "pkg-octokit-oauth-authorization-url-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/oauth-authorization-url",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/oauth-authorization-url.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Universal library to retrieve GitHubâs identity URL for the OAuth web flow",
-      "versions": [
-        "8.0.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-oauth-methods-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/oauth-methods",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/oauth-methods.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Set of stateless request methods to create, check, reset, refresh, and delete user access tokens for OAuth and GitHub Apps",
-      "versions": [
-        "6.0.2"
-      ]
-    },
-    {
-      "id": "pkg-octokit-openapi-types-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/openapi-types",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/openapi-types.ts#readme",
-      "author": "Gregor Martynus",
-      "description": "Generated TypeScript definitions based on GitHub's OpenAPI spec for api.github.com",
-      "versions": [
-        "27.0.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-openapi-webhooks-types-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/openapi-webhooks-types",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/openapi-webhooks#readme",
-      "author": "wolfy1339",
-      "description": "Generated TypeScript definitions based on GitHub's OpenAPI spec for api.github.com",
-      "versions": [
-        "12.1.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-plugin-paginate-rest-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/plugin-paginate-rest",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/plugin-paginate-rest.js#readme",
-      "description": "Octokit plugin to paginate REST API endpoint responses",
-      "versions": [
-        "14.0.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-request-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/request",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/request.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Send parameterized requests to GitHub's APIs with sensible defaults in browsers and Node",
-      "versions": [
-        "10.0.7"
-      ]
-    },
-    {
-      "id": "pkg-octokit-request-error-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/request-error",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/request-error.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Error class for Octokit request errors",
-      "versions": [
-        "7.1.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-types-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/types",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/types.ts#readme",
-      "author": "Gregor Martynus",
-      "description": "Shared TypeScript definitions for Octokit projects",
-      "versions": [
-        "16.0.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-webhooks-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/webhooks",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/webhooks.js#readme",
-      "author": "Gregor Martynus",
-      "description": "GitHub webhook events toolset for Node.js",
-      "versions": [
-        "14.2.0"
-      ]
-    },
-    {
-      "id": "pkg-octokit-webhooks-methods-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@octokit/webhooks-methods",
-      "license": "MIT",
-      "homepage": "https://github.com/octokit/webhooks-methods.js#readme",
-      "author": "Gregor Martynus",
-      "description": "Methods to handle GitHub Webhook requests",
-      "versions": [
-        "6.0.0"
-      ]
-    },
-    {
-      "id": "pkg-onesignal-node-onesignal-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@onesignal/node-onesignal",
-      "license": "MIT",
-      "homepage": "https://github.com/OneSignal/onesignal-node-api",
-      "author": "OpenAPI-Generator Contributors",
-      "description": "OpenAPI client for @onesignal/node-onesignal",
-      "versions": [
-        "5.3.1-beta1"
+        "0.169.1",
+        "0.169.1-linux-arm64"
       ]
     },
     {
@@ -1913,6 +3454,69 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-opentelemetry-semantic-conventions-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@opentelemetry/semantic-conventions",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/open-telemetry/opentelemetry-js/tree/main/semantic-conventions",
+      "author": "OpenTelemetry Authors",
+      "description": "OpenTelemetry semantic conventions",
+      "versions": [
+        "1.43.0"
+      ]
+    },
+    {
+      "id": "pkg-orama-orama-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@orama/orama",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/oramasearch/orama#readme",
+      "author": "Michele Riva",
+      "description": "A complete search engine and RAG pipeline in your browser, server, or edge network with support for full-text, vector, and hybrid search in less than 2kb.",
+      "versions": [
+        "3.1.18"
+      ]
+    },
+    {
+      "id": "pkg-oxc-project-types-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@oxc-project/types",
+      "license": "MIT",
+      "homepage": "https://oxc.rs",
+      "author": "Boshen and oxc contributors",
+      "description": "Types for Oxc AST nodes",
+      "versions": [
+        "0.139.0",
+        "0.148.0",
+        "0.151.0"
+      ]
+    },
+    {
+      "id": "pkg-paper-design-shaders-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@paper-design/shaders",
+      "license": "Apache-2.0",
+      "homepage": "https://www.npmjs.com/package/@paper-design/shaders",
+      "versions": [
+        "0.0.77"
+      ]
+    },
+    {
+      "id": "pkg-paper-design-shaders-react-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@paper-design/shaders-react",
+      "license": "Apache-2.0",
+      "homepage": "https://www.npmjs.com/package/@paper-design/shaders-react",
+      "versions": [
+        "0.0.77"
+      ]
+    },
+    {
       "id": "pkg-pierre-diffs-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
@@ -1920,7 +3524,44 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "apache-2.0",
       "homepage": "https://www.npmjs.com/package/@pierre/diffs",
       "versions": [
-        "1.0.10"
+        "1.0.10",
+        "1.6.1"
+      ]
+    },
+    {
+      "id": "pkg-pierre-highlights-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@pierre/highlights",
+      "license": "apache-2.0",
+      "homepage": "https://www.npmjs.com/package/@pierre/highlights",
+      "description": "A fast code highlighter written in WebAssembly Text(Wat), from Pierre",
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "id": "pkg-pierre-theme-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@pierre/theme",
+      "license": "apache-2.0",
+      "homepage": "https://github.com/pierrecomputer/pierre/tree/main/packages/theme",
+      "author": "Pierre Computer",
+      "description": "Pierre theme for Shiki, VS Code, and more",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-pierre-theming-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@pierre/theming",
+      "license": "apache-2.0",
+      "homepage": "https://www.npmjs.com/package/@pierre/theming",
+      "versions": [
+        "1.0.2"
       ]
     },
     {
@@ -1931,6 +3572,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://github.com/PostHog/posthog-js#readme",
       "versions": [
+        "1.38.1",
         "1.39.6"
       ]
     },
@@ -1956,7 +3598,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/PostHog/posthog-js#readme",
       "description": "Type definitions for the PostHog JavaScript SDK",
       "versions": [
+        "1.392.0",
         "1.392.1"
+      ]
+    },
+    {
+      "id": "pkg-preact-signals-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@preact/signals-core",
+      "license": "MIT",
+      "homepage": "https://preactjs.com",
+      "description": "Manage state with style in every framework",
+      "versions": [
+        "1.14.5"
       ]
     },
     {
@@ -2102,6 +3757,95 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-prosekit-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosekit/core",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosekit#readme",
+      "author": "ocavue",
+      "description": "Core features for ProseKit",
+      "versions": [
+        "0.13.0-beta.7"
+      ]
+    },
+    {
+      "id": "pkg-prosekit-extensions-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosekit/extensions",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosekit#readme",
+      "author": "ocavue",
+      "description": "A collection of common extensions for ProseKit",
+      "versions": [
+        "0.18.0-beta.19"
+      ]
+    },
+    {
+      "id": "pkg-prosekit-pm-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosekit/pm",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosekit#readme",
+      "author": "ocavue",
+      "description": "A re-export of ProseMirror packages",
+      "versions": [
+        "0.1.19-beta.4"
+      ]
+    },
+    {
+      "id": "pkg-prosekit-react-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosekit/react",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosekit#readme",
+      "author": "ocavue",
+      "description": "React components and utilities for ProseKit",
+      "versions": [
+        "0.8.0-beta.24"
+      ]
+    },
+    {
+      "id": "pkg-prosekit-web-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosekit/web",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosekit#readme",
+      "author": "ocavue",
+      "description": "A collection of web components for ProseKit",
+      "versions": [
+        "0.9.0-beta.24"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-adapter-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosemirror-adapter/core",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosemirror-adapter#readme",
+      "description": "Core package for ProseMirror Adapter",
+      "versions": [
+        "0.5.5"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-adapter-react-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@prosemirror-adapter/react",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosemirror-adapter#readme",
+      "description": "React package for ProseMirror Adapter",
+      "versions": [
+        "0.5.5"
+      ]
+    },
+    {
       "id": "pkg-protobufjs-aspromise-bsd-3-clause",
       "kind": "package",
       "scope": "production-dependency",
@@ -2232,17 +3976,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-number-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/number",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.1.1"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-primitive-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2263,17 +3996,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://radix-ui.com/primitives",
       "versions": [
         "1.2.12"
-      ]
-    },
-    {
-      "id": "pkg-radix-ui-react-alert-dialog-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-alert-dialog",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.1.15"
       ]
     },
     {
@@ -2333,17 +4055,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
         "1.1.2",
         "1.1.3",
         "1.1.4"
-      ]
-    },
-    {
-      "id": "pkg-radix-ui-react-context-menu-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-context-menu",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "2.2.16"
       ]
     },
     {
@@ -2506,28 +4217,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-scroll-area-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-scroll-area",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.2.10"
-      ]
-    },
-    {
-      "id": "pkg-radix-ui-react-select-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-select",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "2.2.6"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-separator-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2552,17 +4241,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-tabs-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-tabs",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.1.13"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-toggle-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2570,7 +4248,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://radix-ui.com/primitives",
       "versions": [
-        "1.1.10",
         "1.1.12"
       ]
     },
@@ -2656,17 +4333,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-radix-ui-react-use-previous-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@radix-ui/react-use-previous",
-      "license": "MIT",
-      "homepage": "https://radix-ui.com/primitives",
-      "versions": [
-        "1.1.1"
-      ]
-    },
-    {
       "id": "pkg-radix-ui-react-use-rect-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -2711,34 +4377,50 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-react-three-fiber-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@react-three/fiber",
+      "license": "MIT",
+      "homepage": "https://github.com/pmndrs/react-three-fiber#readme",
+      "author": "Paul Henschel",
+      "description": "A React renderer for Threejs",
+      "versions": [
+        "9.7.0"
+      ]
+    },
+    {
+      "id": "pkg-rolldown-binding-linux-arm64-gnu-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@rolldown/binding-linux-arm64-gnu",
+      "license": "MIT",
+      "homepage": "https://rolldown.rs/",
+      "description": "Fast JavaScript/TypeScript bundler in Rust with Rollup-compatible API.",
+      "versions": [
+        "1.1.5",
+        "1.2.7",
+        "1.2.11"
+      ]
+    },
+    {
       "id": "pkg-rolldown-pluginutils-mit",
       "kind": "package",
       "scope": "production-dependency",
       "name": "@rolldown/pluginutils",
       "license": "MIT",
-      "homepage": "https://github.com/rolldown/rolldown#readme",
+      "homepage": "https://github.com/rolldown/plugins/tree/main/packages/pluginutils#readme",
+      "description": "Plugin utilities for Rolldown",
       "versions": [
-        "1.0.0-beta.27"
+        "1.0.0-rc.3",
+        "1.0.1"
       ]
     },
     {
-      "id": "pkg-rollup-rollup-linux-x64-gnu-mit",
+      "id": "pkg-rollup-rollup-linux-arm64-gnu-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@rollup/rollup-linux-x64-gnu",
-      "license": "MIT",
-      "homepage": "https://rollupjs.org/",
-      "author": "Lukas Taegert-Atkinson",
-      "description": "Native bindings for Rollup",
-      "versions": [
-        "4.57.1"
-      ]
-    },
-    {
-      "id": "pkg-rollup-rollup-linux-x64-musl-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@rollup/rollup-linux-x64-musl",
+      "name": "@rollup/rollup-linux-arm64-gnu",
       "license": "MIT",
       "homepage": "https://rollupjs.org/",
       "author": "Lukas Taegert-Atkinson",
@@ -2757,7 +4439,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Pine Wu",
       "description": "Core of Shiki",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
       ]
     },
     {
@@ -2770,7 +4454,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Anthony Fu",
       "description": "Engine for Shiki using JavaScript's native RegExp",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
       ]
     },
     {
@@ -2783,7 +4469,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Anthony Fu",
       "description": "Engine for Shiki using Oniguruma RegExp engine in WebAssembly",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
       ]
     },
     {
@@ -2796,7 +4484,23 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Anthony Fu",
       "description": "TextMate grammars for Shiki in ESM",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
+      ]
+    },
+    {
+      "id": "pkg-shikijs-primitive-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@shikijs/primitive",
+      "license": "MIT",
+      "homepage": "https://github.com/shikijs/shiki#readme",
+      "author": "Anthony Fu",
+      "description": "Tokenizer primitives of Shiki",
+      "versions": [
+        "4.1.0",
+        "4.3.1"
       ]
     },
     {
@@ -2809,7 +4513,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Anthony Fu",
       "description": "TextMate themes for Shiki in ESM",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
       ]
     },
     {
@@ -2835,7 +4541,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Anthony Fu",
       "description": "Type definitions for Shiki",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
       ]
     },
     {
@@ -2852,16 +4560,152 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-sindresorhus-is-mit",
+      "id": "pkg-smithy-core-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@sindresorhus/is",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/is#readme",
-      "author": "Sindre Sorhus",
-      "description": "Type check values",
+      "name": "@smithy/core",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/core",
+      "author": "AWS Smithy Team",
       "versions": [
-        "4.6.0"
+        "3.40.0"
+      ]
+    },
+    {
+      "id": "pkg-smithy-credential-provider-imds-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@smithy/credential-provider-imds",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/credential-provider-imds",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "AWS credential provider that sources credentials from the EC2 instance metadata service and ECS container metadata service",
+      "versions": [
+        "4.5.2"
+      ]
+    },
+    {
+      "id": "pkg-smithy-fetch-http-handler-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@smithy/fetch-http-handler",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/fetch-http-handler",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "Provides a way to make requests",
+      "versions": [
+        "5.8.1"
+      ]
+    },
+    {
+      "id": "pkg-smithy-node-http-handler-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@smithy/node-http-handler",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/node-http-handler",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "Provides a way to make requests",
+      "versions": [
+        "4.12.1",
+        "4.14.2"
+      ]
+    },
+    {
+      "id": "pkg-smithy-signature-v4-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@smithy/signature-v4",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/signature-v4",
+      "author": "AWS SDK for JavaScript Team",
+      "description": "A standalone implementation of the AWS Signature V4 request signing algorithm",
+      "versions": [
+        "5.7.5"
+      ]
+    },
+    {
+      "id": "pkg-smithy-types-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@smithy/types",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/types",
+      "author": "AWS Smithy Team",
+      "versions": [
+        "4.20.0"
+      ]
+    },
+    {
+      "id": "pkg-sorbetai-artifacts-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@sorbetai/artifacts",
+      "license": "MIT",
+      "homepage": "https://github.com/LodyAI/sorbet-distribution#readme",
+      "description": "Immutable artifact storage contracts for Sorbet",
+      "versions": [
+        "0.1.0-alpha.23"
+      ]
+    },
+    {
+      "id": "pkg-sorbetai-context-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@sorbetai/context",
+      "license": "MIT",
+      "homepage": "https://github.com/LodyAI/sorbet-distribution#readme",
+      "description": "Provider-neutral Context assembly for Sorbet",
+      "versions": [
+        "0.1.0-alpha.23"
+      ]
+    },
+    {
+      "id": "pkg-sorbetai-control-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@sorbetai/control",
+      "license": "MIT",
+      "homepage": "https://github.com/LodyAI/sorbet-distribution#readme",
+      "description": "Headless control plane for one local Sorbet installation",
+      "versions": [
+        "0.1.0-alpha.23"
+      ]
+    },
+    {
+      "id": "pkg-sorbetai-plugins-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@sorbetai/plugins",
+      "license": "MIT",
+      "homepage": "https://github.com/LodyAI/sorbet-distribution#readme",
+      "description": "Effect-owned Plugin composition and request borrowing for Sorbet",
+      "versions": [
+        "0.1.0-alpha.23"
+      ]
+    },
+    {
+      "id": "pkg-sorbetai-runtime-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@sorbetai/runtime",
+      "license": "MIT",
+      "homepage": "https://github.com/LodyAI/sorbet-distribution#readme",
+      "description": "Core package for Sorbet",
+      "versions": [
+        "0.1.0-alpha.23"
+      ]
+    },
+    {
+      "id": "pkg-sorbetai-schema-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@sorbetai/schema",
+      "license": "MIT",
+      "homepage": "https://github.com/LodyAI/sorbet-distribution#readme",
+      "description": "Strict JSON Schema boundaries for Sorbet",
+      "versions": [
+        "0.1.0-alpha.23"
       ]
     },
     {
@@ -2917,40 +4761,37 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-streamdown-math-apache-2-0",
+      "id": "pkg-stylexjs-stylex-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@streamdown/math",
-      "license": "Apache-2.0",
-      "homepage": "https://github.com/vercel/streamdown#readme",
-      "author": "Hayden Bleasel",
-      "description": "KaTeX math rendering plugin for Streamdown",
+      "name": "@stylexjs/stylex",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/stylex#readme",
+      "description": "A library for defining styles for optimized user interfaces.",
       "versions": [
-        "1.0.2"
+        "0.19.0"
       ]
     },
     {
-      "id": "pkg-szmarczak-http-timer-mit",
+      "id": "pkg-tailwindcss-oxide-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@szmarczak/http-timer",
+      "name": "@tailwindcss/oxide",
       "license": "MIT",
-      "homepage": "https://github.com/szmarczak/http-timer#readme",
-      "author": "Szymon Marczak",
-      "description": "Timings for HTTP requests",
+      "homepage": "https://github.com/tailwindlabs/tailwindcss#readme",
       "versions": [
-        "4.0.6"
+        "4.3.3"
       ]
     },
     {
-      "id": "pkg-tailwindcss-container-queries-mit",
+      "id": "pkg-tailwindcss-oxide-linux-arm64-gnu-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@tailwindcss/container-queries",
+      "name": "@tailwindcss/oxide-linux-arm64-gnu",
       "license": "MIT",
-      "homepage": "https://github.com/tailwindlabs/tailwindcss-container-queries#readme",
+      "homepage": "https://github.com/tailwindlabs/tailwindcss#readme",
       "versions": [
-        "0.1.1"
+        "4.3.3"
       ]
     },
     {
@@ -2963,7 +4804,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Tanner Linsley",
       "description": "Modern and scalable routing for React applications",
       "versions": [
-        "1.154.14"
+        "1.162.0"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-hotkeys-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/hotkeys",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/hotkeys",
+      "author": "Tanner Linsley",
+      "description": "Type-safe, framework-agnostic keyboard hotkey management for the browser",
+      "versions": [
+        "0.8.0"
       ]
     },
     {
@@ -2976,7 +4830,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Tanner Linsley",
       "description": "Modern and scalable routing for React applications",
       "versions": [
-        "1.159.5"
+        "1.170.18"
       ]
     },
     {
@@ -2993,6 +4847,58 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-tanstack-react-start-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/react-start",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.168.33"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-react-start-client-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/react-start-client",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.168.16"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-react-start-rsc-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/react-start-rsc",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "React Server Components support for TanStack Start",
+      "versions": [
+        "0.1.32"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-react-start-server-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/react-start-server",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.167.22"
+      ]
+    },
+    {
       "id": "pkg-tanstack-react-store-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3002,7 +4908,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Tanner Linsley",
       "description": "Framework agnostic type-safe store w/ reactive framework adapters",
       "versions": [
-        "0.8.0"
+        "0.9.3"
       ]
     },
     {
@@ -3041,7 +4947,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Tanner Linsley",
       "description": "Modern and scalable routing for React applications",
       "versions": [
-        "1.159.4"
+        "1.171.15",
+        "1.171.16"
       ]
     },
     {
@@ -3058,6 +4965,123 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-tanstack-router-generator-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/router-generator",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/router",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.167.21"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-router-plugin-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/router-plugin",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/router",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.168.23"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-router-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/router-utils",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/router",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.162.2"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-start-client-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/start-client-core",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.170.14"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-start-fn-stubs-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/start-fn-stubs",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Stub functions for TanStack Start isomorphic and environment-specific functions",
+      "versions": [
+        "1.162.0"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-start-plugin-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/start-plugin-core",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.171.24"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-start-server-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/start-server-core",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.169.17"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-start-static-server-functions-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/start-static-server-functions",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.167.19"
+      ]
+    },
+    {
+      "id": "pkg-tanstack-start-storage-context-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@tanstack/start-storage-context",
+      "license": "MIT",
+      "homepage": "https://tanstack.com/start",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
+      "versions": [
+        "1.167.17"
+      ]
+    },
+    {
       "id": "pkg-tanstack-store-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3067,7 +5091,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Tanner Linsley",
       "description": "Framework agnostic type-safe store w/ reactive framework adapters",
       "versions": [
-        "0.8.0"
+        "0.9.3",
+        "0.11.1"
       ]
     },
     {
@@ -3097,15 +5122,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-aws-lambda-mit",
+      "id": "pkg-tanstack-virtual-file-routes-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@types/aws-lambda",
+      "name": "@tanstack/virtual-file-routes",
       "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/aws-lambda",
-      "description": "TypeScript definitions for aws-lambda",
+      "homepage": "https://tanstack.com/router",
+      "author": "Tanner Linsley",
+      "description": "Modern and scalable routing for React applications",
       "versions": [
-        "8.10.160"
+        "1.162.0"
       ]
     },
     {
@@ -3169,18 +5195,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-cacheable-request-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/cacheable-request",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/cacheable-request",
-      "description": "TypeScript definitions for cacheable-request",
-      "versions": [
-        "6.0.3"
-      ]
-    },
-    {
       "id": "pkg-types-chai-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3190,18 +5204,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "TypeScript definitions for chai",
       "versions": [
         "5.2.3"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3",
-      "description": "TypeScript definitions for d3",
-      "versions": [
-        "7.4.3"
       ]
     },
     {
@@ -3217,42 +5219,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-d3-axis-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-axis",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-axis",
-      "description": "TypeScript definitions for d3-axis",
-      "versions": [
-        "3.0.6"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-brush-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-brush",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-brush",
-      "description": "TypeScript definitions for d3-brush",
-      "versions": [
-        "3.0.6"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-chord-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-chord",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-chord",
-      "description": "TypeScript definitions for d3-chord",
-      "versions": [
-        "3.0.6"
-      ]
-    },
-    {
       "id": "pkg-types-d3-color-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3265,66 +5231,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-d3-contour-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-contour",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-contour",
-      "description": "TypeScript definitions for d3-contour",
-      "versions": [
-        "3.0.6"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-delaunay-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-delaunay",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-delaunay",
-      "description": "TypeScript definitions for d3-delaunay",
-      "versions": [
-        "6.0.4"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-dispatch-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-dispatch",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-dispatch",
-      "description": "TypeScript definitions for d3-dispatch",
-      "versions": [
-        "3.0.7"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-drag-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-drag",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-drag",
-      "description": "TypeScript definitions for d3-drag",
-      "versions": [
-        "3.0.7"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-dsv-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-dsv",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-dsv",
-      "description": "TypeScript definitions for d3-dsv",
-      "versions": [
-        "3.0.7"
-      ]
-    },
-    {
       "id": "pkg-types-d3-ease-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3334,66 +5240,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "TypeScript definitions for d3-ease",
       "versions": [
         "3.0.2"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-fetch-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-fetch",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-fetch",
-      "description": "TypeScript definitions for d3-fetch",
-      "versions": [
-        "3.0.7"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-force-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-force",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-force",
-      "description": "TypeScript definitions for d3-force",
-      "versions": [
-        "3.0.10"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-format-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-format",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-format",
-      "description": "TypeScript definitions for d3-format",
-      "versions": [
-        "3.0.4"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-geo-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-geo",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-geo",
-      "description": "TypeScript definitions for d3-geo",
-      "versions": [
-        "3.1.0"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-hierarchy-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-hierarchy",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-hierarchy",
-      "description": "TypeScript definitions for d3-hierarchy",
-      "versions": [
-        "3.1.7"
       ]
     },
     {
@@ -3421,42 +5267,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-d3-polygon-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-polygon",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-polygon",
-      "description": "TypeScript definitions for d3-polygon",
-      "versions": [
-        "3.0.2"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-quadtree-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-quadtree",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-quadtree",
-      "description": "TypeScript definitions for d3-quadtree",
-      "versions": [
-        "3.0.6"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-random-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-random",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-random",
-      "description": "TypeScript definitions for d3-random",
-      "versions": [
-        "3.0.3"
-      ]
-    },
-    {
       "id": "pkg-types-d3-scale-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3466,30 +5276,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "TypeScript definitions for d3-scale",
       "versions": [
         "4.0.9"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-scale-chromatic-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-scale-chromatic",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-scale-chromatic",
-      "description": "TypeScript definitions for d3-scale-chromatic",
-      "versions": [
-        "3.1.0"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-selection-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-selection",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-selection",
-      "description": "TypeScript definitions for d3-selection",
-      "versions": [
-        "3.0.11"
       ]
     },
     {
@@ -3517,18 +5303,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-d3-time-format-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-time-format",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-time-format",
-      "description": "TypeScript definitions for d3-time-format",
-      "versions": [
-        "4.0.3"
-      ]
-    },
-    {
       "id": "pkg-types-d3-timer-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3538,30 +5312,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "TypeScript definitions for d3-timer",
       "versions": [
         "3.0.2"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-transition-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-transition",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-transition",
-      "description": "TypeScript definitions for d3-transition",
-      "versions": [
-        "3.0.9"
-      ]
-    },
-    {
-      "id": "pkg-types-d3-zoom-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/d3-zoom",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-zoom",
-      "description": "TypeScript definitions for d3-zoom",
-      "versions": [
-        "3.0.8"
       ]
     },
     {
@@ -3589,6 +5339,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-types-dom-webcodecs-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@types/dom-webcodecs",
+      "license": "MIT",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/dom-webcodecs",
+      "description": "TypeScript definitions for dom-webcodecs",
+      "versions": [
+        "0.1.18"
+      ]
+    },
+    {
       "id": "pkg-types-estree-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3613,18 +5375,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-geojson-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/geojson",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/geojson",
-      "description": "TypeScript definitions for geojson",
-      "versions": [
-        "7946.0.16"
-      ]
-    },
-    {
       "id": "pkg-types-hast-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3633,19 +5383,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/hast",
       "description": "TypeScript definitions for hast",
       "versions": [
-        "3.0.4"
-      ]
-    },
-    {
-      "id": "pkg-types-http-cache-semantics-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/http-cache-semantics",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/http-cache-semantics",
-      "description": "TypeScript definitions for http-cache-semantics",
-      "versions": [
-        "4.2.0"
+        "3.0.4",
+        "3.0.5"
       ]
     },
     {
@@ -3661,18 +5400,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-types-keyv-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/keyv",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/keyv",
-      "description": "TypeScript definitions for keyv",
-      "versions": [
-        "3.1.4"
-      ]
-    },
-    {
       "id": "pkg-types-mdast-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3682,6 +5409,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "TypeScript definitions for mdast",
       "versions": [
         "4.0.4"
+      ]
+    },
+    {
+      "id": "pkg-types-mdx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@types/mdx",
+      "license": "MIT",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mdx",
+      "description": "TypeScript definitions for mdx",
+      "versions": [
+        "2.0.14"
       ]
     },
     {
@@ -3705,20 +5444,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node",
       "description": "TypeScript definitions for node",
       "versions": [
-        "22.19.10",
-        "24.10.12"
-      ]
-    },
-    {
-      "id": "pkg-types-pg-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/pg",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/pg",
-      "description": "TypeScript definitions for pg",
-      "versions": [
-        "8.15.6"
+        "24.10.12",
+        "26.2.0",
+        "26.6.6"
       ]
     },
     {
@@ -3730,19 +5458,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/prismjs",
       "description": "TypeScript definitions for prismjs",
       "versions": [
-        "1.26.5"
-      ]
-    },
-    {
-      "id": "pkg-types-prop-types-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/prop-types",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/prop-types",
-      "description": "TypeScript definitions for prop-types",
-      "versions": [
-        "15.7.15"
+        "1.26.6"
       ]
     },
     {
@@ -3754,7 +5470,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react",
       "description": "TypeScript definitions for react",
       "versions": [
-        "18.3.28"
+        "19.2.17"
       ]
     },
     {
@@ -3766,19 +5482,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom",
       "description": "TypeScript definitions for react-dom",
       "versions": [
-        "18.3.7"
+        "19.2.3"
       ]
     },
     {
-      "id": "pkg-types-responselike-mit",
+      "id": "pkg-types-react-reconciler-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "@types/responselike",
+      "name": "@types/react-reconciler",
       "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/responselike",
-      "description": "TypeScript definitions for responselike",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-reconciler",
+      "description": "TypeScript definitions for react-reconciler",
       "versions": [
-        "1.0.3"
+        "0.28.9"
+      ]
+    },
+    {
+      "id": "pkg-types-retry-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@types/retry",
+      "license": "MIT",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped#readme",
+      "description": "TypeScript definitions for retry",
+      "versions": [
+        "0.12.0"
       ]
     },
     {
@@ -3819,6 +5547,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-types-webxr-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@types/webxr",
+      "license": "MIT",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/webxr",
+      "description": "TypeScript definitions for webxr",
+      "versions": [
+        "0.5.24"
+      ]
+    },
+    {
       "id": "pkg-types-whatwg-url-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3831,6 +5571,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-types-wicg-file-system-access-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@types/wicg-file-system-access",
+      "license": "MIT",
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/wicg-file-system-access",
+      "description": "TypeScript definitions for File System Access API",
+      "versions": [
+        "2020.9.8"
+      ]
+    },
+    {
       "id": "pkg-types-ws-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -3839,19 +5591,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ws",
       "description": "TypeScript definitions for ws",
       "versions": [
-        "8.18.1"
-      ]
-    },
-    {
-      "id": "pkg-types-yauzl-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@types/yauzl",
-      "license": "MIT",
-      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/yauzl",
-      "description": "TypeScript definitions for yauzl",
-      "versions": [
-        "2.10.3"
+        "8.18.2"
       ]
     },
     {
@@ -3865,19 +5605,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A structuredClone polyfill",
       "versions": [
         "1.3.0"
-      ]
-    },
-    {
-      "id": "pkg-upsetjs-venn-js-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "@upsetjs/venn.js",
-      "license": "MIT",
-      "homepage": "https://github.com/upsetjs/venn.js",
-      "author": "Ben Frederickson",
-      "description": "Area Proportional Venn and Euler Diagrams",
-      "versions": [
-        "2.0.0"
       ]
     },
     {
@@ -3916,7 +5643,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Evan You",
       "description": "The default Vite plugin for React projects",
       "versions": [
-        "4.7.0"
+        "5.2.0"
+      ]
+    },
+    {
+      "id": "pkg-vitest-coverage-v8-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@vitest/coverage-v8",
+      "license": "MIT",
+      "homepage": "https://vitest.dev/guide/coverage",
+      "author": "Anthony Fu",
+      "description": "V8 coverage provider for Vitest",
+      "versions": [
+        "5.0.2"
       ]
     },
     {
@@ -3925,10 +5665,37 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/expect",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/expect#readme",
+      "homepage": "https://vitest.dev/api/expect",
       "description": "Jest's expect matchers as a Chai plugin",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11"
+      ]
+    },
+    {
+      "id": "pkg-vitest-istanbul-lib-coverage-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@vitest/istanbul-lib-coverage",
+      "license": "MIT",
+      "homepage": "https://vitest.dev/",
+      "author": "Vitest Team",
+      "description": "Data library for istanbul coverage objects",
+      "versions": [
+        "1.0.2"
+      ]
+    },
+    {
+      "id": "pkg-vitest-istanbul-lib-report-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@vitest/istanbul-lib-report",
+      "license": "MIT",
+      "homepage": "https://vitest.dev",
+      "author": "Vitest Team",
+      "description": "Base reporting library and report generators for istanbul",
+      "versions": [
+        "1.0.2"
       ]
     },
     {
@@ -3937,10 +5704,12 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/mocker",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/mocker#readme",
+      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/mocker",
       "description": "Vitest module mocker implementation",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11",
+        "5.0.2"
       ]
     },
     {
@@ -3949,10 +5718,12 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/pretty-format",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/utils#readme",
+      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/pretty-format",
       "description": "Fork of pretty-format with support for ESM",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "3.2.7",
+        "4.1.11"
       ]
     },
     {
@@ -3961,10 +5732,11 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/runner",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/runner#readme",
+      "homepage": "https://vitest.dev/api/advanced/runner",
       "description": "Vitest test runner",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11"
       ]
     },
     {
@@ -3973,10 +5745,11 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/snapshot",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/snapshot#readme",
+      "homepage": "https://vitest.dev/guide/snapshot",
       "description": "Vitest snapshot manager",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11"
       ]
     },
     {
@@ -3985,10 +5758,12 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/spy",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/spy#readme",
+      "homepage": "https://vitest.dev/api/mock",
       "description": "Lightweight Jest compatible spy implementation",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11",
+        "5.0.2"
       ]
     },
     {
@@ -3997,10 +5772,11 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "@vitest/utils",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/utils#readme",
+      "homepage": "https://github.com/vitest-dev/vitest/tree/main/packages/utils",
       "description": "Shared Vitest utility functions",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11"
       ]
     },
     {
@@ -4121,6 +5897,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-web-kits-audio-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@web-kits/audio",
+      "license": "MIT",
+      "homepage": "https://github.com/raphaelsalaja/audio",
+      "author": "Raphael Salaja",
+      "description": "A declarative synthesizer for the web",
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
       "id": "pkg-xterm-addon-fit-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -4145,6 +5934,107 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-zag-js-dismissable-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@zag-js/dismissable",
+      "license": "MIT",
+      "homepage": "https://github.com/chakra-ui/zag#readme",
+      "author": "Segun Adebayo",
+      "description": "Dismissable layer utilities for the DOM",
+      "versions": [
+        "1.42.0"
+      ]
+    },
+    {
+      "id": "pkg-zag-js-dom-query-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@zag-js/dom-query",
+      "license": "MIT",
+      "homepage": "https://github.com/chakra-ui/zag#readme",
+      "author": "Segun Adebayo",
+      "description": "The dom helper library for zag.js machines",
+      "versions": [
+        "1.42.0"
+      ]
+    },
+    {
+      "id": "pkg-zag-js-interact-outside-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@zag-js/interact-outside",
+      "license": "MIT",
+      "homepage": "https://github.com/chakra-ui/zag#readme",
+      "author": "Segun Adebayo",
+      "description": "Track interactions or focus outside an element",
+      "versions": [
+        "1.42.0"
+      ]
+    },
+    {
+      "id": "pkg-zag-js-types-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@zag-js/types",
+      "license": "MIT",
+      "homepage": "https://github.com/chakra-ui/zag#readme",
+      "author": "Segun Adebayo",
+      "versions": [
+        "1.42.0"
+      ]
+    },
+    {
+      "id": "pkg-zag-js-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@zag-js/utils",
+      "license": "MIT",
+      "homepage": "https://github.com/chakra-ui/zag#readme",
+      "author": "Segun Adebayo",
+      "versions": [
+        "1.42.0"
+      ]
+    },
+    {
+      "id": "pkg-zumer-snapdom-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "@zumer/snapdom",
+      "license": "MIT",
+      "homepage": "https://snapdom.dev/",
+      "author": "Juan Martin Muda",
+      "description": "Fast, modern alternative to html2canvas — captures HTML elements to images (PNG, JPG, SVG, WebP) with exceptional speed and accuracy.",
+      "versions": [
+        "2.24.15"
+      ]
+    },
+    {
+      "id": "pkg-abbrev-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "abbrev",
+      "license": "ISC",
+      "homepage": "https://github.com/npm/abbrev-js#readme",
+      "author": "GitHub Inc.",
+      "description": "Like ruby's abbrev module, but in js",
+      "versions": [
+        "5.0.0"
+      ]
+    },
+    {
+      "id": "pkg-accepts-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "accepts",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/accepts#readme",
+      "description": "Higher-level content negotiation",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
       "id": "pkg-acorn-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -4153,19 +6043,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/acornjs/acorn",
       "description": "ECMAScript parser",
       "versions": [
-        "8.16.0"
+        "8.15.0",
+        "8.19.0"
       ]
     },
     {
-      "id": "pkg-acp-extension-core-unknown",
+      "id": "pkg-acorn-jsx-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "acp-extension-core",
-      "license": "Unknown",
-      "homepage": "https://www.npmjs.com/package/acp-extension-core",
-      "description": "A minimal typescript library.",
+      "name": "acorn-jsx",
+      "license": "MIT",
+      "homepage": "https://github.com/acornjs/acorn-jsx",
+      "description": "Modern, fast React.js JSX parser",
       "versions": [
-        "0.0.5"
+        "5.3.2"
+      ]
+    },
+    {
+      "id": "pkg-acorn-walk-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "acorn-walk",
+      "license": "MIT",
+      "homepage": "https://github.com/acornjs/acorn",
+      "description": "ECMAScript (ESTree) AST walker",
+      "versions": [
+        "8.3.5"
       ]
     },
     {
@@ -4178,7 +6081,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Nathan Rajlich",
       "description": "Turn a function into an `http.Agent` instance",
       "versions": [
-        "7.1.4"
+        "7.1.4",
+        "9.0.0"
       ]
     },
     {
@@ -4191,7 +6095,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Evgeny Poberezkin",
       "description": "Another JSON Schema Validator",
       "versions": [
-        "8.17.1"
+        "8.18.0",
+        "8.20.0"
       ]
     },
     {
@@ -4205,6 +6110,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Format validation for Ajv v7+",
       "versions": [
         "3.0.1"
+      ]
+    },
+    {
+      "id": "pkg-alien-signals-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "alien-signals",
+      "license": "MIT",
+      "homepage": "https://github.com/stackblitz/alien-signals#readme",
+      "description": "The lightest signal library.",
+      "versions": [
+        "3.2.1"
       ]
     },
     {
@@ -4230,8 +6147,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sindre Sorhus",
       "description": "Regular expression for matching ANSI escape codes",
       "versions": [
-        "5.0.1",
-        "6.2.2"
+        "5.0.1"
       ]
     },
     {
@@ -4245,6 +6161,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "ANSI escape codes for styling strings in the terminal",
       "versions": [
         "4.3.0"
+      ]
+    },
+    {
+      "id": "pkg-ansis-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ansis",
+      "license": "ISC",
+      "homepage": "https://github.com/webdiscus/ansis#readme",
+      "author": "webdiscus",
+      "description": "ANSI color lib",
+      "versions": [
+        "4.2.0"
       ]
     },
     {
@@ -4326,16 +6255,29 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-asynckit-mit",
+      "id": "pkg-ast-v8-to-istanbul-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "asynckit",
+      "name": "ast-v8-to-istanbul",
       "license": "MIT",
-      "homepage": "https://github.com/alexindigo/asynckit#readme",
-      "author": "Alex Indigo",
-      "description": "Minimal async jobs utility library, with streams support",
+      "homepage": "https://github.com/AriPerkkio/ast-v8-to-istanbul",
+      "author": "Ari Perkkiö",
+      "description": "AST-aware v8-to-istanbul",
       "versions": [
-        "0.4.0"
+        "1.0.7"
+      ]
+    },
+    {
+      "id": "pkg-astring-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "astring",
+      "license": "MIT",
+      "homepage": "https://github.com/davidbonnet/astring#readme",
+      "author": "David Bonnet",
+      "description": "JavaScript code generator from an ESTree-compliant AST.",
+      "versions": [
+        "1.9.0"
       ]
     },
     {
@@ -4361,6 +6303,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "AWS RDS SSL certificates bundles.",
       "versions": [
         "1.1.2"
+      ]
+    },
+    {
+      "id": "pkg-babel-dead-code-elimination-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "babel-dead-code-elimination",
+      "license": "MIT",
+      "homepage": "https://github.com/pcattori/babel-dead-code-elimination#readme",
+      "author": "pcattori",
+      "description": "Composable primitives for dead code elimination in Babel",
+      "versions": [
+        "1.0.12"
       ]
     },
     {
@@ -4414,16 +6369,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-before-after-hook-apache-2-0",
+      "id": "pkg-beautiful-mermaid-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "before-after-hook",
-      "license": "Apache-2.0",
-      "homepage": "https://github.com/gr2m/before-after-hook#readme",
-      "author": "Gregor Martynus",
-      "description": "asynchronous before/error/after hooks for internal functionality",
+      "name": "beautiful-mermaid",
+      "license": "MIT",
+      "homepage": "https://github.com/lukilabs/beautiful-mermaid",
+      "author": "Craft Docs",
+      "description": "Render Mermaid diagrams as beautiful SVGs or ASCII art. Ultra-fast, fully themeable, zero DOM dependencies.",
       "versions": [
-        "4.0.0"
+        "1.1.3"
       ]
     },
     {
@@ -4435,7 +6390,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://better-auth.com",
       "description": "The most comprehensive authentication framework for TypeScript.",
       "versions": [
-        "1.5.5"
+        "1.6.33"
       ]
     },
     {
@@ -4459,7 +6414,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://github.com/better-auth/better-call#readme",
       "versions": [
-        "1.3.2"
+        "1.4.0"
       ]
     },
     {
@@ -4472,7 +6427,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Joshua Wise",
       "description": "The fastest and simplest library for SQLite in Node.js.",
       "versions": [
-        "12.10.0"
+        "12.10.0",
+        "13.0.3"
+      ]
+    },
+    {
+      "id": "pkg-bignumber-js-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "bignumber.js",
+      "license": "MIT",
+      "homepage": "https://github.com/MikeMcl/bignumber.js#readme",
+      "author": "Michael Mclaughlin",
+      "description": "A library for arbitrary-precision decimal and non-decimal arithmetic",
+      "versions": [
+        "9.3.1"
       ]
     },
     {
@@ -4501,15 +6470,28 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-boolean-mit",
+      "id": "pkg-body-parser-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "boolean",
+      "name": "body-parser",
       "license": "MIT",
-      "homepage": "https://github.com/thenativeweb/boolean#readme",
-      "description": "boolean converts lots of things to boolean.",
+      "homepage": "https://github.com/expressjs/body-parser#readme",
+      "description": "Node.js body parsing middleware",
       "versions": [
-        "3.2.0"
+        "2.2.2"
+      ]
+    },
+    {
+      "id": "pkg-bowser-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "bowser",
+      "license": "MIT",
+      "homepage": "https://github.com/bowser-js/bowser",
+      "author": "Dustin Diaz",
+      "description": "Lightweight browser detector",
+      "versions": [
+        "2.15.0"
       ]
     },
     {
@@ -4548,20 +6530,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "The MongoDB NodeJS Team",
       "description": "A bson parser for node.js and the browser",
       "versions": [
-        "7.2.0"
-      ]
-    },
-    {
-      "id": "pkg-btoa-mit-or-apache-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "btoa",
-      "license": "(MIT OR Apache-2.0)",
-      "homepage": "https://git.coolaj86.com/coolaj86/btoa.js.git",
-      "author": "AJ ONeal",
-      "description": "btoa for Node.JS (it's a one-liner)",
-      "versions": [
-        "1.2.1"
+        "7.3.4"
       ]
     },
     {
@@ -4574,20 +6543,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Feross Aboukhadijeh",
       "description": "Node.js Buffer API, for the browser",
       "versions": [
-        "5.7.1"
+        "5.7.1",
+        "6.0.3"
       ]
     },
     {
-      "id": "pkg-buffer-crc32-mit",
+      "id": "pkg-buffer-equal-constant-time-bsd-3-clause",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "buffer-crc32",
-      "license": "MIT",
-      "homepage": "https://github.com/brianloveswords/buffer-crc32",
-      "author": "Brian J. Brennan",
-      "description": "A pure javascript CRC32 algorithm that plays nice with binary data",
+      "name": "buffer-equal-constant-time",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/goinstant/buffer-equal-constant-time#readme",
+      "author": "GoInstant Inc., a salesforce.com company",
+      "description": "Constant-time comparison of Buffers",
       "versions": [
-        "0.2.13"
+        "1.0.1"
       ]
     },
     {
@@ -4627,6 +6597,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-bundle-name-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "bundle-name",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/bundle-name#readme",
+      "author": "Sindre Sorhus",
+      "description": "Get bundle name from a bundle identifier (macOS): `com.apple.Safari` → `Safari`",
+      "versions": [
+        "4.1.0"
+      ]
+    },
+    {
+      "id": "pkg-bytes-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "bytes",
+      "license": "MIT",
+      "homepage": "https://github.com/visionmedia/bytes.js#readme",
+      "author": "TJ Holowaychuk",
+      "description": "Utility to parse a string bytes to bytes and vice-versa",
+      "versions": [
+        "3.1.2"
+      ]
+    },
+    {
       "id": "pkg-c12-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -4644,37 +6640,12 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "cac",
       "license": "MIT",
-      "homepage": "https://github.com/egoist/cac#readme",
+      "homepage": "https://github.com/cacjs/cac#readme",
       "author": "egoist",
       "description": "Simple yet powerful framework for building command-line apps.",
       "versions": [
-        "6.7.14"
-      ]
-    },
-    {
-      "id": "pkg-cacheable-lookup-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "cacheable-lookup",
-      "license": "MIT",
-      "homepage": "https://github.com/szmarczak/cacheable-lookup#readme",
-      "author": "Szymon Marczak",
-      "description": "A cacheable dns.lookup(…) that respects the TTL",
-      "versions": [
-        "5.0.4"
-      ]
-    },
-    {
-      "id": "pkg-cacheable-request-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "cacheable-request",
-      "license": "MIT",
-      "homepage": "https://github.com/lukechilds/cacheable-request#readme",
-      "author": "Luke Childs",
-      "description": "Wrap native HTTP requests with RFC compliant cache support",
-      "versions": [
-        "7.0.4"
+        "6.7.14",
+        "7.0.0"
       ]
     },
     {
@@ -4691,6 +6662,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-call-bound-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "call-bound",
+      "license": "MIT",
+      "homepage": "https://github.com/ljharb/call-bound#readme",
+      "author": "Jordan Harband",
+      "description": "Robust call-bound JavaScript intrinsics, using `call-bind` and `get-intrinsic`.",
+      "versions": [
+        "1.0.4"
+      ]
+    },
+    {
+      "id": "pkg-camelcase-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "camelcase",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/camelcase#readme",
+      "author": "Sindre Sorhus",
+      "description": "Convert a dash/dot/underscore/space separated string to camelCase or PascalCase: `foo-bar` → `fooBar`",
+      "versions": [
+        "5.3.1"
+      ]
+    },
+    {
       "id": "pkg-caniuse-lite-cc-by-4-0",
       "kind": "package",
       "scope": "production-dependency",
@@ -4701,6 +6698,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A smaller version of caniuse-db, with only the essentials!",
       "versions": [
         "1.0.30001769"
+      ]
+    },
+    {
+      "id": "pkg-canonicalize-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "canonicalize",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/erdtman/canonicalize#readme",
+      "description": "JSON canonicalize function",
+      "versions": [
+        "5.1.0"
+      ]
+    },
+    {
+      "id": "pkg-cborg-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "cborg",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/rvagg/cborg#readme",
+      "author": "Rod",
+      "description": "Fast CBOR with a focus on strictness",
+      "versions": [
+        "6.1.3"
       ]
     },
     {
@@ -4726,7 +6748,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Jake Luer",
       "description": "BDD/TDD assertion library for node.js and the browser. Test framework agnostic.",
       "versions": [
-        "5.3.3"
+        "5.3.3",
+        "6.3.0"
       ]
     },
     {
@@ -4817,7 +6840,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Paul Miller",
       "description": "Minimal and efficient cross-platform file watching library",
       "versions": [
-        "4.0.3"
+        "4.0.3",
+        "5.0.0"
       ]
     },
     {
@@ -4831,6 +6855,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "like `chown -R`",
       "versions": [
         "1.1.4"
+      ]
+    },
+    {
+      "id": "pkg-chownr-blueoak-1-0-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "chownr",
+      "license": "BlueOak-1.0.0",
+      "homepage": "https://github.com/isaacs/chownr#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "like `chown -R`",
+      "versions": [
+        "3.0.0"
       ]
     },
     {
@@ -4882,20 +6919,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ben Coe",
       "description": "easily create complex multi-column command-line-interfaces",
       "versions": [
+        "6.0.0",
         "8.0.1"
-      ]
-    },
-    {
-      "id": "pkg-clone-response-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "clone-response",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/clone-response#readme",
-      "author": "Luke Childs",
-      "description": "Clone a Node.js HTTP response stream",
-      "versions": [
-        "1.0.3"
       ]
     },
     {
@@ -4921,6 +6946,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Paco",
       "versions": [
         "1.1.1"
+      ]
+    },
+    {
+      "id": "pkg-collapse-white-space-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "collapse-white-space",
+      "license": "MIT",
+      "homepage": "https://github.com/wooorm/collapse-white-space#readme",
+      "author": "Titus Wormer",
+      "description": "Collapse white space",
+      "versions": [
+        "2.1.0"
       ]
     },
     {
@@ -4950,19 +6988,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-combined-stream-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "combined-stream",
-      "license": "MIT",
-      "homepage": "https://github.com/felixge/node-combined-stream",
-      "author": "Felix Geisendörfer",
-      "description": "A stream that emits multiple other streams one after another.",
-      "versions": [
-        "1.0.8"
-      ]
-    },
-    {
       "id": "pkg-comma-separated-tokens-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -4986,7 +7011,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "the complete solution for node.js command-line programs",
       "versions": [
         "2.20.3",
-        "7.2.0",
         "8.3.0",
         "12.1.0"
       ]
@@ -5002,6 +7026,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "a few common utility template tags for ES2015",
       "versions": [
         "1.8.2"
+      ]
+    },
+    {
+      "id": "pkg-compute-scroll-into-view-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "compute-scroll-into-view",
+      "license": "MIT",
+      "homepage": "https://scroll-into-view.dev",
+      "author": "Cody Olsen",
+      "description": "The engine that powers scroll-into-view-if-needed",
+      "versions": [
+        "3.1.1"
       ]
     },
     {
@@ -5026,7 +7063,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/confbox#readme",
       "description": "Compact YAML, TOML, JSONC, JSON5 and INI parser and serializer",
       "versions": [
-        "0.2.4"
+        "0.2.4",
+        "0.3.2"
       ]
     },
     {
@@ -5039,6 +7077,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Elegant Console Wrapper",
       "versions": [
         "3.4.2"
+      ]
+    },
+    {
+      "id": "pkg-content-disposition-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "content-disposition",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/content-disposition#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Create and parse Content-Disposition header",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "id": "pkg-content-type-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "content-type",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/content-type#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Create and parse HTTP Content-Type header",
+      "versions": [
+        "1.0.5"
       ]
     },
     {
@@ -5081,6 +7145,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-cookie-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "cookie",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/cookie#readme",
+      "author": "Roman Shtylman",
+      "description": "HTTP server cookie parsing and serialization",
+      "versions": [
+        "0.7.2",
+        "1.1.1"
+      ]
+    },
+    {
       "id": "pkg-cookie-es-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -5088,7 +7166,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://github.com/unjs/cookie-es#readme",
       "versions": [
-        "2.0.0"
+        "3.1.1"
+      ]
+    },
+    {
+      "id": "pkg-cookie-signature-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "cookie-signature",
+      "license": "MIT",
+      "homepage": "https://github.com/visionmedia/node-cookie-signature#readme",
+      "author": "TJ Holowaychuk",
+      "description": "Sign and unsign cookies",
+      "versions": [
+        "1.2.2"
       ]
     },
     {
@@ -5105,16 +7196,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-cose-base-mit",
+      "id": "pkg-cors-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "cose-base",
+      "name": "cors",
       "license": "MIT",
-      "homepage": "https://github.com/iVis-at-Bilkent/cose-base#readme",
-      "description": "Core module for compound spring embedder based layout styles",
+      "homepage": "https://github.com/expressjs/cors#readme",
+      "author": "Troy Goode",
+      "description": "Node.js CORS middleware",
       "versions": [
-        "1.0.3",
-        "2.2.0"
+        "2.8.6"
       ]
     },
     {
@@ -5131,6 +7222,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-crelt-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "crelt",
+      "license": "MIT",
+      "homepage": "https://code.haverbeke.berlin/marijn/crelt",
+      "author": "Marijn Haverbeke",
+      "description": "Tiny DOM-element-creation utility",
+      "versions": [
+        "1.0.7"
+      ]
+    },
+    {
+      "id": "pkg-croner-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "croner",
+      "license": "MIT",
+      "homepage": "https://croner.56k.guru",
+      "author": "Hexagon",
+      "description": "Trigger functions and/or evaluate cron expressions in JavaScript. No dependencies. Most features. All environments.",
+      "versions": [
+        "10.0.1"
+      ]
+    },
+    {
       "id": "pkg-cross-spawn-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -5141,6 +7258,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Cross platform child_process#spawn and child_process#spawnSync",
       "versions": [
         "7.0.6"
+      ]
+    },
+    {
+      "id": "pkg-crossws-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "crossws",
+      "license": "MIT",
+      "homepage": "https://crossws.h3.dev",
+      "description": "Cross-platform WebSocket Servers for Node.js, Deno, Bun and Cloudflare Workers",
+      "versions": [
+        "0.4.12"
+      ]
+    },
+    {
+      "id": "pkg-css-mediaquery-bsd",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "css-mediaquery",
+      "license": "BSD",
+      "homepage": "https://github.com/ericf/css-mediaquery",
+      "author": "Eric Ferraiuolo",
+      "description": "Parses and determines if a given CSS Media Query matches a set of values.",
+      "versions": [
+        "0.1.2"
       ]
     },
     {
@@ -5169,56 +7311,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-cytoscape-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "cytoscape",
-      "license": "MIT",
-      "homepage": "http://js.cytoscape.org",
-      "description": "Graph theory (a.k.a. network) library for analysis and visualisation",
-      "versions": [
-        "3.33.4"
-      ]
-    },
-    {
-      "id": "pkg-cytoscape-cose-bilkent-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "cytoscape-cose-bilkent",
-      "license": "MIT",
-      "homepage": "https://github.com/cytoscape/cytoscape.js-cose-bilkent",
-      "description": "The CoSE layout for Cytoscape.js by Bilkent with enhanced compound node placement",
-      "versions": [
-        "4.1.0"
-      ]
-    },
-    {
-      "id": "pkg-cytoscape-fcose-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "cytoscape-fcose",
-      "license": "MIT",
-      "homepage": "https://github.com/iVis-at-Bilkent/cytoscape.js-fcose",
-      "author": "iVis-at-Bilkent",
-      "description": "The fCoSE layout for Cytoscape.js by Bilkent with fast compound node placement",
-      "versions": [
-        "2.2.0"
-      ]
-    },
-    {
-      "id": "pkg-d3-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3",
-      "license": "ISC",
-      "homepage": "https://d3js.org",
-      "author": "Mike Bostock",
-      "description": "Data-Driven Documents",
-      "versions": [
-        "7.9.0"
-      ]
-    },
-    {
       "id": "pkg-d3-array-isc",
       "kind": "package",
       "scope": "production-dependency",
@@ -5229,58 +7321,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Array manipulation, ordering, searching, summarizing, etc.",
       "versions": [
         "3.2.4"
-      ]
-    },
-    {
-      "id": "pkg-d3-array-bsd-3-clause",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-array",
-      "license": "BSD-3-Clause",
-      "homepage": "https://d3js.org/d3-array/",
-      "author": "Mike Bostock",
-      "description": "Array manipulation, ordering, searching, summarizing, etc.",
-      "versions": [
-        "2.12.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-axis-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-axis",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-axis/",
-      "author": "Mike Bostock",
-      "description": "Displays automatic reference lines for scales.",
-      "versions": [
-        "3.0.0"
-      ]
-    },
-    {
-      "id": "pkg-d3-brush-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-brush",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-brush/",
-      "author": "Mike Bostock",
-      "description": "Select a one- or two-dimensional region using the mouse or touch.",
-      "versions": [
-        "3.0.0"
-      ]
-    },
-    {
-      "id": "pkg-d3-chord-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-chord",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-chord/",
-      "author": "Mike Bostock",
-      "description": "Visualize relationships or network flow with an aesthetically-pleasing circular layout.",
-      "versions": [
-        "3.0.1"
       ]
     },
     {
@@ -5297,71 +7337,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-d3-contour-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-contour",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-contour/",
-      "author": "Mike Bostock",
-      "description": "Compute contour polygons using marching squares.",
-      "versions": [
-        "4.0.2"
-      ]
-    },
-    {
-      "id": "pkg-d3-delaunay-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-delaunay",
-      "license": "ISC",
-      "homepage": "https://github.com/d3/d3-delaunay",
-      "author": "Mike Bostock",
-      "description": "Compute the Voronoi diagram of a set of two-dimensional points.",
-      "versions": [
-        "6.0.4"
-      ]
-    },
-    {
-      "id": "pkg-d3-dispatch-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-dispatch",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-dispatch/",
-      "author": "Mike Bostock",
-      "description": "Register named callbacks and call them with arguments.",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-drag-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-drag",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-drag/",
-      "author": "Mike Bostock",
-      "description": "Drag and drop SVG, HTML or Canvas using mouse or touch input.",
-      "versions": [
-        "3.0.0"
-      ]
-    },
-    {
-      "id": "pkg-d3-dsv-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-dsv",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-dsv/",
-      "author": "Mike Bostock",
-      "description": "A parser and formatter for delimiter-separated values, such as CSV and TSV",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
       "id": "pkg-d3-ease-bsd-3-clause",
       "kind": "package",
       "scope": "production-dependency",
@@ -5372,32 +7347,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Easing functions for smooth animation.",
       "versions": [
         "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-fetch-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-fetch",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-fetch/",
-      "author": "Mike Bostock",
-      "description": "Convenient parsing for Fetch.",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-force-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-force",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-force/",
-      "author": "Mike Bostock",
-      "description": "Force-directed graph layout using velocity Verlet integration.",
-      "versions": [
-        "3.0.0"
       ]
     },
     {
@@ -5466,71 +7415,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-d3-path-bsd-3-clause",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-path",
-      "license": "BSD-3-Clause",
-      "homepage": "https://d3js.org/d3-path/",
-      "author": "Mike Bostock",
-      "description": "Serialize Canvas path commands to SVG.",
-      "versions": [
-        "1.0.9"
-      ]
-    },
-    {
-      "id": "pkg-d3-polygon-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-polygon",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-polygon/",
-      "author": "Mike Bostock",
-      "description": "Operations for two-dimensional polygons.",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-quadtree-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-quadtree",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-quadtree/",
-      "author": "Mike Bostock",
-      "description": "Two-dimensional recursive spatial subdivision.",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-random-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-random",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-random/",
-      "author": "Mike Bostock",
-      "description": "Generate random numbers from various distributions.",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-sankey-bsd-3-clause",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-sankey",
-      "license": "BSD-3-Clause",
-      "homepage": "https://github.com/d3/d3-sankey",
-      "author": "Mike Bostock",
-      "description": "Visualize flow between nodes in a directed acyclic network.",
-      "versions": [
-        "0.12.3"
-      ]
-    },
-    {
       "id": "pkg-d3-scale-isc",
       "kind": "package",
       "scope": "production-dependency",
@@ -5544,32 +7428,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-d3-scale-chromatic-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-scale-chromatic",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-scale-chromatic/",
-      "author": "Mike Bostock",
-      "description": "Sequential, diverging and categorical color schemes.",
-      "versions": [
-        "3.1.0"
-      ]
-    },
-    {
-      "id": "pkg-d3-selection-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-selection",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-selection/",
-      "author": "Mike Bostock",
-      "description": "Data-driven DOM manipulation: select elements and join them to data.",
-      "versions": [
-        "3.0.0"
-      ]
-    },
-    {
       "id": "pkg-d3-shape-isc",
       "kind": "package",
       "scope": "production-dependency",
@@ -5580,19 +7438,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Graphical primitives for visualization, such as lines and areas.",
       "versions": [
         "3.2.0"
-      ]
-    },
-    {
-      "id": "pkg-d3-shape-bsd-3-clause",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-shape",
-      "license": "BSD-3-Clause",
-      "homepage": "https://d3js.org/d3-shape/",
-      "author": "Mike Bostock",
-      "description": "Graphical primitives for visualization, such as lines and areas.",
-      "versions": [
-        "1.3.7"
       ]
     },
     {
@@ -5635,40 +7480,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-d3-transition-isc",
+      "id": "pkg-data-uri-to-buffer-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "d3-transition",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-transition/",
-      "author": "Mike Bostock",
-      "description": "Animated transitions for D3 selections.",
-      "versions": [
-        "3.0.1"
-      ]
-    },
-    {
-      "id": "pkg-d3-zoom-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "d3-zoom",
-      "license": "ISC",
-      "homepage": "https://d3js.org/d3-zoom/",
-      "author": "Mike Bostock",
-      "description": "Pan and zoom SVG, HTML or Canvas using mouse or touch input.",
-      "versions": [
-        "3.0.0"
-      ]
-    },
-    {
-      "id": "pkg-dagre-d3-es-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "dagre-d3-es",
+      "name": "data-uri-to-buffer",
       "license": "MIT",
-      "homepage": "https://github.com/tbo47/dagre-es#readme",
+      "homepage": "https://github.com/TooTallNate/node-data-uri-to-buffer",
+      "author": "Nathan Rajlich",
+      "description": "Generate a Buffer instance from a Data URI string",
       "versions": [
-        "7.0.14"
+        "4.0.1"
       ]
     },
     {
@@ -5694,31 +7515,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Modern JavaScript date utility library",
       "versions": [
         "4.1.0"
-      ]
-    },
-    {
-      "id": "pkg-date-fns-jalali-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "date-fns-jalali",
-      "license": "MIT",
-      "homepage": "https://github.com/date-fns-jalali/date-fns-jalali#readme",
-      "description": "Modern JavaScript date utility library for jalali calendar",
-      "versions": [
-        "4.1.0-0"
-      ]
-    },
-    {
-      "id": "pkg-dayjs-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "dayjs",
-      "license": "MIT",
-      "homepage": "https://day.js.org",
-      "author": "iamkun",
-      "description": "2KB immutable date time library alternative to Moment.js with the same modern API",
-      "versions": [
-        "1.11.20"
       ]
     },
     {
@@ -5748,6 +7544,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-decamelize-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "decamelize",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/decamelize#readme",
+      "author": "Sindre Sorhus",
+      "description": "Convert a camelized string into a lowercased one with a custom separator: unicornRainbow → unicorn_rainbow",
+      "versions": [
+        "1.2.0"
+      ]
+    },
+    {
       "id": "pkg-decimal-js-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -5758,6 +7567,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "An arbitrary-precision Decimal type for JavaScript.",
       "versions": [
         "10.6.0"
+      ]
+    },
+    {
+      "id": "pkg-decimal-js-light-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "decimal.js-light",
+      "license": "MIT",
+      "homepage": "https://github.com/MikeMcl/decimal.js-light#readme",
+      "author": "Michael Mclaughlin",
+      "description": "An arbitrary-precision Decimal type for JavaScript.",
+      "versions": [
+        "2.5.1"
       ]
     },
     {
@@ -5826,55 +7648,42 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-default-shell-mit",
+      "id": "pkg-default-browser-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "default-shell",
+      "name": "default-browser",
       "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/default-shell#readme",
+      "homepage": "https://github.com/sindresorhus/default-browser#readme",
       "author": "Sindre Sorhus",
-      "description": "Get the user's default shell",
+      "description": "Get the default browser",
       "versions": [
-        "2.2.0"
+        "5.5.1"
       ]
     },
     {
-      "id": "pkg-defer-to-connect-mit",
+      "id": "pkg-default-browser-id-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "defer-to-connect",
+      "name": "default-browser-id",
       "license": "MIT",
-      "homepage": "https://github.com/szmarczak/defer-to-connect#readme",
-      "author": "Szymon Marczak",
-      "description": "The safe way to handle the `connect` socket event",
+      "homepage": "https://github.com/sindresorhus/default-browser-id#readme",
+      "author": "Sindre Sorhus",
+      "description": "Get the bundle identifier of the default browser (macOS). Example: com.apple.Safari",
       "versions": [
-        "2.0.1"
+        "5.0.1"
       ]
     },
     {
-      "id": "pkg-define-data-property-mit",
+      "id": "pkg-define-lazy-prop-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "define-data-property",
+      "name": "define-lazy-prop",
       "license": "MIT",
-      "homepage": "https://github.com/ljharb/define-data-property#readme",
-      "author": "Jordan Harband",
-      "description": "Define a data property on an object. Will fall back to assignment in an engine without descriptors.",
+      "homepage": "https://github.com/sindresorhus/define-lazy-prop#readme",
+      "author": "Sindre Sorhus",
+      "description": "Define a lazily evaluated property on an object",
       "versions": [
-        "1.1.4"
-      ]
-    },
-    {
-      "id": "pkg-define-properties-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "define-properties",
-      "license": "MIT",
-      "homepage": "https://github.com/ljharb/define-properties#readme",
-      "author": "Jordan Harband",
-      "description": "Define multiple non-enumerable properties at once. Uses `Object.defineProperty` when available; falls back to standard assignment in older engines.",
-      "versions": [
-        "1.2.1"
+        "3.0.0"
       ]
     },
     {
@@ -5886,34 +7695,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/defu#readme",
       "description": "Recursively assign default properties. Lightweight and Fast!",
       "versions": [
-        "6.1.6",
         "6.1.7"
-      ]
-    },
-    {
-      "id": "pkg-delaunator-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "delaunator",
-      "license": "ISC",
-      "homepage": "https://github.com/mapbox/delaunator#readme",
-      "author": "Vladimir Agafonkin",
-      "description": "An incredibly fast JavaScript library for Delaunay triangulation of 2D points",
-      "versions": [
-        "5.1.0"
-      ]
-    },
-    {
-      "id": "pkg-delayed-stream-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "delayed-stream",
-      "license": "MIT",
-      "homepage": "https://github.com/felixge/node-delayed-stream",
-      "author": "Felix Geisendörfer",
-      "description": "Buffers events from a stream until you are ready to handle them.",
-      "versions": [
-        "1.0.0"
       ]
     },
     {
@@ -5927,6 +7709,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "The fastest javascript implementation of a double-ended queue. Used by the official Redis, MongoDB, MariaDB & MySQL libraries for Node.js and many other libraries. Maintains compatability with deque.",
       "versions": [
         "2.1.0"
+      ]
+    },
+    {
+      "id": "pkg-depd-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "depd",
+      "license": "MIT",
+      "homepage": "https://github.com/dougwilson/nodejs-depd#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Deprecate all the things",
+      "versions": [
+        "2.0.0"
       ]
     },
     {
@@ -5968,19 +7763,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-detect-node-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "detect-node",
-      "license": "MIT",
-      "homepage": "https://github.com/iliakan/detect-node",
-      "author": "Ilya Kantor",
-      "description": "Detect Node.JS (as opposite to browser environment) (reliable)",
-      "versions": [
-        "2.1.0"
-      ]
-    },
-    {
       "id": "pkg-detect-node-es-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -5991,6 +7773,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Detect Node.JS (as opposite to browser environment). ESM modification",
       "versions": [
         "1.1.0"
+      ]
+    },
+    {
+      "id": "pkg-devframe-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "devframe",
+      "license": "MIT",
+      "homepage": "https://github.com/devframes/devframe#readme",
+      "author": "Anthony Fu",
+      "description": "Framework for building one portable devtool integration that runs in any viewer.",
+      "versions": [
+        "1.0.0"
       ]
     },
     {
@@ -6015,7 +7810,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/kpdecker/jsdiff#readme",
       "description": "A JavaScript text diff implementation.",
       "versions": [
-        "8.0.3"
+        "8.0.3",
+        "9.0.0"
+      ]
+    },
+    {
+      "id": "pkg-dijkstrajs-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "dijkstrajs",
+      "license": "MIT",
+      "homepage": "https://github.com/tcort/dijkstrajs",
+      "description": "A simple JavaScript implementation of Dijkstra's single-source shortest-paths algorithm.",
+      "versions": [
+        "1.0.3"
       ]
     },
     {
@@ -6042,6 +7850,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Docker Remote API module.",
       "versions": [
         "4.0.9"
+      ]
+    },
+    {
+      "id": "pkg-dom-helpers-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "dom-helpers",
+      "license": "MIT",
+      "homepage": "https://github.com/react-bootstrap/dom-helpers#readme",
+      "author": "Jason Quense",
+      "description": "tiny modular DOM lib for ie9+",
+      "versions": [
+        "5.2.1"
       ]
     },
     {
@@ -6084,19 +7905,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-drizzle-orm-apache-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "drizzle-orm",
-      "license": "Apache-2.0",
-      "homepage": "https://orm.drizzle.team",
-      "author": "Drizzle Team",
-      "description": "Drizzle ORM package for SQL databases",
-      "versions": [
-        "0.45.1"
-      ]
-    },
-    {
       "id": "pkg-dunder-proto-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6110,6 +7918,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-ecdsa-sig-formatter-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ecdsa-sig-formatter",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/Brightspace/node-ecdsa-sig-formatter#readme",
+      "author": "D2L Corporation",
+      "description": "Translate ECDSA signatures between ASN.1/DER and JOSE-style concatenation",
+      "versions": [
+        "1.0.11"
+      ]
+    },
+    {
+      "id": "pkg-ee-first-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ee-first",
+      "license": "MIT",
+      "homepage": "https://github.com/jonathanong/ee-first#readme",
+      "author": "Jonathan Ong",
+      "description": "return the first event in a set of ee/event pairs",
+      "versions": [
+        "1.1.1"
+      ]
+    },
+    {
       "id": "pkg-effect-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6118,7 +7952,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://effect.website",
       "description": "The missing standard library for TypeScript, for writing production-grade software.",
       "versions": [
-        "3.18.4"
+        "3.18.4",
+        "4.0.2",
+        "4.1.0"
       ]
     },
     {
@@ -6131,7 +7967,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Electron Community",
       "description": "Build cross platform desktop apps with JavaScript, HTML, and CSS",
       "versions": [
-        "39.5.1"
+        "44.9.3"
+      ]
+    },
+    {
+      "id": "pkg-electron-ipc-decorator-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "electron-ipc-decorator",
+      "license": "MIT",
+      "homepage": "https://github.com/innei/electron-ipc-decorator#readme",
+      "author": "Innei",
+      "description": "A TypeScript-first decorator library that simplifies Electron IPC communication with type safety and automatic proxy generation",
+      "versions": [
+        "1.0.2"
+      ]
+    },
+    {
+      "id": "pkg-electron-sparkle-updater-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "electron-sparkle-updater",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/electron-sparkle-updater",
+      "description": "Sparkle-based auto-updates for Electron apps on macOS.",
+      "versions": [
+        "0.5.1"
       ]
     },
     {
@@ -6161,6 +8022,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-elkjs-epl-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "elkjs",
+      "license": "EPL-2.0",
+      "homepage": "https://github.com/kieler/elkjs#readme",
+      "author": "Ulf Rüegg",
+      "description": "Automatic graph layout based on Sugiyama's algorithm. Specialized for data flow diagrams and ports.",
+      "versions": [
+        "0.11.1"
+      ]
+    },
+    {
       "id": "pkg-emoji-regex-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6171,6 +8045,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A regular expression to match all Emoji-only symbols as per the Unicode Standard.",
       "versions": [
         "8.0.0"
+      ]
+    },
+    {
+      "id": "pkg-emojibase-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "emojibase",
+      "license": "MIT",
+      "homepage": "https://github.com/milesj/emojibase#readme",
+      "author": "Miles Johnson",
+      "description": "Emojibase utility functions for working with emoji characters.",
+      "versions": [
+        "17.0.0"
+      ]
+    },
+    {
+      "id": "pkg-emojibase-data-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "emojibase-data",
+      "license": "MIT",
+      "homepage": "https://github.com/milesj/emojibase#readme",
+      "author": "Miles Johnson",
+      "description": "Evergreen emoji datasets.",
+      "versions": [
+        "17.0.0"
       ]
     },
     {
@@ -6187,6 +8087,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-encodeurl-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "encodeurl",
+      "license": "MIT",
+      "homepage": "https://github.com/pillarjs/encodeurl#readme",
+      "description": "Encode a URL to a percent-encoded form, excluding already-encoded sequences",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
       "id": "pkg-end-of-stream-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6197,6 +8109,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Call a callback when a readable/writable/duplex stream has completed or failed.",
       "versions": [
         "1.4.5"
+      ]
+    },
+    {
+      "id": "pkg-ensure-error-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ensure-error",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/ensure-error#readme",
+      "author": "Sindre Sorhus",
+      "description": "Ensures a value is a valid error by making it one if not",
+      "versions": [
+        "5.0.0"
       ]
     },
     {
@@ -6263,7 +8188,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Guy Bedford",
       "description": "Lexes ES modules returning their import/export metadata",
       "versions": [
-        "1.7.0"
+        "1.7.0",
+        "2.3.2"
       ]
     },
     {
@@ -6280,19 +8206,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-es-set-tostringtag-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "es-set-tostringtag",
-      "license": "MIT",
-      "homepage": "https://github.com/es-shims/es-set-tostringtag#readme",
-      "author": "Jordan Harband",
-      "description": "A helper to optimistically set Symbol.toStringTag, when possible.",
-      "versions": [
-        "2.1.0"
-      ]
-    },
-    {
       "id": "pkg-es-toolkit-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6301,33 +8214,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://es-toolkit.dev",
       "description": "A state-of-the-art, high-performance JavaScript utility library with a small bundle size and strong type annotations.",
       "versions": [
-        "1.46.1"
+        "1.53.2"
       ]
     },
     {
-      "id": "pkg-es6-error-mit",
+      "id": "pkg-esast-util-from-estree-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "es6-error",
+      "name": "esast-util-from-estree",
       "license": "MIT",
-      "homepage": "https://github.com/bjyoungblood/es6-error",
-      "author": "Ben Youngblood",
-      "description": "Easily-extendable error for use with ES6 classes",
+      "homepage": "https://github.com/syntax-tree/esast-util-from-estree#readme",
+      "author": "Titus Wormer",
+      "description": "esast utility to transform from estree",
       "versions": [
-        "4.1.1"
+        "2.0.0"
       ]
     },
     {
-      "id": "pkg-es6-promise-mit",
+      "id": "pkg-esast-util-from-js-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "es6-promise",
+      "name": "esast-util-from-js",
       "license": "MIT",
-      "homepage": "https://github.com/stefanpenner/es6-promise",
-      "author": "Yehuda Katz, Tom Dale, Stefan Penner and contributors",
-      "description": "A lightweight library that provides tools for organizing asynchronous code",
+      "homepage": "https://github.com/syntax-tree/esast-util-from-js#readme",
+      "author": "Titus Wormer",
+      "description": "estree (and esast) utility to parse from JavaScript",
       "versions": [
-        "4.2.8"
+        "2.0.1"
       ]
     },
     {
@@ -6339,8 +8252,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/evanw/esbuild#readme",
       "description": "An extremely fast JavaScript and CSS bundler and minifier.",
       "versions": [
-        "0.25.12",
-        "0.27.0"
+        "0.27.0",
+        "0.28.2"
       ]
     },
     {
@@ -6357,6 +8270,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-escape-html-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "escape-html",
+      "license": "MIT",
+      "homepage": "https://github.com/component/escape-html#readme",
+      "description": "Escape string for use in HTML",
+      "versions": [
+        "1.0.3"
+      ]
+    },
+    {
       "id": "pkg-escape-string-regexp-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6366,8 +8291,45 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sindre Sorhus",
       "description": "Escape RegExp special characters",
       "versions": [
-        "4.0.0",
         "5.0.0"
+      ]
+    },
+    {
+      "id": "pkg-esm-env-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "esm-env",
+      "license": "MIT",
+      "homepage": "https://github.com/benmccann/esm-env",
+      "author": "Ben McCann",
+      "versions": [
+        "1.2.2"
+      ]
+    },
+    {
+      "id": "pkg-estree-util-attach-comments-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "estree-util-attach-comments",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/estree-util-attach-comments#readme",
+      "author": "Titus Wormer",
+      "description": "Attach comments to estree nodes",
+      "versions": [
+        "3.0.0"
+      ]
+    },
+    {
+      "id": "pkg-estree-util-build-jsx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "estree-util-build-jsx",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/estree-util-build-jsx#readme",
+      "author": "Titus Wormer",
+      "description": "Transform JSX in estrees to function calls (for react, preact, and most hyperscript interfaces)",
+      "versions": [
+        "3.0.1"
       ]
     },
     {
@@ -6381,6 +8343,58 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Check if something can be an ecmascript (javascript) identifier name",
       "versions": [
         "3.0.0"
+      ]
+    },
+    {
+      "id": "pkg-estree-util-scope-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "estree-util-scope",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/estree-util-scope#readme",
+      "author": "Titus Wormer",
+      "description": "Check what’s defined in an estree scope",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-estree-util-to-js-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "estree-util-to-js",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/estree-util-to-js#readme",
+      "author": "Titus Wormer",
+      "description": "estree (and esast) utility to serialize to JavaScript",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-estree-util-value-to-estree-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "estree-util-value-to-estree",
+      "license": "MIT",
+      "homepage": "https://github.com/remcohaszing/estree-util-value-to-estree#readme",
+      "author": "Remco Haszing",
+      "description": "Convert a JavaScript value to an estree expression",
+      "versions": [
+        "3.5.0"
+      ]
+    },
+    {
+      "id": "pkg-estree-util-visit-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "estree-util-visit",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/estree-util-visit#readme",
+      "author": "Titus Wormer",
+      "description": "esast (and estree) utility to visit nodes",
+      "versions": [
+        "2.0.0"
       ]
     },
     {
@@ -6398,6 +8412,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-etag-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "etag",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/etag#readme",
+      "description": "Create simple HTTP ETags",
+      "versions": [
+        "1.8.1"
+      ]
+    },
+    {
       "id": "pkg-eventemitter3-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6411,16 +8437,29 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-execa-mit",
+      "id": "pkg-eventsource-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "execa",
+      "name": "eventsource",
       "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/execa#readme",
-      "author": "Sindre Sorhus",
-      "description": "Process execution for humans",
+      "homepage": "https://github.com/EventSource/eventsource#readme",
+      "author": "Espen Hovlandsdal",
+      "description": "WhatWG/W3C compliant EventSource client for Node.js and browsers",
       "versions": [
-        "5.1.1"
+        "3.0.7"
+      ]
+    },
+    {
+      "id": "pkg-eventsource-parser-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "eventsource-parser",
+      "license": "MIT",
+      "homepage": "https://github.com/rexxars/eventsource-parser#readme",
+      "author": "Espen Hovlandsdal",
+      "description": "Streaming, source-agnostic EventSource/Server-Sent Events parser",
+      "versions": [
+        "3.0.7"
       ]
     },
     {
@@ -6444,7 +8483,46 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "Apache-2.0",
       "homepage": "https://github.com/mmkal/expect-type#readme",
       "versions": [
-        "1.3.0"
+        "1.4.0"
+      ]
+    },
+    {
+      "id": "pkg-exponential-backoff-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "exponential-backoff",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/coveooss/exponential-backoff#readme",
+      "author": "Sami Sayegh",
+      "description": "A utility that allows retrying a function with an exponential delay between attempts.",
+      "versions": [
+        "3.1.3"
+      ]
+    },
+    {
+      "id": "pkg-express-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "express",
+      "license": "MIT",
+      "homepage": "https://expressjs.com/",
+      "author": "TJ Holowaychuk",
+      "description": "Fast, unopinionated, minimalist web framework",
+      "versions": [
+        "5.2.1"
+      ]
+    },
+    {
+      "id": "pkg-express-rate-limit-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "express-rate-limit",
+      "license": "MIT",
+      "homepage": "https://github.com/express-rate-limit/express-rate-limit",
+      "author": "Nathan Friedly",
+      "description": "Basic IP rate-limiting middleware for Express. Use to limit repeated requests to public APIs and/or endpoints such as password reset.",
+      "versions": [
+        "8.3.2"
       ]
     },
     {
@@ -6456,7 +8534,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/exsolve#readme",
       "description": "Module resolution utilities based on Node.js upstream implementation.",
       "versions": [
-        "1.0.8"
+        "1.0.8",
+        "1.2.0"
       ]
     },
     {
@@ -6473,19 +8552,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-extract-zip-bsd-2-clause",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "extract-zip",
-      "license": "BSD-2-Clause",
-      "homepage": "https://github.com/maxogden/extract-zip#readme",
-      "author": "max ogden",
-      "description": "unzip a zip file into a directory using 100% javascript",
-      "versions": [
-        "2.0.1"
-      ]
-    },
-    {
       "id": "pkg-fast-check-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6496,19 +8562,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Property based testing framework for JavaScript (like QuickCheck)",
       "versions": [
         "3.23.2"
-      ]
-    },
-    {
-      "id": "pkg-fast-content-type-parse-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "fast-content-type-parse",
-      "license": "MIT",
-      "homepage": "https://github.com/fastify/fast-content-type-parse#readme",
-      "author": "Aras Abbasi",
-      "description": "Parse HTTP Content-Type header according to RFC 7231",
-      "versions": [
-        "3.0.0"
       ]
     },
     {
@@ -6525,6 +8578,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-fast-equals-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fast-equals",
+      "license": "MIT",
+      "homepage": "https://github.com/planttheidea/fast-equals#readme",
+      "author": "Tony Quetano",
+      "description": "A blazing fast equality comparison, either shallow or deep",
+      "versions": [
+        "5.4.1"
+      ]
+    },
+    {
+      "id": "pkg-fast-png-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fast-png",
+      "license": "MIT",
+      "homepage": "https://image-js.github.io/fast-png/",
+      "author": "Michaël Zasso",
+      "description": "PNG image decoder and encoder written entirely in JavaScript",
+      "versions": [
+        "8.0.0"
+      ]
+    },
+    {
       "id": "pkg-fast-uri-bsd-3-clause",
       "kind": "package",
       "scope": "production-dependency",
@@ -6535,32 +8614,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Dependency-free RFC 3986 URI toolbox",
       "versions": [
         "3.1.0"
-      ]
-    },
-    {
-      "id": "pkg-fault-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "fault",
-      "license": "MIT",
-      "homepage": "https://github.com/wooorm/fault#readme",
-      "author": "Titus Wormer",
-      "description": "Functional errors with formatted output",
-      "versions": [
-        "1.0.4"
-      ]
-    },
-    {
-      "id": "pkg-fd-slicer-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "fd-slicer",
-      "license": "MIT",
-      "homepage": "https://github.com/andrewrk/node-fd-slicer#readme",
-      "author": "Andrew Kelley",
-      "description": "safely create multiple ReadStream or WriteStream objects from the same file descriptor",
-      "versions": [
-        "1.1.0"
       ]
     },
     {
@@ -6577,6 +8630,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-fetch-blob-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fetch-blob",
+      "license": "MIT",
+      "homepage": "https://github.com/node-fetch/fetch-blob#readme",
+      "author": "Jimmy Wärting",
+      "description": "Blob & File implementation in Node.js, originally from node-fetch.",
+      "versions": [
+        "3.2.0"
+      ]
+    },
+    {
+      "id": "pkg-fetchdts-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fetchdts",
+      "license": "MIT",
+      "homepage": "https://github.com/unjs/fetchdts#readme",
+      "author": "Daniel Roe",
+      "description": "A suite of type utilities for building strongly-typed APIs",
+      "versions": [
+        "0.1.7"
+      ]
+    },
+    {
       "id": "pkg-fflate-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6586,7 +8665,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Arjun Barrett",
       "description": "High performance (de)compression in an 8kB package",
       "versions": [
-        "0.4.8"
+        "0.4.8",
+        "0.8.3"
       ]
     },
     {
@@ -6603,6 +8683,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-finalhandler-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "finalhandler",
+      "license": "MIT",
+      "homepage": "https://github.com/pillarjs/finalhandler#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Node.js final http responder",
+      "versions": [
+        "2.1.1"
+      ]
+    },
+    {
+      "id": "pkg-find-up-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "find-up",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/find-up#readme",
+      "author": "Sindre Sorhus",
+      "description": "Find a file or directory by walking up parent directories",
+      "versions": [
+        "4.1.0"
+      ]
+    },
+    {
       "id": "pkg-foreground-child-isc",
       "kind": "package",
       "scope": "production-dependency",
@@ -6616,29 +8722,28 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-form-data-mit",
+      "id": "pkg-formdata-polyfill-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "form-data",
+      "name": "formdata-polyfill",
       "license": "MIT",
-      "homepage": "https://github.com/form-data/form-data#readme",
-      "author": "Felix Geisendörfer",
-      "description": "A library to create readable \"multipart/form-data\" streams. Can be used to submit forms and file uploads to other web applications.",
+      "homepage": "https://github.com/jimmywarting/FormData#readme",
+      "author": "Jimmy Wärting",
+      "description": "HTML5 `FormData` for Browsers and Node.",
       "versions": [
-        "2.5.5"
+        "4.0.10"
       ]
     },
     {
-      "id": "pkg-format-mit",
+      "id": "pkg-forwarded-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "format",
+      "name": "forwarded",
       "license": "MIT",
-      "homepage": "http://samhuri.net/proj/format",
-      "author": "Sami Samhuri",
-      "description": "printf, sprintf, and vsprintf for JavaScript",
+      "homepage": "https://github.com/jshttp/forwarded#readme",
+      "description": "Parse HTTP X-Forwarded-For header",
       "versions": [
-        "0.2.2"
+        "0.2.0"
       ]
     },
     {
@@ -6651,7 +8756,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Matt Perry",
       "description": "A simple and powerful JavaScript animation library",
       "versions": [
-        "12.34.0"
+        "12.43.0",
+        "14.9.0"
+      ]
+    },
+    {
+      "id": "pkg-fresh-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fresh",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/fresh#readme",
+      "author": "TJ Holowaychuk",
+      "description": "HTTP response freshness testing",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-frimousse-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "frimousse",
+      "license": "MIT",
+      "homepage": "https://frimousse.liveblocks.io",
+      "description": "A lightweight, unstyled, and composable emoji picker for React.",
+      "versions": [
+        "0.3.0"
       ]
     },
     {
@@ -6677,8 +8808,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "JP Richardson",
       "description": "fs-extra contains methods that aren't included in the vanilla Node.js fs package. Such as recursive mkdir, copy, and remove.",
       "versions": [
-        "8.1.0",
         "10.1.0"
+      ]
+    },
+    {
+      "id": "pkg-fumadocs-core-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fumadocs-core",
+      "license": "MIT",
+      "homepage": "https://fumadocs.dev",
+      "author": "Fuma Nama",
+      "description": "The React.js library for building a documentation website",
+      "versions": [
+        "16.8.12"
+      ]
+    },
+    {
+      "id": "pkg-fumadocs-mdx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fumadocs-mdx",
+      "license": "MIT",
+      "homepage": "https://fumadocs.dev",
+      "author": "Fuma Nama",
+      "description": "The built-in source for Fumadocs",
+      "versions": [
+        "15.0.7"
       ]
     },
     {
@@ -6692,6 +8848,45 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Implementation of Function.prototype.bind",
       "versions": [
         "1.1.2"
+      ]
+    },
+    {
+      "id": "pkg-fzstd-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "fzstd",
+      "license": "MIT",
+      "homepage": "https://github.com/101arrowz/fzstd#readme",
+      "author": "Arjun Barrett",
+      "description": "High performance Zstandard (de)compression",
+      "versions": [
+        "0.1.1"
+      ]
+    },
+    {
+      "id": "pkg-gaxios-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "gaxios",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/googleapis/google-cloud-node/tree/main/core/packages/gaxios",
+      "author": "Google, LLC",
+      "description": "A simple common HTTP client specifically for Google APIs and services.",
+      "versions": [
+        "7.3.1"
+      ]
+    },
+    {
+      "id": "pkg-gcp-metadata-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "gcp-metadata",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/googleapis/google-cloud-node-core/tree/main/packages/gcp-metadata",
+      "author": "Google LLC",
+      "description": "Get the metadata from a Google Cloud Platform environment",
+      "versions": [
+        "8.1.2"
       ]
     },
     {
@@ -6730,6 +8925,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Stefan Penner",
       "versions": [
         "2.0.5"
+      ]
+    },
+    {
+      "id": "pkg-get-east-asian-width-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "get-east-asian-width",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/get-east-asian-width#readme",
+      "author": "Sindre Sorhus",
+      "description": "Determine the East Asian Width of a Unicode character",
+      "versions": [
+        "1.4.0"
       ]
     },
     {
@@ -6784,20 +8992,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-get-stream-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "get-stream",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/get-stream#readme",
-      "author": "Sindre Sorhus",
-      "description": "Get a stream as a string, buffer, or array",
-      "versions": [
-        "5.2.0",
-        "6.0.1"
-      ]
-    },
-    {
       "id": "pkg-get-tsconfig-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6836,29 +9030,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-global-agent-bsd-3-clause",
+      "id": "pkg-github-slugger-isc",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "global-agent",
-      "license": "BSD-3-Clause",
-      "homepage": "https://github.com/gajus/global-agent#readme",
-      "author": "Gajus Kuizinas",
-      "description": "Global HTTP/HTTPS proxy configurable using environment variables.",
+      "name": "github-slugger",
+      "license": "ISC",
+      "homepage": "https://github.com/Flet/github-slugger",
+      "author": "Dan Flettre",
+      "description": "Generate a slug just like GitHub does for markdown headings.",
       "versions": [
-        "3.0.0"
-      ]
-    },
-    {
-      "id": "pkg-globalthis-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "globalthis",
-      "license": "MIT",
-      "homepage": "https://github.com/ljharb/System.global#readme",
-      "author": "Jordan Harband",
-      "description": "ECMAScript spec-compliant polyfill/shim for `globalThis`",
-      "versions": [
-        "1.0.4"
+        "2.0.0"
       ]
     },
     {
@@ -6875,6 +9056,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-google-auth-library-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "google-auth-library",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/googleapis/google-cloud-node/tree/main/core/packages/google-auth-library-nodejs",
+      "author": "Google Inc.",
+      "description": "Google APIs Authentication Client Library for Node.js",
+      "versions": [
+        "10.9.1"
+      ]
+    },
+    {
+      "id": "pkg-google-logging-utils-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "google-logging-utils",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/googleapis/google-cloud-node-core/tree/main/dev-packages/logging-utils",
+      "author": "Google API Authors",
+      "description": "A debug logger package for other Google libraries",
+      "versions": [
+        "1.1.3"
+      ]
+    },
+    {
       "id": "pkg-gopd-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6885,18 +9092,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "`Object.getOwnPropertyDescriptor`, but accounts for IE's broken implementation.",
       "versions": [
         "1.2.0"
-      ]
-    },
-    {
-      "id": "pkg-got-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "got",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/got#readme",
-      "description": "Human-friendly and powerful HTTP request library for Node.js",
-      "versions": [
-        "11.8.6"
       ]
     },
     {
@@ -6920,7 +9115,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/fabiospampinato/grammex#readme",
       "description": "A tiny, PEG-like system for building language grammars with regexes.",
       "versions": [
-        "3.1.12"
+        "3.1.13"
       ]
     },
     {
@@ -6936,29 +9131,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-hachure-fill-mit",
+      "id": "pkg-h3-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "hachure-fill",
+      "name": "h3",
       "license": "MIT",
-      "homepage": "https://github.com/pshihn/hachure-fill#readme",
-      "author": "Preet Shihn",
-      "description": "Fill a polygon with lines",
+      "homepage": "https://h3.dev",
+      "description": "Minimal H(TTP) framework built for high performance and portability.",
       "versions": [
-        "0.5.2"
-      ]
-    },
-    {
-      "id": "pkg-has-property-descriptors-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "has-property-descriptors",
-      "license": "MIT",
-      "homepage": "https://github.com/inspect-js/has-property-descriptors#readme",
-      "author": "Jordan Harband",
-      "description": "Does the environment have full property descriptor support? Handles IE 8's broken defineProperty/gOPD.",
-      "versions": [
-        "1.0.2"
+        "2.0.1-rc.20",
+        "2.0.1-rc.31"
       ]
     },
     {
@@ -6975,19 +9157,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-has-tostringtag-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "has-tostringtag",
-      "license": "MIT",
-      "homepage": "https://github.com/inspect-js/has-tostringtag#readme",
-      "author": "Jordan Harband",
-      "description": "Determine if the JS environment has `Symbol.toStringTag` support. Supports spec, or shams.",
-      "versions": [
-        "1.0.2"
-      ]
-    },
-    {
       "id": "pkg-hasown-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -6997,8 +9166,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Jordan Harband",
       "description": "A robust, ES3 compatible, \"has own property\" predicate.",
       "versions": [
-        "2.0.2",
         "2.0.3"
+      ]
+    },
+    {
+      "id": "pkg-hast-util-embedded-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-embedded",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/hast-util-embedded#readme",
+      "author": "Titus Wormer",
+      "description": "hast utility to check if a node is an embedded element",
+      "versions": [
+        "3.0.0"
       ]
     },
     {
@@ -7054,6 +9235,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-hast-util-has-property-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-has-property",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/hast-util-has-property#readme",
+      "author": "Titus Wormer",
+      "description": "hast utility to check if a node has a property",
+      "versions": [
+        "3.0.0"
+      ]
+    },
+    {
+      "id": "pkg-hast-util-is-body-ok-link-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-is-body-ok-link",
+      "license": "MIT",
+      "homepage": "https://github.com/rehypejs/rehype-minify/tree/main#readme",
+      "author": "Titus Wormer",
+      "description": "hast utility to check if a link element is “Body OK”",
+      "versions": [
+        "3.0.1"
+      ]
+    },
+    {
       "id": "pkg-hast-util-is-element-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7067,6 +9274,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-hast-util-minify-whitespace-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-minify-whitespace",
+      "license": "MIT",
+      "homepage": "https://github.com/rehypejs/rehype-minify/tree/main#readme",
+      "author": "Titus Wormer",
+      "description": "hast utility to get the plain-text value of a node",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
       "id": "pkg-hast-util-parse-selector-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7077,6 +9297,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "hast utility to create an element from a simple CSS selector",
       "versions": [
         "4.0.0"
+      ]
+    },
+    {
+      "id": "pkg-hast-util-phrasing-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-phrasing",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/hast-util-phrasing#readme",
+      "author": "Titus Wormer",
+      "description": "hast utility to check if a node is phrasing content",
+      "versions": [
+        "3.0.1"
       ]
     },
     {
@@ -7106,6 +9339,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-hast-util-to-estree-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-to-estree",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/hast-util-to-estree#readme",
+      "author": "Titus Wormer",
+      "description": "hast utility to transform to estree (JavaScript AST) JSX",
+      "versions": [
+        "3.1.3"
+      ]
+    },
+    {
       "id": "pkg-hast-util-to-html-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7129,6 +9375,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "hast utility to transform to preact, react, solid, svelte, vue, etc",
       "versions": [
         "2.3.6"
+      ]
+    },
+    {
+      "id": "pkg-hast-util-to-mdast-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "hast-util-to-mdast",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/hast-util-to-mdast#readme",
+      "author": "Seth Vincent",
+      "description": "hast utility to transform to mdast",
+      "versions": [
+        "10.1.2"
       ]
     },
     {
@@ -7180,7 +9439,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Titus Wormer",
       "description": "hast utility to create trees",
       "versions": [
-        "9.0.1"
+        "9.0.1",
+        "9.0.3"
       ]
     },
     {
@@ -7193,7 +9453,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Josh Goebel",
       "description": "Syntax highlighting with language autodetection.",
       "versions": [
-        "10.7.3",
         "11.11.1"
       ]
     },
@@ -7264,16 +9523,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-http-cache-semantics-bsd-2-clause",
+      "id": "pkg-http-errors-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "http-cache-semantics",
-      "license": "BSD-2-Clause",
-      "homepage": "https://github.com/kornelski/http-cache-semantics#readme",
-      "author": "Kornel Lesiński",
-      "description": "Parses Cache-Control and other headers. Helps building correct HTTP caches and proxies",
+      "name": "http-errors",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/http-errors#readme",
+      "author": "Jonathan Ong",
+      "description": "Create HTTP error objects",
       "versions": [
-        "4.2.0"
+        "2.0.1"
       ]
     },
     {
@@ -7286,7 +9545,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Nathan Rajlich",
       "description": "An HTTP(s) proxy `http.Agent` implementation for HTTP",
       "versions": [
-        "7.0.2"
+        "7.0.2",
+        "9.1.0"
       ]
     },
     {
@@ -7303,19 +9563,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-http2-wrapper-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "http2-wrapper",
-      "license": "MIT",
-      "homepage": "https://github.com/szmarczak/http2-wrapper#readme",
-      "author": "Szymon Marczak",
-      "description": "HTTP2 client, just with the familiar `https` API",
-      "versions": [
-        "1.0.3"
-      ]
-    },
-    {
       "id": "pkg-https-proxy-agent-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7325,20 +9572,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Nathan Rajlich",
       "description": "An HTTP(s) proxy `http.Agent` implementation for HTTPS",
       "versions": [
-        "7.0.6"
-      ]
-    },
-    {
-      "id": "pkg-human-signals-apache-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "human-signals",
-      "license": "Apache-2.0",
-      "homepage": "https://git.io/JeluP",
-      "author": "ehmicky",
-      "description": "Human-friendly process signals",
-      "versions": [
-        "2.1.0"
+        "7.0.6",
+        "9.1.0"
       ]
     },
     {
@@ -7365,7 +9600,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Convert character encodings in pure javascript.",
       "versions": [
         "0.6.3",
-        "0.7.2"
+        "0.7.2",
+        "0.7.3"
       ]
     },
     {
@@ -7382,6 +9618,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-ignore-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ignore",
+      "license": "MIT",
+      "homepage": "https://github.com/kaelzhang/node-ignore#readme",
+      "author": "kael",
+      "description": "Ignore is a manager and filter for .gitignore rules, the one used by eslint, gitbook and many others.",
+      "versions": [
+        "7.0.5"
+      ]
+    },
+    {
+      "id": "pkg-image-dimensions-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "image-dimensions",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/image-dimensions#readme",
+      "author": "Sindre Sorhus",
+      "description": "Get the dimensions of an image",
+      "versions": [
+        "2.5.1"
+      ]
+    },
+    {
       "id": "pkg-immer-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7393,19 +9655,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "versions": [
         "10.2.0",
         "11.1.4"
-      ]
-    },
-    {
-      "id": "pkg-import-meta-resolve-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "import-meta-resolve",
-      "license": "MIT",
-      "homepage": "https://github.com/wooorm/import-meta-resolve#readme",
-      "author": "Titus Wormer",
-      "description": "Resolve things like Node.js — ponyfill for `import.meta.resolve`",
-      "versions": [
-        "4.2.0"
       ]
     },
     {
@@ -7455,8 +9704,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Mike Bostock",
       "description": "Map and Set with automatic key interning",
       "versions": [
-        "1.0.1",
         "2.0.3"
+      ]
+    },
+    {
+      "id": "pkg-invariant-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "invariant",
+      "license": "MIT",
+      "homepage": "https://github.com/zertosh/invariant#readme",
+      "author": "Andres Suarez",
+      "description": "invariant",
+      "versions": [
+        "2.2.4"
+      ]
+    },
+    {
+      "id": "pkg-iobuffer-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "iobuffer",
+      "license": "MIT",
+      "homepage": "https://image-js.github.io/iobuffer/",
+      "author": "Michaël Zasso",
+      "description": "Read and write binary data on ArrayBuffers",
+      "versions": [
+        "6.0.1"
       ]
     },
     {
@@ -7469,7 +9743,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Beau Gunderson",
       "description": "A library for parsing IPv4 and IPv6 IP addresses in node and the browser.",
       "versions": [
-        "10.1.0"
+        "10.1.0",
+        "10.7.6"
+      ]
+    },
+    {
+      "id": "pkg-ipaddr-js-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ipaddr.js",
+      "license": "MIT",
+      "homepage": "https://github.com/whitequark/ipaddr.js#readme",
+      "author": "whitequark",
+      "description": "A library for manipulating IPv4 and IPv6 addresses in JavaScript.",
+      "versions": [
+        "1.9.1"
       ]
     },
     {
@@ -7512,6 +9800,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-is-docker-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "is-docker",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/is-docker#readme",
+      "author": "Sindre Sorhus",
+      "description": "Check if the process is running inside a Docker container",
+      "versions": [
+        "3.0.0"
+      ]
+    },
+    {
       "id": "pkg-is-fullwidth-code-point-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7535,6 +9836,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Check if a character is hexadecimal",
       "versions": [
         "2.0.1"
+      ]
+    },
+    {
+      "id": "pkg-is-in-ssh-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "is-in-ssh",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/is-in-ssh#readme",
+      "author": "Sindre Sorhus",
+      "description": "Check if the process is running in an SSH session",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-is-inside-container-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "is-inside-container",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/is-inside-container#readme",
+      "author": "Sindre Sorhus",
+      "description": "Check if the process is running inside a container (Docker/Podman)",
+      "versions": [
+        "1.0.0"
       ]
     },
     {
@@ -7564,6 +9891,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-is-promise-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "is-promise",
+      "license": "MIT",
+      "homepage": "https://github.com/then/is-promise#readme",
+      "author": "ForbesLindesay",
+      "description": "Test whether an object looks like a promises-a+ promise",
+      "versions": [
+        "4.0.0"
+      ]
+    },
+    {
       "id": "pkg-is-property-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7577,16 +9917,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-is-stream-mit",
+      "id": "pkg-is-wsl-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "is-stream",
+      "name": "is-wsl",
       "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/is-stream#readme",
+      "homepage": "https://github.com/sindresorhus/is-wsl#readme",
       "author": "Sindre Sorhus",
-      "description": "Check if something is a Node.js stream",
+      "description": "Check if the process is running inside Windows Subsystem for Linux (Bash on Windows)",
       "versions": [
-        "2.0.1"
+        "3.1.1"
       ]
     },
     {
@@ -7603,6 +9943,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-isexe-blueoak-1-0-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "isexe",
+      "license": "BlueOak-1.0.0",
+      "homepage": "https://github.com/isaacs/isexe#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "Minimal module to check if a file is executable.",
+      "versions": [
+        "4.0.0"
+      ]
+    },
+    {
+      "id": "pkg-its-fine-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "its-fine",
+      "license": "MIT",
+      "homepage": "https://github.com/pmndrs/its-fine",
+      "author": "Cody Bennett",
+      "description": "A collection of escape hatches for React.",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
       "id": "pkg-jiti-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7611,7 +9977,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/jiti#readme",
       "description": "Runtime typescript and ESM support for Node.js",
       "versions": [
-        "2.6.1"
+        "2.6.1",
+        "2.7.0"
       ]
     },
     {
@@ -7664,7 +10031,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Tiny JavaScript tokenizer.",
       "versions": [
         "4.0.0",
-        "9.0.1"
+        "9.0.1",
+        "10.0.0"
       ]
     },
     {
@@ -7706,16 +10074,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-json-buffer-mit",
+      "id": "pkg-json-bigint-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "json-buffer",
+      "name": "json-bigint",
       "license": "MIT",
-      "homepage": "https://github.com/dominictarr/json-buffer",
-      "author": "Dominic Tarr",
-      "description": "JSON parse & stringify that supports binary via bops & base64",
+      "homepage": "https://github.com/sidorares/json-bigint#readme",
+      "author": "Andrey Sidorov",
+      "description": "JSON.parse with bigints support",
       "versions": [
-        "3.0.1"
+        "1.0.0"
       ]
     },
     {
@@ -7729,6 +10097,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "JSON Schema validation and specifications",
       "versions": [
         "0.4.0"
+      ]
+    },
+    {
+      "id": "pkg-json-schema-to-ts-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "json-schema-to-ts",
+      "license": "MIT",
+      "homepage": "https://github.com/ThomasAribart/json-schema-to-ts#readme",
+      "author": "Thomas Aribart",
+      "description": "Infer typescript types from your JSON schemas!",
+      "versions": [
+        "3.1.1"
       ]
     },
     {
@@ -7755,19 +10136,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "JSON Schema TypeScript definitions with complete inline documentation.",
       "versions": [
         "8.0.2"
-      ]
-    },
-    {
-      "id": "pkg-json-stringify-safe-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "json-stringify-safe",
-      "license": "ISC",
-      "homepage": "https://github.com/isaacs/json-stringify-safe",
-      "author": "Isaac Z. Schlueter",
-      "description": "Like JSON.stringify, but doesn't blow up on circular refs.",
-      "versions": [
-        "5.0.1"
       ]
     },
     {
@@ -7806,8 +10174,45 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "JP Richardson",
       "description": "Easily read/write JSON files.",
       "versions": [
-        "4.0.0",
         "6.2.0"
+      ]
+    },
+    {
+      "id": "pkg-jsqr-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "jsqr",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/cozmo/jsQR#readme",
+      "description": "A pure javascript QR code reading library that takes in raw images and will locate, extract and parse any QR code found within.",
+      "versions": [
+        "1.4.0"
+      ]
+    },
+    {
+      "id": "pkg-jwa-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "jwa",
+      "license": "MIT",
+      "homepage": "https://github.com/brianloveswords/node-jwa#readme",
+      "author": "Brian J. Brennan",
+      "description": "JWA implementation (supports all JWS algorithms)",
+      "versions": [
+        "2.0.1"
+      ]
+    },
+    {
+      "id": "pkg-jws-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "jws",
+      "license": "MIT",
+      "homepage": "https://github.com/brianloveswords/node-jws#readme",
+      "author": "Brian J Brennan",
+      "description": "Implementation of JSON Web Signatures",
+      "versions": [
+        "4.0.1"
       ]
     },
     {
@@ -7819,45 +10224,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://katex.org",
       "description": "Fast math typesetting for the web.",
       "versions": [
-        "0.16.47"
-      ]
-    },
-    {
-      "id": "pkg-keyv-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "keyv",
-      "license": "MIT",
-      "homepage": "https://github.com/jaredwray/keyv",
-      "author": "Jared Wray",
-      "description": "Simple key-value storage with support for multiple backends",
-      "versions": [
-        "4.5.4"
-      ]
-    },
-    {
-      "id": "pkg-khroma-unknown",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "khroma",
-      "license": "Unknown",
-      "homepage": "https://github.com/fabiospampinato/khroma#readme",
-      "description": "A collection of functions for manipulating CSS colors, inspired by SASS.",
-      "versions": [
-        "2.1.0"
-      ]
-    },
-    {
-      "id": "pkg-konsta-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "konsta",
-      "license": "MIT",
-      "homepage": "https://konstaui.com",
-      "author": "Vladimir Kharlampidi",
-      "description": "Mobile UI components made with Tailwind CSS",
-      "versions": [
-        "5.0.9"
+        "0.16.47",
+        "0.18.1"
       ]
     },
     {
@@ -7870,20 +10238,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sami Koskimäki",
       "description": "Type safe SQL query builder",
       "versions": [
-        "0.28.11"
-      ]
-    },
-    {
-      "id": "pkg-layout-base-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "layout-base",
-      "license": "MIT",
-      "homepage": "https://github.com/iVis-at-Bilkent/layout-base#readme",
-      "description": "Basic layout model and some utilities for Cytoscape.js layout extensions",
-      "versions": [
-        "1.0.2",
-        "2.0.1"
+        "0.29.6"
       ]
     },
     {
@@ -7899,6 +10254,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-lexical-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "lexical",
+      "license": "MIT",
+      "homepage": "https://github.com/facebook/lexical#readme",
+      "description": "Lexical is an extensible text editor framework that provides excellent reliability, accessible and performance.",
+      "versions": [
+        "0.53.0"
+      ]
+    },
+    {
       "id": "pkg-lightningcss-mpl-2-0",
       "kind": "package",
       "scope": "production-dependency",
@@ -7907,31 +10274,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/parcel-bundler/lightningcss#readme",
       "description": "A CSS parser, transformer, and minifier written in Rust",
       "versions": [
-        "1.32.0"
+        "1.33.0"
       ]
     },
     {
-      "id": "pkg-lightningcss-linux-x64-gnu-mpl-2-0",
+      "id": "pkg-lightningcss-linux-arm64-gnu-mpl-2-0",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "lightningcss-linux-x64-gnu",
+      "name": "lightningcss-linux-arm64-gnu",
       "license": "MPL-2.0",
       "homepage": "https://github.com/parcel-bundler/lightningcss#readme",
       "description": "A CSS parser, transformer, and minifier written in Rust",
       "versions": [
-        "1.32.0"
-      ]
-    },
-    {
-      "id": "pkg-lightningcss-linux-x64-musl-mpl-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "lightningcss-linux-x64-musl",
-      "license": "MPL-2.0",
-      "homepage": "https://github.com/parcel-bundler/lightningcss#readme",
-      "description": "A CSS parser, transformer, and minifier written in Rust",
-      "versions": [
-        "1.32.0"
+        "1.33.0"
       ]
     },
     {
@@ -7948,6 +10303,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-locate-path-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "locate-path",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/locate-path#readme",
+      "author": "Sindre Sorhus",
+      "description": "Get the first path that exists on disk of multiple paths",
+      "versions": [
+        "5.0.0"
+      ]
+    },
+    {
       "id": "pkg-lodash-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -7957,19 +10325,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "John-David Dalton",
       "description": "Lodash modular utilities.",
       "versions": [
-        "4.17.21"
-      ]
-    },
-    {
-      "id": "pkg-lodash-es-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "lodash-es",
-      "license": "MIT",
-      "homepage": "https://lodash.com/custom-builds",
-      "author": "John-David Dalton",
-      "description": "Lodash exported as ES modules.",
-      "versions": [
+        "4.17.21",
         "4.18.1"
       ]
     },
@@ -8072,7 +10428,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://loro.dev",
       "description": "Loro CRDTs is a high-performance CRDT framework that makes your app state synchronized, collaborative and maintainable effortlessly.",
       "versions": [
-        "1.13.9"
+        "1.17.0"
       ]
     },
     {
@@ -8085,7 +10441,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Loro Team",
       "description": "Type-safe state management synchronized with Loro CRDT via a declarative schema and bidirectional mirroring.",
       "versions": [
-        "2.2.0"
+        "2.3.2"
       ]
     },
     {
@@ -8098,7 +10454,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Loro Team",
       "description": "Jotai atoms for Loro Mirror: CRDT-backed atomic state with typed schema and bidirectional sync.",
       "versions": [
-        "2.2.0"
+        "2.3.2"
       ]
     },
     {
@@ -8111,7 +10467,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Loro Team",
       "description": "React hooks and context for Loro Mirror: type-safe CRDT-backed state with selective subscriptions.",
       "versions": [
-        "2.2.0"
+        "2.3.2"
       ]
     },
     {
@@ -8136,7 +10492,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/loro-dev/loro-repo#readme",
       "description": "Draft TypeScript definitions for the LoroRepo orchestrator.",
       "versions": [
-        "0.18.3"
+        "0.29.0"
       ]
     },
     {
@@ -8166,19 +10522,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-lowercase-keys-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "lowercase-keys",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/lowercase-keys#readme",
-      "author": "Sindre Sorhus",
-      "description": "Lowercase the keys of an object",
-      "versions": [
-        "2.0.0"
-      ]
-    },
-    {
       "id": "pkg-lowlight-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -8188,7 +10531,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Titus Wormer",
       "description": "Virtual syntax highlighting for virtual DOMs and non-HTML things",
       "versions": [
-        "1.20.0",
         "3.3.0"
       ]
     },
@@ -8229,7 +10571,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "https://github.com/wellwelwel",
       "description": "🔥 An extremely fast and efficient LRU cache for JavaScript with high compatibility (including Browsers).",
       "versions": [
-        "1.1.4"
+        "1.1.5"
       ]
     },
     {
@@ -8243,7 +10585,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A Lucide icon library package for React applications.",
       "versions": [
         "0.523.0",
-        "0.525.0"
+        "0.525.0",
+        "1.27.0"
       ]
     },
     {
@@ -8256,7 +10599,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Rich Harris",
       "description": "Modify strings, generate sourcemaps",
       "versions": [
-        "0.30.21"
+        "0.30.21",
+        "1.4.5"
       ]
     },
     {
@@ -8268,7 +10612,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/magicast#readme",
       "description": "Modify a JS/TS file and write back magically just like JSON!",
       "versions": [
-        "0.3.5"
+        "0.3.5",
+        "0.5.5"
+      ]
+    },
+    {
+      "id": "pkg-markdown-extensions-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "markdown-extensions",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/markdown-extensions#readme",
+      "author": "Sindre Sorhus",
+      "description": "List of Markdown file extensions",
+      "versions": [
+        "2.0.0"
       ]
     },
     {
@@ -8295,21 +10653,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A markdown parser built for speed",
       "versions": [
         "14.0.0",
-        "16.4.2",
-        "17.0.6"
-      ]
-    },
-    {
-      "id": "pkg-matcher-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "matcher",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/matcher#readme",
-      "author": "Sindre Sorhus",
-      "description": "Simple wildcard matching",
-      "versions": [
-        "3.0.0"
+        "18.0.13"
       ]
     },
     {
@@ -8443,6 +10787,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-mdast-util-mdx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "mdast-util-mdx",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/mdast-util-mdx#readme",
+      "author": "Titus Wormer",
+      "description": "mdast extension to parse and serialize MDX (or MDX.js)",
+      "versions": [
+        "3.0.0"
+      ]
+    },
+    {
       "id": "pkg-mdast-util-mdx-expression-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -8521,6 +10878,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-mdast-util-to-markdown-cjk-friendly-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "mdast-util-to-markdown-cjk-friendly",
+      "license": "MIT",
+      "homepage": "https://github.com/tats-u/markdown-cjk-friendly#readme",
+      "author": "Tatsunori Uchino",
+      "description": "mdast-util-to-markdown extension to make Markdown emphasis output more friendly with Chinese, Japanese, and Korean (CJK)",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
       "id": "pkg-mdast-util-to-string-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -8531,6 +10901,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "mdast utility to get the plain text content of a node",
       "versions": [
         "4.0.0"
+      ]
+    },
+    {
+      "id": "pkg-media-typer-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "media-typer",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/media-typer#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Simple RFC 6838 media type parser and formatter",
+      "versions": [
+        "1.1.0"
       ]
     },
     {
@@ -8547,29 +10930,15 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-merge-stream-mit",
+      "id": "pkg-merge-descriptors-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "merge-stream",
+      "name": "merge-descriptors",
       "license": "MIT",
-      "homepage": "https://github.com/grncdr/merge-stream#readme",
-      "author": "Stephen Sugden",
-      "description": "Create a stream that emits events from multiple other streams",
+      "homepage": "https://github.com/sindresorhus/merge-descriptors#readme",
+      "description": "Merge objects using their property descriptors",
       "versions": [
         "2.0.0"
-      ]
-    },
-    {
-      "id": "pkg-mermaid-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "mermaid",
-      "license": "MIT",
-      "homepage": "https://github.com/mermaid-js/mermaid#readme",
-      "author": "Knut Sveidqvist",
-      "description": "Markdown-ish syntax for generating flowcharts, mindmaps, sequence diagrams, class diagrams, gantt charts, git graphs and more.",
-      "versions": [
-        "11.15.0"
       ]
     },
     {
@@ -8596,6 +10965,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "The CommonMark markdown constructs",
       "versions": [
         "2.0.3"
+      ]
+    },
+    {
+      "id": "pkg-micromark-extension-cjk-friendly-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-cjk-friendly",
+      "license": "MIT",
+      "homepage": "https://github.com/tats-u/markdown-cjk-friendly#readme",
+      "author": "Tatsunori Uchino",
+      "description": "micromark extension to make Markdown emphasis (`**`) in CommonMark more friendly with Chinese, Japanese, and Korean (CJK)",
+      "versions": [
+        "2.0.1"
+      ]
+    },
+    {
+      "id": "pkg-micromark-extension-cjk-friendly-util-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-cjk-friendly-util",
+      "license": "MIT",
+      "homepage": "https://github.com/tats-u/markdown-cjk-friendly#readme",
+      "author": "Tatsunori Uchino",
+      "description": "common library for micromark-extension-cjk-friendly and its related packages",
+      "versions": [
+        "3.0.1"
       ]
     },
     {
@@ -8703,6 +11098,71 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-micromark-extension-mdx-expression-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-mdx-expression",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdx-expression/tree/main#readme",
+      "author": "Titus Wormer",
+      "description": "micromark extension to support MDX or MDX JS expressions",
+      "versions": [
+        "3.0.1"
+      ]
+    },
+    {
+      "id": "pkg-micromark-extension-mdx-jsx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-mdx-jsx",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdx-jsx#readme",
+      "author": "Titus Wormer",
+      "description": "micromark extension to support MDX or MDX.js JSX",
+      "versions": [
+        "3.0.2"
+      ]
+    },
+    {
+      "id": "pkg-micromark-extension-mdx-md-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-mdx-md",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdx-md#readme",
+      "author": "Titus Wormer",
+      "description": "micromark extension to turn some markdown features off for MDX",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-micromark-extension-mdxjs-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-mdxjs",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdxjs#readme",
+      "author": "Titus Wormer",
+      "description": "micromark extension to support MDX.js",
+      "versions": [
+        "3.0.0"
+      ]
+    },
+    {
+      "id": "pkg-micromark-extension-mdxjs-esm-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-extension-mdxjs-esm",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdxjs-esm#readme",
+      "author": "Titus Wormer",
+      "description": "micromark extension to support MDX JS import/exports",
+      "versions": [
+        "3.0.0"
+      ]
+    },
+    {
       "id": "pkg-micromark-factory-destination-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -8726,6 +11186,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "micromark factory to parse labels (found in media, definitions)",
       "versions": [
         "2.0.1"
+      ]
+    },
+    {
+      "id": "pkg-micromark-factory-mdx-expression-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-factory-mdx-expression",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdx-expression/tree/main#readme",
+      "author": "Titus Wormer",
+      "description": "micromark factory to parse MDX expressions (found in JSX attributes, flow, text)",
+      "versions": [
+        "2.0.3"
       ]
     },
     {
@@ -8859,6 +11332,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-micromark-util-events-to-acorn-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "micromark-util-events-to-acorn",
+      "license": "MIT",
+      "homepage": "https://github.com/micromark/micromark-extension-mdx-expression/tree/main#readme",
+      "author": "Titus Wormer",
+      "description": "micromark utility to try and parse events w/ acorn",
+      "versions": [
+        "2.0.3"
+      ]
+    },
+    {
       "id": "pkg-micromark-util-html-tag-name-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -8958,7 +11444,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/jshttp/mime-db#readme",
       "description": "Media Type Database",
       "versions": [
-        "1.52.0"
+        "1.54.0"
       ]
     },
     {
@@ -8970,20 +11456,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/jshttp/mime-types#readme",
       "description": "The ultimate javascript content-type utility.",
       "versions": [
-        "2.1.35"
-      ]
-    },
-    {
-      "id": "pkg-mimic-fn-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "mimic-fn",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/mimic-fn#readme",
-      "author": "Sindre Sorhus",
-      "description": "Make a function mimic another one",
-      "versions": [
-        "2.1.0"
+        "3.0.2"
       ]
     },
     {
@@ -9009,7 +11482,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sindre Sorhus",
       "description": "Mimic a Node.js HTTP response stream",
       "versions": [
-        "1.0.1",
         "3.1.0"
       ]
     },
@@ -9024,6 +11496,45 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "parse argument options",
       "versions": [
         "1.2.8"
+      ]
+    },
+    {
+      "id": "pkg-minipass-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "minipass",
+      "license": "ISC",
+      "homepage": "https://github.com/isaacs/minipass#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "minimal implementation of a PassThrough stream",
+      "versions": [
+        "7.1.2"
+      ]
+    },
+    {
+      "id": "pkg-minisearch-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "minisearch",
+      "license": "MIT",
+      "homepage": "https://lucaong.github.io/minisearch/",
+      "author": "Luca Ongaro",
+      "description": "Tiny but powerful full-text search engine for browser and Node",
+      "versions": [
+        "7.2.0"
+      ]
+    },
+    {
+      "id": "pkg-minizlib-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "minizlib",
+      "license": "MIT",
+      "homepage": "https://github.com/isaacs/minizlib#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "A small fast zlib stream built on [minipass](http://npm.im/minipass) and Node.js's zlib binding.",
+      "versions": [
+        "3.1.0"
       ]
     },
     {
@@ -9074,7 +11585,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/mongodb-js/mongodb-connection-string-url",
       "description": "MongoDB connection strings, based on the WhatWG URL API",
       "versions": [
-        "7.0.1"
+        "7.0.3"
+      ]
+    },
+    {
+      "id": "pkg-motion-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "motion",
+      "license": "MIT",
+      "homepage": "https://github.com/motiondivision/motion#readme",
+      "author": "Matt Perry",
+      "description": "An animation library for JavaScript and React.",
+      "versions": [
+        "12.43.0"
       ]
     },
     {
@@ -9086,7 +11610,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/motiondivision/motion#readme",
       "author": "Matt Perry",
       "versions": [
-        "12.34.0"
+        "12.43.0",
+        "14.9.0"
       ]
     },
     {
@@ -9098,7 +11623,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/motiondivision/motion#readme",
       "author": "Matt Perry",
       "versions": [
-        "12.29.2"
+        "12.39.0",
+        "14.7.0"
+      ]
+    },
+    {
+      "id": "pkg-mp4-muxer-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "mp4-muxer",
+      "license": "MIT",
+      "homepage": "https://github.com/Vanilagy/mp4-muxer#readme",
+      "author": "Vanilagy",
+      "description": "MP4 multiplexer in pure TypeScript with support for WebCodecs API, video & audio.",
+      "versions": [
+        "5.2.2"
       ]
     },
     {
@@ -9111,6 +11650,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Tiny millisecond conversion utility",
       "versions": [
         "2.1.3"
+      ]
+    },
+    {
+      "id": "pkg-multiformats-apache-2-0-or-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "multiformats",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/multiformats/js-multiformats#readme",
+      "author": "Mikeal Rogers",
+      "description": "Interface for multihash, multicodec, multibase and CID",
+      "versions": [
+        "14.0.5"
       ]
     },
     {
@@ -9161,8 +11713,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Andrey Sitnik",
       "description": "A tiny (118 bytes), secure URL-friendly unique string ID generator",
       "versions": [
-        "3.3.11",
-        "3.3.12",
+        "3.3.16",
+        "3.3.18",
         "5.1.5",
         "5.1.6"
       ]
@@ -9191,6 +11743,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A set of utilities to assist developers of tools that build N-API native add-ons",
       "versions": [
         "2.0.0"
+      ]
+    },
+    {
+      "id": "pkg-negotiator-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "negotiator",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/negotiator#readme",
+      "description": "HTTP content negotiation",
+      "versions": [
+        "1.0.0"
       ]
     },
     {
@@ -9226,7 +11790,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/nodejs/node-addon-api",
       "description": "Node.js API (Node-API)",
       "versions": [
-        "7.1.1"
+        "8.9.1"
+      ]
+    },
+    {
+      "id": "pkg-node-domexception-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "node-domexception",
+      "license": "MIT",
+      "homepage": "https://github.com/jimmywarting/node-domexception#readme",
+      "author": "Jimmy Wärting",
+      "description": "An implementation of the DOMException class from NodeJS",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-node-fetch-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "node-fetch",
+      "license": "MIT",
+      "homepage": "https://github.com/node-fetch/node-fetch",
+      "author": "David Frank",
+      "description": "A light-weight module that brings Fetch API to node.js",
+      "versions": [
+        "3.3.2"
       ]
     },
     {
@@ -9242,16 +11832,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-node-pty-mit",
+      "id": "pkg-node-gyp-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "node-pty",
+      "name": "node-gyp",
       "license": "MIT",
-      "homepage": "https://github.com/microsoft/node-pty",
-      "author": "Microsoft Corporation",
-      "description": "Fork pseudoterminals in Node.JS",
+      "homepage": "https://github.com/nodejs/node-gyp#readme",
+      "author": "Nathan Rajlich",
+      "description": "Node.js native addon build tool",
       "versions": [
-        "1.1.0"
+        "13.0.2"
       ]
     },
     {
@@ -9268,29 +11858,42 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-normalize-url-mit",
+      "id": "pkg-nopt-isc",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "normalize-url",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/normalize-url#readme",
-      "author": "Sindre Sorhus",
-      "description": "Normalize a URL",
+      "name": "nopt",
+      "license": "ISC",
+      "homepage": "https://github.com/npm/nopt#readme",
+      "author": "GitHub Inc.",
+      "description": "Option parsing for Node, supporting types, shorthands, etc. Used by npm.",
       "versions": [
-        "6.1.0"
+        "10.0.1"
       ]
     },
     {
-      "id": "pkg-npm-run-path-mit",
+      "id": "pkg-nostics-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "npm-run-path",
+      "name": "nostics",
       "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/npm-run-path#readme",
-      "author": "Sindre Sorhus",
-      "description": "Get your PATH prepended with locally installed binaries",
+      "homepage": "https://github.com/vercel-labs/nostics#readme",
+      "author": "Anthony Fu",
+      "description": "Structured diagnostic code library",
       "versions": [
-        "4.0.1"
+        "1.2.0"
+      ]
+    },
+    {
+      "id": "pkg-number-flow-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "number-flow",
+      "license": "MIT",
+      "homepage": "https://number-flow.barvian.me/vanilla",
+      "author": "Maxwell Barvian",
+      "description": "A component to transition and format numbers.",
+      "versions": [
+        "0.6.2"
       ]
     },
     {
@@ -9315,20 +11918,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/nypm#readme",
       "description": "Unified Package Manager for Node.js",
       "versions": [
-        "0.6.5"
+        "0.6.12"
       ]
     },
     {
-      "id": "pkg-object-keys-mit",
+      "id": "pkg-object-assign-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "object-keys",
+      "name": "object-assign",
       "license": "MIT",
-      "homepage": "https://github.com/ljharb/object-keys#readme",
-      "author": "Jordan Harband",
-      "description": "An Object.keys replacement, in case Object.keys is not available. From https://github.com/es-shims/es5-shim",
+      "homepage": "https://github.com/sindresorhus/object-assign#readme",
+      "author": "Sindre Sorhus",
+      "description": "ES2015 `Object.assign()` ponyfill",
       "versions": [
-        "1.1.1"
+        "4.1.1"
+      ]
+    },
+    {
+      "id": "pkg-object-inspect-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "object-inspect",
+      "license": "MIT",
+      "homepage": "https://github.com/inspect-js/object-inspect",
+      "author": "James Halliday",
+      "description": "string representations of objects in node and the browser",
+      "versions": [
+        "1.13.4"
       ]
     },
     {
@@ -9345,6 +11961,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-obug-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "obug",
+      "license": "MIT",
+      "homepage": "https://github.com/sxzz/obug#readme",
+      "author": "Kevin Deng",
+      "description": "A lightweight JavaScript debugging utility, forked from debug, featuring TypeScript and ESM support.",
+      "versions": [
+        "2.2.1"
+      ]
+    },
+    {
       "id": "pkg-ohash-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -9353,7 +11982,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/ohash#readme",
       "description": "Simple object hashing, serialization and comparison utils.",
       "versions": [
-        "2.0.11"
+        "2.0.12"
+      ]
+    },
+    {
+      "id": "pkg-on-finished-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "on-finished",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/on-finished#readme",
+      "description": "Execute a callback when a request closes, finishes, or errors",
+      "versions": [
+        "2.4.1"
       ]
     },
     {
@@ -9382,19 +12023,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-onetime-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "onetime",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/onetime#readme",
-      "author": "Sindre Sorhus",
-      "description": "Ensure a function is only called once",
-      "versions": [
-        "5.1.2"
-      ]
-    },
-    {
       "id": "pkg-oniguruma-parser-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -9404,7 +12032,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Steven Levithan",
       "description": "Parse, validate, traverse, transform, and optimize Oniguruma regular expressions",
       "versions": [
-        "0.12.1"
+        "0.12.1",
+        "0.12.2"
       ]
     },
     {
@@ -9417,18 +12046,45 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Steven Levithan",
       "description": "Convert Oniguruma patterns to native JavaScript RegExp",
       "versions": [
-        "4.3.4"
+        "4.3.4",
+        "4.3.6"
       ]
     },
     {
-      "id": "pkg-p-cancelable-mit",
+      "id": "pkg-open-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "p-cancelable",
+      "name": "open",
       "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/p-cancelable#readme",
+      "homepage": "https://github.com/sindresorhus/open#readme",
       "author": "Sindre Sorhus",
-      "description": "Create a promise that can be canceled",
+      "description": "Open stuff like URLs, files, executables. Cross-platform.",
+      "versions": [
+        "11.0.2"
+      ]
+    },
+    {
+      "id": "pkg-openai-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "openai",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/openai/openai-node#readme",
+      "author": "OpenAI",
+      "description": "The official TypeScript library for the OpenAI API",
+      "versions": [
+        "7.59.0"
+      ]
+    },
+    {
+      "id": "pkg-orderedmap-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "orderedmap",
+      "license": "MIT",
+      "homepage": "https://github.com/marijnh/orderedmap#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Persistent ordered mapping from strings",
       "versions": [
         "2.1.1"
       ]
@@ -9447,6 +12103,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-p-limit-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "p-limit",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/p-limit#readme",
+      "author": "Sindre Sorhus",
+      "description": "Run multiple promise-returning & async functions with limited concurrency",
+      "versions": [
+        "2.3.0"
+      ]
+    },
+    {
+      "id": "pkg-p-locate-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "p-locate",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/p-locate#readme",
+      "author": "Sindre Sorhus",
+      "description": "Get the first fulfilled promise that satisfies the provided testing function",
+      "versions": [
+        "4.1.0"
+      ]
+    },
+    {
       "id": "pkg-p-queue-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -9456,6 +12138,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Promise queue with concurrency control",
       "versions": [
         "6.6.2"
+      ]
+    },
+    {
+      "id": "pkg-p-retry-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "p-retry",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/p-retry#readme",
+      "author": "Sindre Sorhus",
+      "description": "Retry a promise-returning or async function",
+      "versions": [
+        "4.6.2"
       ]
     },
     {
@@ -9472,16 +12167,41 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-package-manager-detector-mit",
+      "id": "pkg-p-try-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "package-manager-detector",
+      "name": "p-try",
       "license": "MIT",
-      "homepage": "https://github.com/antfu-collective/package-manager-detector#readme",
-      "author": "Anthony Fu",
-      "description": "Package manager detector",
+      "homepage": "https://github.com/sindresorhus/p-try#readme",
+      "author": "Sindre Sorhus",
+      "description": "`Start a promise chain",
       "versions": [
-        "1.6.0"
+        "2.2.0"
+      ]
+    },
+    {
+      "id": "pkg-pako-mit-and-zlib",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "pako",
+      "license": "(MIT AND Zlib)",
+      "homepage": "https://github.com/nodeca/pako",
+      "description": "zlib port to javascript - fast, modularized, with browser support",
+      "versions": [
+        "1.0.11"
+      ]
+    },
+    {
+      "id": "pkg-papaparse-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "papaparse",
+      "license": "MIT",
+      "homepage": "https://www.papaparse.com/",
+      "author": "Matthew Holt",
+      "description": "Fast and powerful CSV parser for the browser that supports web workers and streaming large files. Converts CSV to JSON and JSON to CSV.",
+      "versions": [
+        "5.5.3"
       ]
     },
     {
@@ -9511,16 +12231,41 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-path-data-parser-mit",
+      "id": "pkg-parseurl-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "path-data-parser",
+      "name": "parseurl",
       "license": "MIT",
-      "homepage": "https://github.com/pshihn/path-data-parser#readme",
-      "author": "Preet Shihn",
-      "description": "Yet another SVG path parser. This one's tiny",
+      "homepage": "https://github.com/pillarjs/parseurl#readme",
+      "description": "parse a url with memoization",
       "versions": [
-        "0.1.0"
+        "1.3.3"
+      ]
+    },
+    {
+      "id": "pkg-partial-json-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "partial-json",
+      "license": "MIT",
+      "homepage": "https://promplate.dev/partial-json-parser",
+      "author": "Muspi Merol",
+      "description": "Parse partial JSON generated by LLM",
+      "versions": [
+        "0.1.7"
+      ]
+    },
+    {
+      "id": "pkg-path-exists-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "path-exists",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/path-exists#readme",
+      "author": "Sindre Sorhus",
+      "description": "Check if a path exists",
+      "versions": [
+        "4.0.0"
       ]
     },
     {
@@ -9534,6 +12279,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Get the PATH environment variable key cross-platform",
       "versions": [
         "3.1.1"
+      ]
+    },
+    {
+      "id": "pkg-path-to-regexp-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "path-to-regexp",
+      "license": "MIT",
+      "homepage": "https://github.com/pillarjs/path-to-regexp#readme",
+      "description": "Express style path to RegExp utility",
+      "versions": [
+        "8.4.2"
       ]
     },
     {
@@ -9562,16 +12319,28 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-pend-mit",
+      "id": "pkg-pdfjs-dist-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "pend",
-      "license": "MIT",
-      "homepage": "https://github.com/andrewrk/node-pend#readme",
-      "author": "Andrew Kelley",
-      "description": "dead-simple optimistic async helper",
+      "name": "pdfjs-dist",
+      "license": "Apache-2.0",
+      "homepage": "https://mozilla.github.io/pdf.js/",
+      "description": "Generic build of Mozilla's PDF.js library.",
       "versions": [
-        "1.2.0"
+        "6.3.289"
+      ]
+    },
+    {
+      "id": "pkg-pele-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "pele",
+      "license": "MIT",
+      "homepage": "https://pele.run",
+      "author": "kepano",
+      "description": "A fast, lightweight Mermaid renderer that outputs themeable SVG.",
+      "versions": [
+        "1.6.0"
       ]
     },
     {
@@ -9583,43 +12352,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/perfect-debounce#readme",
       "versions": [
         "1.0.0"
-      ]
-    },
-    {
-      "id": "pkg-pg-int8-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "pg-int8",
-      "license": "ISC",
-      "homepage": "https://github.com/charmander/pg-int8#readme",
-      "description": "64-bit big-endian signed integer-to-string conversion",
-      "versions": [
-        "1.0.1"
-      ]
-    },
-    {
-      "id": "pkg-pg-protocol-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "pg-protocol",
-      "license": "MIT",
-      "homepage": "https://github.com/brianc/node-postgres#readme",
-      "description": "The postgres client/server binary protocol, implemented in TypeScript",
-      "versions": [
-        "1.11.0"
-      ]
-    },
-    {
-      "id": "pkg-pg-types-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "pg-types",
-      "license": "MIT",
-      "homepage": "https://github.com/brianc/node-pg-types",
-      "author": "Brian M. Carlson",
-      "description": "Query result type converters for node-postgres",
-      "versions": [
-        "2.2.0"
       ]
     },
     {
@@ -9645,7 +12377,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Jon Schlinkert",
       "description": "Blazing fast and accurate glob matcher written in JavaScript, with no dependencies and full support for standard and extended Bash glob features, including braces, extglobs, POSIX brackets, and regular expressions.",
       "versions": [
-        "4.0.3"
+        "4.0.5",
+        "4.0.7"
+      ]
+    },
+    {
+      "id": "pkg-pkce-challenge-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "pkce-challenge",
+      "license": "MIT",
+      "homepage": "https://github.com/crouchcd/pkce-challenge#readme",
+      "author": "crouchcd",
+      "description": "Generate or verify a Proof Key for Code Exchange (PKCE) challenge pair",
+      "versions": [
+        "5.0.1"
       ]
     },
     {
@@ -9657,33 +12403,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/pkg-types#readme",
       "description": "Node.js utilities and TypeScript definitions for `package.json` and `tsconfig.json`",
       "versions": [
-        "2.3.0"
+        "2.4.0"
       ]
     },
     {
-      "id": "pkg-points-on-curve-mit",
+      "id": "pkg-pngjs-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "points-on-curve",
+      "name": "pngjs",
       "license": "MIT",
-      "homepage": "https://github.com/pshihn/bezier-points#readme",
-      "author": "Preet Shihn",
-      "description": "Estimate points on a bezier curve or a set of connexted bezier curves",
+      "homepage": "https://github.com/lukeapage/pngjs",
+      "description": "PNG encoder/decoder in pure JS, supporting any bit size & interlace, async & sync with full test suite.",
       "versions": [
-        "0.2.0"
-      ]
-    },
-    {
-      "id": "pkg-points-on-path-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "points-on-path",
-      "license": "MIT",
-      "homepage": "https://github.com/pshihn/points-on-path#readme",
-      "author": "Preet Shihn",
-      "description": "Estimate points on a SVG path",
-      "versions": [
-        "0.2.1"
+        "5.0.0"
       ]
     },
     {
@@ -9696,60 +12428,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Andrey Sitnik",
       "description": "Tool for transforming styles with JS plugins",
       "versions": [
-        "8.5.6",
-        "8.5.15"
-      ]
-    },
-    {
-      "id": "pkg-postgres-array-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "postgres-array",
-      "license": "MIT",
-      "homepage": "https://github.com/bendrucker/postgres-array#readme",
-      "author": "Ben Drucker",
-      "description": "Parse postgres array columns",
-      "versions": [
-        "2.0.0"
-      ]
-    },
-    {
-      "id": "pkg-postgres-bytea-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "postgres-bytea",
-      "license": "MIT",
-      "homepage": "https://github.com/bendrucker/postgres-bytea#readme",
-      "author": "Ben Drucker",
-      "description": "Postgres bytea parser",
-      "versions": [
-        "1.0.1"
-      ]
-    },
-    {
-      "id": "pkg-postgres-date-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "postgres-date",
-      "license": "MIT",
-      "homepage": "https://github.com/bendrucker/postgres-date#readme",
-      "author": "Ben Drucker",
-      "description": "Postgres date column parser",
-      "versions": [
-        "1.0.7"
-      ]
-    },
-    {
-      "id": "pkg-postgres-interval-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "postgres-interval",
-      "license": "MIT",
-      "homepage": "https://github.com/bendrucker/postgres-interval#readme",
-      "author": "Ben Drucker",
-      "description": "Parse Postgres interval columns",
-      "versions": [
-        "1.2.0"
+        "8.5.25",
+        "8.5.28"
       ]
     },
     {
@@ -9763,6 +12443,33 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Posthog-js allows you to automatically capture usage and send events to PostHog.",
       "versions": [
         "1.396.6"
+      ]
+    },
+    {
+      "id": "pkg-posthog-node-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "posthog-node",
+      "license": "MIT",
+      "homepage": "https://github.com/PostHog/posthog-js#readme",
+      "author": "PostHog",
+      "description": "PostHog Node.js integration",
+      "versions": [
+        "5.38.8"
+      ]
+    },
+    {
+      "id": "pkg-powershell-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "powershell-utils",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/powershell-utils#readme",
+      "author": "Sindre Sorhus",
+      "description": "Utilities for executing PowerShell commands",
+      "versions": [
+        "0.1.0",
+        "0.2.1"
       ]
     },
     {
@@ -9800,7 +12507,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "James Long",
       "description": "Prettier is an opinionated code formatter",
       "versions": [
-        "3.8.1"
+        "3.9.10"
       ]
     },
     {
@@ -9817,16 +12524,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-prismjs-mit",
+      "id": "pkg-proc-log-isc",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "prismjs",
-      "license": "MIT",
-      "homepage": "https://github.com/PrismJS/prism#readme",
-      "author": "Lea Verou",
-      "description": "Lightweight, robust, elegant syntax highlighting. A spin-off project from Dabblet.",
+      "name": "proc-log",
+      "license": "ISC",
+      "homepage": "https://github.com/npm/proc-log#readme",
+      "author": "GitHub Inc.",
+      "description": "just emit 'log' events on the process object",
       "versions": [
-        "1.30.0"
+        "7.0.0"
       ]
     },
     {
@@ -9840,6 +12547,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Flexible ascii progress bar",
       "versions": [
         "2.0.3"
+      ]
+    },
+    {
+      "id": "pkg-prop-types-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prop-types",
+      "license": "MIT",
+      "homepage": "https://facebook.github.io/react/",
+      "description": "Runtime type checking for React props and similar objects.",
+      "versions": [
+        "15.8.1"
       ]
     },
     {
@@ -9865,7 +12584,254 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Titus Wormer",
       "description": "Info on the properties and attributes of the web platform",
       "versions": [
-        "7.1.0"
+        "7.1.0",
+        "7.2.0"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-changeset-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-changeset",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/prosemirror-changeset",
+      "description": "Distills a series of editing steps into deleted and added ranges",
+      "versions": [
+        "2.4.1"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-commands-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-commands",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-commands#readme",
+      "description": "Editing commands for ProseMirror",
+      "versions": [
+        "1.7.1"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-drop-indicator-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-drop-indicator",
+      "license": "MIT",
+      "homepage": "https://github.com/prosekit/prosemirror-drop-indicator#readme",
+      "author": "ocavue",
+      "description": "A ProseMirror plugin for drop indicator",
+      "versions": [
+        "0.1.4"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-dropcursor-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-dropcursor",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/prosemirror-dropcursor",
+      "description": "Drop cursor plugin for ProseMirror",
+      "versions": [
+        "1.8.3"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-enter-rules-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-enter-rules",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/prosemirror-enter-rules#readme",
+      "author": "ocavue",
+      "description": "Enter rules for ProseMirror",
+      "versions": [
+        "0.1.6"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-flat-list-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-flat-list",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/prosemirror-flat-list#readme",
+      "author": "ocavue",
+      "description": "Powerful list support for ProseMirror",
+      "versions": [
+        "0.7.1"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-gapcursor-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-gapcursor",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-gapcursor#readme",
+      "description": "ProseMirror plugin for cursors at normally impossible-to-reach positions",
+      "versions": [
+        "1.4.1"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-highlight-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-highlight",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/prosemirror-highlight#readme",
+      "author": "ocavue",
+      "description": "A ProseMirror plugin to highlight code blocks",
+      "versions": [
+        "0.15.3"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-history-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-history",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-history#readme",
+      "description": "Undo history for ProseMirror",
+      "versions": [
+        "1.5.0"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-inputrules-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-inputrules",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-inputrules#readme",
+      "description": "Automatic transforms on text input for ProseMirror",
+      "versions": [
+        "1.5.1"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-keymap-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-keymap",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-keymap#readme",
+      "description": "Keymap plugin for ProseMirror",
+      "versions": [
+        "1.2.3"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-math-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-math",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/prosemirror-math#readme",
+      "author": "ocavue",
+      "description": "Rendering math expressions in ProseMirror",
+      "versions": [
+        "0.2.2"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-model-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-model",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/prosemirror-model",
+      "description": "ProseMirror's document model",
+      "versions": [
+        "1.25.11"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-safari-ime-span-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-safari-ime-span",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/prosemirror-safari-ime-span#readme",
+      "author": "ocavue",
+      "versions": [
+        "1.0.2"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-search-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-search",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/prosemirror-search",
+      "description": "Search API for ProseMirror",
+      "versions": [
+        "1.1.1"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-splittable-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-splittable",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/prosemirror-splittable#readme",
+      "author": "ocavue",
+      "description": "Inherit ProseMirror node attributes when splitting nodes.",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-state-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-state",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-state#readme",
+      "description": "ProseMirror editor state",
+      "versions": [
+        "1.4.4"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-tables-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-tables",
+      "license": "MIT",
+      "homepage": "https://github.com/ProseMirror/prosemirror-tables#readme",
+      "description": "ProseMirror's rowspan/colspan tables component",
+      "versions": [
+        "1.8.5"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-transform-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-transform",
+      "license": "MIT",
+      "homepage": "https://github.com/prosemirror/prosemirror-transform#readme",
+      "description": "ProseMirror document transformations",
+      "versions": [
+        "1.12.0"
+      ]
+    },
+    {
+      "id": "pkg-prosemirror-view-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "prosemirror-view",
+      "license": "MIT",
+      "homepage": "https://www.npmjs.com/package/prosemirror-view",
+      "description": "ProseMirror's view component",
+      "versions": [
+        "1.42.2"
       ]
     },
     {
@@ -9879,6 +12845,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Protocol Buffers for JavaScript (& TypeScript).",
       "versions": [
         "7.5.4"
+      ]
+    },
+    {
+      "id": "pkg-proxy-addr-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "proxy-addr",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/proxy-addr#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Determine address of proxied request",
+      "versions": [
+        "2.0.7"
+      ]
+    },
+    {
+      "id": "pkg-proxy-agent-negotiate-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "proxy-agent-negotiate",
+      "license": "MIT",
+      "homepage": "https://github.com/TooTallNate/proxy-agents#readme",
+      "author": "Nathan Rajlich",
+      "description": "Negotiate/SPNEGO proxy authentication for proxy-agents",
+      "versions": [
+        "1.1.0"
       ]
     },
     {
@@ -9921,6 +12913,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-qrcode-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "qrcode",
+      "license": "MIT",
+      "homepage": "http://github.com/soldair/node-qrcode",
+      "author": "Ryan Day",
+      "description": "QRCode / 2d Barcode api with both server side and client side support using canvas",
+      "versions": [
+        "1.5.4"
+      ]
+    },
+    {
+      "id": "pkg-qs-bsd-3-clause",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "qs",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/ljharb/qs",
+      "description": "A querystring parser that supports nesting and arrays, with a depth limit",
+      "versions": [
+        "6.15.1"
+      ]
+    },
+    {
       "id": "pkg-query-selector-shadow-dom-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -9934,29 +12951,42 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-querystringify-mit",
+      "id": "pkg-race-signal-apache-2-0-or-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "querystringify",
-      "license": "MIT",
-      "homepage": "https://github.com/unshiftio/querystringify",
-      "author": "Arnout Kazemier",
-      "description": "Querystringify - Small, simple but powerful query string parser.",
+      "name": "race-signal",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://github.com/achingbrain/race-signal#readme",
+      "author": "Alex Potsides",
+      "description": "Race a promise against an AbortSignal",
       "versions": [
-        "2.2.0"
+        "2.0.2"
       ]
     },
     {
-      "id": "pkg-quick-lru-mit",
+      "id": "pkg-range-parser-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "quick-lru",
+      "name": "range-parser",
       "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/quick-lru#readme",
-      "author": "Sindre Sorhus",
-      "description": "Simple “Least Recently Used” (LRU) cache",
+      "homepage": "https://github.com/jshttp/range-parser#readme",
+      "author": "TJ Holowaychuk",
+      "description": "Range header field string parser",
       "versions": [
-        "5.1.1"
+        "1.2.1"
+      ]
+    },
+    {
+      "id": "pkg-raw-body-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "raw-body",
+      "license": "MIT",
+      "homepage": "https://github.com/stream-utils/raw-body#readme",
+      "author": "Jonathan Ong",
+      "description": "Get and validate the raw body of a readable stream.",
+      "versions": [
+        "3.0.2"
       ]
     },
     {
@@ -9990,23 +13020,10 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "react",
       "license": "MIT",
-      "homepage": "https://reactjs.org/",
+      "homepage": "https://react.dev/",
       "description": "React is a JavaScript library for building user interfaces.",
       "versions": [
-        "18.3.1"
-      ]
-    },
-    {
-      "id": "pkg-react-day-picker-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "react-day-picker",
-      "license": "MIT",
-      "homepage": "https://daypicker.dev",
-      "author": "Giampaolo Bellavite",
-      "description": "Customizable Date Picker for React",
-      "versions": [
-        "9.13.2"
+        "19.2.0"
       ]
     },
     {
@@ -10015,10 +13032,10 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "react-dom",
       "license": "MIT",
-      "homepage": "https://reactjs.org/",
+      "homepage": "https://react.dev/",
       "description": "React package for working with the DOM.",
       "versions": [
-        "18.3.1"
+        "19.2.0"
       ]
     },
     {
@@ -10061,6 +13078,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-react-is-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "react-is",
+      "license": "MIT",
+      "homepage": "https://reactjs.org/",
+      "description": "Brand checking of React Elements.",
+      "versions": [
+        "16.13.1",
+        "18.3.1"
+      ]
+    },
+    {
       "id": "pkg-react-markdown-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10071,18 +13101,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "React component to render markdown",
       "versions": [
         "10.1.0"
-      ]
-    },
-    {
-      "id": "pkg-react-onesignal-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "react-onesignal",
-      "license": "MIT",
-      "homepage": "https://onesignal.com",
-      "description": "React OneSignal Module: Make it easy to integrate OneSignal with your React App!",
-      "versions": [
-        "3.4.6"
       ]
     },
     {
@@ -10099,6 +13117,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-react-property-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "react-property",
+      "license": "MIT",
+      "homepage": "https://github.com/remarkablemark/react-dom-core#readme",
+      "description": "HTML and SVG DOM property configs used by React.",
+      "versions": [
+        "2.0.2"
+      ]
+    },
+    {
       "id": "pkg-react-refresh-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10107,7 +13137,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://react.dev/",
       "description": "React is a JavaScript library for building user interfaces.",
       "versions": [
-        "0.17.0"
+        "0.18.0"
       ]
     },
     {
@@ -10150,6 +13180,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-react-router-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "react-router",
+      "license": "MIT",
+      "homepage": "https://github.com/remix-run/react-router#readme",
+      "author": "Remix Software",
+      "description": "Declarative routing for React",
+      "versions": [
+        "7.13.0"
+      ]
+    },
+    {
+      "id": "pkg-react-smooth-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "react-smooth",
+      "license": "MIT",
+      "homepage": "https://github.com/recharts/react-smooth#readme",
+      "author": "JasonHzq",
+      "description": "react animation library",
+      "versions": [
+        "4.0.4"
+      ]
+    },
+    {
       "id": "pkg-react-style-singleton-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10163,19 +13219,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-react-syntax-highlighter-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "react-syntax-highlighter",
-      "license": "MIT",
-      "homepage": "https://github.com/react-syntax-highlighter/react-syntax-highlighter#readme",
-      "author": "Conor Hastings",
-      "description": "syntax highlighting component for react with prismjs or highlightjs ast using inline styles",
-      "versions": [
-        "16.1.0"
-      ]
-    },
-    {
       "id": "pkg-react-textarea-autosize-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10186,6 +13229,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "textarea component for React which grows with content",
       "versions": [
         "8.5.9"
+      ]
+    },
+    {
+      "id": "pkg-react-transition-group-bsd-3-clause",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "react-transition-group",
+      "license": "BSD-3-Clause",
+      "homepage": "https://github.com/reactjs/react-transition-group#readme",
+      "description": "A react component toolset for managing animations",
+      "versions": [
+        "4.4.5"
+      ]
+    },
+    {
+      "id": "pkg-react-use-measure-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "react-use-measure",
+      "license": "MIT",
+      "homepage": "https://github.com/pmndrs/react-use-measure",
+      "author": "Paul Henschel",
+      "description": "Utility to measure view bounds",
+      "versions": [
+        "2.1.7"
       ]
     },
     {
@@ -10208,9 +13276,88 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://github.com/paulmillr/readdirp",
       "author": "Thorsten Lorenz",
-      "description": "Recursive version of fs.readdir with small RAM & CPU footprint.",
+      "description": "Recursive version of fs.readdir with small RAM & CPU footprint",
       "versions": [
-        "4.1.2"
+        "4.1.2",
+        "5.0.0"
+      ]
+    },
+    {
+      "id": "pkg-recharts-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "recharts",
+      "license": "MIT",
+      "homepage": "https://github.com/recharts/recharts",
+      "author": "recharts group",
+      "description": "React charts",
+      "versions": [
+        "2.15.4"
+      ]
+    },
+    {
+      "id": "pkg-recharts-scale-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "recharts-scale",
+      "license": "MIT",
+      "homepage": "https://github.com/recharts/recharts-scale",
+      "author": "recharts group",
+      "description": "Scale of Cartesian Coordinates",
+      "versions": [
+        "0.4.5"
+      ]
+    },
+    {
+      "id": "pkg-recma-build-jsx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "recma-build-jsx",
+      "license": "MIT",
+      "homepage": "https://github.com/mdx-js/recma",
+      "author": "Titus Wormer",
+      "description": "recma plugin to add support for parsing and serializing JSX",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-recma-jsx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "recma-jsx",
+      "license": "MIT",
+      "homepage": "https://github.com/mdx-js/recma",
+      "author": "Titus Wormer",
+      "description": "recma plugin to add support for parsing and serializing JSX",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
+      "id": "pkg-recma-parse-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "recma-parse",
+      "license": "MIT",
+      "homepage": "https://github.com/mdx-js/recma",
+      "author": "Titus Wormer",
+      "description": "recma plugin to parse JavaScript",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-recma-stringify-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "recma-stringify",
+      "license": "MIT",
+      "homepage": "https://github.com/mdx-js/recma",
+      "author": "Titus Wormer",
+      "description": "recma plugin to serialize JavaScript",
+      "versions": [
+        "1.0.0"
       ]
     },
     {
@@ -10279,16 +13426,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-rehype-harden-mit",
+      "id": "pkg-regl-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "rehype-harden",
+      "name": "regl",
       "license": "MIT",
-      "homepage": "https://github.com/vercel-labs/markdown-sanitizers#readme",
-      "author": "S. Elliott Johnson",
-      "description": "A security-focused rehype plugin that filters URLs based on allowed prefixes",
+      "homepage": "https://regl-project.github.io/regl",
+      "author": "Mikola Lysenko",
+      "description": "regl is a fast functional WebGL framework.",
       "versions": [
-        "1.1.8"
+        "2.1.1"
       ]
     },
     {
@@ -10305,6 +13452,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-rehype-minify-whitespace-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "rehype-minify-whitespace",
+      "license": "MIT",
+      "homepage": "https://github.com/rehypejs/rehype-minify/tree/main#readme",
+      "author": "Titus Wormer",
+      "description": "rehype plugin to collapse whitespace",
+      "versions": [
+        "6.0.2"
+      ]
+    },
+    {
+      "id": "pkg-rehype-parse-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "rehype-parse",
+      "license": "MIT",
+      "homepage": "https://github.com/rehypejs/rehype",
+      "author": "Titus Wormer",
+      "description": "rehype plugin to parse HTML",
+      "versions": [
+        "9.0.1"
+      ]
+    },
+    {
       "id": "pkg-rehype-raw-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10318,6 +13491,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-rehype-recma-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "rehype-recma",
+      "license": "MIT",
+      "homepage": "https://github.com/mdx-js/recma",
+      "author": "Titus Wormer",
+      "description": "recma plugin to transform HTML (hast) to JS (estree)",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-rehype-remark-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "rehype-remark",
+      "license": "MIT",
+      "homepage": "https://github.com/rehypejs/rehype-remark#readme",
+      "author": "Titus Wormer",
+      "description": "rehype plugin to transform to remark",
+      "versions": [
+        "10.0.1"
+      ]
+    },
+    {
       "id": "pkg-rehype-sanitize-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10328,6 +13527,32 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "rehype plugin to sanitize HTML",
       "versions": [
         "6.0.0"
+      ]
+    },
+    {
+      "id": "pkg-remark-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "remark",
+      "license": "MIT",
+      "homepage": "https://remark.js.org",
+      "author": "Titus Wormer",
+      "description": "markdown processor powered by plugins part of the unified collective",
+      "versions": [
+        "15.0.1"
+      ]
+    },
+    {
+      "id": "pkg-remark-cjk-friendly-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "remark-cjk-friendly",
+      "license": "MIT",
+      "homepage": "https://github.com/tats-u/markdown-cjk-friendly#readme",
+      "author": "Tatsunori Uchino",
+      "description": "remark plugin to make Markdown emphasis (`**`) in CommonMark (and MDX) more friendly with Chinese, Japanese, and Korean (CJK)",
+      "versions": [
+        "2.3.1"
       ]
     },
     {
@@ -10354,6 +13579,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "remark plugin to parse and stringify math",
       "versions": [
         "6.0.0"
+      ]
+    },
+    {
+      "id": "pkg-remark-mdx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "remark-mdx",
+      "license": "MIT",
+      "homepage": "https://mdxjs.com",
+      "author": "Titus Wormer",
+      "description": "remark plugin to support MDX syntax",
+      "versions": [
+        "3.1.1"
       ]
     },
     {
@@ -10449,41 +13687,28 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-requires-port-mit",
+      "id": "pkg-require-main-filename-isc",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "requires-port",
-      "license": "MIT",
-      "homepage": "https://github.com/unshiftio/requires-port",
-      "author": "Arnout Kazemier",
-      "description": "Check if a protocol requires a certain port number to be added to an URL.",
+      "name": "require-main-filename",
+      "license": "ISC",
+      "homepage": "https://github.com/yargs/require-main-filename#readme",
+      "author": "Ben Coe",
+      "description": "shim for require.main.filename() that works in as many environments as possible",
       "versions": [
-        "1.0.0"
+        "2.0.0"
       ]
     },
     {
-      "id": "pkg-resend-mit",
+      "id": "pkg-reselect-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "resend",
+      "name": "reselect",
       "license": "MIT",
-      "homepage": "https://github.com/resend/resend-node#readme",
-      "description": "Node.js library for the Resend API",
+      "homepage": "https://github.com/reduxjs/reselect#readme",
+      "description": "Selectors for Redux.",
       "versions": [
-        "6.6.0"
-      ]
-    },
-    {
-      "id": "pkg-resolve-alpn-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "resolve-alpn",
-      "license": "MIT",
-      "homepage": "https://github.com/szmarczak/resolve-alpn#readme",
-      "author": "Szymon Marczak",
-      "description": "Detects the ALPN protocol",
-      "versions": [
-        "1.2.1"
+        "5.2.0"
       ]
     },
     {
@@ -10500,19 +13725,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-responselike-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "responselike",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/responselike#readme",
-      "author": "lukechilds",
-      "description": "A response-like object for mocking a Node.js HTTP response stream",
-      "versions": [
-        "2.0.1"
-      ]
-    },
-    {
       "id": "pkg-retry-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10522,20 +13734,22 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Tim Koschützki",
       "description": "Abstraction for exponential and custom retry strategies for failed operations.",
       "versions": [
-        "0.12.0"
+        "0.12.0",
+        "0.13.1"
       ]
     },
     {
-      "id": "pkg-roarr-bsd-3-clause",
+      "id": "pkg-rolldown-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "roarr",
-      "license": "BSD-3-Clause",
-      "homepage": "https://github.com/gajus/roarr#readme",
-      "author": "Gajus Kuizinas",
-      "description": "JSON logger for Node.js and browser.",
+      "name": "rolldown",
+      "license": "MIT",
+      "homepage": "https://rolldown.rs/",
+      "description": "Fast JavaScript/TypeScript bundler in Rust with Rollup-compatible API.",
       "versions": [
-        "2.15.4"
+        "1.1.5",
+        "1.2.7",
+        "1.2.11"
       ]
     },
     {
@@ -10552,6 +13766,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-rope-sequence-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "rope-sequence",
+      "license": "MIT",
+      "homepage": "https://github.com/marijnh/rope-sequence#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Rope-based persistent sequence type",
+      "versions": [
+        "1.3.4"
+      ]
+    },
+    {
       "id": "pkg-rou3-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10560,20 +13787,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/h3js/rou3#readme",
       "description": "Lightweight and fast router for JavaScript.",
       "versions": [
-        "0.7.12"
+        "0.8.1",
+        "0.9.2"
       ]
     },
     {
-      "id": "pkg-roughjs-mit",
+      "id": "pkg-router-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "roughjs",
+      "name": "router",
       "license": "MIT",
-      "homepage": "https://roughjs.com",
-      "author": "Preet Shihn",
-      "description": "Create graphics using HTML Canvas or SVG with a hand-drawn, sketchy, appearance.",
+      "homepage": "https://github.com/pillarjs/router#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Simple middleware-style router",
       "versions": [
-        "4.6.6"
+        "2.2.0"
       ]
     },
     {
@@ -10590,16 +13818,29 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-rw-bsd-3-clause",
+      "id": "pkg-run-applescript-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "rw",
-      "license": "BSD-3-Clause",
-      "homepage": "https://github.com/mbostock/rw",
-      "author": "Mike Bostock",
-      "description": "Now stdin and stdout are files.",
+      "name": "run-applescript",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/run-applescript#readme",
+      "author": "Sindre Sorhus",
+      "description": "Run AppleScript and get the result",
       "versions": [
-        "1.3.3"
+        "7.1.0"
+      ]
+    },
+    {
+      "id": "pkg-rxjs-apache-2-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "rxjs",
+      "license": "Apache-2.0",
+      "homepage": "https://rxjs.dev",
+      "author": "Ben Lesh",
+      "description": "Reactive Extensions for modern JavaScript",
+      "versions": [
+        "7.8.2"
       ]
     },
     {
@@ -10660,10 +13901,23 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "scheduler",
       "license": "MIT",
-      "homepage": "https://reactjs.org/",
+      "homepage": "https://react.dev/",
       "description": "Cooperative scheduler for the browser environment.",
       "versions": [
-        "0.23.2"
+        "0.27.0"
+      ]
+    },
+    {
+      "id": "pkg-scroll-into-view-if-needed-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "scroll-into-view-if-needed",
+      "license": "MIT",
+      "homepage": "https://scroll-into-view.dev",
+      "author": "Cody Olsen",
+      "description": "Ponyfill for upcoming Element.scrollIntoView() APIs like scrollMode: if-needed, behavior: smooth and block: center",
+      "versions": [
+        "3.1.0"
       ]
     },
     {
@@ -10690,20 +13944,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "The semantic version parser used by npm.",
       "versions": [
         "6.3.1",
-        "7.7.4"
+        "7.7.4",
+        "7.8.5"
       ]
     },
     {
-      "id": "pkg-semver-compare-mit",
+      "id": "pkg-send-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "semver-compare",
+      "name": "send",
       "license": "MIT",
-      "homepage": "https://github.com/substack/semver-compare",
-      "author": "James Halliday",
-      "description": "compare two semver version strings, returning -1, 0, or 1",
+      "homepage": "https://github.com/pillarjs/send#readme",
+      "author": "TJ Holowaychuk",
+      "description": "Better streaming static file server with Range and conditional-GET support",
       "versions": [
-        "1.0.0"
+        "1.2.1"
       ]
     },
     {
@@ -10720,29 +13975,17 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-serialize-error-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "serialize-error",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/serialize-error#readme",
-      "author": "Sindre Sorhus",
-      "description": "Serialize/deserialize an error into a plain object",
-      "versions": [
-        "7.0.1"
-      ]
-    },
-    {
       "id": "pkg-seroval-mit",
       "kind": "package",
       "scope": "production-dependency",
       "name": "seroval",
       "license": "MIT",
-      "homepage": "https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval",
+      "homepage": "https://seroval.vercel.app",
       "author": "Alexis Munsayac",
       "description": "Stringify JS values",
       "versions": [
-        "1.5.0"
+        "1.6.0",
+        "1.8.1"
       ]
     },
     {
@@ -10751,11 +13994,51 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "seroval-plugins",
       "license": "MIT",
-      "homepage": "https://github.com/lxsmnsyc/seroval/tree/main/packages/plugins",
+      "homepage": "https://seroval.vercel.app/docs/using-plugins",
       "author": "Alexis Munsayac",
       "description": "Stringify JS values",
       "versions": [
-        "1.5.0"
+        "1.6.0",
+        "1.8.0"
+      ]
+    },
+    {
+      "id": "pkg-serve-static-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "serve-static",
+      "license": "MIT",
+      "homepage": "https://github.com/expressjs/serve-static#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Serve static files",
+      "versions": [
+        "2.2.1"
+      ]
+    },
+    {
+      "id": "pkg-server-dom-shim-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "server-dom-shim",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/server-dom-shim#readme",
+      "author": "ocavue",
+      "description": "A simple shim for the server-side DOM API",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "id": "pkg-set-blocking-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "set-blocking",
+      "license": "ISC",
+      "homepage": "https://github.com/yargs/set-blocking#readme",
+      "author": "Ben Coe",
+      "description": "set blocking stdio and stderr ensuring that terminal output does not truncate",
+      "versions": [
+        "2.0.0"
       ]
     },
     {
@@ -10768,7 +14051,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Nathan Friedly",
       "description": "Parses set-cookie headers into objects",
       "versions": [
-        "3.0.1"
+        "2.7.2",
+        "3.1.2"
+      ]
+    },
+    {
+      "id": "pkg-setprototypeof-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "setprototypeof",
+      "license": "ISC",
+      "homepage": "https://github.com/wesleytodd/setprototypeof",
+      "author": "Wes Todd",
+      "description": "A small polyfill for Object.setprototypeof",
+      "versions": [
+        "1.2.0"
       ]
     },
     {
@@ -10798,19 +14095,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-shell-env-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "shell-env",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/shell-env#readme",
-      "author": "Sindre Sorhus",
-      "description": "Get environment variables from the shell",
-      "versions": [
-        "4.0.3"
-      ]
-    },
-    {
       "id": "pkg-shiki-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10820,7 +14104,61 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Pine Wu",
       "description": "A beautiful Syntax Highlighter.",
       "versions": [
-        "3.22.0"
+        "3.22.0",
+        "4.1.0",
+        "4.3.1"
+      ]
+    },
+    {
+      "id": "pkg-side-channel-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "side-channel",
+      "license": "MIT",
+      "homepage": "https://github.com/ljharb/side-channel#readme",
+      "author": "Jordan Harband",
+      "description": "Store information about any JS value in a side channel. Uses WeakMap if available.",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
+      "id": "pkg-side-channel-list-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "side-channel-list",
+      "license": "MIT",
+      "homepage": "https://github.com/ljharb/side-channel-list#readme",
+      "author": "Jordan Harband",
+      "description": "Store information about any JS value in a side channel, using a linked list",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
+      "id": "pkg-side-channel-map-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "side-channel-map",
+      "license": "MIT",
+      "homepage": "https://github.com/ljharb/side-channel-map#readme",
+      "author": "Jordan Harband",
+      "description": "Store information about any JS value in a side channel, using a Map",
+      "versions": [
+        "1.0.1"
+      ]
+    },
+    {
+      "id": "pkg-side-channel-weakmap-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "side-channel-weakmap",
+      "license": "MIT",
+      "homepage": "https://github.com/ljharb/side-channel-weakmap#readme",
+      "author": "Jordan Harband",
+      "description": "Store information about any JS value in a side channel. Uses WeakMap if available.",
+      "versions": [
+        "1.0.2"
       ]
     },
     {
@@ -10877,6 +14215,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-sisteransi-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "sisteransi",
+      "license": "MIT",
+      "homepage": "https://github.com/terkelg/sisteransi#readme",
+      "author": "Terkel Gjervig",
+      "description": "ANSI escape codes for some terminal swag",
+      "versions": [
+        "1.0.5"
+      ]
+    },
+    {
       "id": "pkg-smart-buffer-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -10925,7 +14276,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Nick Fitzgerald",
       "description": "Generates and consumes source maps",
       "versions": [
-        "0.6.1"
+        "0.6.1",
+        "0.7.6"
       ]
     },
     {
@@ -10938,7 +14290,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Valentin 7rulnik Semirulnik",
       "description": "Generates and consumes source maps",
       "versions": [
-        "1.2.1"
+        "1.2.1",
+        "1.2.2"
       ]
     },
     {
@@ -10993,19 +14346,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-sprintf-js-bsd-3-clause",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "sprintf-js",
-      "license": "BSD-3-Clause",
-      "homepage": "https://github.com/alexei/sprintf.js#readme",
-      "author": "Alexandru Mărășteanu",
-      "description": "JavaScript sprintf implementation",
-      "versions": [
-        "1.1.3"
-      ]
-    },
-    {
       "id": "pkg-sqlstring-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11015,6 +14355,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Simple SQL escape and format for MySQL",
       "versions": [
         "2.3.3"
+      ]
+    },
+    {
+      "id": "pkg-srvx-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "srvx",
+      "license": "MIT",
+      "homepage": "https://srvx.h3.dev",
+      "description": "Universal Server.",
+      "versions": [
+        "0.11.22",
+        "1.0.4"
       ]
     },
     {
@@ -11044,6 +14397,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-standardwebhooks-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "standardwebhooks",
+      "license": "MIT",
+      "homepage": "https://github.com/standard-webhooks/standard-webhooks/tree/main/libraries/javascript",
+      "author": "Standard Webhooks",
+      "description": "Standard Webhooks for TypeScript",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-statuses-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "statuses",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/statuses#readme",
+      "description": "HTTP status utility",
+      "versions": [
+        "2.0.2"
+      ]
+    },
+    {
       "id": "pkg-std-env-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11052,20 +14430,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/unjs/std-env#readme",
       "description": "Runtime agnostic JS utils",
       "versions": [
-        "3.10.0"
-      ]
-    },
-    {
-      "id": "pkg-streamdown-apache-2-0",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "streamdown",
-      "license": "Apache-2.0",
-      "homepage": "https://streamdown.ai",
-      "author": "Hayden Bleasel",
-      "description": "A drop-in replacement for react-markdown, designed for AI-powered streaming.",
-      "versions": [
-        "2.5.0"
+        "3.10.0",
+        "4.2.0",
+        "4.3.0"
       ]
     },
     {
@@ -11116,21 +14483,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sindre Sorhus",
       "description": "Strip ANSI escape codes from a string",
       "versions": [
-        "6.0.1",
-        "7.1.2"
-      ]
-    },
-    {
-      "id": "pkg-strip-final-newline-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "strip-final-newline",
-      "license": "MIT",
-      "homepage": "https://github.com/sindresorhus/strip-final-newline#readme",
-      "author": "Sindre Sorhus",
-      "description": "Strip the final newline character from a string/buffer",
-      "versions": [
-        "2.0.0"
+        "6.0.1"
       ]
     },
     {
@@ -11184,6 +14537,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-style-mod-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "style-mod",
+      "license": "MIT",
+      "homepage": "https://github.com/marijnh/style-mod#readme",
+      "author": "Marijn Haverbeke",
+      "description": "A minimal CSS module shim",
+      "versions": [
+        "4.1.3"
+      ]
+    },
+    {
       "id": "pkg-style-to-js-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11210,16 +14576,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-stylis-mit",
+      "id": "pkg-styleq-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "stylis",
+      "name": "styleq",
       "license": "MIT",
-      "homepage": "https://github.com/thysultan/stylis.js",
-      "author": "Sultan Tarimo",
-      "description": "A Light–weight CSS Preprocessor",
+      "homepage": "https://github.com/necolas/styleq#readme",
+      "author": "Nicolas Gallagher",
+      "description": "A quick JavaScript runtime for Atomic CSS compilers.",
       "versions": [
-        "4.4.0"
+        "0.2.1"
       ]
     },
     {
@@ -11236,16 +14602,29 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-svix-mit",
+      "id": "pkg-supports-color-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "svix",
+      "name": "supports-color",
       "license": "MIT",
-      "homepage": "https://github.com/svix/svix-libs#readme",
-      "author": "svix",
-      "description": "Svix webhooks API client and webhook verification library",
+      "homepage": "https://github.com/chalk/supports-color#readme",
+      "author": "Sindre Sorhus",
+      "description": "Detect whether a terminal supports color",
       "versions": [
-        "1.76.1"
+        "11.0.0"
+      ]
+    },
+    {
+      "id": "pkg-suspend-react-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "suspend-react",
+      "license": "MIT",
+      "homepage": "https://github.com/pmndrs/suspend-react#readme",
+      "author": "Paul Henschel",
+      "description": "Integrate React Suspense into your apps",
+      "versions": [
+        "0.1.3"
       ]
     },
     {
@@ -11297,7 +14676,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Dany Castillo",
       "description": "Merge Tailwind CSS classes without style conflicts",
       "versions": [
-        "3.4.0"
+        "3.6.0"
       ]
     },
     {
@@ -11309,7 +14688,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://tailwindcss.com",
       "description": "A utility-first CSS framework for rapidly building custom user interfaces.",
       "versions": [
-        "4.3.0"
+        "4.3.3"
+      ]
+    },
+    {
+      "id": "pkg-tar-blueoak-1-0-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "tar",
+      "license": "BlueOak-1.0.0",
+      "homepage": "https://github.com/isaacs/node-tar#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "tar for node",
+      "versions": [
+        "7.5.7"
       ]
     },
     {
@@ -11352,6 +14744,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-three-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "three",
+      "license": "MIT",
+      "homepage": "https://threejs.org/",
+      "author": "mrdoob",
+      "description": "JavaScript 3D library",
+      "versions": [
+        "0.185.1"
+      ]
+    },
+    {
       "id": "pkg-tiny-invariant-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11378,27 +14783,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-tiny-warning-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "tiny-warning",
-      "license": "MIT",
-      "homepage": "https://github.com/alexreardon/tiny-warning#readme",
-      "author": "Alex Reardon",
-      "description": "A tiny warning function",
-      "versions": [
-        "1.0.3"
-      ]
-    },
-    {
       "id": "pkg-tinybench-mit",
       "kind": "package",
       "scope": "production-dependency",
       "name": "tinybench",
       "license": "MIT",
       "homepage": "https://github.com/tinylibs/tinybench#readme",
+      "description": "🔎 A simple, tiny and lightweight benchmarking library!",
       "versions": [
-        "2.9.0"
+        "2.9.0",
+        "6.2.3"
       ]
     },
     {
@@ -11412,7 +14806,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "A minimal library for executing processes in Node",
       "versions": [
         "0.3.2",
-        "1.1.1"
+        "1.2.4",
+        "1.3.1"
       ]
     },
     {
@@ -11425,7 +14820,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Superchupu",
       "description": "A fast and minimal alternative to globby and fast-glob",
       "versions": [
-        "0.2.15"
+        "0.2.17"
       ]
     },
     {
@@ -11449,7 +14844,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://github.com/tinylibs/tinyrainbow#readme",
       "description": "A small library to print colourful messages.",
       "versions": [
-        "2.0.0"
+        "2.0.0",
+        "3.2.0"
       ]
     },
     {
@@ -11491,16 +14887,29 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-toad-cache-mit",
+      "id": "pkg-toidentifier-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "toad-cache",
+      "name": "toidentifier",
       "license": "MIT",
-      "homepage": "https://github.com/kibertoad/toad-cache",
-      "author": "Igor Savin",
-      "description": "LRU and FIFO caches for Client or Server",
+      "homepage": "https://github.com/component/toidentifier#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Convert a string of words to a JavaScript identifier",
       "versions": [
-        "3.7.0"
+        "1.0.1"
+      ]
+    },
+    {
+      "id": "pkg-topojson-client-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "topojson-client",
+      "license": "ISC",
+      "homepage": "https://github.com/topojson/topojson-client",
+      "author": "Mike Bostock",
+      "description": "Manipulate TopoJSON and convert it to GeoJSON.",
+      "versions": [
+        "3.1.0"
       ]
     },
     {
@@ -11526,7 +14935,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sebastian Mayr",
       "description": "An implementation of the Unicode UTS #46: Unicode IDNA Compatibility Processing",
       "versions": [
-        "5.1.1"
+        "5.1.1",
+        "6.0.0"
       ]
     },
     {
@@ -11543,6 +14953,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-trim-trailing-lines-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "trim-trailing-lines",
+      "license": "MIT",
+      "homepage": "https://github.com/wooorm/trim-trailing-lines#readme",
+      "author": "Titus Wormer",
+      "description": "Remove final line feeds from a string",
+      "versions": [
+        "2.1.0"
+      ]
+    },
+    {
       "id": "pkg-trough-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11556,16 +14979,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-ts-dedent-mit",
+      "id": "pkg-ts-algebra-mit",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "ts-dedent",
+      "name": "ts-algebra",
       "license": "MIT",
-      "homepage": "https://github.com/tamino-martinius/node-ts-dedent#readme",
-      "author": "Tamino Martinius",
-      "description": "TypeScript package which smartly trims and strips indentation from multi-line strings",
+      "homepage": "https://github.com/ThomasAribart/ts-algebra#readme",
+      "author": "Thomas Aribart",
+      "description": "Types on steroids 💊",
       "versions": [
-        "2.2.0"
+        "2.0.0"
       ]
     },
     {
@@ -11574,11 +14997,13 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "tsx",
       "license": "MIT",
-      "homepage": "https://tsx.is",
+      "homepage": "https://tsx.hirok.io",
       "author": "Hiroki Osame",
       "description": "TypeScript Execute (tsx): Node.js enhanced with esbuild to run TypeScript & ESM files",
       "versions": [
-        "4.21.0"
+        "4.21.0",
+        "4.23.7",
+        "4.23.13"
       ]
     },
     {
@@ -11617,9 +15042,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sindre Sorhus",
       "description": "A collection of essential TypeScript types",
       "versions": [
-        "0.13.1",
-        "4.41.0",
-        "5.4.4"
+        "5.8.0"
+      ]
+    },
+    {
+      "id": "pkg-type-is-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "type-is",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/type-is#readme",
+      "description": "Infer the content-type of a request.",
+      "versions": [
+        "2.0.1"
       ]
     },
     {
@@ -11636,6 +15071,18 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-ufo-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "ufo",
+      "license": "MIT",
+      "homepage": "https://github.com/unjs/ufo#readme",
+      "description": "URL utils for humans",
+      "versions": [
+        "1.6.3"
+      ]
+    },
+    {
       "id": "pkg-uint8array-extras-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11649,6 +15096,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-undici-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "undici",
+      "license": "MIT",
+      "homepage": "https://undici.nodejs.org",
+      "description": "An HTTP/1.1 client, written from scratch for Node.js",
+      "versions": [
+        "6.29.1",
+        "7.30.1",
+        "8.12.2",
+        "8.12.3"
+      ]
+    },
+    {
       "id": "pkg-undici-types-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11657,8 +15119,22 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://undici.nodejs.org",
       "description": "A stand-alone types package for Undici",
       "versions": [
-        "6.21.0",
-        "7.16.0"
+        "7.16.0",
+        "8.3.0",
+        "8.9.0"
+      ]
+    },
+    {
+      "id": "pkg-unicode-by-name-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "unicode-by-name",
+      "license": "MIT",
+      "homepage": "https://github.com/ocavue/unicode-by-name#readme",
+      "author": "ocavue",
+      "description": "A list of special Unicode characters",
+      "versions": [
+        "0.2.0"
       ]
     },
     {
@@ -11714,6 +15190,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-unist-util-position-from-estree-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "unist-util-position-from-estree",
+      "license": "MIT",
+      "homepage": "https://github.com/syntax-tree/unist-util-position-from-estree#readme",
+      "author": "Titus Wormer",
+      "description": "unist utility to get a position from an estree node",
+      "versions": [
+        "2.0.0"
+      ]
+    },
+    {
       "id": "pkg-unist-util-remove-position-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11766,32 +15255,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-universal-github-app-jwt-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "universal-github-app-jwt",
-      "license": "MIT",
-      "homepage": "https://github.com/gr2m/universal-github-app-jwt#readme",
-      "author": "Gregor Martynus",
-      "description": "Calculate GitHub App bearer tokens for Node & modern browsers",
-      "versions": [
-        "2.2.2"
-      ]
-    },
-    {
-      "id": "pkg-universal-user-agent-isc",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "universal-user-agent",
-      "license": "ISC",
-      "homepage": "https://github.com/gr2m/universal-user-agent#readme",
-      "author": "Gregor Martynus",
-      "description": "Get a user agent string across all JavaScript Runtime Environments",
-      "versions": [
-        "7.0.3"
-      ]
-    },
-    {
       "id": "pkg-universalify-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11801,7 +15264,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ryan Zimmerman",
       "description": "Make a callback- or promise-based function support both promises and callbacks.",
       "versions": [
-        "0.1.2",
         "2.0.1"
       ]
     },
@@ -11819,6 +15281,31 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-unpipe-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "unpipe",
+      "license": "MIT",
+      "homepage": "https://github.com/stream-utils/unpipe#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Unpipe a stream from all destinations",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "id": "pkg-unplugin-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "unplugin",
+      "license": "MIT",
+      "homepage": "https://unplugin.unjs.io",
+      "description": "Unified plugin system for build tools",
+      "versions": [
+        "3.3.0"
+      ]
+    },
+    {
       "id": "pkg-update-browserslist-db-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11832,16 +15319,16 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-url-parse-mit",
+      "id": "pkg-us-atlas-isc",
       "kind": "package",
       "scope": "production-dependency",
-      "name": "url-parse",
-      "license": "MIT",
-      "homepage": "https://github.com/unshiftio/url-parse#readme",
-      "author": "Arnout Kazemier",
-      "description": "Small footprint URL parser that works seamlessly across Node.js and browser environments",
+      "name": "us-atlas",
+      "license": "ISC",
+      "homepage": "https://github.com/topojson/us-atlas#readme",
+      "author": "Mike Bostock",
+      "description": "Pre-built TopoJSON from the U.S. Census Bureau.",
       "versions": [
-        "1.5.10"
+        "3.0.1"
       ]
     },
     {
@@ -11919,6 +15406,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-utif-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "utif",
+      "license": "MIT",
+      "homepage": "https://github.com/photopea/UTIF.js",
+      "author": "photopea",
+      "description": "Fast and advanced TIFF decoder",
+      "versions": [
+        "3.1.0"
+      ]
+    },
+    {
       "id": "pkg-util-deprecate-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -11942,8 +15442,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "versions": [
         "9.0.1",
         "10.0.0",
-        "11.1.0",
-        "13.0.0"
+        "11.1.0"
       ]
     },
     {
@@ -11970,6 +15469,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "String validation and sanitization",
       "versions": [
         "13.15.35"
+      ]
+    },
+    {
+      "id": "pkg-vary-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "vary",
+      "license": "MIT",
+      "homepage": "https://github.com/jshttp/vary#readme",
+      "author": "Douglas Christopher Wilson",
+      "description": "Manipulate the HTTP Vary header",
+      "versions": [
+        "1.1.2"
       ]
     },
     {
@@ -12025,6 +15537,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-victory-vendor-mit-and-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "victory-vendor",
+      "license": "MIT AND ISC",
+      "homepage": "https://commerce.nearform.com/open-source/victory",
+      "author": "Formidable",
+      "description": "Vendored dependencies for Victory",
+      "versions": [
+        "36.9.2"
+      ]
+    },
+    {
       "id": "pkg-virtua-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -12032,9 +15557,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "license": "MIT",
       "homepage": "https://github.com/inokawa/virtua#readme",
       "author": "inokawa",
-      "description": "A zero-config, fast and small (~3kB) virtual list (and grid) component for React, Vue, Solid and Svelte.",
+      "description": "A zero-config, fast and small virtual list and grid component for React, Vue, Solid, Svelte and Angular.",
       "versions": [
-        "0.49.1"
+        "0.52.7"
       ]
     },
     {
@@ -12047,8 +15572,9 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Evan You",
       "description": "Native-ESM powered web dev build tool",
       "versions": [
-        "6.4.1",
-        "7.3.1"
+        "7.3.1",
+        "8.1.5",
+        "8.2.2"
       ]
     },
     {
@@ -12065,16 +15591,30 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-vitefu-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "vitefu",
+      "license": "MIT",
+      "homepage": "https://github.com/svitejs/vitefu#readme",
+      "description": "Utilities for building frameworks with Vite",
+      "versions": [
+        "1.1.3"
+      ]
+    },
+    {
       "id": "pkg-vitest-mit",
       "kind": "package",
       "scope": "production-dependency",
       "name": "vitest",
       "license": "MIT",
-      "homepage": "https://github.com/vitest-dev/vitest#readme",
+      "homepage": "https://vitest.dev",
       "author": "Anthony Fu",
       "description": "Next generation testing framework powered by Vite",
       "versions": [
-        "3.2.4"
+        "3.2.4",
+        "4.1.11",
+        "5.0.2"
       ]
     },
     {
@@ -12091,6 +15631,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-vscode-jsonrpc-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "vscode-jsonrpc",
+      "license": "MIT",
+      "homepage": "https://github.com/Microsoft/vscode-languageserver-node#readme",
+      "author": "Microsoft Corporation",
+      "description": "A json rpc implementation over streams",
+      "versions": [
+        "9.0.1"
+      ]
+    },
+    {
       "id": "pkg-vue-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -12101,6 +15654,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "The progressive JavaScript framework for building modern web UI.",
       "versions": [
         "3.5.28"
+      ]
+    },
+    {
+      "id": "pkg-w3c-keyname-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "w3c-keyname",
+      "license": "MIT",
+      "homepage": "https://github.com/marijnh/w3c-keyname#readme",
+      "author": "Marijn Haverbeke",
+      "description": "Get a KeyboardEvent.key-style string from an event",
+      "versions": [
+        "2.2.8"
       ]
     },
     {
@@ -12129,6 +15695,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-web-streams-polyfill-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "web-streams-polyfill",
+      "license": "MIT",
+      "homepage": "https://github.com/MattiasBuelens/web-streams-polyfill#readme",
+      "author": "Mattias Buelens",
+      "description": "Web Streams, based on the WHATWG spec reference implementation",
+      "versions": [
+        "3.3.3"
+      ]
+    },
+    {
       "id": "pkg-web-vitals-apache-2-0",
       "kind": "package",
       "scope": "production-dependency",
@@ -12151,7 +15730,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Domenic Denicola",
       "description": "Implements the WebIDL algorithms for converting to and from JavaScript values",
       "versions": [
-        "7.0.0"
+        "7.0.0",
+        "8.0.1"
+      ]
+    },
+    {
+      "id": "pkg-webpack-virtual-modules-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "webpack-virtual-modules",
+      "license": "MIT",
+      "homepage": "https://github.com/sysgears/webpack-virtual-modules#readme",
+      "author": "SysGears INC",
+      "description": "Webpack Virtual Modules",
+      "versions": [
+        "0.6.2"
       ]
     },
     {
@@ -12190,7 +15783,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sebastian Mayr",
       "description": "An implementation of the WHATWG URL Standard's URL API and parsing machinery",
       "versions": [
-        "14.2.0"
+        "14.2.0",
+        "15.1.0"
       ]
     },
     {
@@ -12211,11 +15805,25 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "scope": "production-dependency",
       "name": "which",
       "license": "ISC",
-      "homepage": "https://github.com/isaacs/node-which#readme",
-      "author": "Isaac Z. Schlueter",
+      "homepage": "https://github.com/npm/node-which#readme",
+      "author": "GitHub Inc.",
       "description": "Like which(1) unix command. Find the first instance of an executable in the PATH.",
       "versions": [
-        "2.0.2"
+        "2.0.2",
+        "7.0.0"
+      ]
+    },
+    {
+      "id": "pkg-which-module-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "which-module",
+      "license": "ISC",
+      "homepage": "https://github.com/nexdrew/which-module#readme",
+      "author": "nexdrew",
+      "description": "Find the module object for something that was require()d",
+      "versions": [
+        "2.0.1"
       ]
     },
     {
@@ -12228,7 +15836,21 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Mathias Buus",
       "description": "Node is running but you don't know why? why-is-node-running is here to help you.",
       "versions": [
-        "2.3.0"
+        "2.3.0",
+        "3.2.2"
+      ]
+    },
+    {
+      "id": "pkg-world-atlas-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "world-atlas",
+      "license": "ISC",
+      "homepage": "https://github.com/topojson/world-atlas#readme",
+      "author": "Mike Bostock",
+      "description": "Pre-built TopoJSON from Natural Earth.",
+      "versions": [
+        "2.0.2"
       ]
     },
     {
@@ -12241,6 +15863,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Sindre Sorhus",
       "description": "Wordwrap a string with ANSI escape codes",
       "versions": [
+        "6.2.0",
         "7.0.0"
       ]
     },
@@ -12268,7 +15891,22 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Simple to use, blazing fast and thoroughly tested websocket client and server for Node.js",
       "versions": [
         "8.18.0",
-        "8.19.0"
+        "8.19.0",
+        "8.21.3",
+        "8.22.0"
+      ]
+    },
+    {
+      "id": "pkg-wsl-utils-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "wsl-utils",
+      "license": "MIT",
+      "homepage": "https://github.com/sindresorhus/wsl-utils#readme",
+      "author": "Sindre Sorhus",
+      "description": "Utilities for working with Windows Subsystem for Linux (WSL)",
+      "versions": [
+        "1.0.0"
       ]
     },
     {
@@ -12285,6 +15923,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-xmlbuilder2-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "xmlbuilder2",
+      "license": "MIT",
+      "homepage": "https://github.com/oozcitak/xmlbuilder2",
+      "author": "Ozgur Ozcitak",
+      "description": "An XML builder for node.js",
+      "versions": [
+        "4.0.3"
+      ]
+    },
+    {
       "id": "pkg-xmlchars-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -12298,19 +15949,6 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
-      "id": "pkg-xtend-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "xtend",
-      "license": "MIT",
-      "homepage": "https://github.com/Raynos/xtend",
-      "author": "Raynos",
-      "description": "extend like a boss",
-      "versions": [
-        "4.0.2"
-      ]
-    },
-    {
       "id": "pkg-y18n-isc",
       "kind": "package",
       "scope": "production-dependency",
@@ -12320,6 +15958,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ben Coe",
       "description": "the bare-bones internationalization library used by yargs",
       "versions": [
+        "4.0.3",
         "5.0.8"
       ]
     },
@@ -12334,6 +15973,19 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "description": "Yet Another Linked List",
       "versions": [
         "3.1.1"
+      ]
+    },
+    {
+      "id": "pkg-yallist-blueoak-1-0-0",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "yallist",
+      "license": "BlueOak-1.0.0",
+      "homepage": "https://github.com/isaacs/yallist#readme",
+      "author": "Isaac Z. Schlueter",
+      "description": "Yet Another Linked List",
+      "versions": [
+        "5.0.0"
       ]
     },
     {
@@ -12358,6 +16010,7 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "homepage": "https://yargs.js.org/",
       "description": "yargs the modern, pirate-themed, successor to optimist.",
       "versions": [
+        "15.4.1",
         "17.7.2"
       ]
     },
@@ -12371,20 +16024,8 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Ben Coe",
       "description": "the mighty option parser used by yargs",
       "versions": [
+        "18.1.3",
         "21.1.1"
-      ]
-    },
-    {
-      "id": "pkg-yauzl-mit",
-      "kind": "package",
-      "scope": "production-dependency",
-      "name": "yauzl",
-      "license": "MIT",
-      "homepage": "https://github.com/thejoshwolfe/yauzl",
-      "author": "Josh Wolfe",
-      "description": "yet another unzip library for node",
-      "versions": [
-        "2.10.0"
       ]
     },
     {
@@ -12400,6 +16041,17 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       ]
     },
     {
+      "id": "pkg-zigpty-mit",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "zigpty",
+      "license": "MIT",
+      "homepage": "https://github.com/pithings/zigpty#readme",
+      "versions": [
+        "0.2.1"
+      ]
+    },
+    {
       "id": "pkg-zod-mit",
       "kind": "package",
       "scope": "production-dependency",
@@ -12409,7 +16061,20 @@ export const OPEN_SOURCE_ATTRIBUTION_BUNDLE: OpenSourceAttributionBundle = {
       "author": "Colin McDonnell",
       "description": "TypeScript-first schema declaration and validation library with static type inference",
       "versions": [
-        "4.3.6"
+        "4.6.7"
+      ]
+    },
+    {
+      "id": "pkg-zod-to-json-schema-isc",
+      "kind": "package",
+      "scope": "production-dependency",
+      "name": "zod-to-json-schema",
+      "license": "ISC",
+      "homepage": "https://github.com/StefanTerdell/zod-to-json-schema#readme",
+      "author": "Stefan Terdell",
+      "description": "Converts Zod schemas to Json Schemas",
+      "versions": [
+        "3.25.2"
       ]
     },
     {

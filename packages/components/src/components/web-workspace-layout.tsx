@@ -18,7 +18,7 @@ import {
 import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace-layout-utils';
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { getNavigationSidebarMinWidth } from '@/lib/boot-shell-script';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
 import { WorkspaceCard } from './workspace-frame';
@@ -135,7 +135,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     <div
       ref={setLayoutRoot}
       {...rootProps}
-      className={clsx(
+      className={cn(
         getWebWorkspaceLayoutRootClassName({ surface: 'sidebar' }),
         rootProps.className
       )}

@@ -3,7 +3,7 @@ import { Drawer as DrawerPrimitive } from 'vaul';
 import * as stylex from '@stylexjs/stylex';
 import { ModalContainerProvider, PopupContainerProvider } from '@lody/ui/popup-container';
 
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import { isNativeAppShell, isNativeIOSAppShell } from '@/lib/native-platform';
 import { themeColors } from '../style/theme-colors.stylex';
@@ -213,7 +213,7 @@ const DrawerOverlay = React.forwardRef<
   <DrawerPrimitive.Overlay
     ref={ref}
     data-slot="drawer-overlay"
-    className={clsx(stylex.props(styles.overlay).className, className)}
+    className={cn(stylex.props(styles.overlay).className, className)}
     {...props}
   />
 ));
@@ -297,7 +297,7 @@ function DrawerContent({
       <DrawerPrimitive.Content
         ref={setContentRef}
         data-slot="drawer-content"
-        className={clsx(sx.className, className)}
+        className={cn(sx.className, className)}
         style={mergedStyle}
         {...props}
       >
@@ -331,7 +331,7 @@ function DrawerHeader({
   return (
     <div
       data-slot="drawer-header"
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -348,7 +348,7 @@ function DrawerFooter({
   return (
     <div
       data-slot="drawer-footer"
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       style={sx.style ? { ...sx.style, ...style } : style}
       {...props}
     />
@@ -369,7 +369,7 @@ function DrawerTitle({
   return (
     <DrawerPrimitive.Title
       data-slot="drawer-title"
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       {...props}
       style={sx.style ? { ...sx.style, ...style } : style}
     />
@@ -393,7 +393,7 @@ function DrawerDescription({
   return (
     <DrawerPrimitive.Description
       data-slot="drawer-description"
-      className={clsx(sx.className, className)}
+      className={cn(sx.className, className)}
       {...props}
       style={
         sx.style || fontSize != null

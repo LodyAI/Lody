@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Bot, SquareTerminal } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
@@ -90,7 +90,7 @@ export function AgentIcon({
   const cls = className ?? ICON_GLYPH_BOX_CLASS;
   const fill = stylex.props(iconSurface.glyphFill);
   /** The wrapper the raw registry markup is painted into. */
-  const inlineGlyphClass = clsx(fill.className, cls);
+  const inlineGlyphClass = cn(fill.className, cls);
   if (cliType === 'custom') {
     return <SquareTerminal className={cls} />;
   }

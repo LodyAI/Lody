@@ -1,4 +1,4 @@
-import { clsx } from 'clsx';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { text } from '@lody/ui/tokens/scales.stylex';
 import { sidebarSurface } from './sidebar-surface';
@@ -672,7 +672,7 @@ function reconcileRevealedRowsByGroups(
 // elsewhere in LocalProjectSessionItem, where it's a meaningful distinction.
 function TaskRowTime({ relativeTime, className }: { relativeTime: string; className?: string }) {
   return (
-    <span className={clsx(stylex.props(taskStyles.time).className, className)}>
+    <span className={cn(stylex.props(taskStyles.time).className, className)}>
       <span {...stylex.props(taskStyles.timeText)}>{relativeTime}</span>
     </span>
   );
@@ -831,25 +831,25 @@ const TaskGroupSection = memo(function TaskGroupSection({
   // shared group label.
   const isRepoHeader = group.kind === 'repo';
   const headerTypographyClass = isRepoHeader
-    ? clsx(SIDEBAR_ROW_TEXT_CLASS, stylex.props(taskStyles.repoHeaderWeight).className)
+    ? cn(SIDEBAR_ROW_TEXT_CLASS, stylex.props(taskStyles.repoHeaderWeight).className)
     : stylex.props(taskStyles.groupLabelType).className;
 
   return (
     <div
-      className={clsx(
+      className={cn(
         stylex.props(taskStyles.groupStack).className,
         stylex.props(group.collapsed ? taskStyles.groupSpacingCollapsed : taskStyles.groupSpacing)
           .className
       )}
     >
-      <div className={clsx('group', stylex.props(taskStyles.groupRow).className)}>
+      <div className={cn('group', stylex.props(taskStyles.groupRow).className)}>
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
           data-id={`group:${group.key}`}
           data-scope-item="row"
           data-sidebar-group-key={group.key}
-          className={clsx(
+          className={cn(
             headerTypographyClass,
             stylex.props(
               taskStyles.groupHeader,
@@ -1040,13 +1040,13 @@ const TaskGroupSection = memo(function TaskGroupSection({
                     onPointerDown={(e) => e.stopPropagation()}
                     onBlur={() => commitRename(task.taskId, task.title)}
                     onFocus={(e) => e.currentTarget.select()}
-                    className={clsx(stylex.props(taskStyles.renameInput).className, extraClassName)}
+                    className={cn(stylex.props(taskStyles.renameInput).className, extraClassName)}
                   />
                 ) : (
                   <SidebarSessionTitleText
                     sessionId={task.taskId}
                     selected={showSelectedState}
-                    className={clsx(stylex.props(taskStyles.titleText).className, extraClassName)}
+                    className={cn(stylex.props(taskStyles.titleText).className, extraClassName)}
                   >
                     {task.title}
                   </SidebarSessionTitleText>
@@ -1090,7 +1090,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   data-id={`session:${task.taskId}`}
                   data-scope-item="row"
                   data-sidebar-session-id={task.taskId}
-                  className={clsx(
+                  className={cn(
                     'group',
                     stylex.props(taskStyles.rowBox).className,
                     // Both chat and repo rows are a single line now; the repo row's
@@ -1145,7 +1145,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                   <div {...stylex.props(taskStyles.rowContent)}>
                     <SessionRowLeadingSlot />
                     <div
-                      className={clsx(
+                      className={cn(
                         stylex.props(taskStyles.titleRow).className,
                         SIDEBAR_ROW_TEXT_CLASS,
                         stylex.props(
@@ -1443,7 +1443,6 @@ const TaskGroupSection = memo(function TaskGroupSection({
             >
               <span {...stylex.props(taskStyles.toggleBox)} aria-hidden="true" />
               <span>{showLessLabel}</span>
-
             </button>
           )}
         </div>
@@ -1662,7 +1661,7 @@ export const TaskList = memo(function TaskList({
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={repoIds} strategy={verticalListSortingStrategy}>
           <div
-            className={clsx(stylex.props(taskStyles.listStack, xstyle).className, className)}
+            className={cn(stylex.props(taskStyles.listStack, xstyle).className, className)}
             style={stylex.props(taskStyles.listStack, xstyle).style}
           >
             {groups.map((group, groupIndex) => {

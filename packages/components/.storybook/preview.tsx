@@ -10,7 +10,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
-import '../src/tailwind/index.css';
+import '../src/style/index.css';
 import {
   AuthenticatedConvexContext,
   type AuthenticatedConvexContextValue,
