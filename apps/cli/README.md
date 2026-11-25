@@ -158,10 +158,11 @@ generation for exact-session read grants. The uploader resumes from Roost's
 durable upload state after restart.
 An authorized latest-page read promotes an already queued session between
 upload batches while background sessions continue to make progress.
-Detaching the remote bridge lets the current append settle and stops issuing
-new appends. The remaining work stays in Roost's durable upload state.
-Reattaching the remote bridge resumes incomplete and offline changes from the
-workspace's queue. It does not rescan sessions already processed by this daemon.
+Detaching the remote bridge stops issuing new appends. The publisher retains its
+Roost lease until the dispatched append settles. Local workspace cleanup can
+continue while that request drains and joins a dispatched metadata write before
+closing the repo. Reattaching resumes the workspace queue after the previous
+publisher finishes, with outstanding frames retained in Roost's durable state.
 
 ## Roost cache recovery tests
 

@@ -302,7 +302,16 @@ export function createRoostHistoryReplica(options: RoostHistoryReplicaOptions): 
         let binding = observedBinding ?? options.getBinding();
         let initialGrant: RoostCloudHistoryGrant | undefined;
         if (!binding) {
-          initialGrant = await options.requestGrant(abort.signal);
+          try {
+            const signal = readDeadline
+              ? AbortSignal.any([abort.signal, readDeadline])
+              : abort.signal;
+            initialGrant = await options.requestGrant(signal);
+          } catch (error) {
+            if (error instanceof RoostCloudHistoryRequestError && error.status === 403)
+              throw new Error('Roost history publication could not be confirmed', { cause: error });
+            throw error;
+          }
           binding = observedBinding = initialGrant.binding;
         }
         assertLive();

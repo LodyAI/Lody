@@ -26,7 +26,7 @@ type Options = {
     binding: RoostCloudHistoryBinding,
     signal: AbortSignal
   ) => Promise<RoostCloudHistoryGrant>;
-  readonly isOwned: (sessionId: SessionId) => Promise<boolean>;
+  readonly isOwned: (sessionId: SessionId, signal: AbortSignal) => Promise<boolean>;
   readonly publish: (
     sessionId: SessionId,
     binding: RoostCloudHistoryBinding,
@@ -131,7 +131,7 @@ export class RoostCloudHistoryPublisher {
       if (this.removed.has(sessionId)) {
         await this.options.unpublish(sessionId, this.lifetime.signal);
         this.removed.delete(sessionId);
-      } else if (await this.options.isOwned(sessionId)) {
+      } else if (await this.options.isOwned(sessionId, this.lifetime.signal)) {
         const done = await this.upload(sessionId);
         if (!done && !this.lifetime.signal.aborted) {
           this.pending.set(sessionId, 0);
@@ -229,7 +229,7 @@ export class RoostCloudHistoryPublisher {
         ).id;
     }
     signal.throwIfAborted();
-    if (!(await this.options.isOwned(sessionId))) return true;
+    if (!(await this.options.isOwned(sessionId, signal))) return true;
     const unbind = owner.bindAuth(remoteId, async ({ reason, signal: request }) => {
       const grant = await getGrant(AbortSignal.any([signal, request]), reason === 'unauthorized');
       if (grant.streamUrl !== url) throw new Error('Roost upload grant changed stream');
@@ -260,7 +260,7 @@ export class RoostCloudHistoryPublisher {
           await history.resolve();
           signal.throwIfAborted();
           if (history.observationStream !== source) return false;
-          if (await this.options.isOwned(sessionId))
+          if (await this.options.isOwned(sessionId, signal))
             await this.options.publish(sessionId, binding, signal);
           return true;
         }

@@ -89,6 +89,7 @@ describe('createConversationSession backend seam', () => {
     'append during metadata',
     'earlier metadata changes',
     'publication notice',
+    'grant 403 before publication',
     'grant 503',
     'HEAD 503',
   ])(
@@ -99,7 +100,9 @@ describe('createConversationSession backend seam', () => {
       const editDuringMetadata = startingState === 'earlier metadata changes';
       const updateDuringMetadata = appendDuringMetadata || editDuringMetadata;
       const alreadyPublished = startingState === 'published' || updateDuringMetadata;
-      const discovering = startingState === 'grant 503' || startingState === 'HEAD 503';
+      const discovering = ['grant 403 before publication', 'grant 503', 'HEAD 503'].includes(
+        startingState
+      );
       vi.stubGlobal('indexedDB', new IDBFactory());
       vi.stubGlobal('IDBKeyRange', IDBKeyRange);
       const workspaceId = 'roost-cloud-workspace' as WorkspaceId;
@@ -341,6 +344,8 @@ describe('createConversationSession backend seam', () => {
       const first = open(
         async () => {
           readGrants++;
+          if (startingState === 'grant 403 before publication' && readGrants === 1)
+            throw new RoostCloudHistoryRequestError(403);
           if (startingState === 'grant 503' && readGrants === 1)
             throw new RoostCloudHistoryRequestError(503);
           return {
