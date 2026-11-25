@@ -13,17 +13,17 @@ The owner can opt in on a Mac with `LODY_ENABLE_PASSKEY=1`. Supply both:
   each Mach-O architecture with `lipo`. Universal packaging is not supported.
 - `LODY_PASSKEY_PROVISIONING_PROFILE`: absolute path to an owner-provided Developer
   ID provisioning profile granting Associated Domains for Team `YTRMX32C99` and
-  App ID `ai.lody.desktop`. Keep it outside source control. Electron-builder's Mac
-  signing flow embeds it. The owner must verify profile contents, expiry and the
-  signing identity before publishing.
+  App ID `ai.lody.desktop` (or `ai.lody.desktop.nightly` for Nightly). Keep it outside
+  source control. Electron-builder's Mac signing flow embeds it. The owner must verify
+  profile contents, expiry and the signing identity before publishing.
 
 The addon lands at `Contents/Resources/passkey_bridge.node`, outside ASAR, for the
 public native loader. Electron-builder signs enclosed Mach-O binaries with the
 selected app identity. Generated main entitlements extend the public base with
 `webcredentials:lody.ai`, the application identifier and team identifier.
 The main app retains library validation. Helper entitlements remain the public
-inherit file and receive none of these vault rights. Windows, Linux and Nightly
-app identifiers cannot opt into this association.
+inherit file and receive none of these vault rights. Windows and Linux builds
+cannot opt into this association.
 
 The hook generates files in the per-invocation temporary config directory and
 removes them after packaging. It never edits the public source or its plists.

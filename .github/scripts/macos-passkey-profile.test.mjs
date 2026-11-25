@@ -173,6 +173,31 @@ test('enforces expiry, entitlements, and CLI verification for both PEM and DER c
       { encoding: 'utf8' }
     )
     assert.match(derOutput, new RegExp(cert.cert.fingerprint256))
+
+    const nightlyPlistPath = path.join(dir, 'nightly-profile.plist')
+    writeFileSync(
+      nightlyPlistPath,
+      buildProfilePlist({
+        certsDer: [cert.der],
+        appId: 'YTRMX32C99.ai.lody.desktop.nightly',
+        expirationDate: '2035-01-01T00:00:00Z'
+      }),
+      'utf8'
+    )
+    const nightlyOutput = execFileSync(
+      process.execPath,
+      [
+        scriptPath,
+        '--plist',
+        nightlyPlistPath,
+        '--cert-der',
+        cert.derPath,
+        '--app-id',
+        'YTRMX32C99.ai.lody.desktop.nightly'
+      ],
+      { encoding: 'utf8' }
+    )
+    assert.match(nightlyOutput, new RegExp(cert.cert.fingerprint256))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
