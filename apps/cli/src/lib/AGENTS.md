@@ -11,6 +11,31 @@ Credential JSON publication creates an exclusive 0600 temporary file and atomica
 replaces its destination on POSIX. New state roots use 0700; existing custom
 directories keep their permissions. Windows retains direct file writes.
 
+## Machine identity
+
+- `credentials-file.ts` owns the sole V3 `credentials.json` schema and atomic read/write
+  helpers; `machine-identity.ts` owns `machine-id` and the host-bound backup anchor
+  (`$XDG_STATE_HOME/<ns>/machine-identity.json` or `%LOCALAPPDATA%/<ns>/machine-identity.json`).
+  Precedence is always: valid v3 `credentials.json` > `machine-id` > host-fingerprint-verified
+  anchor > deterministic HMAC-SHA256 UUIDv5 (`namespace` + OS user + hardware ID) >
+  `crypto.randomUUID()`.
+- Host anchor and hardware recovery apply ONLY to the default installation data dir
+  (`LODY_DATA_DIR` unset and resolved root equals `getLodyDataDir()`). The anchor stores
+  `sha256(platform + rawHardwareId)`, never the raw hardware ID, and rejects mismatched hosts
+  so cloned home directories never share an identity. Linux containers (`/.dockerenv`,
+  `/run/.containerenv`) skip `/etc/machine-id`.
+- Failure containment and startup ordering: warm-path anchor sync skips OS hardware probes;
+  transient hardware-probe failures are never cached; anchor I/O degrades silently.
+  Telemetry (`instrument.ts`, `analytics/posthog.ts`) must use read-only
+  `readExistingMachineId()` so it never creates `machine-id`/anchor before
+  `applyPendingMachineIdentityRestore` or `lody machine restore-id`.
+- `auth.ts` (`saveAuthInfo`, `logout`, `clearRejectedToken`) persists `machine-id` before
+  removing `credentials.json`. Offline `restoreLocalMachineId` refuses while any local host
+  lease is active on the default data dir, refuses corrupt `credentials.json`, backs up prior
+  files under `identity-restore-backups/manual-*` (`0700`/`0600`), and force-refreshes the
+  anchor; online `applyPendingMachineIdentityRestore` commits only before runtime startup and
+  retains intent + backup until both files and anchor are published.
+
 ## Composition and transports
 
 - Encrypted local RPC allows iOS simulators; `session/dispatch-turn` stays blocked.

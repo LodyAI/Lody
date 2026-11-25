@@ -1,16 +1,35 @@
+import { randomBytes, randomUUID } from 'node:crypto';
+import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { MachineIdentityRestoreIntent } from '@lody/cloud-api';
-import { deriveConvexSiteUrl, normalizeBaseUrl } from '@lody/shared';
+import { deriveConvexSiteUrl, normalizeBaseUrl, type MachineId } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
-import { isCustomLodyDataDir, syncMachineIdentityAnchor } from '@/utils/machine-identity-store';
 import {
-  CLI_EXIT_CODE_RETRYABLE_STARTUP,
+  inspectLocalCliHost,
+  type LocalCliHostRecord,
+} from '@lody/shared/node/local-cli-host-lease';
+import {
   CLI_EXIT_CODE_AUTH_FAILURE,
+  CLI_EXIT_CODE_RETRYABLE_STARTUP,
 } from '@lody/shared/node/local-cli-supervisor';
+import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
+import {
+  CredentialsV3Schema,
+  getCredentialsFilePath,
+  MachineIdSchema,
+  readCredentialsFileStrict,
+  writeCredentialsFile,
+} from './credentials-file';
+import {
+  getMachineIdFilePath,
+  isDefaultLodyDataDir,
+  parseMachineId,
+  persistMachineId,
+  readAnchorMachineId,
+} from './machine-identity';
+import { writePrivateCredentialFile } from './private-credential-file';
 
 export class MachineIdentityRestoreError extends Error {
   constructor(
@@ -33,21 +52,13 @@ export function machineIdentityRestoreStartupExitCode(error: unknown): number {
 const IntentSchema = z
   .object({
     workspaceId: z.string().min(1),
-    sourceMachineId: z.string().min(1),
-    targetMachineId: z.string().min(1),
+    sourceMachineId: MachineIdSchema,
+    targetMachineId: MachineIdSchema,
     requestId: z.string().regex(/^[a-zA-Z0-9-]{1,100}$/),
     requesterUserId: z.string().min(1),
   })
   .strict();
 type Intent = MachineIdentityRestoreIntent;
-const CredentialsSchema = z
-  .object({
-    version: z.literal(3),
-    token: z.string().min(1),
-    user: z.object({ id: z.string().min(1) }).passthrough(),
-    machine: z.object({ machineId: z.string().min(1), machineName: z.string() }).passthrough(),
-  })
-  .passthrough();
 
 async function readOptional(file: string): Promise<string | null> {
   try {
@@ -58,10 +69,26 @@ async function readOptional(file: string): Promise<string | null> {
   }
 }
 
-async function atomicWrite(file: string, bytes: string): Promise<void> {
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await fs.writeFile(temporary, bytes, { mode: 0o600 });
-  await fs.rename(temporary, file);
+function readOptionalSync(file: string): string | null {
+  try {
+    return fsSync.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function writeIdentityBackupFiles(
+  backupDir: string,
+  files: { credentialsRaw?: string | null; machineIdRaw?: string | null }
+): void {
+  fsSync.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  if (files.credentialsRaw != null) {
+    writePrivateCredentialFile(path.join(backupDir, 'credentials.json'), files.credentialsRaw);
+  }
+  if (files.machineIdRaw != null) {
+    writePrivateCredentialFile(path.join(backupDir, 'machine-id'), files.machineIdRaw);
+  }
 }
 
 /** An accepted restart owns this intent. No running runtime changes identity. */
@@ -69,8 +96,8 @@ export async function prepareMachineIdentityRestore(input: Intent, root = getLod
   const intent = IntentSchema.parse(input);
   if (intent.sourceMachineId === intent.targetMachineId)
     throw new Error('Choose a different machine identity.');
-  const credentials = CredentialsSchema.parse(
-    JSON.parse(await fs.readFile(path.join(root, 'credentials.json'), 'utf8'))
+  const credentials = CredentialsV3Schema.parse(
+    JSON.parse(await fs.readFile(getCredentialsFilePath(root), 'utf8'))
   );
   if (
     credentials.user.id !== intent.requesterUserId ||
@@ -139,10 +166,9 @@ export async function applyPendingMachineIdentityRestore(
   if (options.readOnly)
     throw new Error('A pending machine identity restore must finish before a managed update.');
   const intent = IntentSchema.parse(JSON.parse(original));
-  const credentialsPath = path.join(root, 'credentials.json');
-  const credentials = CredentialsSchema.parse(
-    JSON.parse(await fs.readFile(credentialsPath, 'utf8'))
-  );
+  const credentialsPath = getCredentialsFilePath(root);
+  const rawCredentials = await fs.readFile(credentialsPath, 'utf8');
+  const credentials = CredentialsV3Schema.parse(JSON.parse(rawCredentials));
   if (
     credentials.user.id !== intent.requesterUserId ||
     ![intent.sourceMachineId, intent.targetMachineId].includes(credentials.machine.machineId)
@@ -157,13 +183,11 @@ export async function applyPendingMachineIdentityRestore(
   // Retain the original credentials before any remote or local mutation. Exact retries
   // use the same request id even if the previous commit response was lost.
   const backup = path.join(root, 'identity-restore-backups', intent.requestId);
-  await fs.mkdir(backup, { recursive: true, mode: 0o700 });
   const backupCredentials = path.join(backup, 'credentials.json');
   if ((await readOptional(backupCredentials)) === null) {
     if (credentials.machine.machineId !== intent.sourceMachineId)
       throw new Error('Identity restore backup is missing.');
-    await fs.copyFile(credentialsPath, backupCredentials, fs.constants.COPYFILE_EXCL);
-    await fs.chmod(backupCredentials, 0o600);
+    writeIdentityBackupFiles(backup, { credentialsRaw: rawCredentials });
   }
   let response: Response;
   try {
@@ -211,17 +235,157 @@ export async function applyPendingMachineIdentityRestore(
   // Keep the intent until both files are published. After an interrupted write,
   // the next worker reconfirms this exact commit and rewrites both files before
   // any runtime starts; it never relies on getSystemMachineId to run first.
-  await atomicWrite(
-    credentialsPath,
-    JSON.stringify(
-      { ...credentials, machine: { ...credentials.machine, machineId: intent.targetMachineId } },
-      null,
-      2
-    )
+  writeCredentialsFile(
+    { ...credentials, machine: { ...credentials.machine, machineId: intent.targetMachineId } },
+    root
   );
-  await atomicWrite(path.join(root, 'machine-id'), intent.targetMachineId);
-  if (!isCustomLodyDataDir() && path.resolve(root) === path.resolve(getLodyDataDir())) {
-    syncMachineIdentityAnchor(intent.targetMachineId, { forceRefreshFingerprint: true });
-  }
+  persistMachineId(intent.targetMachineId, { dataDir: root, forceRefreshAnchor: true });
   await fs.rename(file, path.join(backup, 'completed.json'));
+}
+
+export type RestoreLocalMachineIdResult =
+  | {
+      ok: true;
+      changed: false;
+      targetMachineId: MachineId;
+      previousMachineId: MachineId | null;
+      previousCredentialMachineId: MachineId | null;
+      credentialsUpdated: false;
+      anchorUpdated: false;
+      backupDir: null;
+    }
+  | {
+      ok: true;
+      changed: true;
+      targetMachineId: MachineId;
+      previousMachineId: MachineId | null;
+      previousCredentialMachineId: MachineId | null;
+      credentialsUpdated: boolean;
+      anchorUpdated: boolean;
+      backupDir: string | null;
+    };
+
+function formatRunningHostError(host: LocalCliHostRecord): string {
+  if (host.mode === 'electron') {
+    return `Cannot restore machine ID while the Lody desktop app is running (pid ${host.pid}). Quit the Lody desktop app completely and retry.`;
+  }
+  if (host.mode === 'daemon') {
+    return `Cannot restore machine ID while the Lody daemon is running (pid ${host.pid}). Stop it with \`lody daemon stop\` and retry.`;
+  }
+  return `Cannot restore machine ID while a local \`lody start\` process is running (pid ${host.pid}). Stop it and retry.`;
+}
+
+function formatBackupTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+    '-',
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
+  ].join('');
+}
+
+/**
+ * Offline recovery for reinstalling or restoring a known previous machine ID.
+ * Refuses while a local host lease is active on the default data dir, backs up
+ * prior files, and atomically updates `credentials.json`, `machine-id`, and anchor.
+ */
+export async function restoreLocalMachineId(
+  targetMachineIdInput: string
+): Promise<RestoreLocalMachineIdResult> {
+  const targetMachineId = parseMachineId(targetMachineIdInput);
+  const dataDir = getLodyDataDir();
+  const defaultDataDir = isDefaultLodyDataDir(dataDir);
+
+  if (defaultDataDir) {
+    const runningHost = await inspectLocalCliHost();
+    if (runningHost) {
+      throw new Error(formatRunningHostError(runningHost));
+    }
+  }
+
+  const rawMachineId = readOptionalSync(getMachineIdFilePath(dataDir));
+  const previousMachineId = rawMachineId?.trim() ? (rawMachineId.trim() as MachineId) : null;
+  const existingCreds = readCredentialsFileStrict(dataDir);
+  const previousCredentialMachineId = existingCreds?.credentials.machine.machineId ?? null;
+  const existingAnchorMachineId = defaultDataDir ? readAnchorMachineId() : null;
+
+  const machineIdMatches = previousMachineId === targetMachineId;
+  const credentialsMatch = !existingCreds || previousCredentialMachineId === targetMachineId;
+  const anchorMatches = !defaultDataDir || existingAnchorMachineId === targetMachineId;
+
+  if (machineIdMatches && credentialsMatch && anchorMatches) {
+    const anchorUpdated = defaultDataDir
+      ? persistMachineId(targetMachineId, { dataDir, forceRefreshAnchor: true }).anchorStatus ===
+        'updated'
+      : false;
+    if (!anchorUpdated) {
+      return {
+        ok: true,
+        changed: false,
+        targetMachineId,
+        previousMachineId,
+        previousCredentialMachineId,
+        credentialsUpdated: false,
+        anchorUpdated: false,
+        backupDir: null,
+      };
+    }
+    return {
+      ok: true,
+      changed: true,
+      targetMachineId,
+      previousMachineId,
+      previousCredentialMachineId,
+      credentialsUpdated: false,
+      anchorUpdated: true,
+      backupDir: null,
+    };
+  }
+
+  fsSync.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+
+  let backupDir: string | null = null;
+  if (rawMachineId !== null || existingCreds !== null) {
+    const backupName = `manual-${formatBackupTimestamp(new Date())}-${randomBytes(2).toString('hex')}`;
+    backupDir = path.join(dataDir, 'identity-restore-backups', backupName);
+    writeIdentityBackupFiles(backupDir, {
+      machineIdRaw: rawMachineId,
+      credentialsRaw: existingCreds?.raw ?? null,
+    });
+  }
+
+  let credentialsUpdated = false;
+  if (existingCreds) {
+    writeCredentialsFile(
+      {
+        ...existingCreds.credentials,
+        machine: {
+          ...existingCreds.credentials.machine,
+          machineId: targetMachineId,
+        },
+      },
+      dataDir
+    );
+    credentialsUpdated = true;
+  }
+
+  const { anchorStatus } = persistMachineId(targetMachineId, {
+    dataDir,
+    forceRefreshAnchor: true,
+  });
+
+  return {
+    ok: true,
+    changed: true,
+    targetMachineId,
+    previousMachineId,
+    previousCredentialMachineId,
+    credentialsUpdated,
+    anchorUpdated: anchorStatus === 'updated',
+    backupDir,
+  };
 }
