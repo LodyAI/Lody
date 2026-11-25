@@ -104,6 +104,7 @@ const STATES: SessionAutoDelivery[] = (
     { state: 'stalled', reason: 'ci_limit' },
     { state: 'stalled', reason: 'merge_blocked' },
     { state: 'stalled', reason: 'no_new_commit' },
+    { state: 'stalled', reason: 'request_blocked', blockReason: 'permission_unconfirmed' },
     { state: 'stalled', reason: 'stopped' },
   ] as const
 ).map((status) => ({ ...status, updatedAt: 1_700_000_000_000 }));

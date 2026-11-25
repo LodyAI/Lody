@@ -83,6 +83,7 @@ export type SessionAutoDeliveryStallReason =
   | 'multiple_prs'
   | 'workspace_unpushed'
   | 'stopped'
+  | 'request_blocked'
   | 'request_failed';
 
 export type SessionAutoDelivery = {
@@ -90,6 +91,8 @@ export type SessionAutoDelivery = {
   /** 1-based count of the current kind of request (`fix` or `conflict`). */
   attempt?: number;
   reason?: SessionAutoDeliveryStallReason;
+  /** Underlying automation block reason when `reason === 'request_blocked'`. */
+  blockReason?: string;
   prUrl?: string;
   /** 1-based position of `prUrl` when delivering multiple PRs sequentially. */
   prIndex?: number;

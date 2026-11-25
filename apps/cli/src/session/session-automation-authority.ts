@@ -37,6 +37,7 @@ export class SessionAutomationAuthority {
     }
   ) {}
 
+  private observations: import('./automation-observations').AutomationObservationSink | undefined;
   private pendingAutomationWork:
     | ((sessionId: string, excludingInvocationId?: string) => boolean)
     | undefined;
@@ -46,7 +47,11 @@ export class SessionAutomationAuthority {
   setObservations(
     sink: import('./automation-observations').AutomationObservationSink | undefined
   ): void {
+    this.observations = sink;
     this.deps.execution.setAutomationObservations(sink);
+  }
+  notifyNativeIdle(sessionId: SessionId): void {
+    this.observations?.idle?.(sessionId);
   }
   refreshCapacity(bindingId: string) {
     return this.deps.execution.refreshProviderRateLimits(

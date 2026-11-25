@@ -143,4 +143,28 @@ describe('SessionContinuationNote', () => {
     });
     expect(onTurnOff).toHaveBeenCalledTimes(1);
   });
+
+  it('surfaces a blocked Auto delivery receipt with its localized or fallback reason', () => {
+    act(() => {
+      root.render(
+        withTestI18n(
+          <SessionAutoDeliveryNote
+            status={{
+              state: 'stalled',
+              reason: 'request_blocked',
+              blockReason: 'native_activity_unobserved',
+              updatedAt: NOW,
+            }}
+            now={NOW}
+            onTurnOff={() => {}}
+          />,
+          testI18n
+        )
+      );
+    });
+
+    const note = container.querySelector('[data-auto-delivery-state="stalled"]');
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('native_activity_unobserved');
+  });
 });

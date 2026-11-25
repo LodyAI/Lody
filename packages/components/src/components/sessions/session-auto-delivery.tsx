@@ -339,6 +339,26 @@ export function AutoDeliveryDialog({
   );
 }
 
+function autoDeliveryStallReasonLabel(status: SessionAutoDelivery, t: TFunction): string {
+  if (status.reason === 'request_blocked') {
+    if (status.blockReason) {
+      const key = `sessions.autoDelivery.blockReason.${status.blockReason}`;
+      const translated = t(key, { defaultValue: '' });
+      if (translated) return translated;
+      const fallback = t('sessions.autoDelivery.reason.request_blocked', {
+        defaultValue: '请求被阻塞，暂无法下发',
+      });
+      return `${fallback} (${status.blockReason})`;
+    }
+    return t('sessions.autoDelivery.reason.request_blocked', {
+      defaultValue: '请求被阻塞，暂无法下发',
+    });
+  }
+  return t(`sessions.autoDelivery.reason.${status.reason ?? 'request_failed'}`, {
+    defaultValue: status.reason ?? '',
+  });
+}
+
 export function autoDeliveryStatusLabel(status: SessionAutoDelivery, t: TFunction): string {
   switch (status.state) {
     case 'pr':
@@ -364,9 +384,7 @@ export function autoDeliveryStatusLabel(status: SessionAutoDelivery, t: TFunctio
     case 'stalled':
       return t('sessions.autoDelivery.state.stalled', {
         defaultValue: '停住了，等你：{{reason}}',
-        reason: t(`sessions.autoDelivery.reason.${status.reason ?? 'request_failed'}`, {
-          defaultValue: status.reason ?? '',
-        }),
+        reason: autoDeliveryStallReasonLabel(status, t),
       });
   }
 }
@@ -464,6 +482,7 @@ export function SessionAutoDeliveryNote({
   const hasUpdatedAt = now !== undefined && status.updatedAt > 0;
   const showOptions = !merged && Boolean(options) && Boolean(onOptionsChange);
   const hasPrUrl = Boolean(status.prUrl);
+  const hasBlockReason = Boolean(status.blockReason);
 
   return (
     <SessionAutomationNoteShell
@@ -477,13 +496,20 @@ export function SessionAutoDeliveryNote({
       dataAttributes={{ 'data-auto-delivery-state': status.state }}
       role="status"
       popoverBody={
-        hasPrUrl || hasUpdatedAt || showOptions ? (
+        hasPrUrl || hasUpdatedAt || hasBlockReason || showOptions ? (
           <div {...stylex.props(styles.popoverSection)}>
             {status.prUrl ? (
               <SessionAutomationNoteRow
                 icon={GitPullRequestArrow}
                 label={t('sessions.autoDelivery.currentPr', 'Current PR')}
                 value={shortPrLabel(status.prUrl)}
+              />
+            ) : null}
+            {status.blockReason ? (
+              <SessionAutomationNoteRow
+                icon={AlertTriangle}
+                label={t('sessions.autoDelivery.blockDetail', 'Blocked reason')}
+                value={status.blockReason}
               />
             ) : null}
             {hasUpdatedAt ? (

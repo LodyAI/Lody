@@ -4805,6 +4805,7 @@ export class MessageHandler {
 
     this.sessionManager.on('onNativeWorkChanged', (sessionId, work) => {
       this.sessionActivePresence.native.setNativeWork(sessionId, work);
+      if (work === null) this.automationSessionAuthority?.notifyNativeIdle(sessionId);
     });
 
     this.sessionManager.on('onSessionTitleUpdate', (sessionId, title) => {
@@ -13100,7 +13101,11 @@ export class MessageHandler {
       nativeActivity: (sessionId) => {
         const session = this.sessionManager.getSession(sessionId);
         if (!session || session.hasLiveAgentProcess?.() === false) return 'idle';
-        return session.agentClient ? session.agentClient.getNativeActivityObservation() : 'idle';
+        const observation = session.agentClient?.getNativeActivityObservation();
+        if (!observation || observation === 'unsupported') {
+          return this.sessionActivePresence.native.hasLateActivity(sessionId) ? 'running' : 'idle';
+        }
+        return observation;
       },
       author: (sessionId) =>
         this.executionService.getActiveInvocationContext(sessionId)?.requesterUserId,

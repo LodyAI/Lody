@@ -65,7 +65,10 @@
 - Auto delivery requests only the existing quick-action text and facts the agent
   cannot discover, admitted under Session group settlement and a current-head guard.
   The daemon never mutates GitHub. Keep its per-kind repair limit and one merge
-  request per head; exhausted limits stop with a reason, never retry.
+  request per head; exhausted limits stop with a reason, never retry. Non-busy
+  receipt blocks surface as `stalled` (`request_blocked` + `blockReason`) without
+  ending the enablement, while agents without Core `sessionActivity` v1 follow the
+  shared `lateActivity` presence contract rather than stalling as unobserved.
   [Spec](../../../../specs/session-auto-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools

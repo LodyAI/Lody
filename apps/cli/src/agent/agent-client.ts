@@ -2620,13 +2620,10 @@ export class AgentClient implements acp.Client {
     return this.getNativeWork() !== null;
   }
 
-  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unknown' {
-    if (
-      !this.reportsSessionActivity() ||
-      !this.nativeActivity ||
-      this.nativeActivity.sessionId !== this.acpSessionId
-    )
-      return 'unknown';
+  getNativeActivityObservation(): 'idle' | 'running' | 'background' | 'unsupported' {
+    if (!this.reportsSessionActivity()) return 'unsupported';
+    // Core `sessionActivity` v1 uses replace semantics: no update yet for the active
+    // ACP session means idle with no background tasks.
     return this.getNativeWork() ?? 'idle';
   }
 

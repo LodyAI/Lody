@@ -187,14 +187,14 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
     });
     await builtin.client.startSession({} as never, '/synthetic/project');
     expect(builtin.client.reportsSessionActivity()).toBe(false);
-    expect(builtin.client.getNativeActivityObservation()).toBe('unknown');
+    expect(builtin.client.getNativeActivityObservation()).toBe('unsupported');
 
     const customModern = createHarness({
       agentConfig: { cliType: 'custom', agentType: 'my-agy' },
     });
     await customModern.client.startSession({} as never, '/synthetic/project');
     expect(customModern.client.reportsSessionActivity()).toBe(false);
-    expect(customModern.client.getNativeActivityObservation()).toBe('unknown');
+    expect(customModern.client.getNativeActivityObservation()).toBe('unsupported');
 
     mockState.prompt.mockResolvedValueOnce({
       stopReason: 'end_turn',
@@ -240,7 +240,7 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
     });
     await customLegacy.client.startSession({} as never, '/synthetic/project');
     expect(customLegacy.client.reportsSessionActivity()).toBe(false);
-    expect(customLegacy.client.getNativeActivityObservation()).toBe('unknown');
+    expect(customLegacy.client.getNativeActivityObservation()).toBe('unsupported');
     await expect(
       customLegacy.client.unstable_createElicitation(elicitationParams)
     ).resolves.toEqual({ action: 'cancel' });
@@ -328,6 +328,8 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
     const harness = createHarness();
     await harness.client.startSession({} as never, '/synthetic/project');
     expect(harness.client.reportsSessionActivity()).toBe(true);
+    // Core sessionActivity v1 uses replace semantics: before any update, default is idle.
+    expect(harness.client.getNativeActivityObservation()).toBe('idle');
 
     await mockState.client?.extNotification?.('_lody/session/activity_update', {
       version: 1,
@@ -336,6 +338,7 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
       backgroundTaskCount: 1,
     });
     expect(harness.client.getNativeWork()).toBe('background');
+    expect(harness.client.getNativeActivityObservation()).toBe('background');
     expect(harness.client.hasUnsettledNativeWork()).toBe(true);
 
     await mockState.client?.extNotification?.('_lody/session/activity_update', {
@@ -345,6 +348,7 @@ describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => 
       backgroundTaskCount: 0,
     });
     expect(harness.client.getNativeWork()).toBeNull();
+    expect(harness.client.getNativeActivityObservation()).toBe('idle');
     expect(harness.client.hasUnsettledNativeWork()).toBe(false);
     expect(harness.workChanges).toEqual(['background', null]);
   });

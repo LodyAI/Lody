@@ -518,6 +518,142 @@ describe('Automation control authority', () => {
     expect(host.ledger.receipt(request.id)?.state).toBe('cancelled');
     expect(host.ledger.hasSessionWork('session-a')).toBe(false);
   });
+  it('surfaces a blocked Auto delivery receipt in SessionMeta and wakes immediately on idle', async () => {
+    vi.useFakeTimers();
+    let settledState: { value: 'yes' | 'no' | 'unknown'; reason: string } = {
+      value: 'unknown',
+      reason: 'native_activity_unobserved',
+    };
+    let onIdle: ((sessionId: SessionId) => void) | undefined;
+    const prUrl = 'https://github.com/owner/project/pull/42';
+    const meta: Record<string, unknown> = {
+      id: 'session-a',
+      machineId: 'machine',
+      userId: 'user',
+      cliType: 'builtin',
+      agentType: 'antigravity',
+      collaborationStopped: false,
+      pullRequests: [{ url: prUrl, status: 'open' }],
+      autoDelivery: undefined,
+    };
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-automation-blocked-'));
+    roots.push(root);
+    vi.stubEnv('LODY_DATA_DIR', root);
+    const noop = () => {};
+    const logger: Logger = {
+      debug: noop,
+      trace: noop,
+      info: noop,
+      warn: noop,
+      error: noop,
+      success: noop,
+      setLevel: noop,
+      setDebug: noop,
+      child: () => logger,
+      close: async () => {},
+    };
+    const repo = {
+      getDocMeta: async (room: string) =>
+        room === getSessionRoomId('session-a' as SessionId) ? { meta } : undefined,
+      upsertDocMeta: async (room: string, patch: Record<string, unknown>) => {
+        if (room !== getSessionRoomId('session-a' as SessionId)) throw new Error('Unknown session');
+        Object.assign(meta, patch);
+      },
+      flush: async () => {},
+    };
+    const doc = new SessionDocument(
+      repo as never,
+      'session-a' as SessionId,
+      async () => {},
+      logger
+    );
+    composeTestSessionDoc(doc);
+    let admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined;
+    const authority = {
+      author: () => 'user',
+      canEdit: async () => 'yes' as const,
+      setPendingWork: noop,
+      setObservations: (sink?: { idle?(sessionId: SessionId): void }) => {
+        onIdle = sink?.idle;
+      },
+      setAdmission: (check: typeof admit) => {
+        admit = check;
+      },
+      settled: async () => settledState,
+      acceptInput: (args: {
+        sessionId: SessionId;
+        turnId: string;
+        userId: string;
+        config: SessionTurnInputConfig;
+      }) => {
+        const origin = args.config._lodyAutomation;
+        return origin && admit ? admit({ ...args, origin }) : Promise.resolve(false);
+      },
+      inputDisposition: () => 'unsubmitted',
+      cancelInput: async () => true,
+    };
+    const host = await createAutomationWorkspaceLegacy({
+      lody: {
+        documentManager: {
+          repo,
+          isEncryptedWorkspace: () => false,
+          signMachineInput: async () => undefined,
+          getOrCreateSessionDoc: async () => doc,
+          getAgentConfigForMachineLaunch: async () => undefined,
+        },
+        hasAutomationSessionWork: () => false,
+        resolveAutomationWorkdir: async () => root,
+        getAutomationSessionAuthority: () => authority,
+      } as unknown as Lody,
+      workspace: { id: 'workspace', name: 'synthetic', slug: 'synthetic' } as WorkspaceSummary,
+      auth: {
+        token: 'token',
+        userId: 'user',
+        userName: 'User',
+        userEmail: 'user@example.com',
+        machineId: 'machine',
+      } as AuthContext,
+      logger,
+    });
+    owners.push(host);
+    await host.recordObservations(
+      meta as never,
+      'owner/project',
+      [
+        {
+          number: 42,
+          url: prUrl,
+          status: 'open',
+          headSha: 'a'.repeat(40),
+          headRefName: 'fix/test',
+          ciState: 's',
+          mergeState: 'c',
+          updatedAt: new Date(Date.now()).toISOString(),
+        },
+      ],
+      Date.now()
+    );
+    await host.command({
+      type: 'configure',
+      sessionId: 'session-a',
+      settings: { autoDeliver: { fixCi: true, resolveConflicts: true, merge: true } },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(meta.autoDelivery).toMatchObject({
+      state: 'stalled',
+      reason: 'request_blocked',
+      blockReason: 'native_activity_unobserved',
+      prUrl,
+    });
+
+    // Once the agent settles, notifying idle wakes delivery immediately (well before the 15s cap).
+    settledState = { value: 'yes', reason: 'group_settled' };
+    onIdle?.('session-a' as SessionId);
+    await vi.advanceTimersByTimeAsync(1);
+    const backend = await createSessionBackend(doc);
+    expect(await backend.getMessageQueue()).toHaveLength(1);
+    expect(meta.autoDelivery).toMatchObject({ state: 'merge', prUrl });
+  });
   it('enables recovery for the current confirmed failure without replaying a later input', async () => {
     const meta = {
       id: 'session-a',

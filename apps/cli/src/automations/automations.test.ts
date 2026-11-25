@@ -1946,6 +1946,50 @@ describe('Auto delivery', () => {
     expect(deliver(ledger, 103)).toEqual([]);
   });
 
+  it('surfaces non-busy blocked receipts as stalled with blockReason and resumes once unblocked', () => {
+    const ledger = enabled();
+    const head = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(head, 's', 'c')], 100);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 101 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+    const receipt = required(deliver(ledger, 101)[0]);
+
+    // Normal busy wait keeps the active step state while waiting for the session to settle.
+    ledger.update(
+      receipt.id,
+      receipt.state,
+      { state: 'blocked', reason: 'session_work_active' },
+      102
+    );
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+
+    // Unexpected/external block surfaces immediately as stalled with blockReason.
+    ledger.update(
+      receipt.id,
+      'blocked',
+      { state: 'blocked', reason: 'native_activity_unobserved' },
+      104
+    );
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 105 }).status).toEqual({
+      state: 'stalled',
+      reason: 'request_blocked',
+      blockReason: 'native_activity_unobserved',
+      prUrl,
+    });
+
+    // Clearing the block restores active delivery without burning attempts or ending the enablement.
+    ledger.update(receipt.id, 'blocked', { state: 'queued', reason: undefined }, 106);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 107 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+  });
+
   const prUrls = [prUrl, 'https://github.com/owner/project/pull/43'];
   const pick = <A>(table: readonly A[], index: number) => required(table[index % table.length]);
   const prStatuses = ['open', 'open', 'open', 'open', 'open', 'draft', 'merged', 'closed'] as const;

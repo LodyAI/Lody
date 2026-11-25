@@ -127,11 +127,7 @@ export class Automations extends Context.Service<
           const now = yield* Clock.currentTimeMillis;
           return yield* Effect.try(() => {
             const current = ledger.receipt(receipt.id);
-            const wokeDuringCheck =
-              receipt.event.type === 'provider.quota.exhausted' &&
-              receipt.rule.handler.kind === 'policy' &&
-              receipt.rule.handler.policy === 'recover-capacity' &&
-              current?.capacityWakeRevision !== receipt.capacityWakeRevision;
+            const wokeDuringCheck = current?.capacityWakeRevision !== receipt.capacityWakeRevision;
             return ledger.update(
               receipt.id,
               receipt.state,

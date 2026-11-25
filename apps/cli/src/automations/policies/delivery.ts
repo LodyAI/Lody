@@ -1,5 +1,14 @@
 import {
+  AUTO_DELIVERY_ORIGIN_PROMPT,
+  CREATE_PR_BASE_PROMPT,
+  PR_BRANCH_UPKEEP_PROMPT,
+  buildFixCiRequest,
+  buildMergePrRequest,
+  buildResolveConflictsRequest,
   resolveSessionPullRequests,
+  withPrBranchUpkeep,
+  withProjectGroupPrScope,
+  withQuickActionOrigin,
   type PrPromptProvider,
   type SessionAutoDelivery,
   type SessionAutoDeliveryStallReason,
@@ -7,6 +16,7 @@ import {
   type SessionPullRequestCiState,
   type SessionPullRequestMergeState,
 } from '@lody/shared';
+import { z } from 'zod';
 import type {
   AutoDeliverOptions,
   AutomationEvent,
@@ -82,9 +92,26 @@ export type PullRequestSnapshot = {
 export type StepOutcome =
   | { state: 'outstanding' }
   | { state: 'stopped' }
+  | { state: 'blocked'; reason?: string }
   | { state: 'failed' }
   | { state: 'superseded' }
   | { state: 'settled'; at: number };
+
+/**
+ * Expected transient block reasons while the target Session group finishes active
+ * work. Any other `blocked` reason is surfaced to the user so delivery never hides
+ * a stuck receipt behind an active state.
+ */
+const BUSY_BLOCK_REASONS = new Set([
+  'session_work_active',
+  'input_pending',
+  'queue_pending',
+  'goal_active',
+  'automation_work_pending',
+  'native_work_active',
+  'session_admission_busy',
+  'session_admission_blocked',
+]);
 
 export type DeliveryStatus = Omit<SessionAutoDelivery, 'updatedAt'>;
 
@@ -192,6 +219,11 @@ export function decideDelivery(input: {
     );
   if (input.lastStep?.state === 'stopped')
     return statusFor(last?.prUrl ?? progress.prUrl, 'stalled', { reason: 'stopped' });
+  if (input.lastStep?.state === 'blocked')
+    return statusFor(last?.prUrl ?? progress.prUrl, 'stalled', {
+      reason: 'request_blocked',
+      ...(input.lastStep.reason ? { blockReason: input.lastStep.reason } : {}),
+    });
   if (input.lastStep?.state === 'failed')
     return statusFor(last?.prUrl ?? progress.prUrl, 'stalled', { reason: 'request_failed' });
   const settledAt = input.lastStep?.state === 'settled' ? input.lastStep.at : undefined;
@@ -387,7 +419,9 @@ const receiptOutcome = (receipt: AutomationReceipt): StepOutcome => {
     case 'cancelled':
       return { state: 'stopped' };
     case 'blocked':
-      return receipt.reason === 'target_stopped' ? { state: 'stopped' } : { state: 'outstanding' };
+      if (receipt.reason === 'target_stopped') return { state: 'stopped' };
+      if (receipt.reason && BUSY_BLOCK_REASONS.has(receipt.reason)) return { state: 'outstanding' };
+      return { state: 'blocked', ...(receipt.reason ? { reason: receipt.reason } : {}) };
     default:
       return { state: 'outstanding' };
   }
@@ -547,4 +581,49 @@ export function deliveryStepCurrent(
   if (pr.status !== 'open' || pr.headSha !== step.headSha)
     return { value: 'no', reason: 'delivery_pr_changed' };
   return { value: 'yes', reason: 'delivery_current' };
+}
+
+const deliveryValues = z
+  .object({
+    provider: z.enum(['github', 'gitlab', 'other']).optional(),
+    repoFullName: z.string().min(1).optional(),
+    prNumber: z.number().int().positive().optional(),
+    prUrl: z.string().url().optional(),
+    headSha: z.string().min(1).optional(),
+    mergeMethod: z.enum(['auto', 'squash', 'merge', 'rebase']).optional(),
+    projectGroup: z.boolean().optional(),
+  })
+  .passthrough();
+
+/**
+ * Auto delivery sends the same request the matching Info Bar button sends, after
+ * an origin line; it adds only facts the agent cannot discover (the merged head).
+ */
+export function deliveryRequest(step: string, values: unknown): string | undefined {
+  const parsed = deliveryValues.safeParse(values);
+  if (!parsed.success) return undefined;
+  const { provider, repoFullName, prNumber, prUrl, headSha, mergeMethod } = parsed.data;
+  const target = prUrl
+    ? {
+        ...(provider ? { provider } : {}),
+        repoFullName: repoFullName ?? null,
+        prNumber: prNumber ?? null,
+        prUrl,
+      }
+    : undefined;
+  const request =
+    step === 'create_pr'
+      ? withPrBranchUpkeep(CREATE_PR_BASE_PROMPT, PR_BRANCH_UPKEEP_PROMPT)
+      : step === 'fix_ci' && target
+        ? buildFixCiRequest(target)
+        : step === 'resolve_conflicts' && target
+          ? buildResolveConflictsRequest(target)
+          : step === 'merge' && target && headSha
+            ? buildMergePrRequest({ ...target, headSha, ...(mergeMethod ? { mergeMethod } : {}) })
+            : undefined;
+  if (!request) return undefined;
+  return withQuickActionOrigin(
+    AUTO_DELIVERY_ORIGIN_PROMPT,
+    parsed.data.projectGroup ? withProjectGroupPrScope(request) : request
+  );
 }
