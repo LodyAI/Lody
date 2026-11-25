@@ -103,6 +103,14 @@ nonmodal recovery notice. The Convex adapter may still observe SDK auth state be
 `ConvexProviderWithAuth` is a React API, but it does not own session reads, retry
 budgets or browser lifecycle work.
 
+React projections of these rooms go through `lib/external-snapshot.ts`'s
+`useExternalSnapshot`, the single adapter over React's `useSyncExternalStore`:
+business modules must not hand-wire the primitive, because its lease ordering
+and subscribe/re-seed sequence are easy to get wrong. The adapter keys the room
+lease on the room itself, so a fresh inline `acquire` closure per render does
+not release and re-acquire the supervisor (that churn used to drop in-flight
+401 verification).
+
 ## MCP default readiness
 
 `use-session-mcp-selection.ts` allows default-derived sends after the local catalog

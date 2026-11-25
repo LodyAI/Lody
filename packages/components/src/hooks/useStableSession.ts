@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { createContext, useContext } from 'react';
 import { useAuthClient } from '../providers/convex-provider';
+import { useExternalSnapshot } from '../lib/external-snapshot';
 import {
   acquireStableSessionSupervisor,
   getStableSessionSupervisor,
@@ -21,22 +22,8 @@ export { StableSessionContext, StableSessionSupervisorContext };
  */
 export function useStableSessionInternal(options?: StableSessionOptions): StableSessionValue {
   const authClient = useAuthClient();
-  const supervisor = useMemo(
-    () => getStableSessionSupervisor(authClient, options),
-    [authClient, options]
-  );
-  const value = useSyncExternalStore(
-    supervisor.subscribe,
-    supervisor.getSnapshot,
-    supervisor.getSnapshot
-  );
-
-  useEffect(() => {
-    const lease = acquireStableSessionSupervisor(authClient);
-    return lease.release;
-  }, [authClient, supervisor]);
-
-  return value;
+  const supervisor = getStableSessionSupervisor(authClient, options);
+  return useExternalSnapshot(supervisor, () => acquireStableSessionSupervisor(authClient));
 }
 
 export function useStableSessionSupervisor(): StableSessionSupervisor {
