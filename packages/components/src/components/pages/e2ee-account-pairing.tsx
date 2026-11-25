@@ -19,6 +19,7 @@ import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text as type } from '@lody/ui/tokens/scales.stylex';
 import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { classifyPairingFailure } from '@/lib/e2ee-actionable-failure';
 import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 
 const styles = stylex.create({
@@ -65,13 +66,16 @@ export function localCodeError(input: string): string | null {
   }
   return `e2ee.accountPair.code.${parsed.failure.code}`;
 }
-/** Host refusals become specific messages; anything else keeps the custody wording. */
+/** Host refusals become specific messages; anything else uses the actionable pairing classifier. */
 export function failureKey(error: unknown) {
   const code = accountPairingErrorCode(error);
   if (code) return `e2ee.accountPair.error.${code}`;
-  return (
-    custodyFailureMessage(classifyE2eeControlFailure(error).kind) ?? 'e2ee.accountPair.error.failed'
-  );
+  const custody = custodyFailureMessage(classifyE2eeControlFailure(error).kind);
+  if (custody) return custody;
+  const classified = classifyPairingFailure(error);
+  return classified.disposition === 'retryable' && classified.code === 'e2ee_network_unconfirmed'
+    ? 'e2ee.accountPair.error.failed'
+    : classified.messageKey;
 }
 /** Runs `tick` every `ms` while `active`, never overlapping; the latest `tick` is used.
  * An optional `subscribe` hint runs it at once on a change; the poll stays the fallback,
@@ -475,8 +479,7 @@ export function E2eeAccountPairingApprove(props: { runtime: ApproveRuntime; poll
   const subscribeApproval = useMemo(
     () =>
       shownLookupId && runtime.subscribeAccountPairingApproval
-        ? (changed: () => void) =>
-            runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
+        ? (changed: () => void) => runtime.subscribeAccountPairingApproval!(shownLookupId, changed)
         : undefined,
     [shownLookupId, runtime]
   );

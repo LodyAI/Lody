@@ -501,9 +501,9 @@ export function personalEntry(options: PersonalEntryOptions) {
       );
     /**
      * A new invitation for a workspace whose earlier join is still pinned as pending: ask
-     * that join once and stop routing to it if it ended (rejected, cancelled, or its
-     * invitation expired). The pin grants nothing; the host still retires the old request
-     * through the relay before a new identity, and an admitted join claims as committed.
+     * that join once and stop routing to it if it ended (rejected, cancelled, expired, or
+     * never registered on the relay). An orphan pending pin whose local claim original was
+     * never written is also retired so it cannot lock out future invitations.
      */
     const settleEndedMemberJoin = async (invitation: import('@lody/cloud-api').E2eeMemberOffer) => {
       observe();
@@ -516,15 +516,57 @@ export function personalEntry(options: PersonalEntryOptions) {
       const { runtime, entry } = await get(invitation.workspaceId);
       const pending = await runtime.pendingMemberJoin!(invitation.workspaceId);
       check(accountId);
-      if (!pending?.requestId) return;
-      const { state } = await runtime.claimMemberJoin!(invitation.workspaceId, pending.requestId);
-      check(accountId);
+      if (!pending?.requestId) {
+        // Orphan pin saved before the local claim original was written: safe to retire.
+        await execute(options.pins.finish(accountId, entry.offer, 'cancelled'));
+        check(accountId);
+        return;
+      }
+      let state: string;
+      try {
+        ({ state } = await runtime.claimMemberJoin!(invitation.workspaceId, pending.requestId));
+        check(accountId);
+      } catch (claimError) {
+        // If the local claim was never accepted by the relay, retire it explicitly via
+        // cancelPendingMemberJoin so the user is not permanently locked out of new invites.
+        if (runtime.cancelPendingMemberJoin) {
+          const retired = await runtime.cancelPendingMemberJoin(invitation.workspaceId);
+          check(accountId);
+          if (retired.state === 'cancelled') {
+            await execute(options.pins.finish(accountId, entry.offer, 'cancelled'));
+            check(accountId);
+            return;
+          }
+        }
+        throw claimError;
+      }
       const ended =
         state === 'rejected' ||
         state === 'cancelled' ||
         (state === 'pending' && pending.offer.expiresAt <= Date.now());
       if (ended) await execute(options.pins.finish(accountId, entry.offer, 'cancelled'));
       check(accountId);
+    };
+    /**
+     * A new invitation can reach a member who was already removed from the workspace before
+     * this browser reopened it. Confirm access loss against the verified ledger/relay so
+     * `lose()` retires the stale ready pin; if still active, report `already_member`.
+     */
+    const settleRemovedMemberPin = async (workspaceId: string) => {
+      observe();
+      const accountId = await execute(resolveAccount());
+      if (!accountId) return;
+      const pin = await execute(options.pins.read(accountId, workspaceId));
+      check(accountId);
+      if (!pin || pin.phase !== 'ready') return;
+      try {
+        await invoke(workspaceId, (runtime) => runtime.status(workspaceId), statusLoss);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (message === 'e2ee_member_removed' || message === 'e2ee_device_revoked') return;
+        throw error;
+      }
+      throw Object.assign(new Error('already_member'), { code: 'already_member' });
     };
     /**
      * The single way to an approval session. Acquiring it opens the workspace, and every
@@ -807,6 +849,7 @@ export function personalEntry(options: PersonalEntryOptions) {
       // member join, so personal pairing never shows it; the portable host verifies admission.
       prepareMemberJoin: async (invitation) => {
         await settleEndedMemberJoin(invitation);
+        await settleRemovedMemberPin(invitation.workspaceId);
         const { runtime, accountId, entry } = await get(
           invitation.workspaceId,
           (account) => memberPairingOffer(account, invitation),
@@ -816,6 +859,32 @@ export function personalEntry(options: PersonalEntryOptions) {
         const value = await runtime.prepareMemberJoin!(invitation);
         check(accountId);
         if (entry.retired) throw fail('closed');
+        return value;
+      },
+      cancelPendingMemberJoin: async (id) => {
+        observe();
+        const accountId = await execute(resolveAccount());
+        if (!accountId) return { state: 'cancelled' };
+        const pin = await execute(options.pins.read(accountId, id));
+        check(accountId);
+        if (!pin || pin.phase === 'cancelled' || pin.kind !== 'member')
+          return { state: 'cancelled' };
+        if (pin.phase === 'ready') return { state: 'committed' };
+        const { runtime, entry } = await get(id);
+        const pending = await runtime.pendingMemberJoin!(id);
+        check(accountId);
+        if (!pending?.requestId) {
+          await execute(options.pins.finish(accountId, entry.offer, 'cancelled'));
+          check(accountId);
+          return { state: 'cancelled' };
+        }
+        const value = await runtime.cancelPendingMemberJoin!(id);
+        check(accountId);
+        if (entry.retired) throw fail('closed');
+        if (value.state === 'cancelled') {
+          await execute(options.pins.finish(accountId, entry.offer, 'cancelled'));
+          check(accountId);
+        }
         return value;
       },
       pendingMemberJoin: async (id) => {

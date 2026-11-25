@@ -28,6 +28,7 @@ export function isIpcInvokeChannel(channel: string): boolean {
       'account',
       'createMemberInvitation',
       'pendingMemberJoin',
+      'cancelPendingMemberJoin',
       'prepareMemberJoin',
       'memberJoinRequests',
       'approveMemberJoin',

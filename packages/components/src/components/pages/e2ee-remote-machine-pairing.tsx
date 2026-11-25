@@ -9,6 +9,8 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check, ChevronDown, Copy, Server } from 'lucide-react';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { classifyPairingFailure, type E2eeActionableFailure } from '@/lib/e2ee-actionable-failure';
+import { E2eeActionableError } from '@/components/e2ee/e2ee-actionable-error';
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'beginRemoteMachinePairing'
@@ -64,8 +66,7 @@ export function E2eeRemoteMachinePairing({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  // A revoked identity cannot be readmitted; the machine must create a new one.
-  const [error, setError] = useState<false | 'generic' | 'key-revoked'>(false);
+  const [failure, setFailure] = useState<E2eeActionableFailure | null>(null);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -87,16 +88,11 @@ export function E2eeRemoteMachinePairing({
   const run = async (work: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
-    setError(false);
+    setFailure(null);
     try {
       await work();
     } catch (cause) {
-      if (active.current)
-        setError(
-          cause instanceof Error && /\be2ee_pairing_key_revoked$/.test(cause.message)
-            ? 'key-revoked'
-            : 'generic'
-        );
+      if (active.current) setFailure(classifyPairingFailure(cause));
     } finally {
       if (active.current) setBusy(false);
     }
@@ -118,12 +114,23 @@ export function E2eeRemoteMachinePairing({
         <Card.Description>{t('e2ee.remoteMachine.description')}</Card.Description>
       </Card.Header>
       <div {...stylex.props(styles.body)}>
-        {error && (
-          <p role="alert">
-            {t(
-              error === 'key-revoked' ? 'e2ee.remoteMachine.keyRevoked' : 'e2ee.remoteMachine.error'
-            )}
-          </p>
+        {failure && (
+          <E2eeActionableError
+            failure={failure}
+            busy={busy}
+            onAction={{
+              restart_pairing: () => {
+                setSession(null);
+                setPreview(null);
+                setFailure(null);
+              },
+              retry_saved: () => {
+                if (session) void run(refresh);
+                else setFailure(null);
+              },
+              unlock_custody: () => setFailure(null),
+            }}
+          />
         )}
         {session && (
           <>

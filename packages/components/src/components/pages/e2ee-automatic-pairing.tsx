@@ -42,6 +42,7 @@ import {
   useE2eeDeviceRequests,
 } from './e2ee-device-requests';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
+import { classifyPairingFailure } from '@/lib/e2ee-actionable-failure';
 import { E2eeLostAccessEntry, type E2eeLostAccessProps } from './e2ee-lost-access';
 
 /** Seconds left until `expiresAt`, ticking once a second; null without a deadline. */
@@ -113,7 +114,10 @@ export function automaticPairingErrorKey(cause: unknown): string {
     return 'e2ee.auto.connectionRetry';
   if (/pairing-unavailable|account_pairing_disabled/.test(code))
     return 'e2ee.accountPair.error.pairing-unavailable';
-  return 'e2ee.accountPair.error.failed';
+  const classified = classifyPairingFailure(cause);
+  return classified.disposition === 'retryable'
+    ? 'e2ee.accountPair.error.failed'
+    : classified.messageKey;
 }
 const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
   const { t } = useTranslation();

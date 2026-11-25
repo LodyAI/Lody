@@ -1210,12 +1210,13 @@ export function makePersonalCloudNetwork(
         : Effect.fail(failure('unauthorized')),
     /** Joining side, under the account login: retire this account's ended request before
      * joining from another invitation. Only `cancelled` lets the host settle the old one. */
-    retire: (input: { token: string; keyPackageHex: string }) =>
+    retire: (input: { token: string; keyPackageHex: string; cancelPending?: boolean }) =>
       request(
         () =>
           client.mutation(api.e2eeMembers.retire, {
             token: input.token,
             keyPackageHex: input.keyPackageHex,
+            ...(input.cancelPending ? { cancelPending: true } : {}),
           }),
         z.object({
           state: z.enum(['pending', 'admitting', 'committed', 'rejected', 'cancelled']),

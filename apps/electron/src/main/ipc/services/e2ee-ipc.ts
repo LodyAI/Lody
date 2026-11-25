@@ -716,6 +716,48 @@ export class E2eeIpc extends ProductWindowIpcService {
       throw error
     })
   }
+  @IpcMethod()
+  async cancelPendingMemberJoin(workspaceId: string) {
+    sender()
+    const identity = getIpcServiceDeps().authService.getCachedSessionIdentity()
+    const scope = this.memberScope(workspaceId, identity)
+    const cloud = await desktopE2eeCloudClient()
+    let pending: Awaited<
+      ReturnType<
+        Owner['bootstrap']['pendingMemberJoin'] extends (...a: never[]) => Effect.Effect<infer R, unknown>
+          ? () => Promise<R>
+          : never
+      >
+    >
+    try {
+      pending = await scope((owner) =>
+        owner.accountId === cloud.accountId
+          ? owner.bootstrap.pendingMemberJoin(workspaceId)
+          : Effect.fail(new Error('e2ee_account_mismatch'))
+      )
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_missing-binding')
+        return { state: 'cancelled' }
+      throw error
+    }
+    if (!pending) return { state: 'cancelled' }
+    const retired = pending.keyPackageHex
+      ? await Effect.runPromise(
+          cloud.client.memberRetire({
+            token: pending.offer.token,
+            keyPackageHex: pending.keyPackageHex,
+            cancelPending: true
+          })
+        )
+      : { state: 'cancelled' as const }
+    if (retired.state !== 'cancelled') return { state: retired.state }
+    await scope((owner) =>
+      owner.accountId === cloud.accountId
+        ? owner.bootstrap.retireMemberJoin(pending)
+        : Effect.fail(new Error('e2ee_account_mismatch'))
+    )
+    return { state: 'cancelled' }
+  }
   /** A new invitation can reach a removed member before any refresh or token request has
    * told this device. Its accepted earlier join would refuse the offer as a conflict, so
    * this device's credential confirms the removal first; local removal erases that join.

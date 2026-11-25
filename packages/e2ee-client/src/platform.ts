@@ -155,10 +155,12 @@ export class PersonalHostPlatform extends Context.Service<
         requestId: string;
       }): Effect.Effect<E2eeMemberReplies['claim'], unknown>;
       /** Retire this account's earlier request before joining from another invitation.
-       * Only `cancelled` (terminal, expired or revoked) lets the old identity move on. */
+       * Only `cancelled` (terminal, expired, revoked, or explicitly cancelled pre-CAS)
+       * lets the old identity move on. */
       retire?(input: {
         token: string;
         keyPackageHex: string;
+        cancelPending?: boolean;
       }): Effect.Effect<E2eeMemberReplies['retire'], unknown>;
     };
     /** Real optional policy host. Uses existing core policy verification/pins; absence does not advertise sharing. */

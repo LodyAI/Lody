@@ -490,7 +490,11 @@ describe('encrypted team joining', () => {
         offer={emailOffer}
         runtime={{
           pendingMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req' }),
-          prepareMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req', state: 'pending' }),
+          prepareMemberJoin: async () => ({
+            offer: emailOffer,
+            requestId: 'email-req',
+            state: 'pending',
+          }),
           claimMemberJoin: async () => ({ state: 'pending', ready: false }),
         }}
         accountId="account"
@@ -829,5 +833,95 @@ describe('encrypted team joining', () => {
     const data = new URLSearchParams(path!.slice(path!.indexOf('#') + 1)).get('e2ee')!;
     expect(parseMemberOffer(data, offer.token)).toEqual(offer);
     expect(parseMemberOffer(data, '99'.repeat(32))).toBeNull();
+  });
+  it('offers explicit cancel-and-reapply or resume when another pending invitation exists for the workspace', async () => {
+    const previousOffer: E2eeMemberOffer = { ...offer, token: '44'.repeat(32) };
+    let cancelled = false;
+    let submittedToken: string | null = null;
+    const runtime = {
+      pendingMemberJoin: async () =>
+        cancelled ? null : { offer: previousOffer, requestId: 'prev-req' },
+      cancelPendingMemberJoin: async () => {
+        cancelled = true;
+        return { state: 'cancelled' };
+      },
+      prepareMemberJoin: async (target: E2eeMemberOffer) => {
+        submittedToken = target.token;
+        return {
+          ...application('new-req', 'link'),
+          requestId: 'new-req',
+          offer: target,
+        };
+      },
+      claimMemberJoin: async () => ({ state: 'pending', ready: false }),
+    };
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={runtime}
+        accountId="account"
+        email="member@synthetic.test"
+        emailVerified
+        preview={{
+          status: 'available',
+          offer,
+          workspaceName: 'Team',
+          workspaceSlug: 'team',
+          recipientEmailMasked: null,
+          matchesRecipient: null,
+        }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={() => {}}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    expect(container.textContent).toContain('e2ee.actionable.previousJoinPending');
+    expect(container.textContent).not.toContain('e2ee.team.retryOriginal');
+    expect(button('e2ee.actionable.action.cancelAndUseNew')).toBeDefined();
+    expect(button('e2ee.actionable.action.resumeExisting')).toBeDefined();
+    await act(async () => button('e2ee.actionable.action.cancelAndUseNew').click());
+    await settle();
+    expect(cancelled).toBe(true);
+    expect(submittedToken).toBe(offer.token);
+    expect(container.textContent).toContain('e2ee.team.waitingApproval');
+  });
+  it('maps already_member and custody-blocked join refusals to actionable recovery buttons instead of retryOriginal', async () => {
+    const opened: Array<[string | null, string | undefined]> = [];
+    await render(
+      <E2eeMemberJoin
+        offer={offer}
+        runtime={{
+          pendingMemberJoin: async () => null,
+          prepareMemberJoin: async () => {
+            throw Object.assign(new Error('already_member'), { code: 'already_member' });
+          },
+          claimMemberJoin: async () => ({ state: 'pending', ready: false }),
+        }}
+        accountId="account"
+        email="member@synthetic.test"
+        emailVerified
+        preview={{
+          status: 'available',
+          offer,
+          workspaceName: 'Team',
+          workspaceSlug: 'team',
+          recipientEmailMasked: null,
+          matchesRecipient: null,
+        }}
+        onSignInRequested={() => {}}
+        onEmailVerificationRequested={() => {}}
+        onWorkspaceRequested={(slug, id) => opened.push([slug, id])}
+        onHomeRequested={() => {}}
+      />
+    );
+    await settle();
+    await act(async () => button('e2ee.team.submit').click());
+    await settle();
+    expect(container.textContent).toContain('e2ee.actionable.alreadyMember');
+    expect(container.textContent).not.toContain('e2ee.team.retryOriginal');
+    await act(async () => button('e2ee.team.openWorkspace').click());
+    expect(opened).toEqual([['team', offer.workspaceId]]);
   });
 });
