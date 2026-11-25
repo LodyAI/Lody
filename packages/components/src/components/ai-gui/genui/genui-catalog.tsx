@@ -164,7 +164,6 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       return;
     }
     if (node.dir === 'lines') {
-      // Placeholder content bars — nav items, form rows, body text.
       const count = Math.max(1, num(p.count, Math.floor((h + 6) / 16)));
       const lp = num(p.pad, 6);
       const bar = num(p.size, 7);
