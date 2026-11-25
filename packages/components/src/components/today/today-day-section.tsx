@@ -26,6 +26,7 @@ import { TodayMention } from './today-session-mention';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayPageStoreCache } from '../../providers/today-page-store-cache';
 import { formatTodayHeading } from './today-stream';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 import { TodayMoreAtEndContext, todayOutline, todaySurfaceMarker } from './outline.stylex';
 
 const styles = stylex.create({
@@ -335,6 +336,15 @@ function TodayStaticOutline(props: {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const controller = useTodayEditor();
   useEffect(() => controller?.registerDay(store.date, store), [controller, store]);
+  useEffect(() => {
+    if (!isTop) return undefined;
+    markTodayWindowBoot('page-acquired');
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => markTodayWindowBoot('content-painted'));
+    });
+    void store.synced.then(() => markTodayWindowBoot('page-synced'));
+    return () => cancelAnimationFrame(frame);
+  }, [isTop, store]);
   useEffect(() => {
     if (isTop) return undefined;
     let cancelled = false;

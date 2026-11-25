@@ -36,6 +36,9 @@ import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
 import { installAppIconBridge } from './app-icon'
+import { markTodayWindowBoot } from '@lody/components/lib/today/today-window-boot-timeline'
+
+markTodayWindowBoot('renderer-entry')
 
 const stopClientDiagnostics = installClientLog()
 import.meta.hot?.dispose(stopClientDiagnostics)
@@ -231,6 +234,7 @@ try {
   const detectedLanguage = storedLanguage ?? detectBrowserLanguage()
   const bootLanguage = detectedLanguage ?? fallbackLanguage
   await initI18n(bootLanguage)
+  markTodayWindowBoot('i18n-ready')
   if (!storedLanguage && detectedLanguage) {
     jotaiStore.set(languageAtom, detectedLanguage)
   }
@@ -263,6 +267,7 @@ try {
       sessionStorage.setItem('lody:windowFocusConsumed', '1')
     }
   }
+  markTodayWindowBoot('react-render')
   createRoot(rootElement, {
     // ErrorBoundary remains the single owner of caught-error UI and PostHog.
     // React 19 no longer rethrows render errors, so these root callbacks only

@@ -25,3 +25,6 @@ Data model and undo: `packages/shared/src/today-outline.ts` (a mention is one ma
 [decision](../../../../../.agents/notes/implemented/architecture/2026-11-20-today-inline-mentions.md)); identity and links:
 `packages/shared/src/today-types.ts`, `packages/shared/src/session-link.ts`; page stores:
 `src/lib/today/today-page-store.ts`, `src/providers/today-page-store-cache.ts`.
+
+Desktop window cold-open phases: `src/lib/today/today-window-boot-timeline.ts`; main logs them with its own
+milestones as one `[today-window] boot timeline` JSON line per open.

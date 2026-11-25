@@ -4,6 +4,7 @@ import { lazy, useEffect } from 'react';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
 import { RouteSuspense } from '@/components/route-suspense';
 import { validateTodaySearch } from '@/components/today/today-stream';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 
 const LazyTodayWindow = lazy(async () => {
   const module = await import('@/components/today/today-window');
@@ -23,6 +24,7 @@ export const Route = createFileRoute('/$workspaceName/today-window')({
 function TodayWindowRoute() {
   const enabled = useAtomValue(todayFeatureEnabledAtom);
   const search = Route.useSearch();
+  markTodayWindowBoot('route');
   useEffect(() => {
     // Turning the experiment off unmounts every Today surface: the window closes.
     if (!enabled) window.close();

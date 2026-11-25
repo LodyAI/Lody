@@ -6,6 +6,7 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
 import { WorkspaceCard } from '../workspace-frame';
 import { getWebWorkspaceLayoutRootClassName } from '../workspace-layout-utils';
 import { TodayView, type TodayViewTarget } from './today-view';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 
 /**
  * The desktop's standalone Today window: only the day stream, in one page card on
@@ -14,6 +15,7 @@ import { TodayView, type TodayViewTarget } from './today-view';
  */
 export function TodayWindow(props: { memberId?: string; anchorDate?: string }) {
   const { t } = useTranslation();
+  markTodayWindowBoot('view-chunk');
   const [target, setTarget] = useState<TodayViewTarget>({
     member: props.memberId,
     date: props.anchorDate,

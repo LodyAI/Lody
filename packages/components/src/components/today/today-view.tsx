@@ -93,6 +93,7 @@ import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
 import { TodayBreadcrumb, type TodayCrumb } from './today-breadcrumb';
 import { useTodayClock } from './use-today-clock';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 
 /**
  * What a Today surface shows: a member's stream around `date`, or with
@@ -278,6 +279,7 @@ export function TodayView(props: {
     setRegistered([]);
     setEmpty(new Set());
     if (!runtime || !userId) return undefined;
+    markTodayWindowBoot('view-runtime');
     return runtime.todayPages.observeDates(userId, setRegistered);
   }, [runtime, userId]);
 

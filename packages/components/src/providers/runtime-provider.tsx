@@ -77,6 +77,7 @@ import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
 import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
 import { isTodayWindow, isWarmWindow } from '@/lib/desktop-window';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { describeErrorType } from '@/lib/workspace-data-scope';
@@ -1246,7 +1247,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // loro-repo/streams-crdt/flock stay out of the boot chunk: this provider
         // module is statically reachable from the root route, so the workspace
         // runtime stack loads only once a workspace runtime is actually needed.
+        markTodayWindowBoot('runtime-start');
         const { createWorkspaceRuntime } = await import('./create-workspace-runtime');
+        markTodayWindowBoot('runtime-module');
         workspaceRuntime = await createWorkspaceRuntime({
           content: encryptedAccess?.content ?? { mode: 'plaintext' },
           ...(!isLocalPlatform && !encryptedAccess && !storedDescriptor
@@ -1314,6 +1317,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // The owner's cleanup or the retirement chain disposes it once.
           return;
         }
+        markTodayWindowBoot('runtime-ready');
         setRuntime(workspaceRuntime);
         // Local runtime (IndexedDB-backed Loro repo) is ready — unblock UI
         // rendering immediately. WebSocket sync state is tracked separately
