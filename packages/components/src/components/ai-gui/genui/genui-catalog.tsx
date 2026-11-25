@@ -188,12 +188,19 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       const label = str(p.label),
         sub = str(p.sub),
         hint = str(p.hint);
-      const fs = h >= 64 ? 12 : h >= 34 ? 10 : 8; // shrink label to box height
-      const lines = [
-        label && { t: label, s: fs, b: 600 },
-        sub && h >= 40 && { t: sub, s: 9 },
-        hint && h >= 56 && { t: hint, s: 8 },
-      ].filter(Boolean) as { t: string; s: number; b?: number }[];
+      // Keep a line only when it still fits: a 12/9/8px slot needs ~1.7·s of box.
+      const room = Math.max(0, h - 6);
+      const fs = room >= 30 ? 12 : room >= 18 ? 10 : 8;
+      const want = [
+        label && { t: label, s: fs, b: 600, need: fs * 1.7 },
+        sub && { t: sub, s: 9, need: 15 },
+        hint && { t: hint, s: 8, need: 13 },
+      ].filter(Boolean) as { t: string; s: number; b?: number; need: number }[];
+      let used = 0;
+      const lines = want.filter((l) => {
+        used += l.need;
+        return used <= room;
+      });
       const slots = lines.map((l) => l.s * 1.4);
       const blockH = slots.reduce((a, b) => a + b, 0);
       let ty = cy - blockH / 2;
