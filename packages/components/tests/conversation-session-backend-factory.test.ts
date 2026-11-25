@@ -2255,6 +2255,85 @@ it.each([false, true])(
   }
 );
 
+it.each(['at base', 'ahead with tail edits', 'ahead with an older edit'] as const)(
+  'commits an owner-verified older page against a cache %s',
+  async (state) => {
+    const h = await cachedRecoveryFixture('verified-older-' + state, 41, 1);
+    const reading = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<void>();
+    const older = h.entries[0]!;
+    const data = createRemoteRoostSessionDataFactory({
+      workspaceId: h.workspaceId,
+      machineId: h.machineId,
+      incremental: true,
+      olderRange: true,
+      requestHistoryRead: async (_machine, _session, query) => {
+        expect(query).toEqual({
+          kind: 'readOlderRange',
+          baseCheckpoint: 'checkpoint-1',
+          from: 0,
+          to: 1,
+        });
+        reading.resolve();
+        await reply.promise;
+        return h.reply(2, {
+          baseCheckpoint: 'checkpoint-1',
+          checkpoint: 'checkpoint-2',
+          turns: [{ state: 'ready', turn: older }],
+        }).responses[0]!;
+      },
+      requestHistoryWrite: async () => {
+        throw new Error('Unexpected write');
+      },
+    })({ sessionId: h.sessionId, doc: h.doc, backendKind: 'roost' });
+    try {
+      const current = await data.history.readLatestDirectoryPage!(40);
+      const loading = data.history.readOlderDirectoryPage!(current.cursor!, 40);
+      // A rejection on an invalidated page can occur before the next assertion.
+      void loading.catch(() => {});
+      await reading.promise;
+      if (state !== 'at base') {
+        const tail = h.entries.at(-1)!;
+        for (const revision of [2, 3]) {
+          const head = (await h.cache.getHead())!;
+          const editsOlder = revision === 3 && state === 'ahead with an older edit';
+          expect(
+            await h.cache.applyChanges(
+              head,
+              revision,
+              41,
+              `checkpoint-${revision}`,
+              undefined,
+              [],
+              {
+                changedIds: [editsOlder ? older.id : tail.id],
+              }
+            )
+          ).toBe(true);
+        }
+      }
+      reply.resolve();
+      if (state === 'ahead with an older edit') {
+        await expect(loading).rejects.toThrow('superseded');
+        expect(await h.cache.readRows(0, 1)).toBeUndefined();
+      } else {
+        const checkpoint = state === 'at base' ? 'checkpoint-1' : 'checkpoint-3';
+        expect(await loading).toMatchObject({
+          checkpoint,
+          startPosition: 0,
+          rows: [{ turnId: older.id }],
+        });
+        expect(await h.cache.getHead()).toMatchObject({ checkpoint, start: 0 });
+        expect(await h.cache.readRows(0, 1)).toMatchObject([{ turn: older }]);
+      }
+    } finally {
+      reply.resolve();
+      data.dispose();
+      h.cache.dispose();
+    }
+  }
+);
+
 it.each([1, 9])(
   'adopts a shared history reset at revision %i in both open windows',
   async (revision) => {

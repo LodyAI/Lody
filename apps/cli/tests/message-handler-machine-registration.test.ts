@@ -229,7 +229,7 @@ describe('MessageHandler machine registration', () => {
         terminalNotifications: 1,
         memoryProviders: 3,
         sessionHistory: 4,
-        sessionHistoryIncremental: 1,
+        sessionHistoryIncremental: 2,
         sessionHistoryInspection: 2,
         sessionHistorySubscription: 1,
         sessionHistoryPatches: 1,

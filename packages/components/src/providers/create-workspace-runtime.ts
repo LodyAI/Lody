@@ -15,6 +15,7 @@ import {
 } from '@lody/shared/workspace-streams-content';
 import {
   machineSupportsSessionHistoryIncremental,
+  machineSupportsSessionHistoryOlderRange,
   machineSupportsSessionHistoryInspection,
   machineSupportsSessionHistoryPatches,
   machineSupportsSessionHistorySubscription,
@@ -5400,6 +5401,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         const bridge: RemoteRoostSessionBridgeOptions = {
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
+          olderRange: () => machineSupportsSessionHistoryOlderRange(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
           cacheNamespace: protectedContent
             ? encryptedLocalInstance(deps.e2eeLocalIdentity!)

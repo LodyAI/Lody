@@ -2145,6 +2145,14 @@ export const SessionHistoryReadQuerySchema = z
       .strict(),
     z
       .object({
+        kind: z.literal('readOlderRange'),
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+        baseCheckpoint: z.string().min(1).max(1024),
+      })
+      .strict(),
+    z
+      .object({
         kind: z.literal('readDirectory'),
         atCheckpoint: z.string().min(1).max(1024).optional(),
         from: z.number().int().nonnegative(),
@@ -2185,8 +2193,21 @@ export const SessionHistoryReadQuerySchema = z
         ctx.addIssue({ code: 'custom', path: ['to'], message: 'Invalid history query range' });
       return;
     }
-    if (value.kind !== 'readRange' && value.kind !== 'readDirectory' && value.kind !== 'readQuery')
+    if (
+      value.kind !== 'readRange' &&
+      value.kind !== 'readOlderRange' &&
+      value.kind !== 'readDirectory' &&
+      value.kind !== 'readQuery'
+    )
       return;
+    if (value.kind === 'readOlderRange' && value.to === value.from) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['to'],
+        message: 'An older history page cannot be empty',
+      });
+      return;
+    }
     if (value.to < value.from) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -2201,6 +2222,14 @@ export const SessionHistoryReadQuerySchema = z
       });
     }
   });
+
+export const SessionHistoryOlderRangeSchema = z
+  .object({
+    baseCheckpoint: z.string().min(1).max(1024),
+    checkpoint: z.string().min(1).max(1024),
+    turns: z.array(z.unknown()).max(SESSION_HISTORY_READ_MAX_RANGE),
+  })
+  .strict();
 
 export const SessionHistoryReadRequestSchema = z
   .object({

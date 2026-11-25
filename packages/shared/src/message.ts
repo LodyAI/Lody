@@ -826,6 +826,12 @@ export type SessionHistoryReadQuery =
       readonly atCheckpoint?: string;
     }
   | {
+      readonly kind: 'readOlderRange';
+      readonly from: number;
+      readonly to: number;
+      readonly baseCheckpoint: string;
+    }
+  | {
       readonly kind: 'readDirectory';
       readonly from: number;
       readonly to: number;

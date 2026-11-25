@@ -51,7 +51,7 @@ import {
 } from './roost-history-cache';
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
-import { SessionHistoryChangesSchema } from '@lody/shared';
+import { SessionHistoryChangesSchema, SessionHistoryOlderRangeSchema } from '@lody/shared';
 
 type HistoryReadResponse = Extract<
   LocalSessionControlResponse,
@@ -87,6 +87,7 @@ type RoostHistoryObservationOptions = {
   readonly pollIntervalMs?: number;
   readonly coherentInspection?: boolean | (() => boolean);
   readonly incremental?: boolean | (() => boolean);
+  readonly olderRange?: boolean | (() => boolean);
   readonly live?: boolean | (() => boolean);
   readonly patches?: boolean | (() => boolean);
   readonly active?: () => boolean;
@@ -712,30 +713,48 @@ const createRoostSessionDataFactoryFromTransport =
       }
       if (before) {
         if (incrementalEnabled() && localHead?.checkpoint && !replacingSnapshot) {
-          // Reconcile an exact page against the cache transaction that will
-          // install it. A tail publication alone does not invalidate its rows.
           const from = Math.max(0, before.end - query.limit);
-          const response = await transport.readHistory({
-            kind: 'readRange',
-            from,
-            to: before.end,
-            atCheckpoint: localHead.checkpoint,
-          });
+          const baseCheckpoint = localHead.checkpoint;
+          const olderRange =
+            typeof options.olderRange === 'function' ? options.olderRange() : options.olderRange;
+          const response = await transport
+            .readHistory(
+              olderRange
+                ? { kind: 'readOlderRange', from, to: before.end, baseCheckpoint }
+                : { kind: 'readRange', from, to: before.end, atCheckpoint: baseCheckpoint }
+            )
+            .catch((error) => {
+              if (olderRange && isHistorySuperseded(error)) scheduleRefresh();
+              throw error;
+            });
+          const proof = olderRange
+            ? SessionHistoryOlderRangeSchema.parse(response.result)
+            : undefined;
+          const checkpoint = proof?.checkpoint ?? baseCheckpoint;
+          const reads = proof?.turns ?? response.result;
           if (
             disposed ||
             replacingSnapshot ||
-            response.historyRevision !== localHead.revision ||
-            response.historyCount !== localHead.count ||
-            !Array.isArray(response.result) ||
-            response.result.length !== before.end - from
+            (proof && proof.baseCheckpoint !== baseCheckpoint) ||
+            (checkpoint === baseCheckpoint &&
+              (response.historyRevision !== localHead.revision ||
+                response.historyCount !== localHead.count)) ||
+            response.historyRevision === undefined ||
+            response.historyRevision < localHead.revision ||
+            response.historyCount === undefined ||
+            response.historyCount < before.end ||
+            !Array.isArray(reads) ||
+            reads.length !== before.end - from
           )
             throw new HistoryRefreshSupersededError();
-          const turns = response.result.map((value) => {
+          const turns = reads.map((value) => {
             const read = validateTurnRead(value, 'Roost cached page recovery');
             if (read.state !== 'ready') throw new Error('Roost cached page body is unavailable');
             return read.turn as SessionHistoryInput;
           });
-          const page = await cached(() => cache.retainOlderPage(localHead, from, turns));
+          const page = await cached(() =>
+            cache.retainOlderPage(localHead, from, turns, checkpoint)
+          );
           if (!page || disposed || replacingSnapshot) throw new HistoryRefreshSupersededError();
           return { page, directoryEpoch };
         }
