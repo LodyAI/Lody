@@ -159,7 +159,6 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       return;
     }
     // leaf: cell or labelled box — paint a rect, box also centres up to 3 lines.
-    const tone = FILL[str(p.tone, 'mid')] ?? FILL.mid;
     rects.push({ x, y, w, h, tone: str(p.tone, 'mid'), rx: Math.min(4, w / 2, h / 2) });
     if (node.dir === 'box') {
       const cx = x + w / 2;
