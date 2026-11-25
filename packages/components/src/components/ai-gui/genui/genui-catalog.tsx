@@ -8,7 +8,7 @@ import { Badge, Button, Card, Checkbox, Input, Select, Separator, Switch } from 
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { icons } from 'lucide-react';
-import { createElement, type ReactNode, type SVGProps } from 'react';
+import { createElement, useId, type ReactNode, type SVGProps } from 'react';
 
 export type GenuiProps = Record<string, unknown> & { children?: ReactNode };
 export type GenuiRenderer = (props: GenuiProps) => ReactNode;
@@ -87,6 +87,7 @@ const FILL: Record<string, { fill: string; op: number; dash?: boolean; stroke?: 
 };
 
 function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const W = num(w, 160);
   const H = num(h, 132);
   const P = num(pad, 4);
@@ -115,7 +116,7 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
     .filter((n): n is Node => n !== undefined);
 
   const rects: { x: number; y: number; w: number; h: number; tone: string; rx: number }[] = [];
-  const texts: { x: number; y: number; s: number; w: number; t: string }[] = [];
+  const texts: { x: number; y: number; s: number; w: number; t: string; clip: number }[] = [];
 
   const layout = (node: Node, x: number, y: number, w: number, h: number): void => {
     const p = node.props;
@@ -123,25 +124,21 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
     const inset = num(p.pad, 1);
     const kids = node.kids;
     if (node.dir === 'col' || node.dir === 'row') {
+      const main = node.dir === 'col' ? 'h' : 'w';
       const ix = x + inset,
         iy = y + inset,
         iw = w - inset * 2,
         ih = h - inset * 2;
-      const total = kids.reduce(
-        (s, k) => s + num(node.dir === 'col' ? k.props.h : k.props.w, 0),
-        0
-      );
+      const inner = node.dir === 'col' ? ih : iw;
+      const total = kids.reduce((s, k) => s + num(k.props[main], 0), 0);
       const flexSum = kids.reduce(
-        (s, k) => s + Math.max(0, num(k.props.flex, k.props.h || k.props.w ? 0 : 1)),
+        (s, k) => s + Math.max(0, num(k.props.flex, num(k.props[main], 0) > 0 ? 0 : 1)),
         0
       );
-      const free = Math.max(
-        0,
-        (node.dir === 'col' ? ih : iw) - total - gap * Math.max(0, kids.length - 1)
-      );
+      const free = Math.max(0, inner - total - gap * Math.max(0, kids.length - 1));
       let cur = node.dir === 'col' ? iy : ix;
       for (const k of kids) {
-        const fixed = num(node.dir === 'col' ? k.props.h : k.props.w, 0);
+        const fixed = num(k.props[main], 0);
         const share =
           fixed > 0 ? fixed : free * (Math.max(0, num(k.props.flex, 1)) / Math.max(1, flexSum));
         if (node.dir === 'col') {
@@ -157,6 +154,7 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
     // leaf: cell or labelled box — paint a rect, box also centres up to 3 lines.
     rects.push({ x, y, w, h, tone: str(p.tone, 'mid'), rx: Math.min(4, w / 2, h / 2) });
     if (node.dir === 'box') {
+      const clip = rects.length - 1;
       const cx = x + w / 2;
       const cy = y + h / 2;
       const label = str(p.label),
@@ -169,7 +167,7 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       ].filter(Boolean) as { t: string; s: number; b?: number }[];
       const blockH = lines.length * 12;
       lines.forEach((l, i) =>
-        texts.push({ x: cx, y: cy - blockH / 2 + 9 + i * 14, s: l.s, w: l.b ?? 400, t: l.t })
+        texts.push({ x: cx, y: cy - blockH / 2 + 9 + i * 14, s: l.s, w: l.b ?? 400, t: l.t, clip })
       );
     }
   };
@@ -186,6 +184,13 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
       aria-label={str(ariaLabel, 'wireframe')}
     >
       <rect x={P} y={P} width={W - P * 2} height={H - P * 2} rx={5} stroke={G} fill="none" />
+      <defs>
+        {rects.map((r, i) => (
+          <clipPath key={i} id={`${uid}c${i}`}>
+            <rect x={r.x} y={r.y} width={Math.max(0, r.w)} height={Math.max(0, r.h)} rx={r.rx} />
+          </clipPath>
+        ))}
+      </defs>
       {rects.map((r, i) => {
         const t = FILL[r.tone] ?? FILL.mid;
         return (
@@ -212,6 +217,7 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
           fontSize={t.s}
           fontWeight={t.w}
           fill="currentColor"
+          clipPath={`url(#${uid}c${t.clip})`}
         >
           {t.t}
         </text>
