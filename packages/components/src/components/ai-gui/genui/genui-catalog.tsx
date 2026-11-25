@@ -85,7 +85,7 @@ const FILL: Record<string, { fill: string; op: number; dash?: boolean; stroke?: 
   faint: { fill: G, op: 0.05, dash: true, stroke: G },
 };
 
-type MockDir = 'col' | 'row' | 'cell' | 'box';
+type MockDir = 'col' | 'row' | 'cell' | 'box' | 'lines';
 const mockTag = (dir: MockDir) => {
   const c = (props: GenuiProps) => createElement(`m:${dir}` as 'div', props);
   (c as { genuiMock?: MockDir }).genuiMock = dir;
@@ -113,7 +113,9 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
               ? 'cell'
               : t === 'm:box'
                 ? 'box'
-                : undefined;
+                : t === 'm:lines'
+                  ? 'lines'
+                  : undefined;
     if (!dir) return undefined;
     const kids = (Array.isArray(e.props?.children) ? e.props.children : [e.props?.children])
       .map(read)
@@ -158,6 +160,27 @@ function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps)
           layout(k, cur, iy, share, ih);
           cur += share + gap;
         }
+      }
+      return;
+    }
+    if (node.dir === 'lines') {
+      // Placeholder content bars — nav items, form rows, body text.
+      const count = Math.max(1, num(p.count, Math.floor((h + 6) / 16)));
+      const lp = num(p.pad, 6);
+      const bar = num(p.size, 7);
+      const gap = count > 1 ? Math.min(10, (h - lp * 2 - bar) / (count - 1) - bar) : 0;
+      let ly = y + lp;
+      for (let i = 0; i < count; i++) {
+        const bw = i === count - 1 && p.lastShort !== false ? w * 0.62 : w;
+        rects.push({
+          x: q(x + lp),
+          y: q(ly),
+          w: q(Math.max(8, w - lp * 2) * (bw === w ? 1 : 0.62)),
+          h: bar,
+          tone: 'soft',
+          rx: Math.min(3, bar / 2),
+        });
+        ly += bar + gap;
       }
       return;
     }
@@ -520,8 +543,11 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   'Mock:Row': mockTag('row'),
   'Mock:Cell': mockTag('cell'),
   'Mock:Box': mockTag('box'),
+  'Mock:Lines': mockTag('lines'),
   svg: ({ children, ...rest }) => (
     <svg
+      fill="currentColor"
+      fontFamily="-apple-system, system-ui, sans-serif"
       {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
       {...stylex.props(styles.svg)}
     >

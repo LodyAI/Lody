@@ -16,7 +16,8 @@ reduces the reader's scan cost:
   static data a markdown table is usually clearer.
 - `Mock` — **the default for any wireframe, UI mock-up, layout or architecture
   schematic.** Nest `Mock:Col`/`Mock:Row` (split space), `Mock:Cell` (a labelled
-  or blank block), `Mock:Box` (a block centred on `label`/`sub`/`hint`) and the renderer computes
+  or blank block), `Mock:Box` (a block centred on `label`/`sub`/`hint`),
+  `Mock:Lines` (placeholder content bars — nav items, form rows, body text) and the renderer computes
   every coordinate — you never write x/y/w/h and it always comes out aligned.
   Do not hand-place `svg` rects for a layout; `svg` is only for shapes `Mock`
   cannot express (icons, annotations). Node→edge graphs → ```` ```mermaid ````.
@@ -103,7 +104,7 @@ renders at 14px.
 | `Checkbox`/`Switch` | Toggle | `checked`, `onCheckedChange(v)`, `disabled` |
 | `Select` | Dropdown | `items`, `value`, `onValueChange(v)`, `placeholder` |
 | `Slider` | Range | `value`, `min`, `max`, `step`, `onChange(n)` |
-| `Mock` | Wireframe → greyscale svg | `w`, `h`, `pad`; `Mock:Col`/`Mock:Row`/`Mock:Cell`/`Mock:Box` |
+| `Mock` | Wireframe → greyscale svg | `w`, `h`, `pad`; `Mock:Col`/`Mock:Row`/`Mock:Cell`/`Mock:Box`/`Mock:Lines` |
 | `svg` | Vector shapes | `viewBox`; `rect` `circle` `ellipse` `line` `polyline` `polygon` `path` `g`; `svg:text` |
 
 ## References (read on demand, only for families you use)

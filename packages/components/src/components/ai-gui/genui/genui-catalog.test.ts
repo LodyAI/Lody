@@ -47,7 +47,13 @@ describe('svg catalog family', () => {
       onClick: () => 1,
       'data-x': '1',
     });
-    expect(Object.keys(el.props).sort()).toEqual(['children', 'className', 'viewBox']);
+    expect(Object.keys(el.props).sort()).toEqual([
+      'children',
+      'className',
+      'fill',
+      'fontFamily',
+      'viewBox',
+    ]);
   });
 
   it('keeps aria attributes in kebab case on the svg root', () => {

@@ -57,12 +57,13 @@ labels.
 - `Mock:Col` / `Mock:Row` — split their box vertically / horizontally among
   children. `gap` sets spacing; children with a fixed `h` (in a `Mock:Col`) or
   `w` (in a `Mock:Row`) take it and the rest share what remains by `flex`.
-- `Mock:Cell` — a blank block. `w`/`h` fix its cross-axis or main-axis size.
-- `Mock:Box` — a labelled block; centres up to three lines: `label` (12px),
-  `sub` (9px), `hint` (8px).
-- `tone` — `deep` `.35` / `mid` `.18` / `band` `.12` / `soft` `.25` /
-  `faint` `.1` + dashed outline. Pick the step that matches the region's
-  visual weight.
+- `Mock:Cell` — a block; optional single `label`. `w`/`h` fix its size.
+- `Mock:Box` — a labelled block; centres up to three lines: `label`, `sub`,
+  `hint`. Lines that would overflow the box are dropped.
+- `Mock:Lines` — placeholder content bars (nav items, form rows, body text).
+  `count` bars of `size` px, the last bar shortened unless `lastShort={false}`.
+- `tone` — one grey family, deepest→lightest: `deep` `.5` / `mid` `.3` /
+  `band` `.16` / `soft` `.09` / `faint` `.05` + dashed outline.
 
 Keep `Mock` self-contained — it cannot take state or events; it is a static
 schematic.
