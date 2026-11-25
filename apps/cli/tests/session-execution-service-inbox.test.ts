@@ -1934,6 +1934,7 @@ describe('Operation Inbox execution boundary', () => {
       });
       await f.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
         latestUserMsgId: steerTurnId,
+        processingUserMsgId: 'unrelated-claim',
       });
 
       const cancelResult = await f.service.cancelSession({
@@ -1957,6 +1958,7 @@ describe('Operation Inbox execution boundary', () => {
         history.find((turn) => turn.id === steerTurnId)?.status
       );
       expect(meta?.lastHandledUserMsgId).toBe('human-input');
+      expect(meta?.processingUserMsgId).toBe('unrelated-claim');
       expect(findNextDispatchableUserTurn(history, meta as SessionMeta)?.id).toBe(steerTurnId);
 
       // The preserved user turn can now be dispatched and completes normally.

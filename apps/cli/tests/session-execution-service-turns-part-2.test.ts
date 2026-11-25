@@ -221,11 +221,22 @@ describe('SessionExecutionService', () => {
   });
 
   it('does not cancel a newer latestUserMsgId when cancelling a turn with no processingUserMsgId', async () => {
-    const upsertDocMeta = vi.fn(async () => {});
+    let meta: Partial<SessionMeta> = {
+      latestUserMsgId: 'turn-steer-pending',
+      lastHandledUserMsgId: 'turn-previous-1',
+    };
+    const history: Array<{ id: string; role: 'user'; status: string }> = [
+      { id: 'turn-steer-pending', role: 'user', status: 'pending' },
+    ];
+    const upsertDocMeta = vi.fn(async (_id: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
     const sessionDoc = withHistoryPort({
-      getHistory: vi.fn(() => []),
+      getHistory: vi.fn(() => history),
       setStatus: vi.fn(async () => {}),
-      updateHistory: vi.fn(async () => {}),
+      updateHistory: vi.fn(async (updater: (draft: typeof history) => void) => {
+        updater(history);
+      }),
     });
     const session = {
       acpSessionId: 'acp-system-cancel' as ACPSessionId,
@@ -248,12 +259,7 @@ describe('SessionExecutionService', () => {
       workspaceDocument: {
         repo: {
           upsertDocMeta,
-          getDocMeta: vi.fn(async () => ({
-            meta: {
-              latestUserMsgId: 'turn-steer-pending',
-              lastHandledUserMsgId: 'turn-previous-1',
-            },
-          })),
+          getDocMeta: vi.fn(async () => ({ meta })),
         },
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
         updateAcpCapabilities: vi.fn(async () => {}),
@@ -271,10 +277,12 @@ describe('SessionExecutionService', () => {
 
     expect(result).toEqual({ success: true });
     expect(session.agentClient.cancel).toHaveBeenCalledWith('acp-system-cancel');
-    expect(upsertDocMeta).not.toHaveBeenCalledWith(
-      'session-session-system-cancel',
-      expect.objectContaining({ lastHandledUserMsgId: 'turn-steer-pending' })
-    );
+    expect(meta).toMatchObject({
+      latestUserMsgId: 'turn-steer-pending',
+      lastHandledUserMsgId: 'turn-previous-1',
+    });
+    expect(meta.processingUserMsgId).toBeUndefined();
+    expect(history[0]).toMatchObject({ id: 'turn-steer-pending', status: 'pending' });
     expect(
       service.getTerminalUserTurnStatusWithoutEntry(
         'session-system-cancel' as SessionId,
