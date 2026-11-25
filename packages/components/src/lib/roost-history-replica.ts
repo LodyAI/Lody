@@ -84,6 +84,7 @@ export function canReadRoostHistoryFromOwnerAfter(error: unknown): boolean {
     error instanceof RoostCloudHistoryTransportError ||
     (error instanceof RoostCloudHistoryRequestError && error.retryable) ||
     (error instanceof TransportError && error.code === 'unavailable') ||
+    (error instanceof DOMException && error.name === 'QuotaExceededError') ||
     (error instanceof Error && error.name === 'TimeoutError')
   );
 }

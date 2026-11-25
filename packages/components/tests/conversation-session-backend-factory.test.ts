@@ -36,6 +36,18 @@ import { createConversationViewFromReader } from '../src/lib/conversation-view/c
 import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/main/services/local-session-control-budget';
 import type { SessionDataChange } from '@lody/shared/session-data';
 
+function limitReplicaStorage(isFull: () => boolean) {
+  const put = IDBObjectStore.prototype.put;
+  return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    ...args
+  ) {
+    if (isFull() && this.transaction.db.name.startsWith('lody-roost-replica-'))
+      throw new DOMException('Replica storage quota exceeded', 'QuotaExceededError');
+    return put.apply(this, args);
+  });
+}
+
 describe('createConversationSession backend seam', () => {
   it.each([
     { status: 401, hint: true },
@@ -96,7 +108,7 @@ describe('createConversationSession backend seam', () => {
     }
   );
 
-  it.each(['unavailable', 'requires owner authorization'] as const)(
+  it.each(['unavailable', 'requires owner authorization', 'exceeds local storage quota'] as const)(
     'keeps a cached history private when the cloud %s and the machine denies access',
     async (cloud) => {
       vi.stubGlobal('indexedDB', new IDBFactory());
@@ -104,6 +116,12 @@ describe('createConversationSession backend seam', () => {
       const workspaceId = 'workspace' as WorkspaceId;
       const machineId = 'machine' as MachineId;
       const sessionId = 'denied-owner-cache' as SessionId;
+      const binding = { generation: 'root', ownerPublicKey: 'A'.repeat(43) };
+      const storage =
+        cloud === 'exceeds local storage quota' ? limitReplicaStorage(() => true) : undefined;
+      vi.stubGlobal('fetch', async () => {
+        throw new Error('Unexpected history transport');
+      });
       const cache = createRoostHistoryCache(
         JSON.stringify(['local', workspaceId, machineId, sessionId])
       );
@@ -136,11 +154,25 @@ describe('createConversationSession backend seam', () => {
             machineId,
             sessionId,
             replicaNamespace: 'denied-owner-cache',
-            getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
+            getBinding: () => binding,
             observeBinding: () => () => {},
             requestGrant: async () => {
               if (cloud === 'requires owner authorization') return { state: 'owner-required' };
-              throw new RoostCloudHistoryRequestError(503);
+              if (cloud === 'unavailable') throw new RoostCloudHistoryRequestError(503);
+              const streamId = roostCloudHistoryStreamId(
+                workspaceId,
+                machineId,
+                sessionId,
+                binding
+              );
+              return {
+                state: 'published',
+                binding,
+                streamUrl: `https://streams.example.test/ds/${ROOST_HISTORY_BUCKET_ID}/${encodeURIComponent(streamId)}`,
+                token: 'synthetic-read-grant',
+                expiresIn: 60,
+                newerVersionPending: false,
+              };
             },
           }),
       })({ doc, sessionId, backendKind: 'roost' });
@@ -164,6 +196,7 @@ describe('createConversationSession backend seam', () => {
         data.dispose();
         cache.dispose();
         doc.free();
+        storage?.mockRestore();
         vi.unstubAllGlobals();
       }
     }
@@ -179,6 +212,7 @@ describe('createConversationSession backend seam', () => {
     'grant 503',
     'Streams reverse read 503',
     'published grant 503',
+    'published replica exceeds local storage quota',
     'published grant 503 then refusal',
     'published grant 503 then Streams recovers first',
     'published grant 503 then Streams refuses first',
@@ -224,10 +258,12 @@ describe('createConversationSession backend seam', () => {
         bothUnavailable ||
         closing ||
         startingState === 'published grant 503 then Streams recovers first';
-      const cloudOutage = liveOutage || startingState.startsWith('published grant 503');
+      const quotaExhausted = startingState === 'published replica exceeds local storage quota';
+      const grantOutage = startingState.startsWith('published grant 503');
+      const cloudOutage = liveOutage || grantOutage || quotaExhausted;
       const alreadyPublished = startingState.startsWith('published') || updateDuringMetadata;
       const discovering = ['grant 503', 'Streams reverse read 503'].includes(startingState);
-      let cloudUnavailable = (cloudOutage && !liveOutage) || discovering;
+      let cloudUnavailable = grantOutage || discovering;
       const pendingWithoutNotice = startingState === 'publication without notice' || needsOwner;
       let awaitingPublication = !alreadyPublished && !discovering;
       vi.stubGlobal('indexedDB', new IDBFactory());
@@ -474,6 +510,8 @@ describe('createConversationSession backend seam', () => {
       const offline = async (): Promise<never> => {
         throw new Error('Synthetic owner is offline');
       };
+      let replicaFull = quotaExhausted;
+      const quota = quotaExhausted ? limitReplicaStorage(() => replicaFull) : undefined;
       let cachedBinding: typeof binding | undefined =
         alreadyPublished && startingState !== 'published without a hint' ? binding : undefined;
       const publicationWakes = new Set<() => void>();
@@ -538,6 +576,7 @@ describe('createConversationSession backend seam', () => {
           machineId,
         },
       });
+      const ownerTurn = quotaExhausted ? { ...turn, id: 'machine-message' } : turn;
       const ownerRead: Parameters<
         typeof createRemoteRoostSessionDataFactory
       >[0]['requestHistoryRead'] = async (_machine, _session, query) => ({
@@ -557,10 +596,10 @@ describe('createConversationSession backend seam', () => {
                   totalCount: paginating ? 2 : 1,
                   hasMoreOlder: paginating,
                   cursor: paginating ? 'machine-older' : null,
-                  rows: [createRoostDirectoryRow(paginating ? 1 : 0, turn)],
+                  rows: [createRoostDirectoryRow(paginating ? 1 : 0, ownerTurn)],
                 }
-              : { state: 'ready', turn },
-        pageTurns: [turn],
+              : { state: 'ready', turn: ownerTurn },
+        pageTurns: [ownerTurn],
       });
       const ownerStarted = Promise.withResolvers<void>();
       const ownerReply = Promise.withResolvers<Awaited<ReturnType<typeof ownerRead>>>();
@@ -748,7 +787,7 @@ describe('createConversationSession backend seam', () => {
         }
         if (cloudOutage) {
           await expect(observation.initialPage).resolves.toMatchObject({
-            rows: [{ turnId: turn.id }],
+            rows: [{ turnId: ownerTurn.id }],
           });
           if (liveOutage) {
             await vi.advanceTimersByTimeAsync(0);
@@ -760,7 +799,9 @@ describe('createConversationSession backend seam', () => {
               rows: [{ turnId: turn.id }],
             });
           }
-          expect(sync).toMatchObject({ source: 'machine', phase: 'retrying', httpStatus: 503 });
+          expect(sync?.source).toBe('machine');
+          if (!quotaExhausted) expect(sync).toMatchObject({ phase: 'retrying', httpStatus: 503 });
+          replicaFull = false;
           cloudUnavailable = false;
           await vi.advanceTimersByTimeAsync(1_000);
           await recovered.promise;
@@ -879,6 +920,7 @@ describe('createConversationSession backend seam', () => {
         observation.unsubscribe();
       } finally {
         if (!closed) first.dispose();
+        quota?.mockRestore();
         if (delayedRequest)
           ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
         if (discovering || pendingWithoutNotice || cloudOutage || checkingCachedGrant)

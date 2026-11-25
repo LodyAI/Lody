@@ -295,9 +295,10 @@ A remote plaintext Roost session starts by requesting an exact-session Streams
 grant. Metadata publication fields wake the reader. The grant authorizes and
 identifies the replica, including when those fields have yet to arrive. The
 server distinguishes pending publication, access that requires the target
-machine, and refusal. Pending publication, required machine authorization, or
-temporary transport failure lets the owning machine admit a fresh exact-session
-read. A Streams access refusal ends that read route.
+machine, and refusal. Pending publication, required machine authorization,
+temporary transport failure, or local replica quota exhaustion lets the owning
+machine admit a fresh exact-session read. A Streams access refusal ends that
+read route.
 
 During machine admission and while the machine serves history, Streams can
 prepare a window at a captured tail independently. The route switches when
