@@ -467,6 +467,8 @@ jobs:
         if: matrix.target == 'mac' && needs.release.outputs.target_environment == 'production'
         env:
           MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         shell: bash
         run: bash .github/scripts/prepare-macos-passkey.sh
       - name: Build Electron package (${{ matrix.target }})
