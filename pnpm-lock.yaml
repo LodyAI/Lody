@@ -223,6 +223,9 @@ patchedDependencies:
   app-builder-lib@26.15.3:
     hash: 80637977dda4ea924da866a67751774a621195429af5af0f103e9129b3bec57f
     path: patches/app-builder-lib@26.15.3.patch
+  electron-sparkle-updater@0.5.1:
+    hash: ffba715016197f804e20bd8894f4a26bb8f6117cfbf9451e566428f89d2cb487
+    path: patches/electron-sparkle-updater@0.5.1.patch
   glob@13.0.1:
     hash: 061d355627e4d2f2e7582889f6f36611a80324c9c0d8c8c84228b9acae287484
     path: patches/glob@13.0.1.patch
@@ -654,7 +657,7 @@ importers:
         version: 1.0.2(electron@44.9.3)
       electron-sparkle-updater:
         specifier: 0.5.1
-        version: 0.5.1(electron@44.9.3)
+        version: 0.5.1(patch_hash=ffba715016197f804e20bd8894f4a26bb8f6117cfbf9451e566428f89d2cb487)(electron@44.9.3)
       electron-updater:
         specifier: ^6.3.9
         version: 6.7.3
@@ -23023,7 +23026,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron-sparkle-updater@0.5.1(electron@44.9.3):
+  electron-sparkle-updater@0.5.1(patch_hash=ffba715016197f804e20bd8894f4a26bb8f6117cfbf9451e566428f89d2cb487)(electron@44.9.3):
     dependencies:
       node-addon-api: 8.9.1
       node-gyp: 13.0.2

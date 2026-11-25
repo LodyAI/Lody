@@ -475,20 +475,32 @@ export function AboutSettingsComponent() {
                 </span>
               )}
               {isDownloaded ? (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    void handleQuitAndInstall();
-                  }}
-                  disabled={isInstalling}
-                >
-                  {isInstalling ? (
-                    <Spinner size="small" />
-                  ) : (
-                    <Download {...stylex.props(styles.icon)} />
-                  )}
-                  {t('settings.about.updateAndRestart')}
-                </Button>
+                <>
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={() => {
+                      void handleCheckForUpdates();
+                    }}
+                    disabled={isChecking || isInstalling}
+                  >
+                    {t('settings.about.checkForUpdates')}
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void handleQuitAndInstall();
+                    }}
+                    disabled={isInstalling}
+                  >
+                    {isInstalling ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <Download {...stylex.props(styles.icon)} />
+                    )}
+                    {t('settings.about.updateAndRestart')}
+                  </Button>
+                </>
               ) : (
                 <Button
                   variant="secondary"
