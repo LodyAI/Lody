@@ -34,11 +34,27 @@ for arch in arm64 x64; do
 
   codesign --verify --deep --strict -R='anchor apple generic' "${app}"
   xcrun stapler validate "${app}"
+  spctl -a -vvv -t exec "${app}"
 
   if [[ ! -f "${app}/Contents/embedded.provisionprofile" ]]; then
     echo "Missing Contents/embedded.provisionprofile in ${app}"
     exit 1
   fi
+
+  cert_prefix="${verify_dir}/${arch}-cert"
+  codesign -d --extract-certificates="${cert_prefix}" "${app}" 2>/dev/null
+  leaf_cert="${cert_prefix}0"
+  if [[ ! -s "${leaf_cert}" ]]; then
+    echo "Failed to extract leaf signing certificate from ${app}"
+    exit 1
+  fi
+
+  profile_plist="${verify_dir}/${arch}-embedded-profile.plist"
+  if ! security cms -D -i "${app}/Contents/embedded.provisionprofile" > "${profile_plist}"; then
+    echo "Failed to decode Contents/embedded.provisionprofile in ${app}"
+    exit 1
+  fi
+  node .github/scripts/macos-passkey-profile.mjs --plist "${profile_plist}" --cert-der "${leaf_cert}"
 
   addon="${app}/Contents/Resources/passkey_bridge.node"
   if [[ ! -f "${addon}" ]]; then
