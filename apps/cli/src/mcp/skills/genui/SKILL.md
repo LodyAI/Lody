@@ -19,6 +19,13 @@ reduces the reader's scan cost:
 - **Interactive controls** — only when the reader can act on the UI itself
   (a slider to preview a value, a button to trigger the next step). For
   static data, plain markdown tables are usually clearer.
+- **`Mock` wireframes** — architecture/layout schematics where a labelled
+  greyscale block diagram beats a paragraph. Describe the nesting
+  (`Mock:Col`/`Mock:Row` split space; `Mock:Box` centres `label`/`sub`/`hint`)
+  and the renderer computes every coordinate — never write x/y/w/h.
+  For node→edge graphs and state machines, a ```` ```mermaid ```` fenced block
+  in ordinary Markdown renders the diagram; for hand-tuned vector scenes,
+  `svg` + `svg:text`.
 
 A single reply often mixes all three: lead with prose, drop inline badges
 where status matters, add a fenced card only for the part that benefits from
@@ -130,7 +137,7 @@ Props that matter per tag; full prop tables and per-family examples live in
 | `Checkbox` / `Switch` | Boolean toggle | `checked`, `onCheckedChange(v)`, `disabled` |
 | `Select` | Dropdown | `items`, `value`, `onValueChange(v)`, `placeholder` |
 | `Slider` | Numeric range | `value`, `min`, `max`, `step`, `disabled`, `onChange(n)` |
-| `Diagram` | Auto-laid-out layered diagram | `layers` (array), `edges` (array), `aria-label` |
+| `Mock` | Declarative nested-layout wireframe → greyscale svg | `w`, `h`, `pad`; children `Mock:Col`/`Mock:Row`/`Mock:Cell`/`Mock:Box` |
 | `svg` family | Hand-placed vector shapes | `viewBox`; `rect` `circle` `ellipse` `line` `polyline` `polygon` `path` `g`; labels via `svg:text` |
 
 ## References (read on demand)
@@ -138,7 +145,7 @@ Props that matter per tag; full prop tables and per-family examples live in
 - [expressions](references/expressions.md) — confined-JS subset, state semantics, `lody.*` capabilities, error shapes.
 - [layout-text](references/layout-text.md) — Card, Row, Column, Divider, Spacer, Text, Heading, Badge, Icon: props, examples, misuse patterns.
 - [controls](references/controls.md) — Button, Input, Checkbox, Switch, Select, Slider: props, event contracts, worked examples.
-- [svg](references/svg.md) — Diagram (auto layout), svg, shapes, svg:text: the confined diagram subset, paint attributes, examples.
+- [svg](references/svg.md) — svg, shapes, svg:text, `Mock` wireframes: the confined vector subset, paint attributes, examples.
 
 ## Validate before shipping
 

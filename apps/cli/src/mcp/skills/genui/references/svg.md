@@ -1,57 +1,81 @@
-# svg diagrams
+# diagrams, wireframes, and vector
 
-Two ways to draw: **`Diagram`** for structured layered/flow pictures — you give
-data, it computes every coordinate — and the lowercase **`svg` family** for
-hand-placed shapes when you need exact control.
+Three drawing surfaces, picked by what you are showing:
 
-## Prefer `Diagram` for architecture and flows
+- **Node-and-edge diagrams** (flowcharts, sequences, state, architecture
+  dependencies) → write a ```` ```mermaid ```` fenced block. The mermaid
+  renderer computes all layout; you write only the graph in mermaid syntax.
+  This is the disciplined default — reach for it first for anything that is a
+  set of nodes with connections.
+- **Wireframes and UI mockups** (a window, a sidebar layout, a checklist card) →
+  `Mock`: describe the nesting and the renderer computes every coordinate —
+  you never write x/y/w/h.
+- **Precise vector art** (an icon, an annotated figure, a shape the above cannot
+  express) → the lowercase `svg` family below.
 
-`Diagram` renders a top-down layered diagram. You describe *what* connects, not
-*where*; the layout (positions, sizing, alignment, label placement) is computed
-for you, so output stays aligned without hand-written coordinates.
+## Prefer ` ```mermaid ```` for node-and-edge diagrams
+
+Anything that reads as *boxes connected by arrows* — a pipeline, a sequence
+chart, a dependency or architecture graph — belongs in mermaid, not hand-drawn
+SVG. Inside a `genui` surface you can still emit a fenced block where the
+markup accepts one:
+
+````
+```mermaid
+flowchart LR
+  Client --> Daemon
+  Daemon --> Extension
+```
+````
+
+mermaid covers `flowchart`, `sequenceDiagram`, `stateDiagram`, `graph` and
+more; the host renders it. Do not rebuild these by hand with `<svg>` — the
+result is less legible and cannot be re-laid-out.
+
+## `Mock` — wireframes and UI mockups
+
+`Mock` renders a compact greyscale svg wireframe from a *declarative nested
+layout*. You write the structure as JSX and the renderer runs a flex pass that
+computes every x/y/w/h — you never position anything. The output matches the
+house wireframe style: hairline frame, layered `fill-opacity` blocks, centred
+labels.
 
 ```genui
-<Diagram
-  layers={[
-    { label: 'Clients', items: [
-      { id: 'desk', title: 'Desktop' },
-      { id: 'web', title: 'Web' },
-      { id: 'mob', title: 'Mobile' },
-    ]},
-    { label: 'Daemon', items: [
-      { id: 'core', title: 'Core', subtitle: 'Projects · Threads · Runtime' },
-      { id: 'ext', title: 'Extensions' },
-    ]},
-    { items: [{ id: 'run', title: 'External runners', tone: 'accent' }] },
-  ]}
-  edges={[
-    { from: 'web', to: 'core', label: 'RPC' },
-    { from: 'core', to: 'run', dashed: true },
-  ]}
-/>
+<Mock w={160} h={132}>
+  <Mock:Col>
+    <Mock:Cell h={15}/>            {/* title bar strip */}
+    <Mock:Row>
+      <Mock:Cell w={33} tone="band"/>   {/* sidebar */}
+      <Mock:Box label="Webview" sub="Own UI Runtime" hint="postMessage"/>
+    </Mock:Row>
+  </Mock:Col>
+</Mock>
 ```
 
-- `layers` — array of bands, top to bottom. Each layer: `label` (optional,
-  small-caps band header), `items` (array of boxes), optional `tone`.
-- item — `id` (edge anchor, unique), `title`, optional `subtitle`, `tone`.
-- `edges` — `from`/`to` are item `id`s; `label`, `tone`, `dashed` optional.
-- `tone: 'accent'` highlights a box, band, or edge with the accent colour.
-- Items in a layer share the band width evenly; edges run bottom-of-source to
-  top-of-target. An edge naming a missing `id` is skipped.
-- `aria-label` sets the accessible name (default `diagram`).
+- `Mock` — the svg root. `w`/`h` set the viewBox (default 160×132), `pad`
+  insets the whole frame.
+- `Mock:Col` / `Mock:Row` — split their box vertically / horizontally among
+  children. `gap` sets spacing; children with a fixed `h` (in a `Mock:Col`) or
+  `w` (in a `Mock:Row`) take it and the rest share what remains by `flex`.
+- `Mock:Cell` — a blank block. `w`/`h` fix its cross-axis or main-axis size.
+- `Mock:Box` — a labelled block; centres up to three lines: `label` (12px),
+  `sub` (9px), `hint` (8px).
+- `tone` — `deep` `.35` / `mid` `.18` / `band` `.12` / `soft` `.25` /
+  `faint` `.1` + dashed outline. Pick the step that matches the region's
+  visual weight.
 
-Reach for `Diagram` before hand-writing `<svg>`: it is the disciplined default.
-Drop to the `svg` family only for a shape `Diagram` cannot express — a free-form
-wireframe, a sequence chart, or a single annotated figure.
+Keep `Mock` self-contained — it cannot take state or events; it is a static
+schematic.
 
 ## `svg` family — hand-placed shapes
 
-`<svg>` draws custom diagrams, wireframes, and charts inline — the family keeps
-real lowercase SVG element names, unlike the PascalCase catalog components. It
-is a confined subset: only the elements and attributes below exist, so a
-surface can paint vector shapes but never load resources, embed HTML, or run
-handlers. The one exception is `svg:text`, namespaced to stay distinct from
-the prose `Text` tag.
+`<svg>` draws custom diagrams and figures inline — the family keeps real
+lowercase SVG element names, unlike the PascalCase catalog components. It is a
+confined subset: only the elements and attributes below exist, so a surface
+can paint vector shapes but never load resources, embed HTML, or run handlers.
+The one exception is `svg:text`, namespaced to stay distinct from the prose
+`Text` tag. Reach for `svg` only when neither mermaid nor `Mock` can express the
+shape — you are then responsible for every coordinate.
 
 ### Typography discipline
 
@@ -60,8 +84,9 @@ Hand-placed SVG looks clean only with restraint. Follow this scale:
 - Font sizes: `8` (captions), `9` (labels), `10` (item titles), `11–12`
   (section titles). `font-weight="600"` for titles only; everything else `400`.
 - Colour: `currentColor` for all text. Fills use `currentColor` with
-  `fill-opacity` in `.05` / `.08` / `.12` / `.15` bands. One accent hue maximum
-  (e.g. `#8b5cf6`), reserved for the single element you want highlighted.
+  `fill-opacity` in `.05` / `.08` / `.12` / `.15` bands — restrained grey is the
+  default look; one accent hue maximum (a muted `#d97706` or similar), reserved
+  for the single element you want highlighted.
 - Outlines: `stroke="currentColor"` `stroke-opacity=".25"–.35`; dashed
   connectors via `stroke-dasharray="4 3"` or `"3 3"`.
 

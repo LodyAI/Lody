@@ -57,296 +57,6 @@ const pascal = (name: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join('');
 
-/* --------------------------------------------------------------------------
- * Diagram: a declarative layered/flow diagram. The model supplies structure
- * (`layers` and `edges` data); the renderer computes all geometry at render
- * time so the output stays aligned — the model never writes coordinates.
- * ------------------------------------------------------------------------ */
-
-const ACCENT = '#8b5cf6';
-const DIAGRAM = {
-  width: 560,
-  padX: 20,
-  padTop: 18,
-  padBottom: 18,
-  layerGap: 46,
-  itemGap: 12,
-  layerPadX: 14,
-  layerPadTop: 18,
-  layerPadBottom: 12,
-  itemH: 44,
-  edgeStub: 10,
-  fontTitle: 10,
-  fontItem: 9,
-  fontSub: 8,
-  fontLabel: 8,
-} as const;
-
-interface DiagramItem {
-  id: string;
-  title: string;
-  subtitle?: string;
-  tone?: string;
-}
-interface DiagramLayer {
-  label?: string;
-  tone?: string;
-  items: DiagramItem[];
-}
-interface DiagramEdge {
-  from: string;
-  to: string;
-  label?: string;
-  tone?: string;
-  dashed?: boolean;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function readItem(v: unknown, index: number): DiagramItem | undefined {
-  if (!isRecord(v)) return undefined;
-  const title = str(v.title);
-  if (!title) return undefined;
-  return {
-    id: str(v.id) || `item-${index}`,
-    title,
-    subtitle: v.subtitle === undefined ? undefined : str(v.subtitle),
-    tone: v.tone === undefined ? undefined : str(v.tone),
-  };
-}
-
-function readLayers(v: unknown): DiagramLayer[] {
-  if (!Array.isArray(v)) return [];
-  const layers: DiagramLayer[] = [];
-  for (const raw of v) {
-    if (!isRecord(raw)) continue;
-    const items = Array.isArray(raw.items)
-      ? raw.items.map(readItem).filter((i): i is DiagramItem => i !== undefined)
-      : [];
-    layers.push({
-      label: raw.label === undefined ? undefined : str(raw.label),
-      tone: raw.tone === undefined ? undefined : str(raw.tone),
-      items,
-    });
-  }
-  return layers;
-}
-
-function readEdges(v: unknown): DiagramEdge[] {
-  if (!Array.isArray(v)) return [];
-  const edges: DiagramEdge[] = [];
-  for (const raw of v) {
-    if (!isRecord(raw)) continue;
-    const from = str(raw.from);
-    const to = str(raw.to);
-    if (!from || !to) continue;
-    edges.push({
-      from,
-      to,
-      label: raw.label === undefined ? undefined : str(raw.label),
-      tone: raw.tone === undefined ? undefined : str(raw.tone),
-      dashed: bool(raw.dashed),
-    });
-  }
-  return edges;
-}
-
-const toneStroke = (tone?: string) => (tone === 'accent' ? ACCENT : 'currentColor');
-const toneOpacity = (tone?: string, base = 0.05) => (tone === 'accent' ? 0.12 : base);
-
-/**
- * Compute a top-down layered layout. Each layer is a band; items inside a
- * layer share the band width equally. Edges run from the bottom-centre of a
- * source item to the top-centre of its target. Returns the svg children.
- */
-function GenuiDiagram({ layers, edges, ariaLabel }: GenuiProps) {
-  const ls = readLayers(layers);
-  const es = readEdges(edges);
-  const D = DIAGRAM;
-  const innerW = D.width - D.padX * 2;
-
-  // Pre-compute each layer's band height (taller when it has a label).
-  const bandH = (layer: DiagramLayer) =>
-    (layer.label ? D.layerPadTop : 8) + D.itemH + D.layerPadBottom;
-
-  const totalH =
-    D.padTop +
-    ls.reduce((h, l) => h + bandH(l), 0) +
-    Math.max(0, ls.length - 1) * D.layerGap +
-    D.padBottom;
-
-  // Place every item: record its box and layer index for edge routing.
-  const boxes = new Map<string, { x: number; y: number; w: number; h: number; layer: number }>();
-  const layerRects: { x: number; y: number; w: number; h: number; label?: string; tone?: string }[] =
-    [];
-  let cursorY = D.padTop;
-  ls.forEach((layer, layerIndex) => {
-    const h = bandH(layer);
-    layerRects.push({ x: D.padX, y: cursorY, w: innerW, h, label: layer.label, tone: layer.tone });
-    const n = Math.max(1, layer.items.length);
-    const itemW = (innerW - D.layerPadX * 2 - (n - 1) * D.itemGap) / n;
-    const itemY = cursorY + (layer.label ? D.layerPadTop : 8);
-    layer.items.forEach((item, i) => {
-      const x = D.padX + D.layerPadX + i * (itemW + D.itemGap);
-      boxes.set(item.id, { x, y: itemY, w: itemW, h: D.itemH, layer: layerIndex });
-    });
-    cursorY += h + D.layerGap;
-  });
-
-  const cx = (b: { x: number; w: number }) => b.x + b.w / 2;
-  // Cross-layer edges route through a right-hand gutter so the stroke never
-  // crosses an intermediate band.
-  const gutterX = D.width - 8;
-
-  return (
-    <svg
-      viewBox={`0 0 ${D.width} ${totalH}`}
-      width="100%"
-      role="img"
-      aria-label={str(ariaLabel, 'diagram')}
-      {...stylex.props(styles.svg)}
-    >
-      {/* edges first so boxes paint over their endpoints */}
-      {es.map((edge, i) => {
-        const a = boxes.get(edge.from);
-        const b = boxes.get(edge.to);
-        if (!a || !b) return null;
-        const stroke = toneStroke(edge.tone);
-        const accent = edge.tone === 'accent';
-        const strokeProps = {
-          stroke,
-          strokeOpacity: accent ? 0.95 : 0.4,
-          strokeWidth: accent ? 1.8 : 1,
-          strokeDasharray: edge.dashed ? '4 3' : undefined,
-        };
-        const adjacent = Math.abs(a.layer - b.layer) === 1;
-        if (adjacent) {
-          // Straight line between vertically neighbouring layers.
-          const [top, bot] = a.layer < b.layer ? [a, b] : [b, a];
-          const x1 = cx(top);
-          const y1 = top.y + top.h;
-          const x2 = cx(bot);
-          const y2 = bot.y;
-          return (
-            <g key={`e${i}`}>
-              <line x1={x1} y1={y1} x2={x2} y2={y2} {...strokeProps} />
-              {edge.label ? (
-                <text
-                  x={(x1 + x2) / 2 + 4}
-                  y={(y1 + y2) / 2}
-                  fontSize={D.fontLabel}
-                  fill="currentColor"
-                  opacity={0.6}
-                >
-                  {edge.label}
-                </text>
-              ) : null}
-            </g>
-          );
-        }
-        // Same-layer or multi-layer edge: exit the source's right edge into
-        // the gutter, descend to just above the target's layer, then enter
-        // the target's top edge — the stroke never crosses a band and the
-        // flow still lands from above like the adjacent-layer strokes.
-        const midY = a.y + a.h / 2;
-        const topY = b.y - D.layerGap / 2;
-        const d = [
-          `M ${a.x + a.w} ${midY}`,
-          `L ${gutterX} ${midY}`,
-          `L ${gutterX} ${topY}`,
-          `L ${cx(b)} ${topY}`,
-          `L ${cx(b)} ${b.y}`,
-        ].join(' ');
-        return (
-          <g key={`e${i}`}>
-            <path d={d} fill="none" {...strokeProps} />
-            {edge.label ? (
-              <text
-                x={(gutterX + cx(b)) / 2}
-                y={topY - 3 - (i % 3) * 9}
-                fontSize={D.fontLabel}
-                fill="currentColor"
-                opacity={0.6}
-                textAnchor="middle"
-              >
-                {edge.label}
-              </text>
-            ) : null}
-          </g>
-        );
-      })}
-      {/* layer bands */}
-      {layerRects.map((r, i) => (
-        <g key={`l${i}`}>
-          <rect
-            x={r.x}
-            y={r.y}
-            width={r.w}
-            height={r.h}
-            rx={8}
-            fill="currentColor"
-            opacity={toneOpacity(r.tone, 0.04)}
-            stroke="currentColor"
-            strokeOpacity={0.25}
-          />
-          {r.label ? (
-            <text
-              x={r.x + 12}
-              y={r.y + 14}
-              fontSize={D.fontLabel}
-              letterSpacing={1}
-              fill="currentColor"
-              opacity={0.55}
-            >
-              {r.label.toUpperCase()}
-            </text>
-          ) : null}
-        </g>
-      ))}
-      {/* items */}
-      {ls.flatMap((layer) =>
-        layer.items.map((item) => {
-          const b = boxes.get(item.id);
-          if (!b) return null;
-          const accent = item.tone === 'accent';
-          const hasSub = Boolean(item.subtitle);
-          return (
-            <g key={item.id}>
-              <rect
-                x={b.x}
-                y={b.y}
-                width={b.w}
-                height={b.h}
-                rx={6}
-                fill={accent ? ACCENT : 'currentColor'}
-                opacity={toneOpacity(item.tone)}
-                stroke={toneStroke(item.tone)}
-                strokeOpacity={accent ? 0.9 : 0.35}
-              />
-              <text
-                x={b.x + 10}
-                y={hasSub ? b.y + 18 : b.y + b.h / 2 + 3}
-                fontSize={D.fontItem}
-                fontWeight={600}
-                fill="currentColor"
-              >
-                {item.title}
-              </text>
-              {hasSub ? (
-                <text x={b.x + 10} y={b.y + 32} fontSize={D.fontSub} fill="currentColor" opacity={0.6}>
-                  {item.subtitle}
-                </text>
-              ) : null}
-            </g>
-          );
-        })
-      )}
-    </svg>
-  );
-}
-
 // lucide-react 1.x dropped deprecated aliases like `x-circle` (now `circle-x`);
 // models still write the old kebab names, so retry with rotated segments.
 export function resolveIcon(name: string) {
@@ -363,6 +73,156 @@ export function resolveIcon(name: string) {
     if (icon) return icon;
   }
   return undefined;
+}
+
+/* `Mock`: nested JSX layout → this flex pass computes coordinates → greyscale svg. */
+const MOCK_COL = ({ children }: GenuiProps) => <>{children}</>;
+const MOCK_ROW = ({ children }: GenuiProps) => <>{children}</>;
+const MOCK_CELL = (_p: GenuiProps) => null;
+const MOCK_BOX = (_p: GenuiProps) => null;
+const G = '#888';
+const G2 = '#64748b';
+const FILL: Record<string, { fill: string; op: number; dash?: boolean; stroke?: string }> = {
+  deep: { fill: G, op: 0.35 },
+  mid: { fill: G, op: 0.18 },
+  band: { fill: G, op: 0.12 },
+  soft: { fill: G2, op: 0.25 },
+  faint: { fill: G2, op: 0.1, dash: true, stroke: G2 },
+};
+
+function GenuiMock({ children, w, h, pad, 'aria-label': ariaLabel }: GenuiProps) {
+  const W = num(w, 160);
+  const H = num(h, 132);
+  const P = num(pad, 4);
+  type Node = { dir: 'col' | 'row' | 'cell' | 'box'; props: Record<string, unknown>; kids: Node[] };
+  const read = (el: unknown): Node | undefined => {
+    if (!el || typeof el !== 'object' || Array.isArray(el)) return undefined;
+    const e = el as { type?: unknown; props?: Record<string, unknown> };
+    const dir =
+      e.type === MOCK_COL
+        ? 'col'
+        : e.type === MOCK_ROW
+          ? 'row'
+          : e.type === MOCK_CELL
+            ? 'cell'
+            : e.type === MOCK_BOX
+              ? 'box'
+              : undefined;
+    if (!dir) return undefined;
+    const kids = (Array.isArray(e.props?.children) ? e.props.children : [e.props?.children])
+      .map(read)
+      .filter((n): n is Node => n !== undefined);
+    return { dir, props: e.props ?? {}, kids };
+  };
+  const roots = (Array.isArray(children) ? children : [children])
+    .map(read)
+    .filter((n): n is Node => n !== undefined);
+
+  const rects: { x: number; y: number; w: number; h: number; tone: string; rx: number }[] = [];
+  const texts: { x: number; y: number; s: number; w: number; t: string }[] = [];
+
+  const layout = (node: Node, x: number, y: number, w: number, h: number): void => {
+    const p = node.props;
+    const gap = num(p.gap, 1);
+    const inset = num(p.pad, 1);
+    const kids = node.kids;
+    if (node.dir === 'col' || node.dir === 'row') {
+      const ix = x + inset,
+        iy = y + inset,
+        iw = w - inset * 2,
+        ih = h - inset * 2;
+      const total = kids.reduce(
+        (s, k) => s + num(node.dir === 'col' ? k.props.h : k.props.w, 0),
+        0
+      );
+      const flexSum = kids.reduce(
+        (s, k) => s + Math.max(0, num(k.props.flex, k.props.h || k.props.w ? 0 : 1)),
+        0
+      );
+      const free = Math.max(
+        0,
+        (node.dir === 'col' ? ih : iw) - total - gap * Math.max(0, kids.length - 1)
+      );
+      let cur = node.dir === 'col' ? iy : ix;
+      for (const k of kids) {
+        const fixed = num(node.dir === 'col' ? k.props.h : k.props.w, 0);
+        const share =
+          fixed > 0 ? fixed : free * (Math.max(0, num(k.props.flex, 1)) / Math.max(1, flexSum));
+        if (node.dir === 'col') {
+          layout(k, ix, cur, iw, share);
+          cur += share + gap;
+        } else {
+          layout(k, cur, iy, share, ih);
+          cur += share + gap;
+        }
+      }
+      return;
+    }
+    // leaf: cell or labelled box — paint a rect, box also centres up to 3 lines.
+    const tone = FILL[str(p.tone, 'mid')] ?? FILL.mid;
+    rects.push({ x, y, w, h, tone: str(p.tone, 'mid'), rx: Math.min(4, w / 2, h / 2) });
+    if (node.dir === 'box') {
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      const label = str(p.label),
+        sub = str(p.sub),
+        hint = str(p.hint);
+      const lines = [
+        label && { t: label, s: 12, b: 600 },
+        sub && { t: sub, s: 9 },
+        hint && { t: hint, s: 8 },
+      ].filter(Boolean) as { t: string; s: number; b?: number }[];
+      const blockH = lines.length * 12;
+      lines.forEach((l, i) =>
+        texts.push({ x: cx, y: cy - blockH / 2 + 9 + i * 14, s: l.s, w: l.b ?? 400, t: l.t })
+      );
+    }
+  };
+  for (const r of roots) layout(r, P, P, W - P * 2, H - P * 2);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      fill="currentColor"
+      fontFamily="-apple-system, system-ui, sans-serif"
+      {...stylex.props(styles.svg)}
+      role="img"
+      aria-label={str(ariaLabel, 'wireframe')}
+    >
+      <rect x={P} y={P} width={W - P * 2} height={H - P * 2} rx={5} stroke={G} fill="none" />
+      {rects.map((r, i) => {
+        const t = FILL[r.tone] ?? FILL.mid;
+        return (
+          <rect
+            key={i}
+            x={r.x}
+            y={r.y}
+            width={Math.max(0, r.w)}
+            height={Math.max(0, r.h)}
+            rx={r.rx}
+            fill={t.fill}
+            fillOpacity={t.op}
+            stroke={t.stroke}
+            strokeDasharray={t.dash ? '4 3' : undefined}
+          />
+        );
+      })}
+      {texts.map((t, i) => (
+        <text
+          key={i}
+          x={t.x}
+          y={t.y}
+          textAnchor="middle"
+          fontSize={t.s}
+          fontWeight={t.w}
+          fill="currentColor"
+        >
+          {t.t}
+        </text>
+      ))}
+    </svg>
+  );
 }
 
 function GenuiSlider({ value, onChange, min, max, step, disabled }: GenuiProps) {
@@ -470,9 +330,7 @@ const SVG_TEXT: ReadonlySet<string> = new Set([
 
 /** `aria-*` keeps kebab case; other attributes camelize for React. */
 const camelAttr = (name: string) =>
-  name.startsWith('aria-')
-    ? name
-    : name.replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase());
+  name.startsWith('aria-') ? name : name.replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase());
 
 function pickSvgProps(
   props: Record<string, unknown>,
@@ -503,11 +361,7 @@ type SvgTag =
 
 function svgElement(tag: SvgTag, allowed: ReadonlySet<string>): GenuiRenderer {
   return ({ children, ...rest }) =>
-    createElement(
-      tag as 'svg',
-      pickSvgProps(rest, allowed) as SVGProps<SVGSVGElement>,
-      children
-    );
+    createElement(tag as 'svg', pickSvgProps(rest, allowed) as SVGProps<SVGSVGElement>, children);
 }
 
 const svgRect = new Set([...SVG_PAINT, 'x', 'y', 'width', 'height', 'rx', 'ry']);
@@ -534,8 +388,13 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   ),
   Divider: () => <Separator />,
   Spacer: ({ size }) => <span style={{ flex: 1, minWidth: num(size), minHeight: num(size) }} />,
-  Text: ({ children, muted }) => (
-    <p {...stylex.props(styles.text, bool(muted) && styles.textMuted)}>{children}</p>
+  Text: ({ children, muted, size }) => (
+    <p
+      {...stylex.props(styles.text, bool(muted) && styles.textMuted)}
+      style={{ fontSize: size === undefined ? undefined : num(size) }}
+    >
+      {children}
+    </p>
   ),
   Heading: ({ children, level }) => {
     const Tag = `h${Math.min(Math.max(num(level, 3), 1), 6)}` as 'h3';
@@ -600,7 +459,11 @@ export const GENUI_CATALOG: Record<string, GenuiRenderer> = {
   ),
   Select: (props) => <GenuiSelect {...props} />,
   Slider: (props) => <GenuiSlider {...props} />,
-  Diagram: GenuiDiagram,
+  Mock: (props) => <GenuiMock {...props} />,
+  'Mock:Col': (props) => <MOCK_COL {...props} />,
+  'Mock:Row': (props) => <MOCK_ROW {...props} />,
+  'Mock:Cell': (props) => <MOCK_CELL {...props} />,
+  'Mock:Box': (props) => <MOCK_BOX {...props} />,
   svg: ({ children, ...rest }) => (
     <svg
       {...(pickSvgProps(rest, SVG_ROOT) as SVGProps<SVGSVGElement>)}
