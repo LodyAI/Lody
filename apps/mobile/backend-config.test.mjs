@@ -3,11 +3,9 @@ import assert from 'node:assert/strict';
 import { defaults, resolveBackendConfig } from './backend-config.mjs';
 
 test('unconfigured mobile builds preserve production endpoints and existing credential namespace', () => {
-  assert.deepEqual(resolveBackendConfig('', {}), { ...defaults, STORAGE_SUFFIX: '' });
-  assert.deepEqual(resolveBackendConfig('CONVEX_URL=\nCF_WORKER_URL=""', {}), {
-    ...defaults,
-    STORAGE_SUFFIX: '',
-  });
+  const production = { ...defaults, STORAGE_SUFFIX: '', LORO_STREAMS_WS_ENABLED: '0' };
+  assert.deepEqual(resolveBackendConfig('', {}), production);
+  assert.deepEqual(resolveBackendConfig('CONVEX_URL=\nCF_WORKER_URL=""', {}), production);
 });
 
 test('mobile local builds select both Convex interfaces and Worker without sharing production storage', () => {
@@ -53,4 +51,33 @@ test('changing any backend isolates native credentials and persisted account dat
   );
   assert.equal(new Set(namespaces).size, 3);
   assert.ok(namespaces.every((value) => value !== ''));
+});
+
+test('the Streams WebSocket switch follows desktop rules and never moves stored data', () => {
+  for (const value of ['1', 'true'])
+    assert.equal(
+      resolveBackendConfig('', { LODY_LORO_STREAMS_WS_ENABLED: value }).LORO_STREAMS_WS_ENABLED,
+      '1'
+    );
+  for (const value of ['0', 'false', 'yes', 'TRUE', ' 1', ''])
+    assert.equal(
+      resolveBackendConfig('', { LODY_LORO_STREAMS_WS_ENABLED: value }).LORO_STREAMS_WS_ENABLED,
+      '0'
+    );
+  assert.equal(
+    resolveBackendConfig('LODY_LORO_STREAMS_WS_ENABLED=1', {}).LORO_STREAMS_WS_ENABLED,
+    '1'
+  );
+  assert.equal(
+    resolveBackendConfig('LODY_LORO_STREAMS_WS_ENABLED=1', { LODY_LORO_STREAMS_WS_ENABLED: '0' })
+      .LORO_STREAMS_WS_ENABLED,
+    '0'
+  );
+  const enabled = resolveBackendConfig('', { LODY_LORO_STREAMS_WS_ENABLED: '1' });
+  assert.equal(enabled.STORAGE_SUFFIX, '');
+  const local = { CF_WORKER_URL: 'https://local.test' };
+  assert.equal(
+    resolveBackendConfig('', { ...local, LODY_LORO_STREAMS_WS_ENABLED: '1' }).STORAGE_SUFFIX,
+    resolveBackendConfig('', local).STORAGE_SUFFIX
+  );
 });
