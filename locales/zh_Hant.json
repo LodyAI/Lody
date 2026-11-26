@@ -6928,6 +6928,8 @@
   "settings.machines.batchUpdate.unsupported.foreground": "透過終端機的 lody start 啟動；遠端更新需要背景 daemon",
   "settings.machines.batchUpdate.unsupported.install": "此安裝方式無法遠端更新（Windows、已加密的工作區，或較舊的 npm 安裝）。請在該機器上執行：",
   "settings.machines.batchUpdate.unsupported.unknown": "無法讀取此機器是否支援遠端更新",
+  "settings.machines.batchUpdate.unsupported.unreachable": "暫時無法透過 Lody 雲端連線此機器，請稍後重試。",
+  "settings.machines.batchUpdate.unsupported.unreachableRetrying": "暫時無法透過 Lody 雲端連線此機器，正在重試…",
   "settings.machines.batchUpdate.title": "更新我的所有機器",
   "settings.machines.batchUpdate.description": "每台機器都會更新至各自發布通道的最新版本；若新版本無法啟動，系統會自動還原。",
   "settings.machines.batchUpdate.running": "{{count}} 個對話正在執行",

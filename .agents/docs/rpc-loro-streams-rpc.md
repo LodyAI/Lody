@@ -32,6 +32,14 @@ response through another bounded four-slot pool. At most 128 busy responses are
 retained; further overload is logged and left to the caller's timeout/recovery.
 No overload result proves the outcome of an earlier duplicate dispatched write.
 
+The plaintext client repeats a request append after a gateway 502/503/504 only
+for the pure reads `machine/status` and `machine/ping`, using the shared short
+backoff in `@lody/shared/transient-gateway` while the request deadline allows.
+Every other method fails at once: a 502/504 can follow an append that was
+delivered, and the plaintext server does not deduplicate requests. The backoff
+covers a brief gateway fault; a longer outage is left to the caller, as in the
+batch update dialog, which retries its status reads for about a minute.
+
 Local Electron history reads instead use their own pool (at most eight active
 sessions) in `MessageProcessor`. Writes remain ordered on the session writer lane.
 Remote RPC calls the history handlers directly. Stop prevents queued handlers from
