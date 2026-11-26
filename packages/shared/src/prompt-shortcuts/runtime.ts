@@ -268,45 +268,6 @@ export class PromptShortcutRuntime {
     );
   }
 
-  private async connectWorkspaceIndex(write: boolean): Promise<{
-    catalog: PromptShortcutCatalog;
-    write: boolean;
-    close(): Promise<void>;
-  } | null> {
-    const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
-    const sync = await this.remote!.acquire(
-      { kind: 'workspace-index', workspaceId: this.workspaceId },
-      write
-    );
-    let releaseReplica: (() => Promise<void>) | undefined;
-    let unsubscribe: (() => void) | undefined;
-    let retained = false;
-    try {
-      const lease = await this.store.repo.acquireFlockDoc(id);
-      releaseReplica = () => lease.release();
-      const catalog = new PromptShortcutCatalog(lease.flock);
-      unsubscribe = lease.flock.subscribe(() => this.refreshIndexes());
-      await sync.join();
-      if (this.disposed) return null;
-      retained = true;
-      return {
-        catalog,
-        write,
-        close: async () => {
-          unsubscribe?.();
-          await sync.release();
-          await lease.release();
-        },
-      };
-    } finally {
-      if (!retained) {
-        unsubscribe?.();
-        await sync.release();
-        await releaseReplica?.();
-      }
-    }
-  }
-
   private async openWorkspaceIndex(): Promise<void> {
     while (!this.disposed) {
       const desiredWrite = this.canWrite;
@@ -317,18 +278,15 @@ export class PromptShortcutRuntime {
       }
       const next = (async () => {
         const previous = this.workspaceIndex;
-        let acquired = false;
         const id = getWorkspaceShortcutIndexStreamId(this.workspaceId);
-        let sync: ShortcutSyncLease | undefined;
+        const sync = await this.remote!.acquire(
+          { kind: 'workspace-index', workspaceId: this.workspaceId },
+          desiredWrite
+        );
         let releaseReplica: (() => Promise<void>) | undefined;
         let unsubscribe: (() => void) | undefined;
         let retained = false;
         try {
-          sync = await this.remote!.acquire(
-            { kind: 'workspace-index', workspaceId: this.workspaceId },
-            desiredWrite
-          );
-          acquired = true;
           const lease = await this.store.repo.acquireFlockDoc(id);
           releaseReplica = () => lease.release();
           const catalog = new PromptShortcutCatalog(lease.flock);
@@ -340,7 +298,7 @@ export class PromptShortcutRuntime {
             write: desiredWrite,
             close: async () => {
               unsubscribe?.();
-              await sync!.release();
+              await sync.release();
               await lease.release();
             },
           };
@@ -349,33 +307,10 @@ export class PromptShortcutRuntime {
             await previous.close();
           }
           this.refreshIndexes();
-        } catch (error) {
-          unsubscribe?.();
-          unsubscribe = undefined;
-          await sync?.release().catch(() => undefined);
-          sync = undefined;
-          await releaseReplica?.().catch(() => undefined);
-          releaseReplica = undefined;
-          // If acquire() succeeded, the transport may have already retired `previous`;
-          // restore a read-only subscription best-effort so live updates keep flowing.
-          if (acquired && previous && this.workspaceIndex === previous) {
-            this.workspaceIndex = null;
-            await previous.close().catch(() => undefined);
-            if (!this.disposed && !previous.write) {
-              const restored = await this.connectWorkspaceIndex(false).catch(() => null);
-              if (restored && !this.disposed) {
-                this.workspaceIndex = restored;
-                this.refreshIndexes();
-              } else {
-                await restored?.close().catch(() => undefined);
-              }
-            }
-          }
-          throw error;
         } finally {
           if (!retained) {
             unsubscribe?.();
-            await sync?.release();
+            await sync.release();
             await releaseReplica?.();
           }
         }

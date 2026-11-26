@@ -653,18 +653,23 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     }
   });
 
-  it('retires the previous workspace-index room when switching between read and write modes, but keeps it alive if the new grant fails', async () => {
+  it('completes concurrent read and write workspace-index acquisitions and disposal without deadlocking', async () => {
     const repo = await LoroRepo.create({});
-    let failWriteGrant = true;
+    let resolveReadGrant!: () => void;
+    let resolveWriteGrant!: () => void;
+    const readGrantGate = new Promise<void>((resolve) => {
+      resolveReadGrant = resolve;
+    });
+    const writeGrantGate = new Promise<void>((resolve) => {
+      resolveWriteGrant = resolve;
+    });
     const sync = new PromptShortcutSync({
       content: { mode: 'plaintext' },
       repo,
       workspaceId: 'ws-mode',
       now: () => 0,
       grant: async (resource, write) => {
-        if (write && failWriteGrant) {
-          throw new Error('transient write grant failure');
-        }
+        await (write ? writeGrantGate : readGrantGate);
         return {
           token: 'shortcut-token',
           expiresIn: 300,
@@ -675,22 +680,13 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     });
     const resource = { kind: 'workspace-index', workspaceId: 'ws-mode' } as const;
     try {
-      const readLease = await sync.acquire(resource, false);
-      await expect(sync.acquire(resource, true)).rejects.toThrow('transient write grant failure');
-
-      // Failed write grant must not have retired the active read room.
-      const reusedReadLease = await sync.acquire(resource, false);
-      await reusedReadLease.release();
-
-      failWriteGrant = false;
-      const writeLease = await sync.acquire(resource, true);
-      await expect(readLease.sync()).rejects.toThrow('Shortcut room closed');
+      const readPending = sync.acquire(resource, false);
+      const writePending = sync.acquire(resource, true);
+      resolveReadGrant();
+      resolveWriteGrant();
+      const [readLease, writeLease] = await Promise.all([readPending, writePending]);
       await readLease.release();
-
-      const downgradedReadLease = await sync.acquire(resource, false);
-      await expect(writeLease.sync()).rejects.toThrow('Shortcut room closed');
       await writeLease.release();
-      await downgradedReadLease.release();
     } finally {
       await sync.dispose();
       await repo.destroy();
@@ -746,16 +742,6 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       acquire: async (resource, write) => {
         const streamId = getShortcutResourceStreamId(resource);
         const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
-        if (resource.kind === 'workspace-index') {
-          const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
-          const opposite = rooms.get(oppositeKey);
-          if (opposite) {
-            rooms.delete(oppositeKey);
-            opposite.closed = true;
-            opposite.joined = false;
-            activeJoinedSubscribers.delete(opposite);
-          }
-        }
         const key = `${write ? 'w' : 'r'}:${streamId}`;
         let room = rooms.get(key);
         if (!room) {
@@ -852,7 +838,7 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     }
   });
 
-  it('preserves or restores live read-only updates when write-grant or join fails after role upgrade', async () => {
+  it('keeps the original read-only subscription untouched if write grant or gateway join fails after role upgrade', async () => {
     const clientRepo = await LoroRepo.create({});
     const serverRepo = await LoroRepo.create({});
     const store = await LocalShortcutStore.open({
@@ -862,7 +848,7 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     });
     let canWrite = false;
     let failWriteAcquire = false;
-    let failWriteJoin = false;
+    let gatewayDown = false;
     const indexStreamId = getWorkspaceShortcutIndexStreamId('ws-upgrade-fail');
 
     type RoomState = { write: boolean; refs: number; closed: boolean };
@@ -901,15 +887,6 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
         if (resource.kind === 'workspace-index' && write && failWriteAcquire) {
           throw new Error('write grant unavailable');
         }
-        if (resource.kind === 'workspace-index') {
-          const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
-          const opposite = rooms.get(oppositeKey);
-          if (opposite) {
-            rooms.delete(oppositeKey);
-            opposite.closed = true;
-            activeJoined.delete(opposite);
-          }
-        }
         const key = `${write ? 'w' : 'r'}:${streamId}`;
         let room = rooms.get(key);
         if (!room) {
@@ -926,8 +903,8 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
           },
           join: async () => {
             if (released || captured.closed) throw new Error('Shortcut room closed');
-            if (resource.kind === 'workspace-index' && write && failWriteJoin) {
-              throw new Error('write join failed');
+            if (resource.kind === 'workspace-index' && gatewayDown) {
+              throw new Error('gateway unavailable');
             }
             await syncStream(streamId, write, isFlock);
             if (resource.kind === 'workspace-index') activeJoined.add(captured);
@@ -955,7 +932,7 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       const initialReadRoom = [...activeJoined][0];
       expect(initialReadRoom?.write).toBe(false);
 
-      // 1) Write grant fails before acquiring write room: original read subscription must stay untouched.
+      // 1) Write grant fails: original read subscription stays untouched.
       canWrite = true;
       failWriteAcquire = true;
       await runtime.save({
@@ -971,52 +948,35 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
       expect([...activeJoined]).toEqual([initialReadRoom]);
 
-      const peer1 = projectShortcutIndex(
-        makeShortcut({
-          id: 'sc-peer-1',
-          workspaceId: 'ws-upgrade-fail',
-          ownerUserId: 'peer-user',
-          name: 'Peer 1',
-          slug: 'peer-1',
-          revision: 'rev-peer-1',
-        }),
-        'sc-peer-1'
-      );
-      const sIndex1 = await serverRepo.acquireFlockDoc(indexStreamId);
-      try {
-        new PromptShortcutCatalog(sIndex1.flock).put(peer1);
-      } finally {
-        await sIndex1.release();
-      }
-      if (activeJoined.size > 0) await syncStream(indexStreamId, false, true);
-      expect(runtime.getSnapshot().entries.some((e) => e.id === 'sc-peer-1')).toBe(true);
-
-      // 2) Write grant succeeds (retiring old read room) but join fails: runtime restores read-only live subscription.
+      // 2) Full gateway outage covers write join() (even read join() would fail):
+      // original read subscription is NEVER closed, so when gateway recovers it still delivers updates.
       failWriteAcquire = false;
-      failWriteJoin = true;
+      gatewayDown = true;
       await runtime.flush();
       expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
-      expect([...activeJoined].map((r) => r.write)).toEqual([false]);
+      expect(initialReadRoom.closed).toBe(false);
+      expect([...activeJoined]).toEqual([initialReadRoom]);
 
-      const peer2 = projectShortcutIndex(
+      gatewayDown = false;
+      const peer = projectShortcutIndex(
         makeShortcut({
-          id: 'sc-peer-2',
+          id: 'sc-peer-after-outage',
           workspaceId: 'ws-upgrade-fail',
           ownerUserId: 'peer-user',
-          name: 'Peer 2',
-          slug: 'peer-2',
-          revision: 'rev-peer-2',
+          name: 'Peer After Outage',
+          slug: 'peer-after-outage',
+          revision: 'rev-peer',
         }),
-        'sc-peer-2'
+        'sc-peer-after-outage'
       );
-      const sIndex2 = await serverRepo.acquireFlockDoc(indexStreamId);
+      const sIndex = await serverRepo.acquireFlockDoc(indexStreamId);
       try {
-        new PromptShortcutCatalog(sIndex2.flock).put(peer2);
+        new PromptShortcutCatalog(sIndex.flock).put(peer);
       } finally {
-        await sIndex2.release();
+        await sIndex.release();
       }
       if (activeJoined.size > 0) await syncStream(indexStreamId, false, true);
-      expect(runtime.getSnapshot().entries.some((e) => e.id === 'sc-peer-2')).toBe(true);
+      expect(runtime.getSnapshot().entries.some((e) => e.id === 'sc-peer-after-outage')).toBe(true);
     } finally {
       await runtime.dispose();
       await clientRepo.destroy();

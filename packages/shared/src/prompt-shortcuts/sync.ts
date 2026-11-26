@@ -86,7 +86,6 @@ export class PromptShortcutSync {
     string,
     { refs: number; write: boolean; opening: Promise<ShortcutSyncRoom> }
   >();
-  private retiringRooms = new Map<string, Promise<void>>();
   private disposed = false;
 
   constructor(
@@ -162,30 +161,6 @@ export class PromptShortcutSync {
     };
   }
 
-  private async retireOppositeWorkspaceIndex(streamId: string, write: boolean): Promise<void> {
-    const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
-    const opposite = this.rooms.get(oppositeKey);
-    if (opposite) {
-      this.rooms.delete(oppositeKey);
-      const previous = this.retiringRooms.get(streamId);
-      const retire = (async () => {
-        await previous;
-        const oldRoom = await opposite.opening.catch(() => null);
-        await oldRoom?.close();
-      })().finally(() => {
-        if (this.retiringRooms.get(streamId) === retire) {
-          this.retiringRooms.delete(streamId);
-        }
-      });
-      this.retiringRooms.set(streamId, retire);
-    }
-    const retiring = this.retiringRooms.get(streamId);
-    if (retiring) {
-      await retiring;
-      if (this.disposed) throw new Error('Shortcut sync is disposed');
-    }
-  }
-
   private async open(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncRoom> {
     const streamId = getShortcutResourceStreamId(resource);
     let grant = await this.lifetime.wait(this.options.grant(resource, write, false));
@@ -249,9 +224,6 @@ export class PromptShortcutSync {
       }
       return grant.token;
     };
-    if (resource.kind === 'workspace-index') {
-      await this.retireOppositeWorkspaceIndex(streamId, write);
-    }
     const isBody = resource.kind === 'body' || resource.kind === 'workspace-body';
     const lease = isBody
       ? await this.options.repo.acquireDoc(streamId)
@@ -383,13 +355,11 @@ export class PromptShortcutSync {
     this.lifetime.dispose();
     const entries = [...this.rooms.values()];
     this.rooms.clear();
-    const retiring = [...this.retiringRooms.values()];
-    await Promise.all([
-      ...retiring.map((task) => task.catch(() => undefined)),
-      ...entries.map(async (entry) => {
+    await Promise.all(
+      entries.map(async (entry) => {
         const room = await entry.opening.catch(() => null);
         await room?.close();
-      }),
-    ]);
+      })
+    );
   }
 }
