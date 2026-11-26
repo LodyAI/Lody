@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import {
   useCallback,
@@ -29,7 +30,6 @@ import { Collapsible } from '@lody/ui/collapsible';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { duration, ease, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   NO_SCROLL_EDGE_OVERFLOW,
@@ -67,9 +67,12 @@ export type MessageQueueDisplayProps = {
   roomy?: boolean | 'airy';
   title?: string;
   className?: string;
+  xstyle?: stylex.StyleXStyles;
 };
 
 const FADE_PX = 20;
+const DARK_SCOPE =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
 /** The list scrolls inside this. The mask must not live on the scroller. */
 const LIST_MAX_HEIGHT = 'min(25vh, 240px)';
 /** Below this sheet width, row actions fold into one More button. */
@@ -85,6 +88,24 @@ function focusQueueDisclosure(element: HTMLElement) {
 }
 
 const styles = stylex.create({
+  sheet: {
+    overflow: 'hidden',
+    borderTopLeftRadius: 'var(--radius-lg)',
+    borderTopRightRadius: 'var(--radius-lg)',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderBottomWidth: 0,
+    borderColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input-border) / 1) 45%, transparent)',
+    },
+    backgroundColor: {
+      default: 'hsl(var(--composer))',
+      [DARK_SCOPE]: 'color-mix(in oklab, hsl(var(--input) / 1) 70%, transparent)',
+    },
+  },
   joinedSheet: { paddingBottom: space[4], marginBottom: `calc(-1 * ${space[4]})` },
   // The header's chevron sits in the rows' 16 px gutter, so the disclosure,
   // the indices and the Scheduled label share one left edge.
@@ -134,6 +155,7 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
   },
   failed: { color: colors.destructive },
+  scrollRegion: { overflowY: 'auto' },
 });
 
 export function MessageQueueDisplay({
@@ -157,6 +179,7 @@ export function MessageQueueDisplay({
   roomy = false,
   title,
   className,
+  xstyle,
 }: MessageQueueDisplayProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -283,11 +306,10 @@ export function MessageQueueDisplay({
         open={expanded}
         onOpenChange={setExpanded}
         className={cn(
-          'overflow-hidden rounded-t-lg rounded-b-none border-[0.5px] border-b-0',
-          'border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/45 dark:bg-input/70',
-          roomy && stylex.props(styles.joinedSheet).className,
+          stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).className,
           className
         )}
+        style={stylex.props(styles.sheet, roomy && styles.joinedSheet, xstyle).style}
       >
         <Collapsible.Trigger
           {...stylex.props(styles.header)}
@@ -362,7 +384,8 @@ export function MessageQueueDisplay({
           >
             <div
               ref={scrollRef}
-              className={cn(stylex.props(queueSurface.list).className, 'overflow-y-auto')}
+              data-message-queue-scroll-region=""
+              {...stylex.props(queueSurface.list, styles.scrollRegion)}
               style={{ maxHeight: LIST_MAX_HEIGHT }}
             >
               <DndContext

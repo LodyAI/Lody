@@ -24,6 +24,7 @@
     "convex": "catalog:",
     "zod": "catalog:",
     "@lody/platform": "workspace:*",
+    "@lody/shared": "workspace:*",
     "@noble/hashes": "2.2.0",
     "@lody/e2ee-machine-sharing": "workspace:*"
   },

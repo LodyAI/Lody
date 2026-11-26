@@ -11,8 +11,10 @@ import {
 } from '../src/atoms/settings';
 import { MobileAboutSettings } from '../src/components/mobile/mobile-about-settings';
 
+import { LOCAL_PLATFORM_CAPABILITIES } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 import { useVisibleSettingsTabs } from '../src/components/settings/settings-tabs';
-import { TestCloudPlatformProvider } from './test-platform';
+import { TEST_CLOUD_PLATFORM, TestCloudPlatformProvider } from './test-platform';
 import { initI18n } from '../src/i18n';
 
 (
@@ -31,12 +33,21 @@ class TestPointerEvent extends MouseEvent {
 let container: HTMLDivElement;
 let root: Root;
 
+const TEST_LOCAL_PLATFORM = {
+  ...TEST_CLOUD_PLATFORM,
+  kind: 'local' as const,
+  capabilities: LOCAL_PLATFORM_CAPABILITIES,
+  cloudApi: undefined,
+};
+
 function render(store: ReturnType<typeof createStore>): void {
   act(() => {
     root.render(
-      <Provider store={store}>
-        <MobileAboutSettings />
-      </Provider>
+      <PlatformContext.Provider value={TEST_LOCAL_PLATFORM}>
+        <Provider store={store}>
+          <MobileAboutSettings />
+        </Provider>
+      </PlatformContext.Provider>
     );
   });
 }

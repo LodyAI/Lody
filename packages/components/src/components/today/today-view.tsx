@@ -1,35 +1,59 @@
+import { duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Pin, PinOff } from 'lucide-react';
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Maximize2,
+  MessageSquarePlus,
+  MoreHorizontal,
+  PictureInPicture2,
+  Pin,
+  Square,
+  SquareCheck,
+  Trash2,
+  Type,
+} from 'lucide-react';
+import { formatKeyBinding, isMac } from '@/lib/commands';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { todayFullWidthAtom } from '@/atoms/sidebar-state';
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ComponentType,
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  GLOBAL_SHORTCUT_DEFAULTS,
+  TODAY_MENTION_CHAR,
   buildTodayLink,
   getSessionRoomId,
+  getTodayDocId,
   parseTodayDate,
   readTodayText,
-  TODAY_MENTION_CHAR,
   type SessionId,
   type TodayDate,
   type TodayRichText,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Kbd } from '@lody/ui/kbd';
 import { Menu } from '@lody/ui/menu';
 import { Popover } from '@lody/ui/popover';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { Toggle } from '@lody/ui/toggle';
+import { Tooltip } from '@lody/ui/tooltip';
 import { userAtom } from '@/atoms';
 import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
-import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { openTodayWindow } from '@/lib/desktop-window';
+import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { withClassName } from '@/lib/stylex';
 import {
@@ -42,41 +66,56 @@ import {
 import { SidebarHistoryControls } from '../sidebar-history-controls';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { runtimeAtom } from '@/atoms/runtime';
+import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useWorkspaceMembers } from '@/hooks/use-workspace-members';
+import { UserAvatar } from '../user-avatar';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/lib/toast';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { openSessionDeepLink } from '@/lib/session-deep-link';
 import {
   hasAcceptableSessionMentionTransfer,
+  isSessionMentionDragFrom,
   readSessionMentionDragSessionId,
   registerSessionMentionPointerTarget,
 } from '@/lib/session-mention-drag';
-import {
-  selectSessionMentionCandidates,
-  useSessionMentionItems,
-  type SessionMentionItem,
-} from '@/components/mentions/mention-session-source';
 import { useTodayEditor } from './editor/today-editor-context';
 import { TodayEditorContext } from './editor/today-editor-context';
 import { TodayEditorController } from './editor/today-editor-controller';
+import { TodayLiveSessionPicker } from './today-mention-picker';
+import { TodayMembersContext } from './today-members';
 import { TodayDaySection } from './today-day-section';
-import { todayOutline } from './outline.stylex';
+import { TodayMoreAtEndContext, todayOutline, todaySurfaceMarker } from './outline.stylex';
 import { TodayConvertDialog } from './today-convert-dialog';
+import { TodaySelectionBar } from './today-selection-bar';
 import { TodayMentionStatusMenuHost } from './today-mention-status-menu';
 import { buildConvertPrompt, todayMentionMarkdown } from './editor/block-selection';
 import type { TodayPageStore } from '@/lib/today/today-page-store';
 import type { TodayNodeId } from '@lody/shared';
 import { buildDayStream, localTodayDate, todayDateToLocalDate } from './today-stream';
+import { TodayBreadcrumb, type TodayCrumb } from './today-breadcrumb';
 import { useTodayClock } from './use-today-clock';
+import { markTodayWindowBoot } from '@/lib/today/today-window-boot-timeline';
 
-export type TodayViewTarget = { member?: string; date?: string };
+/**
+ * What a Today surface shows: a member's stream around `date`, or with
+ * `focus` only that day (`'day'`) or one node of it (its id).
+ */
+export type TodayViewTarget = { member?: string; date?: string; focus?: string };
+
+/** Opens a conversation a mention points at; the host decides where it shows. */
+export type TodayOpenSession = (target: { sessionId: SessionId; workspaceId: string }) => void;
 
 /** Default max width of the Today page's text column, in px. */
 export const TODAY_READABLE_WIDTH = 720;
 
 const styles = stylex.create({
+  tooltipWithShortcut: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+  },
   root: {
     position: 'relative',
     display: 'flex',
@@ -101,6 +140,18 @@ const styles = stylex.create({
   // the traffic lights and the sidebar header's controls at y=23.
   toolbarOnTrafficLightLine: { marginTop: -1 },
   controls: { display: 'flex', alignItems: 'center', gap: space[1] },
+  pinIcon: {
+    transform: 'rotate(0deg)',
+    transitionProperty: {
+      default: 'transform',
+      '@media (prefers-reduced-motion: reduce)': 'none',
+    },
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  pinUnpinned: {
+    transform: 'rotate(45deg)',
+  },
   title: {
     flex: 1,
     minWidth: 0,
@@ -118,6 +169,7 @@ const styles = stylex.create({
     paddingInlineStart: `calc(${space[6]} + ${todayOutline.foldOverhang})`,
     paddingInlineEnd: space[6],
     paddingBottom: space[8],
+    boxShadow: { ':focus-visible': 'none' },
   },
   // The pinned column is narrow: a tighter end gutter.
   scrollerPinned: { paddingInlineEnd: space[4] },
@@ -192,12 +244,20 @@ const styles = stylex.create({
 export function TodayView(props: {
   target: TodayViewTarget;
   onNavigate: (target: TodayViewTarget) => void;
-  /** Rendered as the pinned column (vs the full page). */
+  /**
+   * Rendered as the pinned column (vs the full page). In the standalone window
+   * it is instead whether the window stays above all others.
+   */
   pinned?: boolean;
   onTogglePin?: () => void;
+  /** Rendered as the desktop's standalone Today window. */
+  standalone?: boolean;
+  ownerWindow?: Window;
+  onDayReady?: () => void;
+  onOpenSession?: TodayOpenSession;
 }) {
   const { t, i18n } = useTranslation();
-  const scope = useResolvedWorkspaceScope();
+  const scope = useResolvedWorkspaceScope({ docMetaRequired: false });
   const activeRuntime = useAtomValue(runtimeAtom);
   const runtime =
     scope.enabled && activeRuntime && scope.workspaceId === activeRuntime.workspaceId
@@ -205,18 +265,31 @@ export function TodayView(props: {
       : null;
   const self = useAtomValue(userAtom)?.id ?? null;
   const userId = props.target.member ?? self;
-  const today = useTodayClock();
+  const today = useTodayClock(undefined, props.ownerWindow);
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const anchor = props.target.date ? (parseTodayDate(props.target.date) ?? undefined) : undefined;
   const [registered, setRegistered] = useState<readonly TodayDate[]>([]);
   const [fullWidth, setFullWidth] = useAtom(todayFullWidthAtom);
   const [empty, setEmpty] = useState<ReadonlySet<TodayDate>>(new Set());
+  const [moreOpen, setMoreOpen] = useState(false);
   const { members, isMultiMember } = useWorkspaceMembers();
+  const membersById = useMemo(
+    () => new Map(members.map((member) => [member.userId, member] as const)),
+    [members]
+  );
+  const latest = useRef({ membersById, target: props.target, onNavigate: props.onNavigate, self });
+  latest.current = { membersById, target: props.target, onNavigate: props.onNavigate, self };
+  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const standalone = props.standalone ?? false;
+  const pinnedColumn = !standalone && (props.pinned ?? false);
+  const openSession = useRef<TodayOpenSession>(openSessionDeepLink);
+  openSession.current = props.onOpenSession ?? openSessionDeepLink;
 
   useEffect(() => {
     setRegistered([]);
     setEmpty(new Set());
     if (!runtime || !userId) return undefined;
+    markTodayWindowBoot('view-runtime');
     return runtime.todayPages.observeDates(userId, setRegistered);
   }, [runtime, userId]);
 
@@ -229,9 +302,12 @@ export function TodayView(props: {
       return next;
     });
   }, []);
+  const focus = props.target.focus;
+  const focusDate = focus ? (anchor ?? today) : null;
+  const zoomRoot = focus && focus !== 'day' ? (focus as TodayNodeId) : null;
   const days = useMemo(
-    () => buildDayStream({ today, anchor, registered, empty }),
-    [anchor, empty, registered, today]
+    () => (focusDate ? [focusDate] : buildDayStream({ today, anchor, registered, empty })),
+    [anchor, empty, focusDate, registered, today]
   );
   const cache = runtime?.todayPages ?? null;
   const jotai = useStore();
@@ -247,10 +323,16 @@ export function TodayView(props: {
         title:
           mention.kind === 'session'
             ? jotai.get(sessionMetaAtomFamily(getSessionRoomId(mention.id as SessionId)))?.title
-            : null,
+            : mention.kind === 'member'
+              ? latest.current.membersById.get(mention.id)?.name
+              : null,
       });
+    created.onOpenMember = (memberId) => {
+      const { target, onNavigate, self: me } = latest.current;
+      onNavigate({ date: target.date, member: memberId === me ? undefined : memberId });
+    };
     created.onOpenSession = (sessionId) => {
-      if (workspaceId) openSessionDeepLink({ sessionId: sessionId as SessionId, workspaceId });
+      if (workspaceId) openSession.current({ sessionId: sessionId as SessionId, workspaceId });
     };
     setController(created);
     return () => {
@@ -262,147 +344,307 @@ export function TodayView(props: {
     userId && userId !== self
       ? members.find((member) => member.userId === userId)?.name
       : undefined;
+  useEffect(
+    () => controller?.setFocus(focusDate ? { date: focusDate, rootId: zoomRoot } : null),
+    [controller, focusDate, zoomRoot]
+  );
+
+  const streamReturn = useRef<{ target: TodayViewTarget; anchor: TodayScrollAnchor | null } | null>(
+    null
+  );
+  const dateParam = (date: TodayDate) => (date === today ? undefined : date);
+  const enterFocus = (next: TodayViewTarget) => {
+    if (!props.target.focus) {
+      streamReturn.current = {
+        target: props.target,
+        anchor: captureScrollAnchor(controller?.getSurface() ?? null),
+      };
+    }
+    props.onNavigate(next);
+  };
+  const leaveFocus = () =>
+    props.onNavigate(streamReturn.current?.target ?? { member: props.target.member });
+  const focusPage = () =>
+    focusDate && userId ? cache?.peek(getTodayDocId(userId, focusDate)) : undefined;
+  const nav = {
+    zoom: (store: TodayPageStore, nodeId: TodayNodeId) =>
+      enterFocus({ member: props.target.member, date: dateParam(store.date), focus: nodeId }),
+    zoomOut: () => {
+      if (!focusDate) return;
+      if (!zoomRoot) return leaveFocus();
+      const parent = focusPage()?.outline.getNode(zoomRoot)?.parentId;
+      props.onNavigate({ ...props.target, focus: parent ?? 'day' });
+    },
+    openDay: (date: TodayDate) =>
+      enterFocus({ member: props.target.member, date: dateParam(date), focus: 'day' }),
+  };
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  useEffect(() => {
+    if (!controller) return undefined;
+    controller.onZoom = (store, nodeId) => navRef.current.zoom(store, nodeId);
+    controller.onZoomOut = () => navRef.current.zoomOut();
+    return () => {
+      controller.onZoom = null;
+      controller.onZoomOut = null;
+    };
+  }, [controller]);
+  useLayoutEffect(() => {
+    if (focusDate || !streamReturn.current) return undefined;
+    const { anchor } = streamReturn.current;
+    streamReturn.current = null;
+    return restoreScrollAnchor(controller?.getSurface() ?? null, anchor);
+  }, [controller, focusDate]);
+
+  const { shortcuts: globalShortcuts } = useGlobalShortcuts();
+  const toggleWindowEntry = globalShortcuts.find((entry) => entry.id === 'today.toggleWindow');
+  const toggleWindowBinding = toggleWindowEntry
+    ? toggleWindowEntry.binding
+    : GLOBAL_SHORTCUT_DEFAULTS['today.toggleWindow'];
 
   if (!runtime || !userId) return null;
+  const toolbarSurface: TodayToolbarSurface = standalone
+    ? 'standalone'
+    : pinnedColumn
+      ? 'pinned'
+      : 'page';
+  const openWindowLabel = t('today.openWindow', 'Open in new window');
+  // Keep Toggle aria-label static to match aria-pressed; the tooltip states the next action.
+  const pinControlLabel = standalone
+    ? t('today.pinWindow', 'Keep on top')
+    : t('today.pin', 'Pin to sidebar');
+  const pinTooltip = standalone
+    ? props.pinned
+      ? t('today.unpinWindow', 'Stop keeping on top')
+      : pinControlLabel
+    : props.pinned
+      ? t('today.unpin', 'Unpin')
+      : pinControlLabel;
+  const moreLabel = t('today.more', 'More');
   return (
     <TodayEditorContext.Provider value={controller}>
-      <div {...stylex.props(styles.root)} data-testid="today-view">
-        <TodayToolbar
-          pinned={props.pinned ?? false}
-          title={
-            memberName ? t('today.memberTitle', '{{name}}’s Today', { name: memberName }) : null
-          }
-        >
-          <TodayCalendar
-            today={today}
-            selected={anchor ?? today}
-            registered={registered}
-            language={i18n.language}
-            onPick={(date) =>
-              props.onNavigate({ ...props.target, date: date === today ? undefined : date })
+      <TodayMembersContext.Provider value={membersById}>
+        <div {...stylex.props(styles.root)} data-testid="today-view">
+          <TodayToolbar
+            surface={toolbarSurface}
+            title={
+              focusDate ? (
+                <TodayFocusCrumbs
+                  page={focusPage}
+                  date={focusDate}
+                  zoomRoot={zoomRoot}
+                  rootLabel={
+                    memberName
+                      ? t('today.memberTitle', '{{name}}’s Today', { name: memberName })
+                      : t('today.nav', 'Today')
+                  }
+                  onStream={leaveFocus}
+                  onFocus={(next) => props.onNavigate({ ...props.target, focus: next })}
+                />
+              ) : memberName ? (
+                t('today.memberTitle', '{{name}}’s Today', { name: memberName })
+              ) : null
             }
-          />
-          {props.onTogglePin ? (
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              aria-pressed={props.pinned ?? false}
-              aria-label={
-                props.pinned
-                  ? t('today.unpin', 'Unpin Today')
-                  : t('today.pin', 'Pin Today beside the sidebar')
-              }
-              onClick={props.onTogglePin}
-            >
-              {props.pinned ? (
-                <PinOff size={16} strokeWidth={1.5} />
-              ) : (
-                <Pin size={16} strokeWidth={1.5} />
-              )}
-            </Button>
-          ) : null}
-          <Menu.Root>
-            <Menu.Trigger
-              render={
-                <Button variant="ghost" size="small" icon aria-label={t('today.more', 'More')}>
-                  <MoreHorizontal size={16} strokeWidth={1.5} />
-                </Button>
-              }
-            />
-            <Menu.Content>
-              {isMultiMember ? (
-                <Menu.Submenu>
-                  <Menu.SubmenuTrigger>
-                    {t('today.viewMember', "View a member's Today")}
-                  </Menu.SubmenuTrigger>
-                  <Menu.Content>
-                    {members.map((member) => (
-                      <Menu.Item
-                        key={member.userId}
+            interactiveTitle={!!focusDate}
+          >
+            <Tooltip.Provider delay={400}>
+              <TodayCalendar
+                today={today}
+                selected={anchor ?? today}
+                registered={registered}
+                language={i18n.language}
+                onPick={(date) =>
+                  props.onNavigate({ ...props.target, date: date === today ? undefined : date })
+                }
+              />
+              {!standalone && workspaceSlug && isElectronRenderer() ? (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="small"
+                        icon
+                        aria-label={openWindowLabel}
                         onClick={() =>
-                          props.onNavigate({
+                          openTodayWindow({
+                            workspace: workspaceSlug,
+                            member: props.target.member,
                             date: props.target.date,
-                            member: member.userId === self ? undefined : member.userId,
                           })
                         }
                       >
-                        {member.name}
-                      </Menu.Item>
-                    ))}
-                  </Menu.Content>
-                </Menu.Submenu>
+                        <PictureInPicture2 size={16} strokeWidth={1.5} />
+                      </Button>
+                    }
+                  />
+                  <Tooltip.Content side="bottom">
+                    {toggleWindowBinding ? (
+                      <span {...stylex.props(styles.tooltipWithShortcut)}>
+                        {openWindowLabel}
+                        <Kbd>{formatKeyBinding(toggleWindowBinding)}</Kbd>
+                      </span>
+                    ) : (
+                      openWindowLabel
+                    )}
+                  </Tooltip.Content>
+                </Tooltip.Root>
               ) : null}
-              {props.pinned ? null : (
-                <Menu.CheckboxItem
-                  checked={fullWidth}
-                  indicatorSide="end"
-                  onCheckedChange={(checked) => setFullWidth(checked)}
+              {props.onTogglePin ? (
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={
+                      <Toggle
+                        size="small"
+                        icon
+                        pressed={props.pinned ?? false}
+                        aria-label={pinControlLabel}
+                        onPressedChange={() => props.onTogglePin?.()}
+                      >
+                        <Pin
+                          size={16}
+                          strokeWidth={1.5}
+                          fill="none"
+                          {...stylex.props(styles.pinIcon, !props.pinned && styles.pinUnpinned)}
+                        />
+                      </Toggle>
+                    }
+                  />
+                  <Tooltip.Content side="bottom">{pinTooltip}</Tooltip.Content>
+                </Tooltip.Root>
+              ) : null}
+              <Menu.Root open={moreOpen} onOpenChange={setMoreOpen}>
+                <Tooltip.Root disabled={moreOpen}>
+                  <Tooltip.Trigger
+                    render={
+                      <Menu.Trigger
+                        render={
+                          <Button variant="ghost" size="small" icon aria-label={moreLabel}>
+                            <MoreHorizontal size={16} strokeWidth={1.5} />
+                          </Button>
+                        }
+                      />
+                    }
+                  />
+                  <Tooltip.Content side="bottom">{moreLabel}</Tooltip.Content>
+                </Tooltip.Root>
+                <Menu.Content>
+                  {isMultiMember ? (
+                    <Menu.Submenu>
+                      <Menu.SubmenuTrigger>
+                        {t('today.viewMember', "View a member's Today")}
+                      </Menu.SubmenuTrigger>
+                      <Menu.Content>
+                        {members.map((member) => (
+                          <Menu.Item
+                            key={member.userId}
+                            icon={
+                              <UserAvatar user={{ id: member.userId, ...member }} size="mini" />
+                            }
+                            onClick={() =>
+                              props.onNavigate({
+                                date: props.target.date,
+                                member: member.userId === self ? undefined : member.userId,
+                              })
+                            }
+                          >
+                            {member.name}
+                          </Menu.Item>
+                        ))}
+                      </Menu.Content>
+                    </Menu.Submenu>
+                  ) : null}
+                  {pinnedColumn || standalone ? null : (
+                    <Menu.CheckboxItem
+                      checked={fullWidth}
+                      indicatorSide="end"
+                      onCheckedChange={(checked) => setFullWidth(checked)}
+                    >
+                      {t('today.fullWidth', 'Full width')}
+                    </Menu.CheckboxItem>
+                  )}
+                  <Menu.Item
+                    onClick={() => {
+                      void writeTextToClipboard(
+                        buildTodayLink(runtime.workspaceId, userId, anchor ?? today)
+                      ).then((copied) => {
+                        if (copied) toast.success(t('today.linkCopied', 'Link copied'));
+                      });
+                    }}
+                  >
+                    {t('today.copyLink', 'Copy link')}
+                  </Menu.Item>
+                </Menu.Content>
+              </Menu.Root>
+            </Tooltip.Provider>
+          </TodayToolbar>
+          <TodayOutlineSurface
+            controller={controller}
+            fullWidth={pinnedColumn || standalone || fullWidth}
+            placement={
+              standalone
+                ? 'pinned'
+                : pinnedColumn
+                  ? sidebarVisible
+                    ? 'pinned'
+                    : 'pinnedAtWindowEdge'
+                  : 'page'
+            }
+          >
+            {days.map((date, index) => (
+              <TodayDaySection
+                key={`${userId}:${date}`}
+                cache={runtime.todayPages}
+                userId={userId}
+                date={date}
+                today={today}
+                isTop={index === 0}
+                onPageReady={index === 0 ? props.onDayReady : undefined}
+                onEmptyChange={onEmptyChange}
+                zoomRoot={zoomRoot}
+                onOpenDay={focusDate ? undefined : nav.openDay}
+              />
+            ))}
+          </TodayOutlineSurface>
+          <TodayLiveSessionPicker />
+          <TodayNodeActions pinned={pinnedColumn} />
+          <TodayMentionStatusMenuHost />
+          {anchor && anchor !== today && !focusDate ? (
+            <div {...stylex.props(styles.back)}>
+              <span {...stylex.props(styles.backButton)}>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  shape="pill"
+                  onClick={() => props.onNavigate({ ...props.target, date: undefined })}
                 >
-                  {t('today.fullWidth', 'Full width')}
-                </Menu.CheckboxItem>
-              )}
-              <Menu.Item
-                onClick={() => {
-                  void writeTextToClipboard(
-                    buildTodayLink(runtime.workspaceId, userId, anchor ?? today)
-                  ).then((copied) => {
-                    if (copied) toast.success(t('today.linkCopied', 'Link copied'));
-                  });
-                }}
-              >
-                {t('today.copyLink', 'Copy link')}
-              </Menu.Item>
-            </Menu.Content>
-          </Menu.Root>
-        </TodayToolbar>
-        <TodayOutlineSurface
-          controller={controller}
-          fullWidth={props.pinned || fullWidth}
-          placement={props.pinned ? (sidebarVisible ? 'pinned' : 'pinnedAtWindowEdge') : 'page'}
-        >
-          {days.map((date, index) => (
-            <TodayDaySection
-              key={`${userId}:${date}`}
-              cache={runtime.todayPages}
-              userId={userId}
-              date={date}
-              today={today}
-              isTop={index === 0}
-              onEmptyChange={onEmptyChange}
-            />
-          ))}
-        </TodayOutlineSurface>
-        <TodayLiveSessionPicker />
-        <TodayNodeActions pinned={props.pinned ?? false} />
-        <TodayMentionStatusMenuHost />
-        {anchor && anchor !== today ? (
-          <div {...stylex.props(styles.back)}>
-            <span {...stylex.props(styles.backButton)}>
-              <Button
-                variant="secondary"
-                size="small"
-                shape="pill"
-                onClick={() => props.onNavigate({ ...props.target, date: undefined })}
-              >
-                {t('today.backToToday', 'Back to today')}
-              </Button>
-            </span>
-          </div>
-        ) : null}
-      </div>
+                  {t('today.backToToday', 'Back to today')}
+                </Button>
+              </span>
+            </div>
+          ) : null}
+        </div>
+      </TodayMembersContext.Provider>
     </TodayEditorContext.Provider>
   );
 }
 
+export type TodayToolbarSurface = 'page' | 'pinned' | 'standalone';
+
 /**
- * The Today toolbar. The full page's row is the window top: it sits under the
- * workspace's window drag strip, so its controls are drag-exempt or Electron
- * swallows their clicks, and while the navigation sidebar is hidden it carries
- * the sidebar's toggle and Back/Forward, which would otherwise be unreachable.
- * The pinned column is not at the window top and needs none of this.
+ * The Today toolbar. Every surface is a window-top row under a drag strip, so
+ * the row drags (and on macOS double-click zooms) the window and its controls
+ * are drag-exempt; when the sidebar is hidden the main window's leftmost Today
+ * surface carries sidebar navigation. Only rows that can reach the window's
+ * right edge pad for the Windows caption buttons, never the pinned column.
  */
-export function TodayToolbar(props: { pinned: boolean; title: ReactNode; children: ReactNode }) {
+export function TodayToolbar(props: {
+  surface?: TodayToolbarSurface;
+  title: ReactNode;
+  /** The title holds controls (the focus view's breadcrumb): they must take clicks. */
+  interactiveTitle?: boolean;
+  children: ReactNode;
+}) {
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
   const showSidebar = useSetAtom(showNavigationSidebarAtom);
   const fullscreen = useElectronFullscreen();
@@ -413,17 +655,20 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
     insideWorkspaceFrame: true,
     includeDesktopWeb: true,
   });
-  const page = !props.pinned;
-  // Both forms sit in a page card's window-top row and line up with its
-  // controls; only the page is window chrome (drag region, caption buttons).
-  const exemptClassName = page && dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
+  const surface = props.surface ?? 'page';
+  const standalone = surface === 'standalone';
+  const exemptClassName = dragClass ? WINDOW_DRAG_EXEMPT_CLASS : undefined;
   const besideTrafficLights =
-    !sidebarVisible && !isNativeAppShell() && isMacOSElectronRenderer() && !fullscreen;
-  const chromeClassName = (
-    page
-      ? [dragClass, captionPadClass, captionRowPadClass, trafficLightRowPadClass]
-      : [captionRowPadClass, trafficLightRowPadClass]
-  )
+    (standalone || !sidebarVisible) &&
+    !isNativeAppShell() &&
+    isMacOSElectronRenderer() &&
+    !fullscreen;
+  const chromeClassName = [
+    dragClass,
+    surface === 'pinned' ? undefined : captionPadClass,
+    captionRowPadClass,
+    trafficLightRowPadClass,
+  ]
     .filter(Boolean)
     .join(' ');
   return (
@@ -441,14 +686,201 @@ export function TodayToolbar(props: { pinned: boolean; title: ReactNode; childre
     >
       {/* With the sidebar hidden, Today (page or pinned column) is the window's
           leftmost surface and carries the sidebar toggle and Back/Forward. */}
-      {!sidebarVisible ? (
+      {!sidebarVisible && !standalone ? (
         <SidebarHistoryControls onToggleSidebar={showSidebar} className={exemptClassName} />
       ) : null}
-      <span {...stylex.props(styles.title)}>{props.title}</span>
+      <span
+        {...withClassName(
+          stylex.props(styles.title),
+          props.interactiveTitle ? exemptClassName : undefined
+        )}
+      >
+        {props.title}
+      </span>
       <div {...withClassName(stylex.props(styles.controls), exemptClassName)}>{props.children}</div>
     </div>
   );
 }
+
+/**
+ * A node's menu, from its "⋯" button or a right-click on its bullet: the
+ * selection bar's actions for that one node, plus zooming into it.
+ */
+function TodayNodeMenu(props: {
+  store: TodayPageStore;
+  nodeId: TodayNodeId;
+  anchor: HTMLElement | { x: number; y: number };
+  controller: TodayEditorController;
+  onConvert: () => void;
+  onClose: (keepSelection: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const { store, nodeId, controller, anchor } = props;
+  const node = store.outline.getNode(nodeId);
+  const positioned = useMemo(
+    () =>
+      'getBoundingClientRect' in anchor
+        ? anchor
+        : {
+            getBoundingClientRect: () => new DOMRect(anchor.x, anchor.y, 0, 0),
+          },
+    [anchor]
+  );
+  if (!node) return null;
+  const canConvert = node.text.replaceAll(TODAY_MENTION_CHAR, '').trim().length > 0;
+  const todo =
+    node.todo === undefined
+      ? { icon: <Square size={16} />, label: t('today.todo.make', 'Turn into to-do') }
+      : node.todo === 'todo'
+        ? { icon: <SquareCheck size={16} />, label: t('today.todo.markDone', 'Mark as done') }
+        : { icon: <Type size={16} />, label: t('today.todo.clear', 'Back to plain text') };
+  const isMacPlatform = isMac();
+  return (
+    <Menu.Root open onOpenChange={(open) => !open && props.onClose(false)}>
+      <Menu.Content anchor={positioned} side="bottom" align="start">
+        <Menu.Item
+          icon={<Maximize2 size={16} />}
+          shortcut={isMacPlatform ? '⌥→' : 'Alt+→'}
+          onClick={() => {
+            props.onClose(false);
+            controller.onZoom?.(store, nodeId);
+          }}
+        >
+          {t('today.zoomIn', 'Zoom in')}
+        </Menu.Item>
+        <Menu.Item
+          icon={todo.icon}
+          shortcut={formatKeyBinding('Mod+Enter')}
+          onClick={() => {
+            store.undo.structural(() => store.outline.cycleTodo([nodeId]));
+            props.onClose(false);
+          }}
+        >
+          {todo.label}
+        </Menu.Item>
+        <Menu.Item
+          icon={<MessageSquarePlus size={16} />}
+          disabled={!canConvert}
+          onClick={() => {
+            props.onClose(true);
+            props.onConvert();
+          }}
+        >
+          {t('today.convertToTask', 'Convert to task')}
+        </Menu.Item>
+        <Menu.Separator />
+        <Menu.Item
+          icon={<Copy size={16} />}
+          shortcut={formatKeyBinding('Mod+C')}
+          onClick={() => {
+            controller.copySelection();
+            props.onClose(false);
+          }}
+        >
+          {t('common.copy', 'Copy')}
+        </Menu.Item>
+        <Menu.Item
+          icon={<Trash2 size={16} />}
+          tone="destructive"
+          onClick={() => {
+            controller.deleteSelection();
+            props.onClose(true);
+          }}
+        >
+          {t('common.delete', 'Delete')}
+        </Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
+  );
+}
+
+/** Where the stream was: the top visible row and its offset (plus the raw scroll, as a fallback). */
+export type TodayScrollAnchor = { nodeId: string | null; offset: number; scrollTop: number };
+
+export function captureScrollAnchor(surface: HTMLElement | null): TodayScrollAnchor | null {
+  if (!surface) return null;
+  const top = surface.getBoundingClientRect().top;
+  for (const row of surface.querySelectorAll<HTMLElement>('[data-today-node]')) {
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom > top) {
+      return {
+        nodeId: row.dataset.todayNode ?? null,
+        offset: rect.top - top,
+        scrollTop: surface.scrollTop,
+      };
+    }
+  }
+  return { nodeId: null, offset: 0, scrollTop: surface.scrollTop };
+}
+
+/**
+ * Put the stream back where it was. Days above may have grown or shrunk
+ * meanwhile, so after the raw offset the anchor row is lined up again once it
+ * mounts (the stream's pages open over a few frames).
+ */
+export function restoreScrollAnchor(surface: HTMLElement | null, anchor: TodayScrollAnchor | null) {
+  if (!surface || !anchor) return undefined;
+  surface.scrollTop = anchor.scrollTop;
+  let frames = 0;
+  let handle = 0;
+  const align = () => {
+    const row = anchor.nodeId
+      ? surface.querySelector<HTMLElement>(`[data-today-node="${CSS.escape(anchor.nodeId)}"]`)
+      : null;
+    if (row) {
+      surface.scrollTop +=
+        row.getBoundingClientRect().top - surface.getBoundingClientRect().top - anchor.offset;
+      return;
+    }
+    frames += 1;
+    if (frames < 30) handle = requestAnimationFrame(align);
+  };
+  align();
+  return () => cancelAnimationFrame(handle);
+}
+
+/** The focus view's breadcrumb: back to the stream, the day, and the zoomed node's ancestors. */
+export function TodayFocusCrumbs(props: {
+  /** The focused day's page, once a section has opened it. */
+  page: () => TodayPageStore | undefined;
+  date: TodayDate;
+  zoomRoot: TodayNodeId | null;
+  rootLabel: string;
+  onStream: () => void;
+  onFocus: (focus: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { zoomRoot } = props;
+  useTodayEditor();
+  const page = props.page();
+  useSyncExternalStore(page?.subscribe ?? noopSubscribe, page?.getSnapshot ?? noSnapshot);
+  const label = (nodeId: TodayNodeId) => {
+    const text = page?.outline.getNode(nodeId)?.text.replaceAll(TODAY_MENTION_CHAR, '').trim();
+    return text || t('today.untitledNode', 'Untitled');
+  };
+  const ancestors: TodayNodeId[] = [];
+  for (
+    let parent = zoomRoot ? (page?.outline.getNode(zoomRoot)?.parentId ?? null) : null;
+    parent;
+    parent = page?.outline.getNode(parent)?.parentId ?? null
+  ) {
+    ancestors.unshift(parent);
+  }
+  const crumbs: TodayCrumb[] = [
+    { key: 'stream', label: props.rootLabel, onSelect: props.onStream },
+    {
+      key: 'day',
+      label: props.date,
+      onSelect: zoomRoot ? () => props.onFocus('day') : undefined,
+    },
+    ...ancestors.map((id) => ({ key: id, label: label(id), onSelect: () => props.onFocus(id) })),
+    ...(zoomRoot ? [{ key: zoomRoot, label: label(zoomRoot) }] : []),
+  ];
+  return <TodayBreadcrumb crumbs={crumbs} />;
+}
+
+const noopSubscribe = () => () => {};
+const noSnapshot = () => null;
 
 /** The scroll surface: focus, keys and clipboard for block selection. */
 export function TodayOutlineSurface(props: {
@@ -477,6 +909,7 @@ export function TodayOutlineSurface(props: {
   return (
     <div
       {...stylex.props(
+        todaySurfaceMarker,
         styles.scroller,
         props.placement !== undefined && props.placement !== 'page' && styles.scrollerPinned,
         props.placement === 'pinnedAtWindowEdge' && styles.scrollerAtWindowEdge
@@ -490,6 +923,12 @@ export function TodayOutlineSurface(props: {
         // Captured so the node editor never inserts the dragged title as text.
         event.preventDefault();
         event.stopPropagation();
+        // A mention dragged out of Today is meant for a conversation, never a drop here.
+        if (isSessionMentionDragFrom(event.dataTransfer, 'today')) {
+          event.dataTransfer.dropEffect = 'none';
+          controller.leaveExternal();
+          return;
+        }
         event.dataTransfer.dropEffect = 'copy';
         controller.hoverExternal(event.clientX, event.clientY);
       }}
@@ -502,12 +941,15 @@ export function TodayOutlineSurface(props: {
         if (!controller || !hasAcceptableSessionMentionTransfer(event.dataTransfer)) return;
         event.preventDefault();
         event.stopPropagation();
-        const sessionId = readSessionMentionDragSessionId(event.dataTransfer);
+        const sessionId = isSessionMentionDragFrom(event.dataTransfer, 'today')
+          ? null
+          : readSessionMentionDragSessionId(event.dataTransfer);
         if (sessionId) controller.dropExternal(sessionId, event.clientX, event.clientY);
         else controller.leaveExternal();
       }}
       tabIndex={-1}
       role="tree"
+      data-today-scroller=""
       aria-multiselectable
       onKeyDown={(event) => {
         if (event.target === event.currentTarget) controller?.onBlockKey(event.nativeEvent);
@@ -518,7 +960,9 @@ export function TodayOutlineSurface(props: {
         if (event.target === event.currentTarget) controller?.onBlockPaste(event.nativeEvent);
       }}
     >
-      <div {...stylex.props(!props.fullWidth && styles.column)}>{props.children}</div>
+      <TodayMoreAtEndContext.Provider value={props.placement === 'pinnedAtWindowEdge'}>
+        <div {...stylex.props(!props.fullWidth && styles.column)}>{props.children}</div>
+      </TodayMoreAtEndContext.Provider>
       <TodayDragLayer />
     </div>
   );
@@ -578,7 +1022,7 @@ const dragStyles = stylex.create({
       default: 'top, left, opacity',
       '@media (prefers-reduced-motion: reduce)': 'none',
     },
-    transitionDuration: '120ms',
+    transitionDuration: duration.fast,
     transitionTimingFunction: 'ease-out',
   },
 });
@@ -621,114 +1065,16 @@ function TodayDragLayer() {
   );
 }
 
-const pickerStyles = stylex.create({
-  menu: {
-    position: 'fixed',
-    zIndex: 50,
-    minWidth: 260,
-    maxWidth: 420,
-    padding: space[1],
-    borderRadius: radius.medium,
-    backgroundColor: colors.raisedBackground,
-    boxShadow: '0 8px 24px rgb(0 0 0 / 0.16)',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  item: {
-    textAlign: 'start',
-    borderWidth: 0,
-    background: 'none',
-    color: colors.label,
-    padding: `${space[1]} ${space[2]}`,
-    borderRadius: radius.small,
-    fontSize: text.subheadlineSize,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    cursor: 'pointer',
-  },
-  highlighted: { backgroundColor: colors.hoverFill },
-  disabled: { color: colors.tertiaryLabel, cursor: 'default' },
-  empty: { padding: space[2], fontSize: text.footnoteSize, color: colors.tertiaryLabel },
-});
-
-/**
- * The live picker: the workspace's conversation list is subscribed only while
- * `@` is open, so session-list ticks never re-render the whole Today surface.
- */
-function TodayLiveSessionPicker() {
-  const controller = useTodayEditor();
-  if (!controller?.getPicker()) return null;
-  return <TodayWorkspaceSessionPicker />;
-}
-
-function TodayWorkspaceSessionPicker() {
-  return <TodaySessionPicker items={useSessionMentionItems()} />;
-}
-
-/** The `@` conversation picker, below the editing caret. Items come from the host. */
-export function TodaySessionPicker(props: { items: readonly SessionMentionItem[] }) {
-  const { t } = useTranslation();
-  const controller = useTodayEditor();
-  const { items } = props;
-  const picker = controller?.getPicker() ?? null;
-  const root = controller?.getEditorRoot() ?? null;
-  // Keyed on the query alone: arrowing through the list replaces `picker`.
-  const query = picker?.query ?? null;
-  const candidates = useMemo(() => {
-    if (query === null) return [];
-    return query
-      ? selectSessionMentionCandidates(items, query, 8)
-      : [...items].sort((a, b) => b.activityAt - a.activityAt).slice(0, 8);
-  }, [items, query]);
-  if (controller) controller.pickerItems = candidates.map((item) => item.sessionId);
-  if (!controller || !picker || !root) return null;
-  // Under the `@`: the caret's line when the browser can measure it, else the node.
-  const selection = window.getSelection();
-  const caret =
-    selection?.rangeCount && root.contains(selection.anchorNode)
-      ? selection.getRangeAt(0).getBoundingClientRect()
-      : null;
-  const rect = caret && caret.height > 0 ? caret : root.getBoundingClientRect();
-  return (
-    <div
-      {...stylex.props(pickerStyles.menu)}
-      style={{ left: rect.left, top: rect.bottom + 4 }}
-      role="listbox"
-      aria-label={t('today.pickSession', 'Conversations')}
-    >
-      {candidates.length === 0 ? (
-        <span {...stylex.props(pickerStyles.empty)}>
-          {t('today.noSessions', 'No matching conversations')}
-        </span>
-      ) : (
-        candidates.map((item, index) => (
-          <button
-            type="button"
-            key={item.sessionId}
-            role="option"
-            aria-selected={index === picker.index}
-            {...stylex.props(pickerStyles.item, index === picker.index && pickerStyles.highlighted)}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => controller.acceptPicker(item.sessionId)}
-          >
-            {item.title || t('today.untitledSession', 'Untitled conversation')}
-          </button>
-        ))
-      )}
-    </div>
-  );
-}
-
 export type TodayConvertDialogComponent = ComponentType<{
   open: boolean;
   prompt: string;
+  promptWithAncestors?: string | null;
   onAccepted: (sessionId: SessionId) => void;
   onOpenChange: (open: boolean) => void;
 }>;
 
 /**
- * The bullet menu and "Convert to task". Only an accepted conversation changes
+ * The selection bar and "Convert to task". Only an accepted conversation changes
  * the node: unchanged since the dialog opened, the line becomes the mention
  * (children stay, folded); edited meanwhile, the mention is prefixed; a node
  * deleted meanwhile gets a mention node appended to the page instead. The dialog is replaceable so Storybook
@@ -740,60 +1086,72 @@ export function TodayNodeActions(props: {
 }) {
   const controller = useTodayEditor();
   const ConvertDialog = props.ConvertDialog ?? TodayConvertDialog;
-  const [nodeMenu, setNodeMenu] = useState<{
-    store: TodayPageStore;
-    nodeId: TodayNodeId;
-    x: number;
-    y: number;
-  } | null>(null);
   const [converting, setConverting] = useState<{
     store: TodayPageStore;
     nodeId: TodayNodeId;
     prompt: string;
+    promptWithAncestors: string | null;
     /** The node's text when the dialog opened: unchanged, the line becomes the mention. */
     snapshot: TodayRichText;
+  } | null>(null);
+  const [nodeMenu, setNodeMenu] = useState<{
+    store: TodayPageStore;
+    nodeId: TodayNodeId;
+    anchor: HTMLElement | { x: number; y: number };
   } | null>(null);
   useEffect(() => {
     if (!controller) return undefined;
     controller.onNodeMenu = (store, nodeId, anchor) => {
-      const rect = anchor.getBoundingClientRect();
-      // Select the node (its subtree shows selected) so the menu's actions,
-      // such as Convert to task, visibly cover everything they will take.
       controller.selectBlocks(store, [nodeId]);
-      setNodeMenu({ store, nodeId, x: rect.left, y: rect.bottom + 4 });
+      setNodeMenu({ store, nodeId, anchor });
     };
     return () => {
       controller.onNodeMenu = null;
     };
   }, [controller]);
+  const convert = (store: TodayPageStore, nodeId: TodayNodeId) => {
+    const [fragment] = store.outline.extract([nodeId]);
+    const text = store.outline.getText(nodeId);
+    if (!fragment || !text || !controller) return;
+    const ancestors: TodayRichText[] = [];
+    for (
+      let parent = store.outline.getNode(nodeId)?.parentId ?? null;
+      parent;
+      parent = store.outline.getNode(parent)?.parentId ?? null
+    ) {
+      const node = store.outline.getNode(parent);
+      if (!node) break;
+      ancestors.unshift({ text: node.text, mentions: [...node.mentions] });
+    }
+    setConverting({
+      store,
+      nodeId,
+      prompt: buildConvertPrompt(fragment, controller.mentionText),
+      promptWithAncestors:
+        ancestors.length > 0
+          ? buildConvertPrompt(fragment, controller.mentionText, ancestors)
+          : null,
+      snapshot: readTodayText(text),
+    });
+  };
   return (
     <>
-      {nodeMenu ? (
+      {converting || nodeMenu ? null : <TodaySelectionBar onConvert={convert} />}
+      {nodeMenu && controller ? (
         <TodayNodeMenu
           {...nodeMenu}
-          onClose={() => {
+          controller={controller}
+          onConvert={() => convert(nodeMenu.store, nodeMenu.nodeId)}
+          onClose={(keepSelection) => {
             setNodeMenu(null);
-            controller?.clearBlockSelection();
-          }}
-          onConvert={() => {
-            const { store, nodeId } = nodeMenu;
-            const [fragment] = store.outline.extract([nodeId]);
-            const text = store.outline.getText(nodeId);
-            setNodeMenu(null);
-            if (!fragment || !text || !controller) return;
-            controller.deactivate();
-            setConverting({
-              store,
-              nodeId,
-              prompt: buildConvertPrompt(fragment, controller.mentionText),
-              snapshot: readTodayText(text),
-            });
+            if (!keepSelection) controller.clearBlockSelection();
           }}
         />
       ) : null}
       <ConvertDialog
         open={converting !== null}
         prompt={converting?.prompt ?? ''}
+        promptWithAncestors={converting?.promptWithAncestors ?? null}
         onOpenChange={(open) => {
           if (!open) {
             setConverting(null);
@@ -823,53 +1181,6 @@ export function TodayNodeActions(props: {
   );
 }
 
-/** The bullet menu: actions on one node. */
-function TodayNodeMenu(props: {
-  store: TodayPageStore;
-  nodeId: TodayNodeId;
-  x: number;
-  y: number;
-  onClose: () => void;
-  onConvert: () => void;
-}) {
-  const { t } = useTranslation();
-  const node = props.store.outline.getNode(props.nodeId);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
-      if (event instanceof PointerEvent && ref.current?.contains(event.target as Node)) return;
-      props.onClose();
-    };
-    window.addEventListener('pointerdown', close, true);
-    window.addEventListener('keydown', close, true);
-    return () => {
-      window.removeEventListener('pointerdown', close, true);
-      window.removeEventListener('keydown', close, true);
-    };
-  }, [props]);
-  // Offered when the node says something besides its mentions.
-  const canConvert = !!node && node.text.replaceAll(TODAY_MENTION_CHAR, '').trim().length > 0;
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      {...stylex.props(pickerStyles.menu)}
-      style={{ left: props.x, top: props.y }}
-    >
-      <button
-        type="button"
-        role="menuitem"
-        disabled={!canConvert}
-        {...stylex.props(pickerStyles.item, !canConvert && pickerStyles.disabled)}
-        onClick={props.onConvert}
-      >
-        {t('today.convertToTask', 'Convert to task')}
-      </button>
-    </div>
-  );
-}
-
 function TodayCalendar(props: {
   today: TodayDate;
   selected: TodayDate;
@@ -889,6 +1200,7 @@ function TodayCalendar(props: {
     year: 'numeric',
     month: 'long',
   });
+  const calendarLabel = t('today.calendar', 'Pick a date');
   return (
     <Popover.Root
       open={open}
@@ -897,13 +1209,20 @@ function TodayCalendar(props: {
         if (next) setMonth(todayDateToLocalDate(props.selected));
       }}
     >
-      <Popover.Trigger
-        render={
-          <Button variant="ghost" size="small" icon aria-label={t('today.calendar', 'Pick a date')}>
-            <CalendarDays size={16} strokeWidth={1.5} />
-          </Button>
-        }
-      />
+      <Tooltip.Root disabled={open}>
+        <Tooltip.Trigger
+          render={
+            <Popover.Trigger
+              render={
+                <Button variant="ghost" size="small" icon aria-label={calendarLabel}>
+                  <CalendarDays size={16} strokeWidth={1.5} />
+                </Button>
+              }
+            />
+          }
+        />
+        <Tooltip.Content side="bottom">{calendarLabel}</Tooltip.Content>
+      </Tooltip.Root>
       <Popover.Content>
         <div {...stylex.props(styles.calendar)}>
           <div {...stylex.props(styles.calendarHead)}>

@@ -12,9 +12,11 @@ const TODAY_CLOCK_FALLBACK_MS = 60_000;
  */
 const systemNow = () => new Date();
 
-export function useTodayClock(now: () => Date = systemNow): TodayDate {
+export function useTodayClock(now: () => Date = systemNow, ownerWindow?: Window): TodayDate {
   const [today, setToday] = useState(() => localTodayDate(now()));
   useEffect(() => {
+    const view = ownerWindow ?? window;
+    const { document } = view;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = () => {
       const current = now();
@@ -28,21 +30,21 @@ export function useTodayClock(now: () => Date = systemNow): TodayDate {
       if (document.visibilityState === 'visible') check();
     };
     document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', check);
+    view.addEventListener('focus', check);
     return () => {
       if (timer) clearTimeout(timer);
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', check);
+      view.removeEventListener('focus', check);
     };
-  }, [now]);
+  }, [now, ownerWindow]);
   return today;
 }
 
 /**
  * Now, read fresh on every render; the app's shared minute ticker (the
  * sidebar's) only re-renders the subscribed mentions. Its snapshot can be up to
- * a minute old, which would round a just-chosen "Later today" countdown up an
+ * a minute old, which would round a just-chosen "In 3 hours" countdown up an
  * extra hour.
  */
 export function useTodayNow(): number {

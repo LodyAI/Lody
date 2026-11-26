@@ -1,11 +1,14 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace as appSpace } from '../style/theme-scale.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Timer } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Dialog } from '@/ui/dialog';
-import { formatSnoozeCountdown } from '@/lib/sidebar-status-group';
-import { cn } from '@/lib/utils';
+import { formatSnoozeCountdown } from '@lody/shared';
 
 export type CustomSnoozeDialogTarget = {
   sessionId: string;
@@ -40,7 +43,9 @@ export function CustomSnoozeDialog({
   const { t } = useTranslation();
   const safeNow = now instanceof Date ? now : new Date();
   const [openFor, setOpenFor] = useState<CustomSnoozeDialogTarget | null>(null);
-  const [value, setValue] = useState(() => toLocalDateTimeInputValue(defaultCustomSnoozeMs(safeNow)));
+  const [value, setValue] = useState(() =>
+    toLocalDateTimeInputValue(defaultCustomSnoozeMs(safeNow))
+  );
 
   if (target !== openFor) {
     setOpenFor(target);
@@ -81,33 +86,29 @@ export function CustomSnoozeDialog({
         if (!open) onClose();
       }}
     >
-      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
-          <Dialog.Title className="text-base">
+      <Dialog.Content xstyle={themeStyles.glyph}>
+        <Dialog.Header xstyle={themeStyles.copy}>
+          <Dialog.Title>
             {t('sidebar.status.snooze.customTitle', 'Snooze until…')}
           </Dialog.Title>
           {target?.title ? (
-            <Dialog.Description className="truncate text-xs text-muted-foreground">
+            <Dialog.Description xstyle={themeStyles.hint}>
               {target.title}
             </Dialog.Description>
           ) : null}
         </Dialog.Header>
 
-        <div className="flex flex-col gap-3 px-4 py-4 sm:px-5">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div {...stylex.props(themeStyles.column)}>
+          <div {...stylex.props(themeStyles.row)}>
             {quickOffsets.map((preset) => (
-              <button
+              <Button
                 key={preset.label}
-                type="button"
-                className={cn(
-                  'inline-flex items-center gap-1 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs font-medium tabular-nums text-foreground/85 transition-colors',
-                  'hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40'
-                )}
+                type="button" variant="secondary" size="small"
                 onClick={() => setValue(toLocalDateTimeInputValue(preset.ms))}
               >
-                <Timer className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+                <Timer {...stylex.props(themeStyles.hint2)} aria-hidden="true" />
                 <span>{preset.label}</span>
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -126,8 +127,8 @@ export function CustomSnoozeDialog({
           />
 
           {previewCountdown ? (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Timer className="h-3.5 w-3.5 text-amber-500/80 dark:text-amber-400/80" />
+            <div {...stylex.props(themeStyles.row2)}>
+              <Timer {...stylex.props(themeStyles.copy3)} />
               <span>
                 {t('sidebar.status.snooze.returnsIn', 'Returns to Focus in {{countdown}}', {
                   countdown: previewCountdown,
@@ -135,13 +136,13 @@ export function CustomSnoozeDialog({
               </span>
             </div>
           ) : (
-            <div className="text-xs text-destructive">
+            <div {...stylex.props(themeStyles.copy4)}>
               {t('sidebar.status.snooze.mustBeFuture', 'Choose a time in the future.')}
             </div>
           )}
         </div>
 
-        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+        <Dialog.Footer xstyle={themeStyles.panel}>
           <Button variant="secondary" size="small" onClick={onClose}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -153,3 +154,17 @@ export function CustomSnoozeDialog({
     </Dialog.Root>
   );
 }
+
+const themeStyles = stylex.create({
+  glyph: { maxWidth: '24rem', gap: 0, overflow: 'hidden', padding: { 'default': 0, '@media (min-width: 640px)': 0 } },
+  copy: { paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4], paddingRight: { 'default': appSpace[12], '@media (min-width: 640px)': appSpace[12] }, textAlign: 'start' },
+  copy2: { fontSize: uiText.bodySize, lineHeight: uiText.bodyLeading },
+  hint: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  column: { display: 'flex', flexDirection: 'column', gap: appSpace[3], paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[4] },
+  row: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: appSpace[1.5] },
+  hint2: { height: appSpace[3], width: appSpace[3], color: uiColors.secondaryLabel },
+  row2: { display: 'flex', alignItems: 'center', gap: appSpace[1.5], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  copy3: { height: appSpace[3.5], width: appSpace[3.5], color: uiColors.warning },
+  copy4: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.destructive },
+  panel: { backgroundColor: uiColors.secondaryBackground, paddingInline: { 'default': appSpace[4], '@media (min-width: 640px)': appSpace[5] }, paddingBlock: appSpace[3] },
+});

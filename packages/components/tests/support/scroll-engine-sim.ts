@@ -35,6 +35,7 @@ export interface SimRow {
   turnIndex: number;
   groupTurnIds?: readonly string[];
   itemIndex?: number | null;
+  itemIdentity?: string | null;
   fixed?: FixedRowKind | null;
   placeholder?: boolean;
   height: number;
@@ -161,7 +162,7 @@ export class ScrollSim implements ScrollHost {
       groupTurnIds: row.groupTurnIds,
       turnIndex: row.turnIndex,
       itemIndex: row.itemIndex ?? null,
-      itemIdentity: null,
+      itemIdentity: row.itemIdentity ?? null,
       firstItemIndex: row.itemIndex ?? null,
       placeholder: row.placeholder ?? false,
       fixed: row.fixed ?? null,

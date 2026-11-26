@@ -1,6 +1,37 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Button } from '@lody/ui/button';
 import { OnboardingBackdrop, OnboardingShell } from '@/components/onboarding';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    borderRadius: 'var(--radius-md)',
+    borderStyle: 'dashed',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    padding: 'calc(var(--spacing) * 8)',
+    textAlign: 'center',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  frame: {
+    position: 'relative',
+    'min-height': '640px',
+    width: '100%',
+  },
+  row: {
+    position: 'relative',
+    'z-index': '10',
+    display: 'flex',
+    'min-height': '640px',
+    'align-items': 'center',
+    'justify-content': 'center',
+    padding: 'calc(var(--spacing) * 8)',
+  },
+});
 
 /**
  * Wraps the shell in the same backdrop the overlay uses so stories preview
@@ -8,11 +39,9 @@ import { OnboardingBackdrop, OnboardingShell } from '@/components/onboarding';
  */
 function OnboardingShellPreviewWrapper({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-[640px] w-full">
+    <div {...stylex.props(storyLayout.frame)}>
       <OnboardingBackdrop />
-      <div className="relative z-10 flex min-h-[640px] items-center justify-center p-8">
-        {children}
-      </div>
+      <div {...stylex.props(storyLayout.row)}>{children}</div>
     </div>
   );
 }
@@ -42,11 +71,7 @@ export const NarrowSingleAction: Story = {
     title: 'Choose your language',
     description: 'You can switch this anytime from settings.',
     primaryAction: <Button size="large">Next</Button>,
-    children: (
-      <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-        Body slot
-      </div>
-    ),
+    children: <div {...stylex.props(storyLayoutStyles.canvas)}>Body slot</div>,
   },
 };
 
@@ -62,11 +87,7 @@ export const WideWithBackAndNext: Story = {
       </Button>
     ),
     primaryAction: <Button size="large">Next</Button>,
-    children: (
-      <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-        Body slot — wide
-      </div>
-    ),
+    children: <div {...stylex.props(storyLayoutStyles.canvas)}>Body slot — wide</div>,
   },
 };
 
@@ -82,10 +103,6 @@ export const ProjectsStep: Story = {
       </Button>
     ),
     primaryAction: <Button size="large">Finish</Button>,
-    children: (
-      <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-        Body slot
-      </div>
-    ),
+    children: <div {...stylex.props(storyLayoutStyles.canvas)}>Body slot</div>,
   },
 };

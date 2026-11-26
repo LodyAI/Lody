@@ -1,3 +1,4 @@
+import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { AgentConfigId, LocalProjectId, MachineId, ProviderSetupTask } from '@lody/shared';
 
@@ -54,3 +55,6 @@ export const desktopOnboardingDraftAtom = atomWithStorage<DesktopOnboardingDraft
   'lody-desktop-onboarding-draft',
   { provider: null, project: null }
 );
+
+// Recheck the main process marker if the workspace mounted before its write finished.
+export const desktopOnboardingCompletionRevisionAtom = atom(0);

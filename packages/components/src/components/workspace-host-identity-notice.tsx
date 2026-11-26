@@ -1,3 +1,4 @@
+import { E2eeDiagnosticCode } from './e2ee-diagnostic-code';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
@@ -19,7 +20,7 @@ const styles = stylex.create({
 /** This device has not yet confirmed whether it holds the workspace's encrypted
  * identity. Local work stays available; sending and sync wait. Not a failure:
  * checking continues on its own, and Retry only asks again sooner. The host's
- * original failure code stays visible for diagnosis. */
+ * original failure code is available in technical details. */
 export function WorkspaceHostIdentityNotice({
   code,
   onRetry,
@@ -31,10 +32,10 @@ export function WorkspaceHostIdentityNotice({
   return (
     <div role="status" aria-live="polite" {...stylex.props(styles.notice)}>
       <span>{t('e2ee.content.hostIdentityPending')}</span>
-      <code>{code}</code>
       <Button type="button" variant="secondary" size="small" onClick={onRetry}>
         {t('e2ee.content.retryHostIdentity')}
       </Button>
+      <E2eeDiagnosticCode code={code} />
     </div>
   );
 }

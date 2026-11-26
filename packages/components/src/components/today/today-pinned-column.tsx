@@ -1,11 +1,13 @@
+import { duration as sharedMotion, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { navigationSidebarVisibleAtom } from '@/atoms/layout-state';
+import { withClassName } from '@/lib/stylex';
 import { WORKSPACE_FRAME_CSS } from '@/lib/workspace-frame';
+import { WINDOW_DRAG_EXEMPT_CLASS, WindowDragStrip } from '@/ui/window-drag-region';
 import { DocumentStyle } from '../document-style';
 import {
   TODAY_COLUMN_MAX_WIDTH,
@@ -47,7 +49,9 @@ const styles = stylex.create({
     right: -2,
     width: 8,
     cursor: 'col-resize',
-    zIndex: 5,
+    // Above the toolbar's drag header (20): the sash resizes along its whole
+    // height, the window-top row included.
+    zIndex: 21,
     outline: 'none',
     '::after': {
       content: '""',
@@ -60,7 +64,7 @@ const styles = stylex.create({
       backgroundColor: colors.accent,
       opacity: { default: 0, ':hover': 1, ':active': 1, ':focus-visible': 1 },
       transitionProperty: 'opacity',
-      transitionDuration: '120ms',
+      transitionDuration: sharedMotion.fast,
       transitionDelay: { default: '0ms', ':hover': '150ms' },
     },
   },
@@ -131,6 +135,9 @@ export function TodayPinnedCard(props: {
       data-testid="today-column"
     >
       <DocumentStyle name="lody-workspace-frame" css={WORKSPACE_FRAME_CSS} />
+      {/* The window ground above and beside the card's top row drags the window
+          like the main pane's strip does. */}
+      <WindowDragStrip />
       <div
         className={`lody-workspace-card ${stylex.props(styles.card).className ?? ''}`}
         data-anchored={props.anchored}
@@ -168,7 +175,10 @@ export function TodayColumnSash(props: {
       aria-label={props.label}
       tabIndex={0}
       data-today-sash=""
-      {...stylex.props(styles.sash, dragging && styles.sashDragging)}
+      {...withClassName(
+        stylex.props(styles.sash, dragging && styles.sashDragging),
+        WINDOW_DRAG_EXEMPT_CLASS
+      )}
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         drag.current = { startX: event.clientX, startWidth: props.width };

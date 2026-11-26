@@ -182,6 +182,7 @@ export interface SessionHistoryReader {
   readTurn(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
   /** Display-only turn: run.items contains at most the latest step's small
    * summary, not a transcript. Never use this for export, copy, hashes or writes.
+   * Returned values may be structurally shared; treat them as read-only.
    * Advertise only together with readSubagentRun. */
   readTurnForDisplay?(turnId: string): SessionTurnRead | Promise<SessionTurnRead>;
   /** Read exactly one run from its owning turn, preserving root ACP identity. */
@@ -213,7 +214,7 @@ export interface SessionHistoryReader {
     options?: { readonly withPatches?: true }
   ): Promise<SessionHistoryChanges>;
   /** Bounded commit observation; it owns no database transaction while waiting. */
-  waitForChanges?(checkpoint: string, waitMs: number, signal?: AbortSignal): Promise<void>;
+  waitForChanges?(checkpoint: string, signal: AbortSignal): Promise<void>;
   /** Latest bounded directory page for windowed-history backends. */
   readLatestDirectoryPage?(limit: number): Promise<SessionHistoryDirectoryPage>;
   /** Bounded page immediately older than `cursor`. */
@@ -269,9 +270,12 @@ export type SessionInputAcceptanceResult =
 export interface SessionInputAcceptance {
   /** The renderer capability is bound to this owner, independently of mutable metadata. */
   readonly targetMachineId?: string;
-  accept(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  accept(entry: SessionTurn, assertCurrent?: () => void): Promise<SessionInputAcceptanceResult>;
   /** Negotiated owner-side history acceptance and ordinary dispatch handoff. */
-  acceptAndDispatch?(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
+  acceptAndDispatch?(
+    entry: SessionTurn,
+    assertCurrent?: () => void
+  ): Promise<SessionInputAcceptanceResult>;
   lookup(entry: SessionTurn): Promise<SessionInputAcceptanceResult>;
 }
 

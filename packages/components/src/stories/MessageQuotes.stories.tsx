@@ -6,6 +6,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { applyTextRewrites, reanchorMessageTextSpansForTrim, type SessionId } from '@lody/shared';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
+import { Dialog } from '@/ui/dialog';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { MessageQuoteAction } from '@/components/ai-gui/message-quote-action';
 import { formatMessageQuoteExcerpt } from '@/components/ai-gui/message-quote-markdown';
@@ -265,6 +266,17 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Inline: Story = { render: () => <QuoteHarness /> };
+export const ModalOverSelection: Story = {
+  render: () => (
+    <Dialog.Root>
+      <Dialog.Trigger>Open settings</Dialog.Trigger>
+      <QuoteHarness />
+      <Dialog.Content noAnimation style={{ width: '90vw', height: '90vh' }}>
+        <Dialog.Title>Settings</Dialog.Title>
+      </Dialog.Content>
+    </Dialog.Root>
+  ),
+};
 export const Rejected: Story = { render: () => <QuoteHarness reject /> };
 
 export const CaretAndGrowth: Story = {

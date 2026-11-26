@@ -49,6 +49,7 @@ import {
   type ProjectRef,
   getSessionRoomId,
   isLoroRepoDocDeleted,
+  resolveSessionAcpTargetId,
   type SessionMeta,
   encodeProjectPreparationProgress,
   isMissingEmail,
@@ -125,6 +126,10 @@ import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error'
 import { captureCli } from '@/lib/analytics/posthog';
 import { getEffectiveMemoryLimitBytes } from '@/utils/memory';
 import { withSlowOperationWarning } from '@/utils/slow-operation-warning';
+import { setLocalAcpSessionArchived } from '@/agent/acp-runner';
+import { withoutElectronBootstrapCredentials } from '@/electron-bootstrap-env';
+import { withTimeout } from '@/lib/loro/timeout-utils';
+import { TURN_BUDGETS } from './turn-budgets';
 import { resolveGitHubRepoWorktreeConfig } from './worktree/worktree-config-resolver';
 import type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
 import {
@@ -405,6 +410,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   // shared machine-wide budget. This avoids create/exit races briefly applying stale
   // shares of the 90% execution-plane budget. See docs/exec-sandbox.md.
   private sandboxRebalanceChain: Promise<void> = Promise.resolve();
+  private readonly archiveObservations = new Map<
+    SessionId,
+    { done: Promise<void>; repeat: boolean }
+  >();
+  private readonly nativeArchiveJobs = new Map<SessionId, Promise<unknown>>();
+  // Shutdown aborts archive transitions, whose ACP children do not belong to a Session.
+  private readonly archiveTransitionLifetime = new AbortController();
+  private readonly syncAgentSessionArchive: typeof setLocalAcpSessionArchived;
   private requestPermissionHandler?: (
     sessionId: SessionId,
     requestId: string,
@@ -421,6 +434,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     options: {
       sessionSandboxFactory?: SessionSandboxFactory;
       cloudPort: CloudPort;
+      syncAgentSessionArchive?: typeof setLocalAcpSessionArchived;
     }
   ) {
     super();
@@ -432,6 +446,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       throw new Error('SessionManager requires an assembled CloudPort');
     }
     this.cloudPort = options.cloudPort;
+    this.syncAgentSessionArchive = options.syncAgentSessionArchive ?? setLocalAcpSessionArchived;
     this.mcpAuthentication = new McpAuthenticationLegacy({
       machineId,
       workspaceId,
@@ -780,6 +795,10 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     this.reportStartStage(config, 'credentials');
     await this.freezeCodexProfile(config);
     signal?.throwIfAborted();
+    if (config.sessionId && agentStart?.resumeSessionId && !agentStart.forkSessionId) {
+      await this.archiveObservations.get(config.sessionId)?.done;
+      signal?.throwIfAborted();
+    }
     const credentials = await this.prepareGitHubRepoSessionConfig(config);
     let session: Session | undefined;
     let usageState: 'starting' | 'active' | 'failed' = 'starting';
@@ -1095,7 +1114,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
     const context = sessionId ?? 'git-identity';
     const policy = await resolveGitIdentityPolicyLegacy(
-      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
+      (attemptSignal) =>
+        tokenManager.getCredentialPolicy(
+          { requesterUserId, machineId: this.machineId },
+          attemptSignal
+        ),
       this.logger,
       context,
       signal
@@ -1902,7 +1925,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         failures.push(error);
       }
     };
-    await attempt(() => this.cleanupSessions());
+    // Archive transitions record failures before MessageHandler's final flush.
+    await Promise.all([
+      attempt(() => this.cleanupSessions()),
+      attempt(() => this.joinArchiveTransitions()),
+    ]);
     // MessageHandler drains final callbacks between these two cleanup phases.
     if (!options.keepWorkspaceDocumentOpen) {
       await attempt(() => this.mcpAuthentication.close());
@@ -2024,8 +2051,199 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return childSessionIds;
   }
 
-  async archiveSession(sessionId: SessionId): Promise<void> {
+  isArchiveInFlight(sessionId: SessionId): boolean {
+    return this.archiveObservations.has(sessionId);
+  }
+
+  observeArchiveChange(sessionId: SessionId, reconcile: () => Promise<void>): Promise<void> {
+    const existing = this.archiveObservations.get(sessionId);
+    if (existing) {
+      existing.repeat = true;
+      return existing.done;
+    }
+
+    const observation = { repeat: false, done: Promise.resolve() };
+    observation.done = Promise.resolve().then(async () => {
+      try {
+        do {
+          observation.repeat = false;
+          await reconcile();
+        } while (observation.repeat);
+      } finally {
+        this.archiveObservations.delete(sessionId);
+      }
+    });
+    this.archiveObservations.set(sessionId, observation);
+    return observation.done;
+  }
+
+  /**
+   * Native sync, its warning and the Lody document release form one transition,
+   * so a restore queued behind it never receives a destroyed document.
+   */
+  async archiveSession(
+    sessionId: SessionId,
+    options: {
+      releaseFailure?: string;
+      recordWarning?: (warning: AgentSessionWarning) => Promise<void>;
+    } = {}
+  ): Promise<void> {
+    await this.enqueueArchiveTransition(sessionId, undefined, async (signal) => {
+      let warning: AgentSessionWarning | undefined;
+      try {
+        warning = options.releaseFailure
+          ? this.nativeArchiveFailureWarning(sessionId, options.releaseFailure)
+          : await this.applyNativeSessionArchive(sessionId, true, signal);
+      } catch (error) {
+        warning = this.nativeArchiveFailureWarning(sessionId, error);
+      }
+      try {
+        if (warning) await options.recordWarning?.(warning);
+      } finally {
+        await this.cleanArchivedSessionDoc(sessionId);
+      }
+    });
+  }
+
+  async syncNativeSessionArchive(
+    sessionId: SessionId,
+    archived: boolean,
+    signal?: AbortSignal
+  ): Promise<AgentSessionWarning | undefined> {
+    return await this.enqueueArchiveTransition(sessionId, signal, (transitionSignal) =>
+      this.applyNativeSessionArchive(sessionId, archived, transitionSignal)
+    );
+  }
+
+  private enqueueArchiveTransition<T>(
+    sessionId: SessionId,
+    signal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<T>
+  ): Promise<T> {
+    const lifetime = this.archiveTransitionLifetime.signal;
+    const transitionSignal = signal ? AbortSignal.any([lifetime, signal]) : lifetime;
+    const previous = this.nativeArchiveJobs.get(sessionId) ?? Promise.resolve();
+    // The previous caller reports its error; a failed archive must not fence restore.
+    const next = previous.catch(() => {}).then(() => run(transitionSignal));
+    this.nativeArchiveJobs.set(sessionId, next);
+    void next
+      .finally(() => {
+        if (this.nativeArchiveJobs.get(sessionId) === next)
+          this.nativeArchiveJobs.delete(sessionId);
+      })
+      .catch(() => undefined);
+    return next;
+  }
+
+  private async cleanArchivedSessionDoc(sessionId: SessionId): Promise<void> {
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    const meta = snapshot?.meta as SessionMeta | undefined;
+    if (meta && !isLoroRepoDocDeleted(snapshot) && meta.isArchived !== true) {
+      // A restore committed during synchronization owns the document now.
+      this.logger.debug(`[${sessionId}] Archive superseded by restore; keeping session document`);
+      return;
+    }
     await this.workspaceDocument.cleanSessionDoc(sessionId);
+  }
+
+  /** Cancels archive transitions and waits for their ACP process cleanup. */
+  private async joinArchiveTransitions(): Promise<void> {
+    this.archiveTransitionLifetime.abort();
+    const transitions = [
+      ...this.nativeArchiveJobs.values(),
+      ...Array.from(this.archiveObservations.values(), ({ done }) => done),
+    ];
+    if (!transitions.length) return;
+    await withTimeout(
+      Promise.allSettled(transitions),
+      TURN_BUDGETS.agentCleanupMs,
+      'Agent archive synchronization did not stop after shutdown cancellation'
+    );
+  }
+
+  private async applyNativeSessionArchive(
+    sessionId: SessionId,
+    archived: boolean,
+    signal: AbortSignal
+  ): Promise<AgentSessionWarning | undefined> {
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    const meta = snapshot?.meta as SessionMeta | undefined;
+    if (!meta || isLoroRepoDocDeleted(snapshot) || meta.machineId !== this.machineId) return;
+    if ((meta.isArchived === true) !== archived || !meta.agentConfigId) return;
+    const nativeSessionId = resolveSessionAcpTargetId(meta);
+    if (!nativeSessionId) return;
+    const provider = await this.workspaceDocument.getAgentConfigById(
+      meta.agentConfigId,
+      this.machineId
+    );
+    if (!provider || provider.id !== meta.agentConfigId || provider.machineId !== this.machineId)
+      return;
+    const profiles = getCodexProfileStore();
+    const codex = provider.cliType === 'builtin' && provider.agentType === 'codex';
+    if (
+      codex &&
+      !provider.codexAuth &&
+      (await profiles.isAccountBound({
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        configId: provider.id,
+      }))
+    )
+      throw new Error('This Codex provider account reference is missing');
+    const profile = codex ? await profiles.resolve(this.workspaceId, provider) : undefined;
+    const result = await this.syncAgentSessionArchive({
+      cliType: provider.cliType,
+      agentType: provider.agentType,
+      customAcp: provider.customAcp,
+      runtimeOverrides: provider.runtimeOverrides,
+      agentConfigId: provider.id,
+      magpieGatewayUrl: provider.magpieGatewayUrl,
+      codexProfile: profile ? { profile } : undefined,
+      env: withoutElectronBootstrapCredentials({ ...process.env, ...provider.env }),
+      nativeSessionId,
+      archived,
+      signal,
+      logger: this.logger,
+      shouldApply: async () => {
+        const current = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+        const latest = current?.meta as SessionMeta | undefined;
+        return (
+          !isLoroRepoDocDeleted(current) &&
+          latest?.machineId === this.machineId &&
+          latest.agentConfigId === provider.id &&
+          (latest.isArchived === true) === archived &&
+          resolveSessionAcpTargetId(latest) === nativeSessionId
+        );
+      },
+    });
+    if (archived && result === 'unsupported')
+      return {
+        source: 'native-session-archive',
+        message:
+          'This agent does not advertise archive synchronization. The conversation is archived in Lody only.',
+      };
+    if (archived && result === 'title-marker')
+      return {
+        source: 'native-session-archive',
+        message:
+          'The agent marked its native session title as archived. The session may still appear in its native history picker.',
+      };
+    return undefined;
+  }
+
+  reportNativeArchiveFailure(sessionId: SessionId, error: unknown): void {
+    this.emit('onAgentWarning', sessionId, this.nativeArchiveFailureWarning(sessionId, error));
+  }
+
+  private nativeArchiveFailureWarning(sessionId: SessionId, error: unknown): AgentSessionWarning {
+    this.logger.warn(
+      `[${sessionId}] Native session archive synchronization failed: ${formatErrorMessage(error)}`
+    );
+    return {
+      source: 'native-session-archive',
+      message:
+        'Agent archive synchronization failed. The Lody archive state is unchanged. Restore and archive the conversation again to retry.',
+    };
   }
 
   /**

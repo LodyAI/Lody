@@ -9,6 +9,10 @@ import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { ChatLanding, type ChatLandingEmbedding } from '@/components/chat/chat-landing';
 import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 import { Dialog } from '@/ui/dialog';
+import * as stylex from '@stylexjs/stylex';
+import { Checkbox } from '@lody/ui/checkbox';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   TODAY_CONVERT_DIALOG_WIDTH,
   TodayConvertDialogHeader,
@@ -18,12 +22,32 @@ export type TodayConvertDialogProps = {
   open: boolean;
   /** The node's text and its children; it seeds the dialog's own draft on each open. */
   prompt: string;
+  /**
+   * The same prompt with the node's ancestors around it, when it has any. It
+   * seeds the draft instead, and a checkbox switches between the two while
+   * the prompt is unedited.
+   */
+  promptWithAncestors?: string | null;
   /** Called once `startSession` has accepted the first turn, before the dialog closes. */
   onAccepted: (sessionId: SessionId) => void;
   onOpenChange: (open: boolean) => void;
 };
 
 const SURFACE = 'today-convert' as const;
+
+const styles = stylex.create({
+  ancestors: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    marginTop: space[2],
+    fontSize: text.footnoteSize,
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  hint: { color: colors.tertiaryLabel },
+});
 
 /**
  * "Convert to task": the new-chat page's own landing, in a dialog laid out
@@ -36,6 +60,7 @@ const SURFACE = 'today-convert' as const;
 export function TodayConvertDialog({
   open,
   prompt,
+  promptWithAncestors = null,
   onAccepted,
   onOpenChange,
 }: TodayConvertDialogProps) {
@@ -53,8 +78,15 @@ export function TodayConvertDialog({
   // Whether the landing is mounted, and whether this open still needs its seed.
   const [landingMounted, setLandingMounted] = useState(false);
   const [seedPending, setSeedPending] = useState(false);
-  const promptRef = useRef(prompt);
-  promptRef.current = prompt;
+  const promptRef = useRef(promptWithAncestors ?? prompt);
+  promptRef.current = promptWithAncestors ?? prompt;
+  const draftAtom = chatLandingSessionStateAtomFamily(
+    buildChatLandingSurfaceDraftKey(owner, SURFACE, workspaceSlug ?? '')
+  );
+  const draftPrompt = useAtomValue(draftAtom).prompt;
+  const ancestorsIncluded = promptWithAncestors !== null && draftPrompt === promptWithAncestors;
+  const ancestorsSwitchable =
+    promptWithAncestors !== null && (draftPrompt === promptWithAncestors || draftPrompt === prompt);
 
   // Each open first unmounts a landing still fading out from the last close
   // (its unmount releases the surface draft), then seeds the draft, then
@@ -112,12 +144,12 @@ export function TodayConvertDialog({
       // An Esc that ends an IME composition belongs to the input method.
       const event = details?.event;
       if (
-        event instanceof KeyboardEvent &&
+        event && 'key' in event &&
         isImeComposingNativeKeyboardEvent({
-          key: event.key,
-          isComposing: event.isComposing,
-          keyCode: event.keyCode,
-          which: event.which,
+          key: (event as KeyboardEvent).key,
+          isComposing: (event as KeyboardEvent).isComposing,
+          keyCode: (event as KeyboardEvent).keyCode,
+          which: (event as KeyboardEvent).which,
         })
       ) {
         return;
@@ -145,6 +177,27 @@ export function TodayConvertDialog({
           parent={t('today.nav', 'Today')}
           title={t('today.convertTitle', 'Convert to task')}
         />
+        {promptWithAncestors !== null ? (
+          <label {...stylex.props(styles.ancestors)} data-testid="today-convert-ancestors">
+            <Checkbox
+              checked={ancestorsIncluded}
+              disabled={!ancestorsSwitchable || pending}
+              onCheckedChange={(checked) =>
+                store.set(draftAtom, (previous) => ({
+                  ...previous,
+                  prompt: checked ? promptWithAncestors : prompt,
+                  mentionRanges: [],
+                }))
+              }
+            />
+            <span>{t('today.convertIncludeAncestors', 'Include parent nodes')}</span>
+            {ancestorsSwitchable ? null : (
+              <span {...stylex.props(styles.hint)}>
+                {t('today.convertAncestorsEdited', 'Prompt edited')}
+              </span>
+            )}
+          </label>
+        ) : null}
         {landingMounted && workspaceSlug ? (
           <ChatLanding workspaceSlug={workspaceSlug} embedding={embedding} />
         ) : null}

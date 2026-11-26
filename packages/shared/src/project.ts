@@ -57,7 +57,35 @@ export type LocalProjectGitState =
       defaultBranch: string | null;
       branches: string[];
       githubRepoFullName: string | null;
-      workingTree: LocalProjectWorkingTreeState;
+      workingTree?: LocalProjectWorkingTreeState;
+    };
+
+export type LocalProjectGitSummary =
+  | { git: false }
+  | {
+      git: true;
+      currentBranch: string | null;
+      defaultBranch: string | null;
+      githubRepoFullName: string | null;
+    };
+
+export type LocalProjectListBranchesOptions = {
+  query?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export type LocalProjectBranchListResult =
+  | { git: false }
+  | {
+      git: true;
+      currentBranch: string | null;
+      defaultBranch: string | null;
+      pinnedBranches: string[];
+      branches: string[];
+      truncated: boolean;
+      nextCursor?: string;
+      totalCount: number;
     };
 
 export type LocalProjectHistoryProvider = {
@@ -151,6 +179,9 @@ export type LocalProjectMeta = {
   githubRepoFullName?: string;
   /** Explicit standalone membership; false for folder-only imports. Legacy rows default true. */
   standaloneVisible?: boolean;
+  git?: boolean;
+  defaultBranch?: string | null;
+  currentBranch?: string | null;
 };
 
 const DEFAULT_BASE_BRANCH = 'main';
@@ -211,6 +242,44 @@ export function isDirectLocalProject(project: unknown, sessionIsWorktree?: unkno
   return (
     typedProject.kind === 'local' && typedProject.useWorktree !== true && sessionIsWorktree !== true
   );
+}
+
+export type WorktreeSessionMetaInput = {
+  readonly projectRun?: {
+    readonly members?: Readonly<Record<string, { readonly access?: string }>>;
+  };
+  readonly project?: unknown;
+  readonly isWorktree?: unknown;
+  readonly repoFullName?: unknown;
+};
+
+/**
+ * Whether a Session runs in a Session-owned Git worktree (GitHub Session,
+ * local-project worktree Session, or Project group with any worktree member)
+ * rather than directly in a local checkout or plain chat directory.
+ */
+export function isWorktreeSessionMeta(meta: WorktreeSessionMetaInput | null | undefined): boolean {
+  if (!meta) {
+    return false;
+  }
+  if (meta.projectRun?.members) {
+    return Object.values(meta.projectRun.members).some(
+      (member) => member.access !== 'additional' && member.access !== 'link'
+    );
+  }
+  if (meta.project && typeof meta.project === 'object') {
+    const typedProject = meta.project as { kind?: unknown };
+    if (typedProject.kind === 'github') {
+      return true;
+    }
+    if (typedProject.kind === 'local') {
+      return !isDirectLocalProject(typedProject, meta.isWorktree);
+    }
+  }
+  if (meta.isWorktree === true) {
+    return true;
+  }
+  return getTrimmedRepoFullName(meta.repoFullName) !== undefined;
 }
 
 export function resolveBaseBranchPreference(options: {

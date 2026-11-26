@@ -16,7 +16,8 @@ import { platformLayer } from '@/platform/process-options';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Clock, Deferred, Effect, Layer, Fiber } from 'effect';
+import { Arbitrary, Clock, Deferred, Effect, Layer, Fiber, Schema } from 'effect';
+import { it as effectIt } from '@effect/vitest';
 import type {
   AutomationEvent,
   AutomationRuleDraft,
@@ -31,13 +32,16 @@ import {
 import {
   advanceDelivery,
   deliveryStepCurrent,
+  readDeliveryProgress,
+  readPullRequestSnapshot,
   startDeliveryEpoch,
+  DELIVERY_CI_REPORT_GRACE_MS,
   DELIVERY_PR_CREATION_GRACE_MS,
 } from './policies/delivery';
 import { evaluateCapacity } from './runtime/capacity';
 import { Automations, AutomationHost } from './runtime/engine';
 import { evaluateAutomationProgram as evaluateProgram } from './programs/codemode';
-import { observePullRequests } from './sources/pull-requests';
+import { observeNormalizedPullRequest, observePullRequests } from './sources/pull-requests';
 import type { SessionId, SessionMeta } from '@lody/shared';
 
 function required<A>(value: A | undefined): A {
@@ -113,6 +117,21 @@ function fixture() {
   ledger.upsert(draft, 'user', 1);
   return { ledger, open };
 }
+/** Structural access to the ledger's own connection for schema-level assertions. */
+const rawDb = (ledger: AutomationLedger) =>
+  (
+    ledger as unknown as {
+      connection: {
+        raw: {
+          prepare: (sql: string) => {
+            all: (...args: unknown[]) => Array<Record<string, unknown>>;
+            get: (...args: unknown[]) => Record<string, unknown> | undefined;
+            run: (...args: unknown[]) => unknown;
+          };
+        };
+      };
+    }
+  ).connection.raw;
 
 describe('Automation durability', () => {
   it('activates only the current confirmed failure once when recovery is enabled', () => {
@@ -142,14 +161,14 @@ describe('Automation durability', () => {
       data: { workId: work.id, bindingId: work.bindingId },
     });
     configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 101);
-    ledger.activateCurrentCapacityFailure('session', 'user', 'newer', 102);
+    ledger.activateCurrentCapacityFailure('session', 'newer', 102);
     expect(ledger.deliveries()).toHaveLength(0);
-    ledger.activateCurrentCapacityFailure('session', 'user', 'current', 103);
+    ledger.activateCurrentCapacityFailure('session', 'current', 103);
     expect(ledger.deliveries()).toHaveLength(1);
     expect(ledger.deliveries()[0]?.event.data.workId).toBe(work.id);
     ledger.close();
     const reopened = open();
-    reopened.activateCurrentCapacityFailure('session', 'user', 'current', 104);
+    reopened.activateCurrentCapacityFailure('session', 'current', 104);
     expect(reopened.deliveries()).toHaveLength(1);
   });
 
@@ -162,7 +181,6 @@ describe('Automation durability', () => {
           throw new Error('activation failed');
         },
         'session',
-        'user',
         'current',
         100
       )
@@ -203,6 +221,19 @@ describe('Automation durability', () => {
     }
     expect(ledger.sessionEvents('session', -1, 200)).toHaveLength(2);
     expect(ledger.stagedTurns(100)).toEqual([]);
+  });
+
+  it('observes a turn a teammate sent in a Session on this machine', async () => {
+    const { ledger } = fixture();
+    ledger.stageTurn({ ...fact(1), userId: 'teammate' });
+    await reconcileSessionTurnsLegacy(
+      ledger,
+      manager,
+      () => 'normal',
+      () => {},
+      100
+    );
+    expect(ledger.sessionEvents('session', -1, 200)).toMatchObject([{ subject: 'input-1' }]);
   });
 
   it('retries pending release and failed reads across restart without starving the next batch', async () => {
@@ -630,6 +661,108 @@ describe('Capacity evidence', () => {
         150
       ).value
     ).toBe('yes');
+  });
+
+  it('publishes availability only on a recorded outage recovery while every fresh evidence wakes recovery', () => {
+    const { ledger } = fixture();
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 1);
+    const work = {
+      id: 'parked-work',
+      ownerUserId: 'user',
+      updatedAt: 1,
+      sessionId: 'session',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'account',
+      fingerprint: 'config-version',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    };
+    ledger.recordWork(work, {
+      ...event,
+      id: work.id,
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      subject: work.id,
+      data: { workId: work.id, bindingId: work.bindingId },
+    });
+    const delivery = required(ledger.deliveries().find((item) => item.event.id === work.id));
+    const receipt = ledger.accept(delivery, required(internalPolicy(delivery)[0]), 101);
+    ledger.update(receipt.id, 'accepted', { state: 'blocked', retryAt: 900_000 }, 102);
+    const transitions = () =>
+      (
+        rawDb(ledger)
+          .prepare("SELECT COUNT(*) AS n FROM events WHERE type='provider.capacity.available'")
+          .get() as { n: number }
+      ).n;
+    const snapshot = (usedPercent: number, fetchedAt: number): RateLimitsSnapshot => ({
+      fetchedAtEpochSeconds: fetchedAt,
+      rateLimits: [
+        {
+          limitId: 'quota',
+          scope: { providerId: 'provider' },
+          windows: [{ usedPercent, windowDurationSeconds: 18000, resetsAtEpochSeconds: 500 }],
+        },
+      ],
+    });
+    // 'unknown' -> 'yes' wakes the parked receipt on fresh evidence but publishes nothing.
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      snapshot(0, 100),
+      'push',
+      100_000
+    );
+    expect(transitions()).toBe(0);
+    expect(ledger.receipt(receipt.id)).toMatchObject({
+      retryAt: 100_000,
+      capacityWakeRevision: 1,
+    });
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      snapshot(0, 200),
+      'push',
+      200_000
+    );
+    expect(transitions()).toBe(0);
+    // 'no' -> 'yes': the recorded outage recovering publishes exactly once.
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      snapshot(100, 250),
+      'push',
+      250_000
+    );
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      snapshot(0, 300),
+      'push',
+      300_000
+    );
+    expect(transitions()).toBe(1);
+    // A gap past the 5-minute freshness bound reads 'unknown': no second recovery.
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'config-version' },
+      snapshot(0, 610),
+      'push',
+      610_000
+    );
+    expect(transitions()).toBe(1);
+    observeCapacity(
+      ledger,
+      { bindingId: 'account', fingerprint: 'other' },
+      snapshot(0, 615),
+      'push',
+      615_000
+    );
+    expect(transitions()).toBe(1);
   });
 });
 
@@ -1532,7 +1665,9 @@ describe('Scoped observations and admission evidence', () => {
       manager: {
         repo: { getDocMeta: async () => ({ meta }) },
       } as unknown as import('@/lib/loro/doc').LoroDocumentManager,
-      authority: {} as import('@/session/session-automation-authority').SessionAutomationAuthority,
+      authority: {
+        canEdit: async () => 'yes',
+      } as unknown as import('@/session/session-automation-authority').SessionAutomationAuthority,
     };
     expect(
       await readAutomationContext({
@@ -1668,7 +1803,6 @@ describe('Auto delivery', () => {
     advanceDelivery({ ledger, meta: sessionMeta(), options, now: 20 });
     const receipts = deliver(ledger, 20);
     expect(requested(receipts)).toEqual(['delivery:create_pr']);
-    // The request waits for the Session group to be idle before it is sent.
     expect(receipts[0]?.intent.condition).toEqual({
       kind: 'session.group.settled',
       parameters: { rootId: 'session' },
@@ -1687,6 +1821,22 @@ describe('Auto delivery', () => {
     ).toEqual({ state: 'stalled', reason: 'pr_not_created' });
   });
 
+  it('asks for a new pull request instead of adopting one merged by earlier work', () => {
+    const ledger = enabled();
+    const earlier = sessionMeta([{ url: prUrl, status: 'merged' }]);
+    observePullRequests(
+      ledger,
+      earlier,
+      'owner/project',
+      [{ ...pr('a'.repeat(40), 's', 'c'), status: 'merged' as const }],
+      5
+    );
+    const decision = advanceDelivery({ ledger, meta: earlier, options, now: 10 });
+    expect(decision).toMatchObject({ status: { state: 'pr' } });
+    expect(decision.finished).toBeUndefined();
+    expect(requested(deliver(ledger, 10))).toEqual(['delivery:create_pr']);
+  });
+
   it('requests a CI fix per failing head, stops on an unchanged head and after the limit', () => {
     const ledger = enabled();
     let now = 100;
@@ -1696,13 +1846,11 @@ describe('Auto delivery', () => {
       const decision = advanceDelivery({ ledger, meta: linked, options, now: ++now });
       expect(decision.status).toEqual({ state: 'fix', attempt: index + 1, prUrl });
       expect(requested(deliver(ledger, now))).toEqual(['delivery:fix_ci']);
-      // Still outstanding: no second request for the same head.
       expect(advanceDelivery({ ledger, meta: linked, options, now: ++now }).status.state).toBe(
         'fix'
       );
       settleAll(ledger, ++now);
     }
-    // A poll after the third repair still shows its head failing: nothing was pushed.
     observePullRequests(ledger, linked, 'owner/project', [pr(required(heads[2]), 'f', 'u')], ++now);
     expect(advanceDelivery({ ledger, meta: linked, options, now: ++now }).status).toEqual({
       state: 'stalled',
@@ -1723,7 +1871,6 @@ describe('Auto delivery', () => {
     const first = 'a'.repeat(40);
     observePullRequests(ledger, linked, 'owner/project', [pr(first, 'p', null)], 100);
     expect(advanceDelivery({ ledger, meta: linked, options, now: 101 }).status.state).toBe('ci');
-    // Unpushed work means the PR head is not the latest work yet.
     observePullRequests(ledger, linked, 'owner/project', [pr(first, 's', 'c')], 102);
     expect(
       advanceDelivery({
@@ -1731,14 +1878,14 @@ describe('Auto delivery', () => {
         meta: { ...linked, workspaceUnpushed: true },
         options,
         now: 103,
-      }).status.state
-    ).toBe('ci');
+      }).status
+    ).toEqual({ state: 'stalled', reason: 'workspace_unpushed', prUrl });
+    expect(deliver(ledger, 103)).toEqual([]);
     expect(advanceDelivery({ ledger, meta: linked, options, now: 104 }).status.state).toBe('merge');
     const receipts = deliver(ledger, 104);
     expect(requested(receipts)).toEqual(['delivery:merge']);
     const merge = required(receipts[0]);
     expect(deliveryStepCurrent(ledger, 'session', merge.event.id).value).toBe('yes');
-    // The user pushed before the request was admitted: it is now obsolete.
     observePullRequests(ledger, linked, 'owner/project', [pr('b'.repeat(40), 'p', null)], 105);
     expect(deliveryStepCurrent(ledger, 'session', merge.event.id).value).toBe('no');
     settleAll(ledger, 106);
@@ -1751,6 +1898,36 @@ describe('Auto delivery', () => {
     );
     const done = advanceDelivery({ ledger, meta: linked, options, now: 108 });
     expect(done).toMatchObject({ finished: true, status: { state: 'merged' } });
+  });
+
+  it('waits for checks on a head that reports none before treating it as green', () => {
+    const ledger = enabled();
+    const head = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(head, null, 'c')], 100);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 101 }).status.state).toBe('ci');
+    observePullRequests(
+      ledger,
+      linked,
+      'owner/project',
+      [pr(head, null, 'c')],
+      99 + DELIVERY_CI_REPORT_GRACE_MS
+    );
+    expect(
+      advanceDelivery({ ledger, meta: linked, options, now: 100 + DELIVERY_CI_REPORT_GRACE_MS })
+        .status.state
+    ).toBe('ci');
+    expect(deliver(ledger, 100 + DELIVERY_CI_REPORT_GRACE_MS)).toEqual([]);
+    observePullRequests(
+      ledger,
+      linked,
+      'owner/project',
+      [pr(head, null, 'c')],
+      101 + DELIVERY_CI_REPORT_GRACE_MS
+    );
+    expect(
+      advanceDelivery({ ledger, meta: linked, options, now: 102 + DELIVERY_CI_REPORT_GRACE_MS })
+        .status.state
+    ).toBe('merge');
   });
 
   it('leaves merging to the user unless chosen and stops when GitHub blocks the merge', () => {
@@ -1768,6 +1945,446 @@ describe('Auto delivery', () => {
     });
     expect(deliver(ledger, 103)).toEqual([]);
   });
+
+  it('surfaces non-busy blocked receipts as stalled with grace for transient unknowns and resumes once unblocked', () => {
+    const ledger = enabled();
+    const head = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(head, 's', 'c')], 100);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 101 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+    const receipt = required(deliver(ledger, 101)[0]);
+
+    for (const busyReason of ['session_work_active', 'target_input_pending']) {
+      ledger.update(receipt.id, receipt.state, { state: 'blocked', reason: busyReason }, 102);
+      expect(advanceDelivery({ ledger, meta: linked, options, now: 103 }).status).toEqual({
+        state: 'merge',
+        prUrl,
+      });
+    }
+
+    ledger.update(
+      receipt.id,
+      'blocked',
+      { state: 'blocked', reason: 'execution_release_unconfirmed' },
+      1_000
+    );
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 1_000 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 59_999 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_000 }).status).toEqual({
+      state: 'stalled',
+      reason: 'request_blocked',
+      blockReason: 'execution_release_unconfirmed',
+      prUrl,
+    });
+
+    ledger.update(receipt.id, 'blocked', { state: 'blocked', reason: 'target_stopped' }, 61_001);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_001 }).status).toEqual({
+      state: 'stalled',
+      reason: 'stopped',
+      prUrl,
+    });
+
+    ledger.update(receipt.id, 'blocked', { state: 'blocked', reason: 'permission_denied' }, 61_002);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_002 }).status).toEqual({
+      state: 'stalled',
+      reason: 'request_blocked',
+      blockReason: 'permission_denied',
+      prUrl,
+    });
+
+    ledger.update(receipt.id, 'blocked', { state: 'queued', reason: undefined }, 61_003);
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_004 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+
+    ledger.update(
+      receipt.id,
+      'queued',
+      { state: 'blocked', reason: 'execution_release_unconfirmed' },
+      61_005
+    );
+    expect(advanceDelivery({ ledger, meta: linked, options, now: 61_005 }).status).toEqual({
+      state: 'merge',
+      prUrl,
+    });
+  });
+
+  it('wakes only session-busy blocked receipts on idle without disturbing quota, waiting, or denied receipts', () => {
+    const ledger = enabled();
+    const head = 'a'.repeat(40);
+    observePullRequests(ledger, linked, 'owner/project', [pr(head, 's', 'c')], 100);
+    advanceDelivery({ ledger, meta: linked, options, now: 101 });
+    const busyReceipt = required(deliver(ledger, 101)[0]);
+    ledger.update(
+      busyReceipt.id,
+      busyReceipt.state,
+      { state: 'blocked', reason: 'native_work_active', retryAt: 20_000 },
+      102
+    );
+
+    configureSessionPolicies(ledger, 'session', 'user', { recoverCapacity: true }, 102);
+    const makeWork = (id: string) => ({
+      id,
+      ownerUserId: 'user',
+      updatedAt: 102,
+      sessionId: 'session',
+      turnId: 'input',
+      nativeSessionId: 'native',
+      bindingId: 'binding',
+      fingerprint: 'fp',
+      inputRef: 'input',
+      confirmedBoundary: 'assistant',
+      unresolvedEffects: false,
+      release: 'released' as const,
+      state: 'blocked_on_capacity' as const,
+      attempts: 0,
+    });
+    ledger.recordWork(makeWork('quota-sentinel'), {
+      id: 'quota-sentinel',
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      version: 1,
+      subject: 'quota-sentinel',
+      observedAt: 102,
+      scope: { workspaceId: 'workspace', sessionId: 'session' },
+      data: { workId: 'quota-sentinel', bindingId: 'binding' },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    ledger.recordWork(makeWork('quota-reset'), {
+      id: 'quota-reset',
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      version: 1,
+      subject: 'quota-reset',
+      observedAt: 102,
+      scope: { workspaceId: 'workspace', sessionId: 'session' },
+      data: { workId: 'quota-reset', bindingId: 'binding', retryAt: 90_000 },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    ledger.recordWork(makeWork('overload-wait'), {
+      id: 'overload-wait',
+      source: 'session/session',
+      type: 'provider.model.overloaded',
+      version: 1,
+      subject: 'overload-wait',
+      observedAt: 102,
+      scope: { workspaceId: 'workspace', sessionId: 'session' },
+      data: { workId: 'overload-wait', bindingId: 'binding', retryAt: 95_000 },
+      provenance: 'callback',
+      completeness: 'observed',
+      depth: 0,
+    });
+    const delivered = deliver(ledger, 103);
+    const sentinelReceipt = required(delivered.find((r) => r.event.id === 'quota-sentinel'));
+    const resetReceipt = required(delivered.find((r) => r.event.id === 'quota-reset'));
+    const waitingReceipt = required(delivered.find((r) => r.event.id === 'overload-wait'));
+    ledger.update(
+      sentinelReceipt.id,
+      sentinelReceipt.state,
+      { state: 'blocked', reason: 'capacity_unobserved', retryAt: Number.MAX_SAFE_INTEGER },
+      104
+    );
+    ledger.update(
+      resetReceipt.id,
+      resetReceipt.state,
+      { state: 'blocked', reason: 'capacity_exhausted', retryAt: 90_000 },
+      104
+    );
+    ledger.update(
+      waitingReceipt.id,
+      waitingReceipt.state,
+      { state: 'waiting', reason: 'not_before', retryAt: 95_000 },
+      104
+    );
+
+    expect(ledger.wakeSessionBlocked('other-session', 500)).toBe(0);
+    expect(ledger.wakeSessionBlocked('session', 500)).toBe(1);
+    expect(ledger.receipt(busyReceipt.id)).toMatchObject({ retryAt: 500, capacityWakeRevision: 1 });
+    expect(ledger.receipt(sentinelReceipt.id)).toMatchObject({
+      retryAt: Number.MAX_SAFE_INTEGER,
+      updatedAt: 104,
+    });
+    expect(ledger.receipt(resetReceipt.id)).toMatchObject({
+      retryAt: 90_000,
+      updatedAt: 104,
+    });
+    expect(ledger.receipt(waitingReceipt.id)).toMatchObject({
+      state: 'waiting',
+      retryAt: 95_000,
+      updatedAt: 104,
+    });
+    expect(ledger.receipt(sentinelReceipt.id)?.capacityWakeRevision).toBeUndefined();
+    expect(ledger.receipt(resetReceipt.id)?.capacityWakeRevision).toBeUndefined();
+    expect(ledger.receipt(waitingReceipt.id)?.capacityWakeRevision).toBeUndefined();
+  });
+
+  const prUrls = [prUrl, 'https://github.com/owner/project/pull/43'];
+  const pick = <A>(table: readonly A[], index: number) => required(table[index % table.length]);
+  const prStatuses = ['open', 'open', 'open', 'open', 'open', 'draft', 'merged', 'closed'] as const;
+  const ciStates = ['s', 's', 'f', 'f', 'p', 'e', 'x', null] as const;
+  const mergeStates = ['c', 'c', 'd', 'd', 'u', 'b', 'h', null] as const;
+  const afterTurn = {
+    ci: ['f', 'f', 'f', 'f', 's', 's', 'p', null] as const,
+    merge: ['c', 'c', 'c', 'c', 'd', 'd', 'd', null] as const,
+  };
+  const outcomes = [
+    'settled',
+    'settled',
+    'settled',
+    'settled',
+    'failed',
+    'cancelled',
+    'superseded',
+    'stop',
+    'restore',
+  ] as const;
+  const selector = Schema.Literals([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  const settingsSchema = Schema.Struct({
+    fixCi: Schema.Boolean,
+    resolveConflicts: Schema.Boolean,
+    merge: Schema.Boolean,
+  });
+  const kinds = [
+    'turn',
+    'turn',
+    'turn',
+    'observe',
+    'observe',
+    'agent',
+    'link',
+    'workspace',
+    'wait',
+  ] as const;
+  const step = Schema.Struct({
+    kind: selector,
+    a: selector,
+    b: selector,
+    c: selector,
+    d: selector,
+    toggle: Schema.Boolean,
+    settings: settingsSchema,
+  });
+  const terminal = ['settled', 'failed', 'cancelled', 'superseded'];
+
+  effectIt.prop(
+    'keeps its limits and request preconditions under any observation and outcome order',
+    [Arbitrary.schema(settingsSchema), Arbitrary.array(Arbitrary.schema(step), { maxLength: 80 })],
+    ([initial, steps]) => {
+      const ledger = new AutomationLedger({ kind: 'memory' }, 'workspace', 'machine');
+      try {
+        const heads = ['a', 'b', 'c', 'd'].map((c) => c.repeat(40));
+        let head = required(heads[0]);
+        let pushes = 0;
+        const observe = (
+          url: string,
+          sha: string,
+          status: (typeof prStatuses)[number],
+          ciState: (typeof ciStates)[number],
+          mergeState: (typeof mergeStates)[number]
+        ) =>
+          observePullRequests(
+            ledger,
+            meta(),
+            'owner/project',
+            [
+              {
+                ...pr(sha, ciState, mergeState),
+                number: 42 + prUrls.indexOf(url),
+                url,
+                status,
+                updatedAt: new Date(providerClock).toISOString(),
+              },
+            ],
+            now
+          );
+        const links = new Map<string, string>();
+        const workspace = { workspaceDirty: false, workspaceUnpushed: false };
+        const meta = () =>
+          ({
+            ...sessionMeta(
+              [...links].map(([url, status]) => ({ url, status })) as SessionMeta['pullRequests']
+            ),
+            ...workspace,
+          }) as SessionMeta;
+        let now = 1_000;
+        let providerClock = 1_000;
+        let settings: typeof options | undefined = initial;
+        links.set(prUrl, 'open');
+        startDeliveryEpoch(ledger, 'session', now);
+        configureSessionPolicies(ledger, 'session', 'user', { autoDeliver: initial }, now);
+        let epoch: { fix: number; conflict: number; create: number; merges: Set<string> } = {
+          fix: 0,
+          conflict: 0,
+          create: 0,
+          merges: new Set(),
+        };
+        let boundIn: number | undefined;
+        let ended: string | undefined;
+        const receipts = () =>
+          ledger.activities(500).filter((receipt) => receipt.event.source === 'lody/auto-delivery');
+        const outstanding = () => receipts().filter((receipt) => !terminal.includes(receipt.state));
+        const pass = () => {
+          for (const receipt of outstanding())
+            if (settings && deliveryStepCurrent(ledger, 'session', receipt.event.id).value === 'no')
+              ledger.update(receipt.id, receipt.state, { state: 'superseded' }, now);
+          if (!settings) return;
+          const current = meta();
+          const before = readDeliveryProgress(ledger, 'session');
+          const decision = advanceDelivery({ ledger, meta: current, options: settings, now });
+          const progress = required(readDeliveryProgress(ledger, 'session'));
+          if (!before?.prUrl && progress.prUrl) {
+            expect(links.get(progress.prUrl)).toMatch(/^(open|draft)$/);
+            expect(
+              readPullRequestSnapshot(ledger, 'session', progress.prUrl)?.status ?? 'open'
+            ).toMatch(/^(open|draft)$/);
+            boundIn = progress.epoch;
+          }
+          const created = deliver(ledger, now);
+          expect(created.length).toBeLessThanOrEqual(1);
+          for (const receipt of created) {
+            expect(ended).toBeUndefined();
+            const data = receipt.event.data;
+            const pr = progress.prUrl
+              ? readPullRequestSnapshot(ledger, 'session', progress.prUrl)
+              : undefined;
+            if (data.step === 'create_pr') {
+              expect(++epoch.create).toBe(1);
+              continue;
+            }
+            expect(pr).toMatchObject({ status: 'open', headSha: data.headSha });
+            expect(current.workspaceDirty || current.workspaceUnpushed).toBe(false);
+            if (data.step === 'fix_ci') {
+              expect(settings.fixCi && pr?.checks === 'failed').toBe(true);
+              expect(++epoch.fix).toBeLessThanOrEqual(3);
+            } else if (data.step === 'resolve_conflicts') {
+              expect(settings.resolveConflicts && pr?.mergeability === 'conflicts').toBe(true);
+              expect(++epoch.conflict).toBeLessThanOrEqual(3);
+            } else {
+              expect(settings.merge && pr?.mergeability === 'clean').toBe(true);
+              const graced =
+                pr?.checks === 'none' &&
+                progress.unreportedCi?.head === pr.headSha &&
+                pr.observedAt - progress.unreportedCi.since >= DELIVERY_CI_REPORT_GRACE_MS;
+              expect(pr?.checks === 'passed' || graced).toBe(true);
+              expect(epoch.merges.has(String(data.headSha))).toBe(false);
+              epoch.merges.add(String(data.headSha));
+            }
+          }
+          expect(
+            outstanding().filter(
+              (receipt) => deliveryStepCurrent(ledger, 'session', receipt.event.id).value !== 'no'
+            ).length
+          ).toBeLessThanOrEqual(1);
+          const last = progress.lastStep;
+          const lastReceipt = last && ledger.eventReceipts('lody/auto-delivery', last.eventId)[0];
+          if (lastReceipt?.state === 'failed' || lastReceipt?.state === 'cancelled') {
+            ended ??= lastReceipt.state === 'failed' ? 'request_failed' : 'stopped';
+            expect(decision.status).toMatchObject({ state: 'stalled', reason: ended });
+          }
+          if (decision.finished) {
+            expect(boundIn).toBe(progress.epoch);
+            expect(
+              readPullRequestSnapshot(ledger, 'session', required(progress.prUrl))?.status
+            ).toBe('merged');
+            configureSessionPolicies(ledger, 'session', 'user', { autoDeliver: false }, now);
+            settings = undefined;
+            return;
+          }
+          advanceDelivery({ ledger, meta: current, options: settings, now });
+          expect(deliver(ledger, now)).toEqual([]);
+        };
+        for (const item of steps) {
+          now += 1_000;
+          const { a, b, c, d } = item;
+          switch (item.toggle && a === 0 ? 'toggle' : pick(kinds, item.kind)) {
+            case 'observe': {
+              providerClock += d === 0 ? -500 : 1_000;
+              head = pick(heads, b);
+              observe(
+                pick(prUrls, a === 8 ? 1 : 0),
+                head,
+                pick(prStatuses, c),
+                pick(ciStates, d),
+                pick(mergeStates, a + b)
+              );
+              break;
+            }
+            case 'link': {
+              const url = pick(prUrls, a === 8 ? 1 : 0);
+              links.delete(url);
+              links.set(url, pick(prStatuses, b));
+              break;
+            }
+            case 'workspace':
+              workspace.workspaceDirty = a === 0;
+              workspace.workspaceUnpushed = b === 0;
+              break;
+            case 'agent': {
+              const receipt = outstanding().at(-1);
+              if (!receipt) break;
+              const outcome = pick(outcomes, a);
+              const patch =
+                outcome === 'stop'
+                  ? { state: 'blocked' as const, reason: 'target_stopped' }
+                  : outcome === 'restore'
+                    ? { state: 'queued' as const, reason: undefined }
+                    : { state: outcome };
+              ledger.update(receipt.id, receipt.state, patch, now);
+              break;
+            }
+            case 'turn': {
+              const receipt = outstanding().at(-1);
+              if (receipt) ledger.update(receipt.id, receipt.state, { state: 'settled' }, now);
+              now += 1_000;
+              providerClock += 1_000;
+              if (a !== 0) head = `push-${++pushes}`.padEnd(40, '0');
+              observe(prUrl, head, 'open', pick(afterTurn.ci, b), pick(afterTurn.merge, c));
+              break;
+            }
+            case 'wait':
+              now += pick([0, 1, 4, 6, 11], a) * 60_000;
+              break;
+            case 'toggle': {
+              const on = b !== 0;
+              const chosen = item.settings;
+              if (on && !settings) {
+                startDeliveryEpoch(ledger, 'session', now);
+                epoch = { fix: 0, conflict: 0, create: 0, merges: new Set() };
+                boundIn = undefined;
+                ended = undefined;
+              }
+              configureSessionPolicies(
+                ledger,
+                'session',
+                'user',
+                { autoDeliver: on ? chosen : false },
+                now
+              );
+              settings = on ? chosen : undefined;
+              break;
+            }
+          }
+          pass();
+        }
+      } finally {
+        ledger.close();
+      }
+    },
+    { arbitrary: { runs: 200, size: 80 } }
+  );
 
   it('sends the Info Bar request text after its origin line, plus the merged head', () => {
     const values = { repoFullName: 'owner/project', prNumber: 42, prUrl, headSha: 'a'.repeat(40) };
@@ -1787,5 +2404,635 @@ describe('Auto delivery', () => {
     expect(deliveryRequest('merge', values)).toContain(`head commit ${values.headSha}`);
     expect(deliveryRequest('merge', { ...values, headSha: undefined })).toBeUndefined();
     expect(deliveryRequest('create_pr', {})).toContain(en['sessions.prompts.prBranchUpkeep']);
+  });
+
+  it('acts immediately on an already-observed new head after a superseded step', () => {
+    const ledger = enabled({ fixCi: true, resolveConflicts: true, merge: false });
+    try {
+      const opts = { fixCi: true, resolveConflicts: true, merge: false };
+      const head1 = 'a'.repeat(40);
+      const head2 = 'b'.repeat(40);
+      observePullRequests(ledger, linked, 'owner/project', [pr(head1, 'f', 'u')], 100);
+      const first = advanceDelivery({ ledger, meta: linked, options: opts, now: 101 });
+      expect(first.step?.step).toBe('fix_ci');
+      const delivery = required(ledger.deliveries()[0]);
+      const receipt = ledger.accept(delivery, required(internalPolicy(delivery)[0]), 102);
+      ledger.finishDelivery(delivery, undefined, 102);
+      observePullRequests(ledger, linked, 'owner/project', [pr(head2, 'f', 'u')], 110);
+      ledger.update(
+        receipt.id,
+        'accepted',
+        { state: 'superseded', reason: 'guard:delivery_pr_changed' },
+        120
+      );
+      const next = advanceDelivery({ ledger, meta: linked, options: opts, now: 121 });
+      expect(next.step?.step).toBe('fix_ci');
+      expect(next.step?.pr?.headSha).toBe(head2);
+    } finally {
+      ledger.close();
+    }
+  });
+
+  it('delivers multiple PRs across and within repositories sequentially', () => {
+    const firstUrl = 'https://github.com/owner/project/pull/42';
+    const secondUrl = 'https://github.com/owner/project/pull/43';
+    const thirdUrl = 'https://gitlab.com/team/service/-/merge_requests/7';
+    const opts = {
+      fixCi: true,
+      resolveConflicts: true,
+      merge: true,
+      mergeMethod: 'squash' as const,
+    };
+    const ledger = enabled(opts);
+    try {
+      const multiMeta = sessionMeta([
+        { url: firstUrl, status: 'open' },
+        { url: secondUrl, status: 'open' },
+        { url: thirdUrl, status: 'open' },
+      ]);
+      const head1 = 'a'.repeat(40);
+      const head2 = 'b'.repeat(40);
+      const head3 = 'c'.repeat(40);
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: firstUrl,
+        repoFullName: 'owner/project',
+        number: 42,
+        status: 'open',
+        headSha: head1,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 100,
+      });
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: secondUrl,
+        repoFullName: 'owner/project',
+        number: 43,
+        status: 'open',
+        headSha: head2,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 100,
+      });
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'gitlab',
+        url: thirdUrl,
+        repoFullName: 'team/service',
+        number: 7,
+        status: 'open',
+        headSha: head3,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 100,
+      });
+
+      const step1 = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 101 });
+      expect(step1.step?.step).toBe('merge');
+      expect(step1.step?.pr?.url).toBe(firstUrl);
+      expect(step1.status).toMatchObject({
+        state: 'merge',
+        prUrl: firstUrl,
+        prIndex: 1,
+        prTotal: 3,
+      });
+
+      const d1 = required(ledger.deliveries()[0]);
+      const r1 = ledger.accept(d1, required(internalPolicy(d1)[0]), 102);
+      ledger.finishDelivery(d1, undefined, 102);
+      ledger.update(r1.id, 'accepted', { state: 'settled' }, 103);
+
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: firstUrl,
+        repoFullName: 'owner/project',
+        number: 42,
+        status: 'merged',
+        headSha: head1,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 105,
+      });
+
+      const step2 = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 106 });
+      expect(step2.finished).toBeUndefined();
+      expect(step2.step?.step).toBe('merge');
+      expect(step2.step?.pr?.url).toBe(secondUrl);
+      expect(step2.status).toMatchObject({
+        state: 'merge',
+        prUrl: secondUrl,
+        prIndex: 2,
+        prTotal: 3,
+      });
+
+      const d2 = required(ledger.deliveries()[0]);
+      const r2 = ledger.accept(d2, required(internalPolicy(d2)[0]), 107);
+      ledger.finishDelivery(d2, undefined, 107);
+      ledger.update(r2.id, 'accepted', { state: 'settled' }, 108);
+
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'github',
+        url: secondUrl,
+        repoFullName: 'owner/project',
+        number: 43,
+        status: 'merged',
+        headSha: head2,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 110,
+      });
+
+      const step3 = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 111 });
+      expect(step3.step?.step).toBe('merge');
+      expect(step3.step?.pr?.url).toBe(thirdUrl);
+      expect(step3.status).toMatchObject({
+        state: 'merge',
+        prUrl: thirdUrl,
+        prIndex: 3,
+        prTotal: 3,
+      });
+      const gitlabPrompt = deliveryRequest('merge', {
+        provider: 'gitlab',
+        repoFullName: 'team/service',
+        prNumber: 7,
+        prUrl: thirdUrl,
+        headSha: head3,
+        mergeMethod: 'squash',
+      });
+      expect(gitlabPrompt).toContain('merge request #7');
+      expect(gitlabPrompt).toContain('using squash merge');
+      expect(gitlabPrompt).not.toContain('`gh`');
+
+      const d3 = required(ledger.deliveries()[0]);
+      const r3 = ledger.accept(d3, required(internalPolicy(d3)[0]), 112);
+      ledger.finishDelivery(d3, undefined, 112);
+      ledger.update(r3.id, 'accepted', { state: 'settled' }, 113);
+
+      observeNormalizedPullRequest(ledger, multiMeta, {
+        provider: 'gitlab',
+        url: thirdUrl,
+        repoFullName: 'team/service',
+        number: 7,
+        status: 'merged',
+        headSha: head3,
+        checks: 'passed',
+        mergeability: 'clean',
+        observedAt: 115,
+      });
+
+      const done = advanceDelivery({ ledger, meta: multiMeta, options: opts, now: 116 });
+      expect(done.finished).toBe(true);
+      expect(done.status.state).toBe('merged');
+    } finally {
+      ledger.close();
+    }
+  });
+});
+
+describe('Ledger query columns', () => {
+  const receiptPayload = (overrides: Record<string, unknown> = {}) => ({
+    id: 'receipt-1',
+    deliveryId: 'delivery-1',
+    sessionId: 's1',
+    turnId: 'turn-1',
+    state: 'blocked',
+    retryAt: 7,
+    attempts: 0,
+    intent: {
+      key: 'invoke',
+      action: {
+        kind: 'agent.invoke',
+        parameters: {
+          target: { kind: 'existing', sessionId: 's1' },
+          input: { kind: 'external_event', ref: 'e1' },
+          ifBusy: 'enqueue',
+        },
+      },
+    },
+    rule: {
+      id: 'rule-1',
+      ownerUserId: 'user',
+      ownerMachineId: 'machine',
+      scope: { workspaceId: 'workspace', sessionId: 's1' },
+      handler: { kind: 'policy', policy: 'recover-capacity', options: {} },
+      revision: 1,
+    },
+    event: {
+      id: 'e1',
+      source: 'session/session',
+      type: 'provider.quota.exhausted',
+      correlationId: 'corr-1',
+      data: { workId: 'work-1' },
+    },
+    ...overrides,
+  });
+  const deliveryPayload = {
+    id: 'delivery-1',
+    state: 'accepted',
+    updatedAt: 9,
+    rule: {
+      id: 'rule-1',
+      ownerUserId: 'user',
+      ownerMachineId: 'machine',
+      scope: { workspaceId: 'workspace', sessionId: 's1' },
+      revision: 1,
+    },
+    event: { source: 'session/session', id: 'e1', data: { workId: 'work-1' } },
+  };
+  const waitPayload = {
+    id: 'wait-1',
+    sessionId: 's1',
+    workspaceId: 'workspace',
+    ownerUserId: 'user',
+    ownerMachineId: 'machine',
+    intervalMs: 30_000,
+    state: 'waiting',
+    createdAt: 5,
+    updatedAt: 5,
+    nextCheckAt: 5,
+    checks: 0,
+    consecutiveErrors: 0,
+    reads: ['resource-1'],
+  };
+  const workPayload = {
+    id: 'work-1',
+    ownerUserId: 'user',
+    updatedAt: 6,
+    sessionId: 's1',
+    turnId: 'turn-1',
+    nativeSessionId: 'native',
+    bindingId: 'account',
+    fingerprint: 'config',
+    inputRef: 'input',
+    confirmedBoundary: 'assistant',
+    unresolvedEffects: false,
+    release: 'released',
+    state: 'queued',
+    attempts: 0,
+    invocationId: 'other-invocation',
+  };
+  const stagedFact = (index: number): SessionAutomationObservation => ({
+    sessionId: 's1' as SessionId,
+    turnId: `input-${index}`,
+    assistantTurnId: `assistant-${index}`,
+    userId: 'user',
+    inputConfig: {},
+    outcome: 'completed',
+    released: false,
+    finalized: true,
+    observedAt: index,
+  });
+  it('lifts predicates into columns when upgrading a v2 ledger', () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lody-automations-v2-'));
+    roots.push(root);
+    const filename = path.join(root, 'automations.sqlite');
+    const database = new OrchestrationConnection({ kind: 'disk', path: filename });
+    database.raw.exec(`
+      CREATE TABLE rules (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL
+      );
+      CREATE TABLE sources (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE deliveries (id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL);
+      CREATE INDEX delivery_state ON deliveries(state);
+      CREATE TABLE receipts (
+        id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, state TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, payload TEXT NOT NULL
+      );
+      CREATE INDEX receipt_state ON receipts(state, updated_at);
+      CREATE INDEX receipt_delivery ON receipts(delivery_id);
+      CREATE TABLE capacity (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE work (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+      CREATE TABLE waits (
+        id TEXT PRIMARY KEY, state TEXT NOT NULL, next_check_at INTEGER NOT NULL,
+        payload TEXT NOT NULL
+      );
+      CREATE INDEX waits_due ON waits(state,next_check_at);
+      CREATE TABLE turn_observations (
+        id TEXT PRIMARY KEY, payload TEXT NOT NULL, retry_at INTEGER NOT NULL DEFAULT 0
+      );
+      PRAGMA user_version = 2;
+    `);
+    database.raw.prepare('INSERT INTO events (event_key,payload) VALUES (?,?)').run(
+      'key-1',
+      JSON.stringify({
+        ...event,
+        id: 'ev-1',
+        scope: { workspaceId: 'workspace', sessionId: 's1' },
+      })
+    );
+    database.raw
+      .prepare('INSERT INTO waits VALUES (?,?,?,?)')
+      .run('wait-1', 'waiting', 5, JSON.stringify(waitPayload));
+    database.raw
+      .prepare('INSERT INTO receipts VALUES (?,?,?,?,?)')
+      .run('receipt-1', 'delivery-1', 'blocked', 5, JSON.stringify(receiptPayload()));
+    database.raw
+      .prepare('INSERT INTO deliveries VALUES (?,?,?)')
+      .run('delivery-1', 'accepted', JSON.stringify(deliveryPayload));
+    database.raw
+      .prepare('INSERT INTO work VALUES (?,?)')
+      .run('work-1', JSON.stringify(workPayload));
+    database.raw
+      .prepare('INSERT INTO turn_observations VALUES (?,?,?)')
+      .run('turn-1', JSON.stringify({ ...stagedFact(1), observedAt: 8 }), 0);
+    database.close();
+    const ledger = new AutomationLedger({ kind: 'disk', path: filename }, 'workspace', 'machine');
+    stores.push(ledger);
+    expect(ledger.sessionEvents('s1', 0, 10).map((observed) => observed.id)).toEqual(['ev-1']);
+    expect(ledger.dueWaits(10).map((item) => item.id)).toEqual(['wait-1']);
+    expect(ledger.pending(10).map((item) => item.id)).toEqual(['receipt-1']);
+    expect(ledger.hasSessionWork('s1')).toBe(true);
+    expect(ledger.wantsRead('resource-1', 's1')).toBe(true);
+    expect(ledger.deliveries().map((item) => item.id)).toEqual(['delivery-1']);
+    expect(ledger.sessionWork('s1', 'user').map((item) => item.id)).toEqual(['work-1']);
+    expect(ledger.nextDueAt(0)).toBe(0);
+    expect(ledger.activityPage('user', undefined, 50).items).toHaveLength(4);
+    expect(
+      (rawDb(ledger).prepare('SELECT COUNT(*) AS n FROM wait_reads').get() as { n: number }).n
+    ).toBe(1);
+  });
+
+  it('keeps query columns equal to their frozen payload values', () => {
+    const { ledger } = fixture();
+    ledger.publish(event);
+    const delivery = required(ledger.deliveries()[0]);
+    const receipt = ledger.accept(delivery, intent, 100);
+    ledger.update(receipt.id, 'accepted', { retryAt: 1_000 }, 101);
+    const wait = ledger.registerWait(
+      { program: 'async () => false', intervalMs: 1_000 },
+      'session',
+      'user',
+      200
+    );
+    ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 201);
+    ledger.recordRead(wait.id, 'resource-1', [{ sourceId: 'source', revision: 'r1' }], 202);
+    ledger.stageTurn({ ...stagedFact(2), sessionId: 'session' });
+    ledger.putWork({ ...workPayload, id: 'work-2', sessionId: 'session' });
+    const mismatches = (sql: string) =>
+      (rawDb(ledger).prepare(`SELECT COUNT(*) AS n ${sql}`).get() as { n: number }).n;
+    expect(
+      mismatches(`FROM events
+        WHERE type IS NOT json_extract(payload,'$.type')
+        OR source IS NOT json_extract(payload,'$.source')
+        OR session_id IS NOT json_extract(payload,'$.scope.sessionId')
+        OR project_id IS NOT json_extract(payload,'$.scope.projectId')
+        OR work_id IS NOT json_extract(payload,'$.data.workId')
+        OR observed_at IS NOT json_extract(payload,'$.observedAt')`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM receipts
+        WHERE session_id IS NOT json_extract(payload,'$.sessionId')
+        OR scope_session_id IS NOT COALESCE(json_extract(payload,'$.rule.scope.sessionId'),json_extract(payload,'$.sessionId'))
+        OR owner_user_id IS NOT json_extract(payload,'$.rule.ownerUserId')
+        OR rule_id IS NOT json_extract(payload,'$.rule.id')
+        OR action_kind IS NOT json_extract(payload,'$.intent.action.kind')
+        OR event_type IS NOT json_extract(payload,'$.event.type')
+        OR event_source IS NOT json_extract(payload,'$.event.source')
+        OR event_id IS NOT json_extract(payload,'$.event.id')
+        OR correlation_key IS NOT COALESCE(json_extract(payload,'$.event.correlationId'),json_extract(payload,'$.deliveryId'))
+        OR retry_at IS NOT COALESCE(json_extract(payload,'$.retryAt'),0)`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM waits
+        WHERE session_id IS NOT json_extract(payload,'$.sessionId')
+        OR owner_user_id IS NOT json_extract(payload,'$.ownerUserId')
+        OR invocation_id IS NOT json_extract(payload,'$.invocationId')
+        OR created_at IS NOT json_extract(payload,'$.createdAt')
+        OR due_at IS NOT MIN(next_check_at, COALESCE(json_extract(payload,'$.expiresAt'),9007199254740991))
+        OR run_pending IS NOT (json_extract(payload,'$.run.startedAt') IS NOT NULL AND json_extract(payload,'$.run.exit') IS NULL)`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM work
+        WHERE session_id IS NOT json_extract(payload,'$.sessionId')
+        OR owner_user_id IS NOT json_extract(payload,'$.ownerUserId')
+        OR state IS NOT json_extract(payload,'$.state')
+        OR turn_id IS NOT json_extract(payload,'$.turnId')
+        OR invocation_id IS NOT json_extract(payload,'$.invocationId')
+        OR updated_at IS NOT json_extract(payload,'$.updatedAt')`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM deliveries
+        WHERE rule_id IS NOT json_extract(payload,'$.rule.id')
+        OR owner_user_id IS NOT json_extract(payload,'$.rule.ownerUserId')
+        OR scope_session_id IS NOT json_extract(payload,'$.rule.scope.sessionId')
+        OR event_source IS NOT json_extract(payload,'$.event.source')
+        OR event_id IS NOT json_extract(payload,'$.event.id')
+        OR event_work_id IS NOT json_extract(payload,'$.event.data.workId')
+        OR updated_at IS NOT json_extract(payload,'$.updatedAt')`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM turn_observations
+        WHERE user_id IS NOT json_extract(payload,'$.userId')
+        OR session_id IS NOT json_extract(payload,'$.sessionId')
+        OR observed_at IS NOT json_extract(payload,'$.observedAt')`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM wait_reads wr
+        WHERE NOT EXISTS (
+          SELECT 1 FROM waits w, json_each(w.payload,'$.reads') je
+          WHERE w.id=wr.wait_id AND je.value=wr.resource)`)
+    ).toBe(0);
+    expect(
+      mismatches(`FROM waits w, json_each(w.payload,'$.reads') je
+        WHERE NOT EXISTS (
+          SELECT 1 FROM wait_reads wr WHERE wr.wait_id=w.id AND wr.resource=je.value)`)
+    ).toBe(0);
+  });
+
+  it('resolves every ledger query through an index, never an unindexed scan', () => {
+    const { ledger } = fixture();
+    const raw = rawDb(ledger);
+    const original = raw.prepare;
+    const captured: Array<{ sql: string; args: unknown[] }> = [];
+    const wrap =
+      (run: (...args: unknown[]) => unknown, sql: string) =>
+      (...args: unknown[]) => {
+        if (/^\s*select/i.test(sql)) captured.push({ sql, args });
+        return run(...args);
+      };
+    raw.prepare = (sql: string) => {
+      const statement = original.call(raw, sql);
+      return {
+        all: wrap(statement.all.bind(statement), sql),
+        get: wrap(statement.get.bind(statement), sql),
+        run: wrap(statement.run.bind(statement), sql),
+      };
+    };
+    try {
+      ledger.publish(event);
+      const delivery = required(ledger.deliveries()[0]);
+      const receipt = ledger.accept(delivery, intent, 100);
+      ledger.update(receipt.id, 'accepted', { retryAt: 1_000 }, 101);
+      ledger.finishDelivery(delivery);
+      const wait = ledger.registerWait(
+        { program: 'async () => false', intervalMs: 1_000 },
+        'session',
+        'user',
+        200
+      );
+      ledger.updateWait(wait.id, 'waiting', { state: 'checking' }, 201);
+      ledger.recordRead(wait.id, 'resource-1', [{ sourceId: 's', revision: 'r' }], 202);
+      ledger.stageTurn({ ...stagedFact(3), sessionId: 'session' });
+      ledger.putWork({ ...workPayload, id: 'work-2', sessionId: 'session' });
+      ledger.recordCapacity(
+        {
+          bindingId: 'account',
+          fingerprint: 'config',
+          observedAt: 90,
+          validUntil: 400,
+          source: 'query',
+          authentication: 'valid',
+          billing: 'valid',
+          windows: [{ id: 'quota', usedPercent: 0 }],
+        },
+        300
+      );
+      ledger.dueWaits(300);
+      ledger.pending(300);
+      ledger.sessionEvents('session', 0, 10);
+      ledger.hasSessionWork('session');
+      ledger.wantsRead('resource-1', 'session');
+      ledger.wantsReadSessions('resource-1');
+      ledger.invalidateReads('resource-1', 'session', 300);
+      ledger.activityPage('user', 'session', 50);
+      ledger.sessionWork('session', 'user');
+      ledger.supersedeWork('session', 'other-turn', 'invocation', 300);
+      ledger.eventReceipts('session/session', 'e1');
+      ledger.hasEventDelivery('session/session', 'e1');
+      ledger.nextDueAt(300);
+      ledger.stagedTurns(300);
+      ledger.orphanStartedRuns(300);
+      ledger.rules();
+      ledger.checkpoint('source');
+      ledger.deliveries();
+      ledger.activateCurrentCapacityFailure('session', 'user', 'turn-1', 300);
+      ledger.wait(wait.id);
+      ledger.receipt(receipt.id);
+      ledger.work('work-2');
+      ledger.delivery(delivery.id);
+      ledger.rule(delivery.rule.id);
+      ledger.capacity('account');
+    } finally {
+      raw.prepare = original;
+    }
+    expect(captured.length).toBeGreaterThan(0);
+    for (const { sql, args } of captured) {
+      const plan = original.call(raw, `EXPLAIN QUERY PLAN ${sql}`).all(...args) as Array<{
+        detail: string;
+      }>;
+      for (const step of plan)
+        // No SCAN on hot tables — covering-index sweeps count; tiny list tables may SCAN.
+        expect(step.detail, sql).not.toMatch(
+          /^SCAN (receipts|waits|wait_reads|work|turn_observations|events)\b/
+        );
+    }
+  });
+});
+
+describe('Engine scheduling', () => {
+  const stagedFact = (index: number): SessionAutomationObservation => ({
+    sessionId: 'session' as SessionId,
+    turnId: `input-${index}`,
+    assistantTurnId: `assistant-${index}`,
+    userId: 'user',
+    inputConfig: {},
+    outcome: 'completed',
+    released: false,
+    finalized: true,
+    observedAt: index,
+  });
+
+  it('reports the earliest durable deadline across waits, receipts, staged turns and deliveries', () => {
+    const { ledger } = fixture();
+    expect(ledger.nextDueAt(500)).toBeUndefined();
+    ledger.publish(event);
+    expect(ledger.nextDueAt(500)).toBe(500);
+    const delivery = required(ledger.deliveries()[0]);
+    const receipt = ledger.accept(delivery, intent, 100);
+    ledger.finishDelivery(delivery, undefined, 101);
+    expect(ledger.nextDueAt(500)).toBe(0);
+    ledger.update(receipt.id, 'accepted', { retryAt: 30_000 }, 102);
+    expect(ledger.nextDueAt(0)).toBe(30_000);
+    const wait = ledger.registerWait(
+      { program: 'async () => false', intervalMs: 60_000 },
+      'session',
+      'user',
+      200
+    );
+    expect(ledger.nextDueAt(0)).toBe(200);
+    ledger.updateWait(wait.id, 'waiting', { nextCheckAt: 40_000 }, 210);
+    expect(ledger.nextDueAt(0)).toBe(30_000);
+    ledger.stageTurn(stagedFact(9));
+    expect(ledger.nextDueAt(0)).toBe(0);
+  });
+
+  it('runs passes at the earliest deadline and on wake signals, without spinning', async () => {
+    // Fibers need real scheduling; only the clock surfaces are faked.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    vi.setSystemTime(1_000_000);
+    const { ledger } = fixture();
+    ledger.publish(event);
+    const delivery = required(ledger.deliveries()[0]);
+    const receipt = ledger.accept(delivery, intent, 100);
+    ledger.finishDelivery(delivery);
+    let authorizeCalls = 0;
+    const attempts = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    let arm: (() => void) | undefined;
+    const nextPass = () => new Promise<void>((resolve) => void (arm = resolve));
+    const host = Layer.succeed(AutomationHost, {
+      authorize: () =>
+        Effect.sync(() => {
+          attempts[authorizeCalls]?.resolve();
+          authorizeCalls += 1;
+          return {
+            value: 'no' as const,
+            reason: 'hold',
+            retryAt: authorizeCalls === 1 ? 1_060_000 : 1_120_000,
+          };
+        }),
+      condition: () => Effect.succeed({ value: 'yes' as const, reason: 'current' }),
+      prepare: () => Effect.succeed({ state: 'resolved' as const, prepared: {} }),
+      submit: () => Effect.succeed({ state: 'settled' as const }),
+      reconcile: () => Effect.succeed({ state: 'settled' as const }),
+      cancel: () => Effect.succeed({ state: 'cancelled' as const }),
+      observe: Effect.sync(() => {
+        arm?.();
+      }),
+      report: () => Effect.void,
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* Automations;
+          yield* Effect.promise(() => attempts[0].promise);
+          expect(ledger.receipt(receipt.id)).toMatchObject({
+            state: 'blocked',
+            retryAt: 1_060_000,
+          });
+          // A parked receipt is not re-authorized before its durable deadline.
+          const maintenance = nextPass();
+          yield* Effect.promise(() => vi.advanceTimersByTimeAsync(15_000));
+          yield* Effect.promise(() => maintenance);
+          expect(authorizeCalls).toBe(1);
+          const queued = nextPass();
+          yield* Effect.promise(() => vi.advanceTimersByTimeAsync(15_000));
+          yield* Effect.promise(() => queued);
+          expect(authorizeCalls).toBe(1);
+          yield* Effect.promise(() => vi.advanceTimersByTimeAsync(30_000));
+          yield* Effect.promise(() => attempts[1].promise);
+          expect(authorizeCalls).toBe(2);
+          const signal = nextPass();
+          yield* runtime.wake;
+          yield* Effect.promise(() => signal);
+        }).pipe(
+          Effect.provide(Automations.layer(ledger).pipe(Layer.provide(host))),
+          // Runs on the fake clock; must outlast this test's total fake advance.
+          Effect.timeout('120 seconds')
+        )
+      )
+    );
+    vi.useRealTimers();
   });
 });

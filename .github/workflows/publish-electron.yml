@@ -61,7 +61,7 @@ jobs:
         ${{
           fromJSON(
             github.ref_name == 'release' &&
-            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64"}]}' ||
+            '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:release"},{"os":"windows-2022","target":"win","build_script":"build:win:release"},{"os":"ubuntu-latest","target":"linux","build_script":"build:linux:release"},{"os":"ubuntu-24.04-arm","target":"linux-arm64","build_script":"build:linux:arm64:release"}]}' ||
             '{"include":[{"os":"macos-15","target":"mac","build_script":"build:mac:staging"}]}'
           )
         }}
@@ -100,7 +100,7 @@ jobs:
           'next'
         }}
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      NODE_OPTIONS: ${{ matrix.target == 'mac' && '--max-old-space-size=4096' || '--max-old-space-size=6144' }}
+      NODE_OPTIONS: --max-old-space-size=6144
       npm_config_msvs_version: ${{ matrix.target == 'win' && '2022' || '' }}
       LODY_PLATFORM: cloud
       VITE_LODY_PLATFORM: cloud
@@ -215,6 +215,14 @@ jobs:
           SPARKLE_ED_PUBLIC_KEY: ${{ secrets.SPARKLE_ED_PUBLIC_KEY }}
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: node apps/electron/sparkle-signing.mjs key-pair
+      - name: Prepare macOS Passkey credentials and native addons
+        if: matrix.target == 'mac' && github.ref_name == 'release'
+        env:
+          MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PASSKEY_PROVISIONING_PROFILE_BASE64 }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: bash .github/scripts/prepare-macos-passkey.sh
       - name: Build Electron package (${{ matrix.target }})
         env:
           CSC_NAME: ${{ matrix.target == 'mac' && secrets.MACOS_CERTIFICATE_NAME || '' }}
@@ -232,6 +240,10 @@ jobs:
           else
             corepack pnpm --dir apps/electron run "$BUILD_SCRIPT"
           fi
+      - name: Verify signed macOS Passkey archives (production)
+        if: matrix.target == 'mac' && github.ref_name == 'release'
+        shell: bash
+        run: bash .github/scripts/verify-macos-passkey-archive.sh
       - name: Generate signed Sparkle appcast and deltas (staging)
         if: matrix.target == 'mac' && github.ref_name != 'release'
         uses: ./.github/actions/generate-sparkle-appcast
@@ -340,7 +352,11 @@ jobs:
           APPLE_API_KEY_ID: ${{ matrix.target == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
         if: always() && matrix.target == 'mac'
         shell: bash
-        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8"
+        run: |
+          rm -f \
+            "${RUNNER_TEMP}/AuthKey_${APPLE_API_KEY_ID}.p8" \
+            "${RUNNER_TEMP}/macos-passkey.provisionprofile" \
+            "${RUNNER_TEMP}/macos-passkey.provisionprofile.plist"
     needs:
       - validate-target
   upload-electron-to-r2:

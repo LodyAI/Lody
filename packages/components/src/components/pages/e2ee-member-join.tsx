@@ -1,7 +1,12 @@
+import {
+  isLocalStorageFailure,
+  isRequestUnavailable,
+  requestFailureCode,
+} from '@/lib/e2ee-actionable-failure';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
-import { useCloudQuery, usePlatform } from '@lody/platform/react';
+import { useCloudQueryState, usePlatform } from '@lody/platform/react';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
@@ -95,6 +100,8 @@ type Props = {
   emailVerified?: boolean;
   loading?: boolean;
   preview?: E2eeMemberReplies['preview'];
+  previewError?: unknown;
+  onRetryPreview?: () => void;
   onSignInRequested: () => void;
   onEmailVerificationRequested: () => void;
   onWorkspaceRequested: (workspaceSlug: string | null, workspaceId?: string) => void;
@@ -117,18 +124,36 @@ export function E2eeMemberJoinSurface(
 ) {
   const platform = usePlatform();
   const session = useStableSession();
-  const preview = useCloudQuery(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
+  const {
+    data: preview,
+    error: previewError,
+    retry: retryPreview,
+  } = useCloudQueryState(cloudOperations.e2eeMembers.preview, { token: props.offer.token });
+  const sessionLoading = session.isPending || session.isRetrying || session.isOptimistic;
   return (
     <E2eeMemberJoin
       {...props}
       runtime={platform.e2eeWorkspaces?.runtime}
       accountId={session.data?.user.id ?? null}
       email={session.data?.user.email}
-      emailVerified={session.data?.user.emailVerified}
-      loading={session.isPending}
+      emailVerified={session.isOptimistic ? undefined : session.data?.user.emailVerified}
+      loading={sessionLoading}
       preview={preview}
+      previewError={previewError}
+      onRetryPreview={retryPreview}
     />
   );
+}
+function memberJoinFailureKey(cause: unknown) {
+  if (isLocalStorageFailure(cause)) return 'e2ee.team.error.storage';
+  if (
+    /^(?:e2ee_)?(?:invite|invitation|member_invitation|member_join)_(?:expired|invalid|not_found|unavailable|rejected)$/.test(
+      requestFailureCode(cause) ?? ''
+    )
+  )
+    return 'e2ee.team.unavailable';
+  if (isRequestUnavailable(cause)) return 'e2ee.team.error.network';
+  return 'e2ee.team.retryOriginal';
 }
 export function E2eeMemberJoin(props: Props) {
   return <JoinSession key={`${props.accountId}:${props.offer.token}`} {...props} />;
@@ -140,6 +165,8 @@ function JoinSession({
   email,
   emailVerified,
   preview,
+  previewError,
+  onRetryPreview,
   loading,
   onSignInRequested,
   onEmailVerificationRequested,
@@ -154,7 +181,8 @@ function JoinSession({
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [recovering, setRecovering] = useState(Boolean(accountId && runtime?.pendingMemberJoin));
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<ReturnType<typeof memberJoinFailureKey> | null>(null);
+  const [checkingKey, setCheckingKey] = useState(false);
   const [retry, setRetry] = useState(0);
   // The fast claim window ended while committed: say why the member is still waiting.
   const [slowWait, setSlowWait] = useState(false);
@@ -190,8 +218,8 @@ function JoinSession({
           }
         }
       })
-      .catch(() => {
-        if (!disposed) setError(true);
+      .catch((cause: unknown) => {
+        if (!disposed) setError(memberJoinFailureKey(cause));
       })
       .finally(() => {
         if (!disposed) setRecovering(false);
@@ -213,6 +241,7 @@ function JoinSession({
     setSlowWait(false);
     const claim = async () => {
       delay = CLAIM_INTERVAL_MS;
+      setCheckingKey(true);
       try {
         const result = await runtime.claimMemberJoin!(offer.workspaceId, requestId);
         if (disposed) return;
@@ -221,15 +250,17 @@ function JoinSession({
         );
         setReady(result.ready);
         setUnconfirmed(false);
-        setError(false);
+        setError(null);
         if (result.ready || ['rejected', 'cancelled'].includes(result.state)) return;
         if (result.state === 'committed') {
           committedSince ??= Date.now();
           if (Date.now() - committedSince < KEY_WAIT_FAST_MS) delay = KEY_WAIT_INTERVAL_MS;
           else setSlowWait(true);
         }
-      } catch {
-        if (!disposed) setError(true);
+      } catch (cause) {
+        if (!disposed) setError(memberJoinFailureKey(cause));
+      } finally {
+        if (!disposed) setCheckingKey(false);
       }
       if (!disposed) timer = setTimeout(() => void claim(), delay);
     };
@@ -249,12 +280,12 @@ function JoinSession({
     if (working.current || !runtime?.prepareMemberJoin) return;
     working.current = true;
     setBusy(true);
-    setError(false);
+    setError(null);
     try {
       const result = await runtime.prepareMemberJoin(offer);
       if (current()) setRequest({ requestId: result.requestId, state: result.state });
-    } catch {
-      if (current()) setError(true);
+    } catch (cause) {
+      if (current()) setError(memberJoinFailureKey(cause));
       try {
         const pending = await runtime.pendingMemberJoin?.(offer.workspaceId);
         if (current() && pending?.requestId && sameMemberOffer(pending.offer, offer))
@@ -272,17 +303,22 @@ function JoinSession({
   const native = Boolean(
     runtime?.prepareMemberJoin && runtime.pendingMemberJoin && runtime.claimMemberJoin
   );
-  const terminal = request && ['rejected', 'cancelled'].includes(request.state);
+  const terminal = requestTerminal;
+  const previewFailed = Boolean(previewError) && preview === undefined && !request;
+  const previewFailure = previewFailed ? memberJoinFailureKey(previewError) : null;
   let message = 'e2ee.team.joinHelp';
-  if (loading || recovering || preview === undefined) message = 'e2ee.team.loading';
+  if (loading || recovering || (preview === undefined && !previewFailed && !request))
+    message = 'e2ee.team.loading';
+  else if (previewFailure)
+    message =
+      previewFailure === 'e2ee.team.error.network' ? 'invite.error.network' : previewFailure;
   else if (!accountId) message = 'e2ee.team.signInHelp';
   else if (!emailVerified) message = 'e2ee.team.verifyHelp';
   else if (!native) message = runtime ? 'e2ee.team.joinUpgrade' : 'e2ee.team.desktopRequired';
   else if (ready) message = 'e2ee.team.ready';
   else if (terminal) message = 'e2ee.team.rejected';
   else if (request?.state === 'committed') message = 'e2ee.team.waitingKey';
-  else if (request)
-    message = offer.mode === 'email' ? 'e2ee.team.waitingAdminDevice' : 'e2ee.team.waitingApproval';
+  else if (request) message = 'e2ee.team.waitingApproval';
   else if (!pinMatches) message = 'e2ee.team.unavailable';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
   return (
@@ -295,35 +331,61 @@ function JoinSession({
                 ? t('e2ee.team.joinTitle', { workspace: available.workspaceName })
                 : t('e2ee.team.join')}
             </Card.Title>
-            <Card.Description>{t(message)}</Card.Description>
-            {message === 'e2ee.team.waitingKey' && (
-              <Card.Description>{t('e2ee.team.waitingKeyAdminOnline')}</Card.Description>
+            {message !== 'e2ee.team.waitingKey' && (
+              <Card.Description>{t(message)}</Card.Description>
             )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
-            {accountId && emailVerified && native && (pinMatches || request) && !terminal && (
-              <JoinProgress
-                current={ready ? 4 : request?.state === 'committed' ? 2 : request ? 1 : 0}
-              />
-            )}
+            {!loading &&
+              accountId &&
+              emailVerified &&
+              native &&
+              (pinMatches || request) &&
+              !terminal && (
+                <JoinProgress
+                  current={ready ? 4 : request?.state === 'committed' ? 2 : request ? 1 : 0}
+                />
+              )}
             {email && <p>{email}</p>}
-            {error && <p role="status">{t('e2ee.team.retryOriginal')}</p>}
-            {slowWait && !ready && message === 'e2ee.team.waitingKey' && (
-              <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
+            {message === 'e2ee.team.waitingKey' ? (
+              <Card.Root>
+                <Card.Header>
+                  <Card.Title as="h2">{t(message)}</Card.Title>
+                  <Card.Description>{t('e2ee.team.waitingKeyGuide')}</Card.Description>
+                </Card.Header>
+                <div {...stylex.props(styles.stack)}>
+                  {error ? (
+                    <p role="status">{t(error)}</p>
+                  ) : (
+                    slowWait && <p role="status">{t('e2ee.team.waitingKeySlow')}</p>
+                  )}
+                  <div {...stylex.props(styles.actions)}>
+                    <Button disabled={checkingKey} onClick={() => setRetry((value) => value + 1)}>
+                      {t('e2ee.team.checkKeyAgain')}
+                    </Button>
+                  </div>
+                </div>
+              </Card.Root>
+            ) : (
+              error && <p role="status">{t(error)}</p>
             )}
             <div {...stylex.props(styles.actions)}>
-              {!accountId && !loading && (
+              {previewFailed && previewFailure !== 'e2ee.team.unavailable' && onRetryPreview && (
+                <Button onClick={onRetryPreview}>{t('e2ee.team.retry')}</Button>
+              )}
+              {!accountId && !loading && !previewError && (
                 <Button onClick={onSignInRequested}>{t('e2ee.team.signIn')}</Button>
               )}
-              {accountId && !emailVerified && (
+              {!loading && accountId && !emailVerified && (
                 <Button onClick={onEmailVerificationRequested}>{t('e2ee.team.verify')}</Button>
               )}
-              {accountId && emailVerified && !native && !runtime && (
+              {!loading && accountId && emailVerified && !native && !runtime && (
                 <Button onClick={() => attemptDesktopInviteHandoff(desktopMemberJoinLink(offer))}>
                   {t('e2ee.team.openDesktop')}
                 </Button>
               )}
-              {accountId &&
+              {!loading &&
+                accountId &&
                 emailVerified &&
                 native &&
                 !recovering &&
@@ -340,7 +402,7 @@ function JoinSession({
                     {t(offer.mode === 'email' ? 'e2ee.team.accept' : 'e2ee.team.submit')}
                   </Button>
                 )}
-              {request && !ready && !terminal && (
+              {!loading && request && request.state !== 'committed' && !ready && !terminal && (
                 <Button
                   disabled={busy}
                   onClick={() => {
@@ -351,7 +413,7 @@ function JoinSession({
                   {t('e2ee.team.retry')}
                 </Button>
               )}
-              {ready && (
+              {!loading && ready && (
                 <Button
                   onClick={() =>
                     onWorkspaceRequested(available?.workspaceSlug ?? null, offer.workspaceId)
@@ -360,11 +422,16 @@ function JoinSession({
                   {t('e2ee.team.openWorkspace')}
                 </Button>
               )}
-              {available?.matchesRecipient === false && !request && (
-                <Button variant="secondary" onClick={onEmailVerificationRequested}>
-                  {t('e2ee.team.switchAccount')}
-                </Button>
-              )}
+              {!loading &&
+                !recovering &&
+                accountId &&
+                emailVerified &&
+                available?.matchesRecipient === false &&
+                !request && (
+                  <Button variant="secondary" onClick={onEmailVerificationRequested}>
+                    {t('e2ee.team.switchAccount')}
+                  </Button>
+                )}
               <Button variant="secondary" onClick={onHomeRequested}>
                 {t('e2ee.team.home')}
               </Button>

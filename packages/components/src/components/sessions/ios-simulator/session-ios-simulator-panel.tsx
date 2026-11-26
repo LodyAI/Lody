@@ -23,7 +23,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { saveBytesAsFile } from '@/lib/download-file';
 import {
   getIosSimulatorScreenshotFileName,
   type IosSimulatorCaptureError,
@@ -141,7 +141,7 @@ function SessionIosSimulatorPanelController({
       ? machineSupportsAndroidEmulatorProtocol(machine)
         ? 'available'
         : 'upgrade-required'
-      : getIosSimulatorPanelAvailability(machine);
+      : getIosSimulatorPanelAvailability(machine, runtime?.contentMode);
   // Same-machine Electron talks to the local daemon directly, so cloud presence
   // going offline does not cut it off.
   const blocker: IosSimulatorPanelBlocker | null =
@@ -182,7 +182,9 @@ function SessionIosSimulatorPanelController({
     () => initialSnapshot?.catalog ?? { phase: 'loading' }
   );
   const [refreshing, setRefreshing] = useState(false);
-  const [status, setStatus] = useState<IosSimulatorPanelStatus>(() => initialSnapshot?.status ?? IDLE);
+  const [status, setStatus] = useState<IosSimulatorPanelStatus>(
+    () => initialSnapshot?.status ?? IDLE
+  );
   const statusRef = useRef(status);
   statusRef.current = status;
   const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(
@@ -298,7 +300,7 @@ function SessionIosSimulatorPanelController({
   );
 
   const connected = Boolean(runtime && requesterUserId);
-  const live = active && blocker === null && connected;
+  const live = active && availability !== 'hidden' && blocker === null && connected;
   const loadedRef = useRef(initialSnapshot?.catalog.phase === 'ready');
   useEffect(() => {
     if (!live) return;
@@ -664,7 +666,7 @@ function SessionIosSimulatorPanelController({
           new Date()
         );
         if (target === 'save') {
-          downloadBytesAsFile(fileName, new Uint8Array(result.bytes));
+          await saveBytesAsFile(fileName, new Uint8Array(result.bytes));
           return;
         }
         const file = new File([result.bytes], fileName, { type: 'image/png' });
@@ -686,6 +688,8 @@ function SessionIosSimulatorPanelController({
             )
           );
         }
+      } catch {
+        toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
       } finally {
         setCapturing(false);
       }
@@ -720,7 +724,10 @@ function SessionIosSimulatorPanelController({
                 appearance: true,
                 'open-url': false,
               }
-            : getIosSimulatorControlAvailability(hardware, !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)),
+            : getIosSimulatorControlAvailability(
+                hardware,
+                !!statusDevice && machineSupportsIosSimulatorControls(machine, 2)
+              ),
         pendingControl,
         capturing,
         canAttach: Boolean(onAttachScreenshot),
@@ -795,6 +802,8 @@ function SessionIosSimulatorPanelController({
     viewerState,
     viewerDiagnostics,
   ]);
+
+  if (availability === 'hidden') return null;
 
   return (
     <>

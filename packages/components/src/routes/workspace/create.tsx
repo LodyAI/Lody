@@ -53,7 +53,6 @@ import {
   capturePostHogSampled,
   getDurationSinceMs,
   getPerformanceNowMs,
-  identifyPostHogWorkspace,
 } from '@/lib/posthog-analytics';
 
 type WorkspaceCreateFailureReason =
@@ -536,7 +535,6 @@ function CreateWorkspaceAuthed({
             ? { returnTarget: 'desktop' as const }
             : { successUrl: billingUrl, cancelUrl: billingUrl }),
         });
-        identifyPostHogWorkspace(postHog, result.workspaceId);
         capturePostHogEvent(postHog, 'workspace/create_succeeded', {
           workspace_id: result.workspaceId,
           slug_length: result.workspaceSlug.length,
@@ -570,7 +568,6 @@ function CreateWorkspaceAuthed({
       const createdWorkspace = await createOrganization(workspaceName.trim(), workspaceSlug);
       const createdWorkspaceId =
         typeof createdWorkspace?.id === 'string' ? createdWorkspace.id : null;
-      identifyPostHogWorkspace(postHog, createdWorkspaceId);
       capturePostHogEvent(postHog, 'workspace/create_succeeded', {
         workspace_id: createdWorkspaceId,
         slug_length: workspaceSlug.length,
@@ -656,7 +653,7 @@ function CreateWorkspaceAuthed({
         port,
         storage: localStorage,
         pending: request,
-        deleteWorkspace: deleteOrganization,
+        deleteWorkspace: (id) => deleteOrganization(id, { isEncrypted: true }),
         isCurrent: () => accountRef.current === accountId,
       });
       if (accountRef.current !== accountId) return;

@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-29-workspace-telemetry-privacy.zh.md)
 
+> The following describes the earlier workspace-specific policy. The current upload contract disables replay in every workspace and applies the same field allowlist to all events. See [platform telemetry privacy](../../../../packages/platform/AGENTS.md#telemetry-privacy).
+
 ## Abstract
 
 Text masking does not remove replay DOM attributes. Encrypted and unknown workspace

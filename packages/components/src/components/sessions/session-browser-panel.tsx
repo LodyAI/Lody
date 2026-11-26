@@ -140,7 +140,9 @@ const hydrateInitialBrowserState = (
   const resume = readSessionBrowserResumeState(sessionId);
   const now = Date.now();
   const electron = isElectronRenderer();
-  const machinePlane: 'local' | 'cloud' | null = electron ? (resume?.machinePlane ?? null) : 'cloud';
+  const machinePlane: 'local' | 'cloud' | null = electron
+    ? (resume?.machinePlane ?? null)
+    : 'cloud';
   const cachedRemote = resume?.remotePreview;
   const remoteValid = isCachedRemotePreviewValid(cachedRemote, now);
   const remoteExpired = Boolean(cachedRemote && !remoteValid);

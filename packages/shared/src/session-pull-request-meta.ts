@@ -81,15 +81,39 @@ export type SessionAutoDeliveryStallReason =
   | 'pr_draft'
   | 'pr_not_created'
   | 'multiple_prs'
+  | 'workspace_unpushed'
   | 'stopped'
+  | 'request_blocked'
   | 'request_failed';
 
-export type SessionAutoDelivery = {
-  state: SessionAutoDeliveryState;
-  /** 1-based count of the current kind of request (`fix` or `conflict`). */
-  attempt?: number;
-  reason?: SessionAutoDeliveryStallReason;
+export type SessionAutoDeliveryStall =
+  | { reason: Exclude<SessionAutoDeliveryStallReason, 'request_blocked'> }
+  | {
+      reason: 'request_blocked';
+      /** Underlying automation block reason when `reason === 'request_blocked'`. */
+      blockReason?: string;
+    };
+
+type SessionAutoDeliveryPrRef = {
   prUrl?: string;
+  /** 1-based position of `prUrl` when delivering multiple PRs sequentially. */
+  prIndex?: number;
+  /** Total PRs tracked by the current Auto delivery enablement when > 1. */
+  prTotal?: number;
+};
+
+export type SessionAutoDeliveryStatus = SessionAutoDeliveryPrRef &
+  (
+    | { state: 'pr' | 'ci' | 'merge' | 'ready' | 'merged' }
+    | {
+        state: 'fix' | 'conflict';
+        /** 1-based count of the current kind of request (`fix` or `conflict`). */
+        attempt?: number;
+      }
+    | ({ state: 'stalled' } & SessionAutoDeliveryStall)
+  );
+
+export type SessionAutoDelivery = SessionAutoDeliveryStatus & {
   updatedAt: number;
 };
 

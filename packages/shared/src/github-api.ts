@@ -153,14 +153,12 @@ const GithubUserSchema = z
     html_url: z.string(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubUser => ({
-      login: item.login,
-      id: item.id,
-      avatarUrl: item.avatar_url,
-      htmlUrl: item.html_url,
-    })
-  );
+  .transform((item): GitHubUser => ({
+    login: item.login,
+    id: item.id,
+    avatarUrl: item.avatar_url,
+    htmlUrl: item.html_url,
+  }));
 
 const GithubReactionRollupSchema = z
   .object({
@@ -175,19 +173,17 @@ const GithubReactionRollupSchema = z
     eyes: z.number().optional(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubReactionRollup => ({
-      totalCount: item.total_count ?? 0,
-      '+1': item['+1'] ?? 0,
-      '-1': item['-1'] ?? 0,
-      laugh: item.laugh ?? 0,
-      hooray: item.hooray ?? 0,
-      confused: item.confused ?? 0,
-      heart: item.heart ?? 0,
-      rocket: item.rocket ?? 0,
-      eyes: item.eyes ?? 0,
-    })
-  );
+  .transform((item): GitHubReactionRollup => ({
+    totalCount: item.total_count ?? 0,
+    '+1': item['+1'] ?? 0,
+    '-1': item['-1'] ?? 0,
+    laugh: item.laugh ?? 0,
+    hooray: item.hooray ?? 0,
+    confused: item.confused ?? 0,
+    heart: item.heart ?? 0,
+    rocket: item.rocket ?? 0,
+    eyes: item.eyes ?? 0,
+  }));
 
 const GITHUB_AUTHOR_ASSOCIATIONS = new Set<string>([
   'COLLABORATOR',
@@ -238,32 +234,30 @@ const GithubReviewCommentSchema = z
     reactions: GithubReactionRollupSchema.optional(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubReviewComment => ({
-      id: item.id,
-      nodeId: item.node_id,
-      pullRequestReviewId: item.pull_request_review_id ?? null,
-      body: item.body,
-      path: item.path,
-      commitId: item.commit_id,
-      originalCommitId: item.original_commit_id ?? item.commit_id,
-      diffHunk: item.diff_hunk ?? '',
-      inReplyToId: item.in_reply_to_id,
-      subjectType: normalizeReviewSubjectType(item.subject_type),
-      user: item.user,
-      authorAssociation: normalizeAuthorAssociation(item.author_association),
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
-      htmlUrl: item.html_url,
-      line: item.line ?? null,
-      originalLine: item.original_line ?? null,
-      side: normalizeReviewSide(item.side),
-      startLine: item.start_line ?? null,
-      originalStartLine: item.original_start_line ?? null,
-      startSide: item.start_side === 'LEFT' || item.start_side === 'RIGHT' ? item.start_side : null,
-      reactions: item.reactions,
-    })
-  );
+  .transform((item): GitHubReviewComment => ({
+    id: item.id,
+    nodeId: item.node_id,
+    pullRequestReviewId: item.pull_request_review_id ?? null,
+    body: item.body,
+    path: item.path,
+    commitId: item.commit_id,
+    originalCommitId: item.original_commit_id ?? item.commit_id,
+    diffHunk: item.diff_hunk ?? '',
+    inReplyToId: item.in_reply_to_id,
+    subjectType: normalizeReviewSubjectType(item.subject_type),
+    user: item.user,
+    authorAssociation: normalizeAuthorAssociation(item.author_association),
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+    htmlUrl: item.html_url,
+    line: item.line ?? null,
+    originalLine: item.original_line ?? null,
+    side: normalizeReviewSide(item.side),
+    startLine: item.start_line ?? null,
+    originalStartLine: item.original_start_line ?? null,
+    startSide: item.start_side === 'LEFT' || item.start_side === 'RIGHT' ? item.start_side : null,
+    reactions: item.reactions,
+  }));
 
 const GithubReviewCommentsResponseSchema = z.array(GithubReviewCommentSchema);
 
@@ -296,19 +290,17 @@ const GithubReviewSchema = z
     html_url: z.string(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubReview => ({
-      id: item.id,
-      nodeId: item.node_id,
-      body: item.body ?? '',
-      state: normalizeReviewState(item.state),
-      user: item.user,
-      authorAssociation: normalizeAuthorAssociation(item.author_association),
-      commitId: item.commit_id ?? null,
-      submittedAt: item.submitted_at ?? null,
-      htmlUrl: item.html_url,
-    })
-  );
+  .transform((item): GitHubReview => ({
+    id: item.id,
+    nodeId: item.node_id,
+    body: item.body ?? '',
+    state: normalizeReviewState(item.state),
+    user: item.user,
+    authorAssociation: normalizeAuthorAssociation(item.author_association),
+    commitId: item.commit_id ?? null,
+    submittedAt: item.submitted_at ?? null,
+    htmlUrl: item.html_url,
+  }));
 
 const GithubReviewsResponseSchema = z.array(GithubReviewSchema);
 
@@ -1444,52 +1436,150 @@ export async function githubFetchFileBytesAtCommit(
   );
 }
 
+const GithubMatchingRefListSchema = z.array(z.object({ ref: z.string() }).passthrough());
+
+export const GITHUB_BRANCH_PAGE_SIZE = 100;
+
+export type GitHubBranchPage = {
+  branches: string[];
+  nextPageUrl: string | null;
+};
+
+export type GitHubBranchesFirstPageResult = GitHubBranchesResult & {
+  nextPageUrl: string | null;
+};
+
+function branchesPageUrl(repoFullName: string): string {
+  return `https://api.github.com/repos/${repoFullName}/branches?per_page=${GITHUB_BRANCH_PAGE_SIZE}`;
+}
+
 /**
- * List all branches in a repository, plus its default branch.
+ * The token is attached to every page request, so a cursor must point back at
+ * this repository's branch listing on the GitHub API host and nowhere else.
+ * GitHub's `next` links may use the `/repositories/<id>/branches` form.
  */
-export async function githubFetchBranches(
-  token: string,
-  repoFullName: string
-): Promise<GitHubBranchesResult> {
-  const repoMeta = await fetchGithubJson(
-    `https://api.github.com/repos/${repoFullName}`,
-    token,
-    GithubRepoDefaultBranchSchema
-  );
-  const defaultBranch = repoMeta.default_branch;
-
-  const branches = new Set<string>();
-  let nextUrl: string | null = `https://api.github.com/repos/${repoFullName}/branches?per_page=100`;
-
-  while (nextUrl) {
-    const res = await fetch(nextUrl, { headers: authHeaders(token) });
-    const text = await res.text();
-    if (!res.ok) {
-      if (res.status === 401) {
-        throw new GitHubAuthError();
-      }
-      throw new Error(`GitHub API error: ${res.status} ${text}`);
-    }
-    const page = GithubBranchListSchema.parse(JSON.parse(text) as unknown);
-    for (const item of page) {
-      const name = item.name.trim();
-      if (!name) continue;
-      branches.add(name);
-    }
-    nextUrl = parseNextLink(res.headers.get('link'));
+function assertBranchesPageUrl(repoFullName: string, pageUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(pageUrl);
+  } catch {
+    throw new Error(`Invalid GitHub branches page URL: ${pageUrl}`);
   }
+  const expectedPath = `/repos/${repoFullName}/branches`.toLowerCase();
+  const isRepoPath = url.pathname.toLowerCase() === expectedPath;
+  const isRepoIdPath = /^\/repositories\/\d+\/branches$/.test(url.pathname);
+  if (url.origin !== 'https://api.github.com' || (!isRepoPath && !isRepoIdPath)) {
+    throw new Error(`Unexpected GitHub branches page URL: ${pageUrl}`);
+  }
+}
 
-  const sortedBranches = Array.from(branches).sort((a, b) => a.localeCompare(b));
+async function fetchBranchesPage(token: string, pageUrl: string): Promise<GitHubBranchPage> {
+  const res = await fetch(pageUrl, { headers: authHeaders(token) });
+  const text = await res.text();
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new GitHubAuthError();
+    }
+    throw new Error(`GitHub API error: ${res.status} ${text}`);
+  }
+  const page = GithubBranchListSchema.parse(JSON.parse(text) as unknown);
+  const branches: string[] = [];
+  for (const item of page) {
+    const name = item.name.trim();
+    if (name) branches.push(name);
+  }
+  return { branches, nextPageUrl: parseNextLink(res.headers.get('link')) };
+}
 
+function withDefaultBranch(
+  branches: Iterable<string>,
+  defaultBranch: string
+): GitHubBranchesResult {
+  const sortedBranches = Array.from(new Set(branches)).sort((a, b) => a.localeCompare(b));
   // Only include defaultBranch if the repo actually has branches.
   if (sortedBranches.length > 0 && !sortedBranches.includes(defaultBranch)) {
     sortedBranches.push(defaultBranch);
     sortedBranches.sort((a, b) => a.localeCompare(b));
   }
-
   return {
     defaultBranch: sortedBranches.length > 0 ? defaultBranch : '',
     branches: sortedBranches,
+  };
+}
+
+export async function githubFetchBranchesFirstPage(
+  token: string,
+  repoFullName: string
+): Promise<GitHubBranchesFirstPageResult> {
+  const [repoMeta, page] = await Promise.all([
+    fetchGithubJson(
+      `https://api.github.com/repos/${repoFullName}`,
+      token,
+      GithubRepoDefaultBranchSchema
+    ),
+    fetchBranchesPage(token, branchesPageUrl(repoFullName)),
+  ]);
+  return {
+    ...withDefaultBranch(page.branches, repoMeta.default_branch),
+    nextPageUrl: page.nextPageUrl,
+  };
+}
+
+export async function githubFetchBranchesPage(
+  token: string,
+  repoFullName: string,
+  pageUrl: string
+): Promise<GitHubBranchPage> {
+  assertBranchesPageUrl(repoFullName, pageUrl);
+  return await fetchBranchesPage(token, pageUrl);
+}
+
+/**
+ * Branches whose name starts with `prefix` (GitHub matching-refs). Empty, `.`
+ * and `..` segments return no result: they survive `encodeURIComponent` and
+ * would normalize the request out of `refs/heads/`.
+ */
+export async function githubSearchBranches(
+  token: string,
+  repoFullName: string,
+  prefix: string
+): Promise<string[]> {
+  const segments = prefix.trim().split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return [];
+  const encodedPrefix = segments.map((segment) => encodeURIComponent(segment)).join('/');
+  const refs = await fetchGithubJson(
+    `https://api.github.com/repos/${repoFullName}/git/matching-refs/heads/${encodedPrefix}?per_page=${GITHUB_BRANCH_PAGE_SIZE}`,
+    token,
+    GithubMatchingRefListSchema
+  );
+  const branches = new Set<string>();
+  for (const { ref } of refs) {
+    if (!ref.startsWith('refs/heads/')) continue;
+    const name = ref.slice('refs/heads/'.length).trim();
+    if (name) branches.add(name);
+  }
+  return Array.from(branches).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * List every branch in a repository, plus its default branch. This walks all
+ * pages serially; interactive pickers use {@link githubFetchBranchesFirstPage}.
+ */
+export async function githubFetchBranches(
+  token: string,
+  repoFullName: string
+): Promise<GitHubBranchesResult> {
+  const first = await githubFetchBranchesFirstPage(token, repoFullName);
+  const branches = new Set(first.branches);
+  let nextUrl = first.nextPageUrl;
+  while (nextUrl) {
+    const page = await githubFetchBranchesPage(token, repoFullName, nextUrl);
+    for (const branch of page.branches) branches.add(branch);
+    nextUrl = page.nextPageUrl;
+  }
+  return {
+    defaultBranch: first.defaultBranch,
+    branches: Array.from(branches).sort((a, b) => a.localeCompare(b)),
   };
 }
 
@@ -1953,41 +2043,39 @@ const GithubPullRequestDetailsSchema = z
       .optional(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubPullRequestDetails => ({
-      number: item.number,
-      nodeId: item.node_id,
-      title: item.title,
-      body: item.body ?? '',
-      state: (item.state === 'closed' ? 'closed' : 'open') as GitHubPullRequestState,
-      merged: item.merged ?? false,
-      draft: item.draft ?? false,
-      htmlUrl: item.html_url,
-      baseRef: item.base.ref,
-      baseSha: item.base.sha ?? undefined,
-      headRef: item.head.ref,
-      headSha: item.head.sha,
-      user: item.user,
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
-      mergedAt: item.merged_at ?? null,
-      closedAt: item.closed_at ?? null,
-      additions: item.additions ?? 0,
-      deletions: item.deletions ?? 0,
-      changedFiles: item.changed_files ?? 0,
-      commits: item.commits ?? 0,
-      mergeable: item.mergeable ?? null,
-      mergeableState: normalizeMergeableState(item.mergeable_state),
-      stack: item.stack
-        ? {
-            number: item.stack.number,
-            position: item.stack.position,
-            size: item.stack.size,
-            baseRef: item.stack.base.ref,
-          }
-        : null,
-    })
-  );
+  .transform((item): GitHubPullRequestDetails => ({
+    number: item.number,
+    nodeId: item.node_id,
+    title: item.title,
+    body: item.body ?? '',
+    state: (item.state === 'closed' ? 'closed' : 'open') as GitHubPullRequestState,
+    merged: item.merged ?? false,
+    draft: item.draft ?? false,
+    htmlUrl: item.html_url,
+    baseRef: item.base.ref,
+    baseSha: item.base.sha ?? undefined,
+    headRef: item.head.ref,
+    headSha: item.head.sha,
+    user: item.user,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+    mergedAt: item.merged_at ?? null,
+    closedAt: item.closed_at ?? null,
+    additions: item.additions ?? 0,
+    deletions: item.deletions ?? 0,
+    changedFiles: item.changed_files ?? 0,
+    commits: item.commits ?? 0,
+    mergeable: item.mergeable ?? null,
+    mergeableState: normalizeMergeableState(item.mergeable_state),
+    stack: item.stack
+      ? {
+          number: item.stack.number,
+          position: item.stack.position,
+          size: item.stack.size,
+          baseRef: item.stack.base.ref,
+        }
+      : null,
+  }));
 
 const GithubIssueCommentSchema = z
   .object({
@@ -2003,20 +2091,18 @@ const GithubIssueCommentSchema = z
     reactions: GithubReactionRollupSchema.optional(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubIssueComment => ({
-      id: item.id,
-      nodeId: item.node_id,
-      body: item.body,
-      user: item.user,
-      authorAssociation: normalizeAuthorAssociation(item.author_association),
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
-      htmlUrl: item.html_url,
-      issueUrl: item.issue_url,
-      reactions: item.reactions,
-    })
-  );
+  .transform((item): GitHubIssueComment => ({
+    id: item.id,
+    nodeId: item.node_id,
+    body: item.body,
+    user: item.user,
+    authorAssociation: normalizeAuthorAssociation(item.author_association),
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+    htmlUrl: item.html_url,
+    issueUrl: item.issue_url,
+    reactions: item.reactions,
+  }));
 
 const GithubIssueCommentsResponseSchema = z.array(GithubIssueCommentSchema);
 
@@ -2058,18 +2144,16 @@ const GithubCheckRunSchema = z
     app: z.object({ name: z.string().optional() }).passthrough().nullable().optional(),
   })
   .passthrough()
-  .transform(
-    (item): GitHubCheckRun => ({
-      id: item.id,
-      name: item.name,
-      status: normalizeCheckRunStatus(item.status),
-      conclusion: normalizeCheckRunConclusion(item.conclusion),
-      htmlUrl: item.html_url ?? null,
-      startedAt: item.started_at ?? null,
-      completedAt: item.completed_at ?? null,
-      appName: item.app?.name ?? null,
-    })
-  );
+  .transform((item): GitHubCheckRun => ({
+    id: item.id,
+    name: item.name,
+    status: normalizeCheckRunStatus(item.status),
+    conclusion: normalizeCheckRunConclusion(item.conclusion),
+    htmlUrl: item.html_url ?? null,
+    startedAt: item.started_at ?? null,
+    completedAt: item.completed_at ?? null,
+    appName: item.app?.name ?? null,
+  }));
 
 const GithubCheckRunsResponseSchema = z
   .object({

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { createStore, Provider } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
@@ -5,6 +6,50 @@ import { Tooltip } from '@lody/ui/tooltip';
 import { SessionList, type SessionListRow } from '@/components/session-list';
 import { sessionSendStatusesAtom } from '@/atoms/session-send-status';
 import type { SessionSendStatus } from '@/lib/session-send-status';
+const storyLayoutStyles = stylex.create({
+  canvas: {
+    paddingInline: 'calc(var(--spacing) * 1)',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    fontWeight: 'var(--font-weight-medium)',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  canvas2: {
+    borderRadius: 'var(--radius-xl)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-border) / 1) 80%, transparent)',
+    backgroundColor: 'hsl(var(--sidebar-background) / 1)',
+    padding: 'calc(var(--spacing) * 2)',
+    fontSize: '14px',
+    color: 'hsl(var(--sidebar-foreground) / 1)',
+  },
+});
+
+const storyLayout = stylex.create({
+  stack: {
+    display: 'flex',
+    width: '280px',
+    'flex-direction': 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  section: {
+    'margin-bottom': 'calc(var(--spacing) * 3)',
+  },
+  row: {
+    display: 'flex',
+    'min-height': '100vh',
+    'align-items': 'flex-start',
+    gap: 'calc(var(--spacing) * 6)',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  frame: {
+    'min-height': '100vh',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 /**
  * Messages still leaving this device, shown where the conversation already
@@ -106,11 +151,11 @@ function SidebarFrame({
   const [chatsCollapsed, setChatsCollapsed] = useState(folded);
   const [repos, setRepos] = useState([{ repoFullName: 'loro-dev/loro', collapsed: folded }]);
   return (
-    <div className="flex w-[280px] flex-col gap-2">
-      <div className="px-1 text-xs font-medium text-muted-foreground">{heading}</div>
+    <div {...stylex.props(storyLayout.stack)}>
+      <div {...stylex.props(storyLayoutStyles.canvas)}>{heading}</div>
       <Provider store={store}>
-        <div className="rounded-xl border border-sidebar-border/80 bg-sidebar p-2 text-[14px] text-sidebar-foreground">
-          <div className="mb-3">
+        <div {...stylex.props(storyLayoutStyles.canvas2)}>
+          <div {...stylex.props(storyLayout.section)}>
             <SessionList
               sessions={REPO_ROWS}
               repos={repos}
@@ -138,7 +183,7 @@ function SidebarFrame({
 export const States: Story = {
   render: () => (
     <Tooltip.Provider>
-      <div className="flex min-h-screen items-start gap-6 bg-background p-6">
+      <div {...stylex.props(storyLayout.row)}>
         <SidebarFrame statuses={STATIC_STATUSES} folded={false} heading="Expanded" />
         <SidebarFrame statuses={STATIC_STATUSES} folded heading="Folded" />
       </div>
@@ -170,7 +215,7 @@ export const Live: Story = {
     }, [tick]);
     return (
       <Tooltip.Provider>
-        <div className="min-h-screen bg-background p-6">
+        <div {...stylex.props(storyLayout.frame)}>
           <SidebarFrame statuses={statuses} folded={false} heading="Live upload" />
         </div>
       </Tooltip.Provider>

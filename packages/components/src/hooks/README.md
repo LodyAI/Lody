@@ -74,6 +74,43 @@ See the [attachment draft Spec](../../../../specs/session-files.md).
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
 | Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
+## Session access room
+
+`useSessionAccess` is only a React projection of the shared session-access room.
+`acquireSessionAccessStore` owns one ref-counted room per platform port, account and
+workspace; the room owns its live port subscription, browser resume/online listeners
+and refresh single-flight. Consumers subscribe to its snapshot, so mounting another
+sidebar or history surface does not add another resume request. A notification that
+arrives during a read queues one follow-up rather than starting overlapping reads.
+The room preserves snapshot identity when grants are unchanged, so a successful
+resume read does not force a React render. Keep browser lifecycle listeners and
+refresh ownership in the room, not in session-access consumers.
+
+## Auth and session supervisors
+
+`getStableSessionSupervisor` and `acquireStableSessionSupervisor` share one
+ref-counted Better Auth supervisor per auth client. The supervisor owns the session
+atom and stable-session policy: retry/grace state, current-credential 401
+verification, boot-failure publication, browser resume and keepalive refreshes.
+`StableSessionProvider` only borrows/releases that room and projects its external
+snapshot, so another auth consumer does not add listeners or retry budgets.
+Convex's auth mismatch recovery is a separate ref-counted room from
+`getAuthRecoverySupervisor`/`acquireAuthRecoverySupervisor`; it owns the per-session
+attempt budget, deadlines, visibility/network pause, pending Convex reset and
+automatic-command fence. `AuthenticatedConvexProvider` only bridges the SDK auth
+snapshot, borrows/releases the room, projects its snapshot and renders the existing
+nonmodal recovery notice. The Convex adapter may still observe SDK auth state because
+`ConvexProviderWithAuth` is a React API, but it does not own session reads, retry
+budgets or browser lifecycle work.
+
+React projections of these rooms go through `lib/external-snapshot.ts`'s
+`useExternalSnapshot`, the single adapter over React's `useSyncExternalStore`:
+business modules must not hand-wire the primitive, because its lease ordering
+and subscribe/re-seed sequence are easy to get wrong. The adapter keys the room
+lease on the room itself, so a fresh inline `acquire` closure per render does
+not release and re-acquire the supervisor (that churn used to drop in-flight
+401 verification).
+
 ## MCP default readiness
 
 `use-session-mcp-selection.ts` allows default-derived sends after the local catalog
@@ -109,29 +146,40 @@ reports its own list. See the [command ownership decision](../../../../.agents/n
 
 ## Avatar sources
 
-`use-stable-avatar-src.ts` keeps the initial remote URL on a cold mount while
-filling the byte cache, then asks `lib/avatar-cache.ts` to preload and asynchronously
-decode that local blob for a return visit. Only avatars used by this hook are
+`use-stable-avatar-src.ts` resolves cached avatars from `lib/avatar-cache.ts`
+(URL-keyed memory map backed by IndexedDB `lody:avatar-image-cache` with
+CacheStorage migration/fallback and a synchronous `lody:avatar-cache-index`
+key set). On a new page or Electron `file://` window, persisted URLs hold off
+emitting a remote image request while the local blob resolves in milliseconds;
+truly cold URLs paint immediately while filling the cache, and active workspace
+members warm their cached blobs when the directory loads. Only used avatars are
 decoded; startup restoration does not decode the entire persistent cache. The
 cache entry retains the off-DOM image for the same lifetime as its blob URL.
 Source changes select the current URL synchronously, including delayed profile
 arrival and image removal, while background callbacks remain tied to their source.
-First paint and cache reads never await decoding. Fully cold images and missing
+First paint and cache reads never await decoding. Fully cold images and genuinely absent
 profile data can still show a fallback. Evidence and limits:
-[avatar continuity](../../../../.agents/notes/proposed/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
+[avatar continuity](../../../../.agents/notes/implemented/bug-fix/2026-10-20-message-avatar-switch-continuity.md).
 
 ## Cloud query recovery
 
-`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
-session and semantic query shares one watch and three retries after 1, 2 and 4 seconds.
-All consumers release the failed watch before a new one starts, which waits for a
-server update rather than reading the SDK's cached error. Opaque server failures
-return loading during bounded recovery; application errors and exhausted failures throw to the nearest
-boundary. Auth expiry continues through the central supervisor and retains only a
-matching committed snapshot. Brief success and temporary auth skips do not replenish
-attempts; 30 seconds of continuously observed success resets the budget. Skipped or
-unmounted queries stop retries, and session/query identity fences callbacks and results.
-Public queries and local-only clients keep their existing behavior.
+`use-recoverable-convex-query.ts` owns both the authenticated and public query adapters
+(`useRecoverableConvexQuery`, `useOptionalRecoverableConvexQuery`,
+`usePublicConvexQuery`, `useOptionalPublicConvexQuery`). Raw `convex/react` `useQuery`
+is forbidden by the platform boundary check so backend errors can never throw into React
+render. Each client, session and semantic query shares one watch and three retries after
+1, 2 and 4 seconds. All consumers release the failed watch before a new one starts, which
+waits for a server update rather than reading the SDK's cached error. Opaque server
+failures return loading during bounded recovery; structured errors (such as `ConvexError`)
+and exhausted failures are reported once per outage episode to `client-log.ts` and
+redacted telemetry, then contained as `undefined` in `useCloudQuery` (never throwing into
+render, and never returning stale authorization rows). Consumers that display an inline
+failure notice or retry action read `useCloudQueryState` from `@lody/platform/react`.
+Auth expiry continues through the central supervisor and retains only a matching
+committed snapshot. Brief success and temporary auth skips do not replenish attempts;
+30 seconds of continuously observed success resets the budget. Skipped or unmounted
+queries stop retries, and session/query identity fences callbacks and results. Local-only
+clients keep their existing behavior.
 See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
 
 `providers/cloud-platform-api.ts` also admits imperative queries, subscriptions,
@@ -341,7 +389,11 @@ snapshot. Permission candidates only accelerate that snapshot; they never add an
 alert. Ordinary Push owns reminders. The previous alert-key Set and early return
 were removed because they both duplicated reminders and froze other conversations
 while one request was pending. The optional bridge alert field remains for legacy
-native clients, but this hook never sends it.
+native clients, but this hook never sends it. GA permits notification summaries from admitted
+E2EE workspaces through push providers. Both renderer and CLI remove permission request IDs
+from those summaries so taps open the session for signed in-App approval. Native HTTP
+approval is disabled for E2EE; token registration retains its independent authentication.
+Home Screen widget publication remains plaintext-only.
 
 `iosLiveActivitiesEnabledAtom` defaults to true, so without the native-shell check
 every desktop build would rebuild a summary it can never show. The activity id is
@@ -408,8 +460,23 @@ The directory query key includes the expected account, which the server compares
 with its authenticated user before any directory read. This prevents an old-account
 SDK cache from being accepted under a new account.
 
-Same-account/workspace labels survive optional-query failures. The sharing panel
+Same-account/workspace labels survive optional-query failures, component remounts,
+and cold page reloads through `lib/workspace-sender-identity.ts` (`clear-local-cache.ts`
+clears both display caches). `useWorkspaceSenderProfile` resolves human message
+senders from live `auth:getUserById`, then the same-scope retained sender profile,
+member directory, and matching current user, so virtualized scroll and send-to-history
+handoff do not drop sender names or avatars while queries reconnect; explicit `null`
+responses clear deleted accounts. The sharing panel
 shows a local retry using the query owner's bounded retry budget, shared across all
 mounted consumers; no polling or second watch owner is added. Account, workspace or
 API changes discard retained labels. Team/public sharing and grant writes keep their
 independent permission checks even while labels are unavailable.
+
+## Local project script loading
+
+`useLocalProjectsAdmin(worktreeProjectKey)` keeps project listing and sharing independent
+of script reads. The default `null` key issues no script RPC. Desktop passes the
+project key while its Worktree tab is visible; mobile passes it when the script
+sheet or inline editor opens. Each visited project refreshes setup and cleanup once
+per hook mount, retaining persisted values during background refresh and on refresh
+failure. Offline remote projects remain unprobed.

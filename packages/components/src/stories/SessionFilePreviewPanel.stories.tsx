@@ -1,3 +1,5 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { getServerNow, type SessionFilePayload } from '@lody/shared';
@@ -8,6 +10,7 @@ import {
 } from '@/components/ai-gui/session-file-preview-dialog';
 import { Dialog } from '@/ui/dialog';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
+import { SessionSidePanelTabBar } from '@/components/sessions/session-side-panel-tab-bar';
 
 const file = (overrides: Partial<SessionFilePayload>): SessionFilePayload => ({
   type: 'file',
@@ -46,10 +49,6 @@ const PLAIN_TEXT = Array.from(
   (_, i) => `line ${i + 1}: lorem ipsum dolor sit amet`
 ).join('\n');
 
-// Content designed to blow past the dialog width: a very long unbreakable
-// token, a wide code block (long lines, no spaces), and a wide table. These are
-// exactly the shapes that make the preview body overflow the modal instead of
-// scrolling inside it.
 const LONG_TOKEN = `x${'-verylongunbreakabletoken'.repeat(12)}`;
 
 const WIDE_MARKDOWN = `# Wide content
@@ -71,6 +70,19 @@ const WIDE_PLAIN_TEXT = [
   ...Array.from({ length: 10 }, (_, i) => `line ${i + 1}: short content`),
 ].join('\n');
 
+const storyStyles = stylex.create({
+  pane: {
+    display: 'flex',
+    height: '560px',
+    width: '640px',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  body: { minHeight: 0, flex: 1 },
+});
+
 const meta = {
   title: 'AI/SessionFilePreviewPanel',
   component: SessionFilePreviewPanel,
@@ -81,9 +93,6 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-// The panel renders a `Dialog.Title`, which requires a Dialog.Root ancestor — mirror
-// the real composition (SessionFilePreviewDialog wraps it in Dialog.Root/Dialog.Content)
-// so the story exercises the panel exactly as users see it.
 const wrap = (content: React.ReactNode) => (
   <Dialog.Root open>
     <Dialog.Content closeButton={false} width="48rem">
@@ -221,4 +230,75 @@ export const MobileTextAttachment: Story = {
     file: file({ fileName: 'notes.txt' }),
     status: loaded(PLAIN_TEXT),
   },
+};
+
+const sidePanel = (args: React.ComponentProps<typeof SessionFilePreviewPanel>) => (
+  <div {...stylex.props(storyStyles.pane)}>
+    <SessionSidePanelTabBar
+      tabs={[
+        {
+          id: `attachment:${args.file.fileId}`,
+          label: args.file.fileName,
+          kind: 'file',
+          filePath: args.file.fileName,
+          closeable: true,
+        },
+      ]}
+      activeTabId={`attachment:${args.file.fileId}`}
+      onTabSelect={() => {}}
+      onTabClose={() => {}}
+      closeTabLabel={(label) => `Close ${label}`}
+    />
+    <div {...stylex.props(storyStyles.body)}>
+      <SessionFilePreviewPanel {...args} variant="pane" />
+    </div>
+  </div>
+);
+
+export const SidePanelMarkdown: Story = {
+  args: MarkdownRendered.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelHtml: Story = {
+  args: HtmlAttachment.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelPlainText: Story = {
+  args: PlainText.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+const syntheticVideoUrl = new URL('./fixtures/video-preview.webm', import.meta.url).href;
+
+export const SidePanelVideo: Story = {
+  args: {
+    file: file({
+      fileId: 'preview-video',
+      fileName: 'walkthrough.webm',
+      mimeType: 'video/webm',
+      sizeBytes: 12_800,
+      textPreview: false,
+    }),
+    status: { kind: 'video', src: syntheticVideoUrl },
+    onDownload: () => {},
+  },
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelTruncated: Story = {
+  args: Truncated.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
+};
+
+export const SidePanelError: Story = {
+  args: Error.args,
+  parameters: { layout: 'centered' },
+  render: (args) => sidePanel(args),
 };

@@ -35,11 +35,17 @@ import i18next from 'i18next';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import {
   buildSessionLink,
+  isAppResourceLink,
+  parseAppActionLink,
   parseSessionLink,
   parseTodayLink,
+  type AppActionLink,
   type SessionLink,
   type TodayLink,
 } from '@lody/shared/session-link';
+import type { MachineId } from '@lody/shared';
+import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
+import { useOpenSettings } from '@/hooks/use-open-settings';
 import {
   SESSION_DEEP_LINK_EVENT,
   pendingSessionLinkAtom,
@@ -60,7 +66,10 @@ import {
   authTokenAtom,
   electronDeepLinkSignInInProgressAtom,
   nativeSignInInProgressAtom,
+  nextSettingsActionIntent,
   setWorkspaceContextAtom,
+  settingsActionIntentAtom,
+  settingsDialogOpenAtom,
   userAtom,
 } from '@/atoms';
 import { StableSessionProvider } from '../providers/stable-session-provider';
@@ -69,6 +78,7 @@ import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
+import { WebCookieConsentBanner } from '@/components/web-cookie-consent-banner';
 import { ReferralLeadAttacher } from '@/components/referral-lead-attacher';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
 import { ERROR_BOUNDARY_PROBE_EVENT, consumeErrorBoundaryProbe } from '@/lib/error-boundary-probe';
@@ -88,6 +98,7 @@ import { isLocalAppPlatform, useAppCapability } from '@/lib/app-platform';
 import { getLocalPlatformProvider } from '../providers/local-platform-provider';
 import { LocalPlatformAuthProvider } from '../providers/local-platform-auth-provider';
 import { CloudPlatformProvider } from '../providers/cloud-platform-provider';
+import { TodayCompanionHost } from '@/components/today/today-companion-host';
 import { useOpenToday } from '@/components/today/use-open-today';
 
 const PENDING_MACHINE_PAIRING_KEY = 'lody:pending-machine-pairing-request';
@@ -232,7 +243,7 @@ function RootApp() {
 
   return (
     <LodyPostHogProvider>
-      {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
+      {telemetryEnabled && <AppLaunchAnalyticsTracker />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
       <SessionDeepLinkRouter />
       <ReferralLeadAttacher
@@ -260,8 +271,10 @@ function RootApp() {
                 <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
                   <RuntimeProvider>
                     <RootOutletBoundary />
+                    {isElectron && isLocalAppPlatform() && <TodayCompanionHost />}
                   </RuntimeProvider>
                 </ErrorBoundary>
+                {telemetryEnabled && !isElectron && <WebCookieConsentBanner />}
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>
@@ -468,6 +481,11 @@ function SessionDeepLinkRouter() {
         setPendingToday(today);
         return;
       }
+      const action = parseAppActionLink(raw);
+      if (action) {
+        setPendingAction(action);
+        return;
+      }
       const link = parseSessionLink(raw);
       if (link) {
         setNavigationTarget(null);
@@ -481,7 +499,70 @@ function SessionDeepLinkRouter() {
     };
   }, [setNavigationTarget]);
   const [pendingToday, setPendingToday] = useState<TodayLink | null>(null);
+  const [pendingAction, setPendingAction] = useState<AppActionLink | null>(null);
   const openToday = useOpenToday();
+  const { openSettings } = useOpenSettings();
+  useEffect(() => {
+    if (!pendingAction) return;
+    const resolution = resolveSessionLinkWorkspace(
+      { sessionId: '' as SessionLink['sessionId'], workspaceId: pendingAction.workspaceId },
+      workspaces,
+      currentWorkspaceId
+    );
+    if (resolution.kind === 'wait') return;
+    setPendingAction(null);
+    if (resolution.kind === 'unavailable') {
+      toast.error(
+        i18next.t(
+          'deepLink.workspaceUnavailable',
+          'This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.'
+        )
+      );
+      return;
+    }
+    const sameWorkspace = resolution.workspaceId === currentWorkspaceId;
+    if (pendingAction.kind === 'schedules') {
+      store.set(settingsDialogOpenAtom, false);
+      if (pendingAction.create || pendingAction.scheduleId) {
+        void navigate({
+          to: '/$workspaceName/schedules/$scheduleId',
+          params: {
+            workspaceName: resolution.slug,
+            scheduleId: pendingAction.create ? 'new' : pendingAction.scheduleId!,
+          },
+        });
+      } else {
+        void navigate({
+          to: '/$workspaceName/schedules',
+          params: { workspaceName: resolution.slug },
+        });
+      }
+      return;
+    }
+    const machineId =
+      'machineId' in pendingAction ? (pendingAction.machineId as MachineId | undefined) : undefined;
+    const projectKey =
+      pendingAction.tab === 'projects'
+        ? pendingAction.repoFullName
+          ? `github:${pendingAction.repoFullName}`
+          : pendingAction.localProjectId && pendingAction.machineId
+            ? getLocalProjectVisibilityKey(pendingAction.machineId, pendingAction.localProjectId)
+            : undefined
+        : undefined;
+    store.set(settingsActionIntentAtom, nextSettingsActionIntent(pendingAction));
+    if (sameWorkspace) {
+      openSettings(pendingAction.tab, { machineId, projectKey });
+      return;
+    }
+    void navigate({
+      to: `/$workspaceName/settings/${pendingAction.tab}`,
+      params: { workspaceName: resolution.slug },
+      search: {
+        ...(machineId ? { machine: machineId } : {}),
+        ...(projectKey ? { project: projectKey } : {}),
+      } as never,
+    });
+  }, [currentWorkspaceId, navigate, openSettings, pendingAction, store, workspaces]);
   useEffect(() => {
     // A Today page link (specs/today-outline.md): open that member's day in its workspace.
     if (!pendingToday) return;
@@ -653,7 +734,7 @@ function DesktopDeepLinkRouter() {
         }
         return;
       }
-      if (parseSessionLink(url)) {
+      if (isAppResourceLink(url)) {
         window.dispatchEvent(new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: url }));
         return;
       }

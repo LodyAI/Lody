@@ -1019,6 +1019,53 @@ it.each([true, false])(
   }
 );
 
+it.each([
+  [1_800_000_000_000, { reason: 'self-service-rate-limited', retryAt: 1_800_000_000_000 }],
+  ['soon', {}],
+] as const)(
+  'maps the ledger self-service quota refusal to its core reason (retryAt=%j)',
+  async (retryAt, expected) => {
+    const f = await appendOriginal();
+    const calls: string[] = [];
+    const { network } = fixture(async (name) => {
+      calls.push(name);
+      throw Object.assign(new Error('synthetic-private-cause'), {
+        data: { code: 'e2ee_self_service_rate_limited', retryAt },
+      });
+    }, f.scope);
+    const exit = await Effect.runPromiseExit(
+      network.ledger('cc'.repeat(32)).log.appendCas(f.scope.genesis, f.expected, f.record)
+    );
+    const failure = failureOf(exit) as { _tag?: string; reason?: string; retryAt?: number };
+    expect(failure._tag).toBe('LedgerLogError');
+    expect({ reason: failure.reason, retryAt: failure.retryAt }).toEqual({
+      reason: undefined,
+      retryAt: undefined,
+      ...expected,
+    });
+    expect(calls).toEqual(['e2eeWorkspaces:appendRecord']);
+  }
+);
+
+it.each(['workspace_transfer_active_subscription', 'workspace_transfer_payment_required'])(
+  'retains only the safe transfer refusal code through ledger submission: %s',
+  async (code) => {
+    const f = await appendOriginal();
+    const { network } = fixture(async () => {
+      throw Object.assign(new Error('synthetic-private-cause'), {
+        data: { code, secret: 'private' },
+      });
+    }, f.scope);
+    const exit = await Effect.runPromiseExit(
+      network.ledger('cc'.repeat(32)).log.appendCas(f.scope.genesis, f.expected, f.record)
+    );
+    const failure = failureOf(exit) as { cause?: BackendRefusal };
+    expect(failure.cause).toBeInstanceOf(BackendRefusal);
+    expect(failure.cause?.code).toBe(code);
+    expect(JSON.stringify(failure)).not.toContain('private');
+  }
+);
+
 it.each(['committed', 'conflict'] as const)(
   '%s append skips the genesis prefetch and supplies one signed inline page to the next matching feed read',
   async (status) => {

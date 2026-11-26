@@ -4,12 +4,20 @@ import { ConvexError } from 'convex/values';
 import { isConvexUnauthenticatedError } from '@lody/shared';
 import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
-import type { CloudAction, CloudApi, CloudMutation, CloudQuery } from '@lody/platform';
+import type {
+  CloudAction,
+  CloudApi,
+  CloudMutation,
+  CloudQuery,
+  CloudQueryState,
+} from '@lody/platform';
 import {
+  useOptionalPublicConvexQuery,
   useOptionalRecoverableConvexQuery,
   usePublicConvexQuery,
   useRecoverableConvexQuery,
 } from '@/hooks/use-recoverable-convex-query';
+import { markPersistentWorkspaceSenderCloudApi } from '@/lib/workspace-sender-identity';
 
 function queryReference<Args, Result>(
   operation: CloudQuery<Args, Result>
@@ -27,6 +35,28 @@ function actionReference<Args, Result>(
   operation: CloudAction<Args, Result>
 ): FunctionReference<'action'> {
   return makeFunctionReference<'action'>(operation.name);
+}
+
+function useCloudPlatformQueryState<Args, Result>(
+  operation: CloudQuery<Args, Result>,
+  args: Args | 'skip'
+): CloudQueryState<Result> {
+  const reference = queryReference(operation);
+  const publicResult = useOptionalPublicConvexQuery(
+    reference,
+    operation.access === 'public'
+      ? (args as Parameters<typeof useOptionalPublicConvexQuery>[1])
+      : 'skip'
+  );
+  const authenticatedResult = useOptionalRecoverableConvexQuery(
+    reference,
+    operation.access === 'authenticated'
+      ? (args as Parameters<typeof useOptionalRecoverableConvexQuery>[1])
+      : 'skip'
+  );
+  return (
+    operation.access === 'public' ? publicResult : authenticatedResult
+  ) as CloudQueryState<Result>;
 }
 
 function useCloudPlatformQuery<Args, Result>(
@@ -137,6 +167,8 @@ function useCloudCommand<Args, Result>(
  * to this cloud assembly and can move to `platform-cloud` unchanged in Phase 1.
  */
 export const cloudPlatformApi: CloudApi = {
+  useQueryState: <Args, Result>(operation: CloudQuery<Args, Result>, args: Args | 'skip') =>
+    useCloudPlatformQueryState(operation, args),
   useOptionalAuthenticatedQuery: <Args, Result>(
     operation: CloudQuery<Args, Result>,
     args: Args | 'skip'
@@ -162,6 +194,8 @@ export const cloudPlatformApi: CloudApi = {
       useAction(actionReference(operation)) as (args: Args) => Promise<Result>
     ),
 };
+
+markPersistentWorkspaceSenderCloudApi(cloudPlatformApi);
 
 /** Imperative operations for the app-owned workspace control lifecycle. Callers
  * still supply the same public descriptors as reactive UI, never private APIs.

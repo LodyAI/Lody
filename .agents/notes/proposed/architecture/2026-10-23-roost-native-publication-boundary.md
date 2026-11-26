@@ -45,7 +45,7 @@ flowchart LR
   C --> D[Committed result: scope + cursor + changes]
   D --> E[Advance bounded owner window]
   C --> F[After-commit wake]
-  F --> G[Existing owner watchChanges transport]
+  F --> G[Owner checkpoint subscription]
   G --> H[Renderer read-only cache]
 ```
 
@@ -125,8 +125,7 @@ Expose an owned, bounded Native wake channel outside ordinary request execution.
 Register before obtaining the initial head; drain the persisted journal from its
 checkpoint. Signals may coalesce, but journal coverage cannot be lost. Both local
 writes and remote sync commits on the shared Native owner must wake it. Reuse
-Machine RPC/Electron `watchChanges` for consumers; do not add per-session network
-connections. A stopped subscriber releases its waiter, not the shared writer.
+Machine RPC and local Electron subscriptions for consumers. A stopped subscriber releases its waiter, not the shared writer.
 
 Trigger: active history observers. Owner: the existing pooled Native client,
 with per-session leases. Cancellation: unsubscribe/abort joins or unregisters the

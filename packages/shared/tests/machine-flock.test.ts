@@ -25,6 +25,7 @@ import {
   getRateLimitEntryKey,
   parseRateLimitEntryKey,
   getAcpCapabilityCacheKey,
+  withAgentSessionDefaults,
   type AgentConfigId,
   type LocalProjectId,
   type MachineId,
@@ -257,6 +258,39 @@ describe('machine Flock helpers', () => {
     expect(projects['b' as LocalProjectId]?.githubRepoFullName).toBeUndefined();
   });
 
+  it('normalizes lightweight Git summary fields on localProject rows', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.localProject('git-proj' as LocalProjectId), {
+      id: 'git-proj',
+      name: 'git-proj',
+      rootPath: '/Users/developer/Code/git-proj',
+      createdAtMs: 1,
+      git: true,
+      defaultBranch: 'lody:branch:local:main',
+      currentBranch: 'feat/sync',
+    });
+    flock.set(machineFlockKeys.localProject('empty-git' as LocalProjectId), {
+      id: 'empty-git',
+      name: 'empty-git',
+      rootPath: '/Users/developer/Code/empty-git',
+      createdAtMs: 2,
+      git: true,
+      defaultBranch: null,
+      currentBranch: '   ',
+    });
+    const projects = getMachineFlockLocalProjects(readMachineFlockRowsFromFlock(flock));
+    expect(projects['git-proj' as LocalProjectId]).toMatchObject({
+      git: true,
+      defaultBranch: 'lody:branch:local:main',
+      currentBranch: 'feat/sync',
+    });
+    expect(projects['empty-git' as LocalProjectId]).toMatchObject({
+      git: true,
+      defaultBranch: null,
+    });
+    expect(projects['empty-git' as LocalProjectId]?.currentBranch).toBeUndefined();
+  });
+
   it('extracts ACP capability rows independently for configs sharing a provider', () => {
     const configId = 'config-1' as AgentConfigId;
     const secondConfigId = 'config-2' as AgentConfigId;
@@ -482,6 +516,64 @@ describe('machine Flock helpers', () => {
     expect(
       configs['kimi' as AgentConfigId]?.runtimeOverrides?.antigravitySkipPermissions
     ).toBeUndefined();
+  });
+
+  it('keeps a Provider session defaults and drops only malformed values', () => {
+    const flock = new FakeMachineFlock();
+    flock.set(machineFlockKeys.agentConfig('sorbet' as AgentConfigId), {
+      id: 'sorbet',
+      machineId: 'machine-1',
+      name: 'Lody Agent',
+      cliType: 'builtin',
+      agentType: 'sorbet',
+      env: {},
+      sessionDefaults: {
+        modelId: 'anthropic/claude-fable-5',
+        configOptionValues: { permission_mode: 'auto', fast: true, broken: { nested: 1 } },
+        modelConfigOptionValues: {
+          'anthropic/claude-fable-5': { thought_level: 'high', 'fast-mode': 'ultrafast' },
+          'openai/gpt-6': { thought_level: 'low', secret_api_key: 'sk-drop' },
+          empty_model: { broken: { nested: 1 } },
+        },
+      },
+    });
+    flock.set(machineFlockKeys.agentConfig('other' as AgentConfigId), {
+      id: 'other',
+      machineId: 'machine-1',
+      name: 'Other',
+      cliType: 'builtin',
+      agentType: 'sorbet',
+      env: {},
+      sessionDefaults: 'not an object',
+    });
+
+    const configs = getMachineFlockAgentConfigs(
+      readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
+    );
+    const savedDefaults = configs['sorbet' as AgentConfigId]?.sessionDefaults;
+    expect(savedDefaults).toEqual({
+      modelId: 'anthropic/claude-fable-5',
+      configOptionValues: { permission_mode: 'auto', fast: true },
+      modelConfigOptionValues: {
+        'anthropic/claude-fable-5': { thought_level: 'high', 'fast-mode': 'ultrafast' },
+        'openai/gpt-6': { thought_level: 'low' },
+      },
+    });
+    expect(withAgentSessionDefaults({ modelId: 'openai/gpt-6' }, savedDefaults)).toEqual({
+      modelId: 'openai/gpt-6',
+      configOptionValues: {
+        permission_mode: 'auto',
+        thought_level: 'low',
+      },
+    });
+    expect(withAgentSessionDefaults({ modelId: 'model-without-effort' }, savedDefaults)).toEqual({
+      modelId: 'model-without-effort',
+      configOptionValues: {
+        permission_mode: 'auto',
+      },
+    });
+    expect(configs['other' as AgentConfigId]?.name).toBe('Other');
+    expect(configs['other' as AgentConfigId]?.sessionDefaults).toBeUndefined();
   });
 
   it('round-trips arbitrary ACP provider names through scoped quota rows', () => {

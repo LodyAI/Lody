@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent, within } from 'storybook/test';
 import type {
@@ -9,6 +10,16 @@ import type {
   SessionMeta,
 } from '@lody/shared';
 import { DeviceResourceMonitor } from '@/components/settings/device-resource-monitor';
+const storyLayout = stylex.create({
+  frame: {
+    'margin-inline': 'auto',
+    'min-height': '100vh',
+    'max-width': '64rem',
+    'background-color': 'hsl(var(--background) / 1)',
+    'padding-block': 'calc(var(--spacing) * 6)',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+});
 
 const resource = {
   memoryBytes: 768 * 1024 * 1024,
@@ -128,7 +139,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <div className="mx-auto min-h-screen max-w-5xl bg-background py-6 text-foreground">
+      <div {...stylex.props(storyLayout.frame)}>
         <Story />
       </div>
     ),

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
@@ -8,6 +9,10 @@ import {
 } from '@/components/chat/chat-landing-derived';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { mobileWorkspaceBaseContextAtom } from '@/atoms';
+
+const styles = stylex.create({
+  root: { height: '100%' },
+});
 
 export type ChatSearch = ChatLandingSearch;
 
@@ -27,10 +32,22 @@ function ChatRoute() {
   // a visit to a new page, so the mirror always replaces.
   const handleSelectionUrlSync = useCallback(
     (selectionSearch: ChatLandingSearch) => {
-      void navigate({ search: selectionSearch, replace: true });
+      void navigate({
+        search: (previous) =>
+          previous.pinSection
+            ? { ...selectionSearch, pinSection: previous.pinSection }
+            : selectionSearch,
+        replace: true,
+      });
     },
     [navigate]
   );
+  const handleClearPinSection = useCallback(() => {
+    void navigate({
+      search: ({ pinSection: _cleared, ...rest }) => rest,
+      replace: true,
+    });
+  }, [navigate]);
 
   /* On mobile the home/project landing is owned by `MobileWorkspaceStack` (so
      it stays mounted beneath the session overlay). Publish this route's
@@ -53,7 +70,7 @@ function ChatRoute() {
   }
 
   return (
-    <div className="h-full" data-window-workspace-ready={workspaceName}>
+    <div {...stylex.props(styles.root)} data-window-workspace-ready={workspaceName}>
       <ChatLanding
         workspaceSlug={workspaceName}
         preSelectedContext={search.context}
@@ -61,6 +78,8 @@ function ChatRoute() {
         preSelectedProject={search.project}
         preSelectedRepo={search.repo}
         preSelectedGroup={search.group}
+        pinSectionId={search.pinSection}
+        onClearPinSection={handleClearPinSection}
         onSelectionUrlSync={handleSelectionUrlSync}
       />
     </div>

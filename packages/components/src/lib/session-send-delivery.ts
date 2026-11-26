@@ -1,3 +1,4 @@
+import { requestFailureCode } from './e2ee-actionable-failure';
 import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
@@ -192,7 +193,7 @@ async function awaitQueuedOriginal(
 }
 
 /** An input with no signed intent cannot start, so an unsigned input is not sent at all. */
-async function prepareSignedIntent(
+export async function prepareSignedIntent(
   runtime: SessionSendRuntime,
   sessionId: SessionId,
   input: Pick<SessionHistory, 'id' | 'userId' | 'timestamp' | 'inputConfig'> & {
@@ -221,9 +222,22 @@ async function prepareSignedIntent(
     if (!prepared.original.e2eeIntent) throw new Error('e2ee_intent_missing');
     return prepared.original.e2eeIntent;
   } catch (error) {
-    throw notSent(
-      isKnownMachineWithdrawal(error) ? 'e2ee.machineSharing.issue.notShared' : 'sessions.sendError'
-    );
+    if (isKnownMachineWithdrawal(error)) throw notSent('e2ee.machineSharing.issue.notShared');
+    const code = requestFailureCode(error);
+    if (
+      code === 'e2ee_rpc_prepare_timeout' ||
+      (error instanceof Error && error.name === 'AbortError')
+    )
+      throw notSent('sessions.sendError.e2eeTimeout');
+    if (
+      /^(?:e2ee_)?(?:identity_pending|key_pending|key_unavailable|key-update-required|waiting_for_key|runtime_unavailable|approval-required)$/.test(
+        code ?? ''
+      )
+    )
+      throw notSent('sessions.sendError.e2eeNotReady');
+    if (/^(?:e2ee_)?(?:revoked|unauthorized|device_revoked|member_removed)$/.test(code ?? ''))
+      throw notSent('sessions.sendError.e2eeRevoked');
+    throw notSent('sessions.sendError');
   }
 }
 
@@ -514,7 +528,9 @@ export async function steerUserTurn(
   }
   if (
     !response?.recoveryOwned &&
-    (response?.disposition === 'no-active-turn' || response?.disposition === 'promotion-failed')
+    (response?.disposition === 'no-active-turn' ||
+      response?.disposition === 'promotion-failed' ||
+      response?.disposition === 'unsupported')
   ) {
     await promoteGuideToFollowUp(runtime, sessionId, userTurnId, { inputConfig, machineId });
     log('steer became an ordinary follow-up for %s/%s', sessionId, userTurnId);

@@ -1,3 +1,4 @@
+import { isLoroStreamsWebSocketEnabled } from '../../packages/shared/src/loro-streams-websocket'
 import { resolveSessionShareOrigin } from '../../scripts/session-share-origin.mjs'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
 
@@ -9,9 +10,8 @@ import type { UserConfig } from 'electron-vite'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
-import tailwindcss from '@tailwindcss/vite'
 import stylex from '@stylexjs/unplugin'
-import { stylexOptions } from '../../packages/ui/stylex-options'
+import { componentsStylexOptions } from '../../packages/components/stylex-options'
 import {
   loroCrdtBundlerAlias,
   loroCrdtWasmUrlWorkaround
@@ -27,6 +27,13 @@ import { resolveCloudElectronUpdateConfig } from './sparkle-packaging.mjs'
 import { resolveElectronReleaseProfile } from './release-profile.mjs'
 
 const electronDir = __dirname
+const electronWorkspaceDeps = Object.keys(
+  (
+    JSON.parse(fs.readFileSync(resolve(electronDir, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+  ).dependencies ?? {}
+).filter((dep) => dep.startsWith('@lody/'))
 const componentsDir = resolve(__dirname, '../../packages/components')
 const repoRoot = resolve(__dirname, '../..')
 
@@ -60,6 +67,11 @@ function loadBuildEnv(buildMode: string): Record<string, string> {
     if (!env[key]?.trim()) throw new Error(`Cloud Electron requires ${key}`)
   }
   env.VITE_LODY_PLATFORM = 'cloud'
+  const streamsWebSocket =
+    process.env.LODY_LORO_STREAMS_WS_ENABLED ?? env.VITE_LORO_STREAMS_WS_ENABLED
+  env.VITE_LORO_STREAMS_WS_ENABLED = isLoroStreamsWebSocketEnabled(undefined, streamsWebSocket)
+    ? '1'
+    : '0'
   return env
 }
 
@@ -177,7 +189,18 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
           formats: ['cjs']
         },
         externalizeDeps: {
-          exclude: ['@lody/cli-supervisor', '@lody/shared', 'effect'],
+          exclude: [
+            ...new Set([
+              '@devframes/agentic',
+              '@devframes/hub',
+              '@devframes/json-render',
+              '@lody/cli-supervisor',
+              '@lody/shared',
+              'devframe',
+              'effect',
+              ...electronWorkspaceDeps
+            ])
+          ],
           include: [
             'better-sqlite3',
             '@devframes/hub-ui',
@@ -201,7 +224,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
           formats: ['cjs']
         },
         externalizeDeps: {
-          exclude: ['@lody/shared']
+          exclude: [...new Set(['@lody/shared', ...electronWorkspaceDeps])]
         }
       }
     },
@@ -211,6 +234,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
       envPrefix,
       define: {
         ...viteEnvDefine,
+        __LODY_ELECTRON_RENDERER__: 'true',
         __BUILD_DATE__: JSON.stringify(buildDate),
         __GIT_COMMIT__: JSON.stringify(gitCommit),
         __APP_VERSION__: JSON.stringify(releaseProfile.version),
@@ -278,8 +302,7 @@ export default function cloudConfig({ mode }: { command: string; mode: string })
         cloudRendererCspHtmlPlugin({
           env: runtimeEnv
         }),
-        tailwindcss(),
-        stylex.vite(stylexOptions),
+        stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

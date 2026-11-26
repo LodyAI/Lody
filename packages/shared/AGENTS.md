@@ -12,6 +12,12 @@ Meta/Flock catch-up keeps replica-bound checkpoints and merges into the live rep
 [Streams catch-up](../../.agents/docs/workspace-catalog-durability.md#streams-catch-up)
 explains size selection and cursor-only timeout recovery.
 
+Every workspace-owned Loro Streams stream ID must start with `{workspaceId}:` before any
+feature discriminator; before adding or changing stream IDs, buckets, or token scopes,
+read [Loro Streams UserSpace](../../.agents/docs/loro-streams-user-space.md).
+
+Cloud auth callbacks reject credential failures; undefined permits anonymous transport requests.
+
 ## Session history
 
 - History tolerates unknown string item types without rewriting or blocking unrelated writes.

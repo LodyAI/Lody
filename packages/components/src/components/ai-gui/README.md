@@ -298,7 +298,10 @@ states, and the "no output" status).
 
 Opening or closing a work group, tool group, command detail or terminal detail
 switches the conversation to reading mode and holds the clicked header at its
-screen position. This also applies at the bottom: manually inspecting work takes
+screen position. Expanding an inner activity group also records its segment's
+`WorkedGroup` as open when previously unset, so live-opened thoughts/tools stay
+open when the turn finishes and collapsing the inner group later does not fold
+the outer region out from under the clicked header (explicit outer toggles still win). This also applies at the bottom: manually inspecting work takes
 precedence over following new output. The reader can resume following by scrolling
 to the real bottom or using the scroll-to-latest control.
 
@@ -326,11 +329,13 @@ stories. Native device touch acceptance remains separate from browser coverage.
 ## Subagent tasks
 
 `subagent-task-panel.tsx` renders a turn's `subagent_task` items as one card of
-ruled rows. A row's first line is the task and its time; a running task adds a
-second line with its latest step, taken from the last `run.items` entry, then
-`run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
-working. While any task is pending or running, the finished turn keeps this
-panel after its answer; once every task is terminal, the panel returns to the
+ruled rows. A row shows the task and its time, followed by any reported model
+and reasoning effort. The dialog header shows the same configuration alongside
+status and usage. Both surfaces read the child's run snapshot or the model on a
+legacy task row. Each missing field is omitted. A running task also shows its
+latest step from the last `run.items` entry, then `run.progress`, then the legacy
+`summary`/`lastToolName`. While any task is pending or running, the finished turn
+keeps this panel after its answer. Once every task is terminal, the panel returns to the
 folded work details. When a turn has both agent runs and other tasks (shell
 commands, MCP tasks, monitors, scheduled wakeups), the rows split into a Subagents
 tab, selected first, and a Tasks tab; each tab shows a spinner while live and
@@ -426,7 +431,8 @@ Session data and action controls continue updating. This is independent of
 `message-selection.tsx`, which selects messages for image sharing.
 
 The chat quote action floats above the first visible selected line, centered on
-that line. It measures its rendered size, flips below the selection when there is
+that line, and stays beneath modal backdrops and panels. It measures its rendered
+size, flips below the selection when there is
 no room above, and stays inside the conversation and safe viewport bounds. A
 continuous selection may span text rows of the same turn when every intervening
 row is mounted and contains quoteable text. Other cross-region selections request
@@ -448,7 +454,7 @@ records lifecycle, alternatives, and platform verification limits.
 
 `message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
 Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. When session navigation is available, `view.tsx` also renders an inline source-conversation return link in the user message metadata row using the cached session title (or the generic source label). Human profiles remain
-in `view.tsx`; execution controls continue to describe the receiving turn. The
+in `view.tsx`, shared by `PendingMessageRow` and `UserMessageRowView` across local send, attachment preparation and hydrated history, and gated on multi-member workspaces ([human sender identity](../../../../../.agents/notes/implemented/feature/2026-09-08-chat-sender-identity.md)); execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.
 

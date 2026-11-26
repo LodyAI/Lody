@@ -2,6 +2,9 @@ import { resolveSettings } from '@anthropic-ai/claude-agent-sdk';
 import { runAcp } from 'acp-extension-claude';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { installAcpAdapterHttpProxySupport } from './utils/acp-http-proxy';
+
+delete process.env.ELECTRON_RUN_AS_NODE;
 
 function normalizeClaudeConfigDirEnv(raw: string | undefined): void {
   if (raw === undefined) return;
@@ -43,6 +46,8 @@ console.log = console.error;
 console.info = console.error;
 console.warn = console.error;
 console.debug = console.error;
+
+installAcpAdapterHttpProxySupport();
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);

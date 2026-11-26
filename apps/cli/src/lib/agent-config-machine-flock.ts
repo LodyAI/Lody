@@ -1,6 +1,8 @@
 import {
   deleteAgentConfigFromFlock,
+  getAcpCapabilityCacheKey,
   getAgentConfigRoomId,
+  getMachineFlockAcpCapabilities,
   getMachineFlockAgentConfigs,
   getMachineFlockBuiltinAgentOptOuts,
   getMachineFlockDocId,
@@ -11,6 +13,7 @@ import {
   MACHINE_DOC_PREFIX,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  type AcpCapabilityCacheEntry,
   type AgentConfigId,
   type AgentConfigMeta,
   type AgentConfigCliType,
@@ -35,6 +38,20 @@ export async function readMachineBuiltinAgentOptOuts(
   return getMachineFlockBuiltinAgentOptOuts(
     readMachineFlockRowsFromFlock(handle.flock, { families: ['builtinAgentOptOut'] })
   );
+}
+
+export async function readMachineAcpCapabilityById(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  agentConfigId: AgentConfigId
+): Promise<AcpCapabilityCacheEntry | undefined> {
+  const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+  return getMachineFlockAcpCapabilities(
+    readMachineFlockRowsFromFlock(handle.flock, {
+      prefixes: [machineFlockKeys.acpCapability(agentConfigId)],
+    })
+  )[getAcpCapabilityCacheKey(agentConfigId)];
 }
 
 export async function readMachineAgentConfigs(

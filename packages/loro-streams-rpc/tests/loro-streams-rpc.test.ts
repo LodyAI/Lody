@@ -15,6 +15,7 @@ type MockStreamsClientOptions = {
   url: URL | string;
   auth?: () => Promise<string>;
   fetch?: typeof fetch;
+  webSocket?: unknown;
   timeout?: unknown;
 };
 
@@ -36,9 +37,11 @@ const streamsClientMockFns = {
 };
 
 const streamsClientInstances: MockStreamsClientInstance[] = [];
+let useRealStreamsClient = false;
 
-vi.mock('@loro-dev/streams-client', () => ({
-  StreamsClient: class {
+vi.mock('@loro-dev/streams-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@loro-dev/streams-client')>();
+  class MockStreamsClient {
     readonly options: MockStreamsClientOptions;
     readonly create = vi.fn((...args: unknown[]) => streamsClientMockFns.create(...args));
     readonly head = vi.fn((...args: unknown[]) => streamsClientMockFns.head(...args));
@@ -50,10 +53,35 @@ vi.mock('@loro-dev/streams-client', () => ({
       this.options = options;
       streamsClientInstances.push(this as unknown as MockStreamsClientInstance);
     }
-  },
-}));
+  }
+
+  return {
+    ...actual,
+    StreamsClient: new Proxy(actual.StreamsClient, {
+      construct(_target, args) {
+        if (useRealStreamsClient) {
+          return new actual.StreamsClient(
+            ...(args as [ConstructorParameters<typeof actual.StreamsClient>[0]])
+          );
+        }
+        return new MockStreamsClient(...(args as [MockStreamsClientOptions]));
+      },
+    }),
+  };
+});
 
 import {
+  DS_WS_SUBPROTOCOL_V1_1,
+  acquireDurableWsMultiplexer,
+  decodeClientFrame,
+  deriveWsAuthPoolKey,
+  encodeServerFrame,
+  type DsWebSocketFactory,
+  type DsWebSocketLike,
+  type WsAppendFrame,
+} from '@loro-dev/streams-client';
+import {
+  LORO_STREAMS_RPC_RETENTION_SECONDS,
   LoroStreamsGatewayError,
   LoroStreamsLiveModePolicy,
   LoroStreamsMachineRpcClient,
@@ -445,7 +473,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     const request = fake.appended[0]?.value as { id: string; replyTo: string; method: string };
     expect(request.method).toBe('machine/status');
     expect(fake.appended[0]?.streamId).toBe('workspace-1:rpc:req:machine-1');
-    expect(fake.ensured).toEqual([]);
+    expect(fake.ensured).toEqual([request.replyTo]);
 
     fake.pushBatch({
       messages: [
@@ -1026,7 +1054,7 @@ describe('LoroStreamsMachineRpcClient', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('appends first RPC without pre-ensuring streams from the Web client', async () => {
+  it('pre-ensures fresh random UUID response stream without pre-ensuring request stream', async () => {
     const events: string[] = [];
     const streamClient: LoroStreamsJsonStreamClient = {
       ensureJsonStream: vi.fn(async (streamId: string) => {
@@ -1057,7 +1085,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect(streamClient.appendJson).toHaveBeenCalled();
     });
 
-    expect(events).toEqual(['append:workspace-1:rpc:req:machine-1']);
+    expect(events).toEqual([
+      expect.stringMatching(/^ensure:workspace-1:rpc:res:machine-1:/),
+      'append:workspace-1:rpc:req:machine-1',
+    ]);
     expect(streamClient.appendJson).toHaveBeenCalledWith(
       'workspace-1:rpc:req:machine-1',
       expect.objectContaining({
@@ -2030,6 +2061,74 @@ describe('LoroStreamsMachineRpcClient', () => {
       })
     );
 
+    const listPromise = client.requestLocalProjectBranches({
+      localProjectId: 'local-project-1' as LocalProjectId,
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+      timeoutMs: 5000,
+    });
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(2);
+    });
+    const listRequest = fake.appended[1]?.value as {
+      id: string;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+    expect(listRequest.method).toBe('local-project/list-branches');
+    expect(listRequest.params).toEqual({
+      localProjectId: 'local-project-1',
+      requestedByUserId: 'user-1',
+      query: 'feature',
+      limit: 20,
+      cursor: '20',
+    });
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: listRequest.id,
+          method: 'local-project/list-branches',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'local-project/list-branches_response',
+            machineId: 'machine-1',
+            workspaceId: 'workspace-1',
+            localProjectId: 'local-project-1',
+            success: true,
+            observedAtMs: 456,
+            result: {
+              git: true,
+              currentBranch: 'feature/a',
+              defaultBranch: 'main',
+              pinnedBranches: ['main', 'feature/a'],
+              branches: ['feature/a', 'feature/b'],
+              truncated: true,
+              nextCursor: '40',
+              totalCount: 65,
+            },
+          },
+        },
+      ],
+      nextOffset: '5',
+      cursor: 'cursor-5',
+      upToDate: true,
+    });
+    await expect(listPromise).resolves.toEqual(
+      expect.objectContaining({
+        type: 'local-project/list-branches_response',
+        success: true,
+        result: expect.objectContaining({
+          git: true,
+          branches: ['feature/a', 'feature/b'],
+          nextCursor: '40',
+        }),
+      })
+    );
+
     client.stop();
   });
 
@@ -2737,6 +2836,297 @@ describe('createLoroStreamsJsonStreamClient', () => {
       expect(settled).toBe(true);
       expect(lastLiveSignal().aborted).toBe(true);
     });
+
+    it('keeps the idle watchdog disarmed during quiet WebSocket live reads', async () => {
+      streamsClientMockFns.live.mockImplementation((input: { signal?: AbortSignal }) =>
+        (async function* () {
+          yield { type: 'up_to_date', mode: 'ws', nextOffset: '10', cursor: undefined };
+          await new Promise<void>((resolve) => {
+            input.signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+        })()
+      );
+      const client = createLoroStreamsJsonStreamClient({
+        bucketId: 'bucket-1',
+        getToken: async () => 'token-1',
+        baseUrl: 'https://streams.example.com',
+        liveIdleTimeoutMs: 500,
+        webSocket: {
+          enabled: true,
+          url: 'https://streams.example.com',
+          authPoolKey: 'ws-pool-1',
+        },
+      });
+
+      const parent = new AbortController();
+      let settled = false;
+      const read = client
+        .readJsonLive('workspace-1:rpc:res:client-1', { nextOffset: 'now' }, () => {}, {
+          signal: parent.signal,
+        })
+        .then(() => {
+          settled = true;
+        });
+
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(settled).toBe(false);
+      expect(lastLiveSignal().aborted).toBe(false);
+
+      parent.abort();
+      await flushMicrotasks();
+      await read;
+      expect(settled).toBe(true);
+    });
+  });
+
+  it('passes webSocket, mode auto, and autoCreate when WebSocket is enabled', async () => {
+    const webSocket = {
+      enabled: true as const,
+      url: 'https://streams.example.com',
+      authPoolKey: 'workspace-1',
+    };
+    streamsClientMockFns.live.mockReturnValue(
+      (async function* () {
+        yield {
+          type: 'up_to_date',
+          mode: 'ws',
+          nextOffset: '11',
+          cursor: undefined,
+        };
+        yield {
+          type: 'data',
+          mode: 'ws',
+          nextOffset: '12',
+          cursor: undefined,
+          payload: createMockStreamPart({ id: 'ws-msg-1' }),
+        };
+      })()
+    );
+    const client = createLoroStreamsJsonStreamClient({
+      bucketId: 'bucket-1',
+      getToken: async () => 'token-1',
+      baseUrl: 'https://streams.example.com',
+      webSocket,
+    });
+    const batches: LoroJsonStreamBatch[] = [];
+
+    await client.readJsonLive(
+      'workspace-1:rpc:res:client-1',
+      { nextOffset: '-1' },
+      (batch) => {
+        batches.push(batch);
+      },
+      { autoCreate: { contentType: 'application/json', ttlSeconds: 3600 } }
+    );
+
+    expect(client.webSocketEnabled).toBe(true);
+    expect(getLastStreamsClientInstance().options.webSocket).toEqual(webSocket);
+    expect(streamsClientMockFns.live).toHaveBeenCalledWith({
+      offset: '-1',
+      mode: 'auto',
+      webSocket,
+      autoCreate: { contentType: 'application/json', ttlSeconds: 3600 },
+      signal: expect.any(AbortSignal),
+    });
+    expect(batches).toEqual([
+      { messages: [], nextOffset: '11', cursor: undefined, upToDate: true },
+      { messages: [{ id: 'ws-msg-1' }], nextOffset: '12', cursor: undefined, upToDate: false },
+    ]);
+  });
+
+  it('keeps long-poll mode when pinned even with WebSocket enabled', async () => {
+    const webSocket = {
+      enabled: true as const,
+      url: 'https://streams.example.com',
+      authPoolKey: 'workspace-1',
+    };
+    streamsClientMockFns.live.mockReturnValue(
+      (async function* () {
+        yield { type: 'up_to_date', mode: 'long-poll', nextOffset: '1', cursor: 'c1' };
+      })()
+    );
+    const client = createLoroStreamsJsonStreamClient({
+      bucketId: 'bucket-1',
+      getToken: async () => 'token-1',
+      baseUrl: 'https://streams.example.com',
+      webSocket,
+    });
+    const policy = new LoroStreamsLiveModePolicy({ pin: 'long-poll' });
+
+    await client.readJsonLive('workspace-1:rpc:res:client-1', { nextOffset: 'now' }, () => {}, {
+      modePolicy: policy,
+    });
+
+    expect(streamsClientMockFns.live).toHaveBeenCalledWith({
+      offset: 'now',
+      mode: 'long-poll',
+      webSocket,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('uses WS APPEND on the shared ready multiplexer for small payloads and falls back to HTTP POST above 256 KiB', async () => {
+    const wsAppends: WsAppendFrame[] = [];
+    const httpPosts: Array<{ url: string; bodyBytes: number }> = [];
+    let wsFactoryCalls = 0;
+
+    const webSocketFactory: DsWebSocketFactory = () => {
+      wsFactoryCalls += 1;
+      const socket: DsWebSocketLike = {
+        protocol: DS_WS_SUBPROTOCOL_V1_1,
+        binaryType: 'arraybuffer',
+        onopen: null,
+        onmessage: null,
+        onclose: null,
+        onerror: null,
+        send(data) {
+          const bytes = data instanceof Uint8Array ? data : new Uint8Array(data as ArrayBuffer);
+          const frame = decodeClientFrame(bytes, true);
+          if (frame.type === 'auth') {
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'auth_ok',
+                    reqId: frame.reqId,
+                    expiresAtUnixSec: BigInt(Math.floor(Date.now() / 1000) + 3600),
+                  },
+                  true
+                ),
+              });
+            });
+          } else if (frame.type === 'join') {
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'join_ok',
+                    alias: frame.alias,
+                    startOffset: 0n,
+                    streamClosed: false,
+                    contentType: 'application/json',
+                  },
+                  true
+                ),
+              });
+            });
+          } else if (frame.type === 'leave') {
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'left',
+                    alias: frame.alias,
+                    serverInitiated: false,
+                  },
+                  true
+                ),
+              });
+            });
+          } else if (frame.type === 'append') {
+            wsAppends.push(frame);
+            queueMicrotask(() => {
+              socket.onmessage?.({
+                data: encodeServerFrame(
+                  {
+                    type: 'ack',
+                    reqId: frame.reqId,
+                    nextOffset: 42n,
+                    created: false,
+                    duplicate: false,
+                  },
+                  true
+                ),
+              });
+            });
+          }
+        },
+        close() {},
+      };
+      queueMicrotask(() => socket.onopen?.({}));
+      return socket;
+    };
+
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const bodyBytes =
+          typeof init.body === 'string'
+            ? new TextEncoder().encode(init.body).byteLength
+            : init.body instanceof ArrayBuffer || ArrayBuffer.isView(init.body)
+              ? init.body.byteLength
+              : 0;
+        httpPosts.push({ url, bodyBytes });
+      }
+      return new Response(null, {
+        status: 204,
+        headers: { 'Stream-Next-Offset': '00000000000000000099' },
+      });
+    });
+
+    const authPoolKey = 'workspace-ws-append-test';
+    const wsAuth = async () => 'token-1';
+    const lease = acquireDurableWsMultiplexer({
+      url: 'https://streams.example.com',
+      authPoolKey: deriveWsAuthPoolKey({ authPoolKey }, wsAuth),
+      auth: wsAuth,
+      probe: false,
+      webSocketFactory,
+    });
+
+    const sub = lease.multiplexer.joinDurable('bucket-1/workspace-1:rpc:res', 'tail', {
+      onData() {},
+    });
+
+    useRealStreamsClient = true;
+    try {
+      await vi.waitFor(() => expect(lease.multiplexer.state).toBe('ready'));
+
+      const client = createLoroStreamsJsonStreamClient({
+        bucketId: 'bucket-1',
+        getToken: async () => 'token-1',
+        baseUrl: 'https://streams.example.com',
+        fetchImpl,
+        webSocket: {
+          enabled: true,
+          url: 'https://streams.example.com',
+          authPoolKey,
+          auth: wsAuth,
+          probe: false,
+          webSocketFactory,
+        },
+      });
+
+      const smallPayload = { jsonrpc: '2.0', id: 'req-small', method: 'machine/ping' };
+      await expect(client.appendJson('workspace-1:rpc:req:machine-1', smallPayload)).resolves.toBe(
+        '00000000000000000042'
+      );
+      expect(wsFactoryCalls).toBe(1);
+      expect(httpPosts).toHaveLength(0);
+      expect(wsAppends).toHaveLength(1);
+      expect(wsAppends[0]?.stream).toBe('bucket-1/workspace-1:rpc:req:machine-1');
+      expect(wsAppends[0]?.contentType).toBe('application/json');
+      expect(JSON.parse(new TextDecoder().decode(wsAppends[0]?.payload))).toEqual(smallPayload);
+
+      const largePayload = {
+        jsonrpc: '2.0',
+        id: 'req-large',
+        data: 'x'.repeat(270 * 1024),
+      };
+      await expect(client.appendJson('workspace-1:rpc:req:machine-1', largePayload)).resolves.toBe(
+        '00000000000000000099'
+      );
+      expect(wsAppends).toHaveLength(1);
+      expect(httpPosts).toHaveLength(1);
+      expect(httpPosts[0]?.url).toBe(
+        'https://streams.example.com/ds/bucket-1/workspace-1%3Arpc%3Areq%3Amachine-1'
+      );
+      expect(httpPosts[0]?.bodyBytes).toBeGreaterThan(256 * 1024);
+    } finally {
+      useRealStreamsClient = false;
+      await sub.leave().catch(() => {});
+      lease.release();
+    }
   });
 });
 
@@ -3389,6 +3779,101 @@ describe('machine RPC response live transport fallback', () => {
 
     dispatcher.stop();
   });
+
+  it('skips upfront ensureJsonStream PUT and passes autoCreate when WebSocket is enabled', async () => {
+    const liveCalls: Array<Record<string, unknown>> = [];
+    const webSocket = {
+      enabled: true as const,
+      url: 'https://streams.example.com',
+      authPoolKey: 'workspace-1',
+    };
+    streamsClientMockFns.live.mockImplementation((input: Record<string, unknown>) => {
+      liveCalls.push(input);
+      return (async function* () {
+        yield { type: 'up_to_date', mode: 'ws', nextOffset: '0', cursor: undefined };
+        await untilAborted(input.signal as AbortSignal | undefined);
+      })();
+    });
+
+    const streamClient = createLoroStreamsJsonStreamClient({
+      bucketId: 'bucket-1',
+      getToken: async () => 'token-1',
+      baseUrl: 'https://streams.example.com',
+      webSocket,
+    });
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res',
+      precreateResponseStream: true,
+      liveModePolicy: new LoroStreamsLiveModePolicy({ sseReadFailureLimit: 2 }),
+    });
+
+    await dispatcher.start();
+    await flushMicrotasks();
+
+    expect(streamsClientMockFns.create).not.toHaveBeenCalled();
+    expect(liveCalls).toHaveLength(1);
+    expect(liveCalls[0]).toMatchObject({
+      offset: '-1',
+      mode: 'auto',
+      webSocket,
+      autoCreate: {
+        contentType: 'application/json',
+        ttlSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+      },
+    });
+    expect(dispatcher.getLiveModeDiagnostics()).toMatchObject({
+      transport: 'sse',
+      observedTransport: 'ws',
+      transportSwitches: 0,
+      consecutiveSseReadFailures: 0,
+    });
+
+    dispatcher.stop();
+  });
+
+  it('preserves upfront ensureJsonStream PUT and SSE mode when WebSocket is disabled', async () => {
+    const liveCalls: Array<Record<string, unknown>> = [];
+    streamsClientMockFns.create.mockResolvedValue({
+      ok: true,
+      result: { status: 201, contentType: 'application/json', nextOffset: '-1', closed: false },
+    });
+    streamsClientMockFns.live.mockImplementation((input: Record<string, unknown>) => {
+      liveCalls.push(input);
+      return (async function* () {
+        yield { type: 'up_to_date', mode: 'sse', nextOffset: '0', cursor: 'c0' };
+        await untilAborted(input.signal as AbortSignal | undefined);
+      })();
+    });
+
+    const streamClient = createLoroStreamsJsonStreamClient({
+      bucketId: 'bucket-1',
+      getToken: async () => 'token-1',
+      baseUrl: 'https://streams.example.com',
+    });
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res',
+      precreateResponseStream: true,
+      liveModePolicy: new LoroStreamsLiveModePolicy({ sseReadFailureLimit: 2 }),
+    });
+
+    await dispatcher.start();
+    await flushMicrotasks();
+
+    expect(streamsClientMockFns.create).toHaveBeenCalledTimes(1);
+    expect(liveCalls).toHaveLength(1);
+    expect(liveCalls[0]).toMatchObject({
+      offset: '-1',
+      mode: 'auto',
+    });
+    expect(liveCalls[0]).not.toHaveProperty('webSocket');
+    expect(liveCalls[0]).not.toHaveProperty('autoCreate');
+
+    dispatcher.stop();
+  });
 });
 
 describe('pending RPC deadline', () => {
@@ -3509,6 +3994,62 @@ describe('pending RPC deadline', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('pre-creates fresh random UUID responseStreamId with ensureJsonStream before readJsonLive', async () => {
+    const ops: string[] = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async (streamId) => {
+        ops.push(`ensure:${streamId}`);
+      }),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (streamId, state, _onBatch, options) => {
+        ops.push(`read:${streamId}:${state.nextOffset}`);
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+    });
+
+    await dispatcher.start();
+    await vi.waitFor(() => expect(ops.length).toBeGreaterThanOrEqual(2));
+    const responseStreamId = dispatcher.getResponseStreamId();
+    expect(ops).toEqual([`ensure:${responseStreamId}`, `read:${responseStreamId}:-1`]);
+    dispatcher.stop();
+  });
+
+  it('skips pre-creating when responseStreamId is caller-supplied', async () => {
+    const ops: string[] = [];
+    const streamClient: LoroStreamsJsonStreamClient = {
+      ensureJsonStream: vi.fn(async (streamId) => {
+        ops.push(`ensure:${streamId}`);
+      }),
+      appendJson: vi.fn(async () => 'next-offset'),
+      readJsonLive: vi.fn(async (streamId, state, _onBatch, options) => {
+        ops.push(`read:${streamId}:${state.nextOffset}`);
+        await new Promise((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          })
+        );
+      }),
+    };
+    const dispatcher = new LoroStreamsRpcResponseDispatcher({
+      workspaceId: 'workspace-1',
+      streamClient,
+      responseStreamId: 'workspace-1:rpc:res:explicit-1',
+    });
+
+    await dispatcher.start();
+    await vi.waitFor(() => expect(ops).toHaveLength(1));
+    expect(ops).toEqual(['read:workspace-1:rpc:res:explicit-1:-1']);
+    dispatcher.stop();
   });
 });
 

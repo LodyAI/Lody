@@ -1252,6 +1252,77 @@ for (const mode of ['conflict', 'empty', 'misbound', 'paged']) {
   })
 }
 
+for (const code of [
+  'workspace_transfer_active_subscription',
+  'workspace_transfer_payment_required'
+]) {
+  void test(`retains only the transfer billing refusal code: ${code}`, async () => {
+    const group = stagedGroup()
+    const base = { head: Result.getOrThrow(Bytes.recordHash(Buffer.alloc(32, 2))), length: 1 }
+    const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async () =>
+            Response.json(
+              {
+                status: 'error',
+                errorMessage: 'synthetic-private-cause',
+                errorData: { code, secret: 'private' }
+              },
+              { status: 560 }
+            )
+          )
+          const log = client.ledgerLog(access.workspaceId)
+          yield* log.observe(base)
+          const result = yield* Effect.result(log.appendCas(anchor, base, group.record))
+          assert.equal(result.failure?._tag, 'LedgerLogError')
+          assert.equal(result.failure?.cause?.code, code)
+          assert.equal(JSON.stringify(result.failure).includes('private'), false)
+        })
+      )
+    )
+  })
+}
+
+for (const [retryAt, expected] of [
+  [1_800_000_000_000, { reason: 'self-service-rate-limited', retryAt: 1_800_000_000_000 }],
+  ['soon', { reason: undefined, retryAt: undefined }]
+]) {
+  void test(`maps the ledger self-service quota refusal once, without retrying (retryAt=${retryAt})`, async () => {
+    const group = stagedGroup()
+    const base = { head: Result.getOrThrow(Bytes.recordHash(Buffer.alloc(32, 2))), length: 1 }
+    const anchor = Result.getOrThrow(Bytes.genesisHash(Buffer.from(group.genesis, 'hex')))
+    const calls = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* build(async (_url, init) => {
+            calls.push(JSON.parse(init.body).path)
+            return Response.json(
+              {
+                status: 'error',
+                errorMessage: 'synthetic-private-cause',
+                errorData: { code: 'e2ee_self_service_rate_limited', retryAt }
+              },
+              { status: 560 }
+            )
+          })
+          const log = client.ledgerLog(access.workspaceId)
+          yield* log.observe(base)
+          const appended = yield* Effect.result(log.appendCas(anchor, base, group.record))
+          assert.equal(appended.failure?._tag, 'LedgerLogError')
+          assert.deepEqual(
+            { reason: appended.failure.reason, retryAt: appended.failure.retryAt },
+            expected
+          )
+          assert.deepEqual(calls, ['e2eeWorkspaces:appendRecord'])
+        })
+      )
+    )
+  })
+}
+
 void test('mailbox put and epoch staging inline receipts save post-write readbacks and stop asking older backends', async () => {
   const group = stagedGroup(),
     dto = encodeEpochStagedGroup(group),

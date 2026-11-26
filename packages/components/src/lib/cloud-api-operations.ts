@@ -153,6 +153,16 @@ const action = <Reference extends FunctionReference<'action'>>(
  * public cloud client contract, never from generated server API declarations.
  */
 export const cloudOperations = {
+  analytics: {
+    getUsageSharing: defineCloudQuery<{ accountId: string }, boolean>(
+      'telemetry',
+      'analytics:getUsageSharing'
+    ),
+    setUsageSharing: defineCloudMutation<{ enabled: boolean; accountId: string }, null>(
+      'telemetry',
+      'analytics:setUsageSharing'
+    ),
+  },
   e2eeMachineSharing: {
     listVersions: query<ConvexApi['e2eeMachineSharing']['listVersions']>(
       'e2eeMachineSharing:listVersions'
@@ -199,6 +209,9 @@ export const cloudOperations = {
       'e2eeWorkspaces:memberProfiles'
     ),
     create: action<ConvexApi['e2eeWorkspaces']['create']>('e2eeWorkspaces:create'),
+    deleteWorkspace: action<ConvexApi['e2eeWorkspaces']['deleteWorkspace']>(
+      'e2eeWorkspaces:deleteWorkspace'
+    ),
     describe: query<ConvexApi['e2eeWorkspaces']['describe']>('e2eeWorkspaces:describe'),
     history: action<ConvexApi['e2eeWorkspaces']['history']>('e2eeWorkspaces:history'),
   },

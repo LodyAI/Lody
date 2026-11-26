@@ -1,0 +1,1986 @@
+@layer theme, base, stylex, components, utilities;
+@import './fonts.css';
+@import 'katex/dist/katex.min.css';
+@import './reset.css';
+@import './theme-defaults.css';
+@import './scrollbars.css';
+
+@layer utilities {
+  /* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
+     of view. `auto` remembers each row's last rendered height; 50px is only the
+     estimate for rows never on screen (two-line repo rows are 54px, child and
+     chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
+     See SIDEBAR_ROW_LIST_CLASS. */
+  .sidebar-row-list > * {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 50px;
+  }
+}
+
+/* Override @pierre/diffs italic font style */
+:root {
+  --diffs-token-light-font-style: normal;
+  --diffs-token-dark-font-style: normal;
+  /* Appearance's document baseline; @lody/ui text tokens derive every role. */
+  --ui-font-size: 14px;
+
+  /* Editor z-indexes live behind CSS variables so the values stay concrete at
+     runtime and stack predictably under the app's modal overlays. */
+  --z-editor-diff-gutter: 10;
+  --z-editor-selection: 20;
+  --z-editor-cursor: 30;
+  --z-editor-cursor-label: 40;
+  --z-editor-hover: 50;
+  --z-dialog-overlay: 70;
+  --z-dialog: 80;
+  /* Popover-layer Radix portals (Select dropdowns etc.) must not sink below an
+     open dialog: same z as --z-dialog, and the later-mounted portal wins in DOM
+     order — the upstream shadcn model where popovers and dialogs share one z. */
+  --z-popover: 80;
+  --z-command-palette: 85;
+  --z-tooltip: 90;
+  /* The full-screen image viewer covers every other surface, but must stay
+     under toasts — its own confirmations ("Image copied") render there.
+     react-photo-view ships z-index 2000; `zoomable-image-viewer.css` pulls it
+     back onto this scale. */
+  --z-image-viewer: 95;
+  --z-toast: 100;
+}
+
+/*
+ * Inter and JetBrains Mono are loaded via @fontsource (see fonts.css).
+ */
+
+html,
+body {
+  height: 100%;
+  /* Let browser built-in controls adapt to light/dark theme */
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  /* Inter is bundled; keep system fonts as fallback only. */
+  font-family: var(--font-sans);
+  font-size: var(--ui-font-size, 14px);
+  line-height: 1.45;
+  /* Subpixel: the macOS default weight; `antialiased` thins text app-wide. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  /* Prevent iOS auto font-size adjustment */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Monospace font for code */
+code,
+pre {
+  font-family: var(--font-mono);
+  font-variant-ligatures: var(--lody-font-ligatures, contextual);
+}
+
+.font-terminal {
+  font-family: var(--font-terminal);
+  font-variant-ligatures: var(--lody-font-ligatures, contextual);
+}
+
+@layer utilities {
+  /* Markdown links and reference chips share the brand cyan. */
+  .markdown-renderer a {
+    color: hsl(200 72% 34%);
+  }
+  .dark .markdown-renderer a {
+    color: hsl(200 69% 70%);
+  }
+  /* Reference/link colours must yield to the same selected foreground as prose. */
+  [data-composer-editor] [data-mention-value][data-selected] {
+    color: HighlightText;
+  }
+
+  /* A link rendered as a reference label (GitHub PR / issue): a link-blue
+     tinted chip (no border) instead of the prose underline, so it reads as
+     clickable at a glance. The hue is the prose link's (`.text-markdown-link`). Outranks the
+     renderer's `[&_a]:` link variants in this same layer. */
+  .markdown-renderer :is(a, button, span).markdown-reference-chip {
+    --reference-chip-hue: 200 72% 34%;
+    color: hsl(var(--reference-chip-hue));
+    background-color: hsl(var(--reference-chip-hue) / 0.12);
+    text-decoration: none;
+  }
+  .markdown-renderer :is(a, button).markdown-reference-chip:hover {
+    background-color: hsl(var(--reference-chip-hue) / 0.18);
+  }
+  .dark .markdown-renderer :is(a, button, span).markdown-reference-chip {
+    --reference-chip-hue: 200 69% 70%;
+  }
+}
+
+@layer components {
+  /* Desktop settings content: in light themes the section/card surfaces take the
+     theme's popover fill (white in Lody Light) instead of the gray --card, so
+     grouped rows read as lifted panels on the page rather than gray-on-gray.
+     Dark themes keep their tuned --card. */
+  [data-settings-surface]:not(.dark *) {
+    --card: var(--popover);
+  }
+
+  /* Markdown table columns (`markdown-table.tsx`). Every column keeps a
+     floor so the auto layout cannot squeeze it to a character or two, and
+     breaks between words; a column holding a long unbroken token (path, URL,
+     hash) may also break inside it and has its maximum capped, so it wraps
+     instead of starving prose columns in the auto layout's distribution.
+     `<col>` widths give each column a content-estimated preferred width, and
+     an intrinsically wide column keeps a higher floor so it stays readable
+     when even the minimums already overflow. Beyond phone widths a column of
+     short cells stays on one line at its natural width. Columns past the
+     24th get no classification. */
+  .markdown-renderer [data-markdown-table] :is(th, td) {
+    min-width: 5em;
+    overflow-wrap: break-word;
+  }
+  .markdown-renderer
+    :is(
+      [data-break-anywhere-columns~='1'] tr > :nth-child(1),
+      [data-break-anywhere-columns~='2'] tr > :nth-child(2),
+      [data-break-anywhere-columns~='3'] tr > :nth-child(3),
+      [data-break-anywhere-columns~='4'] tr > :nth-child(4),
+      [data-break-anywhere-columns~='5'] tr > :nth-child(5),
+      [data-break-anywhere-columns~='6'] tr > :nth-child(6),
+      [data-break-anywhere-columns~='7'] tr > :nth-child(7),
+      [data-break-anywhere-columns~='8'] tr > :nth-child(8),
+      [data-break-anywhere-columns~='9'] tr > :nth-child(9),
+      [data-break-anywhere-columns~='10'] tr > :nth-child(10),
+      [data-break-anywhere-columns~='11'] tr > :nth-child(11),
+      [data-break-anywhere-columns~='12'] tr > :nth-child(12),
+      [data-break-anywhere-columns~='13'] tr > :nth-child(13),
+      [data-break-anywhere-columns~='14'] tr > :nth-child(14),
+      [data-break-anywhere-columns~='15'] tr > :nth-child(15),
+      [data-break-anywhere-columns~='16'] tr > :nth-child(16),
+      [data-break-anywhere-columns~='17'] tr > :nth-child(17),
+      [data-break-anywhere-columns~='18'] tr > :nth-child(18),
+      [data-break-anywhere-columns~='19'] tr > :nth-child(19),
+      [data-break-anywhere-columns~='20'] tr > :nth-child(20),
+      [data-break-anywhere-columns~='21'] tr > :nth-child(21),
+      [data-break-anywhere-columns~='22'] tr > :nth-child(22),
+      [data-break-anywhere-columns~='23'] tr > :nth-child(23),
+      [data-break-anywhere-columns~='24'] tr > :nth-child(24)
+    ) {
+    max-width: 20em;
+    overflow-wrap: anywhere;
+  }
+  .markdown-renderer
+    :is(
+      [data-wide-columns~='1'] tr > :nth-child(1),
+      [data-wide-columns~='2'] tr > :nth-child(2),
+      [data-wide-columns~='3'] tr > :nth-child(3),
+      [data-wide-columns~='4'] tr > :nth-child(4),
+      [data-wide-columns~='5'] tr > :nth-child(5),
+      [data-wide-columns~='6'] tr > :nth-child(6),
+      [data-wide-columns~='7'] tr > :nth-child(7),
+      [data-wide-columns~='8'] tr > :nth-child(8),
+      [data-wide-columns~='9'] tr > :nth-child(9),
+      [data-wide-columns~='10'] tr > :nth-child(10),
+      [data-wide-columns~='11'] tr > :nth-child(11),
+      [data-wide-columns~='12'] tr > :nth-child(12),
+      [data-wide-columns~='13'] tr > :nth-child(13),
+      [data-wide-columns~='14'] tr > :nth-child(14),
+      [data-wide-columns~='15'] tr > :nth-child(15),
+      [data-wide-columns~='16'] tr > :nth-child(16),
+      [data-wide-columns~='17'] tr > :nth-child(17),
+      [data-wide-columns~='18'] tr > :nth-child(18),
+      [data-wide-columns~='19'] tr > :nth-child(19),
+      [data-wide-columns~='20'] tr > :nth-child(20),
+      [data-wide-columns~='21'] tr > :nth-child(21),
+      [data-wide-columns~='22'] tr > :nth-child(22),
+      [data-wide-columns~='23'] tr > :nth-child(23),
+      [data-wide-columns~='24'] tr > :nth-child(24)
+    ) {
+    min-width: 9em;
+  }
+  @media (min-width: 641px) {
+    .markdown-renderer [data-markdown-table] :is(th, td) {
+      min-width: 8em;
+    }
+    .markdown-renderer
+      :is(
+        [data-wide-columns~='1'] tr > :nth-child(1),
+        [data-wide-columns~='2'] tr > :nth-child(2),
+        [data-wide-columns~='3'] tr > :nth-child(3),
+        [data-wide-columns~='4'] tr > :nth-child(4),
+        [data-wide-columns~='5'] tr > :nth-child(5),
+        [data-wide-columns~='6'] tr > :nth-child(6),
+        [data-wide-columns~='7'] tr > :nth-child(7),
+        [data-wide-columns~='8'] tr > :nth-child(8),
+        [data-wide-columns~='9'] tr > :nth-child(9),
+        [data-wide-columns~='10'] tr > :nth-child(10),
+        [data-wide-columns~='11'] tr > :nth-child(11),
+        [data-wide-columns~='12'] tr > :nth-child(12),
+        [data-wide-columns~='13'] tr > :nth-child(13),
+        [data-wide-columns~='14'] tr > :nth-child(14),
+        [data-wide-columns~='15'] tr > :nth-child(15),
+        [data-wide-columns~='16'] tr > :nth-child(16),
+        [data-wide-columns~='17'] tr > :nth-child(17),
+        [data-wide-columns~='18'] tr > :nth-child(18),
+        [data-wide-columns~='19'] tr > :nth-child(19),
+        [data-wide-columns~='20'] tr > :nth-child(20),
+        [data-wide-columns~='21'] tr > :nth-child(21),
+        [data-wide-columns~='22'] tr > :nth-child(22),
+        [data-wide-columns~='23'] tr > :nth-child(23),
+        [data-wide-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 15em;
+    }
+    .markdown-renderer
+      :is(
+        [data-one-line-columns~='1'] tr > :nth-child(1),
+        [data-one-line-columns~='2'] tr > :nth-child(2),
+        [data-one-line-columns~='3'] tr > :nth-child(3),
+        [data-one-line-columns~='4'] tr > :nth-child(4),
+        [data-one-line-columns~='5'] tr > :nth-child(5),
+        [data-one-line-columns~='6'] tr > :nth-child(6),
+        [data-one-line-columns~='7'] tr > :nth-child(7),
+        [data-one-line-columns~='8'] tr > :nth-child(8),
+        [data-one-line-columns~='9'] tr > :nth-child(9),
+        [data-one-line-columns~='10'] tr > :nth-child(10),
+        [data-one-line-columns~='11'] tr > :nth-child(11),
+        [data-one-line-columns~='12'] tr > :nth-child(12),
+        [data-one-line-columns~='13'] tr > :nth-child(13),
+        [data-one-line-columns~='14'] tr > :nth-child(14),
+        [data-one-line-columns~='15'] tr > :nth-child(15),
+        [data-one-line-columns~='16'] tr > :nth-child(16),
+        [data-one-line-columns~='17'] tr > :nth-child(17),
+        [data-one-line-columns~='18'] tr > :nth-child(18),
+        [data-one-line-columns~='19'] tr > :nth-child(19),
+        [data-one-line-columns~='20'] tr > :nth-child(20),
+        [data-one-line-columns~='21'] tr > :nth-child(21),
+        [data-one-line-columns~='22'] tr > :nth-child(22),
+        [data-one-line-columns~='23'] tr > :nth-child(23),
+        [data-one-line-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 0;
+      white-space: nowrap;
+    }
+  }
+
+  /* Shiki's CSS-variables theme, for every surface that shows its tokens: a
+     markdown fence and a tool step's command (`tool-call-detail.tsx`). */
+  :is(.markdown-renderer [data-streamdown='code-block'], [data-shiki-palette]) {
+    --lody-shiki-background: transparent;
+    --lody-shiki-foreground: hsl(var(--code-foreground));
+    --lody-shiki-token-comment: hsl(var(--syntax-comment));
+    --lody-shiki-token-string: hsl(var(--syntax-string));
+    --lody-shiki-token-constant: hsl(var(--syntax-number));
+    --lody-shiki-token-keyword: hsl(var(--syntax-keyword));
+    --lody-shiki-token-parameter: hsl(var(--syntax-variable));
+    --lody-shiki-token-function: hsl(var(--syntax-function));
+    --lody-shiki-token-string-expression: hsl(var(--syntax-string));
+    --lody-shiki-token-punctuation: hsl(var(--code-foreground) / 0.72);
+    --lody-shiki-token-link: hsl(var(--syntax-title));
+    --lody-shiki-token-inserted: hsl(var(--code-added));
+    --lody-shiki-token-deleted: hsl(var(--code-removed));
+    --lody-shiki-token-changed: hsl(var(--modified-file));
+  }
+
+  /* A `diff` fence is often an explanatory, headerless snippet rather than a
+     parseable patch. Its renderer marks rows directly so the
+     semantic add/remove treatment works for both forms and while streaming. */
+  .markdown-renderer [data-markdown-diff-block='true'] {
+    --markdown-diff-addition-bg: color-mix(
+      in oklab,
+      hsl(var(--code-added)) 12%,
+      var(--markdown-code-block-bg)
+    );
+    --markdown-diff-deletion-bg: color-mix(
+      in oklab,
+      hsl(var(--code-removed)) 12%,
+      var(--markdown-code-block-bg)
+    );
+    --markdown-diff-hunk-bg: color-mix(
+      in oklab,
+      hsl(var(--modified-file)) 9%,
+      var(--markdown-code-block-bg)
+    );
+  }
+
+  .markdown-renderer [data-markdown-diff-block='true'] [data-streamdown='code-block-body'] {
+    padding-inline: 0 !important;
+  }
+
+  .markdown-renderer [data-markdown-diff-block='true'] pre {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .markdown-renderer [data-markdown-diff-line] {
+    display: block;
+    min-height: 1.4em;
+    padding-inline: 1rem;
+  }
+
+  .markdown-renderer [data-markdown-diff-line='addition'] {
+    background: var(--markdown-diff-addition-bg);
+    box-shadow: inset 0.125rem 0 hsl(var(--code-added));
+    color: hsl(var(--code-added));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='deletion'] {
+    background: var(--markdown-diff-deletion-bg);
+    box-shadow: inset 0.125rem 0 hsl(var(--code-removed));
+    color: hsl(var(--code-removed));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='hunk'] {
+    background: var(--markdown-diff-hunk-bg);
+    color: hsl(var(--modified-file));
+  }
+
+  .markdown-renderer [data-markdown-diff-line='metadata'] {
+    color: var(--markdown-code-block-language);
+  }
+
+  /* A diagram is content, not a card: the block keeps no frame, fill, or
+     reserved height, so it sits in the prose the way an image does. Two
+     rectangles remain. This one positions the hover controls and carries the
+     palette; the frame inside `[data-streamdown='mermaid']` bounds a tall
+     diagram and is the area an activated canvas pans inside. */
+  .markdown-renderer [data-streamdown='mermaid-block'] {
+    --markdown-mermaid-foreground: hsl(var(--foreground));
+    --markdown-mermaid-muted: hsl(var(--muted-foreground));
+    --markdown-mermaid-control-bg: hsl(var(--background));
+    --markdown-mermaid-control-border: hsl(var(--border));
+    /* Diagram colors come from the app palette's tokens (Lody Light or Vesper),
+       so they match the surrounding chrome. Labels are content, so they use the
+       prose foreground. `--pele-bg` backs edge labels, so it is the page
+       background the diagram is drawn on. Chart series keep Pele's categorical
+       palette: status tokens carry meaning (a "danger" slice misreads) and are
+       not built to be told apart as categories. */
+    --pele-bg: hsl(var(--background));
+    --pele-fg: hsl(var(--reading-foreground));
+    --pele-muted: hsl(var(--muted-foreground));
+    --pele-line: hsl(var(--muted-foreground));
+    --pele-surface: hsl(var(--background));
+    --pele-surface-alt: color-mix(in srgb, hsl(var(--muted)) 72%, hsl(var(--background)));
+    --pele-border: color-mix(in srgb, hsl(var(--primary)) 50%, hsl(var(--muted-foreground)));
+    --pele-accent: hsl(var(--primary));
+    --pele-critical: hsl(var(--destructive));
+    --pele-error: hsl(var(--destructive));
+    position: relative;
+    display: block !important;
+    width: 100%;
+    max-width: 100%;
+    margin-block: 1rem !important;
+    overflow: visible;
+    gap: 0 !important;
+    padding: 0 !important;
+    background: none;
+    color: var(--markdown-mermaid-foreground);
+  }
+
+  .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+    position: absolute;
+    inset-block-start: 0.125rem;
+    inset-inline-end: 0.25rem;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.125rem;
+    border-radius: 9999px;
+    /* Opaque: an edge of the diagram can still pass under the pill, and a
+       translucent fill would show it through the controls. */
+    border: 1px solid var(--markdown-mermaid-control-border);
+    background: var(--markdown-mermaid-control-bg);
+    color: var(--markdown-mermaid-muted);
+    opacity: 0;
+    /* The scale's lightest tier: a control-sized lift, and a black shadow in both
+       themes (`--foreground` is near-white in Vesper, so tinting by it would glow). */
+    box-shadow: var(--shadow-xs);
+    transition:
+      opacity 120ms ease,
+      color 120ms ease;
+  }
+
+  .markdown-renderer
+    [data-streamdown='mermaid-block']:hover
+    [data-streamdown='mermaid-block-actions'],
+  .markdown-renderer
+    [data-streamdown='mermaid-block']:focus-within
+    [data-streamdown='mermaid-block-actions'] {
+    opacity: 1;
+  }
+
+  /* A touch device never hovers, so the reveal above never fires there and the
+     copy/download controls stay invisible for good. Same rule the code block
+     already carries. */
+  @media (hover: none) {
+    .markdown-renderer [data-streamdown='mermaid-block-actions'] {
+      opacity: 1;
+    }
+  }
+
+  .markdown-renderer [data-streamdown='mermaid-block-actions'] button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    padding: 0.25rem;
+    cursor: pointer;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid-block-actions'] button:hover {
+    background: hsl(var(--muted) / 0.72);
+    color: var(--markdown-mermaid-foreground);
+  }
+
+  /* The control lane belongs to this box, not to the scrolling one inside it:
+     a tall diagram scrolls under the pill, and the pill must never sit on top of
+     what is scrolling past. */
+  .markdown-renderer [data-streamdown='mermaid'] {
+    width: 100%;
+    height: auto !important;
+    padding-block-start: 2rem;
+    color: var(--markdown-mermaid-foreground);
+  }
+
+  .markdown-renderer [data-streamdown='mermaid'] > div {
+    width: 100% !important;
+    height: auto !important;
+    /* Only height is bounded. A tall diagram scrolls in place instead of running
+       for several screens of the conversation; width never scrolls, because the
+       diagram inside is scaled to the message. */
+    max-height: min(70vh, 36rem) !important;
+    overflow: auto !important;
+    /* Let wheel/touch scrolling continue into the conversation at either edge,
+       including when the diagram fits and has no vertical scroll range. */
+    overscroll-behavior: auto;
+    padding-block: 0.5rem;
+    /* An inactive preview does not pan, it activates on click
+       (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */
+    cursor: zoom-in !important;
+    scrollbar-gutter: stable;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid']:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
+  /* The activated canvas stops promising a zoom it has already performed.
+     Activation adds no ring: the grab cursor is the state, so a diagram that
+     carries no border does not grow one by being clicked. */
+  .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div {
+    cursor: grab !important;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid'][data-lody-canvas='active'] > div:active {
+    cursor: grabbing !important;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid-svg'] {
+    min-width: 100%;
+  }
+
+  .markdown-renderer [data-streamdown='mermaid-svg'] svg {
+    display: block;
+    margin-inline: auto;
+    /* Fit the message width and nothing wider: a diagram that already fits stays
+       at natural size, one that does not is scaled down rather than cut off at
+       the right edge, and neither axis is upscaled by the layout. */
+    width: auto !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible;
+    background: transparent !important;
+  }
+}
+
+@layer components {
+  /* Mobile home. Tints the iOS/Material chrome with project theme tokens.
+     Two layout vars expose the sticky header height + the tabbar height so
+     the sticky machine bar can park beneath the header and the scroll region
+     can reserve bottom space for the tabbar. */
+
+  .mobile-home-app {
+    --mobile-tabbar-height: 3.75rem;
+    --mobile-home-header-height: calc(3.25rem + var(--k-safe-area-top, 0px));
+  }
+
+  /* iOS-style translucent material for the sticky header + machine bar
+     (`saturate(180%) blur(20px)` + ~70% bg opacity). The `-webkit-` prefix
+     is for WKWebView, which still ships the prefixed version of
+     backdrop-filter alongside the unprefixed one. */
+  @supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+    .mobile-home-glass {
+      background: hsl(var(--background) / 0.72);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      backdrop-filter: saturate(180%) blur(20px);
+    }
+  }
+
+  @supports not ((backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px))) {
+    .mobile-home-glass {
+      background: hsl(var(--background) / 0.96);
+    }
+  }
+
+  /* Hide horizontal scrollbar on the machine chip row. */
+  .mobile-home-shell .hide-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .mobile-home-shell .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Chat landing keyboard navigation: the option under the roving
+     focus carries `data-qs-active` (set by useChatLandingKeyboardNav). A
+     primary outline + faint tint highlights it consistently across pickers,
+     tabs, toggles and the send button, independent of each control's own
+     :focus-visible. An INSET ring (not outline / outer ring) so global focus
+     outline-suppression can't hide it and the overflow-hidden animated sheet
+     rows can't clip it; `!important` to win over each control's own ring vars. */
+  [data-qs-active] {
+    box-shadow: inset 0 0 0 2px hsl(var(--primary) / 0.75) !important;
+    background-color: hsl(var(--primary) / 0.08) !important;
+  }
+
+  .mobile-home-shell button:focus-visible,
+  .mobile-home-shell [role='button']:focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 2px;
+  }
+}
+
+@layer base {
+  /* Neutral-gray fallbacks (overridden by the bundled Lody Light theme).
+     Hierarchy: light conversation canvas → neutral sidebar → near-white composer
+     → visible hover → slightly deeper selection pill. */
+  :root {
+    --background: 240 9.1% 97.8%;
+    --foreground: 0 0% 11%;
+    --card: 240 3.2% 93.9%;
+    --card-foreground: 0 0% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 11%;
+    --composer: 0 0% 100%;
+    --primary: 220 82% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 97%;
+    --secondary-foreground: 0 0% 11%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 42%;
+    --highlight: var(--primary);
+    --highlight-foreground: var(--primary-foreground);
+    --hover: 0 0% 94.5%;
+    --hover-foreground: var(--foreground);
+    --selection: 0 0% 87%;
+    --selection-foreground: var(--foreground);
+    --selection-inactive: var(--selection);
+    --selection-inactive-foreground: var(--selection-foreground);
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 86%;
+    --input: 0 0% 92%;
+    --input-foreground: var(--foreground);
+    --input-placeholder: var(--muted-foreground);
+    --input-border: 0 0% 86%;
+    /* Fill of an editable control. `--input` stays the recessed slab used by
+       the composer and by muted chips; a form field on a light canvas must not
+       be darker than the page or it reads as disabled, so it sits on white and
+       is delimited by `--input-border`. Themed builds compute the same rule in
+       `vscode-theme-css.ts`. */
+    --input-field: 0 0% 100%;
+    /* Long-form conversation text, unselected sidebar rows and the one step
+       above the dark brightness ceiling (headings, bold). Themed builds derive
+       them in `vscode-theme-css.ts`; unthemed they are the plain foregrounds. */
+    --reading-foreground: var(--foreground);
+    --foreground-strong: var(--foreground);
+    --sidebar-row-foreground: 0 0% 28%;
+    --switch-track: 0 0% 64%;
+    --ring: 220 82% 65%;
+    /* Chart series defaults; `vscode-theme-css.ts` overrides them from the
+       active theme so unthemed surfaces still render distinct rungs. */
+    --chart-1: 220 82% 65%;
+    --chart-2: 210 70% 45%;
+    --chart-3: 262 60% 55%;
+    --chart-4: 24 90% 50%;
+    --chart-5: 151 55% 40%;
+    --sidebar-background: 240 3.2% 93.9%;
+    --sidebar-foreground: 0 0% 11%;
+    --sidebar-foreground-muted: 0 0% 42%;
+    --sidebar-primary: 220 82% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-highlight: var(--sidebar-primary);
+    --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
+    --sidebar-hover: 0 0% 91.5%;
+    --sidebar-hover-foreground: var(--sidebar-foreground);
+    --sidebar-selection: 0 0% 84%;
+    --sidebar-selection-foreground: var(--sidebar-foreground);
+    --sidebar-border: 0 0% 88%;
+    --sidebar-ring: 220 82% 65%;
+    --button-hover: 219 65% 57%;
+    --button-secondary: var(--secondary);
+    --button-secondary-foreground: var(--secondary-foreground);
+    --button-secondary-hover: var(--hover);
+    --bottom-bar: 0 0% 100%;
+    --bottom-bar-foreground: 0 0% 11%;
+    --tab-bar: 0 0% 97%;
+    --tab-active: var(--background);
+    --tab-active-foreground: var(--foreground);
+    --tab-inactive: var(--tab-bar);
+    --tab-inactive-foreground: var(--muted-foreground);
+    --tab-hover: var(--hover);
+    --tab-hover-foreground: var(--foreground);
+    --tab-border: var(--border);
+    --tab-active-accent: var(--primary);
+    --status-info: 210 70% 45%;
+    --status-success: 151 55% 36%;
+    --status-warning: 32 90% 48%;
+    --status-danger: var(--destructive);
+    --status-merged: 262 60% 55%;
+    /* GitHub semantic colors are intentionally fixed, not VS Code theme-driven. */
+    --github-open: 137 66% 30%;
+    --github-merged: 261 69% 59%;
+    --github-closed: 356 72% 47%;
+    --github-draft: 213 8% 47%;
+    --github-addition: var(--github-open);
+    --github-deletion: var(--github-closed);
+    --primary-content: 225 7% 11%;
+    --scrollbar-thumb: var(--muted-foreground);
+    --scrollbar-thumb-hover: var(--muted-foreground);
+    --scrollbar-thumb-active: var(--muted-foreground);
+    --code-background: 240 14% 94.1%;
+    --code-foreground: 225 7% 11%;
+    --code-border: 220 13% 90%;
+    --code-added: var(--github-addition);
+    --code-removed: var(--github-deletion);
+    --modified-file: 40 90% 45%;
+    --syntax-keyword: 262 60% 48%;
+    --syntax-string: 153 55% 30%;
+    --syntax-number: 24 85% 42%;
+    --syntax-comment: 220 7% 45%;
+    --syntax-function: 210 65% 40%;
+    --syntax-variable: 330 55% 42%;
+    --syntax-title: 220 82% 55%;
+    --syntax-attr: 24 85% 42%;
+    --syntax-builtin: 262 60% 48%;
+    /* Interactive terminal (xterm). The surface (background/foreground/cursor/
+       selection) always derives from the shared app tokens, so the terminal
+       matches the app panel and tracks light/dark + the active VS Code theme
+       (those overrides land on --background/--foreground/--selection). The 16
+       ANSI colors instead prefer the active theme's terminal palette
+       (--vscode-terminal-ansi*) — which has no app-level equivalent — and only
+       fall back to this curated palette when a theme omits them. Consumed by
+       components/terminal/terminal-theme.ts. */
+    --terminal-background: hsl(var(--background));
+    --terminal-foreground: hsl(var(--foreground));
+    --terminal-cursor: hsl(var(--foreground));
+    --terminal-cursor-accent: hsl(var(--background));
+    --terminal-selection: hsl(var(--selection) / 0.5);
+    --terminal-ansi-black: var(--vscode-terminal-ansiBlack, #000000);
+    --terminal-ansi-red: var(--vscode-terminal-ansiRed, #cd3131);
+    --terminal-ansi-green: var(--vscode-terminal-ansiGreen, #00bc00);
+    --terminal-ansi-yellow: var(--vscode-terminal-ansiYellow, #949800);
+    --terminal-ansi-blue: var(--vscode-terminal-ansiBlue, #0451a5);
+    --terminal-ansi-magenta: var(--vscode-terminal-ansiMagenta, #bc05bc);
+    --terminal-ansi-cyan: var(--vscode-terminal-ansiCyan, #0598bc);
+    --terminal-ansi-white: var(--vscode-terminal-ansiWhite, #555555);
+    --terminal-ansi-bright-black: var(--vscode-terminal-ansiBrightBlack, #666666);
+    --terminal-ansi-bright-red: var(--vscode-terminal-ansiBrightRed, #cd3131);
+    --terminal-ansi-bright-green: var(--vscode-terminal-ansiBrightGreen, #14ce14);
+    --terminal-ansi-bright-yellow: var(--vscode-terminal-ansiBrightYellow, #b5ba00);
+    --terminal-ansi-bright-blue: var(--vscode-terminal-ansiBrightBlue, #0451a5);
+    --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #bc05bc);
+    --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #0598bc);
+    --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #a5a5a5);
+    /* macOS draws Latin runs in SF Pro Display; it has no CJK glyphs, so Chinese
+       falls through per glyph to PingFang SC (macOS / iOS, Apple's system font,
+       which cannot be bundled) or Microsoft YaHei on Windows. Where SF Pro is
+       absent (other platforms, unpatched macOS) the self-hosted Inter Variable
+       takes over, then the remaining system faces. PingFang first rendered Latin
+       too, with wide hyphens in file and repo names. */
+    --font-sans-default:
+      'SF Pro Display', 'Inter Variable', 'PingFang SC', -apple-system, BlinkMacSystemFont,
+      'Hiragino Sans GB', 'Segoe UI', 'Microsoft YaHei', 'Helvetica Neue', Arial,
+      'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+    --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
+    --font-serif: serif;
+    --font-wordmark:
+      'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --font-mono:
+      'JetBrains Mono', ui-monospace, 'SF Mono', 'SFMono-Regular', 'Monaco', 'Menlo', 'Consolas',
+      'Liberation Mono', 'Courier New', monospace;
+    --font-terminal:
+      'SF Mono', 'JetBrains Mono', 'Fira Code', 'Inconsolata', 'Source Code Pro', ui-monospace,
+      'SFMono-Regular', 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+    --radius: 0.25rem;
+    --radius-sm: 0.25rem;
+    --radius-md: 0.375rem;
+    --radius-lg: 0.5rem;
+
+    /* Pro control sizing (VS Code/Linear style) */
+    --control-h: 36px;
+    --control-h-ios: 44px;
+
+    /* Pro animation timing (snappy but with feel) */
+    --dur-1: 120ms;
+    --dur-2: 180ms;
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+
+    /* macOS-like shadows (airy, not heavy) */
+    --shadow-2xs: 0px 2px 4px 0px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0px 2px 4px 0px hsl(0 0% 0% / 0.05);
+    --shadow-sm: 0px 2px 4px 0px hsl(0 0% 0% / 0.1), 0px 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow: 0px 2px 4px 0px hsl(0 0% 0% / 0.1), 0px 1px 2px -1px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0px 2px 4px 0px hsl(0 0% 0% / 0.1), 0px 2px 4px -1px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0px 2px 4px 0px hsl(0 0% 0% / 0.1), 0px 4px 6px -1px hsl(0 0% 0% / 0.1);
+    --shadow-xl: 0px 2px 4px 0px hsl(0 0% 0% / 0.1), 0px 8px 10px -1px hsl(0 0% 0% / 0.1);
+    --shadow-2xl: 0px 2px 4px 0px hsl(0 0% 0% / 0.25);
+    /* Pro floating panel shadows (macOS "air" feel) */
+    --shadow-panel: 0 1px 2px hsl(0 0% 0% / 0.08), 0 10px 30px hsl(0 0% 0% / 0.1);
+    --shadow-popover: 0 2px 6px hsl(0 0% 0% / 0.1), 0 18px 50px hsl(0 0% 0% / 0.14);
+    --tracking-normal: 0rem;
+    /* Shared spacing unit (0.25rem) that `calc(var(--spacing) * n)` spacing
+       expressions across the app resolve against. */
+    --spacing: 0.25rem;
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --native-keyboard-height: 0px;
+    /*
+     * The strip the OS caption buttons occupy over web content. Electron's
+     * Windows `titleBarOverlay` turns on Window Controls Overlay, whose
+     * `titlebar-area-*` rect is the part of that strip left free for the app;
+     * the caption buttons sit to its right. Everywhere else, and in native
+     * fullscreen where the overlay hides, those variables are undefined and
+     * both insets fall back to 0, so a surface can always reserve them.
+     */
+    --window-caption-height: env(titlebar-area-height, 0px);
+    --window-caption-inset-right: calc(
+      100vw - env(titlebar-area-x, 100vw) - env(titlebar-area-width, 0px)
+    );
+  }
+  .dark {
+    --background: 222 55% 9.6%;
+    --foreground: 210 40% 96%;
+    --card: 220 54% 11.5%;
+    --card-foreground: 210 40% 96%;
+    --popover: 220 54% 11.5%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 210 90% 62%;
+    --primary-foreground: 220 50% 12%;
+    --secondary: 222 40% 16%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 220 38% 14%;
+    --muted-foreground: 216 18% 70%;
+    --highlight: var(--primary);
+    --highlight-foreground: var(--primary-foreground);
+    --hover: 219 42% 18%;
+    --hover-foreground: var(--foreground);
+    --selection: 219 42% 22%;
+    --selection-foreground: var(--foreground);
+    --selection-inactive: var(--selection);
+    --selection-inactive-foreground: var(--selection-foreground);
+    --destructive: 0 72% 52%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 32% 18%;
+    --input: 220 32% 18%;
+    --input-foreground: var(--foreground);
+    --input-placeholder: var(--muted-foreground);
+    --input-border: var(--border);
+    /* Dark canvases already raise the field above the page, so it keeps the
+       theme fill. */
+    --input-field: var(--input);
+    --composer: var(--input);
+    --switch-track: 220 13% 40%;
+    --ring: 210 90% 62%;
+    --sidebar-background: 222 55% 9.6%;
+    --sidebar-foreground: 210 40% 96%;
+    --sidebar-row-foreground: var(--sidebar-foreground);
+    --sidebar-foreground-muted: 216 18% 70%;
+    --sidebar-primary: 210 90% 62%;
+    --sidebar-primary-foreground: 220 50% 12%;
+    --sidebar-highlight: var(--sidebar-primary);
+    --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
+    --sidebar-hover: 220 44% 13%;
+    --sidebar-hover-foreground: var(--sidebar-foreground);
+    --sidebar-selection: 220 44% 22%;
+    --sidebar-selection-foreground: var(--sidebar-foreground);
+    --sidebar-border: 220 32% 18%;
+    --sidebar-ring: 210 90% 62%;
+    --button-hover: 220 44% 18%;
+    --button-secondary: var(--secondary);
+    --button-secondary-foreground: var(--secondary-foreground);
+    --button-secondary-hover: var(--hover);
+    --bottom-bar: 222 40% 12%;
+    --bottom-bar-foreground: 210 40% 96%;
+    --tab-bar: var(--muted);
+    --tab-active: var(--background);
+    --tab-active-foreground: var(--foreground);
+    --tab-inactive: var(--muted);
+    --tab-inactive-foreground: var(--muted-foreground);
+    --tab-hover: var(--hover);
+    --tab-hover-foreground: var(--foreground);
+    --tab-border: var(--border);
+    --tab-active-accent: var(--primary);
+    --status-info: var(--primary);
+    --status-success: 151 60% 52%;
+    --status-warning: 43 96% 56%;
+    --status-danger: var(--destructive);
+    --status-merged: 262 90% 74%;
+    --github-open: 128 49% 49%;
+    --github-merged: 262 89% 71%;
+    --github-closed: 3 93% 63%;
+    --github-draft: 212 8% 58%;
+    --github-addition: var(--github-open);
+    --github-deletion: var(--github-closed);
+    --primary-content: 210 40% 96%;
+    --scrollbar-thumb: var(--muted-foreground);
+    --scrollbar-thumb-hover: var(--muted-foreground);
+    --scrollbar-thumb-active: var(--muted-foreground);
+    --code-background: 220 48% 12%;
+    --code-foreground: 210 40% 96%;
+    --code-border: 220 32% 20%;
+    --code-added: var(--github-addition);
+    --code-removed: var(--github-deletion);
+    --modified-file: 43 96% 56%;
+    --syntax-keyword: 262 90% 74%;
+    --syntax-string: 154 68% 55%;
+    --syntax-number: 28 88% 62%;
+    --syntax-comment: 216 18% 70%;
+    --syntax-function: 197 85% 58%;
+    --syntax-variable: 330 78% 70%;
+    --syntax-title: 330 78% 70%;
+    --syntax-attr: 28 88% 62%;
+    --syntax-builtin: 262 90% 74%;
+    /* Dark ANSI fallback palette (surface/cursor/selection inherit the mode-aware
+       :root definitions above). Still overridden by --vscode-terminal-ansi* when
+       the active theme defines them. */
+    --terminal-ansi-black: var(--vscode-terminal-ansiBlack, #1c2027);
+    --terminal-ansi-red: var(--vscode-terminal-ansiRed, #f87171);
+    --terminal-ansi-green: var(--vscode-terminal-ansiGreen, #4ade80);
+    --terminal-ansi-yellow: var(--vscode-terminal-ansiYellow, #fbbf24);
+    --terminal-ansi-blue: var(--vscode-terminal-ansiBlue, #60a5fa);
+    --terminal-ansi-magenta: var(--vscode-terminal-ansiMagenta, #c084fc);
+    --terminal-ansi-cyan: var(--vscode-terminal-ansiCyan, #22d3ee);
+    --terminal-ansi-white: var(--vscode-terminal-ansiWhite, #d6dae3);
+    --terminal-ansi-bright-black: var(--vscode-terminal-ansiBrightBlack, #5b6472);
+    --terminal-ansi-bright-red: var(--vscode-terminal-ansiBrightRed, #fca5a5);
+    --terminal-ansi-bright-green: var(--vscode-terminal-ansiBrightGreen, #86efac);
+    --terminal-ansi-bright-yellow: var(--vscode-terminal-ansiBrightYellow, #fcd34d);
+    --terminal-ansi-bright-blue: var(--vscode-terminal-ansiBrightBlue, #93c5fd);
+    --terminal-ansi-bright-magenta: var(--vscode-terminal-ansiBrightMagenta, #d8b4fe);
+    --terminal-ansi-bright-cyan: var(--vscode-terminal-ansiBrightCyan, #67e8f9);
+    --terminal-ansi-bright-white: var(--vscode-terminal-ansiBrightWhite, #f4f6fb);
+    /* Dark mode pro shadows (deeper, more dramatic) */
+    --shadow-panel: 0 1px 1px hsl(0 0% 0% / 0.35), 0 14px 44px hsl(0 0% 0% / 0.55);
+    --shadow-popover: 0 2px 6px hsl(0 0% 0% / 0.45), 0 22px 70px hsl(0 0% 0% / 0.65);
+  }
+}
+
+@layer base {
+  /* Keep form-control reset below utilities in cascade priority so component
+     utility classes keep owning dimensions, radius, and spacing. */
+  :where(button, input, textarea, select) {
+    font: inherit;
+    color: inherit;
+  }
+
+  * {
+    border-color: hsl(var(--border) / 1);
+    outline-color: color-mix(in oklab, hsl(var(--ring) / 1) 50%, transparent);
+  }
+
+  html {
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
+    overflow: hidden;
+  }
+
+  body {
+    background-color: hsl(var(--background) / 1);
+    color: hsl(var(--foreground) / 1);
+  }
+
+  /* Pro selection style */
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+  }
+
+  body.native-mobile-shell,
+  body.native-mobile-shell * {
+    -webkit-touch-callout: none;
+  }
+
+  body * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body textarea,
+  body [contenteditable]:not([contenteditable='false']),
+  body [contenteditable]:not([contenteditable='false']) *,
+  body [data-text-selectable],
+  body [data-text-selectable] *,
+  body
+    input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
+      [type='radio']
+    ):not([type='range']):not([type='file']):not([type='color']) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  body [data-text-selectable] :is(button, [role='button']),
+  body [data-text-selectable] :is(button, [role='button']) * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  body.native-mobile-shell textarea,
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']),
+  body.native-mobile-shell [contenteditable]:not([contenteditable='false']) *,
+  body.native-mobile-shell [data-text-selectable],
+  body.native-mobile-shell [data-text-selectable] *,
+  body.native-mobile-shell
+    input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not(
+      [type='radio']
+    ):not([type='range']):not([type='file']):not([type='color']) {
+    -webkit-touch-callout: default;
+  }
+
+  /* No WKWebView link preview inside selectable text: after its "Open Link",
+     every later tap in the app reopened that link. Links open with a tap. */
+  body.native-mobile-shell [data-text-selectable] a[href],
+  body.native-mobile-shell [data-text-selectable] a[href] * {
+    -webkit-touch-callout: none;
+  }
+
+  button,
+  [role='button'],
+  input[type='button'],
+  input[type='submit'],
+  input[type='reset'] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role='button'][aria-disabled='true'],
+  input[type='button']:disabled,
+  input[type='submit']:disabled,
+  input[type='reset']:disabled {
+    cursor: default;
+  }
+
+  /* The composer editor (`ui/mention/mention-input.tsx`) is a contenteditable
+     that lays out, scrolls and paints its placeholder exactly like the textarea
+     it replaced: a textarea's UA box, `rows` lines tall plus its padding and
+     border, with StyleX still free to size it. WebKit reports no computed style
+     for `::placeholder`, so it cannot be copied — the composer's placeholder
+     colour is the textarea's in every engine (`usePlaceholderPaint` probes a
+     real textarea styled the same and forwards `::placeholder`'s colour via
+     `--composer-placeholder-color`). */
+  [data-composer-editor] {
+    display: inline-block;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    overflow: auto;
+    cursor: text;
+    height: calc(var(--composer-rows, 2) * 1lh + var(--composer-rows-chrome, 0px));
+  }
+
+  [data-composer-editor][data-empty]::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+    color: var(--composer-placeholder-color, rgb(117 117 117));
+    opacity: var(--composer-placeholder-opacity, 1);
+  }
+
+  /* Chip composers always painted their selection with the system colours. */
+  [data-composer-editor][data-system-selection] ::selection,
+  [data-composer-editor][data-system-selection]::selection {
+    background-color: Highlight;
+    color: HighlightText;
+  }
+
+  /* Atomic mentions paint one selection surface from the editor's range.
+     Native text fragments must not add a second rectangle or recolour the icon. */
+  [data-composer-editor][data-system-selection] [data-mention-value]::selection,
+  [data-composer-editor][data-system-selection] [data-mention-value] *::selection {
+    background-color: transparent;
+    color: inherit;
+  }
+
+  /* Pro focus style: only show on keyboard navigation */
+  :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus {
+    outline: none;
+  }
+
+  :where(a, button, input, textarea, select, [tabindex], [data-composer-editor]):focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.5);
+  }
+
+  /* …but only while the person navigates by keyboard: focus handed back after
+     Escape is `:focus-visible` too. Text entry keeps it (see the modality rule
+     at the end of this file). */
+  :where(html[data-focus-modality='pointer'])
+    :where(a, button, select, [tabindex]):not(
+      input,
+      textarea,
+      [data-composer-editor]
+    ):focus-visible {
+    box-shadow: none;
+  }
+
+  /* Radix menu items already paint their own focus highlight (focus:bg-hover /
+     data-[state=open]:bg-hover). Menus move DOM focus onto items as you hover
+     and while a submenu is open, so the global inset accent ring above would
+     draw a stray primary border around the hovered/open row. */
+  :where([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio']):focus-visible {
+    box-shadow: none;
+  }
+
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+  }
+
+  /* Global CodeMirror cursor visibility fixes */
+  .cm-editor {
+    /* Fix for Chrome flex container issues */
+    min-height: 0 !important;
+    min-width: 0 !important;
+  }
+
+  .cm-cursor {
+    /* Ensure cursor is always visible */
+    display: block !important;
+    visibility: visible !important;
+    pointer-events: none !important;
+    border-left-color: var(--cursor-color) !important;
+  }
+
+  .cm-cursorLayer {
+    /* Force cursor layer to be on top */
+    z-index: 100 !important;
+    pointer-events: none !important;
+  }
+
+  /* Fix for browsers that lose cursor on blur */
+  .cm-editor:not(.cm-focused) .cm-cursor {
+    opacity: 0.5 !important;
+    animation: none !important;
+  }
+
+  .cm-focused .cm-cursor {
+    opacity: 1 !important;
+  }
+
+  /* Highlight.js 代码高亮样式 */
+  pre .hljs,
+  pre code.hljs,
+  .hljs {
+    background: hsl(var(--code-background)) !important;
+    color: hsl(var(--code-foreground)) !important;
+  }
+
+  /* 语法高亮颜色使用主题变量 */
+  .hljs-keyword {
+    color: hsl(var(--syntax-keyword)) !important;
+  }
+  .hljs-string {
+    color: hsl(var(--syntax-string)) !important;
+  }
+  .hljs-number {
+    color: hsl(var(--syntax-number)) !important;
+  }
+  .hljs-comment {
+    color: hsl(var(--syntax-comment)) !important;
+  }
+  .hljs-function {
+    color: hsl(var(--syntax-function)) !important;
+  }
+  .hljs-variable {
+    color: hsl(var(--syntax-variable)) !important;
+  }
+  .hljs-title {
+    color: hsl(var(--syntax-title)) !important;
+  }
+  .hljs-attr {
+    color: hsl(var(--syntax-attr)) !important;
+  }
+  .hljs-built_in {
+    color: hsl(var(--syntax-builtin)) !important;
+  }
+}
+
+/* Respect user's reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* iOS / touch devices: larger tap targets */
+@media (pointer: coarse) {
+  :root {
+    --control-h: var(--control-h-ios);
+  }
+}
+
+@layer components {
+  /* Pro Button: crisp, tactile feedback (Linear/VS Code style) */
+  .btn-pro {
+    height: var(--control-h);
+    padding: 0 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: 0 1px 0 hsl(0 0% 0% / 0.03);
+    font-weight: 550;
+    transition:
+      transform var(--dur-1) var(--ease),
+      background var(--dur-1) var(--ease),
+      box-shadow var(--dur-1) var(--ease);
+  }
+
+  @media (hover: hover) {
+    .btn-pro:hover {
+      background: hsl(var(--muted));
+    }
+
+    .btn-pro:active {
+      transform: translateY(0.5px) scale(0.99);
+    }
+  }
+
+  .btn-pro.primary {
+    border-color: hsl(var(--primary) / 0.45);
+    background: hsl(var(--primary) / 0.14);
+  }
+
+  @media (hover: hover) {
+    .btn-pro.primary:hover {
+      background: hsl(var(--primary) / 0.22);
+    }
+  }
+
+  /* Pro Input: native-like borders and focus states */
+  .input-pro {
+    height: var(--control-h);
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid hsl(var(--input-border));
+    background: hsl(var(--input-field));
+    color: hsl(var(--input-foreground));
+    transition:
+      box-shadow var(--dur-1) var(--ease),
+      border-color var(--dur-1) var(--ease);
+  }
+
+  .input-pro::placeholder {
+    color: hsl(var(--input-placeholder));
+  }
+
+  .input-pro:focus {
+    border-color: hsl(var(--primary) / 0.55);
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.35);
+    outline: none;
+  }
+
+  /* Pro Panel/Card: VS Code structure + Linear cleanliness */
+  .panel-pro {
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .separator-pro {
+    height: 1px;
+    background: hsl(var(--border) / 0.8);
+  }
+
+  /* macOS-style glass effect for sidebars/headers */
+  .glass-pro {
+    background: hsl(var(--card) / 0.78);
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-lg);
+  }
+
+  @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .glass-pro {
+      -webkit-backdrop-filter: blur(18px) saturate(180%);
+      backdrop-filter: blur(18px) saturate(180%);
+    }
+  }
+
+  /* Pro scroll container: app-like behavior */
+  .scroll-pro {
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  /* iOS bottom bar with safe area */
+  .bottom-bar-pro {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 12px 16px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Full screen container with dynamic viewport */
+  .fullscreen-pro {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  /* List row with hover/active feedback (Linear style) */
+  .list-row-pro {
+    position: relative;
+    transition:
+      background var(--dur-1) var(--ease),
+      transform var(--dur-1) var(--ease);
+  }
+
+  @media (hover: hover) {
+    .list-row-pro:hover {
+      background: hsl(var(--muted) / 0.5);
+    }
+
+    .list-row-pro:active {
+      transform: translateY(0.5px);
+    }
+  }
+
+  /*
+   * Tasks-only surface ladder — LIGHT MODE ONLY.
+   *
+   * Cool neutral off-white canvas + true-white elevated cards, without the warm
+   * cream paper look that makes pure-white dropdowns feel pasted on. Scoped to
+   * `.tasks-surface` so chat and the rest of the app keep the global theme.
+   *
+   * Dark mode deliberately has NO token overrides here. The app's dark look is
+   * owned by the active VS Code theme (Vesper: #101010 canvas, warm #FFC799
+   * accents) applied on `:root`. Re-tinting `--background` / `--card` under
+   * `.dark .tasks-surface` produced a separate blue-navy island that no longer
+   * matched the conversation surface, and any leftover light-mode foregrounds
+   * (near-black text) stayed unreadable on that canvas.
+   *
+   * Portaled menus use `.tasks-menu` + inline style from `tasks-surface.ts`
+   * because Radix portals escape this subtree.
+   */
+  :root:not(.dark) .tasks-surface {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 12%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 12%;
+    --hover: 0 0% 94%;
+    --hover-foreground: 0 0% 12%;
+    --selection: 0 0% 92%;
+    --selection-foreground: 0 0% 12%;
+    --border: 0 0% 90%;
+    --input: 0 0% 100%;
+    --input-border: 0 0% 88%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 12%;
+    --sidebar-foreground-muted: 0 0% 40%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-hover: 0 0% 94%;
+    --sidebar-hover-foreground: 0 0% 12%;
+    --sidebar-selection: 0 0% 87%;
+    --sidebar-selection-foreground: 0 0% 12%;
+    color-scheme: light;
+  }
+
+  /*
+   * Body type matches the conversation renderer's `default` scale (text-sm), so
+   * a task description and a chat message read at the same size.
+   *
+   * These are real rules with `!important` for the same reason as the task-item
+   * margin below: meowdown ships its typography inside `@layer meowdown`, so a
+   * rule in a later layer (or no layer) loses the layer-order comparison
+   * regardless of specificity. Measured: the wrapper computed to 14px while
+   * `.ProseMirror` inside it stayed at meowdown's 17px.
+   *
+   * Keep these in step with CONVERSATION_TEXT_FONT_SIZE_CLASSES.default.
+   */
+  .task-body-editor .meowdown-content,
+  .task-body-editor .ProseMirror {
+    font-size: 0.875rem !important;
+    line-height: 1.625 !important;
+  }
+
+  .task-body-editor .ProseMirror h1 {
+    font-size: 1.125rem !important;
+  }
+
+  .task-body-editor .ProseMirror h2 {
+    font-size: 1rem !important;
+  }
+
+  .task-body-editor .ProseMirror :is(h3, h4) {
+    font-size: 0.875rem !important;
+  }
+
+  .task-body-editor .ProseMirror :is(h5, h6) {
+    font-size: 0.8125rem !important;
+  }
+
+  /*
+   * Top-level task items sit flush at the line start, so a checkbox lines up
+   * with body text instead of reading as a nested list.
+   *
+   * The indent is prosemirror-flat-list's `margin-left` (its marker is
+   * absolutely positioned into that margin), so the margin is what has to go —
+   * zeroing padding does nothing. Scoped with `>` to DIRECT children of the
+   * content root so genuinely nested task lists keep their indentation.
+   *
+   * This lives here as a real stylesheet rule rather than an inline variant
+   * because the selector needs a child combinator plus an attribute selector
+   * — a reliable, always-emitted rule.
+   *
+   * `!important` because this block is inside `@layer components` while
+   * prosemirror-flat-list ships its `margin-left` UNLAYERED, and any unlayered
+   * declaration beats every layered one regardless of specificity. Measured:
+   * without it the item stayed at its 32px indent.
+   */
+  .task-body-editor .meowdown-content > .prosemirror-flat-list[data-list-kind='task'] {
+    margin-left: 0 !important;
+  }
+
+  /* Menu surface tokens (used by portaled Tasks dropdowns).
+   * Light keeps the cool pure-white ladder; dark aliases the active theme
+   * (VS Code / global `.dark`) so menus match chat popovers — no private
+   * blue-navy palette. */
+  :root {
+    --tasks-menu-bg: 0 0% 100%;
+    --tasks-menu-border: 220 12% 88%;
+    --tasks-menu-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px -12px rgb(15 23 42 / 0.14);
+    --tasks-menu-item-hover: 220 14% 96%;
+  }
+
+  .dark {
+    --tasks-menu-bg: var(--popover);
+    --tasks-menu-border: var(--border);
+    --tasks-menu-shadow: var(--shadow-popover);
+    --tasks-menu-item-hover: var(--hover);
+  }
+
+  .tasks-menu {
+    border-radius: 0.5rem;
+    /* Tighter pad than the global 1.5 — dense config menus look less blocky. */
+    padding: 0.25rem;
+  }
+
+  .tasks-menu [role='menuitem'],
+  .tasks-menu [role='menuitemradio'],
+  .tasks-menu [role='menuitemcheckbox'] {
+    border-radius: 0.375rem;
+  }
+
+  .tasks-menu [role='menuitem']:focus,
+  .tasks-menu [role='menuitemradio']:focus,
+  .tasks-menu [role='menuitemcheckbox']:focus {
+    background-color: hsl(var(--tasks-menu-item-hover));
+  }
+
+  /* Appearance comes from scrollbars.css; keep the conversation's stable gutter. */
+  .chat-scrollbar {
+    /* Always reserve the scrollbar gutter so it appearing/disappearing (e.g. when
+       the terminal dock pops up and the conversation starts overflowing) never
+       shifts the message content sideways. */
+    scrollbar-gutter: stable;
+  }
+
+  /* Todo checkbox with consistent minimalist styling */
+  .cm-todo-checkbox {
+    /* Reset default checkbox styles */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+
+    /* Size and positioning using em units */
+    width: 1em;
+    height: 1em;
+    margin: 0 0.5em 0 0;
+    vertical-align: text-top;
+
+    /* Minimalist design */
+    background: hsl(var(--background));
+    border: 1.5px solid hsl(var(--border));
+    border-radius: calc(var(--radius) * 0.5);
+
+    /* Smooth transitions */
+    transition: all 0.15s ease-in-out;
+
+    cursor: pointer;
+
+    /* Focus outline for accessibility */
+    outline: none;
+
+    /* Positioning in flex layouts */
+    flex-shrink: 0;
+  }
+
+  .cm-todo-checkbox:hover {
+    border-color: hsl(var(--ring));
+    background: hsl(var(--muted) / 0.5);
+  }
+
+  .cm-todo-checkbox:focus-visible {
+    border-color: hsl(var(--border));
+    box-shadow: none;
+  }
+
+  .cm-todo-checkbox:checked {
+    background: hsl(var(--muted));
+    border-color: hsl(var(--muted-foreground) / 0.3);
+    position: relative;
+  }
+
+  /* Checkmark using pseudo-element with em units */
+  .cm-todo-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 0.25em;
+    top: 0.125em;
+    width: 0.25em;
+    height: 0.5em;
+    border: 1.5px solid hsl(var(--muted-foreground) / 0.6);
+    border-top: none;
+    border-left: none;
+    transform: rotate(45deg);
+  }
+
+  .cm-todo-checkbox:checked:hover {
+    background: hsl(var(--muted) / 0.8);
+    border-color: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  /* Indeterminate state (for nested todos) */
+  .cm-todo-checkbox:indeterminate {
+    background: hsl(var(--muted));
+    border-color: hsl(var(--border));
+  }
+
+  .cm-todo-checkbox:indeterminate::after {
+    content: '';
+    position: absolute;
+    left: 0.125em;
+    top: 0.375em;
+    width: 0.5em;
+    height: 0.125em;
+    background: hsl(var(--muted-foreground));
+  }
+
+  /* Todo done state - fade entire line */
+  .cm-todo-done,
+  .cm-todo-done * {
+    color: hsl(var(--muted-foreground) / 0.7) !important;
+    opacity: 0.8;
+  }
+
+  /* Make the todo line text more subtle when completed */
+  .cm-line:has(.cm-todo-checkbox:checked) {
+    color: hsl(var(--muted-foreground) / 0.7);
+    opacity: 0.8;
+  }
+
+  /* Photo viewer safe area insets for mobile (notch/status bar) */
+  .PhotoView-Slider__BannerWrap {
+    padding-top: env(safe-area-inset-top, 0px);
+    height: calc(44px + env(safe-area-inset-top, 0px));
+  }
+
+  /* Checkered background for image viewer */
+  .bg-checkered {
+    background-color: hsl(var(--background));
+    background-image:
+      linear-gradient(45deg, hsl(var(--muted) / 0.3) 25%, transparent 25%),
+      linear-gradient(-45deg, hsl(var(--muted) / 0.3) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, hsl(var(--muted) / 0.3) 75%),
+      linear-gradient(-45deg, transparent 75%, hsl(var(--muted) / 0.3) 75%);
+    background-size: 20px 20px;
+    background-position:
+      0 0,
+      0 10px,
+      10px -10px,
+      -10px 0px;
+  }
+}
+
+/* The workspace keeps its viewport height on older embedded browsers. */
+@supports not (height: 1dvh) {
+  .workspace-viewport {
+    height: 100vh !important;
+  }
+}
+
+/*
+ ---break---
+ */
+
+/* Mobile drill-in transition for `MobileDrillPageLayout` (and any
+   future "push" routes). Pure CSS keyframes so the slide runs on the
+   compositor thread independent of main-thread work — framer-motion's
+   JS-driven transform updates were stuttering badly because the
+   SessionDetail subtree mounts heavily (Loro subscribes, message
+   list, composer pickers) at the same time the animation starts.
+   The compositor doesn't care about main-thread blocking. */
+@keyframes mobile-drill-in {
+  from {
+    transform: translate3d(100%, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes mobile-drill-out {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+.mobile-drill-in {
+  animation: mobile-drill-in 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+  /* `will-change` promotes the element to its own compositor layer
+     before the animation starts, so the browser doesn't have to do
+     a layer-promotion mid-animation. */
+  will-change: transform;
+}
+
+.mobile-drill-out {
+  animation: mobile-drill-out 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+  will-change: transform;
+}
+
+/* Back destination under the sliding-off page (`useMobileBackRevealClass`):
+   iOS-style parallax in from a dimmed, left-shifted position. */
+@keyframes mobile-drill-reveal {
+  from {
+    transform: translate3d(-28%, 0, 0);
+    opacity: 0.72;
+  }
+}
+
+.mobile-drill-reveal {
+  animation: mobile-drill-reveal 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-drill-in,
+  .mobile-drill-out,
+  .mobile-drill-reveal {
+    animation: none;
+  }
+}
+
+/* Live agent status shimmer (the look of shadcn's text shimmer, driven by the
+   compositor). A soft band in the page background color slides across the
+   label: over glyphs it fades them toward the background, over the empty
+   background it is invisible. Only `transform` animates, so a working turn
+   repaints nothing while it waits (see the streaming performance e2e budget);
+   shadcn's `background-position` shimmer repaints the text every frame. */
+.agent-shimmer {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.agent-shimmer::after {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 60%;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, hsl(var(--background) / 0.78), transparent);
+  transform: translateX(-100%);
+  animation: agent-shimmer-sweep 2.2s linear infinite;
+  will-change: transform;
+}
+
+@keyframes agent-shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    /* Band is 60% of the label: 100% / 0.6 carries it fully past the end. */
+    transform: translateX(167%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-shimmer::after {
+    display: none;
+    animation: none;
+  }
+}
+
+/* Background-working badge: the dark outer frame stays fixed; only the inner
+   gradient dot scales up and down. Under reduced-motion it holds a steady mid
+   size. */
+@keyframes badge-pulse {
+  0%,
+  100% {
+    transform: scale(0.65);
+  }
+  50% {
+    transform: scale(1);
+  }
+}
+
+.animate-badge-pulse {
+  animation: badge-pulse 2.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-badge-pulse {
+    animation: none;
+    transform: scale(0.8);
+  }
+}
+
+/* Usage heatmap: each day pops in with a short scale+fade. The stagger is
+   driven by an inline `animation-delay` per column, so the reveal sweeps
+   left to right across the year instead of flashing all 371 cells at once.
+   `backwards` keeps a cell invisible until its own delay elapses. */
+@keyframes usage-heatmap-cell-in {
+  from {
+    opacity: 0;
+    transform: scale(0.45);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-usage-heatmap-cell {
+  animation: usage-heatmap-cell-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-usage-heatmap-cell {
+    animation: none;
+  }
+}
+
+/* Indeterminate `ui/progress.tsx`: work with no known total sweeps instead of
+   inventing a percentage. Under reduced-motion it holds a static partial fill,
+   which still reads as "in progress" without implying a measured position. */
+@keyframes progress-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+.animate-progress-sweep {
+  animation: progress-sweep 1.15s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-progress-sweep {
+    animation: none;
+    transform: translateX(50%);
+  }
+}
+
+/* A long desktop sidebar title only travels while its row is hovered or
+   keyboard-focused. The distance and duration come from the measured overflow,
+   so short labels keep their ordinary ellipsis and the full row layout stays put. */
+@keyframes sidebar-session-title-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--sidebar-title-distance));
+  }
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-session-title],
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+  [data-sidebar-session-title] {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation: sidebar-session-title-marquee var(--sidebar-title-duration, 5s) ease-in-out 600ms
+    infinite alternate;
+  will-change: transform;
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-title-clip],
+[data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+  [data-sidebar-title-clip] {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-session-row][data-sidebar-title-overflow='true']:hover [data-sidebar-session-title],
+  [data-sidebar-session-row][data-sidebar-title-overflow='true']:focus-within
+    [data-sidebar-session-title] {
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    mask-image: none;
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+}
+
+[data-sidebar-session-row][data-sidebar-title-overflow='true'][data-sidebar-title-swiping='true']
+  [data-sidebar-session-title] {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  animation: none;
+  transform: translateX(var(--sidebar-title-swipe-offset, 0px));
+  will-change: transform;
+  user-select: none;
+}
+
+[data-sidebar-session-row][data-sidebar-title-swiping='true'] [data-sidebar-title-clip] {
+  overflow: hidden;
+}
+
+/* The new-chat page's typed transition (`components/chat/home/home-dashboard.tsx`). Keep
+   the page still while the board, heading and every part of the switch follow one curve.
+   Named snapshots are siblings in the overlay, regardless of DOM nesting or z-index:
+   the pill must be below the segments, and the persistent labels above both. The pill
+   carries an own snapshot only across a board change, when it glides between the
+   segments; appearing or leaving with the fold, it is unnamed and part of its segment's.
+   Segment snapshots hold the changing summaries; clip them to their animated width without
+   stretching their text. Reduced motion never starts a transition. */
+html:active-view-transition-type(home-board)::view-transition-old(root),
+html:active-view-transition-type(home-board)::view-transition-new(root) {
+  animation: none;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-board),
+html:active-view-transition-type(home-board)::view-transition-group(home-pill),
+html:active-view-transition-type(home-board)::view-transition-group(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-fold),
+html:active-view-transition-type(home-board)::view-transition-group(home-heading) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-pill) {
+  z-index: 1;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-segment) {
+  z-index: 2;
+  overflow: clip;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-week-label),
+html:active-view-transition-type(home-board)::view-transition-group(home-fold) {
+  z-index: 3;
+}
+
+/* The label remains readable throughout: only its position moves, never its bitmap size. */
+html:active-view-transition-type(home-board)::view-transition-old(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-old(home-week-label) {
+  animation: none;
+  opacity: 0;
+}
+
+html:active-view-transition-type(home-board)::view-transition-new(home-now-label),
+html:active-view-transition-type(home-board)::view-transition-new(home-week-label) {
+  animation: none;
+  width: auto;
+  height: auto;
+}
+
+html:active-view-transition-type(home-board)::view-transition-old(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-new(home-now-segment),
+html:active-view-transition-type(home-board)::view-transition-old(home-week-segment),
+html:active-view-transition-type(home-board)::view-transition-new(home-week-segment) {
+  width: auto;
+  height: auto;
+  animation-duration: 200ms;
+  animation-timing-function: linear;
+}
+
+html:active-view-transition-type(home-board)::view-transition-group(home-board) {
+  /* Switching drifts the old and new pictures beyond this box. Clipping the group shears the
+     leading card edge until the picture arrives, so the short drift must be allowed to paint. */
+  overflow: visible;
+}
+
+html:active-view-transition-type(home-board)::view-transition-old(home-board),
+html:active-view-transition-type(home-board)::view-transition-new(home-board) {
+  height: auto;
+  animation-duration: 200ms;
+  animation-timing-function: linear;
+}
+
+/* Where the board comes from (`morph.ts`). The line holds still while a board is open, so the
+   board carries the direction: switching, it drifts toward the segment left behind as the new
+   one arrives from the side of the one pressed. Short drifts, never scaled, on the switch's
+   curve. */
+@keyframes home-board-out-start {
+  to {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+}
+
+@keyframes home-board-out-end {
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+@keyframes home-board-in-end {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes home-board-in-start {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+
+/* Unfolding and folding, the stage re-centres and the heading and the line travel. The board
+   travels with them as one piece, fixed under the line on the same curve, fading in as it rides
+   into place or out as it rides away (`morph.ts` measures the line's travel). Nothing grows,
+   unrolls or is revealed; its group is not clipped, since the picture moves outside its box. */
+@keyframes home-board-ride-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--home-line-travel, 0px)));
+  }
+  60% {
+    opacity: 1;
+  }
+}
+
+@keyframes home-board-ride-out {
+  40% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--home-line-travel, 0px));
+  }
+}
+
+html:active-view-transition-type(home-board-next)::view-transition-old(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-out-start 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+html:active-view-transition-type(home-board-next)::view-transition-new(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-in-end 300ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+}
+
+html:active-view-transition-type(home-board-previous)::view-transition-old(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-out-end 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+html:active-view-transition-type(home-board-previous)::view-transition-new(home-board) {
+  /* Offset pictures must not add up where they overlap. */
+  mix-blend-mode: normal;
+  animation: home-board-in-start 300ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+}
+
+html:active-view-transition-type(home-board-unfold)::view-transition-group(home-board),
+html:active-view-transition-type(home-board-fold)::view-transition-group(home-board) {
+  overflow: visible;
+}
+
+html:active-view-transition-type(home-board-unfold)::view-transition-new(home-board) {
+  animation: home-board-ride-in 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+html:active-view-transition-type(home-board-fold)::view-transition-old(home-board) {
+  animation: home-board-ride-out 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* One-shot entry for the new-chat landing heading: blur + fade in. */
+@keyframes home-heading-in {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.animate-home-heading-in {
+  animation: home-heading-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-home-heading-in {
+    animation: none;
+    filter: none;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* Pinned sidebar drags (`lib/pinned-drop-settle.ts`): while a pin row or section is
+   held the cursor is grabbing everywhere; from the drop until the pointer next moves,
+   pin sections take no hover, so a landed row does not light up under a still pointer. */
+body[data-pin-dragging],
+body[data-pin-dragging] * {
+  cursor: grabbing !important;
+}
+
+body[data-pin-hover-suppressed] [data-pin-section] {
+  pointer-events: none;
+}

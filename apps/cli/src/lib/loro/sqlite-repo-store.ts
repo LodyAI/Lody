@@ -1,16 +1,20 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { createAliasedIncompleteRecoveryStore } from '@lody/shared/workspace-streams-persistence';
 import fs from 'fs/promises';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import path from 'path';
+import { type JsonObject, type RemoteCursor, type RemoteCursorStore } from '@loro-dev/streams-crdt';
 import {
-  InMemoryRemoteCursorStore,
-  type JsonObject,
-  type RemoteCursor,
-  type RemoteCursorStore,
-} from '@loro-dev/streams-crdt';
-import { getLoroStreamsRemoteCursorUrlAliases, type WorkspaceId } from '@lody/shared';
+  getLoroStreamsRemoteCursorUrlAliases,
+  getLoroStreamIdForDocId,
+  createLoroStreamUrl,
+  LORO_STREAMS_BUCKET_ID,
+  type WorkspaceId,
+} from '@lody/shared';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import type { LoroDoc } from 'loro-crdt';
 import { sqliteLockReporterLegacy } from './sqlite-lock-diagnostics';
 
 export const getLoroRepoStorageBaseDir = (workspaceId: WorkspaceId): string =>
@@ -24,10 +28,9 @@ export const getLoroRepoSqliteDbPath = (workspaceId: WorkspaceId): string =>
 // produce different cursor keys; rejected: using the raw store would make
 // gateway flips lose checkpoints or leave stale invalidated checkpoints behind.
 // This is URL-key compatibility only, not migration of pre-SQLite JSON cursors.
-// It serves LoroDoc rooms of the daemon only (see `DocumentCursorScope`): Meta
+// The daemon writes LoroDoc cursors; commands may read covered seeds. Meta
 // and named Flock cursors are replica-bound checkpoints owned by
-// `SqliteRepoStore` itself (no alias fallback there, so a gateway flip costs
-// those rooms one bootstrap).
+// `SqliteRepoStore` itself, including URL alias resolution.
 export class AliasedRemoteCursorStore<
   TVersion extends JsonObject = JsonObject,
 > implements RemoteCursorStore<TVersion> {
@@ -72,7 +75,7 @@ const remoteCursor = z.object({
     .string()
     .min(1)
     .refine((offset) => offset !== '-1'),
-  serverLowerBoundVersion: z.record(z.string(), z.unknown()),
+  serverLowerBoundVersion: z.record(z.string(), z.json()),
   updatedAtMs: z.number(),
 });
 
@@ -105,16 +108,69 @@ export function hasPersistedFlockRemoteState(dbPath: string, flockDocId: string)
 }
 
 export type CliSqliteRepoStore = {
+  workspaceId: WorkspaceId;
   sqliteStore: SqliteRepoStore;
   storageAdapter: SqliteRepoStore['storage'];
   /**
    * LoroDoc room cursors shared by every process opening this file; see
-   * `AliasedRemoteCursorStore`. Only the daemon may resume from them — use
+   * `AliasedRemoteCursorStore`. Only the daemon may write them — use
    * `createDocumentRemoteCursorStore`, never this field directly.
    */
   sharedDocumentRemoteCursorStore: RemoteCursorStore;
   dbPath: string;
   baseDir: string;
+};
+
+const getSqliteRepoDatabase = (store: CliSqliteRepoStore): Database.Database =>
+  (store.sqliteStore as unknown as { readonly db: Database.Database }).db;
+
+const findDocumentRemoteCursorUrls = (
+  database: Database.Database,
+  workspaceId: WorkspaceId,
+  docId: string,
+  bucketId = LORO_STREAMS_BUCKET_ID
+): string[] => {
+  const pathname = new URL(
+    createLoroStreamUrl({
+      bucketId,
+      baseUrl: 'https://cursor-mapping.invalid',
+      streamId: getLoroStreamIdForDocId(workspaceId, docId),
+    })
+  ).pathname;
+  const rows = database
+    .prepare('SELECT stream_url FROM remote_cursors WHERE stream_url LIKE ?')
+    .all('%' + pathname) as Array<{ stream_url: string }>;
+  return rows
+    .filter(({ stream_url }) => {
+      try {
+        return new URL(stream_url).pathname === pathname;
+      } catch {
+        return false;
+      }
+    })
+    .map(({ stream_url }) => stream_url);
+};
+
+const initializeNewSqliteAutoVacuum = async (dbPath: string): Promise<void> => {
+  try {
+    await fs.access(dbPath);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return;
+  }
+
+  let database: Database.Database | null = null;
+  try {
+    database = new Database(dbPath, { timeout: 5_000 });
+    const pageCount = Number(database.pragma('page_count', { simple: true }) ?? 0);
+    if (pageCount === 0) {
+      database.pragma('auto_vacuum = INCREMENTAL');
+      database.pragma('journal_mode = WAL');
+    }
+  } catch {
+  } finally {
+    database?.close();
+  }
 };
 
 export const createCliSqliteRepoStore = async (
@@ -128,11 +184,17 @@ export const createCliSqliteRepoStore = async (
   // only durable together with FileSystemStorageAdaptor snapshots; migrating
   // cursors without doc/meta state could skip required stream replay.
   const dbPath = path.join(baseDir, 'repo.sqlite3');
-  const sqliteStore = new SqliteRepoStore({ path: dbPath, onWriteFailure });
+  await initializeNewSqliteAutoVacuum(dbPath);
+  const sqliteStore = new SqliteRepoStore({
+    path: dbPath,
+    onWriteFailure,
+    resolveStreamUrlAliases: getLoroStreamsRemoteCursorUrlAliases,
+  });
   // Lock contention reported for this database will name its other openers.
   sqliteLockReporterLegacy.register(dbPath);
 
   return {
+    workspaceId,
     sqliteStore,
     storageAdapter: sqliteStore.storage,
     sharedDocumentRemoteCursorStore: new AliasedRemoteCursorStore(sqliteStore.cursorStore),
@@ -141,27 +203,263 @@ export const createCliSqliteRepoStore = async (
   };
 };
 
-/**
- * Which LoroDoc Streams progress a process may resume from.
- *
- * LoroDoc cursors are not replica-bound: loro-repo keeps them in a store
- * separate from the doc bytes. The daemon and one-shot commands open the same
- * `repo.sqlite3` with their own in-memory replicas, so a process that loaded a
- * doc before another process advanced its data and shared cursor would resume
- * at that tail and permanently miss the entries it never loaded.
- *
- * - `shared-durable`: the long-lived daemon. It is the only writer of the
- *   shared cursors, so they only ever describe its own replica (data may run
- *   ahead of them, which merely replays).
- * - `process`: every other process. Progress lives in memory with this
- *   process's replicas, so each doc room it opens bootstraps once.
- */
+/** Shared cursors are daemon-owned; commands may only seed covered document progress. */
 export type DocumentCursorScope = 'shared-durable' | 'process';
+
+export class ProcessDocumentRemoteCursorStore implements RemoteCursorStore {
+  private readonly cursors = new Map<string, RemoteCursor | null>();
+  private readonly documents = new Map<string, WeakRef<LoroDoc>>();
+
+  constructor(private readonly shared: Pick<RemoteCursorStore, 'load'>) {}
+
+  bindDocument(streamId: string, doc: LoroDoc): void {
+    const previous = this.documents.get(streamId);
+    if (previous && previous.deref() !== doc) {
+      for (const url of this.cursors.keys()) {
+        if (this.streamId(url) === streamId) this.cursors.set(url, null);
+      }
+    }
+    this.documents.set(streamId, new WeakRef(doc));
+  }
+
+  async load(streamUrl: string): Promise<RemoteCursor | null> {
+    if (this.cursors.has(streamUrl)) return this.cursors.get(streamUrl) ?? null;
+    const streamId = this.streamId(streamUrl);
+    const doc = this.documents.get(streamId)?.deref();
+    const cursor = await this.shared.load(streamUrl);
+    // A concurrent save/delete wins over the asynchronous disk read.
+    if (this.cursors.has(streamUrl)) return this.cursors.get(streamUrl) ?? null;
+    if (doc !== this.documents.get(streamId)?.deref()) return null;
+    const version = doc ? new Map<string, number>(doc.version().toJSON()) : undefined;
+    const hasPending = (doc?.exportPendingUpdates()?.byteLength ?? 0) > 0;
+    const clocks = cursor ? Object.entries(cursor.serverLowerBoundVersion) : [];
+    const covered =
+      version &&
+      !hasPending &&
+      clocks.length > 0 &&
+      clocks.every(
+        ([peer, clock]) =>
+          typeof clock === 'number' &&
+          Number.isSafeInteger(clock) &&
+          clock >= 0 &&
+          (version.get(peer) ?? 0) >= clock
+      );
+    const seed = covered ? cursor : null;
+    this.cursors.set(streamUrl, seed);
+    return seed;
+  }
+
+  private streamId(streamUrl: string): string {
+    return decodeURIComponent(new URL(streamUrl).pathname.split('/').at(-1) ?? '');
+  }
+
+  async save(cursor: RemoteCursor): Promise<void> {
+    this.cursors.set(cursor.streamUrl, cursor);
+  }
+
+  async delete(streamUrl: string): Promise<void> {
+    this.cursors.set(streamUrl, null);
+    for (const alias of getLoroStreamsRemoteCursorUrlAliases(streamUrl)) {
+      this.cursors.set(alias, null);
+    }
+  }
+}
+
+export type SqliteRepoSpaceStats = {
+  readonly pageSize: number;
+  readonly pageCount: number;
+  readonly freelistCount: number;
+  readonly autoVacuum: 'none' | 'full' | 'incremental';
+};
+
+export type SqliteRepoMaintenanceStore = {
+  readonly workspaceId: WorkspaceId;
+  readonly dbPath: string;
+  isOpen(): boolean;
+  listStoredDocIds(): string[];
+  listStoredFlockDocIds(): string[];
+  listCompactionCandidates(
+    minUpdateCount: number,
+    minUpdateBytes: number,
+    staleCutoffMs: number,
+    limit: number
+  ): string[];
+  purgeStoredDoc(docId: string): Promise<void>;
+  compactStoredDoc(docId: string): Promise<void>;
+  readSpaceStats(): SqliteRepoSpaceStats;
+  upgradeToIncrementalAndVacuum(): number;
+  runIncrementalVacuumStep(pages: number): number;
+  runWalCheckpoint(): void;
+};
+
+const decodeAutoVacuum = (value: number): SqliteRepoSpaceStats['autoVacuum'] =>
+  value === 2 ? 'incremental' : value === 1 ? 'full' : 'none';
+
+export const createSqliteRepoMaintenanceStore = (
+  store: CliSqliteRepoStore,
+  _scope: 'shared-durable',
+  bucketId = LORO_STREAMS_BUCKET_ID
+): SqliteRepoMaintenanceStore => {
+  const openDb = (): Database.Database | null => {
+    const db = getSqliteRepoDatabase(store);
+    return db.open ? db : null;
+  };
+
+  const readSpaceStats = (): SqliteRepoSpaceStats => {
+    const db = openDb();
+    if (!db) return { pageSize: 4096, pageCount: 0, freelistCount: 0, autoVacuum: 'none' };
+    return {
+      pageSize: Number(db.pragma('page_size', { simple: true }) ?? 4096),
+      pageCount: Number(db.pragma('page_count', { simple: true }) ?? 0),
+      freelistCount: Number(db.pragma('freelist_count', { simple: true }) ?? 0),
+      autoVacuum: decodeAutoVacuum(Number(db.pragma('auto_vacuum', { simple: true }) ?? 0)),
+    };
+  };
+
+  return {
+    workspaceId: store.workspaceId,
+    dbPath: store.dbPath,
+    isOpen: () => openDb() !== null,
+    listStoredDocIds: () => {
+      const db = openDb();
+      if (!db) return [];
+      const rows = db
+        .prepare('SELECT doc_id FROM docs UNION SELECT doc_id FROM doc_updates')
+        .all() as Array<{ doc_id: string }>;
+      return rows.map((row) => row.doc_id);
+    },
+    listStoredFlockDocIds: () => {
+      const db = openDb();
+      if (!db) return [];
+      const rows = db
+        .prepare(
+          'SELECT flock_doc_id FROM flock_docs UNION SELECT flock_doc_id FROM flock_doc_updates'
+        )
+        .all() as Array<{ flock_doc_id: string }>;
+      return rows.map((row) => row.flock_doc_id);
+    },
+    listCompactionCandidates: (minUpdateCount, minUpdateBytes, staleCutoffMs, limit) => {
+      const db = openDb();
+      if (!db) return [];
+      const rows = db
+        .prepare(
+          `SELECT doc_id, COUNT(*) AS update_count, COALESCE(SUM(LENGTH(update_data)), 0) AS total_bytes
+           FROM doc_updates
+           GROUP BY doc_id
+           HAVING update_count >= ? OR total_bytes >= ? OR MAX(created_at) <= ?
+           ORDER BY total_bytes DESC
+           LIMIT ?`
+        )
+        .all(minUpdateCount, minUpdateBytes, staleCutoffMs, limit) as Array<{ doc_id: string }>;
+      return rows.map((row) => row.doc_id);
+    },
+    purgeStoredDoc: async (docId) => {
+      const db = openDb();
+      if (!db) return;
+      const cursorUrls = new Set<string>(
+        (await store.storageAdapter.docCursorIndex?.load(docId)) ?? []
+      );
+      for (const url of findDocumentRemoteCursorUrls(db, store.workspaceId, docId, bucketId)) {
+        cursorUrls.add(url);
+      }
+      for (const url of cursorUrls) {
+        await store.sharedDocumentRemoteCursorStore.delete?.(url);
+      }
+      await store.storageAdapter.docCursorIndex?.delete(docId);
+      await store.storageAdapter.deleteDoc?.(docId);
+    },
+    compactStoredDoc: async (docId) => {
+      if (!openDb()) return;
+      const doc = await store.storageAdapter.loadDoc(docId);
+      (doc as { free?: () => void } | undefined)?.free?.();
+    },
+    readSpaceStats,
+    upgradeToIncrementalAndVacuum: () => {
+      const db = openDb();
+      if (!db) return 0;
+      const before = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      db.pragma('auto_vacuum = INCREMENTAL');
+      db.exec('VACUUM');
+      const after = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      return Math.max(0, before - after);
+    },
+    runIncrementalVacuumStep: (pages) => {
+      const db = openDb();
+      if (!db) return 0;
+      const before = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      if (before <= 0) return 0;
+      db.pragma(`incremental_vacuum(${Math.max(1, Math.floor(pages))})`);
+      const after = Number(db.pragma('freelist_count', { simple: true }) ?? 0);
+      return Math.max(0, before - after);
+    },
+    runWalCheckpoint: () => {
+      const db = openDb();
+      if (!db) return;
+      db.pragma('wal_checkpoint(TRUNCATE)');
+    },
+  };
+};
 
 export const createDocumentRemoteCursorStore = (
   store: CliSqliteRepoStore,
+  scope: DocumentCursorScope,
+  bucketId = LORO_STREAMS_BUCKET_ID
+): RemoteCursorStore => {
+  if (scope === 'shared-durable') return store.sharedDocumentRemoteCursorStore;
+  return new ProcessDocumentRemoteCursorStore(
+    store.sqliteStore.createProcessDocumentCursorStore({
+      // Older Lody writers did not populate docCursorIndex. Resolve only this
+      // workspace/document/bucket's existing URLs inside the capture transaction.
+      documentStreamUrls: (docId) =>
+        findDocumentRemoteCursorUrls(
+          getSqliteRepoDatabase(store),
+          store.workspaceId,
+          docId,
+          bucketId
+        ),
+      resolveStreamUrlAliases: getLoroStreamsRemoteCursorUrlAliases,
+    })
+  );
+};
+
+/** Only the daemon publishes metadata; commands keep their modifications private. */
+export function createCliIncompleteRecoveryStore(
+  store: CliSqliteRepoStore,
   scope: DocumentCursorScope
-): RemoteCursorStore =>
-  scope === 'shared-durable'
-    ? store.sharedDocumentRemoteCursorStore
-    : new InMemoryRemoteCursorStore();
+) {
+  const directory = path.join(store.baseDir, 'incomplete-recovery');
+  const local = new Map<string, unknown>();
+  const fileOf = (key: string) =>
+    path.join(directory, createHash('sha256').update(key).digest('hex') + '.json');
+  return createAliasedIncompleteRecoveryStore({
+    async load(key) {
+      if (local.has(key)) return local.get(key);
+      try {
+        return JSON.parse(await fs.readFile(fileOf(key), 'utf8')) as unknown;
+      } catch {
+        return null;
+      }
+    },
+    async save(key, value) {
+      if (scope === 'process') {
+        local.set(key, value);
+        return;
+      }
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      const temporary = fileOf(key) + '.' + randomUUID();
+      try {
+        await fs.writeFile(temporary, JSON.stringify(value), { flag: 'wx', mode: 0o600 });
+        await fs.rename(temporary, fileOf(key));
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
+    },
+    async delete(key) {
+      if (scope === 'process') {
+        local.set(key, null);
+        return;
+      }
+      await fs.rm(fileOf(key), { force: true });
+    },
+  });
+}

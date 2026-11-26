@@ -1,4 +1,10 @@
-import { buildSessionLink, parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  buildAppActionLink,
+  buildSessionLink,
+  parseSessionLink,
+  type AppActionLink,
+  type SessionLink,
+} from '@lody/shared/session-link';
 import { atom, type createStore } from 'jotai';
 import type { WorkspacesState } from '@lody/platform';
 import { formatExplicitSessionTabSearch } from './session-tab-url';
@@ -38,6 +44,12 @@ export const SESSION_DEEP_LINK_EVENT = 'lody:open-session-link';
 export function openSessionDeepLink(target: SessionLink): void {
   window.dispatchEvent(
     new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: buildSessionLink(target) })
+  );
+}
+
+export function openAppActionDeepLink(target: AppActionLink): void {
+  window.dispatchEvent(
+    new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: buildAppActionLink(target) })
   );
 }
 

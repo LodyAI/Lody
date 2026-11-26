@@ -1,11 +1,13 @@
 import { installClientLog } from '@lody/components/lib/client-log'
 import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
 import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
+import { configureLoroWasmBudget } from '@lody/shared/loro-wasm-budget'
 import type { PreparedWindowTarget } from '@lody/shared/electron-ipc'
 import { observePreparedTarget, waitForTargetContentPainted } from './warm-window-reveal'
 import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
 import {
   isSessionWindow,
+  isTodayWindow,
   isWarmWindow,
   clearWarmWindowFlag
 } from '@lody/components/lib/desktop-window'
@@ -13,6 +15,7 @@ import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
+import { RecoveryAccountPage } from '@lody/components/components/settings/e2ee/recovery-host'
 import {
   detectBrowserLanguage,
   fallbackLanguage,
@@ -21,7 +24,7 @@ import {
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
 import { sidebarCollapsedAtom } from '@lody/components/atoms/sidebar-state'
-import '@lody/components/tailwind/index.css'
+import '@lody/components/style/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'
@@ -34,6 +37,9 @@ import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
 import { installAppIconBridge } from './app-icon'
+import { markTodayWindowBoot } from '@lody/components/lib/today/today-window-boot-timeline'
+
+markTodayWindowBoot('renderer-entry')
 
 const stopClientDiagnostics = installClientLog()
 import.meta.hot?.dispose(stopClientDiagnostics)
@@ -129,6 +135,26 @@ function RendererCommitSentinel(): null {
   return null
 }
 
+function installTodayWindowBinding(router: ReturnType<typeof createRouter>): void {
+  if (!isTodayWindow()) return
+  const workspaceName = router.history.location.pathname.split('/')[1]
+  if (!workspaceName) return
+  onIpcEvent('app.todayWindowTarget', (binding) => {
+    void (
+      binding
+        ? router.navigate({
+            to: '/$workspaceName/today-window',
+            params: { workspaceName },
+            search: binding,
+            replace: true
+          })
+        : router.navigate({ to: '/', replace: true })
+    ).catch((error) => {
+      console.error('[today-window] Could not bind the Today route', error)
+    })
+  })
+}
+
 /**
  * Binds a claimed warm window to a concrete route without a reload. The renderer
  * is already booted; this reproduces the storage flags a fresh auxiliary window
@@ -220,6 +246,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 try {
+  configureLoroWasmBudget()
   installAppIconBridge()
   // Resolve and persist the desktop's first-run language before React can
   // commit. AppInitializer keeps later changes synchronized; awaiting here
@@ -228,6 +255,7 @@ try {
   const detectedLanguage = storedLanguage ?? detectBrowserLanguage()
   const bootLanguage = detectedLanguage ?? fallbackLanguage
   await initI18n(bootLanguage)
+  markTodayWindowBoot('i18n-ready')
   if (!storedLanguage && detectedLanguage) {
     jotaiStore.set(languageAtom, detectedLanguage)
   }
@@ -240,9 +268,11 @@ try {
   if (devbar?.enabled) document.documentElement.setAttribute('data-desktop-devbar', '')
   const router = createRouter({
     authClient,
+    recoveryPage: RecoveryAccountPage,
     history: usesHashHistory ? createHashHistory() : undefined
   })
   installWarmWindowBinding(router)
+  installTodayWindowBinding(router)
   installWindowPreparationIntent()
   if (isWarmWindow()) {
     void preloadMainLayout().catch((error) => {
@@ -259,6 +289,7 @@ try {
       sessionStorage.setItem('lody:windowFocusConsumed', '1')
     }
   }
+  markTodayWindowBoot('react-render')
   createRoot(rootElement, {
     // ErrorBoundary remains the single owner of caught-error UI and PostHog.
     // React 19 no longer rethrows render errors, so these root callbacks only

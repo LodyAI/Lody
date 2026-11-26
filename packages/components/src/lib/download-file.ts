@@ -1,3 +1,5 @@
+import { isNativeAppShell } from './native-platform';
+
 /**
  * Saves bytes the client already holds as a file download. This is the REMOTE
  * stand-in for the desktop app's reveal/open actions: when the file lives on a
@@ -26,4 +28,17 @@ export function downloadBytesAsFile(filePath: string, bytes: Uint8Array): void {
 export function getDownloadFileName(filePath: string): string {
   const segments = filePath.trim().split(/[\\/]+/u);
   return segments[segments.length - 1]?.trim() || 'download';
+}
+
+export async function saveBytesAsFile(
+  filePath: string,
+  bytes: Uint8Array
+): Promise<{ saved: boolean }> {
+  if (isNativeAppShell()) {
+    const { shareFileBytesNatively } = await import('./session-file-native-save');
+    const { shared } = await shareFileBytesNatively(getDownloadFileName(filePath), bytes);
+    return { saved: shared };
+  }
+  downloadBytesAsFile(filePath, bytes);
+  return { saved: true };
 }

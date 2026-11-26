@@ -20,6 +20,9 @@ export type AutomationSessionAdmission = {
   origin: AutomationOrigin;
 };
 
+export type SessionEditAccess = 'yes' | 'no' | 'unknown';
+export type SessionNativeActivity = 'idle' | 'running' | 'background';
+
 /** Existing Session owner; Automations cannot commit lifecycle changes through metadata alone. */
 export class SessionAutomationAuthority {
   constructor(
@@ -29,13 +32,15 @@ export class SessionAutomationAuthority {
       machineId: string;
       hasOtherWork(sessionId: SessionId): boolean;
       hasGoal(sessionId: SessionId): Promise<boolean>;
-      nativeActivity(sessionId: SessionId): 'idle' | 'running' | 'background' | 'unknown';
+      nativeActivity(sessionId: SessionId): SessionNativeActivity;
       author(sessionId: SessionId): string | undefined;
+      canEdit(sessionId: SessionId, userId: string): Promise<SessionEditAccess>;
     }
   ) {}
 
+  private observations: import('./automation-observations').AutomationObservationSink | undefined;
   private pendingAutomationWork:
-    | ((sessionId: string, excludingInvocationId?: string) => boolean)
+    | ((sessionId: SessionId, excludingInvocationId?: string) => boolean)
     | undefined;
   setPendingWork(check: SessionAutomationAuthority['pendingAutomationWork']): void {
     this.pendingAutomationWork = check;
@@ -43,7 +48,11 @@ export class SessionAutomationAuthority {
   setObservations(
     sink: import('./automation-observations').AutomationObservationSink | undefined
   ): void {
+    this.observations = sink;
     this.deps.execution.setAutomationObservations(sink);
+  }
+  notifyNativeIdle(sessionId: SessionId): void {
+    this.observations?.idle?.(sessionId);
   }
   refreshCapacity(bindingId: string) {
     return this.deps.execution.refreshProviderRateLimits(
@@ -52,6 +61,9 @@ export class SessionAutomationAuthority {
   }
   author(sessionId: SessionId): string | undefined {
     return this.deps.author(sessionId);
+  }
+  canEdit(sessionId: SessionId, userId: string): Promise<SessionEditAccess> {
+    return this.deps.canEdit(sessionId, userId);
   }
   setAdmission(
     admit: ((args: AutomationSessionAdmission) => Promise<boolean>) | undefined,
@@ -103,7 +115,9 @@ export class SessionAutomationAuthority {
   ): Promise<ConditionObservation> {
     if (meta.machineId !== this.deps.machineId)
       return { value: 'unknown', reason: 'owner_unavailable' };
-    if (meta.userId !== userId) return { value: 'no', reason: 'permission_denied' };
+    const access = await this.deps.canEdit(meta.id, userId);
+    if (access === 'no') return { value: 'no', reason: 'permission_denied' };
+    if (access === 'unknown') return { value: 'unknown', reason: 'permission_unconfirmed' };
     const execution = this.deps.execution.getExecutionSnapshot(meta.id);
     if (this.deps.execution.hasBlockedAutomationExecution(meta.id) || execution.releaseBlocked)
       return { value: 'unknown', reason: 'execution_release_unconfirmed' };
@@ -122,7 +136,6 @@ export class SessionAutomationAuthority {
     if (this.pendingAutomationWork?.(meta.id, excludingInvocationId))
       return { value: 'no', reason: 'automation_work_pending' };
     const native = this.deps.nativeActivity(meta.id);
-    if (native === 'unknown') return { value: 'unknown', reason: 'native_activity_unobserved' };
     if (native !== 'idle') return { value: 'no', reason: 'native_work_active' };
     return { value: 'yes', reason: 'session_settled' };
   }
@@ -189,20 +202,46 @@ export class SessionAutomationAuthority {
             rootId,
             'archive'
           );
-          // Commit the root last: it must not attest completion of a partial group write.
-          for (const meta of [...targets.slice(1), targets[0]]) {
+          const protectedIds = new Set(current.map((meta) => meta.id));
+          if (targets.some((meta) => !protectedIds.has(meta.id)))
+            return { value: 'unknown', reason: 'group_membership_changed' };
+          const archiveTarget = async (meta: SessionMeta) => {
             const fresh = await this.deps.manager.repo.getDocMeta(getSessionRoomId(meta.id));
             if (
               !fresh?.meta ||
               isLoroRepoDocDeleted(fresh) ||
               hasPendingUserTurnActivation(fresh.meta as SessionMeta)
             )
-              return { value: 'unknown', reason: 'session_changed' };
+              return false;
             await this.deps.manager.repo.upsertDocMeta(
               getSessionRoomId(meta.id),
               buildSessionArchiveMetaPatch()
             );
+            return true;
+          };
+          // Commit the root last: it must not attest completion of a partial group write.
+          for (const meta of targets.slice(1)) {
+            if (!(await archiveTarget(meta)))
+              return { value: 'unknown', reason: 'session_changed' };
           }
+          const finalTargets = await readSessionOperationTargets(
+            this.deps.manager.repo,
+            rootId,
+            'archive'
+          );
+          if (
+            finalTargets
+              .map((meta) => meta.id)
+              .sort()
+              .join('\0') !==
+            targets
+              .map((meta) => meta.id)
+              .sort()
+              .join('\0')
+          )
+            return { value: 'unknown', reason: 'group_membership_changed' };
+          if (!(await archiveTarget(targets[0])))
+            return { value: 'unknown', reason: 'session_changed' };
           await this.deps.manager.repo.flush();
           return { value: 'yes', reason: 'session_archived' };
         } finally {

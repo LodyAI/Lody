@@ -151,6 +151,7 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
     crypto: globalThis.crypto,
     Buffer,
     URL,
+    Request,
     setTimeout,
     clearTimeout,
     console,
@@ -197,7 +198,15 @@ function loadSync(relative, dependencies, console = globalThis.console, env = {}
                                       work
                                     ) => work()
                                   }
-                                : require(id)
+                                : id === '../auth-fetch'
+                                  ? loadSync(
+                                      '../auth-fetch.ts',
+                                      dependencies,
+                                      console,
+                                      env,
+                                      globals
+                                    )
+                                  : require(id)
   })
   return exports
 }
@@ -218,7 +227,13 @@ async function account(options = {}) {
   const api = await load(
     './e2ee-account-runtime.ts',
     {
-      electron: { app: { getPath: () => options.directory ?? '/synthetic-user-data' } },
+      electron: options.electron ?? {
+        app: {
+          getPath: () => options.directory ?? '/synthetic-user-data',
+          whenReady: () => Promise.resolve()
+        },
+        net: { fetch: globalThis.fetch }
+      },
       ...(options.clock
         ? {
             '@lody/shared/node/e2ee-clock': {
@@ -1664,7 +1679,7 @@ async function rotatedTeam(t, latency) {
   await f.approver.open('team')
   const joined = async (joiner, submitted, accountId) => {
     await f.approver.memberJoinRequests('team')
-    await f.approver.approveMemberJoin('team', submitted.requestId, 'automatic')
+    await f.approver.approveMemberJoin('team', submitted.requestId, 'explicit')
     await f.approver.keyDeliveryIdle('acc1', 'team')
     let claimed = await joiner.claimMemberJoin('team', submitted.requestId)
     for (let attempt = 0; !claimed.ready && attempt < 3; attempt++)

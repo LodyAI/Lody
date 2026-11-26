@@ -6,14 +6,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider } from 'jotai';
 
 import { sidebarCollapsedAtom } from '../src/atoms/sidebar-state';
-import { TodayToolbar } from '../src/components/today/today-view';
+import {
+  WINDOW_DRAG_REGION_CLASS,
+  WINDOW_DRAG_EXEMPT_CLASS,
+  WINDOWS_CAPTION_PAD_CLASS,
+} from '../src/ui/window-drag-region';
+import { WebArchiveScreen } from '../src/components/archive/web-archive-screen';
+import { TodayToolbar, type TodayToolbarSurface } from '../src/components/today/today-view';
+import { TodayColumnSash, TodayPinnedCard } from '../src/components/today/today-pinned-column';
 import { createTestI18n, withTestI18n } from './test-i18n';
+
+const desktop = vi.hoisted(() => ({ platform: 'darwin' as 'darwin' | 'win32' }));
 
 // The desktop window: the workspace drag strip covers the Today page's toolbar row.
 vi.mock('../src/lib/electron', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/electron')>()),
   isElectronRenderer: () => true,
-  isMacOSElectronRenderer: () => true,
+  isMacOSElectronRenderer: () => desktop.platform === 'darwin',
+  isWindowsElectronRenderer: () => desktop.platform === 'win32',
   useElectronFullscreen: () => false,
 }));
 
@@ -21,14 +31,17 @@ describe('Today toolbar window chrome', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
 
-  afterEach(() => {
-    if (root) flushSync(() => root?.unmount());
+  afterEach(async () => {
+    await act(async () => {
+      if (root) root.unmount();
+    });
     root = undefined;
     container?.remove();
     container = undefined;
+    desktop.platform = 'darwin';
   });
 
-  async function renderToolbar(pinned: boolean, collapsed: boolean) {
+  async function renderToolbar(surface: TodayToolbarSurface, collapsed: boolean) {
     const store = createStore();
     store.set(sidebarCollapsedAtom, collapsed);
     container = document.createElement('div');
@@ -38,7 +51,7 @@ describe('Today toolbar window chrome', () => {
       root?.render(
         withTestI18n(
           <Provider store={store}>
-            <TodayToolbar pinned={pinned} title={null}>
+            <TodayToolbar surface={surface} title={null}>
               <button type="button">Pick a date</button>
               <button type="button">Pin</button>
               <button type="button">More</button>
@@ -54,15 +67,15 @@ describe('Today toolbar window chrome', () => {
   /** A click lands on a control only when no drag region claims it first. */
   function clickable(button: Element, toolbar: Element) {
     for (let node: Element | null = button; node && node !== toolbar; node = node.parentElement) {
-      if (node.classList.contains('app-region-no-drag')) return true;
-      if (node.classList.contains('app-region-drag')) return false;
+      if (node.classList.contains(WINDOW_DRAG_EXEMPT_CLASS)) return true;
+      if (node.classList.contains(WINDOW_DRAG_REGION_CLASS)) return false;
     }
-    return !toolbar.classList.contains('app-region-drag');
+    return !toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS);
   }
 
   it('keeps every page control clickable and restores the sidebar controls while it is hidden', async () => {
-    const { store, toolbar } = await renderToolbar(false, true);
-    expect(toolbar.classList.contains('app-region-drag')).toBe(true);
+    const { store, toolbar } = await renderToolbar('page', true);
+    expect(toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
     const buttons = [...toolbar.querySelectorAll('button')];
     expect(
       buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent)
@@ -82,14 +95,13 @@ describe('Today toolbar window chrome', () => {
     expect(toolbar.querySelector('[aria-label="commands.sidebar.toggle"]')).toBeNull();
   });
 
-  it('keeps the pinned column out of the drag chrome, carrying the sidebar controls while the sidebar is hidden', async () => {
-    const hidden = await renderToolbar(true, true);
-    expect(hidden.toolbar.classList.contains('app-region-drag')).toBe(false);
+  it('makes the pinned column toolbar window drag chrome with every control clickable, carrying the sidebar controls while the sidebar is hidden', async () => {
+    const hidden = await renderToolbar('pinned', true);
+    expect(hidden.toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
     // Pinned with the sidebar hidden, the column is the leftmost surface.
+    const buttons = [...hidden.toolbar.querySelectorAll('button')];
     expect(
-      [...hidden.toolbar.querySelectorAll('button')].map(
-        (button) => button.getAttribute('aria-label') ?? button.textContent
-      )
+      buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent)
     ).toEqual([
       'commands.sidebar.toggle',
       'commands.nav.back',
@@ -98,9 +110,71 @@ describe('Today toolbar window chrome', () => {
       'Pin',
       'More',
     ]);
-    await act(async () => [...hidden.toolbar.querySelectorAll('button')][0]!.click());
+    for (const button of buttons) expect(clickable(button, hidden.toolbar)).toBe(true);
+    await act(async () => buttons[0]!.click());
     expect(hidden.store.get(sidebarCollapsedAtom)).toBe(false);
     expect(hidden.toolbar.querySelectorAll('button')).toHaveLength(3);
+    expect(hidden.toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+  });
+
+  it('leaves the Windows caption-button gutter to rows that can reach the window right edge', async () => {
+    desktop.platform = 'win32';
+    const padded = (surface: TodayToolbarSurface) =>
+      renderToolbar(surface, false).then(({ toolbar }) => {
+        const result = toolbar.classList.contains(WINDOWS_CAPTION_PAD_CLASS);
+        flushSync(() => root?.unmount());
+        root = undefined;
+        container?.remove();
+        return result;
+      });
+    expect(await padded('page')).toBe(true);
+    expect(await padded('standalone')).toBe(true);
+    expect(await padded('pinned')).toBe(false);
+  });
+
+  it('lets the window ground above the pinned card drag the window while its sash keeps resizing', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () =>
+      root?.render(
+        <TodayPinnedCard
+          width={360}
+          anchored={false}
+          label="Today"
+          sash={<TodayColumnSash width={360} onWidthChange={() => {}} label="Resize Today" />}
+        >
+          <TodayToolbar surface="pinned" title={null}>
+            <button type="button">More</button>
+          </TodayToolbar>
+        </TodayPinnedCard>
+      )
+    );
+    const column = container.querySelector('[data-testid="today-column"]')!;
+    const strip = column.querySelector('[data-window-drag-strip]')!;
+    expect(strip.parentElement).toBe(column);
+    expect(strip.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+    const sash = column.querySelector('[data-today-sash]')!;
+    // Electron applies regions in document order: the later no-drag sash wins
+    // over the strip and the toolbar row it overlaps.
+    expect(sash.classList.contains(WINDOW_DRAG_EXEMPT_CLASS)).toBe(true);
+    expect(strip.compareDocumentPosition(sash) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const toolbar = column.querySelector('[data-testid="today-toolbar"]')!;
+    expect(toolbar.compareDocumentPosition(sash) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('makes the standalone Today window toolbar its own drag chrome, without sidebar controls', async () => {
+    // The Today window has no navigation sidebar, whatever its stored state says.
+    for (const collapsed of [false, true]) {
+      const { toolbar } = await renderToolbar('standalone', collapsed);
+      expect(toolbar.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+      const buttons = [...toolbar.querySelectorAll('button')];
+      expect(buttons.map((button) => button.textContent)).toEqual(['Pick a date', 'Pin', 'More']);
+      for (const button of buttons) expect(clickable(button, toolbar)).toBe(true);
+      flushSync(() => root?.unmount());
+      root = undefined;
+      container?.remove();
+    }
   });
 
   it('hands the sidebar controls to pinned Today: the main page no longer owns the window edge', async () => {
@@ -117,5 +191,72 @@ describe('Today toolbar window chrome', () => {
     expect(store.get(mainPageAtWindowEdgeAtom)).toBe(false);
     store.set(sidebarCollapsedAtom, false);
     expect(store.get(mainPageAtWindowEdgeAtom)).toBe(false);
+  });
+
+  it('keeps Archive header controls clickable in Electron default and multi-select modes', async () => {
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    const onExitMultiSelect = vi.fn();
+    const onBulkRestore = vi.fn();
+    const onRequestBulkDelete = vi.fn();
+
+    const renderArchive = (isMultiSelectMode: boolean) =>
+      act(async () =>
+        root?.render(
+          withTestI18n(
+            <Provider store={store}>
+              <WebArchiveScreen
+                archiveScope="my"
+                isMultiSelectMode={isMultiSelectMode}
+                selectedCount={isMultiSelectMode ? 2 : 0}
+                isBulkActionBusy={false}
+                onArchiveScopeChange={() => {}}
+                onExitMultiSelect={onExitMultiSelect}
+                onBulkRestore={onBulkRestore}
+                onRequestBulkDelete={onRequestBulkDelete}
+                dialogs={null}
+              >
+                <div />
+              </WebArchiveScreen>
+            </Provider>,
+            createTestI18n({ keyLabels: true })
+          )
+        )
+      );
+
+    await renderArchive(false);
+    const defaultHeader = container.querySelector('header')!;
+    expect(defaultHeader.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+    const defaultButtons = [...defaultHeader.querySelectorAll('button')];
+    expect(defaultButtons.length).toBeGreaterThan(0);
+    for (const button of defaultButtons) expect(clickable(button, defaultHeader)).toBe(true);
+
+    await renderArchive(true);
+    const multiSelectHeader = container.querySelector('header')!;
+    expect(multiSelectHeader.classList.contains(WINDOW_DRAG_REGION_CLASS)).toBe(true);
+    const multiSelectButtons = [...multiSelectHeader.querySelectorAll('button')];
+    expect(
+      multiSelectButtons.map((button) => button.getAttribute('aria-label') ?? button.textContent)
+    ).toEqual([
+      'archive.multiSelect.exit',
+      'archive.multiSelect.restore',
+      'archive.multiSelect.delete',
+    ]);
+    for (const button of multiSelectButtons) {
+      expect(clickable(button, multiSelectHeader)).toBe(true);
+    }
+
+    await act(async () => {
+      multiSelectButtons[0]!.click();
+      multiSelectButtons[1]!.click();
+      multiSelectButtons[2]!.click();
+    });
+    expect(onExitMultiSelect).toHaveBeenCalledTimes(1);
+    expect(onBulkRestore).toHaveBeenCalledTimes(1);
+    expect(onRequestBulkDelete).toHaveBeenCalledTimes(1);
   });
 });

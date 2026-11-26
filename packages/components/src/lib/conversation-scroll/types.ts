@@ -91,8 +91,21 @@ export interface CycleDiagnostic {
   resolvedKey: string | null;
 }
 
+export interface SavedSizes {
+  layoutVersion: string;
+  keys: string[];
+  sizes: number[];
+}
+
+export type SavedIntent =
+  | Extract<Intent, { kind: 'follow' }>
+  | (Extract<Intent, { kind: 'read' }> & {
+      replyRoom?: number;
+      disclosureSpace?: boolean;
+    });
+
 export interface SavedScrollState {
   formatVersion: 1;
-  intent: Extract<Intent, { kind: 'follow' | 'read' }>;
-  sizes: { layoutVersion: string; keys: string[]; sizes: number[] } | null;
+  intent: SavedIntent;
+  sizes: SavedSizes | null;
 }

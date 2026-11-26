@@ -77,7 +77,9 @@ export function makeVerifiedExecutionIntent(options: {
 }) {
   return (
     intent: EncryptedExecutionIntent,
-    doc?: LoroDoc,
+    source?:
+      | LoroDoc
+      | { readUserTurn: (id: string) => Promise<Record<string, unknown> | undefined> },
     lookup: { readonly origin?: boolean } = {}
   ): Effect.Effect<
     VerifiedExecutionOriginal | PendingExecutionOriginal | RefusedExecutionOriginal | undefined,
@@ -88,7 +90,12 @@ export function makeVerifiedExecutionIntent(options: {
       let state = (yield* options.ledger()).inspectState();
       const machineId = state.devices.get(options.selfDevice)?.machineId;
       if (!machineId) return refused('e2ee_machine_not_member');
-      const row = doc ? findUserTurn(doc, intent.userTurnId) : undefined;
+      const row =
+        source && 'readUserTurn' in source
+          ? yield* Effect.tryPromise(() => source.readUserTurn(intent.userTurnId))
+          : source
+            ? findUserTurn(source, intent.userTurnId)
+            : undefined;
       let record: unknown;
       let content: { inputConfig: unknown; derivedFrom?: unknown; scheduleRun?: unknown };
       if (row) {

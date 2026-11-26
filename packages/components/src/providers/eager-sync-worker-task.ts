@@ -1,4 +1,6 @@
 import { requirePlaintextWorkspaceStreamsContent } from '@lody/shared/workspace-streams-content';
+import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
+import { configureLoroWasmBudget } from '@lody/shared/loro-wasm-budget';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import { base64ToBytes } from '@lody/shared/local-loro-data-plane';
 import {
@@ -10,7 +12,7 @@ import {
   type JsonObject,
   type StreamsCrdtOptions,
 } from '@loro-dev/streams-crdt';
-import { createLoroDocAdapter, StreamsCrdt } from '@loro-dev/streams-crdt/loro';
+import { createLoroDocAdapter, type StreamsCrdt } from '@loro-dev/streams-crdt/loro';
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
   readEagerSyncSnapshot,
@@ -19,6 +21,12 @@ import {
 } from './eager-sync-snapshot-cache';
 import { coveredEagerSyncCursor } from './eager-sync-checkpoint';
 import type { EagerSyncAuthContext, EagerSyncWorkerInput } from './eager-sync-worker-protocol';
+
+declare const __LODY_ELECTRON_RENDERER__: boolean;
+
+if (typeof __LODY_ELECTRON_RENDERER__ !== 'undefined' && __LODY_ELECTRON_RENDERER__) {
+  configureLoroWasmBudget();
+}
 
 export async function runEagerSyncWorkerTask(
   request: Extract<EagerSyncWorkerInput, { type: 'start' }>,
@@ -99,9 +107,10 @@ export async function runEagerSyncWorkerTask(
         doc
       );
       if (restoredCursor) await cursors.save(restoredCursor);
-      transport = new StreamsCrdt({
+      transport = createStreamsCrdt({
         streamUrl,
-        shardUrls,
+        webSocket: 'disabled',
+        shardUrls: shardUrls ?? 'disabled',
         adapter: createLoroDocAdapter(doc),
         auth: deps.auth,
         fetch: deps.fetch,

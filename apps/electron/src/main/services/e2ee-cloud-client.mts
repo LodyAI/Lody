@@ -3,6 +3,10 @@ import { makeInlineVersionReadHead, sharingReplySchemas } from '@lody/e2ee-machi
 import type { SharingRemote } from '@lody/e2ee-machine-sharing'
 import { E2eeDeviceRevokedError, E2eeMemberRemovedError } from './e2ee-cloud-errors.mjs'
 import { RemoteMachineStatusSchema } from '@lody/shared/e2ee-remote-pairing'
+import {
+  isTransientGatewayStatus,
+  TRANSIENT_GATEWAY_RETRY_DELAYS_MS
+} from '@lody/shared/transient-gateway'
 import type { E2eeMachinePairingRequests } from '@lody/cloud-api'
 import {
   Bytes,
@@ -206,8 +210,6 @@ const memberDeviceAccess = (source: E2eeDeviceAccess): E2eeDeviceAccess => ({
   ...(source.cliToken === undefined ? {} : { cliToken: source.cliToken })
 })
 const unavailable = () => new BackendError({ service: 'E2eeCloud', reason: 'unavailable' })
-const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
-const TRANSIENT_RETRY_DELAYS_MS = [60, 150] as const
 
 async function hasE2eeRefusalBody(response: Response, signal: AbortSignal): Promise<boolean> {
   if (typeof response.clone !== 'function') return false
@@ -293,6 +295,12 @@ export class E2eeMemberInvitationRefusedError extends BackendError {
   }
 }
 
+class E2eeSelfServiceRateLimitedError extends BackendError {
+  constructor(readonly retryAt: number) {
+    super({ service: 'E2eeCloud', reason: 'unavailable' })
+  }
+}
+
 /** Only an explicit backend refusal may be presented as recovery switched off. */
 export class E2eeRecoveryDisabledError extends BackendError {
   readonly code = 'disabled'
@@ -319,9 +327,23 @@ function requestFailure(error: unknown): BackendError {
     .safeParse(error)
   if (capacity.success)
     return new E2eeStagingCapacityError(capacity.data.data.round, capacity.data.data.limit)
+  const rateLimited = z
+    .object({
+      data: z.object({
+        code: z.literal('e2ee_self_service_rate_limited'),
+        retryAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+      })
+    })
+    .safeParse(error)
+  if (rateLimited.success) return new E2eeSelfServiceRateLimitedError(rateLimited.data.data.retryAt)
   const result = z.object({ data: z.object({ code: z.string() }) }).safeParse(error)
   const code = result.success ? result.data.data.code : ''
   if (code === 'e2ee_recovery_vault_disabled') return new E2eeRecoveryDisabledError()
+  if (
+    code === 'workspace_transfer_active_subscription' ||
+    code === 'workspace_transfer_payment_required'
+  )
+    return new E2eeCloudDiagnosticError(code)
   if (operatorCodes.has(code)) return new E2eeCloudDiagnosticError(code)
   const refusal = accountPairingRefusals.get(code)
   if (refusal) return new E2eeAccountPairingRefusedError(refusal)
@@ -455,18 +477,18 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
         logger: false,
         fetch: async (url, options) => {
           let httpResponse!: Response
-          for (let attempt = 0; attempt <= TRANSIENT_RETRY_DELAYS_MS.length; attempt++) {
+          for (let attempt = 0; attempt <= TRANSIENT_GATEWAY_RETRY_DELAYS_MS.length; attempt++) {
             combined.throwIfAborted()
             httpResponse = await fetch(url, { ...options, signal: combined }).catch(() => {
               throw unavailable()
             })
             if (
-              TRANSIENT_GATEWAY_STATUSES.has(httpResponse.status) &&
-              attempt < TRANSIENT_RETRY_DELAYS_MS.length &&
+              isTransientGatewayStatus(httpResponse.status) &&
+              attempt < TRANSIENT_GATEWAY_RETRY_DELAYS_MS.length &&
               !(await hasE2eeRefusalBody(httpResponse, combined))
             ) {
               void httpResponse.body?.cancel?.().catch(() => {})
-              await retryDelay(TRANSIENT_RETRY_DELAYS_MS[attempt]!, combined).catch(() => {
+              await retryDelay(TRANSIENT_GATEWAY_RETRY_DELAYS_MS[attempt]!, combined).catch(() => {
                 throw unavailable()
               })
               combined.throwIfAborted()
@@ -1294,7 +1316,16 @@ export const makeE2eeCloudClient = Effect.fnUntraced(function* (input: {
             if (reply.recordHash !== recordHash || reply.status !== 'committed')
               return yield* unavailable()
             return undefined
-          }).pipe(Effect.mapError((cause) => new LedgerLogError({ cause })))
+          }).pipe(
+            Effect.mapError((cause) =>
+              cause instanceof E2eeSelfServiceRateLimitedError
+                ? new LedgerLogError({
+                    reason: 'self-service-rate-limited',
+                    retryAt: cause.retryAt
+                  })
+                : new LedgerLogError({ cause })
+            )
+          )
         }
       }
     },

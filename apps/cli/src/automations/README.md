@@ -10,20 +10,23 @@ replace the Session as the continuation target.
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Public API          | [condition contracts](../../../../packages/shared/src/automations/conditions.ts), [control](../../../../packages/shared/src/automations/control.ts) | Registration, result, inspection, cancellation and Session feature settings                   |
 | Agent guidance      | [MCP skill](../mcp/skills/lody-automations/SKILL.md)                                                                                                | Progressive workflow, data references, runnable example and generated API schemas             |
-| Persistence         | [ledger](storage/ledger.ts)                                                                                                                         | Waits, results, fixed continuation identities, source observations and native unfinished work |
-| Scheduling          | [runtime](runtime/engine.ts)                                                                                                                        | Reevaluation, expiry, submission fencing, reconciliation and cancellation                     |
-| JavaScript          | [programs](programs/codemode.ts)                                                                                                                    | CodeMode interpreter and scoped read capability                                               |
-| Product policy      | [Session policies](policies/session.ts)                                                                                                             | Fixed merge/archive, quota/recovery and idle/compact behavior                                 |
-| Resource effects    | [Session adapter](actions/session-actions-legacy.ts)                                                                                                | Existing queue, permissions, native continuation and compaction                               |
-| Composition         | [workspace](workspace-legacy.ts)                                                                                                                    | Fleet lifetime, local control and existing source owners                                      |
-| Execution authority | [Session authority](../session/session-automation-authority.ts)                                                                                     | Admission barriers, release proof, group settlement and exact-input cancellation              |
+| Persistence         | [ledger](storage/ledger.ts), [schema](storage/schema.ts)                                              | Waits, results, fixed continuation identities, source observations and native unfinished work |
+| Scheduling          | [runtime](runtime/engine.ts), [managed runs](runtime/managed-runs.ts)                                 | Reevaluation, expiry, submission fencing, reconciliation, cancellation and long-run ownership |
+| JavaScript          | [programs](programs/codemode.ts)                                                                      | CodeMode interpreter and scoped read capability                                               |
+| Product policy      | [Session policies](policies/session.ts), [delivery](policies/delivery.ts)                             | Fixed merge/archive, auto delivery coordinator, quota/recovery and idle/compact behavior      |
+| Admission & effects | [authorization](actions/authorization.ts), [Session adapter](actions/session-actions-legacy.ts)       | Built-in conditions, sync/async admission, queue handoff, archive and compaction              |
+| Control surface     | [commands](control/commands.ts)                                                                       | Local CLI/MCP command routing and proof-verified remote machine control                       |
+| Composition         | [workspace](workspace-legacy.ts)                                                                      | Fleet lifetime, shutdown drain, shared wake queue and existing source owners                  |
+| Execution authority | [Session authority](../session/session-automation-authority.ts)                                       | Admission barriers, release proof, group settlement and exact-input cancellation              |
 
 Automations run in plaintext and encrypted workspaces. In an encrypted workspace, the
 [Session adapter](actions/session-actions-legacy.ts) signs each queued continuation as this
 machine, and encrypted admission refuses an automation input without that signature, as it
 does for scheduled runs. The ledger stays machine-local, and continuation text enters the
-Session through its encrypted history. The PR poller is not registered there, so `github.*`
-reads stay `unknown`. Remote control rides workspace Machine RPC, which encrypted
+Session through its encrypted history. The local PR poller uses the account’s repository-scoped GitHub credentials and feeds
+PR/CI observations into the local automation ledger. PR state stays in protected Loro metadata;
+hosted PR association and content caches remain disabled. Device-only machine composition
+keeps its existing lack of account GitHub credentials. Remote control rides workspace Machine RPC, which encrypted
 workspaces withhold. Fleet therefore installs the remote verifier, and the renderer offers
 remote controls, only where the shared content policy supports `rpc`.
 
@@ -92,7 +95,7 @@ Programs cannot select another Session or directly access Node or the daemon env
 [event composition](examples/wait-for-event.js); an event example requires an
 installed source that publishes that fact.
 
-`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment. Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
+`ctx.exec({ command, args?, cwd? })` runs a local executable without shell interpolation in the Session workdir; `cwd` is relative to that directory. It returns `exitCode`, `signal`, `stdout` and `stderr`, including nonzero exits. Commands run with the local OS user's authority and can access files and the network. The Host supplies a limited environment (`PATH`, home/temp directories, and host proxy variables `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials, while excluding unrelated host or Agent credentials). Use only checks that are safe to repeat: interruption and Host restart may cause another execution, and a Host crash can leave a process running.
 
 Each check has a 30-second deadline, at most 32 read, fetch or exec calls, four concurrent calls
 and a 128-KiB bound per operation. Cancellation interrupts the interpreter and
@@ -117,7 +120,7 @@ It is a wait without a program, so it shares `list`, `show`, `cancel`, the
 Session group's unsettled state and the continuation path above. The
 [run owner](runtime/managed-runs.ts) starts the process on the first check, in the
 Session workdir or a `cwd` inside it, with no shell and an explicit environment:
-the login-shell and daemon `PATH`, home and temp variables, plus the caller's `env`.
+the login-shell and daemon `PATH`, home/temp variables, host proxy variables (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, which may carry proxy URL credentials), plus the caller's `env`.
 Output goes to `<data dir>/automations/runs/<workspace>/<wait>.log`, capped at
 16 MiB; logs older than seven days are removed when another run starts.
 
@@ -208,7 +211,13 @@ to `false` to prevent new submissions. Use `cancel` for an already accepted inpu
   so a crash repeats nothing. The policy turns the event into the existing Create PR,
   Fix CI, Resolve Conflicts or a merge request, admitted only while the Session group
   is settled and while the PR head still matches. Progress is written to
-  `SessionMeta.autoDelivery` at transitions only. The daemon never mutates GitHub;
+  `SessionMeta.autoDelivery` at transitions only, under a `Semaphore` that `configure`
+  also holds, so a pass never republishes a status the user cleared. Only an open or
+  draft current PR binds an enablement; a head with no reported check waits out
+  `DELIVERY_CI_REPORT_GRACE_MS` before it counts as having no CI, and uncommitted or
+  unpushed work stops with `workspace_unpushed`. Turning it off cancels a request that
+  has not reached the Session queue, since a disabled rule's receipt would stay
+  `blocked` and keep the group from settling. The daemon never mutates GitHub;
   the agent merges with `gh`. Encrypted workspaces refuse it because no PR poller runs
   there.
 - **Idle compact:** context occupancy must reach the configured threshold. The same

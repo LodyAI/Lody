@@ -15,10 +15,47 @@ export function isAuxiliaryWindow(): boolean {
     typeof sessionStorage === 'undefined'
   )
     return false;
-  if (/[?&]window=(session|workspace)(?:&|$)/.test(location.href)) {
+  if (/[?&]window=(session|workspace|today)(?:&|$)/.test(location.href)) {
     sessionStorage.setItem('lody:auxiliaryWindow', '1');
   }
   return sessionStorage.getItem('lody:auxiliaryWindow') === '1';
+}
+
+/**
+ * The standalone Today window: it shows only the day stream, so it skips the
+ * workspace shell and the runtime's background prefetch.
+ */
+export function isTodayWindow(): boolean {
+  if (!isAuxiliaryWindow()) return false;
+  if (/[?&]window=today(?:&|$)/.test(location.href)) {
+    sessionStorage.setItem('lody:todayWindow', '1');
+  }
+  return sessionStorage.getItem('lody:todayWindow') === '1';
+}
+
+export type TodayDesktopTarget = { workspace: string; member?: string; date?: string };
+export const OPEN_TODAY_COMPANION = 'lody:open-today-companion';
+
+export function openTodayWindow(target: TodayDesktopTarget): boolean {
+  const services = getIpcServices();
+  if (!isElectronRenderer() || !services) return false;
+  const request = new CustomEvent(OPEN_TODAY_COMPANION, { detail: target, cancelable: true });
+  if (window.dispatchEvent(request)) void services.app.openTodayWindow(target).catch(console.error);
+  return true;
+}
+
+export function closeTodayWindow(): void {
+  const services = getIpcServices();
+  if (!services) {
+    window.close();
+    return;
+  }
+  void services.app.closeTodayWindow().catch(console.error);
+}
+
+export function revealTodayWindow(bindingId: number): void {
+  if (!isTodayWindow()) return;
+  void getIpcServices()?.app.revealTodayWindow(bindingId).catch(console.error);
 }
 
 // Preserve the primary window's existing drafts and navigation. Auxiliary

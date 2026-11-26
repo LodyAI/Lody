@@ -8,6 +8,8 @@ feature directory.
 
 - Native iOS side drawers stay CSS-sized. Non-chat panels opt into
   `nativeKeyboardInset`; chat composers own their lift.
+- Side-drawer keyboard insets use `paddingBottom`, never `bottom`, so `DrawerContent`
+  stays full-viewport and never exposes `DrawerOverlay` or the screen underneath.
 - `DrawerContent` keeps popup/modal hosts state-backed, no-drag, inside the
   modal and outside scrollers. Body portals inherit pointer lock and pass clicks through.
 
@@ -16,8 +18,9 @@ feature directory.
 `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its two copy
 strings on i18n rather than the registry's inline English.
 
-- No surface fill: `bg-popover` lands darker than the `@lody/ui` popup it sits in;
-  only the sticky header fills (`colors.raisedBackground`).
+- The popup owns floating material; the picker stays transparent. Its search
+  owns one field well with a bare input; sticky headers use `popup.background`.
+  Active emoji use `popup.highlight`, not an ad-hoc alpha fill.
 - Its dataset SHIPS WITH THE APP. `frimousse` otherwise fetches
   `${emojibaseUrl}/${locale}/{data,messages}.json` from a public CDN, which leaves the
   picker spinning forever in an offline desktop or mobile app. Every host build must
@@ -34,19 +37,18 @@ strings on i18n rather than the registry's inline English.
 - Anchor the URL on the Vite BASE, never `document.baseURI`: router paths are deep
   routes, so document-relative resolution asks for `…/settings/emojibase` and gets
   SPA-fallback HTML parsed as JSON.
-- Keep `focus-visible:shadow-none` on its search input: `tailwind/index.css`'s
-  zero-specificity "Pro focus style" rings every focused input unless a
-  `focus-visible:` utility overrides it, and this bare registry input had none.
+- Keep the search input's focus shadow neutralized: its surrounding field well
+  owns the focus ring. Keep forced-colors focus feedback.
 
 ## Field colors
 
-- An editable control fills with `bg-input-field`, never `bg-input`. `--input` is the
-  theme's raw `input.background` and doubles as a muted chip/composer slab that may sit
-  BELOW the page color in a light theme — a recessed gray field reads as disabled.
-  `--input-field` (derived in `lib/vscode-theme/vscode-theme-css.ts` as the lighter of
-  the field and page colors) keeps a dark theme's raised fill and lifts a light theme's
-  field onto the page, where `--input-border` delimits it. Gray then means disabled
-  (`disabled:bg-muted`), so keep that pair intact.
+- Rewritten fields share `field` roles: one well, or bare input in an owned well.
+  Mention/Emoji follow this boundary; audit other legacy controls.
+- Value, placeholder, glyph and hints use semantic roles, not text opacity or new
+  alpha tokens. Active popup rows use `popup.highlight`.
+- Disabled state reads `control.disabledOpacity` (45%) once at its control owner;
+  never also dim its child glyph, Spinner or disabled control. Preserve native/
+  ARIA behavior and still-actionable row controls.
 
 ## Menus and viewers
 
@@ -76,7 +78,9 @@ strings on i18n rather than the registry's inline English.
 - Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
 Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no
-  `aria-describedby` — so an icon-only trigger names itself with `aria-label`.
+  `aria-describedby` — so an icon-only trigger names itself with `aria-label`
+  (keep it static on `aria-pressed` `Toggle`s). Pass `disabled={open}` on
+  `Menu.Trigger`/`Popover.Trigger` tooltips.
 - Overlay list hover (menus, command palette, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
@@ -95,13 +99,9 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   prop. `ui/spinner.tsx` is the icon ANIMATOR — `icon`/`spinning` for a refresh
   glyph that only turns while in flight. Use the mark for "work is under way";
   use the animator for an existing icon that must spin.
-- `animate-spin` goes on an HTML wrapper only, never on an `<svg>`. Chromium will
-  not composite a transform animation on an SVG target at DPR≠1 (crbug.com/1186312),
-  so an svg spinner re-runs style, pre-paint and layerize on the main thread every
-  vsync: two idle sidebar spinners measured 40–50% renderer CPU on a Retina Mac.
-  Both implementations obey this; any other infinite transform animation (the
-  readiness orbit) follows the same rule. Both land the caller's `className`
-  on that box; a margin spaces it, not the origin.
+- Infinite transform animations go on an HTML wrapper, never SVG: Chromium cannot
+  composite SVG transforms at DPR≠1 (crbug.com/1186312). Spinner and readiness
+  orbit follow this rule. `className` lands on the wrapper; margins space the box.
 - `Spinner`'s `spinning` defaults to TRUE: a component forwarding its own optional
   `spinning`/`loading`/`spin` prop must default it to `false` — `undefined` hits the
   primitive's default and spins at rest ("No machines available" shipped that way).
@@ -111,7 +111,7 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
 
 - Use `@lody/ui/scroll-area` (Base UI). Its `viewportRef` is the scrolling node;
   never query vendor attributes from the root. Native controls share its tokens
-  through `nativeScrollbar`; `../tailwind/scrollbars.css` covers product containers.
+  through `nativeScrollbar`; `../style/scrollbars.css` covers product containers.
   Hidden bars, compact tracks and conversation gutters stay local.
 - Sidebar keeps `visibility="scroll"` (visible while scrolling), never `hover`.
 
@@ -119,17 +119,24 @@ Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
 
 - `ui/slider.tsx` is the native range input, not a library: the platform supplies
   keyboard stepping, Home/End, the ARIA role and value, and an OS-correct touch
-  target. Two global rules in `tailwind/index.css` must be worked around, and both
+  target. Two global rules in `style/index.css` must be worked around, and both
   are why this is a primitive rather than an inline `<input type="range">`.
   The "Pro focus style" paints an inset `box-shadow` on any focused input through
   a zero-specificity `:where(…)`, which on a range input outlines the whole
-  control, so the input carries `focus-visible:shadow-none` and the focus ring
+  control, so the input neutralizes its `:focus-visible` shadow and the focus ring
   lives on the thumb. The global `*:focus-visible` reset forces `--tw-ring-shadow`
   to none with `!important` and custom properties inherit into pseudo-elements, so
   `ring-*` utilities are dead on the thumb too — its ring is an explicit
   `box-shadow`.
-- Write every `::-webkit-slider-*` / `::-moz-range-*` class out in full. Tailwind
-  scans source text for literal candidates, so a class built from a template
-  literal is never generated, and a variant prefix binds only to the class right
-  after it. The track fill is a `--lody-slider-fill` percentage set inline, because
-  a pseudo-element cannot take a style attribute.
+- Declare `::-webkit-slider-*` and `::-moz-range-*` as separate static StyleX
+  selectors, including their hover and focus states. Verify both browser engines;
+  Chromium cannot validate the Mozilla selectors. The track fill is a
+  `--lody-slider-fill` percentage set inline, because a pseudo-element cannot
+  take a style attribute.
+
+## Legacy Sidebar
+
+- Preserve Slot, refs, events and actual in-repository caller behavior. Compose
+  caller styles through typed `xstyle`; migrate callers with the owner. Do not
+  retain Tailwind for arbitrary hypothetical utility collisions. See
+  [migration](../style/MIGRATION.md).

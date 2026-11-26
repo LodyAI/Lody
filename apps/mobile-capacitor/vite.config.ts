@@ -6,7 +6,6 @@ import { defineConfig, loadEnv } from 'vite';
 import topLevelAwait from '../../packages/components/vite-top-level-await-fixed';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import wasm from 'vite-plugin-wasm';
-import tailwindcss from '@tailwindcss/vite';
 import stylex from '@stylexjs/unplugin';
 import { stylexOptions } from '../../packages/ui/stylex-options';
 import { execSync } from 'child_process';
@@ -15,7 +14,6 @@ import {
   loroCrdtWasmUrlWorkaround,
 } from '../../packages/components/vite-wasm-workarounds';
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets';
-import { vibeloftTelemetryPlugin } from '../../packages/components/vite-vibeloft-telemetry';
 import { mobileWorkerPolyfills } from './vite-worker-polyfills';
 import { diffCssCompatPlugin } from './vite-diff-css-compat';
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker';
@@ -86,18 +84,15 @@ export default defineConfig(({ mode }) => {
           : []),
       ],
     },
-    // Tailwind via Vite plugin so @fontsource url() assets emit.
     plugins: [
       mobileWorkerPolyfills(),
       diffCssCompatPlugin(),
       pdfAbortCompatPlugin(),
-      tailwindcss(),
       stylex.vite(stylexOptions),
       tsconfigPaths(),
       // frimousse constructs these JSON URLs at runtime, so Capacitor builds
       // must ship the same bundled dataset as the other app hosts.
       emojibaseAssetsPlugin(),
-      vibeloftTelemetryPlugin(),
       loroCrdtWasmUrlWorkaround(),
       wasm(),
       topLevelAwait(),

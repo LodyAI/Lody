@@ -22,7 +22,7 @@ interface ImportMetaEnv {
    * Escape hatch that pins the Machine RPC response live transport. Unset (the
    * normal build) uses the SSE-first policy with its long-poll fallback.
    */
-  readonly VITE_LORO_STREAMS_RPC_LIVE_MODE?: 'sse' | 'long-poll';
+  readonly VITE_LORO_STREAMS_RPC_LIVE_MODE?: 'ws' | 'sse' | 'long-poll';
   readonly VITE_PUBLIC_POSTHOG_HOST?: string;
   readonly VITE_PUBLIC_POSTHOG_KEY?: string;
   /**

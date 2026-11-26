@@ -55,12 +55,22 @@ see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
-Per identity, share `repo.sqlite3`, not replicas: Meta/Flock cursors use `createRepoStreamsPersistence`, LoroDoc cursors from
-`createDocumentRemoteCursorStore` (shared rows: daemon only). No shared
-`remoteCursorStore` or schedule-only `onPersist*`. Test:
-`tests/cli-streams-replica-checkpoints.test.ts`.
-
-The manager's incomplete-recovery scope survives cloud reattachment; cursors remain replica-bound.
+Per identity, share `repo.sqlite3`, not replicas. Meta/Flock cursors use
+`createRepoStreamsPersistence`. Only the daemon writes shared LoroDoc cursors.
+Process seeds are captured with document loading in one SQLite transaction and
+require nonempty peer clocks covered by the synchronized document's applied version
+and no pending updates;
+process saves and deletions stay in memory. The [decision](../../../../../.agents/notes/implemented/architecture/2026-09-27-loro-repo-flock-persistence-migration.md)
+explains why unchecked shared reads lose data. Never use a shared `remoteCursorStore`
+or schedule-only `onPersist*`. The incomplete-recovery scope survives reattachment.
+Its metadata persists independently of cursors; only daemons publish it.
+One-shot managers disable cloud ephemeral sinks. SQLite repo maintenance
+(`createSqliteRepoMaintenanceStore` / `makeSqliteRepoMaintenance`) is daemon-only
+(`shared-durable` scope): it purges local bodies and cursors for soft-deleted
+non-machine docs without touching active in-memory docs or `metaFlock`
+tombstones, compacts accumulated or stale `doc_updates`, and reclaims freelist
+pages only with a disk-headroom check before full `VACUUM`. Test:
+`tests/cli-streams-replica-checkpoints.test.ts`, `src/lib/loro/sqlite-repo-store.test.ts`.
 
 ## Shared ACP runtime config contains no secrets
 
@@ -69,6 +79,8 @@ workspace-shared runtime baseline. It must remove every option id matched by
 `isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
 ACP response; otherwise a future agent can persist and broadcast credential-like
 selector values to collaborators.
+
+One-shot command managers disable cloud ephemeral sinks while keeping durable Streams sync.
 
 ## Presence is ephemeral and partitioned by origin
 
@@ -86,8 +98,8 @@ is retired even at registration. Online checks use `getMachinePresenceView`: a f
 heartbeat is online without a joined room, and absence is offline only when `synced`,
 otherwise unknown.
 
-`session-active-presence.ts` owns Turn leases, native agent activity, Clock heartbeats and
-latched stall signals. Only lease release retires a Turn; native activity can remain after it. Its Legacy entry owns execution/analytics. Intent:
+`session-active-presence.ts` owns Turn leases, native agent activity, bounded late-stream activity, Clock heartbeats and
+latched stall signals. Only lease release retires a Turn; native or bounded late-stream activity can remain after it. Its Legacy entry owns execution/analytics. Intent:
 `specs/session-initialization-deadline.md`.
 
 `workspace-presence.ts` owns Scopes; `presence-replica.ts` is synchronous.

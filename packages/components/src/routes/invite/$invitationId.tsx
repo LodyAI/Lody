@@ -1,10 +1,11 @@
+import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
 import { seatBillingErrorKey } from '@/components/settings/billing-errors';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from '@tanstack/react-router';
 import type { Invitation } from 'better-auth/plugins/organization';
-import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { useCloudQueryState, usePlatformCapability } from '@lody/platform/react';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations, type InvitationPreview } from '@/lib/cloud-api-operations';
 import {
@@ -33,6 +34,19 @@ function isEmailVerificationRequiredError(
   );
 }
 
+function invitationLoadError(error: unknown) {
+  const status = (error as { status?: number } | null)?.status;
+  const code = requestFailureCode(error);
+  if (
+    status === 404 ||
+    /^(?:INVITATION_NOT_FOUND|INVITATION_EXPIRED|invitation_not_found|invitation_expired)$/.test(
+      code ?? ''
+    )
+  )
+    return 'invite.error.notFound';
+  return isRequestUnavailable(error) ? 'invite.error.network' : 'invite.error.unknown';
+}
+
 /**
  * 接受邀请页面组件
  * 处理工作空间邀请的接受流程
@@ -47,14 +61,26 @@ export function AcceptInvitationComponent() {
   >(null);
   const { invitationId } = Route.useParams();
   const navigate = useNavigate();
-  const { data: session, isPending, isRetrying, error: sessionError } = useStableSession();
+  const {
+    data: session,
+    isPending,
+    isRetrying,
+    error: sessionError,
+    refetch: refetchSession,
+  } = useStableSession();
   const isAuthenticated = Boolean(session?.user);
   const invitationsAvailable = usePlatformCapability('multiWorkspace');
-  const preview: InvitationPreview | undefined = useCloudQuery(
+  const {
+    data: preview,
+    error: previewError,
+    retry: retryPreview,
+  } = useCloudQueryState<{ invitationId: string }, InvitationPreview>(
     cloudOperations.auth.getInvitationPreview,
     { invitationId }
   );
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [loadError, setLoadError] = useState<ReturnType<typeof invitationLoadError> | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [status, setStatus] = useState<AcceptInvitationPageState>('loading');
   const [organizationName, setOrganizationName] = useState<string>('');
   const getInvitation = useCallback(
@@ -72,9 +98,9 @@ export function AcceptInvitationComponent() {
     if (!preview || isPending || isRetrying) {
       return undefined;
     }
+    setLoadError(null);
     if (preview.status === 'unavailable') {
-      setStatus('error');
-      setErrorMessage(t('invite.error.notFound', 'Invitation not found or expired.'));
+      setLoadError('invite.error.notFound');
       return undefined;
     }
     if (!isAuthenticated) {
@@ -88,6 +114,7 @@ export function AcceptInvitationComponent() {
       return undefined;
     }
     let cancelled = false;
+    setStatus('loading');
     const fetchInvitation = async () => {
       try {
         const { data: invitationData, error } = await getInvitation(invitationId);
@@ -97,26 +124,24 @@ export function AcceptInvitationComponent() {
             if (!cancelled) setStatus('account_mismatch');
             return;
           }
-          throw new Error(error?.message || 'Invitation not found');
+          if (!cancelled)
+            setLoadError(error ? invitationLoadError(error) : 'invite.error.notFound');
+          return;
         }
 
         if (!cancelled) {
           setInvitation(invitationData);
           setStatus('idle');
         }
-      } catch (err) {
-        console.error('fetch invitation error', err);
-        if (!cancelled) {
-          setStatus('error');
-          setErrorMessage(t('invite.error.notFound', 'Invitation not found or expired.'));
-        }
+      } catch (error) {
+        if (!cancelled) setLoadError(invitationLoadError(error));
       }
     };
     void fetchInvitation();
     return () => {
       cancelled = true;
     };
-  }, [getInvitation, invitationId, isAuthenticated, isPending, isRetrying, preview, t]);
+  }, [getInvitation, invitationId, isAuthenticated, isPending, isRetrying, loadAttempt, preview]);
 
   /**
    * 接受邀请
@@ -174,11 +199,31 @@ export function AcceptInvitationComponent() {
     continueToLogin();
   };
 
-  if (sessionError || !invitationsAvailable) {
+  const loadErrorKey = !invitationsAvailable
+    ? 'invite.error.unknown'
+    : sessionError
+      ? isRequestUnavailable(sessionError)
+        ? 'invite.error.network'
+        : 'invite.error.unknown'
+      : previewError
+        ? invitationLoadError(previewError)
+        : loadError;
+  if (loadErrorKey) {
     return (
       <AcceptInvitationPage
         state="error"
-        errorMessage={t('invite.error.unknown')}
+        errorMessage={t(loadErrorKey)}
+        onRetry={
+          !invitationsAvailable || loadErrorKey === 'invite.error.notFound'
+            ? undefined
+            : sessionError
+              ? () => {
+                  void refetchSession();
+                }
+              : previewError
+                ? retryPreview
+                : () => setLoadAttempt((attempt) => attempt + 1)
+        }
         onBackHome={() => {
           void navigate({ to: '/' });
         }}

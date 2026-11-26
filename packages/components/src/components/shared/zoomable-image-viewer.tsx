@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { PhotoSlider } from 'react-photo-view';
 import { toast } from '@/lib/toast';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
 import {
   isMacOSElectronRenderer,
   isWindowsElectronRenderer,
@@ -494,6 +495,13 @@ function OpenZoomableImageViewer({
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images, allowExport);
   const { menu, closeMenu } = useImagePreviewLongPress(elements.floating, images[index]);
+  useMobileBackHandler(
+    () => {
+      if (menu) closeMenu();
+      else onClose();
+    },
+    { layer: 'modal' }
+  );
 
   // Native window controls are drawn ABOVE web content, so the top bar clears
   // them horizontally and centers its own controls on their line (the y=23

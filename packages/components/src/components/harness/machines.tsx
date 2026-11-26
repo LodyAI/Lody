@@ -13,6 +13,7 @@ import { useAtomValue } from 'jotai';
 import { useMemo } from 'react';
 import { getMachineHostType, type MachineId, type MachineViewMeta } from '@lody/shared';
 
+import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getMachineMetaMapAtom } from '@/atoms/machines';
 import {
   lodyPresenceSyncStateAtom,
@@ -115,11 +116,14 @@ export function useHarnessDevices(): HarnessDevices {
       ),
     [machines, onlineIds, presenceSynced]
   );
-  const known = new Set(devices.map((device) => device.id));
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  // The selection while it is still listed, else this device, else the first.
   const activeDevice =
-    state.activeDevice && known.has(state.activeDevice)
+    state.activeDevice && machines.has(state.activeDevice as MachineId)
       ? state.activeDevice
-      : (devices[0]?.id ?? null);
+      : localMachineId && machines.has(localMachineId)
+        ? localMachineId
+        : (devices[0]?.id ?? null);
   return { devices, machines, activeDevice, select: harness.select, isLoading };
 }
 
@@ -130,7 +134,7 @@ export function useDeviceStatus(machineId: MachineId): MachineOnlineStatus {
 
 /**
  * The device a config page is scoped to: the selected machine while it is
- * still listed, else the first row.
+ * still listed, else this device, else the first row.
  */
 export function useActiveDevice(): { device: Device | null; devices: Device[] } {
   const { devices, activeDevice } = useHarnessDevices();

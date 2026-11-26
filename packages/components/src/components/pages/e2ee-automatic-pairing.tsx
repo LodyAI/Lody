@@ -1,3 +1,9 @@
+import { isRequestUnavailable, requestFailureCode } from '@/lib/e2ee-actionable-failure';
+import { classifyE2eeControlFailure, custodyFailureMessage } from '@/lib/e2ee-control-failure';
+import { colors as uiColors, shadow as uiShadow } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { themeSpace as appSpace } from '../../style/theme-scale.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Result } from 'effect';
 import {
@@ -102,26 +108,28 @@ function carriedCode(cause: unknown, depth = 0): string | null {
 /** Only an outage retries quietly; a refusal says what went wrong instead of blaming the
  * connection. */
 export function automaticPairingErrorKey(cause: unknown): string {
-  const known = accountPairingErrorCode(cause);
+  const known =
+    accountPairingErrorCode(cause) ?? accountPairingErrorCode({ code: requestFailureCode(cause) });
   if (known) return `e2ee.accountPair.error.${known}`;
   const code = carriedCode(cause)?.replace(/^e2ee_/, '') ?? null;
-  if (code === null || /^(?:network|closed|offline|timeout|unavailable)$/.test(code))
-    return 'e2ee.auto.connectionRetry';
-  if (/pairing-unavailable|account_pairing_disabled/.test(code))
+  if (/^(?:pairing-unavailable|account_pairing_disabled)$/.test(code ?? ''))
     return 'e2ee.accountPair.error.pairing-unavailable';
+  const custody = custodyFailureMessage(classifyE2eeControlFailure(cause).kind);
+  if (custody) return custody;
+  if (code === 'closed' || isRequestUnavailable(cause)) return 'e2ee.auto.connectionRetry';
   return 'e2ee.accountPair.error.failed';
 }
 const ComparisonCode = ({ code, hint }: { code: string; hint: string }) => {
   const { t } = useTranslation();
   return (
-    <div className="my-6 rounded-2xl border bg-muted/40 px-4 py-5 text-center">
+    <div {...stylex.props(themeStyles.hint)}>
       <p
-        className="font-mono text-4xl font-semibold tracking-[0.15em] tabular-nums"
+        {...stylex.props(pairingStyles.code)}
         aria-live="polite"
       >
         {`${code.slice(0, 3)} ${code.slice(3)}`}
       </p>
-      <p className="mt-2 text-xs text-muted-foreground">{t(hint)}</p>
+      <p {...stylex.props(themeStyles.hint2)}>{t(hint)}</p>
     </div>
   );
 };
@@ -137,7 +145,7 @@ function PairingPage({ children }: { children: ReactNode }) {
   return (
     <main
       data-e2ee-pairing-surface=""
-      className="relative h-dvh overflow-y-auto bg-background px-6 pb-[max(2rem,env(safe-area-inset-bottom))]"
+      {...stylex.props(themeStyles.glyph)}
       style={{
         paddingTop: clearTrafficLights ? '2.75rem' : `max(1rem, ${WINDOW_CAPTION_CLEAR_TOP})`,
       }}
@@ -590,7 +598,7 @@ export function E2eeAutomaticPairingPage({
   const scanButton = (label: string) =>
     qrSupported && (
       <Button
-        className="mt-5 w-full"
+        xstyle={themeStyles.glyph2}
         size="large"
         disabled={busy}
         onClick={() => {
@@ -614,8 +622,8 @@ export function E2eeAutomaticPairingPage({
         <ChevronLeft size={16} />
         {t('e2ee.control.back')}
       </Button>
-      <section className="mx-auto flex min-h-[75dvh] max-w-sm flex-col pt-10 text-center">
-        <h1 className="text-2xl font-semibold leading-snug">
+      <section {...stylex.props(themeStyles.column)}>
+        <h1 {...stylex.props(themeStyles.copy)}>
           {t(
             terminal
               ? `e2ee.auto.${state.phase}.title`
@@ -626,13 +634,13 @@ export function E2eeAutomaticPairingPage({
         </h1>
         {terminal ? (
           <>
-            <p className="mt-4 text-sm text-muted-foreground">
+            <p {...stylex.props(themeStyles.hint3)}>
               {t(`e2ee.auto.${state.phase}.help`)}
             </p>
             {/* A removed member needs a new invitation; this device cannot ask for one. */}
             {state.phase !== 'removed' && (
               <Button
-                className="mt-6"
+                xstyle={themeStyles.spaced}
                 disabled={busy}
                 data-testid={state.phase === 'revoked' ? 'e2ee-auto-pair-again' : undefined}
                 onClick={() => void restart()}
@@ -643,13 +651,13 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : receiving ? (
           <>
-            <p className="mt-5 text-sm text-muted-foreground">{t('e2ee.auto.syncing.help')}</p>
+            <p {...stylex.props(themeStyles.hint4)}>{t('e2ee.auto.syncing.help')}</p>
             {keyFailure && (
-              <div className="mt-5">
-                <p role="alert" className="text-sm text-muted-foreground">
+              <div {...stylex.props(themeStyles.spaced2)}>
+                <p role="alert" {...stylex.props(themeStyles.hint5)}>
                   {t('e2ee.accountPair.request.keyFailed')}
                 </p>
-                <Button className="mt-3" variant="secondary" onClick={onRetryKeys}>
+                <Button xstyle={themeStyles.spaced3} variant="secondary" onClick={onRetryKeys}>
                   {t('e2ee.accountPair.request.keyRetry')}
                 </Button>
               </div>
@@ -657,28 +665,28 @@ export function E2eeAutomaticPairingPage({
           </>
         ) : (
           <>
-            <p className="mb-1 mt-4 text-sm text-muted-foreground">{t('e2ee.auto.requesting')}</p>
-            <p className="font-medium">{state?.workspaceName}</p>
+            <p {...stylex.props(themeStyles.hint6)}>{t('e2ee.auto.requesting')}</p>
+            <p {...stylex.props(themeStyles.layout)}>{state?.workspaceName}</p>
             {qr === 'joining' ? (
-              <div className="my-8">
+              <div {...stylex.props(themeStyles.layout2)}>
                 <p
                   role="status"
                   data-testid="e2ee-qr-joining"
-                  className="text-sm text-muted-foreground"
+                  {...stylex.props(themeStyles.hint5)}
                 >
                   {t('e2ee.instantQr.scannedJoining')}
                 </p>
-                <Button className="mt-3" variant="ghost" onClick={() => abandonQr(null)}>
+                <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => abandonQr(null)}>
                   {t('common.cancel')}
                 </Button>
               </div>
             ) : pendingLink ? (
               <div
                 data-testid="e2ee-link-join"
-                className="my-6 rounded-2xl border bg-muted/40 px-4 py-5 text-center"
+                {...stylex.props(themeStyles.hint)}
               >
-                <p className="text-sm font-medium">{t('e2ee.accountPair.request.title')}</p>
-                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <p {...stylex.props(themeStyles.copy2)}>{t('e2ee.accountPair.request.title')}</p>
+                <div {...stylex.props(themeStyles.row)}>
                   <Button
                     data-testid="e2ee-link-join-confirm"
                     onClick={() => {
@@ -703,19 +711,19 @@ export function E2eeAutomaticPairingPage({
                 </div>
               </div>
             ) : qr === 'scanning' ? (
-              <div className="my-6" data-testid="e2ee-qr-viewfinder">
+              <div {...stylex.props(themeStyles.layout3)} data-testid="e2ee-qr-viewfinder">
                 <video
                   ref={qrVideo}
                   muted
                   playsInline
-                  className="aspect-square w-full rounded-2xl bg-muted object-cover"
+                  {...stylex.props(themeStyles.panel)}
                 />
                 {cameraState === 'unavailable' && (
-                  <p role="alert" className="mt-3 text-sm text-muted-foreground">
+                  <p role="alert" {...stylex.props(themeStyles.hint7)}>
                     {t('e2ee.verify.cameraUnavailable')}
                   </p>
                 )}
-                <Button className="mt-3" variant="ghost" onClick={() => setQr('idle')}>
+                <Button xstyle={themeStyles.spaced3} variant="ghost" onClick={() => setQr('idle')}>
                   {t('common.cancel')}
                 </Button>
               </div>
@@ -723,7 +731,7 @@ export function E2eeAutomaticPairingPage({
               <>
                 <p
                   role="status"
-                  className="mx-auto mt-6 inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-sm"
+                  {...stylex.props(themeStyles.row2)}
                 >
                   <CircleCheck size={15} aria-hidden="true" />
                   {t('e2ee.auto.prompted')}
@@ -732,41 +740,41 @@ export function E2eeAutomaticPairingPage({
                 {!mobile && (
                   <div
                     data-testid="e2ee-auto-pair-qr"
-                    className="mx-auto mt-6 flex flex-col items-center gap-2"
+                    {...stylex.props(themeStyles.column2)}
                   >
-                    <div className="rounded-xl bg-white p-2 leading-none">
+                    <div {...stylex.props(themeStyles.panel2)}>
                       <LedgerQrCode
                         payload={autoPairQrPayload(state.id, state.comparisonCode)}
                         size={168}
                         label={t('e2ee.auto.desktopQr.label')}
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground">{t('e2ee.auto.desktopQr.help')}</p>
+                    <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.desktopQr.help')}</p>
                   </div>
                 )}
                 <ComparisonCode
                   code={state.comparisonCode}
                   hint={mobile ? 'e2ee.auto.showCode' : 'e2ee.auto.showCode.desktop'}
                 />
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                <p {...stylex.props(themeStyles.hint9)}>
                   {t('e2ee.auto.waiting.help')}
                 </p>
               </>
             ) : (
               <div
                 data-testid="e2ee-awaiting-device"
-                className="my-6 rounded-2xl border bg-muted/40 px-4 py-5 text-left"
+                {...stylex.props(themeStyles.hint10)}
               >
-                <p role="status" className="text-sm font-medium">
+                <p role="status" {...stylex.props(themeStyles.copy2)}>
                   {t('e2ee.auto.awaiting.title')}
                 </p>
-                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                <p {...stylex.props(themeStyles.hint11)}>
                   {t(mobile ? 'e2ee.auto.awaiting.help' : 'e2ee.auto.awaiting.desktopHelp')}
                 </p>
                 {scanButton('e2ee.auto.scanJoin')}
                 {!mobile && onManual && (
                   <Button
-                    className="mt-3"
+                    xstyle={themeStyles.spaced3}
                     variant="secondary"
                     disabled={busy}
                     onClick={() => cancel(true)}
@@ -775,24 +783,24 @@ export function E2eeAutomaticPairingPage({
                   </Button>
                 )}
                 {qrSupported && (
-                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                    <QrCode size={12} aria-hidden="true" className="mr-1 inline" />
+                  <p {...stylex.props(themeStyles.hint12)}>
+                    <QrCode size={12} aria-hidden="true" {...stylex.props(themeStyles.layout4)} />
                     {t('e2ee.auto.scanJoin.hint')}
                   </p>
                 )}
               </div>
             )}
             {qrError && (
-              <p role="alert" className="mb-3 text-sm text-muted-foreground">
+              <p role="alert" {...stylex.props(themeStyles.hint13)}>
                 {t(qrError)}
               </p>
             )}
-            <details className="mt-4 text-sm text-muted-foreground">
-              <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
+            <details {...stylex.props(themeStyles.hint3)}>
+              <summary {...stylex.props(themeStyles.row3)}>
                 {t('e2ee.auto.noRequest')}
                 <ChevronDown size={14} />
               </summary>
-              <p className="mt-3 text-left leading-relaxed">{t('e2ee.auto.noRequest.help')}</p>
+              <p {...stylex.props(themeStyles.copy3)}>{t('e2ee.auto.noRequest.help')}</p>
               <Button variant="link" disabled={busy} onClick={() => void restart(true)}>
                 {t('e2ee.auto.changeDevice')}
               </Button>
@@ -802,8 +810,12 @@ export function E2eeAutomaticPairingPage({
                 </Button>
               )}
             </details>
+          </>
+        )}
+        {!receiving && (
+          <>
             {lostAccess ? (
-              <div className="mt-3" data-testid="e2ee-lost-all-entry">
+              <div {...stylex.props(themeStyles.spaced3)} data-testid="e2ee-lost-all-entry">
                 <E2eeLostAccessEntry
                   {...lostAccess}
                   workspaceId={workspaceId}
@@ -815,14 +827,14 @@ export function E2eeAutomaticPairingPage({
               </div>
             ) : (
               <details
-                className="mt-2 text-sm text-muted-foreground"
+                {...stylex.props(themeStyles.hint14)}
                 data-testid="e2ee-lost-all-entry"
               >
-                <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-1.5 [&::-webkit-details-marker]:hidden">
+                <summary {...stylex.props(themeStyles.row3)}>
                   {t('e2ee.auto.noOtherDevice')}
                   <ChevronDown size={14} />
                 </summary>
-                <p className="mt-3 text-left leading-relaxed">
+                <p {...stylex.props(themeStyles.copy3)}>
                   {t('e2ee.auto.noOtherDevice.elsewhere')}
                 </p>
               </details>
@@ -830,7 +842,7 @@ export function E2eeAutomaticPairingPage({
           </>
         )}
         {error && (
-          <p role="alert" className="mt-5 text-sm text-muted-foreground">
+          <p role="alert" {...stylex.props(themeStyles.hint4)}>
             {t(error)}
           </p>
         )}
@@ -864,7 +876,7 @@ export function E2eeAutomaticPairingPage({
           </section>
         )}
         {!terminal && !receiving && (
-          <div className="mt-auto pt-10 text-xs text-muted-foreground">
+          <div {...stylex.props(themeStyles.hint15)}>
             {state && (
               <p>
                 {secondsLeft !== null && secondsLeft < 60 * 60
@@ -887,7 +899,7 @@ function ApprovalExpiry({ expiresAt }: { expiresAt: number }) {
   const seconds = useSecondsLeft(expiresAt);
   if (seconds === null || seconds >= 60 * 60) return null;
   return (
-    <p data-testid="e2ee-approval-expiry" className="text-xs text-muted-foreground">
+    <p data-testid="e2ee-approval-expiry" {...stylex.props(themeStyles.hint8)}>
       {seconds === 0
         ? t('e2ee.auto.expired.short')
         : t('e2ee.auto.expiresIn', { time: clock(seconds) })}
@@ -904,7 +916,7 @@ export function E2eeDeviceRequestsButton({ className }: { className?: string }) 
     <Button variant="secondary" className={className} onClick={ui.open}>
       <Smartphone size={15} />
       {t('e2ee.auto.inbox')}
-      <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums">{ui.count}</span>
+      <span {...stylex.props(themeStyles.hint16)}>{ui.count}</span>
     </Button>
   );
 }
@@ -927,7 +939,9 @@ export function E2eeAutomaticPairingInbox({
   const [inbox, setInbox] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<
-    { kind: 'retry' } | { kind: 'mismatch'; attemptsLeft: number } | null
+    | { kind: 'retry' | 'refused'; key: string }
+    | { kind: 'mismatch'; attemptsLeft: number }
+    | null
   >(null);
   const [code, setCode] = useState('');
   // The typed code belongs to one request. A poll that briefly omits it closes the dialog,
@@ -1126,7 +1140,7 @@ export function E2eeAutomaticPairingInbox({
   };
   const act = async (approve: boolean, entered = code) => {
     const target = current;
-    if (!target || busy || !runtime) return;
+    if (!target || busy || !runtime || error?.kind === 'refused') return;
     if (approve && (target.phase !== 'waiting' || !/^\d{6}$/.test(entered))) return;
     const owner = actionOwner.current;
     setBusy(target.id);
@@ -1144,7 +1158,8 @@ export function E2eeAutomaticPairingInbox({
       }
     } catch (cause) {
       if (owner !== actionOwner.current) return;
-      const refusal = accountPairingErrorCode(cause);
+      const refusal =
+        accountPairingErrorCode(cause) ?? accountPairingErrorCode({ code: requestFailureCode(cause) });
       if (refusal === 'pairing-code-locked') {
         settled.current.add(target.id);
         deferred.current.add(target.id);
@@ -1156,7 +1171,19 @@ export function E2eeAutomaticPairingInbox({
         const left = (cause as { attemptsLeft?: unknown }).attemptsLeft;
         setCode('');
         setError({ kind: 'mismatch', attemptsLeft: typeof left === 'number' ? left : 1 });
-      } else setError({ kind: 'retry' });
+      } else {
+        const key = automaticPairingErrorKey(cause);
+        const terminal =
+          refusal === 'pairing-expired' ||
+          refusal === 'pairing-used' ||
+          refusal === 'pairing-tampered' ||
+          refusal === 'pairing-elsewhere' ||
+          refusal === 'pairing-update-required';
+        setError({
+          kind: terminal ? 'refused' : 'retry',
+          key: key === 'e2ee.auto.connectionRetry' ? 'e2ee.accountPair.error.unavailable' : key,
+        });
+      }
     } finally {
       if (owner === actionOwner.current) setBusy(null);
     }
@@ -1164,11 +1191,11 @@ export function E2eeAutomaticPairingInbox({
   // The one-time code another phone scans to join: shown at once on a computer, and on
   // request on a phone.
   const qrSlot = qrSupported && runtime && (shownQr || current) && (
-    <div className="my-5 rounded-xl border p-4" data-testid="e2ee-approval-qr">
+    <div {...stylex.props(themeStyles.panel3)} data-testid="e2ee-approval-qr">
       {shownQr ? (
         <E2eeInstantQrApprove key={shownQr} runtime={runtime} onJoined={() => qrJoined(shownQr)} />
       ) : (
-        <div className="flex flex-col items-center gap-2 text-center">
+        <div {...stylex.props(themeStyles.column3)}>
           <Button
             data-testid="e2ee-approval-show-qr"
             variant={mobile ? 'ghost' : 'primary'}
@@ -1178,7 +1205,7 @@ export function E2eeAutomaticPairingInbox({
             <QrCode size={16} aria-hidden="true" />
             {t(mobile ? 'e2ee.auto.showQr.mobile' : 'e2ee.auto.showQr')}
           </Button>
-          <p className="text-xs text-muted-foreground">{t('e2ee.auto.showQr.help')}</p>
+          <p {...stylex.props(themeStyles.hint8)}>{t('e2ee.auto.showQr.help')}</p>
         </div>
       )}
     </div>
@@ -1252,17 +1279,17 @@ export function E2eeAutomaticPairingInbox({
     <E2eeDeviceRequestsContext.Provider value={requestsUi}>
       {children}
       <Drawer.Root open={inbox} onOpenChange={setInbox}>
-        <Drawer.Content side="end" className="w-full sm:max-w-sm">
+        <Drawer.Content side="end" xstyle={themeStyles.glyph3}>
           <PrivatePairingSurface>
             <Drawer.Title>{t('e2ee.auto.inbox')}</Drawer.Title>
             <Drawer.Description>{t('e2ee.auto.inbox.help')}</Drawer.Description>
-            <div className="mt-6 space-y-3">
+            <div {...stylex.props(themeStyles.spaced4)}>
               {requests.map((row) => (
-                <div key={row.id} className="rounded-xl border p-4">
-                  <p className="font-medium">{row.deviceName}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{row.workspaceName}</p>
+                <div key={row.id} {...stylex.props(themeStyles.panel4)}>
+                  <p {...stylex.props(themeStyles.layout)}>{row.deviceName}</p>
+                  <p {...stylex.props(themeStyles.hint17)}>{row.workspaceName}</p>
                   <Button
-                    className="mt-4 w-full"
+                    xstyle={themeStyles.glyph4}
                     variant="secondary"
                     disabled={
                       row.phase !== 'waiting' &&
@@ -1297,26 +1324,26 @@ export function E2eeAutomaticPairingInbox({
           data-e2ee-pairing-surface=""
           width={440}
           tabIndex={-1}
-          className="max-h-[90dvh] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl sm:max-w-md"
+          xstyle={themeStyles.panel5}
           closeButton={false}
           initialFocus={dialog}
         >
           <PrivatePairingSurface>
             {ended && !current && !qrFor && (
               <>
-                <Dialog.Title className="text-2xl leading-snug">
+                <Dialog.Title>
                   {t('e2ee.auto.codeLocked.title')}
                 </Dialog.Title>
                 <Dialog.Description>
                   {t('e2ee.auto.codeLocked.help', { workspace: ended.workspaceName })}
                 </Dialog.Description>
-                <Button className="mt-4" onClick={() => setEnded(null)}>
+                <Button xstyle={themeStyles.spaced5} onClick={() => setEnded(null)}>
                   {t('e2ee.auto.codeLocked.ok')}
                 </Button>
               </>
             )}
             {current && (
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <div {...stylex.props(themeStyles.row4)}>
                 <span>{t('e2ee.auto.newRequest')}</span>
                 <Button variant="ghost" onClick={later}>
                   {t('e2ee.auto.later')}
@@ -1325,22 +1352,22 @@ export function E2eeAutomaticPairingInbox({
             )}
             {current ? (
               <>
-                <Dialog.Title className="text-2xl leading-snug">
+                <Dialog.Title>
                   {t('e2ee.auto.approve.title')}
                 </Dialog.Title>
                 <Dialog.Description>{t('e2ee.auto.approve.help')}</Dialog.Description>
-                <p className="mt-2 text-sm font-medium">{current.deviceName}</p>
-                <p className="text-xs text-muted-foreground">
+                <p {...stylex.props(themeStyles.copy5)}>{current.deviceName}</p>
+                <p {...stylex.props(themeStyles.hint8)}>
                   {t('e2ee.auto.deviceNameUnverified')}
                 </p>
               </>
             ) : (
               qrFor && (
                 <>
-                  <Dialog.Title className="text-2xl leading-snug">
+                  <Dialog.Title>
                     {t('e2ee.instantQr.title')}
                   </Dialog.Title>
-                  <Button className="mt-2" variant="ghost" onClick={later}>
+                  <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={later}>
                     {t('common.close')}
                   </Button>
                 </>
@@ -1349,30 +1376,30 @@ export function E2eeAutomaticPairingInbox({
             {/* Fixed slots, so the code survives its request leaving the list. */}
             {!mobile && qrSlot}
             {mobile && current && cameraSupported() && (
-              <div className="my-5" data-testid="e2ee-approval-scan">
+              <div {...stylex.props(themeStyles.layout5)} data-testid="e2ee-approval-scan">
                 {scanning ? (
                   <>
                     <video
                       ref={scanVideo}
                       muted
                       playsInline
-                      className="aspect-square w-full rounded-xl bg-muted object-cover"
+                      {...stylex.props(themeStyles.panel6)}
                     />
                     {scanState === 'unavailable' && (
-                      <p role="alert" className="mt-2 text-sm text-muted-foreground">
+                      <p role="alert" {...stylex.props(themeStyles.hint14)}>
                         {t('e2ee.verify.cameraUnavailable')}
                       </p>
                     )}
-                    <Button className="mt-2" variant="ghost" onClick={() => setScanning(false)}>
+                    <Button xstyle={themeStyles.spaced6} variant="ghost" onClick={() => setScanning(false)}>
                       {t('common.cancel')}
                     </Button>
                   </>
                 ) : (
                   <Button
-                    className="w-full"
+                    xstyle={themeStyles.glyph5}
                     size="large"
                     data-testid="e2ee-approval-scan-start"
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || error?.kind === 'refused'}
                     onClick={() => {
                       setScanNotice(null);
                       setScanning(true);
@@ -1383,7 +1410,7 @@ export function E2eeAutomaticPairingInbox({
                   </Button>
                 )}
                 {scanNotice && (
-                  <p role="status" className="mt-2 text-sm text-muted-foreground">
+                  <p role="status" {...stylex.props(themeStyles.hint14)}>
                     {t(scanNotice)}
                   </p>
                 )}
@@ -1392,18 +1419,18 @@ export function E2eeAutomaticPairingInbox({
             {current && (
               <>
                 {(mobile ? cameraSupported() : qrSupported) && (
-                  <p className="flex items-center gap-3 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">
+                  <p {...stylex.props(pairingStyles.alternative)}>
                     {t(mobile ? 'e2ee.auto.orCode.mobile' : 'e2ee.auto.orCode')}
                   </p>
                 )}
                 <form
-                  className="my-5"
+                  {...stylex.props(themeStyles.layout5)}
                   onSubmit={(event) => {
                     event.preventDefault();
                     void act(true);
                   }}
                 >
-                  <label htmlFor="e2ee-approval-code" className="mb-2 block text-sm">
+                  <label htmlFor="e2ee-approval-code" {...stylex.props(themeStyles.copy6)}>
                     {t('e2ee.auto.enterCode')}
                   </label>
                   <Input
@@ -1416,7 +1443,9 @@ export function E2eeAutomaticPairingInbox({
                     placeholder="000000"
                     aria-invalid={error?.kind === 'mismatch' || undefined}
                     aria-describedby={error ? 'e2ee-approval-code-error' : undefined}
-                    disabled={Boolean(busy) || current.phase !== 'waiting'}
+                    disabled={
+                      Boolean(busy) || current.phase !== 'waiting' || error?.kind === 'refused'
+                    }
                     onChange={(event) => {
                       // Full-width IME digits (１２３) become ASCII before filtering.
                       setCode(event.target.value.normalize('NFKC').replace(/\D/g, '').slice(0, 6));
@@ -1427,27 +1456,26 @@ export function E2eeAutomaticPairingInbox({
                     <p
                       id="e2ee-approval-code-error"
                       role="alert"
-                      className="mt-2 text-sm text-destructive"
+                      {...stylex.props(themeStyles.copy7)}
                     >
                       {t('e2ee.auto.codeMismatch', { count: error.attemptsLeft })}
                     </p>
                   )}
                 </form>
-                <div className="rounded-xl border bg-muted/30 p-4">
-                  <p className="font-medium">{current.workspaceName}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{t('e2ee.auto.scope')}</p>
+                <div {...stylex.props(themeStyles.panel7)}>
+                  <p {...stylex.props(themeStyles.layout)}>{current.workspaceName}</p>
+                  <p {...stylex.props(themeStyles.hint18)}>{t('e2ee.auto.scope')}</p>
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p {...stylex.props(themeStyles.hint8)}>
                   {/* The scanned code admits the phone to this device's encrypted
                       workspaces; the typed code approves this request only. */}
                   {t(qrSupported ? 'e2ee.auto.scopeWithQr' : 'e2ee.auto.currentWorkspaceOnly')}
                 </p>
                 <ApprovalExpiry expiresAt={current.expiresAt} />
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <div {...stylex.props(themeStyles.column4)}>
                   <Button
-                    variant="secondary"
-                    className="border border-destructive/20 bg-destructive/10 text-destructive hover:bg-destructive/15"
-                    disabled={Boolean(busy)}
+                    variant="destructive"
+                    disabled={Boolean(busy) || error?.kind === 'refused'}
                     onClick={() => void act(false)}
                   >
                     {t('e2ee.auto.notMine')}
@@ -1455,11 +1483,12 @@ export function E2eeAutomaticPairingInbox({
                   <Button
                     // Grow only beside "not mine": in the stacked phone layout a
                     // zero flex-basis would override the button height and crush it.
-                    className="sm:flex-1"
+                    xstyle={themeStyles.row5}
                     data-testid="e2ee-approval-authorize"
                     disabled={
                       Boolean(busy) ||
                       current.phase !== 'waiting' ||
+                      error?.kind === 'refused' ||
                       !/^\d{6}$/.test(code) ||
                       current.expiresAt <= Date.now()
                     }
@@ -1468,16 +1497,21 @@ export function E2eeAutomaticPairingInbox({
                     {t(busy ? 'e2ee.auto.confirming' : 'e2ee.auto.authorize')}
                   </Button>
                 </div>
-                {error?.kind === 'retry' && (
+                {(error?.kind === 'retry' || error?.kind === 'refused') && (
                   <p
                     id="e2ee-approval-code-error"
                     role="alert"
-                    className="text-sm text-muted-foreground"
+                    {...stylex.props(themeStyles.hint5)}
                   >
-                    {t('e2ee.auto.approvalRetry')}
+                    {t(error.key)}
                   </p>
                 )}
-                <p className="text-center text-xs text-muted-foreground">
+                {error?.kind === 'refused' && (
+                  <Button variant="secondary" onClick={later}>
+                    {t('common.close')}
+                  </Button>
+                )}
+                <p {...stylex.props(themeStyles.hint19)}>
                   {t('e2ee.auto.laterHint')}
                 </p>
               </>
@@ -1489,3 +1523,69 @@ export function E2eeAutomaticPairingInbox({
     </E2eeDeviceRequestsContext.Provider>
   );
 }
+
+const themeStyles = stylex.create({
+  hint: { marginBlock: appSpace[6], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: appSpace[4], paddingBlock: appSpace[5], textAlign: 'center' },
+  hint2: { marginTop: appSpace[2], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  glyph: { position: 'relative', height: '100dvh', overflowY: 'auto', backgroundColor: uiColors.background, paddingInline: appSpace[6], paddingBottom: 'max(2rem,env(safe-area-inset-bottom))' },
+  glyph2: { marginTop: appSpace[5], width: '100%' },
+  column: { marginInline: 'auto', display: 'flex', minHeight: '75dvh', maxWidth: '24rem', flexDirection: 'column', paddingTop: appSpace[10], textAlign: 'center' },
+  copy: { fontSize: uiText.titleSize, lineHeight: 1.375, fontWeight: 600 },
+  hint3: { marginTop: appSpace[4], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  spaced: { marginTop: appSpace[6] },
+  hint4: { marginTop: appSpace[5], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  spaced2: { marginTop: appSpace[5] },
+  hint5: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  spaced3: { marginTop: appSpace[3] },
+  hint6: { marginBottom: appSpace[1], marginTop: appSpace[4], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  layout: { fontWeight: 500 },
+  layout2: { marginBlock: appSpace[8] },
+  copy2: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
+  row: { marginTop: appSpace[4], display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: appSpace[2] },
+  layout3: { marginBlock: appSpace[6] },
+  panel: { aspectRatio: '1', width: '100%', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.secondaryBackground, objectFit: 'cover' },
+  hint7: { marginTop: appSpace[3], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  row2: { marginInline: 'auto', marginTop: appSpace[6], display: 'inline-flex', alignItems: 'center', gap: appSpace[1.5], borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: appSpace[3], paddingBlock: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
+  column2: { marginInline: 'auto', marginTop: appSpace[6], display: 'flex', flexDirection: 'column', alignItems: 'center', gap: appSpace[2] },
+  panel2: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: '#fff', padding: appSpace[2], lineHeight: 1 },
+  hint8: { fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  hint9: { marginTop: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
+  hint10: { marginBlock: appSpace[6], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, paddingInline: appSpace[4], paddingBlock: appSpace[5], textAlign: 'start' },
+  hint11: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
+  hint12: { marginTop: appSpace[2], fontSize: uiText.footnoteSize, lineHeight: 1.625, color: uiColors.secondaryLabel },
+  layout4: { marginRight: appSpace[1], display: 'inline' },
+  hint13: { marginBottom: appSpace[3], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  row3: { display: { 'default': 'inline-flex', '::-webkit-details-marker': 'none' }, cursor: 'pointer', listStyleType: 'none', alignItems: 'center', justifyContent: 'center', gap: appSpace[1.5] },
+  copy3: { marginTop: appSpace[3], textAlign: 'start', lineHeight: 1.625 },
+  hint14: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  hint15: { marginTop: 'auto', paddingTop: appSpace[10], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  hint16: { borderRadius: uiRadius.full, cornerShape: uiCorner.round, backgroundColor: uiColors.secondaryBackground, paddingInline: appSpace[1.5], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, fontVariantNumeric: 'tabular-nums' },
+  panel3: { marginBlock: appSpace[5], borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
+  column3: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: appSpace[2], textAlign: 'center' },
+  glyph3: { width: '100%', maxWidth: { default: null, '@media (min-width: 640px)': '24rem' } },
+  spaced4: { marginTop: appSpace[6], display: 'flex', flexDirection: 'column', rowGap: appSpace[3] },
+  panel4: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
+  hint17: { marginTop: appSpace[1], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.secondaryLabel },
+  glyph4: { marginTop: appSpace[4], width: '100%' },
+  panel5: { maxHeight: '90dvh', maxWidth: { 'default': 'calc(100vw-2rem)', '@media (min-width: 640px)': '28rem' }, overflowY: 'auto', borderRadius: uiRadius.large, cornerShape: uiCorner.shape },
+  copy4: { fontSize: uiText.titleSize, lineHeight: 1.375 },
+  spaced5: { marginTop: appSpace[4] },
+  row4: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  copy5: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500 },
+  spaced6: { marginTop: appSpace[2] },
+  layout5: { marginBlock: appSpace[5] },
+  panel6: { aspectRatio: '1', width: '100%', borderRadius: uiRadius.large, cornerShape: uiCorner.shape, backgroundColor: uiColors.secondaryBackground, objectFit: 'cover' },
+  glyph5: { width: '100%' },
+  copy6: { marginBottom: appSpace[2], display: 'block', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
+  copy7: { marginTop: appSpace[2], fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, color: uiColors.destructive },
+  panel7: { borderRadius: uiRadius.large, cornerShape: uiCorner.shape, boxShadow: uiShadow.card, backgroundColor: uiColors.elevatedBackground, padding: appSpace[4] },
+  hint18: { marginTop: appSpace[1], fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  column4: { marginTop: appSpace[3], display: 'flex', flexDirection: { 'default': 'column', '@media (min-width: 640px)': 'row' }, gap: appSpace[2] },
+  row5: { flex: { default: null, '@media (min-width: 640px)': '1 1 0%' } },
+  hint19: { textAlign: 'center', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+});
+
+const pairingStyles = stylex.create({
+ code: { fontFamily: 'var(--font-mono)', fontSize: '2.25rem', lineHeight: '2.5rem', fontWeight: 600, letterSpacing: '0.15em', fontVariantNumeric: 'tabular-nums' },
+ alternative: { textAlign: 'center', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+});

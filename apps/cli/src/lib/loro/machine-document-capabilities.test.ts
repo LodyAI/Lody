@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_FETCH_TIME_RENEW_AFTER_MS,
   machineFlockKeys,
+  resolveAcpConfigOptionsForModel,
   type AcpConfigOptionSummary,
   type SessionGoalAction,
   getMachineFlockAcpCapabilities,
@@ -428,5 +429,108 @@ describe('MachineDocument quota publication', () => {
       expected
     );
     expect(flock.rows.get(JSON.stringify(quotaKey))?.value).toEqual(limit);
+  });
+
+  it('passively records observed per-model configOptions only for matching sourceVersion', async () => {
+    const flock = new Flock();
+    let dirtyReasons: string[] = [];
+    const document = new MachineDocument(
+      { openFlockDoc: async () => ({ flock }), flush: async () => {} } as unknown as LoroRepo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      (reason) => dirtyReasons.push(reason)
+    );
+    const configId = 'antigravity-provider' as AgentConfigId;
+    const thinkingModelOptions: AcpConfigOptionSummary[] = [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'claude-thinking',
+        options: [
+          { value: 'claude-thinking', name: 'Claude Thinking' },
+          { value: 'gemini-orchestrator', name: 'Gemini Orchestrator' },
+        ],
+      },
+      {
+        id: 'thought_level',
+        name: 'Thinking Level',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'medium',
+        options: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+        ],
+      },
+    ];
+    await document.updateAcpCapabilities(
+      configId,
+      'builtin',
+      'antigravity',
+      [],
+      [],
+      thinkingModelOptions,
+      undefined,
+      false,
+      'runtime-v1'
+    );
+    dirtyReasons = [];
+
+    const orchestratorOptions: AcpConfigOptionSummary[] = [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'gemini-orchestrator',
+        options: [
+          { value: 'claude-thinking', name: 'Claude Thinking' },
+          { value: 'gemini-orchestrator', name: 'Gemini Orchestrator' },
+        ],
+      },
+    ];
+    expect(
+      await document.recordObservedAcpModelConfigOptions(
+        configId,
+        'wrong-runtime',
+        orchestratorOptions
+      )
+    ).toBe(false);
+    expect(dirtyReasons).toEqual([]);
+
+    expect(
+      await document.recordObservedAcpModelConfigOptions(
+        configId,
+        'runtime-v1',
+        orchestratorOptions
+      )
+    ).toBe(true);
+    expect(dirtyReasons).toEqual(['acp-capability-update']);
+
+    const checkpoint = flock.version();
+    expect(
+      await document.recordObservedAcpModelConfigOptions(
+        configId,
+        'runtime-v1',
+        orchestratorOptions
+      )
+    ).toBe(false);
+    expect(flock.version()).toEqual(checkpoint);
+
+    const merged = getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[configId];
+    expect(merged?.observedModelConfigOptions?.['gemini-orchestrator']).toEqual([]);
+    expect(
+      resolveAcpConfigOptionsForModel(
+        merged?.configOptions,
+        merged?.observedModelConfigOptions,
+        'gemini-orchestrator'
+      )
+    ).toEqual({
+      source: 'observed',
+      configOptions: [thinkingModelOptions[0]],
+    });
   });
 });

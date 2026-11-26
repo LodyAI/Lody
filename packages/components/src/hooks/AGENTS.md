@@ -27,10 +27,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 - Native iOS layout follows observed document width during folds; other hosts use
   window width.
-- Authenticated cloud queries share one subscription/retry budget per client,
-  session and arguments. Retry only opaque server failures; show loading, not stale
-  access rows, then throw on exhaustion. Auth recovery stays separate; crash recovery
-  is user initiated. [Implementation](README.md#cloud-query-recovery).
+- Cloud queries (authenticated and public) share one subscription/retry budget per
+  client, session and arguments. Retry only opaque server failures; return `undefined`
+  and report once on exhaustion or structured errors — never throw into render. Surfaces
+  needing explicit error/retry UI read `useCloudQueryState`. Auth recovery stays
+  separate. [Implementation](README.md#cloud-query-recovery).
 
 - Cloud auth recovery has a per-session budget and per-attempt deadline; loading or
   visibility changes never reset it. Exhaustion requires explicit retry or sign-in.
@@ -38,7 +39,6 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   [Contract](../../../../specs/auth-recovery.md).
 
 - Provider overrides govern model catalogs and command previews. Sessions own actual commands.
-
 
 - History uses SessionData commands.
 - Existing-session run-config drafts store only edited fields, scoped to account,
@@ -53,16 +53,17 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   dispatch for pending/seen entries even if CLI already changed their status. Never
   repair active, terminal, removed, or delivery-unknown turns.
 
-- `useStableSession` treats an HTTP 401 from `authClient.useSession()` as potentially
-  stale and verifies it once with the current credential. Only a second 401 for the
-  unchanged local token is terminal: stop retrying, ignore cached user/bootstrap and
-  grace state, and confirm unauthenticated so the root sign-out path clears both Lody
-  auth state and platform credential storage. A rotated token or successful
-  verification fences late responses from an older login. Native login holds
-  `nativeSignInInProgressAtom` from the first sign-in request through successful page
-  replacement, and root session invalidation must respect that fence. A transport
-  failure (timeout, 5xx, `Client disconnected`) or userless in-flight refetch is never
-  terminal and must not sign out a recoverable user.
+- `getStableSessionSupervisor`/`acquireStableSessionSupervisor` own one ref-counted
+  Better Auth room per auth client: session atom, retry/grace state, 401 verification,
+  boot publication, resume and keepalive refreshes. React only borrows/releases and projects
+  it; it never calls `authClient.useSession()` or owns those timers/listeners. Verify a 401
+  against the current credential; only an unchanged-token second 401 is terminal. Token
+  rotation/success fences old responses. Transport failure or a userless in-flight read never
+  signs out a recoverable user; root invalidation respects the native-login fence.
+  `getAuthRecoverySupervisor`/`acquireAuthRecoverySupervisor` likewise own one room per
+  session/restart owner for the per-session budget, deadlines, availability pause and
+  automatic-command fence. `AuthenticatedConvexProvider` only bridges SDK auth state,
+  borrows/releases that room, projects its snapshot and renders the nonmodal notice.
 - `use-session-doc.ts` publishes the initial mirror snapshot immediately, then coalesces
   history-only mirror bursts to the latest snapshot once per animation frame through
   `lib/latest-frame-subscription.ts`. Control state (`session`, message queue, fork,
@@ -75,11 +76,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   With no frame owed, a press navigates and re-anchors on the route; during an owed
   frame it only advances the target. No time-based debounce.
 
-Legacy cloud machine, project, inbox, GitHub and usage catalogs require the
+Legacy machine, project and content-bearing usage catalogs require the
 runtime admission atom's explicit ordinary or legacy descriptor bound to the current
 account, workspace ID and route slug. Unknown mode stays pending; local runtime
-opening, reading and input remain available. Encrypted workspaces never query
-these catalogs, even after pairing. Use the shared legacy query/mutation/action
+opening, reading and input remain available. E2EE Inbox and push registration use notification wrappers after matching verified runtime admission. Other catalogs stay closed. GitHub metadata uses narrow wrappers and verified runtime roles. Owner/admin manage, member uses, guest is blocked; PR caches and identity repair stay legacy. Use the shared legacy query/mutation/action
 wrappers; imperative operations recheck live admission before sending and retained
 callbacks cannot cross accounts. The repository legacy-cloud check rejects direct
 references; its inventory owns the exact control/CLI exceptions. Preserve ordinary errors and owner-only local
@@ -140,8 +140,11 @@ visibility; skipping a catalog grants no machine or execution authority.
 - Keep the bridge debounce at 250ms.
 - Pending permissions from the UNTHROTTLED list flush the window. Summaries stay
   silent and refresh all rows; ordinary Push owns alerts.
+- Only a matching account/workspace runtime with explicit plaintext or E2EE mode permits Live Activity publication; E2EE omits HTTP permission actions. Other states end existing activities.
 - Compute nothing when disabled: both `iosLiveActivitiesEnabledAtom` and the native
   iOS shell are required, not equivalent. Derive activity id separately so disable
   and unmount can end an activity the payload no longer describes.
 
 Display-only member directories retain same-account/workspace labels on failure and expose the shared query owner’s retry without blocking grant controls.
+
+Local-project admin reads worktree scripts only for the explicitly viewed project key; list-only callers omit it. Preserve persisted-cache rendering and once-per-mount background refresh.

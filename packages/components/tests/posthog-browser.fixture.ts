@@ -1,3 +1,4 @@
+import { writeDeviceUsageSharing } from '../src/lib/usage-sharing';
 import {
   ShortcutTokenAttemptError,
   ShortcutTokenAttempts,
@@ -21,6 +22,7 @@ import {
   suspendWorkspaceTelemetry,
 } from '../src/lib/posthog-privacy';
 Object.assign(window, {
+  writeDeviceUsageSharing,
   POSTHOG_OPTIONS,
   logTokenProviderEvent,
   ShortcutTokenAttempts,

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, Github, MessageCircle } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { Tabs } from '@lody/ui/tabs';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
+import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
 import type { ChatLandingTone } from './chat-landing-view';
 
 export type SessionContextType = 'local' | 'github' | 'chat';
@@ -25,18 +27,63 @@ interface ContextSwitchProps {
   localDisabled?: DisabledTabOverlay;
   /** When set, the github tab is disabled */
   githubDisabled?: DisabledTabOverlay;
-  className?: string;
-  /** Override the per-trigger justify class. Defaults to `justify-center`
-     so icon+label sit as a tight centered group inside each equal-width pill. */
-  triggerJustifyClassName?: string;
+  xstyle?: stylex.StyleXStyles;
+  triggerXstyle?: stylex.StyleXStyles;
 }
+
+const styles = stylex.create({
+  root: {
+    width: '100%',
+    maxWidth: { default: '20rem', '@media (width >= 40rem)': '24rem' },
+  },
+  action: { flex: '1 1 0%', minWidth: 0 },
+  tooltipTab: { cursor: 'default' },
+  actionTab: { position: 'relative' },
+  /** Icon + label bonded as one unit so justify-* positions the pair together
+   *  rather than stretching them apart (which broke affinity on the mobile
+   *  new-chat Type row). */
+  face: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+  /** The overlay's own mark: it is not a flex item that may shrink. */
+  overlayIcon: { width: '14px', height: '14px' },
+  /** The overlay that replaces a disabled tab's face while the pointer is on it. */
+  overlay: {
+    position: 'absolute',
+    inset: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[1],
+    opacity: {
+      default: 0,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-context-disabled-action]):hover')]: 1,
+      },
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /** The face that fades out under the overlay. */
+  faceFade: {
+    opacity: {
+      default: 1,
+      '@media (hover: hover)': {
+        [stylex.when.ancestor(':is([data-context-disabled-action]):hover')]: 0,
+      },
+    },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+});
 
 /** Icon + label bonded as one unit so justify-* positions the pair together
  *  rather than stretching them apart (which broke affinity on the mobile
  *  new-chat Type row). */
 function TabFace({ icon, label }: { icon: React.ReactNode; label: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1">
+    <span {...stylex.props(styles.face)}>
       {icon}
       <span>{label}</span>
     </span>
@@ -46,49 +93,35 @@ function TabFace({ icon, label }: { icon: React.ReactNode; label: React.ReactNod
 export function ContextSwitch({
   value,
   onChange,
-  tone,
   localLabel = 'Local',
   githubLabel = 'GitHub',
   chatLabel = 'Chat',
   localDisabled,
   githubDisabled,
-  className,
-  triggerJustifyClassName = 'justify-center',
+  xstyle,
+  triggerXstyle,
 }: ContextSwitchProps) {
-  const isDark = tone === 'dark';
-  const iconClassName = 'h-3.5 w-3.5 shrink-0';
+  const iconClassName = stylex.props(styles.icon).className;
+  const overlayIconClassName = stylex.props(styles.overlayIcon).className;
 
-  const triggerClassName = cn(
-    'flex-1 rounded-md px-2 sm:px-3 py-1.5 text-sm font-medium transition-all',
-    triggerJustifyClassName,
-    isDark
-      ? 'data-[state=active]:bg-background/95 data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground hover:text-foreground'
-      : 'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs text-muted-foreground'
-  );
+  const triggerStyles = triggerXstyle;
 
   return (
     <Tabs.Root
       value={value}
       onValueChange={(v) => onChange(v as SessionContextType)}
-      className={cn('w-full max-w-xs sm:max-w-sm', className)}
+      xstyle={[styles.root, xstyle]}
     >
-      <Tabs.List
-        className={cn(
-          'flex h-10 w-full rounded-lg p-1',
-          isDark ? 'bg-card/70 border border-border/70' : 'bg-muted border border-border/40'
-        )}
-      >
+      <Tabs.List stretch>
         {localDisabled ? (
           <DisabledTab
             icon={<FolderOpen className={iconClassName} />}
             label={localLabel}
             overlay={localDisabled}
-            overlayIcon={<FolderPlus className="h-3.5 w-3.5" />}
-            className={triggerClassName}
-            tone={tone}
+            overlayIcon={<FolderPlus className={overlayIconClassName} />}
           />
         ) : (
-          <Tabs.Tab value="local" className={triggerClassName}>
+          <Tabs.Tab value="local" xstyle={triggerStyles}>
             <TabFace icon={<FolderOpen className={iconClassName} />} label={localLabel} />
           </Tabs.Tab>
         )}
@@ -97,16 +130,14 @@ export function ContextSwitch({
             icon={<Github className={iconClassName} />}
             label={githubLabel}
             overlay={githubDisabled}
-            overlayIcon={<Github className="h-3.5 w-3.5" />}
-            className={triggerClassName}
-            tone={tone}
+            overlayIcon={<Github className={overlayIconClassName} />}
           />
         ) : (
-          <Tabs.Tab value="github" className={triggerClassName}>
+          <Tabs.Tab value="github" xstyle={triggerStyles}>
             <TabFace icon={<Github className={iconClassName} />} label={githubLabel} />
           </Tabs.Tab>
         )}
-        <Tabs.Tab value="chat" className={triggerClassName}>
+        <Tabs.Tab value="chat" xstyle={triggerStyles}>
           <TabFace icon={<MessageCircle className={iconClassName} />} label={chatLabel} />
         </Tabs.Tab>
       </Tabs.List>
@@ -119,18 +150,12 @@ function DisabledTab({
   label,
   overlay,
   overlayIcon,
-  className,
-  tone,
 }: {
   icon: React.ReactNode;
   label: string;
   overlay: DisabledTabOverlay;
   overlayIcon: React.ReactNode;
-  className?: string;
-  tone: ChatLandingTone;
 }) {
-  const isDark = tone === 'dark';
-
   // Tooltip mode: non-Electron "Desktop only" — no actionable overlay
   // Use controlled open state so mobile tap keeps tooltip visible until user taps elsewhere.
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -166,19 +191,23 @@ function DisabledTab({
   if (!overlay.onClick) {
     return (
       <Tooltip.Root open={tooltipOpen}>
-        <Tooltip.Trigger delay={200} render={<button
-            ref={triggerRef}
-            type="button"
-            onClick={handleClick}
-            onPointerEnter={() => setTooltipOpen(true)}
-            onPointerLeave={handlePointerLeave}
-            className={cn(
-              className,
-              'inline-flex flex-1 cursor-default items-center justify-center whitespace-nowrap opacity-40'
-            )}
-          >
-            <TabFace icon={icon} label={label} />
-          </button>}/>
+        <Tooltip.Trigger
+          delay={200}
+          render={
+            <Button
+              ref={triggerRef}
+              type="button"
+              onClick={handleClick}
+              onPointerEnter={() => setTooltipOpen(true)}
+              onPointerLeave={handlePointerLeave}
+              variant="ghost"
+              size="small"
+              xstyle={[styles.action, styles.tooltipTab]}
+            >
+              <TabFace icon={icon} label={label} />
+            </Button>
+          }
+        />
         <Tooltip.Content
           ref={contentRef}
           side="bottom"
@@ -194,28 +223,21 @@ function DisabledTab({
 
   // Overlay mode: hover shows action text over the button
   return (
-    <button
+    <Button
       type="button"
+      data-context-disabled-action=""
       onClick={overlay.onClick}
-      className={cn(
-        className,
-        'group relative inline-flex flex-1 cursor-pointer items-center justify-center whitespace-nowrap',
-        'opacity-40 transition-opacity hover:opacity-80'
-      )}
+      variant="ghost"
+      size="small"
+      xstyle={[stylex.defaultMarker(), styles.action, styles.actionTab]}
     >
-      <span className="transition-opacity group-hover:opacity-0">
+      <span {...stylex.props(styles.faceFade)}>
         <TabFace icon={icon} label={label} />
       </span>
-      <span
-        className={cn(
-          'absolute inset-0 inline-flex items-center justify-center gap-1 rounded-md',
-          'opacity-0 transition-opacity group-hover:opacity-100',
-          isDark ? 'bg-hover/90 text-hover-foreground' : 'bg-muted/90 text-foreground'
-        )}
-      >
+      <span {...stylex.props(styles.overlay)}>
         {overlayIcon}
         <span>{overlay.label}</span>
       </span>
-    </button>
+    </Button>
   );
 }

@@ -13,7 +13,8 @@ const GITHUB_API_CONNECT_SOURCES = [
 const REMOTE_AVATAR_SOURCES = [
   'https://avatars.githubusercontent.com',
   'https://lh3.googleusercontent.com',
-  'https://cdn.discordapp.com'
+  'https://cdn.discordapp.com',
+  'https://secure.gravatar.com'
 ] as const
 const CSP_META_PATTERN = /<meta\b(?=[^>]*\bhttp-equiv="Content-Security-Policy")[^>]*>/i
 const CSP_CONTENT_PATTERN = /\bcontent="([^"]*)"/i
@@ -165,7 +166,7 @@ export function cloudRendererCspHtmlPlugin(options: { env: CloudRendererEnvironm
       }
       return injectCloudRendererCsp(html, {
         'connect-src': connectSources,
-        'img-src': [serverOrigin, ...REMOTE_AVATAR_SOURCES],
+        'img-src': [serverOrigin, ...(apiOrigin ? [apiOrigin] : []), ...REMOTE_AVATAR_SOURCES],
         'frame-src': ['https://*.trycloudflare.com']
       })
     }

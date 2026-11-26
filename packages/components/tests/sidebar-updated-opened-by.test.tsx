@@ -7,13 +7,14 @@ import { createStore, Provider } from 'jotai';
 import {
   countUpdatedItemRoots,
   getVisibleUpdatedItems,
-  SHOW_FULL_BUCKET_THRESHOLD,
+  UPDATED_BUCKET_PREVIEW_MAX,
   SidebarUpdatedSessionList,
   sortUpdatedItems,
   updatedBucketOverflowsPreview,
   type SidebarUpdatedItem,
 } from '../src/components/sidebar-updated-session-list';
 import { sidebarCollapsedOpenedBySessionsAtom } from '../src/atoms/focus-layer';
+import { sidebarShowBranchNamesAtom } from '../src/atoms/sidebar-state';
 import { initI18n } from '../src/i18n';
 
 function makeItem(overrides: Partial<SidebarUpdatedItem> & { id: string }): SidebarUpdatedItem {
@@ -65,7 +66,7 @@ describe('updated bucket opened-by tree', () => {
       }),
     ]);
 
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
+    expect(getVisibleUpdatedItems(ordered, true, 0).map((item) => item.id)).toEqual([
       'stale-opener',
       'fresh-opened',
       'standalone',
@@ -78,7 +79,7 @@ describe('updated bucket opened-by tree', () => {
       makeItem({ id: 'opened', openedBySessionId: 'pinned-opener' }),
       makeItem({ id: 'other' }),
     ]);
-    expect(getVisibleUpdatedItems(ordered, true, false).map((item) => item.id)).toEqual([
+    expect(getVisibleUpdatedItems(ordered, true, 0).map((item) => item.id)).toEqual([
       'opened',
       'other',
     ]);
@@ -88,22 +89,22 @@ describe('updated bucket opened-by tree', () => {
   it('measures the preview threshold in top-level rows', () => {
     const openerGroup = sortUpdatedItems([
       makeItem({ id: 'opener' }),
-      ...Array.from({ length: SHOW_FULL_BUCKET_THRESHOLD }, (_unused, index) =>
+      ...Array.from({ length: UPDATED_BUCKET_PREVIEW_MAX }, (_unused, index) =>
         makeItem({ id: `opened-${index}`, openedBySessionId: 'opener' })
       ),
     ]);
     expect(updatedBucketOverflowsPreview(openerGroup)).toBe(false);
-    expect(getVisibleUpdatedItems(openerGroup, true, false)).toHaveLength(
-      SHOW_FULL_BUCKET_THRESHOLD + 1
+    expect(getVisibleUpdatedItems(openerGroup, true, 0)).toHaveLength(
+      UPDATED_BUCKET_PREVIEW_MAX + 1
     );
 
     const flat = sortUpdatedItems(
-      Array.from({ length: SHOW_FULL_BUCKET_THRESHOLD + 1 }, (_unused, index) =>
+      Array.from({ length: UPDATED_BUCKET_PREVIEW_MAX + 1 }, (_unused, index) =>
         makeItem({ id: `flat-${index}` })
       )
     );
     expect(updatedBucketOverflowsPreview(flat)).toBe(true);
-    expect(getVisibleUpdatedItems(flat, true, false)).toHaveLength(SHOW_FULL_BUCKET_THRESHOLD);
+    expect(getVisibleUpdatedItems(flat, true, 0)).toHaveLength(UPDATED_BUCKET_PREVIEW_MAX);
   });
 });
 
@@ -129,10 +130,16 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
 
   function render(
     items: SidebarUpdatedItem[],
-    options: { collapsed?: Record<string, boolean>; selectedItemId?: string } = {}
+    options: {
+      collapsed?: Record<string, boolean>;
+      selectedItemId?: string;
+      showBranchNames?: boolean;
+      showProjectContext?: boolean;
+    } = {}
   ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, options.collapsed ?? {});
+    store.set(sidebarShowBranchNamesAtom, options.showBranchNames ?? false);
     const onSelectItem = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -147,13 +154,21 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
             items,
             now: new Date('2026-04-22T12:00:00.000Z'),
             selectedItemId: options.selectedItemId ?? null,
+            showProjectContext: options.showProjectContext,
             onSelectItem,
           })
         )
       );
     });
 
-    return { onSelectItem };
+    return { onSelectItem, store };
+  }
+
+  function trunkVariantOf(id: string): string | null | undefined {
+    const row = container?.querySelector(`[data-sidebar-updated-id="${id}"]`);
+    return row
+      ?.querySelector('[data-session-tree-connector="trunk"]')
+      ?.getAttribute('data-session-tree-connector-variant');
   }
 
   function depthOf(id: string): string | null | undefined {
@@ -254,6 +269,29 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     });
 
     expect(onSelectItem).toHaveBeenCalledWith('root', 'child-tab');
+  });
+
+  it("sizes the first child's connector to the opener's rendered height under Show Branch", () => {
+    // Show Branch is on, but the chat opener draws no meta line: the trunk
+    // stays at the row boundary. The worktree opener's branch does draw one.
+    render(
+      [
+        makeItem({ id: 'worktree-opener', kind: 'github', branchName: 'feat/tall' }),
+        makeItem({ id: 'opened-tall', openedBySessionId: 'worktree-opener' }),
+        makeItem({ id: 'chat-opener' }),
+        makeItem({ id: 'opened-short', openedBySessionId: 'chat-opener' }),
+      ],
+      { showBranchNames: true }
+    );
+    expect(trunkVariantOf('opened-tall')).toBe('tall-opener');
+    expect(trunkVariantOf('opened-short')).toBe('row');
+  });
+
+  it('climbs the second line when the opener renders a project line', () => {
+    render([makeItem({ id: 'opener' }), makeItem({ id: 'opened', openedBySessionId: 'opener' })], {
+      showProjectContext: true,
+    });
+    expect(trunkVariantOf('opened')).toBe('tall-opener');
   });
 
   it('renders an orphan opened session as a top-level row with no gutter', () => {

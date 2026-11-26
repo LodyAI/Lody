@@ -1,5 +1,11 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { build } from 'vite';
 import { describe, expect, it, vi } from 'vitest';
 
+import { inlinePackageManifestPlugin } from '../scripts/inline-package-manifest.mjs';
 import createViteConfig from '../vite.config';
 
 const viteConfig = createViteConfig({ command: 'build', mode: 'test' });
@@ -40,6 +46,7 @@ describe('CLI vite config', () => {
       ['1', '', 'nightly', false],
     ] as const) {
       vi.resetModules();
+      vi.stubEnv('LODY_PLATFORM', 'local');
       vi.stubEnv('LODY_E2E_DAEMON_LOSS_BUILD', enabled);
       vi.stubEnv('LODY_ENV', environment);
       vi.stubEnv('LODY_RELEASE_CHANNEL', channel);
@@ -51,6 +58,90 @@ describe('CLI vite config', () => {
       } finally {
         vi.unstubAllEnvs();
       }
+    }
+  });
+
+  it('loads Node HTTP/2 in the packaged ACP ESM bundle', async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-cli-http2-'));
+    try {
+      const entry = path.join(tmpRoot, 'node_modules', 'guarded-http2.cjs');
+      fs.mkdirSync(path.dirname(entry));
+      fs.writeFileSync(path.join(tmpRoot, 'package.json'), '{"type":"module"}');
+      fs.writeFileSync(
+        entry,
+        `const assert = require('node:assert/strict');
+let http2;
+try {
+  http2 = require('node:http2');
+} catch {
+  http2 = { constants: {} };
+}
+assert.equal(typeof http2.connect, 'function');
+`
+      );
+
+      const acpConfig = createViteConfig({ command: 'build', mode: 'acp-adapters' });
+      await build({
+        configFile: false,
+        root: tmpRoot,
+        logLevel: 'silent',
+        ssr: acpConfig.ssr,
+        build: {
+          ...acpConfig.build,
+          rollupOptions: {
+            ...acpConfig.build?.rollupOptions,
+            input: { 'http2-acp': entry },
+          },
+        },
+      });
+
+      const bundle = path.join(tmpRoot, 'dist', 'http2-acp.js');
+      const result = spawnSync(process.execPath, [bundle], { encoding: 'utf8', timeout: 5_000 });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('inlines ../package.json reads from bundled vendor modules so dist/chunks never fails with ENOENT', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-cli-manifest-'));
+    try {
+      const pkgDir = path.join(tmpRoot, 'node_modules', '@sorbetai', 'control');
+      const distDir = path.join(pkgDir, 'dist');
+      fs.mkdirSync(distDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pkgDir, 'package.json'),
+        JSON.stringify({ name: '@sorbetai/control', version: '0.1.0-alpha.20', private: false })
+      );
+      const plugin = inlinePackageManifestPlugin();
+      const source =
+        'const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));';
+      const transformed = plugin.transform.call(
+        {
+          error: (msg: string) => {
+            throw new Error(msg);
+          },
+        },
+        source,
+        path.join(distDir, 'control.js')
+      );
+      expect(transformed?.code).toBe(
+        'const manifest = JSON.parse("{\\"name\\":\\"@sorbetai/control\\",\\"version\\":\\"0.1.0-alpha.20\\"}");'
+      );
+      expect(() =>
+        plugin.renderChunk.call(
+          {
+            error: (msg: string) => {
+              throw new Error(msg);
+            },
+          },
+          source,
+          { fileName: 'chunks/vendor-@sorbetai-control-abc.js' }
+        )
+      ).toThrow(/unresolved readFileSync/);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 });

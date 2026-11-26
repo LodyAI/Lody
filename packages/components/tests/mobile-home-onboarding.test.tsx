@@ -186,10 +186,10 @@ describe('mobile-session-list-scroll-layer', () => {
       expect(shortcuts.textContent).toContain('Chat 1');
       expect(fullList.textContent).not.toContain('Chat 0');
       expect(fullList.textContent).not.toContain('Chat 1');
-      const showAll = Array.from(fullList.querySelectorAll('button')).find((button) =>
-        button.textContent?.includes('Show all')
+      const showMore = Array.from(fullList.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('Show more')
       )!;
-      flushSync(() => showAll.click());
+      flushSync(() => showMore.click());
       expect(fullList.textContent).toContain('Chat 7');
       const firstChat = Array.from(shortcuts.querySelectorAll('button')).find((button) =>
         button.textContent?.includes('Chat 0')

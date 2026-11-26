@@ -44,10 +44,6 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => {
 });
 
 import { AgentClient } from './agent-client';
-import {
-  DEFAULT_ANTIGRAVITY_POLL_TIMINGS,
-  type AntigravityPollTimings,
-} from './antigravity-background';
 import type { Logger } from '../utils/logger';
 
 function createSilentLogger(): Logger {
@@ -82,7 +78,6 @@ async function emitToLiveClient(notification: acp.SessionNotification): Promise<
 
 function createHarness(options?: {
   agentConfig?: { cliType: 'builtin' | 'custom' | 'registry'; agentType: string; name?: string };
-  timings?: Partial<AntigravityPollTimings>;
 }) {
   const updates: AcpSessionNotification[] = [];
   const workChanges: NativeAgentWork[] = [];
@@ -95,7 +90,6 @@ function createHarness(options?: {
     logger: createSilentLogger(),
     terminalManager: {} as never,
     agentConfig: options?.agentConfig ?? { cliType: 'builtin', agentType: 'antigravity' },
-    antigravityPollTimings: options?.timings,
     onUpdateMessage: (msg) => {
       updates.push(msg);
     },
@@ -120,7 +114,7 @@ function createHarness(options?: {
 function defaultInitResponse(overrides?: Record<string, unknown>): acp.InitializeResponse {
   return {
     protocolVersion: 1,
-    agentInfo: { name: 'Antigravity ACP Server', version: '1.5.9' },
+    agentInfo: { name: 'Antigravity ACP Server', version: '1.5.10' },
     agentCapabilities: {
       loadSession: true,
       sessionCapabilities: {
@@ -134,7 +128,7 @@ function defaultInitResponse(overrides?: Record<string, unknown>): acp.Initializ
   } as acp.InitializeResponse;
 }
 
-describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
+describe('Antigravity ACP v1 compatibility and sessionActivity boundary', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
@@ -159,7 +153,6 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
   });
 
   afterEach(() => {
-    // Ends any post-turn monitor through the connection's own abort signal.
     mockState.abortController.abort();
     vi.useRealTimers();
   });
@@ -193,17 +186,16 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
       agentConfig: { cliType: 'builtin', agentType: 'antigravity' },
     });
     await builtin.client.startSession({} as never, '/synthetic/project');
-    expect(builtin.client.reportsSessionActivity()).toBe(true);
-    expect(builtin.client.getNativeActivityObservation()).toBe('idle');
+    expect(builtin.client.reportsSessionActivity()).toBe(false);
+    expect(builtin.client.getNativeWork()).toBeNull();
 
     const customModern = createHarness({
       agentConfig: { cliType: 'custom', agentType: 'my-agy' },
     });
     await customModern.client.startSession({} as never, '/synthetic/project');
-    expect(customModern.client.reportsSessionActivity()).toBe(true);
-    expect(customModern.client.getNativeActivityObservation()).toBe('idle');
+    expect(customModern.client.reportsSessionActivity()).toBe(false);
+    expect(customModern.client.getNativeWork()).toBeNull();
 
-    // Tool normalization (`update.name` -> `_meta.lody.toolName`), elicitation bridge, and prompt usage all work on custom modern server.
     mockState.prompt.mockResolvedValueOnce({
       stopReason: 'end_turn',
       usage: { inputTokens: 20, outputTokens: 10, thoughtTokens: 4, totalTokens: 34 },
@@ -238,7 +230,6 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     await Promise.resolve();
     expect(customModern.usageUpdates).toHaveLength(1);
 
-    // Legacy `antigravity-acp` (1.4.5) must stay completely untouched.
     mockState.initialize.mockResolvedValueOnce(
       defaultInitResponse({
         agentInfo: { name: 'antigravity-acp', version: '1.4.5' },
@@ -249,7 +240,7 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     });
     await customLegacy.client.startSession({} as never, '/synthetic/project');
     expect(customLegacy.client.reportsSessionActivity()).toBe(false);
-    expect(customLegacy.client.getNativeActivityObservation()).toBe('unknown');
+    expect(customLegacy.client.getNativeWork()).toBeNull();
     await expect(
       customLegacy.client.unstable_createElicitation(elicitationParams)
     ).resolves.toEqual({ action: 'cancel' });
@@ -275,177 +266,88 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     expect((customLegacy.updates[0]?.update as { _meta?: unknown })._meta).toBeUndefined();
   });
 
-  /** A fake agy session: `session/list` reports `updatedAt`; Lody must never call `session/load`. */
-  function installTranscript() {
-    const transcript = { updatedAt: '2026-01-01T00:00:00Z' };
-    mockState.listSessions.mockImplementation(async () => ({
-      sessions: [
-        { sessionId: 'agy-sess-1', cwd: '/synthetic/project', updatedAt: transcript.updatedAt },
-      ],
-    }));
-    let wakeups = 0;
-    /** agy wakes the model: `updatedAt` moves, then stays still. */
-    const wakeUp = () => {
-      wakeups += 1;
-      transcript.updatedAt = `2026-01-01T01:00:${String(wakeups).padStart(2, '0')}Z`;
-    };
-    return { wakeUp };
-  }
-
-  const n = (update: Record<string, unknown>) => makeNotification('agy-sess-1', update);
-  const say = (text: string) =>
-    n({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
-  const tool = (
-    toolCallId: string,
-    name: string,
-    status: string,
-    extra: Record<string, unknown> = {}
-  ) => n({ sessionUpdate: 'tool_call', toolCallId, name, status, title: name, ...extra });
-
-  function promptOnce(live: acp.SessionNotification[]) {
-    mockState.prompt.mockImplementationOnce(async () => {
-      for (const item of live) await emitToLiveClient(item);
-      return { stopReason: 'end_turn' };
-    });
-  }
-
-  function send(harness: ReturnType<typeof createHarness>, text: string) {
-    return harness.client.prompt('agy-sess-1' as ACPSessionId, [{ type: 'text', text }]);
-  }
-
-  const { listPollIntervalMs, wakeupQuietMs } = DEFAULT_ANTIGRAVITY_POLL_TIMINGS;
-  /** Long enough for a wakeup to be seen by `session/list` and then go quiet. */
-  const WAKEUP_DONE = listPollIntervalMs * 2 + wakeupQuietMs;
-
-  it('ends the turn at end_turn and keeps the process protected until the background work has woken agy', async () => {
+  it('does not synthesize native work or poll session/list after end_turn when Core sessionActivity is absent', async () => {
     const harness = createHarness();
-    const { wakeUp } = installTranscript();
     await harness.client.startSession({} as never, '/synthetic/project');
 
-    // A turn with only foreground tools never polls.
-    promptOnce([tool('cmd-1', 'run_command', 'completed', { rawOutput: { Stdout: 'v22' } })]);
-    await send(harness, 'Check version');
+    mockState.prompt.mockImplementationOnce(async () => {
+      await emitToLiveClient(
+        makeNotification('agy-sess-1', {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'cmd-1',
+          name: 'run_command',
+          status: 'completed',
+          title: 'run_command',
+          rawOutput: 'Tool is running as a background task with task id: agy-sess-1/task-1',
+        })
+      );
+      await emitToLiveClient(
+        makeNotification('agy-sess-1', {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'sub-1',
+          name: 'invoke_subagent',
+          status: 'completed',
+          title: 'invoke_subagent',
+          rawOutput: { ok: true },
+        })
+      );
+      await emitToLiveClient(
+        makeNotification('agy-sess-1', {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'sched-1',
+          name: 'schedule',
+          status: 'in_progress',
+          title: 'schedule',
+        })
+      );
+      return { stopReason: 'end_turn' };
+    });
+
+    await expect(
+      harness.client.prompt('agy-sess-1' as ACPSessionId, [{ type: 'text', text: 'Run work' }])
+    ).resolves.toEqual({ stopReason: 'end_turn' });
     await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(harness.client.getNativeWork()).toBeNull();
+    expect(harness.client.hasUnsettledNativeWork()).toBe(false);
+    expect(harness.workChanges).toEqual([]);
     expect(mockState.listSessions).not.toHaveBeenCalled();
-    expect(harness.client.getNativeWork()).toBeNull();
-
-    // The command still runs when agy ends the prompt; the turn ends anyway.
-    promptOnce([
-      tool('cmd-2', 'run_command', 'in_progress', { rawInput: { CommandLine: 'pnpm test' } }),
-    ]);
-    await expect(send(harness, 'Run suite')).resolves.toEqual({ stopReason: 'end_turn' });
-    expect(harness.client.getNativeWork()).toBe('background');
-
-    // A long silent command stays protected well past the idle GC timeout.
-    await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
-    expect(harness.client.getNativeWork()).toBe('background');
-
-    // It finishes and agy wakes the model: running while the transcript moves, then released.
-    wakeUp();
-    await vi.advanceTimersByTimeAsync(listPollIntervalMs * 2);
-    expect(harness.client.getNativeWork()).toBe('running');
-    await vi.advanceTimersByTimeAsync(WAKEUP_DONE);
-    expect(harness.client.getNativeWork()).toBeNull();
-    expect(harness.workChanges).toEqual(['background', 'running', 'background', null]);
-
-    const listCalls = mockState.listSessions.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(mockState.listSessions.mock.calls.length).toBe(listCalls);
-    // agy restarts the session's MCP servers on every load.
     expect(mockState.loadSession).not.toHaveBeenCalled();
   });
 
-  it('waits for one wakeup per pending item, counting dispatched subagents', async () => {
+  it('honors authoritative Core sessionActivity if an Antigravity server advertises it', async () => {
+    mockState.initialize.mockResolvedValueOnce(
+      defaultInitResponse({
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { load: {}, list: {}, resume: {}, close: {} },
+          _meta: { lody: { sessionActivity: { version: 1 } } },
+        },
+      })
+    );
     const harness = createHarness();
-    const { wakeUp } = installTranscript();
     await harness.client.startSession({} as never, '/synthetic/project');
-
-    // invoke_subagent completes on dispatch; each result arrives only by waking the model.
-    promptOnce([
-      tool('sub-1', 'invoke_subagent', 'completed', { rawOutput: { ok: true } }),
-      tool('sub-2', 'invoke_subagent', 'completed', { rawOutput: { ok: true } }),
-      say('Dispatched.'),
-    ]);
-    await send(harness, 'Research');
-    await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(harness.client.getNativeWork()).toBe('background');
-
-    wakeUp();
-    await vi.advanceTimersByTimeAsync(WAKEUP_DONE);
-    expect(harness.client.getNativeWork()).toBe('background');
-
-    wakeUp();
-    await vi.advanceTimersByTimeAsync(WAKEUP_DONE);
-    expect(harness.client.getNativeWork()).toBeNull();
-  });
-
-  it('protects a pending schedule until the 24-hour cap when it never wakes agy', async () => {
-    const harness = createHarness();
-    installTranscript();
-    await harness.client.startSession({} as never, '/synthetic/project');
-
-    // agy keeps a timer in_progress until it fires.
-    promptOnce([
-      tool('sched-1', 'schedule', 'in_progress', { rawInput: { DurationSeconds: 86_400 * 2 } }),
-    ]);
-    await send(harness, 'Remind me in two days');
-    await vi.advanceTimersByTimeAsync(23 * 60 * 60_000);
-    expect(harness.client.getNativeWork()).toBe('background');
-    await vi.advanceTimersByTimeAsync(60 * 60_000 + listPollIntervalMs);
-    expect(harness.client.getNativeWork()).toBeNull();
-  });
-
-  it('keeps protecting when session/list keeps failing rather than releasing early', async () => {
-    const harness = createHarness();
-    installTranscript();
-    await harness.client.startSession({} as never, '/synthetic/project');
-    mockState.listSessions.mockRejectedValue(new Error('transport hiccup'));
-
-    promptOnce([tool('cmd-1', 'run_command', 'in_progress')]);
-    await send(harness, 'Run');
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
-    expect(harness.client.getNativeWork()).toBe('background');
-  });
-
-  it('does not protect daemon processes or failed tools', async () => {
-    const harness = createHarness();
-    installTranscript();
-    await harness.client.startSession({} as never, '/synthetic/project');
-    promptOnce([
-      tool('dev-1', 'run_command', 'in_progress', { rawInput: { IsDaemon: true } }),
-      tool('sub-1', 'invoke_subagent', 'failed'),
-    ]);
-    await send(harness, 'Start the dev server');
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(mockState.listSessions).not.toHaveBeenCalled();
-    expect(harness.client.getNativeWork()).toBeNull();
-  });
-
-  it('keeps protecting earlier background work after the user sends another message', async () => {
-    const harness = createHarness();
-    const { wakeUp } = installTranscript();
-    await harness.client.startSession({} as never, '/synthetic/project');
-
-    promptOnce([tool('cmd-1', 'run_command', 'in_progress')]);
-    await send(harness, 'Run suite');
-    await vi.advanceTimersByTimeAsync(listPollIntervalMs * 2);
-
-    // The next turn has no background work of its own; the command is still running.
-    promptOnce([say('README read.')]);
-    await send(harness, 'Read the README');
-    expect(harness.client.getNativeWork()).toBe('background');
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
-    expect(harness.client.getNativeWork()).toBe('background');
-
-    wakeUp();
-    await vi.advanceTimersByTimeAsync(WAKEUP_DONE);
+    expect(harness.client.reportsSessionActivity()).toBe(true);
     expect(harness.client.getNativeWork()).toBeNull();
 
-    // Once released, a later turn inherits nothing.
-    promptOnce([say('Welcome')]);
-    await send(harness, 'Thanks');
-    await vi.advanceTimersByTimeAsync(10_000);
+    await mockState.client?.extNotification?.('_lody/session/activity_update', {
+      version: 1,
+      sessionId: 'agy-sess-1',
+      state: 'idle',
+      backgroundTaskCount: 1,
+    });
+    expect(harness.client.getNativeWork()).toBe('background');
+    expect(harness.client.hasUnsettledNativeWork()).toBe(true);
+
+    await mockState.client?.extNotification?.('_lody/session/activity_update', {
+      version: 1,
+      sessionId: 'agy-sess-1',
+      state: 'idle',
+      backgroundTaskCount: 0,
+    });
     expect(harness.client.getNativeWork()).toBeNull();
+    expect(harness.client.hasUnsettledNativeWork()).toBe(false);
+    expect(harness.workChanges).toEqual(['background', null]);
   });
 
   it('negotiates the realpath of a symlinked workdir with Antigravity only', async () => {
@@ -455,88 +357,28 @@ describe('Antigravity ACP v1 background lifecycle and GC protection', () => {
     fs.mkdirSync(realTarget, { recursive: true });
     fs.symlinkSync(realTarget, symlinkWs);
     const canonicalWs = fs.realpathSync(symlinkWs);
-    const cwds = { new: [] as string[], list: [] as string[] };
+    const cwds: string[] = [];
     mockState.newSession.mockImplementation(async (params: { cwd: string }) => {
-      cwds.new.push(params.cwd);
+      cwds.push(params.cwd);
       return { sessionId: 'agy-sess-1' };
-    });
-    mockState.listSessions.mockImplementation(async (params: { cwd: string }) => {
-      cwds.list.push(params.cwd);
-      return { sessions: [{ sessionId: 'agy-sess-1', cwd: params.cwd, updatedAt: 'x' }] };
     });
 
     try {
       const agy = createHarness();
       await agy.client.startSession({} as never, symlinkWs);
-      promptOnce([tool('sched-1', 'schedule', 'in_progress')]);
-      await send(agy, 'Schedule');
-      await vi.advanceTimersByTimeAsync(listPollIntervalMs * 2);
-      expect(cwds.new[0]).toBe(canonicalWs);
-      expect(cwds.list[0]).toBe(canonicalWs);
+      expect(cwds[0]).toBe(canonicalWs);
 
-      // A missing workdir is passed through unchanged.
       await createHarness().client.startSession({} as never, '/synthetic/does-not-exist');
-      expect(cwds.new[1]).toBe('/synthetic/does-not-exist');
+      expect(cwds[1]).toBe('/synthetic/does-not-exist');
 
-      // Other agents keep the path they were given.
       mockState.initialize.mockResolvedValueOnce(
         defaultInitResponse({ agentInfo: { name: 'Other ACP Server', version: '1.0.0' } })
       );
       const other = createHarness({ agentConfig: { cliType: 'builtin', agentType: 'claude' } });
       await other.client.startSession({} as never, symlinkWs);
-      expect(cwds.new[2]).toBe(symlinkWs);
+      expect(cwds[2]).toBe(symlinkWs);
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
-
-  it('preserves unsettled native work on closeSession and connection abort instead of flipping to idle', async () => {
-    const closeHarness = createHarness();
-    installTranscript();
-    await closeHarness.client.startSession({} as never, '/synthetic/project');
-    promptOnce([tool('cmd-1', 'run_command', 'in_progress')]);
-    await send(closeHarness, 'Run');
-    expect(closeHarness.client.getNativeWork()).toBe('background');
-    expect(closeHarness.client.hasUnsettledNativeWork()).toBe(true);
-
-    await closeHarness.client.closeSession('agy-sess-1' as ACPSessionId);
-    await Promise.resolve();
-    expect(closeHarness.client.getNativeWork()).toBe('background');
-    expect(closeHarness.client.hasUnsettledNativeWork()).toBe(true);
-    expect(closeHarness.workChanges).toEqual(['background']);
-
-    mockState.abortController = new AbortController();
-    const abortHarness = createHarness();
-    installTranscript();
-    await abortHarness.client.startSession({} as never, '/synthetic/project');
-    promptOnce([tool('cmd-2', 'run_command', 'in_progress')]);
-    await send(abortHarness, 'Run');
-    expect(abortHarness.client.getNativeWork()).toBe('background');
-
-    mockState.abortController.abort();
-    await Promise.resolve();
-    expect(abortHarness.client.getNativeWork()).toBe('background');
-    expect(abortHarness.client.hasUnsettledNativeWork()).toBe(true);
-    expect(abortHarness.workChanges).toEqual(['background']);
-  });
-
-  it('retains unsettled marker when the 24-hour protection cap releases GC until a new turn starts', async () => {
-    const harness = createHarness();
-    installTranscript();
-    await harness.client.startSession({} as never, '/synthetic/project');
-
-    promptOnce([
-      tool('sched-1', 'schedule', 'in_progress', { rawInput: { DurationSeconds: 86_400 * 2 } }),
-    ]);
-    await send(harness, 'Remind me in two days');
-    await vi.advanceTimersByTimeAsync(
-      DEFAULT_ANTIGRAVITY_POLL_TIMINGS.maxDurationMs + listPollIntervalMs
-    );
-    expect(harness.client.getNativeWork()).toBeNull();
-    expect(harness.client.hasUnsettledNativeWork()).toBe(true);
-
-    promptOnce([say('Done.')]);
-    await send(harness, 'Status');
-    expect(harness.client.hasUnsettledNativeWork()).toBe(false);
   });
 });

@@ -7,9 +7,14 @@ This package contains shared React UI for browser-shaped, Electron, and responsi
 mobile surfaces. Background for the rules below:
 [.agents/docs/components-package.md](../../.agents/docs/components-package.md).
 
+Migration rationale: [Tailwind to StyleX](../../.agents/notes/implemented/architecture/2026-10-22-tailwind-to-stylex-migration.md).
+
 ## General rules
 
 - Native shells do not emit `$pageview` or `$pageleave`; browser page tracking remains enabled. Mention file-fetch failures stay visible to consumers but are not analytics events. Authenticated account readiness is represented by `app/active`, not a second `onboarding/account_ready` event.
+- Text is unselectable by default on every host. A reading surface marks its container
+  `data-text-selectable`, not a `select-text` utility, which skips descendants; see
+  [text selection](../../.agents/docs/components-package.md#text-selection).
 - Regenerate TanStack routes after changing route files.
 - Use `pnpm --filter @lody/components dev` to generate and format the route tree
   with Oxfmt before CI compares it with the committed file.
@@ -21,11 +26,12 @@ mobile surfaces. Background for the rules below:
   (a StyleX or Tailwind visual class there loses to, or fights, its own). Legacy
   primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
 - New or rewritten product styling is StyleX, not Tailwind. Colour, shadow, radius and
-  space come from `@lody/ui/tokens/colors.stylex` / `scales.stylex`; styles live in the
-  component's `stylex.create`, and what an area shares lives in its `surface.ts`
-  (e.g. `components/settings/surface.ts`). Copy that follows `--ui-font-size` keeps `em`.
-  Materials are `@lody/ui`'s: cards lift, controls stand up, every value holder is
-  the one recessed well, and a list of records is one card with ruled rows.
+  space come from `src/style/` (the app theme's tokens) or `@lody/ui/tokens/*.stylex`;
+  styles live in the component's `stylex.create`, and what an area shares lives in its
+  `surface.ts` (e.g. `components/settings/surface.ts`). Copy that follows
+  `--ui-font-size` keeps `em`. Materials are `@lody/ui`'s: cards lift, controls stand up,
+  every value holder is the one recessed well, and a list of records is one card with
+  ruled rows.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.
@@ -68,7 +74,7 @@ mobile surfaces. Background for the rules below:
   `window.__LODY_STARTUP_THEME__.persist` (type here, like `LodyLiveActivityBridge`;
   the shell implements it from its own storage). The renderer's own first frame
   needs no help: `lib/boot-shell-script.ts` applies the class before parse.
-- Never `@source`-scan a third-party component library in `src/tailwind/index.css`:
+- Never `@source`-scan a third-party component library in `src/style/index.css`:
   it emits that library's utilities globally. Konsta's `last-child-hairline-b-none`
   (unanchored `:last-child … ::after`) made every portal open/close restyle the whole
   app. Keep `#root` off `<body>`'s tail (`lib/body-tail-sentinel.ts`, mounted by
@@ -92,11 +98,8 @@ mobile surfaces. Background for the rules below:
   14.6:1), `text-foreground-strong` (headings, bold), the selected sidebar row and the
   active tab go above it. Unselected sidebar text uses `text-sidebar-row-foreground`. Never hard-code
   white text on theme surfaces. Hover changes a row's fill, never its text color.
-- Sidebar top-level groups (machines, GitHub Worktrees, Chats) all use
-  `SIDEBAR_GROUP_LABEL_CLASS`, with no leading icon or sticky positioning; labels scroll
-  with their rows. Project, repo and conversation rows
-  are 1em. A machine is identified by its Offline pill and hover card
-  (`sidebar-machine-card.tsx`); never show "offline" while its status is unknown.
+- Before changing sidebar group labels or project, repo and conversation row typography,
+  read [sidebar rules](src/components/AGENTS.md#sidebar-and-session-rows).
 - `@lody/ui` colours come from the VS Code theme: `theme-provider.tsx` puts
   `lib/vscode-theme/lody-ui-palette.stylex.ts` on the root in the resolved mode. Override
   its tokens there with `createTheme`, never with Tailwind classes on package parts.

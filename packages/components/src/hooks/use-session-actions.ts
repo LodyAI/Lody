@@ -1,10 +1,10 @@
+import { usageSharingAllowed } from '@/lib/usage-sharing';
 import { useSessionOwnerAccess } from './use-session-owner-access';
 import { useSessionManagementGuard } from './use-session-management-guard';
-import { useLegacyWorkspaceMutation } from '@/hooks/use-legacy-workspace-query';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, useCloudMutation } from '@lody/platform/react';
 import type {
   Session,
   SessionStatus,
@@ -41,14 +41,10 @@ import {
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
   OPERATION_INBOX_PROTOCOL_VERSION,
-  buildPinnedSectionLayout,
-  planNewPinPlacement,
-  planTopOrderKey,
-  isPinOrderKey,
-  FractionalIndex,
-  type ManualOrderWrite,
-  type PinPlacementWrite,
-  type PinnedSessionPlacement,
+  planStatusViewCommand,
+  type StatusViewCommand,
+  type StatusViewState,
+  type StatusViewWrite,
   getSessionCancelRequestMarker,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
@@ -79,6 +75,8 @@ import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 import { roostHistoryFeatureEnabledAtom } from '@/atoms/settings';
+import { statusViewPatchToMeta, statusViewSessionsFromMetas } from '@/lib/status-view-state';
+import { deleteWorkspacePinSection, writeWorkspacePinSection } from '@/lib/workspace-catalog-write';
 import {
   createSessionSubmission,
   type CreateSessionResult,
@@ -299,13 +297,16 @@ export type SessionActions = {
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
-  /** Write planned pin placements (section and order) for pinned conversations. */
-  applySessionPinPlacements: (writes: readonly PinPlacementWrite[]) => Promise<void>;
-  /** Write planned manual order placements for Focus conversations (clearing snooze/settled on target). */
-  applySessionFocusOrder: (
-    writes: readonly ManualOrderWrite[],
-    restoredSessionId?: SessionId
-  ) => Promise<void>;
+  /**
+   * Plan a Status view or pin-section command with the shared planner and
+   * write the result. `state` is what the caller's list shows (order, presence,
+   * permissions); opened sub-conversations and the target's own metadata are
+   * read from the Repo. Every affected Session passes the guard before any write.
+   */
+  runStatusViewCommand: (
+    command: StatusViewCommand,
+    state?: StatusViewState
+  ) => Promise<StatusViewWrite[]>;
   /** Snooze a session until `snoozedUntil` (epoch ms) in the Status view's Later section. */
   snoozeSession: (
     sessionId: SessionId,
@@ -324,13 +325,14 @@ export type SessionActions = {
   ) => Promise<void>;
 };
 
-const toPinnedSessionPlacement = (meta: SessionMeta): PinnedSessionPlacement => ({
-  id: meta.id,
-  pinSectionId: meta.pinSectionId ?? null,
-  orderKey: meta.orderKey ?? null,
-  recency:
-    meta.lastMessageAt ??
-    (typeof meta.createdAt === 'number' ? meta.createdAt : Date.parse(meta.createdAt ?? '') || 0),
+const randomByte = () => Math.floor(Math.random() * 256);
+
+const emptyStatusViewState = (): StatusViewState => ({
+  sessions: [],
+  sections: [],
+  sectionsLoaded: false,
+  canManageSections: true,
+  nowMs: getServerNow(),
 });
 
 const extractSessionStatus = (value: unknown): Session['status'] | undefined => {
@@ -443,7 +445,7 @@ export function useSessionActions(): SessionActions {
   );
   const postHog = usePostHog();
   const { isAuthenticated: isConvexAuthenticated, requestAuthRecovery } = useAuthenticatedConvex();
-  const recordMyWorkspaceDailyActiveUser = useLegacyWorkspaceMutation(
+  const recordMyWorkspaceDailyActiveUser = useCloudMutation(
     cloudOperations.activity.recordMyWorkspaceDailyActiveUser
   );
 
@@ -451,6 +453,7 @@ export function useSessionActions(): SessionActions {
     (workspaceId: string | undefined) => {
       if (!workspaceId || !isConvexAuthenticated) return;
       // Best-effort DAU recording: never block the chat/session flow.
+      if (!usageSharingAllowed()) return;
       void recordMyWorkspaceDailyActiveUser({ workspaceId }).catch((error: unknown) => {
         if (isConvexUnauthenticatedError(error)) {
           requestAuthRecovery();
@@ -509,14 +512,15 @@ export function useSessionActions(): SessionActions {
         // lands at the top of Status Focus; child Sessions get none (they
         // render nested under their opener row).
         planNewSessionOrderKey: () => {
-          let topKey: string | null = null;
-          for (const meta of Object.values(store.get(sessionMetaCacheAtom))) {
-            if (!isPinOrderKey(meta.orderKey)) continue;
-            if (topKey === null || FractionalIndex.compare(meta.orderKey, topKey) < 0) {
-              topKey = meta.orderKey;
-            }
-          }
-          return planTopOrderKey([{ id: '', orderKey: topKey }]);
+          const write = planStatusViewCommand(
+            {
+              ...emptyStatusViewState(),
+              related: statusViewSessionsFromMetas(Object.values(store.get(sessionMetaCacheAtom))),
+            },
+            { type: 'newSessionOrder', sessionId: '' },
+            { nowMs: getServerNow(), randomByte }
+          )[0];
+          return write?.type === 'session' ? write.patch.orderKey : undefined;
         },
         onRpcDelivered: (sessionId, turnId) =>
           store.set(rpcDeliveredTurnsAtom, (previous) =>
@@ -708,21 +712,9 @@ export function useSessionActions(): SessionActions {
         { lastMessageAt: now, lastReadAt: now },
         assertCanManageSessions
       );
-      const roomId = getSessionRoomId(sessionId);
-      const existing = await runtime.repo.getDocMeta(roomId);
-      const existingMeta = !isLoroRepoDocDeleted(existing)
-        ? (existing?.meta as SessionMeta | undefined)
-        : undefined;
-      const cached = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
-      const meta = existingMeta ?? cached;
-      if (meta?.snoozedUntil !== undefined || meta?.settledAt !== undefined) {
-        await updateSessionMetadata(sessionId, {
-          ...(meta.snoozedUntil !== undefined ? { snoozedUntil: undefined } : {}),
-          ...(meta.settledAt !== undefined ? { settledAt: undefined } : {}),
-        });
-      }
+      await runStatusViewCommandRef.current({ type: 'touchOnSend', sessionId });
     },
-    [runtime, store, assertCanManageSessions, updateSessionMetadata]
+    [runtime, assertCanManageSessions]
   );
 
   const updateSessionTitle = useCallback(
@@ -792,6 +784,24 @@ export function useSessionActions(): SessionActions {
         { lastReadAt: readAt },
         assertReadablePreferences
       );
+      const rootId = cachedMeta?.parentSessionId;
+      const rootMeta = rootId
+        ? (store.get(sessionMetaCacheAtom)[getSessionRoomId(rootId)] as SessionMeta | undefined)
+        : undefined;
+      const rootSnoozedUntil = getFiniteTimestamp(rootMeta?.snoozedUntil);
+      if (
+        rootId &&
+        rootSnoozedUntil !== null &&
+        rootSnoozedUntil <= now &&
+        rootSnoozedUntil > readAt
+      ) {
+        await touchSessionActivityMeta(
+          runtime,
+          rootId,
+          { lastReadAt: rootSnoozedUntil },
+          assertReadablePreferences
+        );
+      }
     },
     [runtime, store, assertReadablePreferences]
   );
@@ -1095,192 +1105,155 @@ export function useSessionActions(): SessionActions {
     [runtime, store, deleteArchivedSessionMeta, assertCanManageSessions]
   );
 
-  const setSessionPinned = useCallback(
-    async (sessionId: SessionId, isPinned: boolean) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
+  const readSessionMetas = useCallback(
+    async (sessionId: SessionId, includeOpened: boolean): Promise<SessionMeta[]> => {
+      if (!runtime) throw new Error('Runtime not ready');
+      if (includeOpened) {
+        const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
+        if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+          throw new Error('Workspace changed during session operation');
+        }
+        return tree;
       }
       const roomId = getSessionRoomId(sessionId);
       const existing = await runtime.repo.getDocMeta(roomId);
-      if (isLoroRepoDocDeleted(existing)) return;
-      if (!isPinned) {
-        // Unpinning clears pinSectionId while preserving orderKey for Focus ordering.
-        await updateSessionPreference(sessionId, {
-          isPinned: false,
-          pinSectionId: undefined,
-        });
-        return;
-      }
-      const defaultSectionPins = Object.values(store.get(sessionMetaCacheAtom)).filter(
-        (meta) =>
-          meta.isPinned === true && !meta.isArchived && !meta.pinSectionId && meta.id !== sessionId
-      );
-      const { orderKey } = planNewPinPlacement(
-        buildPinnedSectionLayout(
-          defaultSectionPins.map(toPinnedSessionPlacement),
-          [],
-          (placement) => placement
-        )
-      );
-      await updateSessionPreference(sessionId, {
-        isPinned: true,
-        pinSectionId: undefined,
-        orderKey,
-      });
-    },
-    [runtime, store, updateSessionPreference]
-  );
-
-  const applySessionPinPlacements = useCallback(
-    async (writes: readonly PinPlacementWrite[]) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      for (const write of writes) {
-        await updateSessionPreference(write.sessionId as SessionId, {
-          isPinned: true,
-          pinSectionId: write.pinSectionId,
-          orderKey: write.orderKey,
-        });
-      }
-    },
-    [runtime, updateSessionPreference]
-  );
-
-  // The session plus its opened sub-conversations. Contained Tabs share the
-  // owner's bucket and never render their own status row.
-  const openedSubTreeSessionIds = useCallback(
-    async (sessionId: SessionId) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const tree = await runtime.readSessionOperationTargets(sessionId, 'archive-tree');
-      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
-        throw new Error('Workspace changed during session operation');
-      }
-      const ids = [sessionId];
-      for (const session of tree.slice(1)) {
-        if (session.parentSessionId === undefined) ids.push(session.id);
-      }
-      return ids;
+      if (isLoroRepoDocDeleted(existing)) return [];
+      const meta =
+        (existing?.meta as SessionMeta | undefined) ??
+        (store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined);
+      return meta ? [{ ...meta, id: sessionId }] : [];
     },
     [runtime, store]
   );
 
-  const applySessionFocusOrder = useCallback(
-    async (writes: readonly ManualOrderWrite[], restoredSessionId?: SessionId) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      // Dragging a parent row into Focus drags its opened sub-conversations
-      // with it; they restore without their own orderKey writes.
-      const restoredIds = new Set<SessionId>(
-        restoredSessionId ? await openedSubTreeSessionIds(restoredSessionId) : []
-      );
-      const now = getServerNow();
+  /** Every affected Session passes its guard before the first write. */
+  const applyStatusViewWrites = useCallback(
+    async (writes: readonly StatusViewWrite[]) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const managed: SessionId[] = [];
+      const preferred: SessionId[] = [];
       for (const write of writes) {
-        const targetId = write.sessionId as SessionId;
-        const isRestored = restoredIds.delete(targetId);
-        const roomId = getSessionRoomId(targetId);
-        const existing = await runtime.repo.getDocMeta(roomId);
-        const meta = !isLoroRepoDocDeleted(existing)
-          ? (existing?.meta as SessionMeta | undefined)
-          : undefined;
-        const hasExpiredSnooze = typeof meta?.snoozedUntil === 'number' && meta.snoozedUntil <= now;
-        const existingRestored = getFiniteTimestamp(meta?.focusRestoredAt) ?? 0;
-        await updateSessionMetadata(targetId, {
-          orderKey: write.orderKey,
-          ...(isRestored
-            ? {
-                snoozedUntil: undefined,
-                settledAt: undefined,
-                focusRestoredAt: now,
-              }
-            : hasExpiredSnooze
-              ? {
-                  snoozedUntil: undefined,
-                  focusRestoredAt: Math.max(existingRestored, meta.snoozedUntil!),
-                }
-              : {}),
-        });
+        if (write.type !== 'session') continue;
+        (write.access === 'manage' ? managed : preferred).push(write.sessionId as SessionId);
       }
-      for (const restoredId of restoredIds) {
-        await updateSessionMetadata(restoredId, {
-          snoozedUntil: undefined,
-          settledAt: undefined,
-          focusRestoredAt: now,
-        });
+      if (managed.length > 0) await assertCanManageSessions(managed);
+      if (preferred.length > 0) await assertReadablePreferences(preferred);
+      for (const write of writes) {
+        if (write.type === 'session') {
+          await runtime.writer.upsertDocMeta(
+            getSessionRoomId(write.sessionId as SessionId),
+            statusViewPatchToMeta(write.patch) as RepoDocMetaPatch
+          );
+        } else if (write.type === 'putSection') {
+          await writeWorkspacePinSection(runtime, write.section);
+        } else {
+          await deleteWorkspacePinSection(runtime, write.sectionId);
+        }
       }
     },
-    [runtime, openedSubTreeSessionIds, updateSessionMetadata]
+    [runtime, assertCanManageSessions, assertReadablePreferences]
+  );
+
+  const runStatusViewCommand = useCallback(
+    async (requested: StatusViewCommand, state?: StatusViewState) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      let command = requested;
+      const base = state ?? emptyStatusViewState();
+      const listed = new Set(base.sessions.map((session) => session.id));
+      let reached: SessionMeta[] = [];
+      switch (command.type) {
+        case 'snooze':
+        case 'settle':
+        case 'moveToFocus':
+          reached = await readSessionMetas(command.sessionId as SessionId, command.includeOpened);
+          break;
+        case 'move':
+          // A row dropped into Focus brings its opened sub-conversations along.
+          reached = await readSessionMetas(
+            command.sessionId as SessionId,
+            command.to.area === 'focus'
+          );
+          break;
+        case 'touchOnSend': {
+          reached = await readSessionMetas(command.sessionId as SessionId, false);
+          const rootId = reached[0]?.parentSessionId;
+          if (rootId) {
+            command = { type: 'touchOnSend', sessionId: rootId };
+            reached = await readSessionMetas(rootId, false);
+          }
+          break;
+        }
+        case 'setPinned': {
+          const pinnedId = command.sessionId;
+          const target = await readSessionMetas(pinnedId as SessionId, false);
+          if (target.length === 0) return [];
+          // The new pin's key is planned against every pin in the default section.
+          reached = [
+            ...Object.values(store.get(sessionMetaCacheAtom)).filter(
+              (meta) => meta.isArchived !== true && meta.id !== pinnedId
+            ),
+            ...target,
+          ];
+          break;
+        }
+        default:
+          break;
+      }
+      const related = statusViewSessionsFromMetas(reached, {
+        keepArchivedId: 'sessionId' in command ? command.sessionId : undefined,
+      }).filter((session) => !listed.has(session.id));
+      const writes = planStatusViewCommand(
+        { ...base, related: [...(base.related ?? []), ...related] },
+        command,
+        { nowMs: getServerNow(), randomByte }
+      );
+      await applyStatusViewWrites(writes);
+      return writes;
+    },
+    [runtime, store, readSessionMetas, applyStatusViewWrites]
+  );
+  const runStatusViewCommandRef = useRef(runStatusViewCommand);
+  runStatusViewCommandRef.current = runStatusViewCommand;
+
+  const setSessionPinned = useCallback(
+    async (sessionId: SessionId, pinned: boolean) => {
+      await runStatusViewCommand({ type: 'setPinned', sessionId, pinned });
+    },
+    [runStatusViewCommand]
   );
 
   const snoozeSession = useCallback(
-    async (
-      sessionId: SessionId,
-      snoozedUntil: number,
-      options?: { includeOpenedSessions?: boolean }
-    ) => {
-      const targetIds =
-        options?.includeOpenedSessions === true
-          ? await openedSubTreeSessionIds(sessionId)
-          : [sessionId];
-      for (const target of targetIds) {
-        await updateSessionMetadata(target, {
-          snoozedUntil,
-          settledAt: undefined,
-        });
-      }
+    async (sessionId: SessionId, until: number, options?: { includeOpenedSessions?: boolean }) => {
+      await runStatusViewCommand({
+        type: 'snooze',
+        sessionId,
+        until,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
     },
-    [openedSubTreeSessionIds, updateSessionMetadata]
+    [runStatusViewCommand]
   );
 
   const settleSession = useCallback(
     async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
-      if (!runtime) {
-        throw new Error('Runtime not ready');
-      }
-      const targetIds =
-        options?.includeOpenedSessions === true
-          ? await openedSubTreeSessionIds(sessionId)
-          : [sessionId];
-      await assertCanManageSessions(targetIds);
-      for (const target of targetIds) {
-        const roomId = getSessionRoomId(target);
-        const existing = await runtime.repo.getDocMeta(roomId);
-        const repoMeta = !isLoroRepoDocDeleted(existing)
-          ? (existing?.meta as SessionMeta | undefined)
-          : undefined;
-        const cachedMeta = store.get(sessionMetaCacheAtom)[roomId] as SessionMeta | undefined;
-        const lastMessageAt =
-          getFiniteTimestamp(repoMeta?.lastMessageAt) ??
-          getFiniteTimestamp(cachedMeta?.lastMessageAt) ??
-          0;
-        await updateSessionMetadata(target, {
-          settledAt: Math.max(getServerNow(), lastMessageAt),
-          snoozedUntil: undefined,
-        });
-      }
+      await runStatusViewCommand({
+        type: 'settle',
+        sessionId,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
     },
-    [runtime, store, openedSubTreeSessionIds, assertCanManageSessions, updateSessionMetadata]
+    [runStatusViewCommand]
   );
 
   const moveSessionToFocus = useCallback(
     async (sessionId: SessionId, options?: { includeOpenedSessions?: boolean }) => {
-      const targetIds =
-        options?.includeOpenedSessions === true
-          ? await openedSubTreeSessionIds(sessionId)
-          : [sessionId];
-      const focusRestoredAt = getServerNow();
-      for (const target of targetIds) {
-        await updateSessionMetadata(target, {
-          snoozedUntil: undefined,
-          settledAt: undefined,
-          focusRestoredAt,
-        });
-      }
+      await runStatusViewCommand({
+        type: 'moveToFocus',
+        sessionId,
+        includeOpened: options?.includeOpenedSessions === true,
+      });
     },
-    [openedSubTreeSessionIds, updateSessionMetadata]
+    [runStatusViewCommand]
   );
 
   return {
@@ -1305,8 +1278,7 @@ export function useSessionActions(): SessionActions {
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,
-    applySessionPinPlacements,
-    applySessionFocusOrder,
+    runStatusViewCommand,
     snoozeSession,
     settleSession,
     moveSessionToFocus,

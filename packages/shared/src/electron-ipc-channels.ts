@@ -36,12 +36,15 @@ export type IpcPushMap = {
   'auth.loginState': ElectronLoginState;
   'app.menuAction': string;
   'app.fullscreen': boolean;
+  'app.todayCompanionFullscreen': { name: string; fullscreen: boolean };
   'app.nativeTheme': 'light' | 'dark';
   'app.globalShortcut': GlobalShortcutTriggeredPayload;
   'app.sessionCompletionClick': SessionCompletionNotificationClickPayload;
   'app.windowTarget': ElectronWindowTarget;
   'app.prepareWindowTarget': PreparedWindowTarget;
   'app.activatePreparedWindow': PreparedWindowTarget;
+  /** The parked Today window's next day to show, or null to park (leave its workspace). */
+  'app.todayWindowTarget': { member?: string; date?: string; bindingId: number } | null;
   /** Re-read hint only: the renderer learns the exact reason from its own refresh. */
   'e2ee.accessLost': { workspaceId: string };
   /** OS sleep/lock transitions; lock events exist on macOS and Windows only. */
@@ -81,12 +84,14 @@ export const IPC_PUSH_CHANNELS = {
   authLoginState: 'auth.loginState',
   appMenuAction: 'app.menuAction',
   appFullscreen: 'app.fullscreen',
+  appTodayCompanionFullscreen: 'app.todayCompanionFullscreen',
   appNativeTheme: 'app.nativeTheme',
   appGlobalShortcut: 'app.globalShortcut',
   appSessionCompletionClick: 'app.sessionCompletionClick',
   appWindowTarget: 'app.windowTarget',
   appPrepareWindowTarget: 'app.prepareWindowTarget',
   appActivatePreparedWindow: 'app.activatePreparedWindow',
+  appTodayWindowTarget: 'app.todayWindowTarget',
   e2eeAccessLost: 'e2ee.accessLost',
   appPowerState: 'app.powerState',
   e2eeRecoveryProgress: 'e2ee.recoveryProgress',

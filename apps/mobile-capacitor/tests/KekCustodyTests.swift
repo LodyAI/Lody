@@ -87,6 +87,34 @@ private struct SharedCustodyVector: Decodable {
         let reused = DispatchSemaphore(value: 0)
         queue.enqueue(route: "same-routing-scope") { reused.signal() }
         precondition(reused.wait(timeout: .now() + 30) == .success, "settled route did not reopen")
+        // A full reset purges custody only after every admitted call on every route returns.
+        let hung = DispatchSemaphore(value: 0), entered = DispatchSemaphore(value: 0)
+        let purged = DispatchSemaphore(value: 0)
+        order = []
+        queue.enqueue(route: "reset-route-a") { append("a-entered"); entered.signal(); hung.wait(); append("a-settled") }
+        precondition(entered.wait(timeout: .now() + 30) == .success, "native start signal missing")
+        queue.enqueue(route: "reset-route-b") { append("b-settled") }
+        let late = DispatchSemaphore(value: 0)
+        queue.fenced(on: .global()) { append("purge"); purged.signal() }
+        // Arrives while the purge waits: it must neither overtake nor interleave with it.
+        queue.enqueue(route: "reset-route-c") { append("late-entered"); late.signal() }
+        hung.signal()
+        precondition(purged.wait(timeout: .now() + 30) == .success, "reset purge never ran")
+        precondition(late.wait(timeout: .now() + 30) == .success, "held call never ran after the purge")
+        state.lock(); let reset = order; state.unlock()
+        let purgeAt = reset.firstIndex(of: "purge") ?? -1
+        check(purgeAt >= 0 && reset.contains("a-settled") && reset.contains("b-settled")
+              && (reset.firstIndex(of: "a-settled") ?? Int.max) < purgeAt
+              && (reset.firstIndex(of: "b-settled") ?? Int.max) < purgeAt,
+              "reset purge ran before admitted calls returned")
+        check(reset.last == "late-entered" && (reset.firstIndex(of: "late-entered") ?? -1) > purgeAt,
+              "a call arriving during the purge reached custody before it settled")
+        let reopened = DispatchSemaphore(value: 0)
+        queue.enqueue(route: "reset-route-c") { reopened.signal() }
+        precondition(reopened.wait(timeout: .now() + 30) == .success, "fence never lifted")
+        let idle = DispatchSemaphore(value: 0)
+        LodyKekCallQueue().fenced(on: .global()) { idle.signal() }
+        precondition(idle.wait(timeout: .now() + 30) == .success, "idle reset purge never ran")
     }
     static func main() throws {
         nativeQueue()

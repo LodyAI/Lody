@@ -154,3 +154,91 @@ describe('ChatComposer image attachment peek', () => {
     expect(thumbnail!.getAttribute('aria-expanded')).toBe('false');
   });
 });
+
+describe('ChatComposer draft attachments', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    await initI18n('en');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it('renders a single pending-upload label for draft file and image cards', async () => {
+    const onFileRemove = vi.fn();
+    const onFileRetry = vi.fn();
+
+    await act(async () => {
+      root.render(
+        createElement(ChatComposer, {
+          promptValue: '',
+          onPromptChange: () => undefined,
+          imageItems: [
+            {
+              id: 'img-draft',
+              name: 'mockup.png',
+              previewUrl: 'blob:mockup',
+              status: 'draft',
+              progress: 0,
+            },
+          ],
+          fileItems: [
+            {
+              id: 'file-draft',
+              name: '6e75228a05aac516.mp4',
+              sizeLabel: '12.4 MB',
+              status: 'draft',
+              progress: 0,
+            },
+            {
+              id: 'file-failed',
+              name: 'broken.zip',
+              sizeLabel: '4.0 MB',
+              status: 'failed',
+              progress: 0,
+              error: 'Upload failed',
+            },
+          ],
+          onFileRemove,
+          onFileRetry,
+        })
+      );
+    });
+
+    const draftMatches = (container.textContent ?? '').match(/Waiting to upload/g) ?? [];
+    // One for the draft image card, one for the draft file card — never duplicated.
+    expect(draftMatches).toHaveLength(2);
+
+    const draftCard = container.querySelector<HTMLDivElement>('[title="6e75228a05aac516.mp4"]');
+    expect(draftCard).not.toBeNull();
+    expect(draftCard?.textContent).toContain('6e75228a05aac516.mp4');
+    expect(draftCard?.textContent).toContain('MP4 · Waiting to upload');
+
+    const removeButton = draftCard?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Remove attachment"]'
+    );
+    expect(removeButton).not.toBeNull();
+    await act(async () => {
+      removeButton?.click();
+    });
+    expect(onFileRemove).toHaveBeenCalledWith('file-draft');
+
+    const retryButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Retry upload"]'
+    );
+    expect(retryButton).not.toBeNull();
+    await act(async () => {
+      retryButton?.click();
+    });
+    expect(onFileRetry).toHaveBeenCalledWith('file-failed');
+  });
+});

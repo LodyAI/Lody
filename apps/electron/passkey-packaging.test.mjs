@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { passkeyPackagingPlan, applyPasskeyPackaging } from './passkey-packaging.mjs'
+import {
+  parseBuildArgs,
+  resolveElectronVersion,
+  resolveNodeGypBin
+} from './scripts/build-passkey-addons.mjs'
 
 const selection = {
   enabled: '1',
@@ -23,10 +28,10 @@ test('ordinary desktop builds do not read native inputs or change packaging', ()
     assert.deepEqual(config, before)
   }
 })
-test('passkey packages target only the associated cloud app and require every selected architecture', () => {
+test('passkey packages target only associated cloud macOS apps and require every selected architecture', () => {
   for (const change of [
     { macPackaging: false },
-    { appId: 'ai.lody.desktop.nightly' },
+    { appId: 'ai.lody.desktop.other' },
     { architectures: ['universal'] },
     { addonDirectory: undefined },
     { provisioningProfile: undefined }
@@ -34,70 +39,96 @@ test('passkey packages target only the associated cloud app and require every se
     assert.throws(() => passkeyPackagingPlan({ ...selection, ...change }))
   }
   const plan = passkeyPackagingPlan(selection)
+  assert.equal(plan.appId, 'ai.lody.desktop')
   assert.deepEqual(
     plan.addons.map(({ arch }) => arch),
     ['arm64', 'x64']
   )
   assert.equal(plan.resource.to, 'passkey_bridge.node')
   assert.equal(plan.resource.from, '/tmp/addons/${arch}/passkey_bridge.node')
+
+  const nightlyPlan = passkeyPackagingPlan({ ...selection, appId: 'ai.lody.desktop.nightly' })
+  assert.equal(nightlyPlan.appId, 'ai.lody.desktop.nightly')
 })
-test(
-  'opted-in packaging preserves main safety entitlements and keeps vault rights out of Helpers',
-  { skip: process.platform !== 'darwin' },
-  () => {
-    const directory = mkdtempSync(path.join(tmpdir(), 'passkey-package-test-'))
-    try {
-      const header = Buffer.alloc(32)
-      header.writeUInt32LE(0xfeedfacf, 0)
-      header.writeUInt32LE(0x100000c, 4)
-      header.writeUInt32LE(0, 8)
-      header.writeUInt32LE(8, 12)
-      mkdirSync(path.join(directory, 'arm64'))
-      writeFileSync(path.join(directory, 'arm64/passkey_bridge.node'), header)
-      writeFileSync(path.join(directory, 'profile'), 'synthetic profile placeholder')
-      const plan = passkeyPackagingPlan({
-        ...selection,
-        architectures: ['arm64'],
-        addonDirectory: directory,
-        provisioningProfile: path.join(directory, 'profile')
-      })
-      const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
-      const inherit = path.join(repoRoot, 'apps/electron/build/entitlements.mac.inherit.plist')
-      const originalInherit = readFileSync(inherit)
-      const config = {
-        mac: {
-          entitlementsInherit: inherit,
-          extraResources: [{ from: 'existing', to: 'existing' }]
+for (const arch of ['arm64', 'x64'])
+  test(
+    `opted-in ${arch} packaging preserves main safety entitlements and keeps vault rights out of Helpers`,
+    { skip: process.platform !== 'darwin' },
+    () => {
+      const directory = mkdtempSync(path.join(tmpdir(), 'passkey-package-test-'))
+      try {
+        const header = Buffer.alloc(32)
+        header.writeUInt32LE(0xfeedfacf, 0)
+        header.writeUInt32LE(arch === 'arm64' ? 0x100000c : 0x1000007, 4)
+        header.writeUInt32LE(arch === 'arm64' ? 0 : 3, 8)
+        header.writeUInt32LE(8, 12)
+        mkdirSync(path.join(directory, arch))
+        writeFileSync(path.join(directory, arch, 'passkey_bridge.node'), header)
+        writeFileSync(path.join(directory, 'profile'), 'synthetic profile placeholder')
+        const plan = passkeyPackagingPlan({
+          ...selection,
+          architectures: [arch],
+          addonDirectory: directory,
+          provisioningProfile: path.join(directory, 'profile')
+        })
+        const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
+        const inherit = path.join(repoRoot, 'apps/electron/build/entitlements.mac.inherit.plist')
+        const originalInherit = readFileSync(inherit)
+        const config = {
+          mac: {
+            entitlementsInherit: inherit,
+            extraResources: [{ from: 'existing', to: 'existing' }]
+          }
         }
+        applyPasskeyPackaging({ config, plan, repoRoot, generatedDirectory: directory })
+        const parsed = JSON.parse(
+          execFileSync('plutil', ['-convert', 'json', '-o', '-', config.mac.entitlements], {
+            encoding: 'utf8'
+          })
+        )
+        assert.equal(parsed['com.apple.security.cs.allow-jit'], true)
+        assert.equal(parsed['com.apple.security.cs.disable-library-validation'], undefined)
+        assert.deepEqual(parsed['com.apple.developer.associated-domains'], [
+          'webcredentials:lody.ai'
+        ])
+        assert.equal(parsed['com.apple.application-identifier'], 'YTRMX32C99.ai.lody.desktop')
+        assert.equal(parsed['com.apple.developer.team-identifier'], 'YTRMX32C99')
+        assert.deepEqual(readFileSync(inherit), originalInherit)
+        assert.equal(config.mac.entitlementsInherit, inherit)
+        assert.equal(config.mac.provisioningProfile, plan.provisioningProfile)
+        assert.deepEqual(config.mac.extraResources, [
+          { from: 'existing', to: 'existing' },
+          plan.resource
+        ])
+        assert.throws(() =>
+          applyPasskeyPackaging({
+            config: {},
+            plan: {
+              ...plan,
+              addons: [{ arch: arch === 'arm64' ? 'x64' : 'arm64', file: plan.addons[0].file }]
+            },
+            repoRoot,
+            generatedDirectory: directory
+          })
+        )
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
       }
-      applyPasskeyPackaging({ config, plan, repoRoot, generatedDirectory: directory })
-      const parsed = JSON.parse(
-        execFileSync('plutil', ['-convert', 'json', '-o', '-', config.mac.entitlements], {
-          encoding: 'utf8'
-        })
-      )
-      assert.equal(parsed['com.apple.security.cs.allow-jit'], true)
-      assert.equal(parsed['com.apple.security.cs.disable-library-validation'], undefined)
-      assert.deepEqual(parsed['com.apple.developer.associated-domains'], ['webcredentials:lody.ai'])
-      assert.equal(parsed['com.apple.application-identifier'], 'YTRMX32C99.ai.lody.desktop')
-      assert.equal(parsed['com.apple.developer.team-identifier'], 'YTRMX32C99')
-      assert.deepEqual(readFileSync(inherit), originalInherit)
-      assert.equal(config.mac.entitlementsInherit, inherit)
-      assert.equal(config.mac.provisioningProfile, plan.provisioningProfile)
-      assert.deepEqual(config.mac.extraResources, [
-        { from: 'existing', to: 'existing' },
-        plan.resource
-      ])
-      assert.throws(() =>
-        applyPasskeyPackaging({
-          config: {},
-          plan: { ...plan, addons: [{ arch: 'x64', file: plan.addons[0].file }] },
-          repoRoot,
-          generatedDirectory: directory
-        })
-      )
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
     }
-  }
-)
+  )
+test('build-passkey-addons resolves the pinned Electron version and local node-gyp binary without network installs', () => {
+  const pkg = JSON.parse(
+    readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')
+  )
+  assert.equal(resolveElectronVersion(), pkg.devDependencies.electron)
+  const gypBin = resolveNodeGypBin()
+  assert.equal(existsSync(gypBin), true, `Missing resolved node-gyp binary: ${gypBin}`)
+
+  const parsed = parseBuildArgs(['--out', '/tmp/passkey-out', '--arches', 'arm64,x64'])
+  assert.equal(parsed.outDir, path.resolve('/tmp/passkey-out'))
+  assert.deepEqual(parsed.arches, ['arm64', 'x64'])
+
+  assert.throws(() => parseBuildArgs([]))
+  assert.throws(() => parseBuildArgs(['--out', '/tmp/passkey-out', '--arches', 'universal']))
+  assert.throws(() => parseBuildArgs(['--out', '/tmp/passkey-out', '--arches', 'arm64,arm64']))
+})

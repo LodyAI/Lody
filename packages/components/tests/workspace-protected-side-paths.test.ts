@@ -1,12 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 import { PromptShortcutSync } from '@lody/shared/prompt-shortcuts/sync';
+import { PromptShortcutError } from '@lody/shared/prompt-shortcuts/model';
 import { WorkspaceStreamsConfigurationError } from '@lody/shared/workspace-streams-content';
 import { createEagerSyncWorkerClient } from '../src/providers/eager-sync-worker-client';
 import { runEagerSyncWorkerTask } from '../src/providers/eager-sync-worker-task';
 
 afterEach(() => vi.unstubAllGlobals());
-it('protected prefetch and shortcuts refuse before network, auth or local cache work', async () => {
+it('protected prefetch and legacy shortcuts refuse before network, auth or local cache work', async () => {
   const requests: string[] = [];
   vi.stubGlobal('fetch', async (url: string) => {
     requests.push(url);
@@ -51,14 +52,19 @@ it('protected prefetch and shortcuts refuse before network, auth or local cache 
     const repo = await LoroRepo.create({});
     try {
       const shortcuts = new PromptShortcutSync({
-        content: { mode: 'protected' },
+        content: {
+          mode: 'protected',
+          namespace: 'synthetic',
+          resolve: () => fail('protection'),
+          snapshotUpload: { canUpload: () => false },
+        },
         repo,
         grant: async () => fail('grant'),
         now: () => 0,
       });
       await expect(
         shortcuts.acquire({ kind: 'body', bodyDocId: 'synthetic-body' }, true)
-      ).rejects.toBeInstanceOf(WorkspaceStreamsConfigurationError);
+      ).rejects.toBeInstanceOf(PromptShortcutError);
     } finally {
       await repo.destroy();
     }

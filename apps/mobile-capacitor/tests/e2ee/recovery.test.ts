@@ -5,16 +5,25 @@ import { IDBFactory, IDBKeyRange, IDBDatabase } from 'fake-indexeddb';
 import { RecoveryVaults } from '@lody/e2ee-core';
 import { RecoveryVaultLocalStore, RecoveryVaultStore } from '@lody/e2ee-core/services';
 import { decodeRecoveryVaultCiphertext, encodeRecoveryVaultCiphertext } from '@lody/e2ee-core/host';
+import { parseRecoveryFile } from '@lody/e2ee-core/protocol';
+import { LODY_CLOUD_RECOVERY_SERVICE_LOCATOR } from '@lody/e2ee-client/recovery-locator';
 import { E2eePasskeyCancelled, type E2eePasskeyPort } from '@lody/platform/e2ee-passkey';
 import { mobileRecoveryJournal } from '../../src/e2ee/recovery-journal';
-import { makeMobileRecovery, visibleSecurityEvents } from '../../src/e2ee/recovery';
+import {
+  makeMobileRecovery,
+  mobileRecoverySite,
+  visibleSecurityEvents,
+} from '../../src/e2ee/recovery';
 import { mobileRecoveryPort } from '../../src/recovery/recovery-port';
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.stubGlobal('IDBKeyRange', IDBKeyRange);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 it('mobile security activity ignores future kinds and all server navigation fields', () => {
   expect(
     visibleSecurityEvents([
@@ -34,7 +43,8 @@ it('mobile security activity ignores future kinds and all server navigation fiel
   ]);
 });
 
-async function fixture() {
+/** `locator` is the one the seeded vault's file names, as desktop or Web wrote it. */
+async function fixture(locator: string = LODY_CLOUD_RECOVERY_SERVICE_LOCATOR) {
   const entries = new Map<string, ReturnType<typeof encodeRecoveryVaultCiphertext>>();
   let index: ReturnType<typeof encodeRecoveryVaultCiphertext> | null = null;
   let current: { accountId: string; sessionId: string } | null = {
@@ -144,7 +154,7 @@ async function fixture() {
     Effect.scoped(
       Effect.gen(function* () {
         const created = yield* (yield* RecoveryVaults).create({
-          locator: 'account-a',
+          locator,
           persistFile: () => Effect.void,
         });
         return { vaultId: created.vault.vaultId, file: created.recoveryFile.slice() };
@@ -651,8 +661,8 @@ it.each(['file', 'password', 'passkey'] as const)(
       expect(await owned.port.restore('file')).toEqual({
         outcome: 'restored',
         results: [
-          { name: 'Alpha', outcome: 'not-backed-up' },
-          { name: 'Beta', outcome: 'not-backed-up' },
+          { workspaceId: 'ws-a', name: 'Alpha', outcome: 'not-backed-up' },
+          { workspaceId: 'ws-b', name: 'Beta', outcome: 'not-backed-up' },
         ],
       });
       for (const bytes of f.prfOutputs) expect(bytes.every((byte) => byte === 0)).toBe(true);
@@ -756,4 +766,48 @@ it('passkey vault creation refuses unavailable PRF before any cloud write', asyn
   } finally {
     dispose();
   }
+});
+
+it('mobile opens Lody Cloud files from desktop and Web, and its own files name the same origin', async () => {
+  expect(mobileRecoverySite({})).toBe(LODY_CLOUD_RECOVERY_SERVICE_LOCATOR);
+  const f = await fixture('https://lody.ai');
+  expect(await Effect.runPromise(f.make().list({ file: f.file }))).toEqual({
+    workspaces: 0,
+    passkeys: [],
+  });
+  f.empty();
+  let saved = new Uint8Array();
+  await Effect.runPromise(
+    f.make().create(async (bytes) => {
+      saved = bytes.slice();
+      return bytes.slice();
+    })
+  );
+  const written = parseRecoveryFile(saved);
+  written.unlock.fill(0);
+  saved.fill(0);
+  expect(written.locator).toBe('https://lody.ai');
+});
+it.each([
+  ['another service', 'https://staging.example'],
+  ['the earlier mobile account-ID locator', 'account-a'],
+  ['the earlier desktop Convex locator', 'https://synthetic.convex.cloud'],
+])('mobile rejects a recovery file from %s before any vault read', async (_name, locator) => {
+  const f = await fixture(locator);
+  await expect(Effect.runPromise(f.make().list({ file: f.file }))).rejects.toThrow(
+    'e2ee_recovery_authentication'
+  );
+  expect(f.paths).toEqual([]);
+});
+it('a staging build binds the origin of its VITE_SITE_URL instead of Lody Cloud', async () => {
+  vi.stubEnv('VITE_SITE_URL', ' https://Staging.example/app ');
+  const staging = await fixture('https://staging.example');
+  expect(await Effect.runPromise(staging.make().list({ file: staging.file }))).toEqual({
+    workspaces: 0,
+    passkeys: [],
+  });
+  const cloud = await fixture('https://lody.ai');
+  await expect(Effect.runPromise(cloud.make().list({ file: cloud.file }))).rejects.toThrow(
+    'e2ee_recovery_authentication'
+  );
 });

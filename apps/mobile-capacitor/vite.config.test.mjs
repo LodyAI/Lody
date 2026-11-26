@@ -56,6 +56,19 @@ void test('nightly keeps production runtime settings and only aliases the icon p
           )
         );
         assert.ok(wasm?.endsWith('/loro-crdt/bundler/index.js'), wasm);
+        const accountPanel = await resolve(
+          '@/components/settings/account-setting',
+          fileURLToPath(
+            new URL(
+              '../../packages/components/src/components/settings/settings-code.ts',
+              import.meta.url
+            )
+          )
+        );
+        assert.equal(
+          accountPanel,
+          fileURLToPath(new URL('./src/recovery/recovery-account-setting.tsx', import.meta.url))
+        );
         const preview = await resolve('./assets/app-icon-default.png', importer);
         const expected = config === nightly ? 'app-icon-nightly.png' : 'app-icon-default.png';
         assert.equal(preview, fileURLToPath(new URL(`./src/assets/${expected}`, import.meta.url)));

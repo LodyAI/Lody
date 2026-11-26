@@ -1,3 +1,4 @@
+import { OPEN_COOKIE_CONSENT_EVENT } from '@site/components/cookie-consent-banner';
 import { SiteAnchor } from '@site/components/site-anchor';
 /**
  * Shared site footer — same structure as the homepage underwater footer:
@@ -22,6 +23,7 @@ const copy = {
     termsHref: '/terms',
     privacy: 'Privacy',
     privacyHref: '/privacy',
+    cookies: 'Cookie settings',
   },
   zh: {
     rights: '© 2026 Lody',
@@ -32,6 +34,7 @@ const copy = {
     termsHref: '/zh/terms',
     privacy: '隐私',
     privacyHref: '/zh/privacy',
+    cookies: 'Cookie 设置',
   },
 } as const;
 
@@ -49,6 +52,13 @@ export function SiteFooter({ locale }: { locale: SiteFooterLocale }) {
           </SiteAnchor>
           <SiteAnchor href={t.termsHref}>{t.terms}</SiteAnchor>
           <SiteAnchor href={t.privacyHref}>{t.privacy}</SiteAnchor>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event(OPEN_COOKIE_CONSENT_EVENT))}
+            className="cursor-pointer bg-transparent p-0 text-inherit hover:underline"
+          >
+            {t.cookies}
+          </button>
           <SiteAnchor href={GITHUB_REPO_URL} rel="noreferrer" target="_blank">
             GitHub
           </SiteAnchor>

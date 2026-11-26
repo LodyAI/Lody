@@ -114,8 +114,9 @@ composer without mention sources.
   `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
   StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row
   highlight from `highlightedItem.value`; row values must stay unique per menu.
-  Rows keep `flexShrink: 0` so wrapped subtitles determine their height; the
-  capped list scrolls instead of letting one row paint over its neighbour.
+  Rows, group headings and status messages keep `flexShrink: 0` so wrapped text
+  determines their height; the capped list scrolls instead of letting one block
+  paint over its neighbour.
   The entrance rises from the side the menu landed on (`--mention-rise`).
 
 ## Files

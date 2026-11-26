@@ -33,6 +33,7 @@ import type {
 } from '@lody/shared';
 
 import { withClassName } from '@/lib/stylex';
+import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
   derivePrStatusFromDetails,
@@ -675,7 +676,7 @@ function UserAvatar({
   const login = user?.login ?? 'ghost';
   return (
     <Avatar.Root size={size}>
-      {user?.avatarUrl && <Avatar.Image src={user.avatarUrl} alt={login} />}
+      <CachedAvatarImage src={user?.avatarUrl} alt={login} />
       <Avatar.Fallback>{login.slice(0, 2).toUpperCase()}</Avatar.Fallback>
     </Avatar.Root>
   );

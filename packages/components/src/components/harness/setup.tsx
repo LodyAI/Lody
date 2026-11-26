@@ -9,20 +9,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, X } from 'lucide-react';
 
-import { AUTONOMY, MODELS, PLUGINS, PROVIDERS } from './catalog';
-import {
-  contextTokens,
-  ModelsPanel,
-  PermissionsPanel,
-  PluginsPanel,
-  ProvidersPanel,
-} from './panels';
+import { useWorkspaceMcpCatalog } from '@/hooks/use-workspace-mcp-catalog';
+
+import { AUTONOMY, PROVIDERS } from './catalog';
+import { useDeviceCapabilities } from './device-capabilities';
+import { ModelsPanel, PermissionsPanel, PluginsPanel, ProvidersPanel } from './panels';
 import { Button, DrawnCheck, Kbd, Spinner, soft } from './primitives';
 import { parts } from './parts';
 import { panelStyles as panel } from './panels.styles';
 import { useActiveDevice } from './machines';
+import { useSessionDefaults } from './session-defaults';
+import { useSorbetTarget } from './sorbet';
 import { harness, useHarness } from './store';
 import { setupStyles as s } from './setup.styles';
 
@@ -173,7 +172,7 @@ export function Setup({ onSkip }: { onSkip?: () => void } = {}) {
                   </header>
                   {current.id === 'providers' ? <ProvidersPanel /> : null}
                   {current.id === 'models' ? <ModelsPanel scope="profile" /> : null}
-                  {current.id === 'plugins' ? <PluginsPanel scope="profile" /> : null}
+                  {current.id === 'plugins' ? <PluginsPanel /> : null}
                   {current.id === 'permissions' ? <PermissionsPanel scope="profile" /> : null}
                   {current.id === 'review' ? (
                     <Review
@@ -222,13 +221,27 @@ function useHeight() {
   return [ref, height] as const;
 }
 
-const CHECKS = [
-  'Device reachable',
-  'Provider credentials valid',
-  'Models respond',
-  'Plugins load',
-  'Sandbox policy applied',
-];
+/**
+ * What the review step can actually confirm from data the page already has:
+ * nothing here is simulated, so a failed check stays failed.
+ */
+function useSetupChecks() {
+  const state = useHarness();
+  const { device } = useActiveDevice();
+  const target = useSorbetTarget();
+  const capabilities = useDeviceCapabilities();
+  const { synced } = useWorkspaceMcpCatalog();
+  return [
+    { label: 'Device online', ok: device?.status === 'online' },
+    { label: 'Lody Agent set up on this device', ok: !!target },
+    {
+      label: 'A provider is connected',
+      ok: Object.keys(state.credentials).length > 0,
+    },
+    { label: 'Models available', ok: capabilities.models.length > 0 },
+    { label: 'Workspace MCP servers read', ok: synced },
+  ];
+}
 
 function Review({
   onEdit,
@@ -240,40 +253,54 @@ function Review({
   deviceName?: string;
 }) {
   const state = useHarness();
-  const config = state.profile;
+  const capabilities = useDeviceCapabilities();
+  const defaults = useSessionDefaults('profile');
+  const { servers } = useWorkspaceMcpCatalog();
+  const checks = useSetupChecks();
   const [at, setAt] = useState(0);
 
   useEffect(() => {
-    if (at > CHECKS.length) return;
-    if (at === CHECKS.length) {
+    if (at > checks.length) return;
+    if (at === checks.length) {
       onChecked();
       return;
     }
-    const timer = window.setTimeout(() => setAt((index) => index + 1), at === 0 ? 450 : 380);
+    const timer = window.setTimeout(() => setAt((index) => index + 1), at === 0 ? 300 : 160);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [at]);
 
-  const providers = PROVIDERS.filter((p) => state.credentials[p.id]).map((p) => p.name);
-  const model = (id: string) => MODELS.find((m) => m.id === id)?.name ?? '—';
-  const enabled = PLUGINS.filter((p) => config.plugins.includes(p.id));
+  const providers = [
+    ...PROVIDERS.filter((p) => state.credentials[p.id]).map((p) => p.name),
+    ...state.customs.filter((c) => state.credentials[c.id]).map((c) => c.name),
+  ];
+  const modelName = (id: string | undefined) =>
+    capabilities.models.find((m) => m.id === id)?.name ?? id ?? 'Agent default';
+  const effort = capabilities.effortOption?.options.find(
+    (option) => option.value === defaults.values.effort
+  )?.name;
+  const attached = servers.filter((server) => server.enabledByDefault === true).length;
+  const failed = checks.filter((check) => !check.ok).length;
+  const done = at >= checks.length;
 
   const rows = [
-    { step: 0, label: 'Providers', value: providers.join(', ') },
+    { step: 0, label: 'Providers', value: providers.join(', ') || 'None connected' },
     {
       step: 1,
       label: 'Models',
-      value: `${model(config.mainModel)} · subagents on ${model(config.subModel)}`,
+      value: `${modelName(defaults.values.mainModel)}${effort ? ` · ${effort} effort` : ''}`,
     },
     {
       step: 2,
       label: 'Plugins',
-      value: `${enabled.length} enabled · ${(contextTokens(config.plugins) / 1000).toFixed(1)}k tokens idle`,
+      value: servers.length
+        ? `${attached} of ${servers.length} MCP server${servers.length > 1 ? 's' : ''} attached by default`
+        : 'No MCP servers in this workspace',
     },
     {
       step: 3,
       label: 'Permissions',
-      value: `${AUTONOMY.find((a) => a.id === config.autonomy)?.title} · ${config.fsScope} files · network ${config.network}`,
+      value: AUTONOMY.find((a) => a.id === defaults.values.autonomy)?.title ?? 'Agent default',
     },
   ];
 
@@ -294,43 +321,44 @@ function Review({
         ))}
       </dl>
 
-      <div {...stylex.props(panel.checks, at >= CHECKS.length && panel.checksDone)}>
+      <div {...stylex.props(panel.checks, done && !failed && panel.checksDone)}>
         <div {...stylex.props(panel.checksHead)}>
-          {at >= CHECKS.length ? (
+          {!done ? (
+            <>
+              <Spinner size={13} /> Checking {deviceName ?? 'your device'}
+            </>
+          ) : failed ? (
+            <>
+              {failed} to fix on {deviceName ?? 'your device'}
+            </>
+          ) : (
             <>
               <span {...stylex.props(panel.checksOk)}>
                 <DrawnCheck size={11} />
               </span>
               Ready on {deviceName ?? 'your device'}
             </>
-          ) : (
-            <>
-              <Spinner size={13} /> Dry run on {deviceName ?? 'your device'}
-            </>
           )}
           <span {...stylex.props(panel.checksCount)}>
-            {Math.min(at, CHECKS.length)}/{CHECKS.length}
+            {checks.slice(0, at).filter((check) => check.ok).length}/{checks.length}
           </span>
         </div>
         <ul {...stylex.props(panel.checksList)}>
-          {CHECKS.map((check, index) => {
-            const state = index < at ? 'done' : index === at ? 'active' : 'todo';
+          {checks.map((check, index) => {
+            const shown = index < at;
+            const ok = shown && check.ok;
             return (
-              <li
-                key={check}
-                {...stylex.props(panel.checkRow, state === 'done' && panel.checkRowDone)}
-              >
-                <span {...stylex.props(panel.checkIcon, state === 'done' && panel.checkIconDone)}>
-                  {state === 'done' ? (
+              <li key={check.label} {...stylex.props(panel.checkRow, ok && panel.checkRowDone)}>
+                <span {...stylex.props(panel.checkIcon, ok && panel.checkIconDone)}>
+                  {ok ? (
                     <DrawnCheck size={10} />
-                  ) : state === 'active' ? (
+                  ) : shown ? (
+                    <X size={10} />
+                  ) : index === at ? (
                     <Spinner size={11} />
                   ) : null}
                 </span>
-                {check}
-                {state === 'done' ? (
-                  <span {...stylex.props(panel.checksMs)}>{[42, 180, 610, 96, 12][index]}ms</span>
-                ) : null}
+                {check.label}
               </li>
             );
           })}

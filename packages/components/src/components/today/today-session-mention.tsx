@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
+import { useRef } from 'react';
 import type React from 'react';
 import { Hand } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +9,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { sessionMetaAtomFamily, sessionMetaCacheSettledAtomFamily } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
+import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import { useTodayEditor } from './editor/today-editor-context';
 import {
   todaySessionDisplay,
@@ -15,6 +17,8 @@ import {
   type TodaySessionState,
 } from './today-session-status';
 import { useTodayNow } from './use-today-clock';
+import { useTodayMembers } from './today-members';
+import { UserAvatar } from '../user-avatar';
 
 // Inline-reference chip rules (Notion, Linear, Slack, AFFiNE, Outline): the chip
 // stays inline text so it never grows the line; it carries its own inline
@@ -114,6 +118,29 @@ const styles = stylex.create({
     textDecorationColor: 'currentColor',
   },
   muted: { color: colors.tertiaryLabel, fontStyle: 'italic' },
+  member: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1],
+    height: text.bodyLeading,
+    verticalAlign: 'top',
+    boxSizing: 'border-box',
+    paddingInlineStart: 2,
+    paddingInlineEnd: space[2],
+    marginInline: 1,
+    borderRadius: radius.full,
+    borderWidth: 0,
+    backgroundColor: {
+      default: `color-mix(in srgb, ${colors.accent} 14%, transparent)`,
+      ':hover': `color-mix(in srgb, ${colors.accent} 22%, transparent)`,
+    },
+    color: colors.accent,
+    font: 'inherit',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  memberSelected: { backgroundColor: `color-mix(in srgb, ${colors.accent} 32%, transparent)` },
 });
 
 /**
@@ -190,11 +217,16 @@ function StatusIcon(props: { display: Extract<TodaySessionDisplay, { state: 'ok'
  * editor's decorators render this same component so metrics match; its root
  * carries `data-today-mention`, which caret geometry counts as one character.
  * Pointer presses never reach the row, so they never activate the editor.
+ * A resolved conversation drags out like a sidebar row (onto a conversation or
+ * the new-chat page); a press on the status icon never starts that drag.
  * Behavior: specs/today-outline.md (Conversation mentions).
  */
 export function TodayMention(props: { mention: TodayMentionTarget; selected?: boolean }) {
   const { t } = useTranslation();
   const { mention, selected = false } = props;
+  if (mention.kind === 'member' && mention.id) {
+    return <TodayMemberMention userId={mention.id} selected={selected} />;
+  }
   if (mention.kind !== 'session' || !mention.id) {
     return (
       <span
@@ -207,6 +239,39 @@ export function TodayMention(props: { mention: TodayMentionTarget; selected?: bo
     );
   }
   return <TodaySessionMention sessionId={mention.id} selected={selected} />;
+}
+
+function TodayMemberMention(props: { userId: string; selected: boolean }) {
+  const { t } = useTranslation();
+  const controller = useTodayEditor();
+  const member = useTodayMembers().get(props.userId);
+  const name = member?.name ?? t('today.memberUnknown', 'Unknown member');
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      {...stylex.props(styles.member, props.selected && styles.memberSelected)}
+      data-today-mention=""
+      data-today-member={props.userId}
+      contentEditable={false}
+      aria-label={t('today.memberMention', '{{name}}, open their Today', { name })}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        controller?.onOpenMember?.(props.userId);
+      }}
+    >
+      <UserAvatar
+        user={{ id: props.userId, name, image: member?.image }}
+        size="mini"
+        showIcon={!member}
+      />
+      {name}
+    </button>
+  );
 }
 
 /** A conversation's mention display from the sidebar's signals and the surface clock. */
@@ -223,11 +288,15 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
   const controller = useTodayEditor();
   const sessionId = props.sessionId as SessionId;
   const display = useTodaySessionDisplay(sessionId);
+  const pressedStatus = useRef(false);
   const rootProps = {
     'data-today-mention': '',
     'data-today-session': sessionId,
     contentEditable: false,
-    onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+    onPointerDown: (event: React.PointerEvent) => {
+      pressedStatus.current = false;
+      event.stopPropagation();
+    },
   } as const;
   if (display.state !== 'ok') {
     return (
@@ -236,12 +305,12 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         {...rootProps}
       >
         {display.state === 'missing'
-          ? t('today.sessionMissing', 'Conversation deleted / No access')
+          ? t('today.sessionMissing', 'Session deleted / No access')
           : '…'}
       </span>
     );
   }
-  const title = display.title || t('today.untitledSession', 'Untitled conversation');
+  const title = display.title || t('today.untitledSession', 'Untitled session');
   const statusLabel = {
     waiting: t('today.status.waiting', 'Waiting for you'),
     running: t('today.status.running', 'Running'),
@@ -255,6 +324,15 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
       {...stylex.props(styles.mention, props.selected && styles.selected)}
       {...rootProps}
       data-today-status={display.status}
+      draggable
+      onDragStart={(event) => {
+        if (pressedStatus.current) {
+          event.preventDefault();
+          return;
+        }
+        event.stopPropagation();
+        startSessionMentionDrag(event, { sessionId, title, source: 'today' });
+      }}
     >
       <button
         type="button"
@@ -266,6 +344,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         })}
         tabIndex={-1}
         onPointerDown={(event) => {
+          pressedStatus.current = true;
           // Keep the editor's focus and selection where they are.
           event.preventDefault();
           event.stopPropagation();
@@ -277,10 +356,11 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
       >
         <StatusIcon display={display} />
       </button>
-      <button
-        type="button"
+      {/* A span: a button never wraps, leaving the status icon alone on the line above. */}
+      <span
+        role="button"
         {...stylex.props(styles.title, display.status === 'done' && styles.titleDone)}
-        aria-label={t('today.mentionLabel', 'Conversation: {{title}}, {{status}}', {
+        aria-label={t('today.mentionLabel', 'Session: {{title}}, {{status}}', {
           title,
           status: statusLabel,
         })}
@@ -288,7 +368,7 @@ function TodaySessionMention(props: { sessionId: string; selected: boolean }) {
         onClick={(event) => controller?.onOpenSession?.(sessionId, event)}
       >
         {title}
-      </button>
+      </span>
     </span>
   );
 }

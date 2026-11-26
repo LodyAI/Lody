@@ -1,12 +1,30 @@
 import {
   autoDeliverOptionsSchema,
   type AutomationContinuation,
+  type AutomationReceipt,
   type AutomationRuleDraft,
   type AutomationSettings,
 } from '@lody/shared/automations';
 import type { Delivery } from '../storage/ledger';
 import { automationIdentity, type AutomationLedger } from '../storage/ledger';
 import { DELIVERY_EVENT_TYPE } from './delivery';
+
+export const isQuotaRecoveryReceipt = (receipt: AutomationReceipt): boolean =>
+  receipt.event.type === 'provider.quota.exhausted' &&
+  receipt.rule.handler.kind === 'policy' &&
+  receipt.rule.handler.policy === 'recover-capacity';
+
+/**
+ * Quota recovery without fresh availability waits either until the recorded reset
+ * estimate (to trigger a single refresh query) or at the `Number.MAX_SAFE_INTEGER`
+ * sentinel until an explicit capacity push bumps `capacityWakeRevision`.
+ */
+export const quotaRecoveryRetryAt = (receipt: AutomationReceipt, now: number): number => {
+  const estimatedReset = receipt.event.data.retryAt;
+  return typeof estimatedReset === 'number' && estimatedReset > now
+    ? estimatedReset
+    : Number.MAX_SAFE_INTEGER;
+};
 
 /** Product behavior lives here. User programs only report a condition result. */
 export function internalPolicy({ rule, event }: Delivery): AutomationContinuation[] {
@@ -159,7 +177,7 @@ export function configureSessionPolicies(
         maxActionsPerEvent: 1,
         // One Auto delivery enablement shares a correlation: one Create PR, bounded
         // repairs and one merge request per head.
-        maxInvocationsPerCorrelation: policy.policy === 'auto-deliver' ? 16 : 8,
+        maxInvocationsPerCorrelation: policy.policy === 'auto-deliver' ? 64 : 8,
         maxPendingActions: 128,
         maxDepth: 8,
       },
@@ -169,14 +187,9 @@ export function configureSessionPolicies(
 }
 
 /** Preserve an enabled recovery setting created before overload observations existed. */
-export function upgradeCapacityPolicies(
-  ledger: AutomationLedger,
-  userId: string,
-  now: number
-): void {
+export function upgradeCapacityPolicies(ledger: AutomationLedger, now: number): void {
   for (const rule of ledger.rules()) {
     if (
-      rule.ownerUserId === userId &&
       rule.ownerMachineId === ledger.machineId &&
       rule.handler.kind === 'policy' &&
       rule.handler.policy === 'recover-capacity' &&
@@ -186,7 +199,7 @@ export function upgradeCapacityPolicies(
       configureSessionPolicies(
         ledger,
         rule.scope.sessionId,
-        userId,
+        rule.ownerUserId,
         { recoverCapacity: rule.enabled },
         now
       );

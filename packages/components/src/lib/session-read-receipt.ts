@@ -1,4 +1,4 @@
-import { getServerNow } from '@lody/shared';
+import { getServerNow, statusViewUnread } from '@lody/shared';
 
 /**
  * Decides whether a mounted conversation surface may clear a session's unread
@@ -148,8 +148,5 @@ export function closedSessionHasUnreadMessages(
 }
 
 function hasUnreadOutput(session: SessionUnreadInput, nowMs: number): boolean {
-  const effectiveLastMessageAt = getEffectiveSessionLastMessageAt(session, nowMs);
-  if (effectiveLastMessageAt === null) return false;
-  const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;
-  return lastReadAt === null || effectiveLastMessageAt > lastReadAt;
+  return statusViewUnread(session, nowMs);
 }

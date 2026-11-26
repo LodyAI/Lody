@@ -4,6 +4,7 @@ import type { ComponentProps, ReactNode } from 'react';
 
 import { isSitePageHref, SITE_URL, siteHref } from '../lib/site-url.mjs';
 import { OptionalEnhancement } from './optional-enhancement';
+import { CookieConsentBanner } from './cookie-consent-banner';
 import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
 
@@ -110,6 +111,7 @@ export function SiteRootProvider({ children }: { children: ReactNode }) {
         <MarketingAtmosphereHost />
       </OptionalEnhancement>
       {children}
+      <CookieConsentBanner locale={locale} />
     </RootProvider>
   );
 }

@@ -5,7 +5,6 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
-import tailwindcss from '@tailwindcss/vite'
 import stylex from '@stylexjs/unplugin'
 import {
   loroCrdtBundlerAlias,
@@ -16,7 +15,7 @@ import {
   isMermaidRuntimeDependency,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
-import { stylexOptions } from '../../packages/ui/stylex-options'
+import { componentsStylexOptions } from '../../packages/components/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 import { preservePdfWorkerExports } from '../../packages/components/vite-pdf-worker'
@@ -129,6 +128,7 @@ export default defineConfig((context) => {
       envPrefix: '__LodyPublicBuildOnlyPrefix__',
       define: {
         ...viteEnvDefine,
+        __LODY_ELECTRON_RENDERER__: 'true',
         __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
         __GIT_COMMIT__: JSON.stringify(getGitCommitHash()),
         __APP_VERSION__: JSON.stringify(getAppVersion())
@@ -193,10 +193,8 @@ export default defineConfig((context) => {
           }
         }
       },
-      // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
-        tailwindcss(),
-        stylex.vite(stylexOptions),
+        stylex.vite(componentsStylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),

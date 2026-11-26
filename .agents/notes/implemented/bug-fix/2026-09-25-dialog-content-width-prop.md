@@ -24,7 +24,7 @@ intentional post-rework and was left alone.
 
 - `max-w-2xl` alone: `max-width` only caps, so the panel stays 512px — the
   regression this note records.
-- A `w-[…]` class: works today only because `tailwind/index.css` declares
+- A `w-[…]` class: works today only because `style/index.css` declares
   `@layer …, stylex, …, utilities`, putting utilities after the component's
   sheet. Reliable but subtle, and overriding `max-w-*` also replaces the
   rung's `100vw - 32px` viewport cap.
@@ -61,7 +61,7 @@ height/padding/gap) stays on `style`; the prop is for the one width dial.
 
 ## Evidence and limits
 
-Cascade facts verified in source: `tailwind/index.css` layer order, the
+Cascade facts verified in source: `style/index.css` layer order, the
 `w-[620px]` precedent in `settings/surface.ts`, and `modal.popup`'s fixed
 `width` token. Behavioral widths match pre-migration `max-w-*` values on
 desktop and improve narrow-viewport behavior (the rung's cap replaces

@@ -7,12 +7,33 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { isNativeAppShell } from '@/lib/native-platform';
 import {
   consumeMobileBackNavigation,
   markMobileBackNavigation,
 } from '@/lib/mobile-back-navigation';
+import { MobileBackDepthProvider, useMobileBackHandler } from '@/hooks/use-mobile-back-handler';
+import { withClassName } from '@/lib/stylex';
+import { themeColors } from '../../style/theme-colors.stylex';
 import { MobileEdgeBackSwipeZone } from './mobile-edge-back-swipe';
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    height: '100%',
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: themeColors.background,
+  },
+  inner: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: themeColors.background,
+  },
+});
 
 export type MobileDrillPageLayoutProps = {
   children: ReactNode;
@@ -23,7 +44,7 @@ export type MobileDrillPageLayoutProps = {
 };
 
 /* Exit slide and reveal duration. Keep in sync with `.mobile-drill-reveal`
-   in `tailwind/index.css`. */
+   in `style/index.css`. */
 const MOBILE_DRILL_EXIT_MS = 280;
 /* Same curve as `.mobile-drill-in` / `.mobile-drill-reveal`. */
 const MOBILE_DRILL_EASING = 'cubic-bezier(0.32, 0.72, 0, 1)';
@@ -65,6 +86,7 @@ export function playMobileDrillExit(source: HTMLElement | null, onBack: () => vo
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (prefersReducedMotion || !source || typeof document === 'undefined') {
+    markMobileBackNavigation();
     onBack();
     return false;
   }
@@ -98,7 +120,10 @@ export function playMobileDrillExit(source: HTMLElement | null, onBack: () => vo
   document.body.appendChild(clone);
   panel?.animate(
     [
-      { transform: startTransform === 'none' ? 'translate3d(0, 0, 0)' : startTransform },
+      {
+        transform:
+          !startTransform || startTransform === 'none' ? 'translate3d(0, 0, 0)' : startTransform,
+      },
       { transform: 'translate3d(100%, 0, 0)' },
     ],
     { duration: MOBILE_DRILL_EXIT_MS, easing: MOBILE_DRILL_EASING, fill: 'forwards' }
@@ -150,19 +175,10 @@ export function useMobileBackRevealClass(): string | null {
 }
 
 /**
- * Generic "drill" page layout for mobile detail surfaces (session
- * detail, settings sub-pages, future drill-in routes). Provides:
- *
- *   - Entry: `.mobile-drill-in` CSS keyframe on the inner div (right
- *     → left on mount). Pure CSS so the compositor handles it
- *     regardless of how busy the React tree is during mount.
- *   - Exit: `playMobileDrillExit` (clone overlay slid off while the
- *     destination paints behind it and plays its reveal).
- *   - Edge-swipe-back zone (native iOS only) wired to the same
- *     animatedBack as the rest.
- *
- * Descendants that need to trigger the animated back (e.g. a header
- * chevron) read it from `useMobileDrillAnimatedBack()`.
+ * Drill page layout for mobile detail surfaces: plays `.mobile-drill-in` on
+ * forward mount (or `.mobile-drill-reveal` on back), slides a clone off right
+ * via `playMobileDrillExit`, and wires edge-swipe and Android Back to the same
+ * `useMobileDrillAnimatedBack()` trigger as the header chevron.
  */
 export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayoutProps) {
   /* CSS keyframes + a clone overlay avoid the heavy-mount stutter we
@@ -172,39 +188,38 @@ export function MobileDrillPageLayout({ children, onBack }: MobileDrillPageLayou
   const layoutRef = useRef<HTMLDivElement>(null);
   const contextValue = useMobileDrillExit(layoutRef, onBack);
   const animatedBack = contextValue ?? noop;
+  const backRevealClass = useMobileBackRevealClass();
+
+  useMobileBackHandler(contextValue, { enabled: Boolean(contextValue), layer: 'page' });
 
   return (
-    /* Outer wrapper carries `overflow-hidden` so the entry slide
-       doesn't paint outside the viewport, and `bg-background` keeps
-       the mount/unmount frames theme-colored instead of flashing
-       white. The exit slide happens on the clone in `body`, not on
-       this element. */
     <MobileDrillAnimatedBackContext.Provider value={contextValue}>
-      <div
-        ref={layoutRef}
-        /* `safe-areas` opts into Konsta's safe-area CSS variables
-           (`--k-safe-area-top`, `--k-safe-area-bottom`, etc.) for
-           every descendant. Without it the Tailwind utilities like
-           `pt-safe-*` resolve to 0 and the headers/content end up
-           tucked under the notch on iOS. The home screen does the
-           same opt-in on its root container — see
-           `mobile-home-screen.tsx`. */
-        className="safe-areas relative h-full w-full overflow-hidden bg-background"
-      >
+      <MobileBackDepthProvider>
         <div
-          data-mobile-drill-panel=""
-          className="mobile-drill-in relative flex h-full flex-col bg-background"
+          ref={layoutRef}
+          /* `safe-areas` opts into the `--k-safe-area-*` CSS variables
+             (defined in `style/theme-defaults.css`) for every
+             descendant. Without it the vars stay 0px and the
+             headers/content end up tucked under the notch on iOS. The
+             home screen does the same opt-in on its root container —
+             see `mobile-home-screen.tsx`. */
+          {...withClassName(stylex.props(styles.root), 'safe-areas')}
         >
-          {onBack ? (
-            <MobileEdgeBackSwipeZone
-              isNativeApp={isNativeAppShell()}
-              onBack={animatedBack}
-              zIndex={30}
-            />
-          ) : null}
-          {children}
+          <div
+            data-mobile-drill-panel=""
+            {...withClassName(stylex.props(styles.inner), backRevealClass ?? 'mobile-drill-in')}
+          >
+            {onBack ? (
+              <MobileEdgeBackSwipeZone
+                isNativeApp={isNativeAppShell()}
+                onBack={animatedBack}
+                zIndex={30}
+              />
+            ) : null}
+            {children}
+          </div>
         </div>
-      </div>
+      </MobileBackDepthProvider>
     </MobileDrillAnimatedBackContext.Provider>
   );
 }

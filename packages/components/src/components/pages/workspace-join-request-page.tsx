@@ -32,6 +32,7 @@ export interface WorkspaceJoinRequestPageProps {
   onVerifyEmail: () => void;
   onSubmit: () => void;
   onOpenWorkspace: () => void;
+  onRetry?: () => void;
   onBackHome: () => void;
 }
 
@@ -81,6 +82,7 @@ export function WorkspaceJoinRequestPage({
   onVerifyEmail,
   onSubmit,
   onOpenWorkspace,
+  onRetry,
   onBackHome,
 }: WorkspaceJoinRequestPageProps) {
   const { t } = useTranslation();
@@ -132,7 +134,16 @@ export function WorkspaceJoinRequestPage({
         {...common}
         title={name}
         description={errorMessage || t('common.tryAgain')}
-        actions={backHome}
+        actions={
+          <>
+            {onRetry && (
+              <Button size="large" onClick={onRetry}>
+                {t('common.retry', 'Retry')}
+              </Button>
+            )}
+            {backHome}
+          </>
+        }
       />
     );
   }

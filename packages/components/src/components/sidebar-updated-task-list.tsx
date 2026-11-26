@@ -22,6 +22,258 @@ import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+/** The legacy flat Updated list's own layout and ink. */
+const ROW_HOVER = ':is(:where(.group\\/row):hover *)';
+const ROW_OPEN = ':is(:where(.group\\/row)[data-menu-open] *)';
+
+const updatedStyles = stylex.create({
+  skeletonSection: {
+    marginBottom: {
+      default: 'calc(var(--spacing) * 4)',
+      ':last-child': 'calc(var(--spacing) * 0)',
+    },
+  },
+  fade: { opacity: { default: null, [ROW_HOVER]: { '@media (hover: hover)': 0 }, [ROW_OPEN]: 0 } },
+  reveal: {
+    opacity: { default: null, [ROW_HOVER]: { '@media (hover: hover)': 1 }, [ROW_OPEN]: 1 },
+    pointerEvents: {
+      default: null,
+      [ROW_HOVER]: { '@media (hover: hover)': 'auto' },
+      [ROW_OPEN]: 'auto',
+    },
+  },
+  menuOpen: {
+    backgroundColor: { default: null, ':is([data-menu-open])': 'hsl(var(--sidebar-hover) / 1)' },
+    color: { default: null, ':is([data-menu-open])': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+  },
+  anchorFocus: {
+    outlineStyle: { default: null, ':has(a:focus-visible)': 'none' },
+    boxShadow: {
+      default: null,
+      ':has(a:focus-visible)':
+        'inset 0 0 0 1px color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    },
+  },
+  swipeRoot: { borderRadius: 'var(--radius-md)' },
+  swipeContent: { backgroundColor: 'hsl(var(--sidebar-background) / 1)' },
+  /** A list's own column. */
+  listStack: { display: 'flex', flexDirection: 'column' },
+  /** The right-aligned row that hosts the list's header action. */
+  headerActionRow: {
+    display: 'flex',
+    height: themeSpace[7],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  /** The empty state's own card. */
+  emptyCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: themeSpace[1],
+    marginTop: themeSpace[2],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'dashed',
+    borderColor: 'hsl(var(--sidebar-border) / 0.7)',
+    paddingInline: themeSpace[3],
+    paddingBlock: themeSpace[4],
+  },
+  emptyTitle: {
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+    fontWeight: themeFontWeight.medium,
+    color: themeColors.sidebarForeground,
+  },
+  emptyDescription: {
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.sidebarForegroundMuted,
+  },
+  /** The rows under a bucket. */
+  rowStack: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  /** The row that shows the rest of a bucket. */
+  showMoreBox: {
+    display: 'flex',
+    height: themeSpace[4],
+    width: themeSpace[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The stretched link that covers the row. */
+  anchor: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 10,
+    borderRadius: themeRadius.md,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  /** A row's own body. */
+  rowBody: {
+    display: 'flex',
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  /** The pin that marks a pinned row. */
+  pin: {
+    position: 'relative',
+    top: '-1px',
+    width: themeSpace[3],
+    height: themeSpace[3],
+    flexShrink: 0,
+    color: 'hsl(var(--sidebar-foreground-muted) / 0.8)',
+  },
+  glyph16: { width: themeSpace[4], height: themeSpace[4] },
+  archiveAction: {
+    backgroundColor: themeColors.sidebarHover,
+    color: themeColors.sidebarHoverForeground,
+  },
+  bucket: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 0.5)',
+  },
+  expandedBucket: {
+    marginBottom: {
+      default: 'calc(var(--spacing) * 4)',
+      ':last-child': 'calc(var(--spacing) * 0)',
+    },
+  },
+  collapsedBucket: {
+    marginBottom: {
+      default: 'calc(var(--spacing) * 1)',
+      ':last-child': 'calc(var(--spacing) * 0)',
+    },
+  },
+  showMore: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    textAlign: 'left',
+    fontSize: 'var(--text-xs)',
+    lineHeight: 'var(--text-xs--line-height)',
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    },
+    backgroundColor: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
+    transitionTimingFunction: 'var(--default-transition-timing-function)',
+    transitionDuration: 'var(--default-transition-duration)',
+  },
+  renameInput: {
+    minWidth: 0,
+    width: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    backgroundColor: 'transparent',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--sidebar-ring) / 1) 40%, transparent)',
+    borderRadius: 'var(--radius-sm)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+    marginInline: 'calc(var(--spacing) * -1)',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+    fontWeight: 'var(--font-weight-normal)',
+  },
+  title: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 'var(--font-weight-normal)',
+    color: 'hsl(var(--sidebar-row-foreground) / 1)',
+  },
+  selectedTitle: { color: 'hsl(var(--sidebar-selection-foreground) / 1)' },
+  row: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    borderRadius: 'var(--radius-md)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    textAlign: 'left',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  rowHover: {
+    backgroundColor: {
+      default: 'transparent',
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover) / 1)' },
+    },
+    color: {
+      default: null,
+      '@media (hover: hover)': { ':hover': 'hsl(var(--sidebar-hover-foreground) / 1)' },
+    },
+  },
+  rowSelected: {
+    backgroundColor: 'hsl(var(--sidebar-selection) / 1)',
+    color: 'hsl(var(--sidebar-selection-foreground) / 1)',
+  },
+  pointer: { cursor: 'pointer' },
+  defaultCursor: { cursor: 'default' },
+  titleBox: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    display: 'flex',
+    alignItems: 'center',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 'var(--text-sm)',
+    lineHeight: 'var(--text-sm--line-height)',
+  },
+  editingAnchorTitle: { position: 'relative', zIndex: 20 },
+  restingMetrics: {
+    display: 'flex',
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'color-mix(in oklab, hsl(var(--sidebar-foreground-muted) / 1) 80%, transparent)',
+  },
+  anchorMetrics: { zIndex: 20 },
+});
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { Tooltip } from '@lody/ui/tooltip';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -99,7 +351,7 @@ export type SidebarUpdatedItem = {
 
 /**
  * The Updated organize mode renders ONE section ("Chats") — a flat
- * recency-sorted list. The bucket plumbing (collapse / show-all state maps,
+ * recency-sorted list. The bucket plumbing (collapse / reveal state maps,
  * toggle callbacks) survives from the earlier today/week/older design, now
  * keyed by the single 'all' bucket.
  */
@@ -133,7 +385,7 @@ export type SidebarUpdatedContextMenuLabels = {
  * state), so the control stays reachable in every list state.
  */
 function HeaderActionRow({ action }: { action: ReactNode }) {
-  return <div className="flex h-7 shrink-0 items-center justify-end">{action}</div>;
+  return <div {...stylex.props(updatedStyles.headerActionRow)}>{action}</div>;
 }
 
 function parseGitHubPrNumber(url: string): number | null {
@@ -179,21 +431,21 @@ export function sortUpdatedItems(items: SidebarUpdatedItem[]): SidebarUpdatedIte
 
 /**
  * When a bucket has more than this many rows, the row list collapses to the
- * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
- * preview pattern in TaskList, but with a higher threshold because Updated
- * mode is a flat firehose rather than a small per-repo group.
+ * latest N and reveals a "Show more" stepper. Mirrors the per-group preview
+ * pattern in TaskList, but with a higher threshold because Updated mode is a
+ * flat firehose rather than a small per-repo group.
  */
-export const SHOW_FULL_BUCKET_THRESHOLD = 20;
+export const UPDATED_BUCKET_PREVIEW_MAX = 20;
 
 export function getVisibleUpdatedItems(
   orderedItems: SidebarUpdatedItem[],
-  canToggleFullList: boolean,
-  showFull: boolean
+  canRevealRows: boolean,
+  revealedRows: number
 ): SidebarUpdatedItem[] {
-  if (!canToggleFullList || showFull || orderedItems.length <= SHOW_FULL_BUCKET_THRESHOLD) {
+  if (!canRevealRows || orderedItems.length <= UPDATED_BUCKET_PREVIEW_MAX) {
     return orderedItems;
   }
-  return orderedItems.slice(0, SHOW_FULL_BUCKET_THRESHOLD);
+  return orderedItems.slice(0, UPDATED_BUCKET_PREVIEW_MAX + revealedRows);
 }
 
 export type SidebarUpdatedTaskListProps = {
@@ -249,12 +501,14 @@ export type SidebarUpdatedTaskListProps = {
   onToggleBucket?: (key: SidebarUpdatedBucketKey) => void;
   toggleBucketLabel?: string;
   /**
-   * Per-bucket "show all" state. When false (default) and the bucket exceeds
-   * {@link SHOW_FULL_BUCKET_THRESHOLD} items, only the latest N render and a
-   * "Show all" button appears.
+   * Per-bucket incremental reveal. When a bucket exceeds
+   * {@link UPDATED_BUCKET_PREVIEW_MAX} rows, only the latest N render and a
+   * "Show more" button uncovers one more page per click; "Show less" returns
+   * to the preview.
    */
-  showFullBuckets?: Partial<Record<SidebarUpdatedBucketKey, boolean>>;
-  onToggleFullBucket?: (key: SidebarUpdatedBucketKey) => void;
+  revealedRowsByBucket?: Partial<Record<SidebarUpdatedBucketKey, number>>;
+  onShowMore?: (key: SidebarUpdatedBucketKey) => void;
+  onShowLess?: (key: SidebarUpdatedBucketKey) => void;
   /**
    * Always-visible action rendered at the right end of the FIRST bucket's
    * header row (desktop sidebar filter trigger). While loading or empty the
@@ -290,8 +544,9 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
   collapsedBuckets,
   onToggleBucket,
   toggleBucketLabel,
-  showFullBuckets,
-  onToggleFullBucket,
+  revealedRowsByBucket,
+  onShowMore,
+  onShowLess,
   headerAction,
 }: SidebarUpdatedTaskListProps) {
   const { t } = useTranslation();
@@ -373,12 +628,12 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
 
   if (isLoading && items.length === 0) {
     return (
-      <div className="flex flex-col">
+      <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
         <SidebarListSkeleton
           className={className}
           showHeaderIcon={false}
-          sectionClassName="mb-4 last:mb-0"
+          sectionClassName={stylex.props(updatedStyles.skeletonSection).className}
         />
       </div>
     );
@@ -386,27 +641,22 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
 
   if (!items.length) {
     return (
-      <div className="flex flex-col">
+      <div {...stylex.props(updatedStyles.listStack)}>
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <div
-          className={cn(
-            'mt-2 flex flex-col items-start gap-1 rounded-md border border-dashed border-sidebar-border/70 px-3 py-4',
-            className
-          )}
-        >
-          <div className="text-sm font-medium text-sidebar-foreground">{merged.emptyTitle}</div>
-          <div className="text-xs text-sidebar-foreground-muted">{merged.emptyDescription}</div>
+        <div className={cn(stylex.props(updatedStyles.emptyCard).className, className)}>
+          <div {...stylex.props(updatedStyles.emptyTitle)}>{merged.emptyTitle}</div>
+          <div {...stylex.props(updatedStyles.emptyDescription)}>{merged.emptyDescription}</div>
         </div>
       </div>
     );
   }
 
   const canToggleBucket = typeof onToggleBucket === 'function';
-  const canToggleFullBucket = typeof onToggleFullBucket === 'function';
+  const canToggleFullBucket = typeof onShowMore === 'function';
 
   return (
     <Tooltip.Provider>
-      <div className={cn('flex flex-col', className)}>
+      <div className={cn(stylex.props(updatedStyles.listStack).className, className)}>
         {buckets.map((bucket, bucketIndex) => {
           const bucketHeaderAction = bucketIndex === 0 ? headerAction : null;
           const collapsed = Boolean(collapsedBuckets?.[bucket.key]);
@@ -414,19 +664,27 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
             if (!canToggleBucket) return;
             onToggleBucket?.(bucket.key);
           };
-          const showFull = Boolean(showFullBuckets?.[bucket.key]);
-          const overflows = bucket.items.length > SHOW_FULL_BUCKET_THRESHOLD;
-          const visibleItems = getVisibleUpdatedItems(bucket.items, canToggleFullBucket, showFull);
-          const showToggleFullList = canToggleFullBucket && overflows && !collapsed;
-          const toggleFullListLabel = showFull
-            ? t('sessions.showLess', 'Show less')
-            : t('sessions.showAll', 'Show all ({{count}})', { count: bucket.items.length });
+          const revealedRows = revealedRowsByBucket?.[bucket.key] ?? 0;
+          const overflows = bucket.items.length > UPDATED_BUCKET_PREVIEW_MAX;
+          const hasMoreRows = bucket.items.length > UPDATED_BUCKET_PREVIEW_MAX + revealedRows;
+          const visibleItems = getVisibleUpdatedItems(
+            bucket.items,
+            canToggleFullBucket,
+            revealedRows
+          );
+          const showMoreRow = canToggleFullBucket && overflows && hasMoreRows && !collapsed;
+          const showLessRow = canToggleFullBucket && overflows && revealedRows > 0 && !collapsed;
+          const showMoreLabel = t('sessions.showMore', 'Show more');
+          const showLessLabel = t('sessions.showLess', 'Show less');
           return (
             <div
               key={bucket.key}
               className={cn(
-                'group flex flex-col gap-0.5',
-                collapsed ? 'mb-1 last:mb-0' : 'mb-4 last:mb-0'
+                'group',
+                stylex.props(
+                  updatedStyles.bucket,
+                  collapsed ? updatedStyles.collapsedBucket : updatedStyles.expandedBucket
+                ).className
               )}
             >
               {/* Same shared section header as Workspace mode, so section labels
@@ -440,7 +698,7 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                 onToggleCollapsed={canToggleBucket ? handleToggle : undefined}
               />
               {!collapsed ? (
-                <div className="flex flex-col gap-px">
+                <div {...stylex.props(updatedStyles.rowStack)}>
                   {visibleItems.map((item) => (
                     <UpdatedItemRow
                       key={item.id}
@@ -469,24 +727,28 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
                       archiveConfirmLabel={archiveLabels.confirm}
                     />
                   ))}
-                  {showToggleFullList ? (
+                  {showMoreRow ? (
                     <button
                       type="button"
                       data-sidebar-updated-show-more={bucket.key}
-                      className={cn(
-                        'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
-                        'transition-colors',
-                        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
-                      )}
-                      aria-label={toggleFullListLabel}
-                      onClick={() => onToggleFullBucket?.(bucket.key)}
+                      {...stylex.props(updatedStyles.showMore)}
+                      aria-label={showMoreLabel}
+                      onClick={() => onShowMore?.(bucket.key)}
                     >
-                      <span
-                        className="flex h-4 w-4 items-center justify-center"
-                        aria-hidden="true"
-                      />
-                      <span>{toggleFullListLabel}</span>
+                      <span {...stylex.props(updatedStyles.showMoreBox)} aria-hidden="true" />
+                      <span>{showMoreLabel}</span>
+                    </button>
+                  ) : null}
+                  {showLessRow ? (
+                    <button
+                      type="button"
+                      data-sidebar-updated-show-less={bucket.key}
+                      {...stylex.props(updatedStyles.showMore)}
+                      aria-label={showLessLabel}
+                      onClick={() => onShowLess?.(bucket.key)}
+                    >
+                      <span {...stylex.props(updatedStyles.showMoreBox)} aria-hidden="true" />
+                      <span>{showLessLabel}</span>
                     </button>
                   ) : null}
                 </div>
@@ -664,20 +926,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       onPointerDown={(e) => e.stopPropagation()}
       onBlur={() => onCommitRename(item.id, item.title)}
       onFocus={(e) => e.currentTarget.select()}
-      className={cn(
-        'min-w-0 w-full truncate bg-transparent outline-hidden',
-        'border border-sidebar-ring/40 rounded-sm px-1 -mx-1',
-        'text-sm font-normal'
-      )}
+      {...stylex.props(updatedStyles.renameInput)}
     />
   ) : (
     <SidebarSessionTitleText
       sessionId={item.id}
       selected={showSelectedState}
-      className={cn(
-        'min-w-0 flex-1 truncate font-normal',
-        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
-      )}
+      {...stylex.props(updatedStyles.title, showSelectedState && updatedStyles.selectedTitle)}
     >
       {item.title}
     </SidebarSessionTitleText>
@@ -700,20 +955,15 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
         // group-hover and reveal every row's archive button at once.
-        'group/row relative flex w-full items-center rounded-md px-2 py-1 text-left',
-        'border border-transparent bg-transparent',
-        !showSelectedState &&
-          onSelect &&
-          !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
-        showSelectedState &&
-          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        // Keyboard-only focus ring — see TaskList: plain :focus-within also
-        // matches after mouse clicks via the overlay <a> and left a permanent
-        // inset ring on the selected row.
-        useAnchor &&
-          'has-[a:focus-visible]:outline-hidden has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-sidebar-ring/40',
-        onSelect ? 'cursor-pointer' : 'cursor-default'
+        'group/row',
+        stylex.props(
+          updatedStyles.row,
+          !showSelectedState && onSelect && !isMobile && updatedStyles.rowHover,
+          showSelectedState && updatedStyles.rowSelected,
+          onSelect ? updatedStyles.pointer : updatedStyles.defaultCursor,
+          !showSelectedState && onSelect && !isMobile && updatedStyles.menuOpen,
+          useAnchor && updatedStyles.anchorFocus
+        ).className
       )}
       onClick={
         useAnchor
@@ -740,23 +990,20 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         <a
           href={href}
           aria-label={item.title}
-          className="absolute inset-0 z-10 rounded-md focus:outline-hidden focus-visible:shadow-none"
+          {...stylex.props(updatedStyles.anchor)}
           onClick={handleAnchorClick}
         />
       ) : null}
 
-      <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
+      <div {...stylex.props(updatedStyles.rowBody)}>
         <SessionRowLeadingSlot />
         {showPinnedIcon && item.isPinned ? (
-          <Pin
-            aria-hidden="true"
-            className="relative -top-px h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
-          />
+          <Pin aria-hidden="true" {...stylex.props(updatedStyles.pin)} />
         ) : null}
         <div
-          className={cn(
-            'min-w-0 flex-1 flex items-center truncate text-sm',
-            useAnchor && isEditing && 'relative z-20'
+          {...stylex.props(
+            updatedStyles.titleBox,
+            useAnchor && isEditing && updatedStyles.editingAnchorTitle
           )}
           // Double-click to rename is scoped to the title only, so double-clicking
           // elsewhere on the row (e.g. the two-step Archive confirm button) cannot
@@ -776,14 +1023,13 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}
-          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
-          rowGroup="row"
+          fadeClassName={stylex.props(updatedStyles.fade).className}
           restIcon={
             showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
-                className={cn(
-                  'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
-                  useAnchor && 'z-20'
+                {...stylex.props(
+                  updatedStyles.restingMetrics,
+                  useAnchor && updatedStyles.anchorMetrics
                 )}
               >
                 {isMobile ? <span>{relativeTime}</span> : null}
@@ -799,7 +1045,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             hasMenuActions ? (
               <SessionRowMenuButton
                 label={contextMenuLabels.moreActions}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                revealClassName={stylex.props(updatedStyles.reveal).className}
               />
             ) : undefined
           }
@@ -809,7 +1055,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 label={archiveTooltipLabel}
                 confirmLabel={archiveConfirmLabel}
                 onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
+                revealClassName={stylex.props(updatedStyles.reveal).className}
               />
             ) : undefined
           }
@@ -827,16 +1073,16 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     return (
       <SwipeActionRow
         enabled={isMobile}
-        className="rounded-md"
-        contentClassName="bg-sidebar"
+        rootXstyle={updatedStyles.swipeRoot}
+        contentXstyle={updatedStyles.swipeContent}
         actions={[
           {
             key: 'archive',
             label: archiveActionLabel,
             ariaLabel: archiveTooltipLabel,
-            icon: <Archive className="h-4 w-4" />,
+            icon: <Archive className={stylex.props(updatedStyles.glyph16).className} />,
             hideLabel: item.kind === 'chat',
-            className: 'bg-sidebar-hover text-sidebar-hover-foreground',
+            xstyle: updatedStyles.archiveAction,
             onClick: () => onArchive?.(item.id),
           },
         ]}
@@ -850,7 +1096,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const menuRow = hasMenuActions ? (
     <ContextMenu.Root onOpenChange={setRowMenuOpen}>
       <ContextMenu.Trigger>{row}</ContextMenu.Trigger>
-      <ContextMenu.Content className="min-w-[180px]">
+      <ContextMenu.Content minWidth={180}>
         {handlePrOpen ? (
           <ContextMenu.Item
             icon={GitPullRequest}

@@ -22,10 +22,12 @@ test('local ignores cloud deployment inputs and keeps release instrumentation di
   delete process.env.LODY_PLATFORM;
   process.env.LODY_ENV = 'production';
   process.env.LODY_AUTH_URL = 'https://auth.example.test';
+  process.env.LODY_LORO_STREAMS_WS_ENABLED = '1';
   const built = await config();
   assert.equal(built.define['process.env.LODY_PLATFORM'], '"local"');
   assert.equal(built.define['process.env.LODY_ENV'], '""');
   assert.equal(built.define['process.env.LODY_AUTH_URL'], undefined);
+  assert.equal(built.define.__LODY_LORO_STREAMS_WS_DEFAULT__, 'false');
   assert.equal(built.define.__LODY_E2E_CLOCK_BUILD__, 'false');
 });
 test('cloud preserves flat workers, externals, WASM alias and separate adapter pass', async (t) => {
@@ -36,9 +38,14 @@ test('cloud preserves flat workers, externals, WASM alias and separate adapter p
   process.env.LODY_PLATFORM = 'cloud';
   process.env.LODY_ENV = 'staging';
   process.env.LODY_AUTH_URL = 'https://auth.example.test';
+  delete process.env.LODY_LORO_STREAMS_WS_ENABLED;
   const built = await config();
   assert.equal(built.define['process.env.LODY_PLATFORM'], '"cloud"');
   assert.equal(built.define['process.env.LODY_AUTH_URL'], '"https://auth.example.test"');
+  assert.equal(built.define.__LODY_LORO_STREAMS_WS_DEFAULT__, 'false');
+  process.env.LODY_LORO_STREAMS_WS_ENABLED = '1';
+  const wsBuilt = await config();
+  assert.equal(wsBuilt.define.__LODY_LORO_STREAMS_WS_DEFAULT__, 'true');
   for (const id of [
     '@napi-rs/keyring',
     '@loro-dev/roost-node',

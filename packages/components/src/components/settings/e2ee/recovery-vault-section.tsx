@@ -1,3 +1,4 @@
+import { recoveryAvailabilityMessage } from '@/lib/e2ee-actionable-failure';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -167,6 +168,17 @@ const statusBadge: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: 
   unknown: { key: 'e2ee.recovery.workspace.unknown', tone: 'neutral' },
 };
 
+export function preferredRecoveryUnlock(
+  methods: RecoveryPlan['methods'],
+  passkey: boolean
+): RecoveryUnlockMethod | undefined {
+  if (!methods) return undefined;
+  if (passkey && methods.hasPasskey === true) return 'passkey';
+  if (methods.hasFile) return 'file';
+  if (methods.hasPassword) return 'password';
+  return passkey && methods.hasPasskey !== false ? 'passkey' : 'file';
+}
+
 /**
  * Account recovery vault controls, enabled by default; desktop main independently honors
  * `LODY_E2EE_RECOVERY_VAULT=off` as an emergency kill switch. The host's recovery port
@@ -331,18 +343,7 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     }
   };
 
-  const preferredUnlock: RecoveryUnlockMethod | undefined =
-    methods === undefined
-      ? undefined
-      : passkey && hasPasskey === true
-        ? 'passkey'
-        : hasFile
-          ? 'file'
-          : passkey && hasPasskey !== false
-            ? 'passkey'
-            : hasPassword
-              ? 'password'
-              : 'file';
+  const preferredUnlock = preferredRecoveryUnlock(methods, passkey);
 
   const triggerWithUnlock = (
     action: (
@@ -1124,19 +1125,21 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       {result?.kind === 'error' && (
         <Alert.Root tone="danger">
           <Alert.Description>
-            {result.code.includes('e2ee_recovery_disabled')
-              ? t('e2ee.recovery.disabled')
-              : result.code.includes('e2ee_recovery_prf-unavailable')
-                ? t('e2ee.recovery.passkeyUnsupported')
-                : result.code.includes('e2ee_recovery_replacing')
-                  ? t('e2ee.recovery.replacingElsewhere')
-                  : result.code.includes('e2ee_recovery_exists')
-                    ? t('e2ee.recovery.exists')
-                    : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                      ? result.method === 'password'
-                        ? t('e2ee.recovery.wrongPassword')
-                        : t('e2ee.recovery.wrongFile')
-                      : t('e2ee.recovery.failed')}
+            {recoveryAvailabilityMessage(result.code)
+              ? t(recoveryAvailabilityMessage(result.code)!)
+              : result.code.includes('e2ee_recovery_disabled')
+                ? t('e2ee.recovery.disabled')
+                : result.code.includes('e2ee_recovery_prf-unavailable')
+                  ? t('e2ee.recovery.passkeyUnsupported')
+                  : result.code.includes('e2ee_recovery_replacing')
+                    ? t('e2ee.recovery.replacingElsewhere')
+                    : result.code.includes('e2ee_recovery_exists')
+                      ? t('e2ee.recovery.exists')
+                      : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                        ? result.method === 'password'
+                          ? t('e2ee.recovery.wrongPassword')
+                          : t('e2ee.recovery.wrongFile')
+                        : t('e2ee.recovery.failed')}
           </Alert.Description>
         </Alert.Root>
       )}

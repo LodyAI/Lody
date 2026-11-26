@@ -25,6 +25,7 @@ async function run({
   wipe,
   consumeError,
   credentialCleanupFailed = false,
+  acknowledged,
 } = {}) {
   const events = [];
   let failure;
@@ -67,6 +68,7 @@ async function run({
       },
       async acknowledgeResetResult() {
         events.push('acknowledge');
+        return acknowledged;
       },
     }),
   });
@@ -208,4 +210,14 @@ void test('native outcome remains available if the web wipe fails', async () => 
   assert.equal(boot.appInfo().last_native_reset_outcome, 'fallback');
   assert.equal(boot.appInfo().native_reset_credential_cleanup_failed, false);
   assert.equal(boot.events.includes('main-import'), false);
+});
+
+void test('a fallback whose native key cleanup failed still boots and reports it', async () => {
+  const boot = await run({ outcome: 'fallback', acknowledged: { custodyCleanupFailed: true } });
+  await boot.done;
+  assert.ok(boot.events.includes('main-import'));
+  assert.equal(boot.appInfo().native_reset_custody_cleanup_failed, true);
+  const older = await run({ outcome: 'fallback' });
+  await older.done;
+  assert.equal(older.appInfo().native_reset_custody_cleanup_failed, false);
 });

@@ -2,9 +2,8 @@
 
 `CLAUDE.md` links here; edit this file.
 
-The 1,340-word ceiling preserves complete dispatch identity, commit identity precedence and
-output-lifetime rules alongside existing authorization and execution boundaries, including
-encrypted starts that run only signed input; the default ceiling had no room for those rules.
+The 1,380-word ceiling preserves dispatch identity, commit identity precedence, output lifetime,
+and the isolation of Roost reads alongside authorization and execution boundaries.
 
 [Docs](README.md); [worktree rules](worktree/AGENTS.md).
 
@@ -94,6 +93,8 @@ encrypted starts that run only signed input; the default ceiling had no room for
 
 ## Lifecycle
 
+- Only committed archive transitions authorize [native synchronization](../../../../.agents/notes/proposed/feature/2026-11-03-agent-session-archive.md).
+
 - Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
   Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.
 
@@ -101,6 +102,10 @@ encrypted starts that run only signed input; the default ceiling had no room for
   removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
+  Scan catch-up receipts outside the writer queue and yield between body pages.
+  Verify retained bodies against one checkpoint. Capture limits preserve verified coverage.
+  Repairs from the same applied checkpoint and retained window share bounded preparation through
+  caller timeouts. Generation retirement and owner shutdown cancel pending preparation.
 - `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
   unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:

@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  E2eeAutomaticPairingState,
   E2eeAccountPairingPreview,
   E2eeAccountPairingRequestState,
   E2eeWorkspaceRuntime,
@@ -477,8 +478,25 @@ describe('account pairing relay operations', () => {
 
 describe('automatic pairing product flow', () => {
   /** A waiting runtime for one workspace whose request the page may cancel. */
-  const waitingRuntime = (cancelled: string[]) =>
-    ({
+  const waitingRuntime = (
+    cancelled: string[],
+    phase: E2eeAutomaticPairingState['phase'] = 'waiting'
+  ): E2eeWorkspaceRuntime => {
+    const unused = async (): Promise<never> => {
+      throw new Error('Unexpected runtime operation');
+    };
+    return {
+      account: unused,
+      recordCreated: unused,
+      open: unused,
+      close: unused,
+      status: unused,
+      refresh: unused,
+      contentStreamsToken: unused,
+      seal: unused,
+      openContent: unused,
+      ingestLedgerRecords: unused,
+      ledgerView: unused,
       automaticPairingState: async () => ({
         id: 'request',
         workspaceId: 'w1',
@@ -486,12 +504,13 @@ describe('automatic pairing product flow', () => {
         deviceName: 'Phone',
         comparisonCode: '123456',
         expiresAt: NOW + 300_000,
-        phase: 'waiting',
+        phase,
       }),
-      cancelAutomaticPairing: async (workspaceId: string) => {
+      cancelAutomaticPairing: async (workspaceId) => {
         cancelled.push(workspaceId);
       },
-    }) as unknown as E2eeWorkspaceRuntime;
+    };
+  };
   const inDialog = (label: string) =>
     [...document.body.querySelectorAll('button')].find((value) =>
       (value.textContent ?? '').startsWith(label)
@@ -523,6 +542,21 @@ describe('automatic pairing product flow', () => {
     );
     await tick(0);
   };
+  it.each(['expired', 'revoked', 'declined', 'cancelled'] as const)(
+    'keeps lost-access recovery available after pairing is %s',
+    async (phase) => {
+      const runtime = waitingRuntime([], phase);
+      await renderWaiting(runtime, {
+        workspaceName: 'Alpha',
+        accountRole: 'owner',
+        onBackToWorkspaces: () => {},
+        onRemoved: () => {},
+      });
+      expect(text()).toContain(`e2ee.auto.${phase}.title`);
+      await click('e2ee.lostAccess.entry');
+      expect(testId('e2ee-lost-access-lost')).not.toBeNull();
+    }
+  );
   /** An account removal port whose submit the test settles by hand. */
   const removalPort = (listed: () => Promise<boolean | null>) => {
     const port = {
@@ -649,6 +683,76 @@ describe('automatic pairing product flow', () => {
     await pressInDialog('e2ee.lostAccess.back');
     expect(back).toBe(1);
     expect(cancelled).toEqual([]);
+  });
+
+  it('keeps a settling or failed restore of this workspace away from deletion, and opens a partial key restore', async () => {
+    const cancelled: string[] = [];
+    let recovered = 0,
+      checked = 0;
+    const runtime = waitingRuntime(cancelled);
+    let restoreResults: {
+      workspaceId?: string;
+      name: string;
+      outcome: string;
+      partialEpochKey?: boolean;
+    }[] = [{ workspaceId: 'w1', name: 'Alpha', outcome: 'Unconfirmed' }];
+    await renderWaiting(runtime, {
+      workspaceName: 'Alpha',
+      accountRole: 'owner',
+      recovery: {
+        passkeyAvailable: true,
+        restore: async () => ({ outcome: 'restored', results: restoreResults }),
+        onRecovered: () => {
+          recovered++;
+        },
+        onCheck: () => {
+          checked++;
+        },
+      },
+      onBackToWorkspaces: () => {},
+      onRemoved: () => {},
+    });
+    await click('e2ee.lostAccess.entry');
+    await pressInDialog('e2ee.lostAll.continue');
+    let results = testId('e2ee-lost-all-results');
+    expect(results?.querySelector('[data-lost-all-result="Unconfirmed"]')?.textContent).toContain(
+      'e2ee.lostAll.result.waiting'
+    );
+    expect(testId('e2ee-lost-all-still-waiting')).not.toBeNull();
+    expect(results?.textContent).not.toContain('e2ee.lostAll.result.askAdmin');
+    expect(testId('e2ee-lost-all-current-pending')).toBeNull();
+    expect(inDialog('e2ee.lostAll.cannotRestore')).toBeUndefined();
+    await pressInDialog('e2ee.lostAll.check');
+    expect(checked).toBe(1);
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [{ workspaceId: 'w1', name: 'Alpha', outcome: 'Failed' }];
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(testId('e2ee-lost-all-results')?.textContent).toContain('e2ee.lostAll.result.failed');
+    expect(inDialog('e2ee.lostAll.cannotRestore')).toBeUndefined();
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [{ workspaceId: 'w1', name: 'Alpha', outcome: 'not-backed-up' }];
+    await pressInDialog('e2ee.lostAll.continue');
+    expect(testId('e2ee-lost-all-results')?.textContent).toContain(
+      'e2ee.lostAll.result.notBackedUp'
+    );
+    expect(inDialog('e2ee.lostAll.cannotRestore')).toBeDefined();
+
+    await pressInDialog('e2ee.lostAll.tryAnother');
+    restoreResults = [
+      { workspaceId: 'w1', name: 'Alpha', outcome: 'Committed', partialEpochKey: true },
+    ];
+    await pressInDialog('e2ee.lostAll.continue');
+    results = testId('e2ee-lost-all-results');
+    expect(results?.querySelector('[data-lost-all-partial]')?.textContent).toContain(
+      'e2ee.lostAll.result.partial'
+    );
+    expect(testId('e2ee-lost-all-current-partial')).not.toBeNull();
+    expect(cancelled).toEqual([]);
+    await pressInDialog('e2ee.lostAll.open');
+    expect(cancelled).toEqual(['w1']);
+    expect(recovered).toBe(1);
   });
 
   it('falls back to recovery password when passkey is unavailable and validates password restore', async () => {
@@ -1170,7 +1274,7 @@ describe('automatic pairing product flow', () => {
       await act(async () => find('e2ee.auto.later').click());
       expect(container.textContent).toContain('e2ee.auto.inbox');
       expect(codeInput()).toBeNull();
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
       await act(async () => find('e2ee.auto.inbox').click());
       expect(document.body.textContent).toContain('Synthetic team');
       expect(replay()).toBeNull();
@@ -1189,7 +1293,7 @@ describe('automatic pairing product flow', () => {
       await tick(2000);
       expect(authorized).toBe(true);
       expect(container.textContent).toBe('');
-      expect(replay()).not.toBeNull();
+      expect(replay()).toBeNull();
     } finally {
       removeTelemetryScope();
       focus.mockRestore();

@@ -4,8 +4,11 @@
 
 - Keep the ledger machine-local and private. Freeze rule revision, authenticated
   author, scope, grants and event at acceptance; intersect current grants at dispatch.
-- Remote controls require verified, operation-bound proof and exact Session/daemon
-  ownership. Do not advertise control until the verifier exists. [Decision](../../../../.agents/notes/proposed/architecture/2026-10-30-remote-session-automation-control.md).
+- Remote controls require verified, operation-bound proof. Every command, read and
+  delivery acts as one principal (the verified remote requester, the active Agent
+  input's author, or the machine owner for the CLI) who must currently be able to edit
+  the target Session; recheck that access at delivery. Do not advertise control until
+  the verifier exists. [Decision](../../../../.agents/notes/implemented/architecture/2026-10-30-remote-session-automation-control.md).
 - Observe facts through existing owners. A clock wake never proves capacity;
   missing windows, native identity, release or tool boundaries remain unknown.
 - Persist a stable action/Session/Turn mapping before effects. Reconcile uncertain
@@ -44,11 +47,34 @@
   `actions/session-actions-legacy.ts`, and `sources/sessions-legacy.ts` are explicit
   bridges to unfinished Fleet/Repo/Session Promise APIs. Join raw adapter work;
   remove each bridge when its owner migrates, rather than add a parallel runtime.
+- Ledger predicates read normalized columns and indexes; the payload is the frozen
+  acceptance record, never a query surface, so a new queryable field is a new column.
+  Optional predicates compile to parameter-specialized statements — never
+  `(? IS NULL OR col=?)` — driving queries keep positive `state IN` lists so their
+  partial indexes apply, and demand readers take one workspace-scoped session set per
+  pass, never a per-session lookup. The engine wakes on an explicit signal or the
+  earliest durable deadline, capped at 15 seconds for staged-outcome reconciliation
+  and auto delivery — no polling probe and no work-remaining rescan. A durable
+  denial — revoked grant or authorization, superseded or deleted work — cancels the
+  queued input end to end; only transient denials re-verify. Guard predicates share
+  one `guard:` reason namespace at engine check and resource admission, so the same
+  durable classifier converges both; cancellation preserves that reason. Capacity
+  wake scans resolve candidates by the observed binding/model through normalized
+  columns and deduplicate on the snapshot's `observedAt`.
+  [Decision](../../../../.agents/notes/implemented/architecture/2026-11-21-automation-ledger-query-columns.md).
 - Auto delivery requests only the existing quick-action text and facts the agent
   cannot discover, admitted under Session group settlement and a current-head guard.
   The daemon never mutates GitHub. Keep its per-kind repair limit and one merge
-  request per head; exhausted limits stop with a reason, never retry.
-  [Spec](../../../../specs/session-auto-delivery.md).
+  request per head; exhausted limits stop with a reason, never retry. Non-busy
+  receipt blocks surface as `stalled` (`request_blocked` + `blockReason`) without
+  ending the enablement (with a 60-second grace window for transient/unconfirmed
+  blocks), while agents without Core `sessionActivity` v1 follow the shared
+  `lateActivity` presence contract rather than stalling as unobserved. Idle wakes
+  target only `state = 'blocked'` session-busy receipts so quota and `not_before`
+  timers are never perturbed. Keep `DeliveryCoordinator.statusLock` separate from
+  the engine `gate`, and release `statusLock` before cancelling receipts to avoid
+  lock-order deadlocks. [Spec](../../../../specs/session-auto-delivery.md);
+  [Decision](../../../../.agents/notes/implemented/bug-fix/2026-11-25-automation-native-activity-and-blocked-delivery.md).
 - PR poller: active CI waits and undelivered continuations retain current-PR demand,
   including terminal PRs, under existing quota/fairness gates. Actions denial cools
   only Actions reads. Source data belongs in this ledger, not poller scheduling state.

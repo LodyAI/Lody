@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId } from '@lody/shared';
+import { SorbetProvidersResultSchema } from '@lody/shared/local-machine-rpc';
 import { createSorbetCredentialsHandler } from './sorbet-credentials';
 
 const openSorbetControl = vi.hoisted(() => vi.fn());
@@ -17,9 +18,14 @@ function control(overrides: Record<string, unknown> = {}) {
     providers: {
       listCustom: vi.fn(async () => []),
       createCustom: vi.fn(async (provider) => ({ ...provider, id: 'custom' })),
+      updateCustom: vi.fn(async (providerId, provider) => ({ ...provider, id: providerId })),
       deleteCustom: vi.fn(async () => {}),
       refresh: vi.fn(async () => ({ refreshed: [], errors: new Map() })),
       availableModels: vi.fn(async () => []),
+    },
+    hostSettings: {
+      get: vi.fn(async () => ({})),
+      update: vi.fn(async (patch) => patch),
     },
     close: vi.fn(async () => {}),
     ...overrides,
@@ -93,6 +99,70 @@ describe('daemon Sorbet credentials', () => {
     expect(list.providers.listCustom).toHaveBeenCalledWith({ signal: undefined });
   });
 
+  it('edits an endpoint over its stored definition, keeping what Sorbet discovered', async () => {
+    const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
+    const stored = {
+      id: 'custom',
+      name: 'Gateway',
+      protocol: 'openai-completions' as const,
+      baseUrl: 'https://old.example/v1',
+      models: [{ id: 'm-1', name: 'Meridian', reasoning: true, contextWindow: 200_000 }],
+      catalogRefs: ['meridian'],
+    };
+    const instance = control();
+    instance.providers.listCustom = vi.fn(async () => [stored]);
+    openSorbetControl.mockResolvedValueOnce(instance);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
+    const updated = await handler.updateProvider(id, 'custom', {
+      name: 'Team gateway',
+      protocol: 'openai-responses',
+      baseUrl: 'https://new.example/v1',
+    });
+
+    expect(instance.providers.updateCustom).toHaveBeenCalledWith(
+      'custom',
+      {
+        name: 'Team gateway',
+        protocol: 'openai-responses',
+        baseUrl: 'https://new.example/v1',
+        models: stored.models,
+        catalogRefs: ['meridian'],
+      },
+      { signal: undefined }
+    );
+    expect(
+      SorbetProvidersResultSchema.parse({ type: 'sorbet/providers-update', provider: updated })
+    ).toEqual({
+      type: 'sorbet/providers-update',
+      provider: {
+        id: 'custom',
+        name: 'Team gateway',
+        protocol: 'openai-responses',
+        baseUrl: 'https://new.example/v1',
+        models: [{ id: 'm-1', name: 'Meridian' }],
+      },
+    });
+    expect(instance.close).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to edit an endpoint the machine does not store', async () => {
+    const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
+    const document = { getAgentConfigForMachineLaunch: async () => config as never };
+    const instance = control();
+    openSorbetControl.mockResolvedValueOnce(instance);
+    await expect(
+      createSorbetCredentialsHandler(document, machine).updateProvider(id, 'missing', {
+        name: 'x',
+        protocol: 'openai-completions',
+        baseUrl: 'https://example.test',
+      })
+    ).rejects.toThrow('not found');
+    expect(instance.providers.updateCustom).not.toHaveBeenCalled();
+    expect(instance.close).toHaveBeenCalledOnce();
+  });
+
   it('refreshes Providers and reads the control model catalog', async () => {
     const config = { id, machineId: machine, cliType: 'builtin', agentType: 'sorbet' };
     const document = { getAgentConfigForMachineLaunch: async () => config as never };
@@ -133,6 +203,29 @@ describe('daemon Sorbet credentials', () => {
       providerId: undefined,
       signal: undefined,
     });
+  });
+
+  it('reads and patches Host settings through Sorbet control', async () => {
+    const document = { getAgentConfigForMachineLaunch: vi.fn(async () => null) };
+    const instance = control({
+      hostSettings: {
+        get: vi.fn(async () => ({ sandboxMode: 'workspace-write' })),
+        update: vi.fn(async (patch) => ({ sandboxMode: 'workspace-write', ...patch })),
+      },
+    });
+    openSorbetControl.mockResolvedValue(instance);
+    const handler = createSorbetCredentialsHandler(document, machine);
+
+    expect(await handler.getHostSettings()).toEqual({ sandboxMode: 'workspace-write' });
+    const patch = { permissionModeCeiling: 'auto' as const };
+    expect(await handler.updateHostSettings(patch)).toEqual({
+      sandboxMode: 'workspace-write',
+      permissionModeCeiling: 'auto',
+    });
+    expect(document.getAgentConfigForMachineLaunch).not.toHaveBeenCalled();
+    expect(instance.hostSettings.get).toHaveBeenCalledWith({ signal: undefined });
+    expect(instance.hostSettings.update).toHaveBeenCalledWith(patch, { signal: undefined });
+    expect(instance.close).toHaveBeenCalledTimes(2);
   });
 
   it('closes control after an operation failure', async () => {

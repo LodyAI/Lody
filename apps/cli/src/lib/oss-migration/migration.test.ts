@@ -1138,7 +1138,7 @@ describe('OSS migration', () => {
   });
 });
 
-it('rejects encrypted import before authenticating or creating streams', async () => {
+it('requires paired authorization before authenticating or creating encrypted streams', async () => {
   const requests: string[] = [];
   vi.stubGlobal('fetch', async (url: string) => {
     requests.push(url);
@@ -1150,7 +1150,14 @@ it('rejects encrypted import before authenticating or creating streams', async (
     },
   });
   await expect(
-    openMigrationTarget(blockedTokens, 'cloud' as WorkspaceId, { mode: 'protected' })
-  ).rejects.toThrow('加密工作区不支持导入');
+    openMigrationTarget(blockedTokens, 'cloud' as WorkspaceId, {
+      mode: 'protected',
+      namespace: 'synthetic',
+      resolve: () => {
+        throw new Error('must not resolve');
+      },
+      snapshotUpload: { canUpload: () => false },
+    })
+  ).rejects.toThrow('approved paired CLI machine');
   expect(requests).toEqual([]);
 });

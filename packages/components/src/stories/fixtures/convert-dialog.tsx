@@ -262,7 +262,7 @@ function ConvertDialogBody({
   };
 
   const topSelector = (
-    <div className="contents">
+    <div {...stylex.props(previewStyles.layout)}>
       <DesktopMachineMenu
         value={machineId}
         visibleLocalMachineId={MAC_STUDIO}
@@ -278,7 +278,7 @@ function ConvertDialogBody({
         }}
         onAddMachine={() => {}}
       />
-      <div className="flex min-w-[4.5rem] shrink">
+      <div {...stylex.props(themeStyles.row)}>
         <UnifiedProjectSelectorView
           value={selection}
           onChange={(next) => {
@@ -322,7 +322,7 @@ function ConvertDialogBody({
   );
 
   const footerSelector = (
-    <div className="contents">
+    <div {...stylex.props(previewStyles.layout)}>
       <DesktopRunConfigMenu
         agentSelection={agentSelection}
         allowedMachineIds={[machineId]}
@@ -379,3 +379,11 @@ function ConvertDialogBody({
     />
   );
 }
+
+const themeStyles = stylex.create({
+  row: { display: 'flex', minWidth: '4.5rem', flexShrink: 1 },
+});
+
+const previewStyles = stylex.create({
+  layout: { display: 'contents' },
+});

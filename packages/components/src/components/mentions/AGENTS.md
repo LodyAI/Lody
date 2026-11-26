@@ -25,7 +25,12 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   in a Worker, cancel stale work, and publish current-source results only; no
   UI-thread fallback. Aggregate results are capped; Roles list all readable entries.
 - Issues and PRs rank over their own slice of the shared cache, partitioned once
-  by `useMentionCategories`.
+  by `useMentionCategories`. Only workspace-linked GitHub repositories enable
+  Issue/PR mentions; unlinked local remotes and `repo_not_linked` /
+  `installation_not_found` / `repo_not_authorized` token responses hide both
+  categories. Non-row list blocks (`groupLabel`, `message`, `notice`,
+  `emptyState`) keep `flexShrink: 0` so wrapped copy scrolls instead of
+  overlapping neighbouring rows.
 - Files, Sessions, Roles, Issues, and PRs use vendored VS Code `scoreFuzzy`
   with source ordering. Skills rank alone; typed slash queries merge Commands
   and Prompt Shortcuts after source gates.
@@ -40,11 +45,15 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   and aggregate views. Both share the menu's once-per-menu-open latch, the menu
   owns no source-specific rule, and categories on one source share its
   `sourceKey`.
-- Activation means "make sure this is loaded", not "revalidate": Issues/PRs gate
-  on `ISSUE_PR_FRESH_FOR_MS`, and only explicit gestures pass `refresh({ force:
-true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
-  An unasked source reports `loading`, never `ready` with zero rows.
-
+- Activation ensures data is loaded without revalidating fresh entries: Issues
+  and PRs gate on `ISSUE_PR_FRESH_FOR_MS`, `fetchedAtMs` persists in the cached
+  entry, and only explicit gestures pass `refresh({ force: true })`. An unasked
+  source reports `loading`, never `ready` with zero rows. See
+  [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md#activation-is-not-revalidation).
+- The file index loads only on Files activation or an `@` in the draft. Remote
+  projects use `local-project/search-files` after checking the
+  `localProjectFileSearch` capability, falling back to the full list only for
+  older daemons.
 - File fetch accounting follows [its contract](../../../../../specs/mention-file-fetch.md).
 
 ## Hydration and drafts
@@ -52,13 +61,10 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 - Hydrators only add ranges for known tokens/items, preserve existing external
   `pasted_text` ranges, and must record a `kind`. Hydration latches the first
   NON-EMPTY text, not the first render's.
-- A composer stores its ranges with its draft and restores them through
-  `PersistedMentionHydrator`; rebuilding from text is the fallback. Store the
-  narrow `PersistedMentionRange`, never the live range. `mergeHydratedMentions`
-  drops a hydrated range that OVERLAPS one already present, not merely a
-  duplicate.
-- A composer that swaps drafts in place (the session one does) must pass
-  `draftKey`; the reset runs during render.
+- Composers persist narrow `PersistedMentionRange` entries with drafts and
+  restore them via `PersistedMentionHydrator` before text fallback;
+  `mergeHydratedMentions` rejects any range that overlaps an existing one.
+- Composers that swap drafts in place must pass `draftKey`; the reset runs during render.
 - Locale files are flat dotted-key maps: i18next runs `keySeparator: false`.
 - `vscode-fuzzy-score.ts` is vendored: keep Microsoft's copyright header, the
   adjacent MIT license, and the generated third-party attribution when updating
@@ -90,8 +96,7 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   each filtered by the provider's `getRegisteredGlobalSkillDirs` /
   `getRegisteredSystemSkillDirs`; `~/.agents/skills` is a provider-specific
   alias, never a universal fallback. The scanner handles flat and catalog
-  layouts, and paths outside the registered roots appear only once their dirs
-  are added.
+  layouts. Bound Codex-magpie mentions include the gateway's two Magpie entries.
 - A registered entry mapping to no dir (`deepagents`) keeps its empty whitelist;
   an unregistered agent type gets `null` (an empty `Set` filters everything).
 
@@ -117,14 +122,19 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   conversation COLUMN paints ONE `ConversationDropOverlay` via
   `SessionMentionDropLayer`, never one per keep-alive tab page.
 
+## Prompt Shortcuts
+
+- Visible labels call a Prompt Shortcut a "Prompt". Its rows show one fixed glyph
+  and no emoji; the stored emoji field stays in the schema for old rows.
+
 ## Agent Roles
 
 - An Agent Role mention has the session mention's shape (plain `@<token>`; the
   RANGE carries `formatAgentRoleMentionValue`: Role id, plus machine for a
   multi-machine Role), but its rewrite is a reference naming only that id/machine,
   never an instruction to create a Session (root `AGENTS.md` owns MCP create/freeze). An
-  unavailable or bare multi-machine Role stays plain text. Tokens derive from
-  the name or alias; uniqueness uses them.
+  unavailable or bare multi-machine Role stays plain text. Tokens come from
+  `getAgentRoleTargetMentionSlug`, which Settings also shows; uniqueness uses them.
 - A Role candidate's emoji REPLACES the category glyph
   (`MentionCandidate.iconEmoji`), defaulted through `getAgentRoleEmoji`, and its
   candidate sets no detail `title`. The committed range shows that emoji through

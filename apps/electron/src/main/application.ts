@@ -62,6 +62,7 @@ import { AppUpdaterService } from './services/app-updater-service'
 import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
 import { startDevbarDevframeService, stopDevbarDevframeService } from './services/devbar/service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
+import { toggleTodayWindow } from './today-windows'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
   WindowBadgeService,
@@ -173,6 +174,13 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
           id: 'app.focus',
           handler: () => {
             openOrFocusMainWindow({ icon: iconPath })
+          }
+        },
+        {
+          id: 'today.toggleWindow',
+          enabled: false,
+          handler: () => {
+            toggleTodayWindow()
           }
         }
       ],
@@ -286,9 +294,8 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
     if (!isLocalPlatform() && !safeStorage.isEncryptionAvailable()) {
       const isLinux = process.platform === 'linux'
       const hint = isLinux
-        ? 'gnome-libsecret was already configured automatically. ' +
-          'Ensure gnome-keyring-daemon is running, or try launching with ' +
-          '--password-store=kwallet5 or --password-store=basic'
+        ? 'Ensure an OS keyring service (such as gnome-keyring-daemon or KWallet) is installed and running, ' +
+          'or launch with --password-store=gnome-libsecret, --password-store=kwallet5, or --password-store=kwallet6.'
         : 'Check that your OS keychain is configured and accessible.'
       console.warn(
         `[Auth] safeStorage encryption is not available. Authentication may fail. ${hint}`

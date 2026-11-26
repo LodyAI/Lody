@@ -99,8 +99,15 @@ Metadata idle/Presence loss is not completion; sequence is local.
   Remote identity is not authorization: the PR reconciler uses authenticated GitHub reads,
   never a product-cloud registry. Absent/unreadable remotes leave creation local.
 - Dispatch point-of-no-rollback (`createSessionResult` / `sendSessionChatResult`):
-  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. AWAIT
-  `confirmDispatchSyncedBestEffort` before transport teardown; it must NEVER throw.
+  `writeDispatchPointer` commits `latestUserMsgId` and enables execution. One-shot CLI
+  processes and cross-machine targets must AWAIT `confirmDispatchSyncedBestEffort` before
+  transport teardown so writes do not strand in a closing transport; it must NEVER throw.
+  When `resolveDaemonTarget` confirms the resident daemon's own replica, flush locally
+  (`repo.flush()`) instead because the daemon keeps syncing that replica in the background
+  and executes the turn in-process. Same-replica `acpCapability` hits are immediately
+  confirmed (`confirmed: true`), while misses and multi-writer `agentConfig`/`localProject`
+  misses run one `requireRemoteConfirmation` sync before rejecting
+  ([authority note](../../../../.agents/notes/implemented/architecture/2026-11-23-per-model-session-config-and-same-replica-flock-authority.md)).
   The durable pointer and SQLite Operation own delivery.
   Create/chat may unwind only before dispatch (`if (!dispatched)`). Never roll back
   a dispatched Session or introduce a hard-fail Streams acknowledgement.

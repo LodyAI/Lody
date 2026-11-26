@@ -1,3 +1,6 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import {
   installEmbeddedKeyringBinding,
   installEmbeddedRoostBinding,
@@ -5,6 +8,7 @@ import {
   installEmbeddedSqliteBinding
 } from './cli-native-deps.mjs'
 import { withDesktopResourceProtocols } from './desktop-protocols.mjs'
+import { validateIcns } from './validate-mac-icon.mjs'
 
 // electron-builder Arch enum (electron-builder/out/index Arch).
 const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' }
@@ -27,6 +31,20 @@ export default async function beforePack(context) {
       `Unsupported packaging arch ${String(context.arch)} for the embedded CLI sqlite binding; ` +
         `universal builds would need one binding per slice.`
     )
+  }
+  if (platform === 'darwin') {
+    // Fail packaging loudly if build/icon.icns is malformed (issue #2887):
+    // every PNG chunk must carry the pixel size its OSType slot requires.
+    const icnsPath = fileURLToPath(new URL('../build/icon.icns', import.meta.url))
+    const { problems, report } = validateIcns(icnsPath)
+    console.log(report.join('\n'))
+    if (problems.length > 0) {
+      throw new Error(
+        `build/icon.icns is invalid (${problems.length} problem(s)). ` +
+          `Regenerate with: python3 scripts/pad-mac-icon.py\n  ${problems.join('\n  ')}`
+      )
+    }
+    console.log(`[icon.icns] validated ${path.basename(icnsPath)}`)
   }
   installEmbeddedSqliteBinding({ platform, arch: archName })
   installEmbeddedNodePtyBinding({ platform, arch: archName })

@@ -4,9 +4,11 @@ import {
   buildSkillMentionItems,
   buildSkillMentionRewrites,
   getAllowedSkillMentionDirs,
+  hasProjectSkillSource,
   mergeMentionSkillState,
   selectSkillMentionCandidates,
 } from '../src/components/mentions/mention-skill-source';
+import { resolveLinkedWorkspaceGitHubRepo } from '../src/lib/session-repo';
 
 /** What the send path does with these rewrites, so the test asserts that. */
 const expandInText = (
@@ -77,6 +79,30 @@ describe('mergeMentionSkillState', () => {
 });
 
 describe('getAllowedSkillMentionDirs', () => {
+  it('offers and expands the Magpie router only for the bound builtin Codex', () => {
+    const dir = '~/.codex/skills/magpie-skills';
+    const absolutePath = '/home/test/.magpie/router/SKILL.md';
+    const items = buildSkillMentionItems([
+      {
+        scope: 'global',
+        dir,
+        skills: [skill({ name: 'magpie-skills', relativePath: dir + '/SKILL.md', absolutePath })],
+      },
+    ]);
+    const agent = { cliType: 'builtin', agentType: 'codex' } as const;
+    const magpie = { ...agent, magpieGatewayUrl: 'http://127.0.0.1:3425' };
+    const allowed = getAllowedSkillMentionDirs(magpie);
+    expect(selectSkillMentionCandidates(items, 'magpie', allowed)).toHaveLength(1);
+    expect(expandInText('$magpie-skills', items, allowed)).toBe(
+      `use /magpie-skills [Skill Path](${absolutePath})`
+    );
+    for (const other of [agent, { ...magpie, agentType: 'pi' }]) {
+      const dirs = getAllowedSkillMentionDirs(other);
+      expect(selectSkillMentionCandidates(items, 'magpie', dirs)).toEqual([]);
+      expect(expandInText('$magpie-skills', items, dirs)).toBe('$magpie-skills');
+    }
+  });
+
   it('returns no whitelist for an unregistered agent type instead of an empty one', () => {
     // An empty-but-present whitelist filters every candidate out; `null` keeps
     // them. Custom agents get generated `custom-<uuid>` types.
@@ -278,5 +304,52 @@ describe('system scope skills', () => {
     ]);
 
     expect(items.map((item) => item.scope)).toEqual(['project', 'global', 'system']);
+  });
+});
+
+describe('hasProjectSkillSource and resolveLinkedWorkspaceGitHubRepo', () => {
+  it('treats a Code Collab provider backed by a local project as a local skill source without GitHub', () => {
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        localProject: {
+          workspaceId: 'ws-1' as never,
+          machineId: 'machine-1' as never,
+          localProjectId: 'local-1' as never,
+        },
+      })
+    ).toBe(true);
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        localProject: {
+          machineId: 'machine-1' as never,
+          localProjectId: 'local-1' as never,
+        },
+      })
+    ).toBe(false);
+    expect(
+      hasProjectSkillSource({
+        kind: 'provider',
+        githubRepoFullName: 'lodyai/lody',
+      })
+    ).toBe(true);
+  });
+
+  it('resolves workspace-linked GitHub repositories case-insensitively and rejects unlinked remotes', () => {
+    const repositories = [
+      { fullName: 'LodyAI/Lody', private: true },
+      { repoFullName: 'LodyAI/Docs', private: false },
+    ];
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/lody', repositories)).toEqual({
+      fullName: 'LodyAI/Lody',
+      isPublic: false,
+    });
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/docs', repositories)).toEqual({
+      fullName: 'LodyAI/Docs',
+      isPublic: true,
+    });
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/unlinked', repositories)).toBeNull();
+    expect(resolveLinkedWorkspaceGitHubRepo('lodyai/lody', undefined)).toBeNull();
   });
 });

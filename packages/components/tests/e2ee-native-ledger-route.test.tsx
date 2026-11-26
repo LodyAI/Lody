@@ -2,6 +2,7 @@
 vi.mock('@/lib/desktop-window', () => ({ desktopWindowId: () => '' }));
 // The security-code card links to public docs; the route never opens it here.
 vi.mock('@/lib/native-browser', () => ({ openExternalUrl: async () => true }));
+import { unexpectedE2eeWorkspaceOperation } from './fixtures/e2ee-workspaces';
 import { act, createElement, Fragment, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -125,7 +126,6 @@ vi.mock('@/components/settings/e2ee-team-settings', async (importOriginal) => {
       fixture.realTeam ? createElement(actual.E2eeTeamSettingsHost, props) : null,
   };
 });
-vi.mock('@/components/e2ee/email-admission-worker', () => ({ EmailAdmissionWorker: () => null }));
 vi.mock('@/components/pages/e2ee-personal-pairing', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../src/components/pages/e2ee-personal-pairing')>();
@@ -233,6 +233,7 @@ it.each([false, true])(
     const reads: unknown[] = [];
     const leases = new Set<string>();
     fixture.port = {
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -314,6 +315,7 @@ it.each([
       );
     const fetched: string[] = [];
     fixture.port = {
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },
@@ -386,6 +388,7 @@ it.each([
 it('guides a desktop that never joined this workspace to approval and, by default, lets it start account pairing', async () => {
   const started: Array<{ pairingString?: string }> = [];
   fixture.port = {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => {
       throw new Error('unused');
     },
@@ -456,6 +459,7 @@ it('opens the local ledger with an expired renderer snapshot and offline main id
   let online = false;
   let matchedBearer = false;
   fixture.port = {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => {
       throw new Error('unused');
     },
@@ -512,6 +516,7 @@ it.each([
       session: () => fixture.session as never,
       refreshWorkspaces: async () => {},
       remote: {
+        deleteWorkspace: unexpectedE2eeWorkspaceOperation,
         create: async () => {
           throw new Error('unused');
         },
@@ -567,6 +572,7 @@ it.each([
 it('keeps E2EE identity IPC dormant for an ordinary workspace even while auth is loading', async () => {
   fixture.session.status = 'loading';
   fixture.port = {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => {
       throw new Error('unused');
     },
@@ -600,6 +606,7 @@ function displayPort(
   memberProfiles: NonNullable<PlatformE2eeWorkspaces['memberProfiles']>
 ): PlatformE2eeWorkspaces {
   return {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => {
       throw new Error('unused');
     },
@@ -2064,6 +2071,7 @@ const pairingRoute = () => {
   let registered = false;
   const claims: string[] = [];
   fixture.port = {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => {
       throw new Error('unused');
     },
@@ -2192,6 +2200,7 @@ it('opened from Settings keeps the running workspace, closes instead of navigati
   };
   const leases = new Set<string>();
   fixture.port = {
+    deleteWorkspace: unexpectedE2eeWorkspaceOperation,
     create: async () => {
       throw new Error('unused');
     },
@@ -2277,6 +2286,7 @@ it('renders automatic pairing before public describe/history settle and retries 
       hasDeviceCredential: true,
     });
     fixture.port = {
+      deleteWorkspace: unexpectedE2eeWorkspaceOperation,
       create: async () => {
         throw new Error('unused');
       },

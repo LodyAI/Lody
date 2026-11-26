@@ -1,9 +1,53 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import {
   SettingsCategoryList,
   SettingsCategoryGrid,
 } from '@/components/settings/settings-category-list';
-import { MemoryRouter } from 'react-router-dom';
+import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
+import { Provider, createStore } from 'jotai';
+import { useState, type ReactNode } from 'react';
+import { currentWorkspaceSlugAtom, userAtom } from '@/atoms';
+function CategoryStoryContext({ children }: { children: ReactNode }) {
+  const [store] = useState(() => {
+    const next = createStore();
+    next.set(currentWorkspaceSlugAtom, 'lody');
+    next.set(userAtom, {
+      id: 'settings-story-user',
+      name: 'Synthetic Settings User',
+      email: 'settings@example.invalid',
+    });
+    return next;
+  });
+  return (
+    <Provider store={store}>
+      <SettingsStoryProviders>
+        <RoutedStory>{children}</RoutedStory>
+      </SettingsStoryProviders>
+    </Provider>
+  );
+}
+
+const responsiveStyles = stylex.create({
+  firstExample: {
+    marginBlockStart: 'calc(var(--spacing) * 0)',
+    marginBlockEnd: 'calc(var(--spacing) * 8)',
+  },
+  frame: {
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderRadius: 'var(--radius-lg)',
+    overflow: 'hidden',
+  },
+});
+const storyLayout = stylex.create({
+  caption: {
+    marginBottom: 'calc(var(--spacing) * 4)',
+    fontSize: 'var(--text-lg)',
+    lineHeight: 'var(--text-lg--line-height)',
+    fontWeight: 'var(--font-weight-semibold)',
+  },
+});
 
 /**
  * SettingsCategoryList 组件的 Storybook 故事
@@ -18,9 +62,9 @@ const meta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <MemoryRouter>
+      <CategoryStoryContext>
         <Story />
-      </MemoryRouter>
+      </CategoryStoryContext>
     ),
   ],
 } satisfies Meta<typeof SettingsCategoryList>;
@@ -87,9 +131,9 @@ const gridMeta = {
   tags: ['autodocs'],
   decorators: [
     (Story) => (
-      <MemoryRouter>
+      <CategoryStoryContext>
         <Story />
-      </MemoryRouter>
+      </CategoryStoryContext>
     ),
   ],
 } satisfies Meta<typeof SettingsCategoryGrid>;
@@ -137,17 +181,17 @@ export const DarkModeGrid: StoryObj<typeof gridMeta> = {
  */
 export const ResponsiveTest: Story = {
   render: () => (
-    <div className="space-y-8">
-      <div>
-        <h3 className="text-lg font-semibold mb-4">Mobile Layout (List)</h3>
-        <div className="border rounded-lg overflow-hidden" style={{ width: '375px' }}>
+    <div>
+      <div {...stylex.props(responsiveStyles.firstExample)}>
+        <h3 {...stylex.props(storyLayout.caption)}>Mobile Layout (List)</h3>
+        <div {...stylex.props(responsiveStyles.frame)} style={{ width: '375px' }}>
           <SettingsCategoryList />
         </div>
       </div>
 
       <div>
-        <h3 className="text-lg font-semibold mb-4">Desktop Layout (Grid)</h3>
-        <div className="border rounded-lg overflow-hidden" style={{ width: '800px' }}>
+        <h3 {...stylex.props(storyLayout.caption)}>Desktop Layout (Grid)</h3>
+        <div {...stylex.props(responsiveStyles.frame)} style={{ width: '800px' }}>
           <SettingsCategoryGrid />
         </div>
       </div>

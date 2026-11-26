@@ -1,3 +1,7 @@
+import { ConvexError } from 'convex/values';
+import { WorkspaceOwnershipTransfer } from '../src/components/settings/workspace-ownership-transfer';
+import en from '../../../locales/en.json';
+import zhCN from '../../../locales/zh_CN.json';
 // @vitest-environment jsdom
 import { ClientCustodyError } from '@lody/e2ee-core/services';
 import { classifyE2eeControlFailure } from '../src/lib/e2ee-control-failure';
@@ -147,11 +151,21 @@ describe('encrypted workspace control page recovery', () => {
       value: { writeText: () => Promise.reject(new Error('denied')) },
     });
     render({ failure: { kind: 'server', code: 'bad-signature' } });
+    const code = container!.querySelector('details code');
+    expect(code?.textContent).toBe('bad-signature');
+    expect(code?.closest('details')?.open).toBe(false);
+    const paragraphs = container!.querySelectorAll('[data-failure-kind="server"] p');
+    expect(
+      [...paragraphs].find(
+        (p) => !p.closest('details') && p.textContent === 'e2ee.control.failure.server'
+      )
+    ).toBeDefined();
     await act(async () => {
       button('e2ee.control.copyDiagnostics')!.click();
       await Promise.resolve();
     });
-    expect(container!.querySelector('details')?.open).toBe(true);
+    const report = container!.querySelector('pre')?.closest('details');
+    expect(report?.open).toBe(true);
     expect(container!.textContent).toContain('lody-e2ee-workspace-diagnostics');
   });
 });
@@ -555,6 +569,112 @@ it('lets only the owner transfer ownership, after a confirmation that states the
   );
   expect(workspace.owner).toBe(member.membershipId);
   expect(document.querySelector('[data-testid="e2ee-member-transfer-dialog"]')).toBeNull();
+});
+
+describe.each([
+  ['en', en],
+  ['zh_CN', zhCN],
+] as const)('ownership transfer billing advice (%s)', (language, copy) => {
+  it.each([
+    ['workspace_transfer_active_subscription', 'workspace.transfer.errors.activeSubscription'],
+    ['workspace_transfer_payment_required', 'workspace.transfer.errors.paymentRequired'],
+  ] as const)(
+    'renders actionable advice in ordinary and encrypted dialogs for %s',
+    async (code, key) => {
+      const i18n = createTestI18n({ language });
+      i18n.addResourceBundle(language, 'translation', copy);
+      const failure = new ConvexError({ code });
+      container = document.createElement('div');
+      document.body.append(container);
+      root = createRoot(container);
+      await act(async () =>
+        root!.render(
+          withTestI18n(
+            <WorkspaceOwnershipTransfer
+              workspaceName="Synthetic"
+              currentUserId="self"
+              members={[
+                {
+                  id: 'member',
+                  userId: 'other',
+                  role: 'member',
+                  user: { id: 'other', name: 'Jordan', email: 'jordan@example.test' },
+                },
+              ]}
+              onTransfer={async () => {
+                throw failure;
+              }}
+            />,
+            i18n
+          )
+        )
+      );
+      await act(async () => (container!.querySelector('button') as HTMLButtonElement).click());
+      await act(async () => (document.querySelector('[role="combobox"]') as HTMLElement).click());
+      await act(async () => (document.querySelector('[role="option"]') as HTMLElement).click());
+      const input = document.querySelector('input[id$="-confirm"]') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+          input,
+          'Synthetic'
+        );
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      const confirm = [...document.querySelectorAll('button')].find(
+        (button) => button.textContent === i18n.t('workspace.transfer.confirm')
+      )!;
+      expect(confirm.disabled).toBe(false);
+      await act(async () => confirm.click());
+      expect(document.querySelector('[role="alert"]')?.textContent).toBe(copy[key]);
+      await act(async () => root!.render(null));
+
+      await act(async () =>
+        root!.render(
+          withTestI18n(
+            <E2eeMemberActions
+              name="Jordan"
+              member={{
+                ordinal: 2,
+                membershipId: '56'.repeat(16),
+                userId: '67'.repeat(32),
+                role: 'admin',
+                devices: [{ key: '78'.repeat(32), kind: 'personal' }],
+              }}
+              management={{
+                actorRole: 'owner',
+                remove: async () => {},
+                setRole: async () => {},
+                transfer: async () => {
+                  throw language === 'en'
+                    ? new Error(`e2ee_${code}`)
+                    : new Error('native management failed', { cause: failure });
+                },
+              }}
+              onRotationSettled={() => {}}
+            />,
+            i18n
+          )
+        )
+      );
+      await act(async () => (container!.querySelector('button') as HTMLButtonElement).click());
+      await act(async () =>
+        (document.querySelector('[data-testid="e2ee-member-transfer"]') as HTMLElement).click()
+      );
+      await act(async () =>
+        (
+          document.querySelector(
+            '[data-testid="e2ee-member-transfer-confirm"]'
+          ) as HTMLButtonElement
+        ).click()
+      );
+      expect(
+        document.querySelector('[data-testid="e2ee-member-transfer-dialog"]')?.textContent
+      ).toContain(copy[key]);
+      expect(document.querySelector('[data-testid="e2ee-member-transfer-confirm"]')).not.toBeNull();
+    }
+  );
 });
 
 describe('QR camera', () => {

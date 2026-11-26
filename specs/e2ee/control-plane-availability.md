@@ -1,6 +1,6 @@
 # Control-plane availability: abandoning unusable epochs and ledger write quotas
 
-Status: draft
+Status: approved · [approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval)
 Translation: current
 
 [中文](control-plane-availability.zh.md)
@@ -45,7 +45,7 @@ The host uses rolling one-hour/24-hour windows, initially 10/30. After validatin
 
 ### 3. Reject low-order encryption public keys at admission
 
-Ledger rules reject low-order or non-canonically encoded X25519 public keys when admitting a device or a member. This changes ledger v1 validation rules and must land before v1 is frozen for production.
+Ledger rules reject low-order or non-canonically encoded X25519 public keys when admitting a device or a member. This changes ledger v1 validation rules and must land before locking the v1 backward-compatibility baseline for production.
 
 ## Guarantees
 
@@ -63,7 +63,7 @@ Ledger rules reject low-order or non-canonically encoded X25519 public keys when
 
 ## Trade-offs considered
 
-This revision selects the following options. This task relays another agent's conclusion and provides no link to human approval of this revision, so approval status remains draft; implementation and approval are recorded separately.
+Owner Zixuan Chen (zxch3n) approved these options on 2026-11-24 ([approval record](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.md#ga-control-plane-outage-and-explicit-email-approval)); implementation and real-device acceptance are recorded separately.
 
 1. **The old-epoch write window is not extended while an epoch is stranded.** Extending it would avoid an outage while the Owner is offline, but if the withheld rotation was meant to follow a member removal, the removed member could read that much more new content. It stays at 15 minutes.
 2. **Admins can still rotate.** Restricting rotation to the Owner would remove the stranded-epoch case at its source, but then nobody could rotate after a removal while the Owner is offline. Admin rotation stays, with the abandon operation as the backstop.

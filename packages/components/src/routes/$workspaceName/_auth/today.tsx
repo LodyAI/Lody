@@ -1,10 +1,9 @@
 import { Navigate, createFileRoute } from '@tanstack/react-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { lazy, useEffect } from 'react';
-import { parseTodayDate } from '@lody/shared';
 import { todayFeatureEnabledAtom } from '@/atoms/settings';
 import { todayPinnedAtom, todayPinnedTargetAtom } from '@/atoms/sidebar-state';
-import { todayRouteOutcome } from '@/components/today/today-stream';
+import { todayRouteOutcome, validateTodaySearch } from '@/components/today/today-stream';
 import { useIsCompactDesktop } from '@/hooks/use-mobile';
 import { RouteSuspense } from '@/components/route-suspense';
 
@@ -13,15 +12,8 @@ const LazyTodayPage = lazy(async () => {
   return { default: module.TodayPage };
 });
 
-export type TodaySearch = { member?: string; date?: string };
-
 export const Route = createFileRoute('/$workspaceName/_auth/today')({
-  validateSearch: (search: Record<string, unknown>): TodaySearch => ({
-    ...(typeof search.member === 'string' && search.member ? { member: search.member } : {}),
-    ...(typeof search.date === 'string' && parseTodayDate(search.date)
-      ? { date: search.date }
-      : {}),
-  }),
+  validateSearch: validateTodaySearch,
   component: TodayRoute,
 });
 
@@ -42,7 +34,7 @@ function TodayRoute() {
   }
   return (
     <RouteSuspense>
-      <LazyTodayPage memberId={search.member} anchorDate={search.date} />
+      <LazyTodayPage memberId={search.member} anchorDate={search.date} focus={search.focus} />
     </RouteSuspense>
   );
 }

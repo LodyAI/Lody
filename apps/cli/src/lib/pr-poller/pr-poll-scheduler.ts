@@ -345,8 +345,6 @@ export class PrPollScheduler {
     } while (this.chain !== previous);
   }
 
-  // ------------------------------------------------------------------ facts
-
   /**
    * Viewing/activity only shift dueness (computed fresh on every wake), so a
    * presence change just needs a debounced wake — no state invalidation.
@@ -525,10 +523,12 @@ export class PrPollScheduler {
         activityWindowMs: config.activityWindowMs,
         highOwnerCap: config.highOwnerCap,
       });
+      const workflowOwners = runtime.handle.workflowObservationOwners?.();
+      const deliveryOwners = runtime.handle.deliveryObservationOwners?.();
       for (const entry of runtime.entries) {
-        const lane = highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
-        const workflowDemand =
-          runtime.handle.wantsWorkflowObservations?.(entry.ownerSessionId) ?? false;
+        const deliveryDemand = deliveryOwners?.has(entry.ownerSessionId) ?? false;
+        const lane = deliveryDemand || highOwners.has(entry.ownerSessionId) ? 'high' : 'low';
+        const workflowDemand = workflowOwners?.has(entry.ownerSessionId) ?? false;
         const ownerMeta = runtime.sessionMetas.get(entry.ownerSessionId)?.meta;
         const statusTargets =
           ownerMeta && workflowDemand ? collectStatusTargets(ownerMeta, true) : entry.statusTargets;
@@ -602,8 +602,6 @@ export class PrPollScheduler {
       lastAttemptAtMs: this.lastAttemptAtMs.get(key) ?? null,
     };
   }
-
-  // -------------------------------------------------------------- wake loop
 
   private enqueue(fn: () => Promise<void>): void {
     this.chain = this.chain.then(fn).catch((error: unknown) => {
@@ -944,8 +942,9 @@ export class PrPollScheduler {
         ...outcome.batch.discoveries.flatMap((item) => (item.ok ? item.prs : [])),
       ];
       const heads = new Map<string, SessionId[]>();
+      const workflowOwners = runtime.handle.workflowObservationOwners?.();
       for (const ownerId of new Set(batch.targets.map((target) => target.ownerSessionId))) {
-        if (!runtime.handle.wantsWorkflowObservations?.(ownerId)) continue;
+        if (!workflowOwners?.has(ownerId)) continue;
         const meta = await runtime.handle.readOwnerMeta(ownerId);
         if (!meta || meta.machineId !== runtime.handle.machineId || meta.isArchived) continue;
         const head = selectWorkflowHead(meta, batch.repoFullName, observations);
@@ -1527,6 +1526,7 @@ export class PrPollScheduler {
           patch.pullRequestState = plan.pullRequestState;
         }
         await runtime.handle.writeOwnerMeta(ownerSessionId, patch);
+        await runtime.handle.onPullRequestMetaWritten?.();
         this.counters.corrections += plan.changedStatusUrls.length;
         for (const url of plan.changedStatusUrls) {
           logger.debug(

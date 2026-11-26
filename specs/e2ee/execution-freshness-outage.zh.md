@@ -1,6 +1,6 @@
 # 后端故障期间的执行新鲜度
 
-Status: draft · [原批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)
+Status: approved · [批准记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#ga-控制面可用性故障窗口与邮件邀请显式审批) · [原方向记录](../../.agents/notes/implemented/architecture/2026-10-28-e2ee-spec-approval.zh.md#后端故障期间的执行新鲜度)
 Translation: current
 
 [English](execution-freshness-outage.md)
@@ -68,5 +68,5 @@ Translation: current
 
 - 实现：`apps/cli/src/lib/e2ee/execution-authorization.ts`，故障规则在 `apps/cli/src/lib/cloud-e2ee-errors.ts` 的 `ledgerReadFailure`。
 - `authority-clock.ts` 取墙钟与单调时钟流逝时间的较大值，不再有一分钟差值门槛。合成测试覆盖休眠 30 分钟、NTP 回拨 3 分钟及执行／读取窗口的精确到期边界。
-- 提示是 `lody daemon status` 显示的运行时问题，其他客户端界面还没有显示。
+- 提示是 `lody daemon status` 显示的运行时问题。按 2026-11-24 owner 决定以当前实现转正并纳入 GA，桌面端与移动端 UI 断联提示条明确延后至 Post-GA。
 - 已执行的验证：`apps/cli/tests/e2ee-runtime.test.ts`（"backend outage windows"）和 `apps/cli/tests/lody-fleet-local-catalog.test.ts`，使用合成账本和注入时钟。没有运行真实的后端故障。

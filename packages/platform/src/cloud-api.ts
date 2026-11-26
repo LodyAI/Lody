@@ -70,20 +70,27 @@ export type CloudActionFunction<Args, Result> = (args: Args) => Promise<Result>;
 export type OptionalCloudArgsOrSkip<Args> =
   Record<string, never> extends Args ? [args?: Args | 'skip'] : [args: Args | 'skip'];
 
+export type CloudQueryState<Result> = {
+  data: Result | undefined;
+  error: Error | null;
+  retry: () => void;
+};
+
 /**
  * React-facing cloud API adapter. Hook ownership stays in the cloud
  * implementation so the open platform package never imports a cloud SDK.
  */
 export interface CloudApi {
+  /** Non-throwing cloud query state: backend failures remain data instead of crashing render. */
+  useQueryState?<Args, Result>(
+    operation: CloudQuery<Args, Result>,
+    args: Args | 'skip'
+  ): CloudQueryState<Result>;
   /** Authenticated optional metadata: failures remain local to the consumer. */
   useOptionalAuthenticatedQuery?<Args, Result>(
     operation: CloudQuery<Args, Result>,
     args: Args | 'skip'
-  ): {
-    data: Result | undefined;
-    error: Error | null;
-    retry: () => void;
-  };
+  ): CloudQueryState<Result>;
   useQuery<Args, Result>(
     operation: CloudQuery<Args, Result>,
     args: Args | 'skip'

@@ -822,6 +822,48 @@ describe('turn-scoped reverse chat rejection', () => {
     expect(storedOperations()).toEqual([]);
     expect(delivered).toEqual([]);
   });
+
+  it('enriches a configured assistant author with runtime modelInfo when freezing an MCP invoking author', async () => {
+    const providerModelId = '550e8400-e29b-41d4-a716-446655440000/codex%2Fgpt-6.2-sol';
+    setInput('source-configured-turn');
+    writer.append({
+      id: 'assistant:source-configured-turn',
+      role: 'assistant',
+      timestamp: '2026-10-12T00:00:01Z',
+      author: {
+        v: 1,
+        kind: 'agent',
+        sessionId: requesterSession.id,
+        turnId: 'source-configured-turn',
+        name: 'Lody Agent',
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        model: { id: providerModelId, source: 'configured' },
+        reasoningEffort: 'medium',
+      },
+      modelInfo: { modelId: providerModelId, name: 'GPT-6.2 Sol' },
+      items: [],
+      fileDiff: [],
+    });
+    await startSessionChatOperation({
+      operationId: 'enriched-author-op',
+      sessionId: targetSession.id,
+      prompt: 'Check author metadata',
+    });
+    const accepted = store.get(requesterSession.id as SessionId, 'enriched-author-op');
+    expect(accepted.author).toMatchObject({
+      kind: 'agent',
+      sessionId: requesterSession.id,
+      turnId: 'source-configured-turn',
+      name: 'Lody Agent',
+      reasoningEffort: 'medium',
+      model: {
+        id: providerModelId,
+        name: 'GPT-6.2 Sol',
+        source: 'runtime',
+      },
+    });
+  });
 });
 
 describe('Machine catalog retry guidance and accepted chat recovery', () => {
@@ -940,6 +982,26 @@ describe('chat Machine offline verdicts', () => {
 
     const result = await startSessionChatOperation({
       operationId: 'offline-before-materialization',
+      sessionId: remoteSession.id,
+      prompt: 'continue',
+    });
+
+    expect(result).toEqual({
+      state: 'active',
+      items: [expect.objectContaining({ status: 'active', inputDurable: false })],
+    });
+  });
+
+  it('hands off an accepted chat for daemon replay on post-accept transient sync failure', async () => {
+    mocks.sendSessionChatResult.mockRejectedValue(
+      new WorkspaceSyncUnavailableError({
+        message: 'Document sync failed: ECONNRESET',
+        cause: new Error('ECONNRESET'),
+      })
+    );
+
+    const result = await startSessionChatOperation({
+      operationId: 'sync-error-after-accept',
       sessionId: remoteSession.id,
       prompt: 'continue',
     });

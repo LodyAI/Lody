@@ -36,6 +36,12 @@ export const colors = stylex.defineVars({
   gray6: { default: 'hsl(0 0% 97.5%)', [DARK]: 'hsl(0 0% 13.7%)' },
 });
 
+/** Contrast for non-interactive content over external images, independent of the UI palette. */
+export const media = stylex.defineVars({
+  scrim: 'hsl(0 0% 0% / 0.6)',
+  label: 'hsl(0 0% 100%)',
+});
+
 export const shadow = stylex.defineVars({
   // A recess, lit from the same light as everything raised: a short shadow
   // inside the top edge, one inner hairline, and the light catching the lower

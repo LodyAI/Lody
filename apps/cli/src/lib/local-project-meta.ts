@@ -6,6 +6,7 @@ import {
   getServerNow,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  type LocalProjectGitSummary,
   type LocalProjectId,
   type LocalProjectMeta,
   type MachineDeleteLocalProjectCommand,
@@ -120,31 +121,71 @@ export async function upsertMachineLocalProject(
     sync?: MachineFlockSyncScheduler;
     reason?: string;
     refreshGitHubRemote?: boolean;
+    observedGitSummary?: LocalProjectGitSummary;
     standaloneVisible?: boolean;
   } = {}
 ): Promise<void> {
   const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
   const rootPath = canonicalLocalProjectRootPath(project.rootPath);
-  const observed = options.refreshGitHubRemote
-    ? existsSync(rootPath)
-      ? await localProjectsLegacy.getLocalProjectGitHubRepoAtRootPath(rootPath)
-      : null
-    : undefined;
+  let observedSummary: LocalProjectGitSummary | null | undefined = options.observedGitSummary;
+  if (observedSummary === undefined && options.refreshGitHubRemote) {
+    if (existsSync(rootPath)) {
+      try {
+        observedSummary = await localProjectsLegacy.getLocalProjectGitSummaryAtRootPath(rootPath);
+      } catch {
+        observedSummary = null;
+      }
+    } else {
+      observedSummary = null;
+    }
+  }
   const current = getMachineFlockLocalProjects(
     readMachineFlockRowsFromFlock(handle.flock, { families: ['localProject'] })
   )[project.id];
-  const canonicalProject = {
+  const githubRepoFullName =
+    observedSummary !== undefined
+      ? observedSummary?.git
+        ? (observedSummary.githubRepoFullName ?? undefined)
+        : undefined
+      : current
+        ? current.githubRepoFullName
+        : project.githubRepoFullName;
+  const git =
+    observedSummary !== undefined
+      ? observedSummary === null
+        ? undefined
+        : observedSummary.git
+      : (current?.git ?? project.git);
+  const defaultBranch =
+    observedSummary !== undefined
+      ? observedSummary?.git
+        ? observedSummary.defaultBranch
+        : undefined
+      : current && 'defaultBranch' in current
+        ? current.defaultBranch
+        : project.defaultBranch;
+  const currentBranch =
+    observedSummary !== undefined
+      ? observedSummary?.git
+        ? observedSummary.currentBranch
+        : undefined
+      : current && 'currentBranch' in current
+        ? current.currentBranch
+        : project.currentBranch;
+  const canonicalProject: LocalProjectMeta = {
     ...project,
     rootPath,
     standaloneVisible:
       options.standaloneVisible ?? current?.standaloneVisible ?? project.standaloneVisible,
-    githubRepoFullName:
-      observed !== undefined
-        ? (observed ?? undefined)
-        : current
-          ? current.githubRepoFullName
-          : project.githubRepoFullName,
+    githubRepoFullName,
+    git,
+    defaultBranch,
+    currentBranch,
   };
+  if (canonicalProject.githubRepoFullName === undefined) delete canonicalProject.githubRepoFullName;
+  if (canonicalProject.git === undefined) delete canonicalProject.git;
+  if (canonicalProject.defaultBranch === undefined) delete canonicalProject.defaultBranch;
+  if (canonicalProject.currentBranch === undefined) delete canonicalProject.currentBranch;
   const changed = writeMachineFlockRowToFlock(
     handle.flock,
     {
@@ -172,13 +213,23 @@ export async function reconcileMachineLocalProjectRootPaths(
   workspaceId: WorkspaceId,
   machineId: MachineId,
   sync: MachineFlockSyncScheduler,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: { verifyProjectIdentity?: boolean } = {}
 ): Promise<void> {
   await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
     const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
     for (const project of Object.values(projects)) {
       if (signal?.aborted) return;
       const canonicalRootPath = canonicalLocalProjectRootPath(project.rootPath);
+      if (options.verifyProjectIdentity) {
+        try {
+          if (localProjectsLegacy.createLocalProjectId(canonicalRootPath) !== project.id) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
       await upsertMachineLocalProject(
         repo,
         workspaceId,
@@ -191,6 +242,93 @@ export async function reconcileMachineLocalProjectRootPaths(
         { sync, reason: 'local-project-path-reconcile', refreshGitHubRemote: true }
       );
     }
+  });
+}
+
+export async function reconcileMissingLocalProjectGitSummaries(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  sync: MachineFlockSyncScheduler,
+  options: { verifyProjectIdentity?: boolean; signal?: AbortSignal } = {}
+): Promise<void> {
+  await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
+    const projects = await readMachineLocalProjects(repo, workspaceId, machineId);
+    for (const project of Object.values(projects)) {
+      if (options.signal?.aborted) return;
+      if (typeof project.git === 'boolean') continue;
+      const canonicalRootPath = canonicalLocalProjectRootPath(project.rootPath);
+      if (!existsSync(canonicalRootPath)) continue;
+      if (options.verifyProjectIdentity) {
+        try {
+          if (localProjectsLegacy.createLocalProjectId(canonicalRootPath) !== project.id) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
+      await upsertMachineLocalProject(
+        repo,
+        workspaceId,
+        machineId,
+        {
+          ...project,
+          rootPath: canonicalRootPath,
+        },
+        undefined,
+        { sync, reason: 'local-project-git-summary', refreshGitHubRemote: true }
+      );
+    }
+  });
+}
+
+export async function updateMachineLocalProjectGitSummaryFields(
+  repo: LoroRepo,
+  workspaceId: WorkspaceId,
+  machineId: MachineId,
+  localProjectId: LocalProjectId,
+  patch: {
+    git: boolean;
+    defaultBranch?: string | null;
+    currentBranch?: string | null;
+    githubRepoFullName?: string | null;
+  },
+  sync: MachineFlockSyncScheduler
+): Promise<void> {
+  await withMachineCatalogWriteLock(getMachineRoomId(machineId), async () => {
+    const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
+    const current = getMachineFlockLocalProjects(
+      readMachineFlockRowsFromFlock(handle.flock, { families: ['localProject'] })
+    )[localProjectId];
+    if (!current) return;
+    const next: LocalProjectMeta = {
+      ...current,
+      git: patch.git,
+    };
+    if (!patch.git) {
+      delete next.defaultBranch;
+      delete next.currentBranch;
+      delete next.githubRepoFullName;
+    } else {
+      if (patch.defaultBranch !== undefined) next.defaultBranch = patch.defaultBranch;
+      if (patch.currentBranch !== undefined) next.currentBranch = patch.currentBranch;
+      if (patch.githubRepoFullName !== undefined) {
+        if (patch.githubRepoFullName) next.githubRepoFullName = patch.githubRepoFullName;
+        else delete next.githubRepoFullName;
+      }
+    }
+    const changed = writeMachineFlockRowToFlock(
+      handle.flock,
+      {
+        key: machineFlockKeys.localProject(localProjectId),
+        value: next,
+      },
+      getServerNow()
+    );
+    if (!changed) return;
+    await repo.flush();
+    sync.markMachineFlockDocDirty(machineId, { reason: 'local-project-git-summary-refresh' });
   });
 }
 

@@ -1318,6 +1318,8 @@ describe('MessageHandler ACP batching', () => {
           source: 'active_turn',
         });
         expect(h.host.sessionActivePresence.has(h.sessionId)).toBe(true);
+        expect(h.host.sessionActivePresence.getStatus(h.sessionId)).toEqual({ type: 'running' });
+        expect((await h.doc.getMetaState())?.status).toEqual({ type: 'running' });
         h.emitText('replacement ');
         h.emitText('output');
         await h.host.flushACPUpdatesNow(h.sessionId);
@@ -1646,20 +1648,58 @@ describe('MessageHandler ACP batching', () => {
   });
 
   it.each([
-    { reportsSessionActivity: true, restartsClock: true },
-    { reportsSessionActivity: false, restartsClock: false },
+    {
+      name: 'activity-reporting agent resets GC clock on late output without synthesizing late presence',
+      reportsSessionActivity: true,
+      update: {
+        sessionUpdate: 'agent_message_chunk' as const,
+        content: { type: 'text' as const, text: 'after the background task' },
+      },
+      restartsClock: true,
+      activatesLatePresence: false,
+    },
+    {
+      name: 'non-activity-reporting agent resets GC clock and activates bounded late presence on visible late output',
+      reportsSessionActivity: false,
+      update: {
+        sessionUpdate: 'tool_call' as const,
+        toolCallId: 'late-tool-1',
+        title: 'Edit file',
+        status: 'in_progress' as const,
+      },
+      restartsClock: true,
+      activatesLatePresence: true,
+    },
+    {
+      name: 'non-activity-reporting agent ignores non-visible late metadata updates for GC clock and presence',
+      reportsSessionActivity: false,
+      update: {
+        sessionUpdate: 'available_commands_update' as const,
+        availableCommands: [{ name: 'help', description: 'Help' }],
+      },
+      restartsClock: false,
+      activatesLatePresence: false,
+    },
   ])(
-    'post-turn output restarts the GC idle clock only for activity-reporting agents (%o)',
-    async ({ reportsSessionActivity, restartsClock }) => {
+    'post-turn output policy: $name',
+    async ({ reportsSessionActivity, update, restartsClock, activatesLatePresence }) => {
       const sessionId = 'late-output-activity' as SessionId;
       const { repo, handler, sessionManagerMock } = await createHandlerHarness([sessionId]);
       sessionManagerMock.getSession.mockImplementation(
-        () => ({ agentClient: { reportsSessionActivity: () => reportsSessionActivity } }) as never
+        () =>
+          ({
+            hasLiveAgentProcess: () => true,
+            agentClient: {
+              reportsSessionActivity: () => reportsSessionActivity,
+              getNativeWork: () => null,
+            },
+          }) as never
       );
       const host = handler as unknown as {
         beginConversationTurn(sessionId: SessionId): string;
         enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
         finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+        clearSessionActivePresence(sessionId: SessionId): void;
       };
       const text = (value: string): AcpSessionNotification => ({
         sessionId,
@@ -1675,10 +1715,20 @@ describe('MessageHandler ACP batching', () => {
         expect(handler.getLastActivity(sessionId)).toBe(beforeOutput);
         await host.finalizeACPState(sessionId, turnId);
 
-        // Claude was woken later by a finished background shell.
+        // Agent was woken later by a finished background task or subagent.
         await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
-        host.enqueueACPUpdate(sessionId, text('after the background task'));
+        host.enqueueACPUpdate(sessionId, { sessionId, update });
         expect(handler.getLastActivity(sessionId)).toBe(restartsClock ? Date.now() : beforeOutput);
+        expect(handler.getSessionMonitorState(sessionId).status).toBe(
+          activatesLatePresence ? 'running' : 'idle'
+        );
+        expect(handler.getNativeWork(sessionId)).toBe(activatesLatePresence ? 'running' : null);
+
+        if (activatesLatePresence) {
+          host.clearSessionActivePresence(sessionId);
+          expect(handler.getSessionMonitorState(sessionId).status).toBe('idle');
+          expect(handler.getNativeWork(sessionId)).toBeNull();
+        }
       } finally {
         await destroyRepoOnRealTimers(repo);
       }
@@ -1964,64 +2014,75 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it('routes custom ACP usage with its accounting identity and user attribution', async () => {
-    vi.useRealTimers();
-    const sessionId = 'custom-usage' as SessionId;
-    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
-    const doc = docs.get(sessionId);
-    if (!doc) throw new Error('Missing session doc');
-    const recorded: unknown[] = [];
-    Object.assign(handler, {
-      usageTrackingService: {
-        recordSessionUsageUpdate: (input: unknown) => recorded.push(input),
-        flushSessionUsage: async () => {},
-      },
-    });
-    const host = handler as unknown as {
-      handleUsageUpdate(
-        sessionId: SessionId,
-        accountingId: string,
-        update: SessionUsageUpdate
-      ): Promise<void>;
-    };
-    const usage = { inputTokens: 12, outputTokens: 3, cacheReadInputTokens: 0, costUSD: 0.42 };
-    const update = { sessionId: 'native', usage, modelUsage: { model: usage } };
-    try {
-      await repo.upsertDocMeta(getSessionRoomId(sessionId), {
-        id: sessionId,
-        machineId: 'm-1',
-        userId: 'u-1',
-        cliType: 'custom',
-        agentType: 'custom-123e4567-e89b-12d3-a456-426614174000',
-      });
-      await doc.sessionData.commands.applyHistoryAction({
-        kind: 'upsert-turn',
-        turn: {
-          id: 'user-turn',
-          role: 'user',
-          userId: 'author',
-          status: 'handled',
-          read: true,
-          timestamp: '2026-10-17T00:00:00.000Z',
-          items: [],
-        } as SessionHistoryInput,
-      });
-      await host.handleUsageUpdate(sessionId, 'native:scope:one', update);
-      expect(recorded).toEqual([
-        {
-          workspaceId: 'ws-1',
-          sessionId,
-          acpSessionId: 'native:scope:one',
-          userId: 'author',
-          machineId: 'm-1',
-          cliType: 'custom',
-          update,
+  it.each(['plaintext', 'e2ee-own', 'e2ee-other'] as const)(
+    'routes custom ACP usage with its accounting identity and safe user attribution (%s)',
+    async (mode) => {
+      vi.useRealTimers();
+      const sessionId = 'custom-usage' as SessionId;
+      const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+      const doc = docs.get(sessionId);
+      if (!doc) throw new Error('Missing session doc');
+      const recorded: unknown[] = [];
+      Object.assign(handler, {
+        encryptedAttachments: mode !== 'plaintext',
+        cloudPort: createTestCloudPort({
+          identity: { userId: mode === 'e2ee-other' ? 'other' : 'author' },
+        }),
+        usageTrackingService: {
+          recordSessionUsageUpdate: (input: unknown) => recorded.push(input),
+          flushSessionUsage: async () => {},
         },
-      ]);
-    } finally {
-      await destroyRepoOnRealTimers(repo);
+      });
+      const host = handler as unknown as {
+        handleUsageUpdate(
+          sessionId: SessionId,
+          accountingId: string,
+          update: SessionUsageUpdate
+        ): Promise<void>;
+      };
+      const usage = { inputTokens: 12, outputTokens: 3, cacheReadInputTokens: 0, costUSD: 0.42 };
+      const update = { sessionId: 'native', usage, modelUsage: { model: usage } };
+      try {
+        await repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          id: sessionId,
+          machineId: 'm-1',
+          userId: 'u-1',
+          cliType: 'custom',
+          agentType: 'custom-123e4567-e89b-12d3-a456-426614174000',
+        });
+        await doc.sessionData.commands.applyHistoryAction({
+          kind: 'upsert-turn',
+          turn: {
+            id: 'user-turn',
+            role: 'user',
+            userId: 'author',
+            status: 'handled',
+            read: true,
+            timestamp: '2026-10-17T00:00:00.000Z',
+            items: [],
+          } as SessionHistoryInput,
+        });
+        await host.handleUsageUpdate(sessionId, 'native:scope:one', update);
+        expect(recorded).toEqual(
+          mode === 'e2ee-other'
+            ? []
+            : [
+                {
+                  workspaceId: 'ws-1',
+                  sessionId,
+                  acpSessionId: 'native:scope:one',
+                  userId: 'author',
+                  machineId: 'm-1',
+                  cliType: 'custom',
+                  update,
+                },
+              ]
+        );
+      } finally {
+        await destroyRepoOnRealTimers(repo);
+      }
     }
-  });
+  );
 
   it('records each turn its own token usage deltas, including late reports', async () => {
     vi.useRealTimers();
@@ -2894,7 +2955,7 @@ describe('MessageHandler ACP batching', () => {
           ok: true,
           ownerSessionId: sessionId,
           workspaceRoot: '/tmp',
-          allChangesBaseBranch: 'main',
+          allChanges: { scope: 'branch', baseBranch: 'main' },
         })
         .mockRejectedValueOnce(new Error('transient persistence failure'))
         .mockResolvedValueOnce({ ok: false, code: 'workspace_unavailable' });
@@ -3087,4 +3148,116 @@ describe('MessageHandler ACP batching', () => {
       await destroyRepoOnRealTimers(repo);
     }
   }, 120_000);
+
+  it('settles non-sessionActivity live agents via lateActivity and notifies idle on native work clear', async () => {
+    const sessionId = 'session-native-settle' as SessionId;
+    const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    let liveProcess = true;
+    let reportsActivity = false;
+    let nativeWork: 'running' | 'background' | null = null;
+    const sessionStub = {
+      hasLiveAgentProcess: () => liveProcess,
+      agentClient: {
+        reportsSessionActivity: () => reportsActivity,
+        getNativeWork: () => nativeWork,
+      },
+    };
+    const { handler, repo, workspaceDocument } = await createHandlerHarness(
+      [sessionId],
+      () =>
+        ({
+          on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+            const list = listeners.get(event) ?? [];
+            list.push(listener);
+            listeners.set(event, list);
+          }),
+          setRequestPermissionHandler: vi.fn(),
+          getSession: vi.fn((id: SessionId) => (id === sessionId ? sessionStub : null)),
+          getPendingSession: vi.fn(() => undefined),
+          cleanUp: vi.fn(async () => {}),
+        }) as unknown as SessionManager
+    );
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'm-1',
+      userId: 'u-1',
+      cliType: 'builtin',
+      agentType: 'antigravity',
+      isArchived: false,
+    };
+    (workspaceDocument as Record<string, unknown>).peekSessionDoc = vi.fn(() => undefined);
+    (workspaceDocument.repo as Record<string, unknown>).listDoc = vi.fn(async () => [
+      { docId: getSessionRoomId(sessionId), meta: sessionMeta },
+    ]);
+    workspaceDocument.repo.getDocMeta.mockImplementation(async (roomId?: string) =>
+      roomId === getSessionRoomId(sessionId) ? { meta: sessionMeta } : undefined
+    );
+
+    try {
+      (
+        handler as unknown as {
+          executionService: { setOperationInbox(inbox: unknown): void };
+        }
+      ).executionService.setOperationInbox({});
+      const authority = handler.getAutomationSessionAuthority();
+      const woken: SessionId[] = [];
+      authority.setObservations({
+        stage: () => {},
+        turn: async () => {},
+        capacity: async () => {},
+        idle: (id) => woken.push(id),
+      });
+
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+
+      const presence = (
+        handler as unknown as {
+          sessionActivePresence: SessionActivePresenceControllerLegacy;
+        }
+      ).sessionActivePresence;
+      presence.native.noteLateActivity(sessionId);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'no',
+        reason: 'native_work_active',
+      });
+      presence.native.clearLateActivity(sessionId);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+
+      reportsActivity = true;
+      nativeWork = 'background';
+      for (const listener of listeners.get('onNativeWorkChanged') ?? []) {
+        listener(sessionId, 'background');
+      }
+      expect(woken).toEqual([]);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'no',
+        reason: 'native_work_active',
+      });
+
+      nativeWork = null;
+      for (const listener of listeners.get('onNativeWorkChanged') ?? []) {
+        listener(sessionId, null);
+      }
+      expect(woken).toEqual([sessionId]);
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+
+      nativeWork = 'running';
+      liveProcess = false;
+      expect(await authority.settled(sessionId, 'u-1')).toEqual({
+        value: 'yes',
+        reason: 'group_settled',
+      });
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
 });

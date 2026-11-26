@@ -1,10 +1,10 @@
+import { cn } from '@/lib/utils';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { space, radius } from '@lody/ui/tokens/scales.stylex';
 import { tabPillStyles } from '../shared/tab-pill-strip';
 import { Plus, X, History, Undo2, FileDiff, Hand, ArchiveRestore } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
@@ -106,6 +106,7 @@ interface SessionTabBarProps {
 const savingPulse = stylex.keyframes({ '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } });
 
 const styles = stylex.create({
+  workingSpinner: { color: 'hsl(var(--tab-active-accent) / 1)' },
   tab: {
     position: 'relative',
     display: 'flex',
@@ -123,7 +124,7 @@ const styles = stylex.create({
     fontSize: '0.9em',
     cursor: 'default',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
   },
@@ -262,7 +263,7 @@ const styles = stylex.create({
       },
     },
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     backgroundColor: {
@@ -329,7 +330,7 @@ const styles = stylex.create({
     textAlign: 'left',
     fontSize: '0.9em',
     transitionProperty:
-      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke',
     transitionDuration: '150ms',
     transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
     backgroundColor: {
@@ -514,7 +515,10 @@ function TabContent({
         {isWaiting ? (
           <Hand {...stylex.props(styles.waitingIcon)} />
         ) : isWorking ? (
-          <Spinner className="h-3 w-3 text-tab-active-accent" />
+          <Spinner
+            diameter="calc(var(--spacing) * 3)"
+            className={stylex.props(styles.workingSpinner).className}
+          />
         ) : isUnread ? (
           <span
             data-session-tab-unread=""
@@ -1167,7 +1171,7 @@ export function ClosedTabsPopover({
           {t('sessions.tabs.closedTabs', 'Closed conversations')}
         </Tooltip.Content>
       </Tooltip.Root>
-      <Popover.Content align="end" className="w-72 p-0" sideOffset={4}>
+      <Popover.Content align="end" padding="none" width="calc(var(--spacing) * 72)" sideOffset={4}>
         <div {...stylex.props(styles.popoverHeader)}>
           <p {...stylex.props(styles.popoverTitle)}>
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
@@ -1219,7 +1223,7 @@ function ClosedConversationStatus({ session }: { session: SessionMeta }) {
         aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
       />
     );
-  if (status) return <Spinner className="h-3 w-3" />;
+  if (status) return <Spinner diameter="calc(var(--spacing) * 3)" />;
   if (closedSessionHasUnreadMessages(session))
     return (
       <span

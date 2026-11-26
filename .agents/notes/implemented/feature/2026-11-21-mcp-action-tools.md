@@ -21,7 +21,7 @@ follow that sentence, or read action help as reliably as full schemas, is unmeas
 ## Decision
 
 - **Action tools.** `lody_session_manage` (rename, archive, share, `pr_link`,
-  `pr_unlink`, `pr_list`), `lody_schedule` (propose, pause), `lody_agent_role`
+  `pr_unlink`, `pr_list`), `lody_schedule` (propose, propose_edit, pause), `lody_agent_role`
   (create, update), `lody_operation` (get, batch, list) and `lody_catalog`
   (machines, projects, mcp_servers, agent_configs, agent_roles, schedules). Each
   action keeps its previous schema as the validator of `arguments`. High-frequency

@@ -36,8 +36,9 @@ This does not disable RPC to an already authorized paired machine. Optional
 features must report unsupported instead of substituting ordinary transports.
 
 Tests cover account changes during I/O, original/scope checks, relay projections,
-history pagination, grants and SDK client compatibility. These synthetic boundary
-tests do not establish installed-app, native Keychain/Keystore or device acceptance.
+history pagination, grants and SDK client compatibility. Injected OS-labelled
+custody doubles validate host composition. Native Keychain/Keystore and
+installed-app acceptance require device testing.
 Use test-build for product acceptance; stable publishing is outside this task.
 
 `personalEntry({ run, pins, ports, ledgerRecords })` is the application owner.
@@ -48,6 +49,8 @@ retains the complete public `PersonalCloseIncomplete.owner` until actual settlem
 `awaitRetirements` lets recovery wait for retired entries without blocking unrelated
 workspaces. Applications supply their own Effect executor and reuse their existing
 authenticated cloud client.
+An approved member can check for workspace keys using the saved join request.
+A failed read or key installation surfaces its error after releasing the reader.
 
 `personalEntryPins(databaseName)` retains verified public desktop offers and routing
 progress. A ready phase never grants access; the public host rechecks approval and
@@ -67,6 +70,13 @@ file creates an empty vault only: the user must save and reimport the exact file
 before ciphertext upload. It does not enroll any workspace or authorize a device.
 Reads may open a retired vault whose recovery identity is still valid; mutations
 require the current vault. Mobile and Web entry points remain thin fixed-namespace wrappers.
+Recovery files carry the signed-in site's canonical origin
+([`recoveryServiceLocator`](../e2ee-client/README.md#recovery-service-locator)) through the
+optional `serviceLocator` option. Omitted, it is the page's HTTP(S) origin, which suits the
+hosted and self-hosted Web client; the mobile wrapper passes `VITE_SITE_URL`. Without a usable
+origin every command refuses as `disabled`.
+Recovery screens receive distinct errors for service outages, local storage
+failures, concurrent backup changes and invalid recovery credentials.
 
 `makeRecoveryWorkspaces` is the shared per-workspace setup and restore engine.
 The caller passes `platform: 'web' | 'mobile'`, the passkey port, and the closed
@@ -88,3 +98,40 @@ Web recovery uses `personalEntryRecovery` on the existing facade. Its setup comm
 borrows one labelled reader and releases exactly that label; other readers and
 independent workspaces remain usable. Restore reuses the original offer/identity,
 and only a verified committed outcome makes the entry pin ready.
+
+## Transport composition
+
+The facade in [`src/entry.ts`](src/entry.ts) exposes the iroh methods when the
+wrapper supplies the native port. Route selection uses those methods to detect
+iroh support. The [mobile host test](../../apps/mobile-capacitor/tests/e2ee/mobile-host.test.ts)
+exercises the path from the facade to the native plugin boundary.
+
+## Remote CLI machines
+
+Official cloud hosts pass `remoteMachineEndpoints: { deploymentUrl, ingressUrl }`
+to `personalEntry` and forward its `ports` input to `personalCloudHostPorts`.
+Only then does the facade expose the four platform remote-machine pairing methods.
+Mobile supplies its existing build-time deployment/server origins; the private Web
+composition must pass the same origins when adopting this revision. Missing or
+invalid origins never affect ordinary workspace opens; creating a command refuses them.
+
+The portable workflow in `@lody/e2ee-client/remote-machine` uses core possession,
+credential-binding, ledger-command and key-distribution primitives. The authenticated
+network adapter calls `e2eeMachinePairing.begin/inspect/authorizeExisting/cancel`
+and the existing ledger append action. Location is untrusted display metadata.
+A locally retained, verified ledger and active owner/admin/member personal device
+are required; guest or lost access cannot start or approve.
+
+The per-installation `:remote-machine:` IndexedDB journal preserves the exact signed
+command, claimed public material and admission request before dispatch. Atomic CAS
+rejects concurrent stale writers. Retry rechecks retained signatures and current
+membership, resubmits the same admission and reads it back from verified local
+history before delivering the current epoch key. A terminal server cancellation
+archives originals only after verified settlement or its explicit no-reservation
+receipt. Closing/logout preserves the journal; reopening Begin returns the same
+command and Resume finishes an interrupted delivery.
+
+[Pairing ownership and service boundaries](../../.agents/notes/proposed/feature/2026-10-27-e2ee-remote-machine-pairing.md)
+explain why admission and machine-confirmed readiness remain separate. Tests use
+real signatures, ledger replay, IndexedDB transactions and HPKE with synthetic
+network boundaries; iOS 16.4 device and deployed Web acceptance remain separate.

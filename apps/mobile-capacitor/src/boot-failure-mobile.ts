@@ -1,7 +1,11 @@
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
-import { renderBootFailure, type BootFailureKind } from '@lody/components/lib/boot-failure';
+import {
+  renderBootFailure,
+  usageSharingAllowed,
+  type BootFailureKind,
+} from '@lody/components/lib/boot-failure';
 import { updateNativeAppInfo } from '@lody/components/lib/native-app-info';
 
 type CachedAppInfo = {
@@ -9,6 +13,7 @@ type CachedAppInfo = {
   build?: string;
   last_native_reset_outcome?: 'success' | 'fallback';
   native_reset_credential_cleanup_failed?: boolean;
+  native_reset_custody_cleanup_failed?: boolean;
 };
 
 // Spec §8f.2 mobile failure_kind taxonomy: chunk_load / offline / unknown.
@@ -68,6 +73,7 @@ function getMobileBuildInfo(): Record<string, string> {
   if (app.build) info['App build'] = app.build;
   if (app.last_native_reset_outcome) info['Last native reset'] = app.last_native_reset_outcome;
   if (app.native_reset_credential_cleanup_failed) info['Native credential cleanup'] = 'failed';
+  if (app.native_reset_custody_cleanup_failed) info['Native key cleanup'] = 'failed';
   return info;
 }
 
@@ -95,75 +101,28 @@ export function classifyMobileBootFailureKind(error: unknown): MobileBootFailure
   return 'unknown';
 }
 
-// Map the mobile taxonomy onto the shared BootFailureKind used by the
-// app/boot_failed beacon so both events agree on the platform-correct kind.
 function toSharedBootFailureKind(kind: MobileBootFailureKind): BootFailureKind {
   if (kind === 'chunk_load') return 'module_load';
   if (kind === 'offline') return 'offline';
   return 'unknown';
 }
 
-const MOBILE_BOOT_INSTALL_ID_KEY = 'lody_install_id';
-
-function resolveMobileInstallId(): string {
-  if (typeof window === 'undefined') return 'anonymous';
-  const nativeInfo = window.__LODY_APP_INFO__;
-  if (nativeInfo?.install_id) return nativeInfo.install_id;
-  try {
-    const existing = window.localStorage.getItem(MOBILE_BOOT_INSTALL_ID_KEY);
-    if (existing) return existing;
-    const generated =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(MOBILE_BOOT_INSTALL_ID_KEY, generated);
-    return generated;
-  } catch {
-    return 'anonymous';
-  }
-}
-
-// Pre-React `mobile/boot_failed` beacon (spec §8f.2, P0, tier A). The PostHog
-// SDK is NOT mounted when boot fails, so we POST the capture payload directly
-// via sendBeacon (survives the imminent reload) with a fetch keepalive
-// fallback. Mirrors the shared app/boot_failed beacon (same key/host/install
-// id) so the two events join. Fire-and-forget; failures are swallowed so an
-// analytics beacon can never compound the boot failure.
-function postMobileBootFailedBeacon(failureKind: MobileBootFailureKind, error: unknown): void {
+function postMobileBootFailedBeacon(): void {
   try {
     const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
     const key = env.VITE_PUBLIC_POSTHOG_KEY;
-    if (!key) return;
+    if (!usageSharingAllowed() || env.VITE_LODY_PLATFORM !== 'cloud' || !key) return;
     const host = env.VITE_PUBLIC_POSTHOG_HOST?.trim().replace(/\/$/, '');
     if (!host) return;
-
-    const installId = resolveMobileInstallId();
-    const app = getCachedAppInfo();
-    let platform = 'mobile';
-    try {
-      platform = Capacitor.getPlatform();
-    } catch {
-      // Capacitor unavailable; keep 'mobile'
-    }
 
     const payload = {
       api_key: key,
       event: 'mobile/boot_failed',
-      distinct_id: installId,
+      distinct_id: crypto.randomUUID(),
       properties: {
         // Anonymous pre-auth beacon: do not create/mutate a person profile.
         $process_person_profile: false,
-        client_ts_ms: Date.now(),
-        failure_kind: failureKind,
         platform: 'mobile',
-        native_platform: platform,
-        error_type: error instanceof Error ? 'Error' : typeof error,
-        is_online: typeof navigator !== 'undefined' ? navigator.onLine : null,
-        app_version: app.version ?? null,
-        app_build: app.build ?? null,
-        install_id: installId,
-        last_native_reset_outcome: app.last_native_reset_outcome ?? null,
-        native_reset_credential_cleanup_failed: app.native_reset_credential_cleanup_failed ?? null,
       },
     };
 
@@ -225,24 +184,18 @@ export function computeMobileHint(error: unknown): string {
 
 /**
  * Styled, copy/reload-capable boot-failure UI for the Capacitor shell. Reuses
- * the shared pure-DOM renderer (no React/Tailwind dependency) so it works even
+ * the shared pure-DOM renderer (no React/stylesheet dependency) so it works even
  * when the app bundle has failed to mount. Registered with the inline boot guard
  * in index.html, which calls it on any unrecoverable boot failure.
  */
 export function showMobileBootFailure(root: HTMLElement, error: unknown): void {
   const mobileKind = classifyMobileBootFailureKind(error);
 
-  // mobile/boot_failed (spec §8f.2, P0): mobile-specific beacon with the
-  // chunk_load/offline/unknown taxonomy, fired before the React SDK exists.
-  postMobileBootFailedBeacon(mobileKind, error);
+  postMobileBootFailedBeacon();
 
   renderBootFailure(root, error, {
     hint: computeMobileHint(error),
     buildInfo: getMobileBuildInfo(),
-    // Tag the shared app/boot_failed beacon with the correct platform + kind so
-    // the cross-shell boot-failure funnel attributes mobile failures correctly
-    // (without it the shared beacon defaults to platform='web').
-    platform: 'mobile',
     failureKind: toSharedBootFailureKind(mobileKind),
     // Default onReload (window.location.reload) re-runs the boot path in the
     // WebView, which is what we want on both iOS and Android.

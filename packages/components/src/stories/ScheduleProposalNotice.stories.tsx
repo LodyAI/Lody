@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useMemo } from 'react';
 import { Provider, createStore } from 'jotai';
@@ -9,6 +10,7 @@ import {
   getSessionRoomId,
   type AgentConfigMeta,
   type MachineMeta,
+  type ScheduleEditProposalMeta,
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
@@ -18,7 +20,18 @@ import {
   sessionMetaCacheAtom,
 } from '@/atoms/doc-meta';
 import { Tooltip } from '@lody/ui/tooltip';
-import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
+import {
+  ScheduleEditProposalNotice,
+  ScheduleProposalNotice,
+} from '@/components/schedules/schedule-proposal-notice';
+
+const storyLayout = stylex.create({
+  frame: {
+    width: '640px',
+    'background-color': 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 4)',
+  },
+});
 
 /** Offline platform plus the three metas the card resolves its target from. */
 const storyPlatform = createLocalPlatformProvider({
@@ -79,7 +92,7 @@ const meta = {
     (Story) => (
       <StoryShell>
         <Tooltip.Provider>
-          <div className="w-[640px] bg-background p-4">
+          <div {...stylex.props(storyLayout.frame)}>
             <Story />
           </div>
         </Tooltip.Provider>
@@ -143,4 +156,27 @@ export const Created: Story = {
 
 export const Dismissed: Story = {
   args: { ...base, meta: { ...Pending.args!.meta!, outcome: 'dismissed' } },
+};
+
+const edit: ScheduleEditProposalMeta = {
+  proposalId: 'e1',
+  scheduleId: 'p1',
+  title: 'Nightly review',
+  patch: {
+    title: 'Nightly risk review',
+    prompt: 'Review the commits merged today on `main`. List only the risky ones.',
+    rule: { kind: 'daily', hour: 22, minute: 30 },
+  },
+  baseActivityId: 'proposal-p1',
+  proposedBy: { kind: 'agent', agentConfigId: 'a1', name: 'Code reviewer' },
+};
+
+export const EditPending: Story = {
+  args: Pending.args,
+  render: () => <ScheduleEditProposalNotice {...base} meta={edit} />,
+};
+
+export const EditApplied: Story = {
+  args: Pending.args,
+  render: () => <ScheduleEditProposalNotice {...base} meta={{ ...edit, outcome: 'applied' }} />,
 };

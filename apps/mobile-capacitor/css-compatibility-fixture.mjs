@@ -39,7 +39,7 @@ export function assertCompatibleCss(css, from) {
   );
 }
 
-// Build the installed PDF/Monaco sheets, the real app Tailwind sheet, and real
+// Build the installed PDF/Monaco sheets, the real app base sheet, and real
 // UI token imports through the mobile pipeline. The small JS entry avoids an
 // entire app/Worker build in unit tests; the optional artifact test scans dist too.
 export async function buildCssFixture(cssMinify) {
@@ -54,15 +54,20 @@ export async function buildCssFixture(cssMinify) {
     const source = `
       import ${JSON.stringify(requireFromComponents.resolve('pdfjs-dist/legacy/web/pdf_viewer.css'))};
       import ${JSON.stringify(requireFromComponents.resolve('monaco-editor/esm/vs/editor/browser/widget/diffEditor/style.css'))};
-      import ${JSON.stringify(join(componentsRoot, 'src/tailwind/index.css'))};
+      import ${JSON.stringify(join(componentsRoot, 'src/style/index.css'))};
       import * as stylex from '@stylexjs/stylex';
       import { colors } from ${JSON.stringify(join(uiRoot, 'src/tokens/colors.stylex'))};
       import { productDarkPalette, productLightPalette } from ${JSON.stringify(join(componentsRoot, 'src/lib/vscode-theme/lody-ui-palette.stylex'))};
-      const styles = stylex.create({ sample: {
+      const styles = stylex.create({ product: {
+        color: colors.label, backgroundColor: colors.background,
+        paddingInline: 16, display: 'flex',
+      }, sample: {
         color: colors.label, backgroundColor: colors.background,
         padding: 12, borderRadius: 6, display: 'flex',
       }});
       document.querySelector('#stylex').className = stylex.props(styles.sample).className;
+      const product = document.querySelector('#product');
+      if (product) product.className = stylex.props(styles.product).className;
       // Match theme-provider.tsx: class + product palette on html, with the
       // committed mode in its inline color-scheme (body keeps the app CSS).
       globalThis.applyCompatibilityTheme = (theme, system) => {

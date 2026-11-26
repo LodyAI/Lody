@@ -79,10 +79,7 @@ later activity time. If the process ends first (idle GC after its 24-hour cap,
 memory pressure, a crash, or ACP child exit without `Session.terminate`), the
 conversation gets a `nativeWorkInterrupted` notice before completion is flushed,
 the Session is still marked unread, and the user is alerted to an `unknown` result
-(`native_work_interrupted`) instead of a success. When Antigravity's monitor hits
-its 24-hour cap with pending work or tears down on `closeSession`/disconnect, its
-unsettled work is preserved for the interruption check rather than flipped to
-normal idle while still releasing GC. If GC destroyed the Turn's `SessionDocument`
+(`native_work_interrupted`) instead of a success. If GC destroyed the Turn's `SessionDocument`
 at termination, completion re-acquires the live document unless the Session was
 archived or deleted. A newer Turn, Stop, archive, or delete withdraws the wait so
 intentional teardown publishes no stale interruption.

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
 import { SettingsEmptyState, settingsRecordsCard } from './compact-layout';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { usePostHog } from '@/lib/posthog-context';
 import { Plus, RefreshCw, Trash2, Settings } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -18,7 +18,7 @@ import {
   type WorkspaceMcpServerMeta,
   type McpAuthenticationResult,
 } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { settingsActionIntentAtom, userAtom } from '@/atoms';
 import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import {
   useWorkspaceMcpCatalog,
@@ -36,7 +36,7 @@ import { space } from '@lody/ui/tokens/scales.stylex';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 import { McpAuthenticationPanel } from './mcp-authentication-panel';
 import {
-  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  settingsEditorDialogStyles,
   SETTINGS_EDITOR_DIALOG_WIDTH,
   settingsCatalog as catalog,
   settingsSurface as surface,
@@ -142,6 +142,27 @@ export function McpSetting() {
     setError(undefined);
     setEditor(next);
   };
+
+  const [actionIntent, setActionIntent] = useAtom(settingsActionIntentAtom);
+  useEffect(() => {
+    if (!actionIntent || actionIntent.action.tab !== 'mcp') return;
+    const act = actionIntent.action;
+    if (!act.create && !act.serverId) {
+      setActionIntent(null);
+      return;
+    }
+    if (act.create) {
+      setActionIntent(null);
+      openEditor({ mode: 'add' });
+      return;
+    }
+    if (act.serverId) {
+      const entry = servers.find((item) => item.id === act.serverId);
+      if (!entry && !synced) return;
+      setActionIntent(null);
+      if (entry) openEditor({ mode: 'edit', entry });
+    }
+  });
 
   const save = async (value: McpConnectionFormValue) => {
     const requestScope = scope.current;
@@ -251,7 +272,11 @@ export function McpSetting() {
       </SettingsPageActions>
 
       {servers.length === 0 ? (
-        <SettingsEmptyState title={t('settings.mcp.empty')} action={addButton} />
+        <SettingsEmptyState
+          title={t('settings.mcp.empty')}
+          description={t('settings.mcp.emptyHint')}
+          action={addButton}
+        />
       ) : (
         <div {...stylex.props(settingsRecordsCard)}>
           {servers.map((server, index) => (
@@ -288,7 +313,7 @@ export function McpSetting() {
         <Dialog.Content
           width={SETTINGS_EDITOR_DIALOG_WIDTH}
           centerOn={settingsPane}
-          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+          xstyle={settingsEditorDialogStyles.panel}
         >
           <Dialog.Header>
             <Dialog.Title>

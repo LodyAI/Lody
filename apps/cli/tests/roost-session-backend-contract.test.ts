@@ -1,3 +1,7 @@
+import { signExecutionIntent } from '@lody/e2ee-core/protocol';
+import { E2EE_INTENT_KIND, encodeE2eeIntentRecord, turnExecutionDigest } from '@lody/shared';
+import { envelopeFixture } from '../../../packages/e2ee-core/test/keys/fixture';
+import { makeVerifiedExecutionIntent } from '../src/lib/e2ee/execution-intent-verification';
 import { prepareReplacement } from '@lody/shared/history-writer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { writeFile } from 'node:fs/promises';
@@ -86,21 +90,47 @@ registerRoostNativeBackendSuite();
 defineSessionBackendContract('Production Roost SQLite', nativeContractFixture);
 
 describe('Production Roost history semantics', () => {
+  it('isolates simultaneous encrypted and ordinary owner histories with identical session IDs', async () => {
+    const id = 'same-session';
+    const paths = ['encrypted-a', 'encrypted-b'].map((name) => join(nativeDirectory, name));
+    const sessions = await Promise.all(
+      [undefined, ...paths].map((dir) => nativeFixture(id, false, undefined, dir))
+    );
+    try {
+      for (const [index, session] of sessions.entries())
+        await session.backend.appendHistoryTurn(nativeUser('private-' + index));
+      await sessions[1]!.close();
+      sessions[1] = await nativeFixture(id, false, undefined, paths[0]);
+      for (const [index, session] of sessions.entries())
+        expect((await session.backend.readHistory()).map((turn) => turn.id)).toEqual([
+          'private-' + index,
+        ]);
+    } finally {
+      await Promise.all(sessions.map((session) => session.close()));
+    }
+  });
   it('cancels parked history observers without cancelling a writer waiting for the same owner', async () => {
     const fixture = await coldHistoryHandlerFixture(1);
     const id = [...fixture.docs.keys()][0]!;
-    const watching = fixture.rpc.readSessionHistoryForRpc(id, {
-      kind: 'watchChanges',
-      checkpoint: 'synthetic-checkpoint',
-      waitMs: 15_000,
-    });
+    const replies: unknown[] = [];
+    const watching = fixture.handler.handleMessage(
+      {
+        type: 'session/history-subscription',
+        workspaceId: 'test-workspace' as WorkspaceId,
+        machineId: 'test-machine' as MachineId,
+        sessionId: id,
+        subscription: { action: 'open', id: crypto.randomUUID() },
+      },
+      { source: 'local', send: (response) => replies.push(response) }
+    );
     const writing = fixture.rpc.writeSessionHistoryForRpc(id, 'append', {
       entry: nativeUser('writer-survives-observer-stop'),
     });
     try {
       await fixture.observing(2);
-      fixture.handler.cancelPendingHistoryWatches();
-      expect(await watching).toMatchObject({ success: false });
+      fixture.handler.cancelPendingHistorySubscriptions();
+      await watching;
+      expect(replies).toEqual([expect.objectContaining({ event: 'closed' })]);
       expect(fixture.observers.size).toBe(1);
       await fixture.ready(id);
       expect(await writing).toMatchObject({ success: true });
@@ -147,14 +177,12 @@ describe('Production Roost history semantics', () => {
       if (!wait) throw new Error('Expected native watch');
       const parked = Promise.withResolvers<void>();
       let watchSignal: AbortSignal | undefined;
-      vi.spyOn(watchedBackend.history, 'waitForChanges').mockImplementation(
-        (cursor, waitMs, signal) => {
-          watchSignal = signal;
-          const pending = wait(cursor, waitMs, signal);
-          parked.resolve();
-          return pending;
-        }
-      );
+      vi.spyOn(watchedBackend.history, 'waitForChanges').mockImplementation((cursor, signal) => {
+        watchSignal = signal;
+        const pending = wait(cursor, signal);
+        parked.resolve();
+        return pending;
+      });
       vi.useFakeTimers({
         toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
       });
@@ -177,11 +205,11 @@ describe('Production Roost history semantics', () => {
       });
       Reflect.set(runtime, 'handler', fixture.handler);
       const watching = runtime.dispatchLocalMessageForResponse({
-        type: 'session/history-read',
+        type: 'session/history-subscription',
         sessionId: watchedId,
         workspaceId: 'test-workspace' as WorkspaceId,
         machineId: 'test-machine' as MachineId,
-        query: { kind: 'watchChanges', checkpoint, waitMs: 15_000 },
+        subscription: { action: 'open', id: crypto.randomUUID(), checkpoint },
       });
       await parked.promise;
       closing = runtime.cleanup();
@@ -189,7 +217,8 @@ describe('Production Roost history semantics', () => {
       // No native I/O guard or ACP batch timer is advanced to make shutdown pass.
       expect(watchSignal?.aborted).toBe(true);
       expect(await watching).toMatchObject([
-        { type: 'session/history-read_response', success: false },
+        { type: 'session/history-subscription_response', event: 'publication' },
+        { type: 'session/history-subscription_response', event: 'closed' },
       ]);
       await closing;
       expect(Date.now()).toBe(startedAt);
@@ -201,7 +230,7 @@ describe('Production Roost history semantics', () => {
         turn: { items: [{ type: 'text', text: 'final buffered reply' }] },
       });
     } finally {
-      fixture.handler.cancelPendingHistoryWatches();
+      fixture.handler.cancelPendingHistorySubscriptions();
       await closing;
       await fixture.close();
     }
@@ -771,6 +800,266 @@ describe('Production Roost history semantics', () => {
     expect(fixture.doc.handle?.doc.getList('history').length).toBe(0);
   });
 
+  it('keeps encrypted attachment manifests and their authenticated source session through Roost fork and edit', async () => {
+    const { SessionForkService } = await import('../src/session/session-fork-service');
+    const { uploadEncryptedAttachment, readEncryptedAttachment } = await import('@lody/shared');
+    const directory = join(nativeDirectory, 'attachment-workspace');
+    const source = await nativeFixture('attachment-source', false, undefined, directory);
+    const { SessionEditAndResendService } =
+      await import('../src/session/session-edit-and-resend-service');
+    const targetId = 'attachment-fork' as SessionId;
+    const target = new SessionDocument(
+      source.repo,
+      targetId,
+      (room) => source.repo.unloadDoc(room),
+      undefined,
+      undefined,
+      directory
+    );
+    const workspaceDocument = {
+      repo: source.repo,
+      isEncryptedWorkspace: () => true,
+      getOrCreateSessionDoc: async (id: SessionId) => {
+        if (id === source.doc.sessionId) return source.doc;
+        if (id !== targetId) throw new Error('Unknown session');
+        if (!target.handle) {
+          target.handle = await source.repo.openPersistedDoc(getSessionRoomId(id));
+          target.composeSessionData(target.handle.doc, undefined, { historyBackend: 'roost' });
+        }
+        return target;
+      },
+      getAgentConfigById: async () => ({}),
+      signMachineInput: async () => 'B'.repeat(131),
+      persistPendingChanges: async () => {},
+    };
+    const agentClient = {
+      prepareReplacementSession: async () => ({ sessionId: 'edited-acp' }),
+      adoptPreparedSession: () => {},
+      closeDetachedSession: async () => true,
+    };
+    const sessionManager = {
+      createSession: async () => {},
+      getSession: (id: string) => ({
+        acpSessionId: id === targetId ? 'target-acp' : 'source-acp',
+        agentClient,
+      }),
+    };
+    const deps = {
+      workspaceDocument,
+      sessionManager,
+      workspaceId: 'workspace',
+      machineId: 'test-machine',
+      userResolver: { resolve: async () => ({ name: 'User', email: '' }) },
+      logger: getDefaultLogger(),
+    };
+    const plain = new TextEncoder().encode('synthetic attachment');
+    const parts = new Map<string, Uint8Array>();
+    const workspaceId = 'workspace';
+    try {
+      const { encryption, sha256 } = await uploadEncryptedAttachment({
+        workspaceId,
+        sessionId: source.doc.sessionId,
+        kind: 'file',
+        fileName: 'test.txt',
+        mimeType: 'text/plain',
+        sizeBytes: plain.length,
+        read: async () => plain.slice(),
+        upload: async (bytes, index) => {
+          const key = 'part-' + index;
+          parts.set(key, bytes.slice());
+          return key;
+        },
+      });
+      const file = {
+        type: 'file' as const,
+        fileId: encryption.parts[0]!,
+        encryption,
+        fileName: 'test.txt',
+        mimeType: 'text/plain',
+        sizeBytes: plain.length,
+        sha256,
+        textPreview: false,
+        transport: 'r2' as const,
+        uploadedAt: 1,
+      };
+      const signed = {
+        ...nativeUser('input'),
+        e2eeIntent: 'A'.repeat(131),
+        inputConfig: { inputBlocks: [file] },
+        items: [file],
+      };
+      await source.backend.inputAcceptance!.accept(signed);
+      expect(await source.backend.readTurn('input')).toMatchObject({
+        turn: { e2eeIntent: signed.e2eeIntent },
+      });
+      await source.backend.appendHistoryTurn({ ...nativeAssistant('finished'), finished: true });
+      await source.repo.upsertDocMeta(getSessionRoomId(source.doc.sessionId), {
+        agentConfigId: 'agent',
+        acpSessionId: 'source-acp',
+        cliType: 'builtin',
+        agentType: 'codex',
+      });
+      const service = new SessionForkService({ ...deps, isSourceBusy: () => false } as never);
+      const forked = await service.fork({
+        sourceSessionId: source.doc.sessionId,
+        sourceTurnId: 'finished',
+        targetSessionId: targetId,
+        requestedByUserId: 'test-user',
+      });
+      expect(forked, JSON.stringify(forked)).toMatchObject({ success: true });
+      const backend = await createSessionBackend(target);
+      const [copied] = await backend.readHistory();
+      const block = copied?.inputConfig?.inputBlocks?.[0];
+      if (block?.type !== 'file' || !block.encryption || !block.storageSessionId)
+        throw new Error('Lost file namespace');
+      expect(copied?.items?.[0]).toMatchObject({
+        storageSessionId: source.doc.sessionId,
+        encryption,
+      });
+      const edit = new SessionEditAndResendService({
+        ...deps,
+        enqueueDispatch: () => {},
+        executionService: {
+          tryAcquireSessionRewriteBarrier: () => () => {},
+          getExecutionSnapshot: () => ({}),
+          acceptInboxHumanInput: async () => {},
+        },
+      } as never);
+      const edited = await edit.editAndResend({
+        sessionId: targetId,
+        expectedUserTurnId: 'input',
+        replacementUserTurnId: 'edited',
+        requestedByUserId: 'test-user',
+        timestamp: signed.timestamp,
+        inputConfig: { inputBlocks: [block] },
+      });
+      expect(edited, JSON.stringify(edited)).toMatchObject({ success: true });
+      expect(await backend.readTurn('edited')).toMatchObject({
+        turn: { e2eeIntent: 'B'.repeat(131), inputConfig: { inputBlocks: [block] } },
+      });
+      const decoded = [];
+      for await (const bytes of readEncryptedAttachment({
+        workspaceId,
+        sessionId: block.storageSessionId,
+        encryption: block.encryption,
+        fetchPart: async (id) => new Response(Uint8Array.from(parts.get(id)!)),
+      }))
+        decoded.push(...bytes);
+      expect(decoded).toEqual([...plain]);
+      expect(parts.get('part-0')).not.toEqual(plain);
+      expect(target.handle!.doc.getList('history').length).toBe(0);
+    } finally {
+      await target.destroy({ preserveStatus: true });
+      await source.close();
+    }
+  });
+  it('routes encrypted remote owner reads and input acceptance through the feature channel', async () => {
+    const ledger = envelopeFixture(1);
+    const workspaceId = 'test-workspace';
+    const machineId = 'fixture-machine';
+    const requesterDevice = Buffer.from(ledger.owner.raw).toString('hex');
+    const owner = await coldHistoryHandlerFixture(1, {
+      machineId,
+      resolveVerifiedExecutionOriginal: makeVerifiedExecutionIntent({
+        workspaceId,
+        genesis: ledger.context.genesis,
+        selfDevice: Buffer.from(ledger.phone.raw).toString('hex'),
+        ledger: ledger.ledger,
+        refreshLedger: Effect.void,
+        isClosed: () => false,
+        readIncoming: () => Effect.succeed(null),
+        openDispatch: () => Effect.die('unexpected dispatch'),
+      }),
+    });
+    const doc = [...owner.docs.values()][0]!;
+    await owner.ready(doc.sessionId);
+    await owner.repo.upsertDocMeta(getMachineRoomId(machineId), {
+      id: machineId,
+      protocolCapabilities: { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES, e2eeRoostHistory: 1 },
+    });
+    const context = {
+      requestId: 'verified-request',
+      requesterDevice,
+      expiresAt: Number.MAX_SAFE_INTEGER,
+      signal: new AbortController().signal,
+      authority: { signal: new AbortController().signal, isCurrent: () => true },
+      requester: { accountId: 'test-user', executionUserId: 'test-user' },
+    };
+    const manager = {
+      repo: owner.repo,
+      isEncryptedWorkspace: () => true,
+      requestEncryptedFeature: async (
+        request: import('@lody/shared/local-machine-rpc').LocalMachineRpcRequest
+      ) => {
+        if (request.method === 'session/history-write')
+          return owner.handler.handleLocalMachineRpc(request, context.signal, context);
+        if (request.method !== 'session/history-read') throw new Error('unexpected owner request');
+        return {
+          ok: true,
+          result: await owner.rpc.readSessionHistoryForRpc(doc.sessionId, request.params.query),
+        };
+      },
+    };
+    const factory = createCommandSessionHistoryFactory(
+      () => manager as never,
+      { machineId: 'remote', userId: 'test-user' } as AuthContext,
+      'test-workspace',
+      async () => {
+        throw new Error('unexpected plaintext request');
+      }
+    );
+    const route = routeRemoteOwnedSessionHistory('remote', factory);
+    const remote = await route(doc, await doc.getMetaState());
+    try {
+      const entry = {
+        ...nativeUser('signed-turn'),
+        inputConfig: { prompt: 'signed content', cliType: 'builtin', agentType: 'codex' },
+      };
+      const signature = await Effect.runPromise(
+        signExecutionIntent({
+          kind: E2EE_INTENT_KIND.memberInput,
+          genesis: ledger.context.genesis,
+          workspaceId,
+          targetMachineId: machineId,
+          scope: doc.sessionId,
+          messageId: entry.id,
+          contentDigest: Buffer.from(turnExecutionDigest(entry)!, 'hex'),
+          signer: ledger.owner.signer,
+        })
+      );
+      entry.e2eeIntent = encodeE2eeIntentRecord({
+        kind: E2EE_INTENT_KIND.memberInput,
+        signer: ledger.owner.raw,
+        signature: signature.toBytes(),
+      });
+      await expect(
+        remote.inputAcceptance!.accept({
+          ...entry,
+          inputConfig: { ...entry.inputConfig, prompt: 'altered' },
+        })
+      ).rejects.toThrow();
+      expect(await remote.readTurn(entry.id)).toMatchObject({ state: 'missing' });
+      await expect(remote.inputAcceptance!.accept(entry)).resolves.toMatchObject({
+        status: 'accepted',
+        turnId: entry.id,
+      });
+      await expect(remote.readTurn(entry.id)).resolves.toMatchObject({
+        state: 'ready',
+        turn: { id: entry.id, e2eeIntent: entry.e2eeIntent },
+      });
+      await owner.repo.upsertDocMeta(getMachineRoomId(machineId), {
+        id: machineId,
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      });
+      await expect(route(doc, await doc.getMetaState())).rejects.toThrow(
+        'Update the owner machine'
+      );
+    } finally {
+      await remote.dispose();
+      await owner.close();
+    }
+  });
+
   it('serves different members and devices through owner RPC and preserves access failures', async () => {
     const owner = await nativeFixture();
     await owner.backend.appendHistoryTurn(nativeUser('remote-u'));
@@ -781,7 +1070,12 @@ describe('Production Roost history semantics', () => {
     let denied = false;
     const remoteClient = async (auth: AuthContext) => {
       const factory = createCommandSessionHistoryFactory(
-        () => ({ repo: owner.repo, waitUntilMetaSynced: async () => true }) as LoroDocumentManager,
+        () =>
+          ({
+            repo: owner.repo,
+            isEncryptedWorkspace: () => false,
+            waitUntilMetaSynced: async () => true,
+          }) as LoroDocumentManager,
         auth,
         'test-workspace',
         async (target, run) => {
@@ -874,7 +1168,12 @@ describe('Production Roost history semantics', () => {
       protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     });
     const refusedOwner = createCommandSessionHistoryFactory(
-      () => ({ repo: owned.repo, waitUntilMetaSynced: async () => true }) as LoroDocumentManager,
+      () =>
+        ({
+          repo: owned.repo,
+          isEncryptedWorkspace: () => false,
+          waitUntilMetaSynced: async () => true,
+        }) as LoroDocumentManager,
       { userId: 'test-user', machineId: 'daemon-machine', token: 'synthetic' } as AuthContext,
       'test-workspace',
       async (target) => {

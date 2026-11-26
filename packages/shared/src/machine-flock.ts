@@ -1,3 +1,4 @@
+import { isSensitiveAcpConfigOptionId } from './acp-config-option-sensitivity';
 import { isMagpieGatewayUrl, normalizeMagpieGateway } from './magpie-import';
 import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
@@ -1847,7 +1848,66 @@ const normalizeLocalProjectMeta = (value: unknown): LocalProjectMeta | undefined
   ) {
     project.githubRepoFullName = value.githubRepoFullName;
   }
+  if (typeof value.git === 'boolean') {
+    project.git = value.git;
+  }
+  if (value.defaultBranch === null) {
+    project.defaultBranch = null;
+  } else if (
+    typeof value.defaultBranch === 'string' &&
+    value.defaultBranch.trim().length > 0 &&
+    value.defaultBranch.length <= 1024
+  ) {
+    project.defaultBranch = value.defaultBranch.trim();
+  }
+  if (value.currentBranch === null) {
+    project.currentBranch = null;
+  } else if (
+    typeof value.currentBranch === 'string' &&
+    value.currentBranch.trim().length > 0 &&
+    value.currentBranch.length <= 1024
+  ) {
+    project.currentBranch = value.currentBranch.trim();
+  }
   return project;
+};
+
+const normalizeAgentSessionDefaults = (
+  value: unknown
+): AgentConfigMeta['sessionDefaults'] | undefined => {
+  if (!isRecord(value)) return undefined;
+  const configOptionValues: Record<string, string | boolean> = {};
+  if (isRecord(value.configOptionValues)) {
+    for (const [configId, optionValue] of Object.entries(value.configOptionValues)) {
+      if (!configId || isSensitiveAcpConfigOptionId(configId)) continue;
+      if (typeof optionValue === 'string' || typeof optionValue === 'boolean')
+        configOptionValues[configId] = optionValue;
+    }
+  }
+  const modelConfigOptionValues: Record<string, Record<string, string | boolean>> = {};
+  if (isRecord(value.modelConfigOptionValues)) {
+    for (const [entryModelId, modelRecord] of Object.entries(value.modelConfigOptionValues)) {
+      if (!entryModelId || !isRecord(modelRecord)) continue;
+      const normalizedModelValues: Record<string, string | boolean> = {};
+      for (const [configId, optionValue] of Object.entries(modelRecord)) {
+        if (!configId || isSensitiveAcpConfigOptionId(configId)) continue;
+        if (typeof optionValue === 'string' || typeof optionValue === 'boolean') {
+          normalizedModelValues[configId] = optionValue;
+        }
+      }
+      if (Object.keys(normalizedModelValues).length > 0) {
+        modelConfigOptionValues[entryModelId] = normalizedModelValues;
+      }
+    }
+  }
+  const hasModelValues = Object.keys(modelConfigOptionValues).length > 0;
+  const modelId = isNonEmptyString(value.modelId) ? value.modelId : undefined;
+  if (!modelId && !Object.keys(configOptionValues).length && !hasModelValues) return undefined;
+  return {
+    ...(modelId ? { modelId } : {}),
+    configOptionValues,
+    ...(hasModelValues ? { modelConfigOptionValues } : {}),
+  };
 };
 
 const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined => {
@@ -1909,6 +1969,10 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   if (!isMissing(value.brandId)) {
     if (typeof value.brandId !== 'string') return undefined;
     config.brandId = value.brandId as AgentConfigMeta['brandId'];
+  }
+  if (!isMissing(value.sessionDefaults)) {
+    const sessionDefaults = normalizeAgentSessionDefaults(value.sessionDefaults);
+    if (sessionDefaults) config.sessionDefaults = sessionDefaults;
   }
 
   if (!isMissing(value.codexAuth)) {

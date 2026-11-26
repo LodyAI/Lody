@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { atom, useAtomValue } from 'jotai';
 import { ArrowBigUp, ChevronUp, Command, Option, type LucideIcon } from 'lucide-react';
-import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   MAX_SIDEBAR_SHORTCUT_SLOTS,
   SIDEBAR_SHORTCUT_SLOTS,
@@ -62,13 +62,16 @@ const styles = stylex.create({
   },
   animated: {
     animationName: { default: pillFadeIn, [REDUCED_MOTION]: 'none' },
-    animationDuration: duration.fast,
-    animationTimingFunction: ease.standard,
+    animationDuration: duration.slow,
+    animationTimingFunction: 'cubic-bezier(0.42, 0, 1, 1)',
   },
   icon: {
     width: '11px',
     height: '11px',
     flexShrink: 0,
+  },
+  iconGrow: {
+    transform: 'scale(1.35)',
   },
 });
 
@@ -115,13 +118,18 @@ export function SidebarShortcutPill({
   );
 }
 
-// macOS modifier glyphs drawn as icons, as the ⌘ pill does: some system fonts
-// paint ⇧ and friends in colour.
-const MODIFIER_ICONS: Record<string, LucideIcon> = {
-  '⌘': Command,
-  '⇧': ArrowBigUp,
-  '⌥': Option,
-  '⌃': ChevronUp,
+/**
+ * macOS modifier glyphs drawn as icons, as the ⌘ pill does: some system fonts
+ * paint ⇧ and friends in colour. ArrowBigUp fills ~55% of the lucide grid where
+ * Command fills 75%, so `grow` scales ⇧'s artwork to ⌘'s ink — the transform
+ * leaves the 11px layout box unchanged — and a thinner stroke restores the
+ * shared weight.
+ */
+const MODIFIER_ICONS: Record<string, { icon: LucideIcon; grow?: boolean }> = {
+  '⌘': { icon: Command },
+  '⇧': { icon: ArrowBigUp, grow: true },
+  '⌥': { icon: Option },
+  '⌃': { icon: ChevronUp },
 };
 
 /**
@@ -153,11 +161,16 @@ export function SidebarBindingPill({
       )}
     >
       {parts.map((part, index) => {
-        const Icon = MODIFIER_ICONS[part];
-        return Icon ? (
-          <Icon key={index} {...stylex.props(styles.icon)} strokeWidth={2} aria-hidden="true" />
-        ) : (
-          <span key={index}>{part}</span>
+        const modifier = MODIFIER_ICONS[part];
+        if (!modifier) return <span key={index}>{part}</span>;
+        const { icon: Icon, grow } = modifier;
+        return (
+          <Icon
+            key={index}
+            {...stylex.props(styles.icon, grow && styles.iconGrow)}
+            strokeWidth={grow ? 1.5 : 2}
+            aria-hidden="true"
+          />
         );
       })}
     </kbd>

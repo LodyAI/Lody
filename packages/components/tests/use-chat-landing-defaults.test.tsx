@@ -15,7 +15,11 @@ import {
   recordChatLandingProjectUse,
   writeChatLandingDefaults,
 } from '../src/lib/chat-landing-defaults';
-import { agentDefaultsCache, persistAgentSessionDefaults } from '../src/lib/local-storage-cache';
+import {
+  agentDefaultsCache,
+  persistAgentSessionDefaults,
+  readAgentStartDefaults,
+} from '../src/lib/local-storage-cache';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -110,6 +114,69 @@ describe('chat landing agent session defaults', () => {
       );
     });
     expect(container.querySelector('output')?.dataset.model).toBe('gpt-5.5');
+  });
+
+  it('persists and restores independent per-model effort and speed across model switches', () => {
+    persistAgentSessionDefaults(agentId, {
+      modeId: 'agent',
+      modelId: 'gpt-6.2-sol',
+      configOptionValues: {
+        reasoning_effort: 'xhigh',
+        'fast-mode': 'ultrafast',
+        plan_mode: true,
+      },
+    });
+    persistAgentSessionDefaults(agentId, {
+      modeId: 'agent',
+      modelId: 'gpt-6-luna',
+      configOptionValues: {
+        reasoning_effort: 'low',
+        'fast-mode': false,
+        plan_mode: false,
+      },
+    });
+
+    const cached = agentDefaultsCache.get(agentId);
+    expect(cached).toEqual({
+      modeId: 'agent',
+      modelId: 'gpt-6-luna',
+      configOptionValues: { plan_mode: false },
+      modelConfigOptionValues: {
+        'gpt-6.2-sol': { reasoning_effort: 'xhigh', 'fast-mode': 'ultrafast' },
+        'gpt-6-luna': { reasoning_effort: 'low', 'fast-mode': false },
+      },
+    });
+
+    const merged = readAgentStartDefaults({
+      id: agentId,
+      sessionDefaults: {
+        modelId: 'gpt-6.2-sol',
+        configOptionValues: { reasoning_effort: 'high' },
+      },
+    });
+    expect(merged?.modelConfigOptionValues).toEqual({
+      'gpt-6.2-sol': { reasoning_effort: 'high', 'fast-mode': 'ultrafast' },
+      'gpt-6-luna': { reasoning_effort: 'low', 'fast-mode': false },
+    });
+  });
+
+  it('migrates legacy flat effort onto the previous model before saving a new model selection', () => {
+    agentDefaultsCache.set(agentId, {
+      modeId: 'agent',
+      modelId: 'legacy-model',
+      configOptionValues: { reasoning_effort: 'max', plan_mode: true },
+    });
+
+    persistAgentSessionDefaults(agentId, {
+      modeId: 'agent',
+      modelId: 'next-model',
+      configOptionValues: { reasoning_effort: 'low', plan_mode: true },
+    });
+
+    expect(agentDefaultsCache.get(agentId)?.modelConfigOptionValues).toEqual({
+      'legacy-model': { reasoning_effort: 'max' },
+      'next-model': { reasoning_effort: 'low' },
+    });
   });
 });
 

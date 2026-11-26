@@ -57,7 +57,6 @@ import {
  * `anywhere` still prefers the ordinary break points (after a `/` or a `-`), so
  * a path breaks on a segment boundary whenever one fits.
  */
-const CHIP_CLASS_NAME = '[overflow-wrap:anywhere]';
 
 /**
  * The label supplies the button's baseline, matching the surrounding prose.
@@ -65,6 +64,17 @@ const CHIP_CLASS_NAME = '[overflow-wrap:anywhere]';
  * Keep the short line-height so collapsed messages retain their line boxes.
  */
 const styles = stylex.create({
+  chip: { overflowWrap: 'anywhere' },
+  inlineIcon: {
+    marginRight: 'calc(var(--spacing) * 1)',
+    display: 'inline-block',
+    verticalAlign: 'middle',
+  },
+  mark: { fontSize: '1.05em', lineHeight: 1 },
+  toggle: { cursor: 'pointer', textDecorationLine: { default: null, ':hover': 'underline' } },
+  interactive: { cursor: 'pointer', textDecorationLine: { default: null, ':hover': 'underline' } },
+  label: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  head: { whiteSpace: 'nowrap' },
   pasteButton: {
     display: 'inline-flex',
     maxWidth: '100%',
@@ -90,7 +100,6 @@ const styles = stylex.create({
  * and width/height do not apply to a non-replaced inline box — left inline they
  * collapse to nothing.
  */
-const CHIP_INLINE_ICON_CLASS_NAME = 'mr-1 inline-block align-middle';
 
 /** Keep the icon's unbreakable prefix on Unicode grapheme boundaries. */
 const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -149,30 +158,31 @@ function MessageTextChip({
 }) {
   const isBoxed = Boolean(onToggle);
   const displayLabel = formatChipDisplayLabel(span.kind, label);
+  const chipProps = stylex.props(
+    !isBoxed && styles.chip,
+    onToggle && styles.toggle,
+    isBoxed && styles.pasteButton
+  );
   const className = cn(
-    !isBoxed && CHIP_CLASS_NAME,
-    span.kind === 'pasted_text'
-      ? MENTION_NEUTRAL_CHIP_CLASS_NAME
-      : span.kind === 'message_quote'
-        ? 'text-markdown-link'
-        : MENTION_CHIP_CLASS_NAME,
+    chipProps.className,
+    span.kind === 'pasted_text' ? MENTION_NEUTRAL_CHIP_CLASS_NAME : MENTION_CHIP_CLASS_NAME,
+    span.kind === 'message_quote' && 'text-markdown-link',
     span.kind === 'message_quote' && stylex.props(styles.quoteButton).className,
-    // With no fill to darken, the hover affordance has to be typographic.
-    (onToggle || onActivate) && 'cursor-pointer hover:underline'
+    (onToggle || onActivate) && stylex.props(styles.interactive).className
   );
   // A frozen mark (an Agent Role's emoji) stands in for the kind's icon, so the
   // bubble shows the same thing the composer did.
   const icon = span.mark ? (
     <span
       aria-hidden="true"
-      className={cn('text-[1.05em] leading-none', !isBoxed && CHIP_INLINE_ICON_CLASS_NAME)}
+      className={stylex.props(styles.mark, !isBoxed && styles.inlineIcon).className}
     >
       {span.mark}
     </span>
   ) : (
     getMentionKindIcon(span.kind, {
       path: span.target,
-      className: cn(MENTION_ICON_CLASS_NAME, !isBoxed && CHIP_INLINE_ICON_CLASS_NAME),
+      className: cn(MENTION_ICON_CLASS_NAME, stylex.props(!isBoxed && styles.inlineIcon).className),
     })
   );
   // Split by grapheme rather than code point so a surrogate pair, combining
@@ -186,11 +196,11 @@ function MessageTextChip({
   const content = isBoxed ? (
     <>
       <span {...stylex.props(styles.pasteIcon)}>{icon}</span>
-      <span className="truncate">{displayLabel}</span>
+      <span {...stylex.props(styles.label)}>{displayLabel}</span>
     </>
   ) : (
     <>
-      <span className="whitespace-nowrap">
+      <span {...stylex.props(styles.head)}>
         {icon}
         {head}
       </span>
@@ -200,11 +210,7 @@ function MessageTextChip({
 
   if (onToggle) {
     return (
-      <button
-        type="button"
-        className={cn(stylex.props(styles.pasteButton).className, className)}
-        onClick={onToggle}
-      >
+      <button type="button" {...chipProps} className={className} onClick={onToggle}>
         {content}
       </button>
     );
@@ -282,9 +288,7 @@ export function MessageTextWithChips({
         <MessageTextChip
           span={span}
           onActivate={
-            sessionId && navigateSession
-              ? () => navigateSession({ sessionId })
-              : undefined
+            sessionId && navigateSession ? () => navigateSession({ sessionId }) : undefined
           }
           label={
             isExpanded

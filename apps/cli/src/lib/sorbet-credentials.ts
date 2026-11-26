@@ -1,8 +1,17 @@
 import { join } from 'node:path';
-import { openSorbetControl } from '@sorbetai/control';
+import {
+  openSorbetControl,
+  type SorbetHostSettings,
+  type SorbetHostSettingsUpdate,
+} from '@sorbetai/control';
 import type { AgentConfigId, MachineId } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import type { SorbetCustomProviderInput } from '@lody/shared/local-machine-rpc';
+import type {
+  SorbetCustomProviderEdit,
+  SorbetCustomProviderInput,
+} from '@lody/shared/local-machine-rpc';
+
+export type { SorbetHostSettings, SorbetHostSettingsUpdate };
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 
 /** Resolve identity on the local machine; persisted launch fields never reach this operation. */
@@ -70,6 +79,46 @@ export function createSorbetCredentialsHandler(
         await control.close();
       }
     },
+    /**
+     * Sorbet's update replaces the whole definition, so the edit is applied over
+     * the stored one: models and catalog references stay what the machine holds.
+     */
+    async updateProvider(
+      configId: AgentConfigId,
+      providerId: string,
+      edit: SorbetCustomProviderEdit,
+      signal?: AbortSignal
+    ) {
+      await validate(configId);
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        const stored = (await control.providers.listCustom({ signal })).find(
+          (provider) => provider.id === providerId
+        );
+        if (!stored) throw new Error('Custom provider not found');
+        const updated = await control.providers.updateCustom(
+          providerId,
+          {
+            ...edit,
+            models: stored.models,
+            ...(stored.catalogRefs ? { catalogRefs: stored.catalogRefs } : {}),
+          },
+          { signal }
+        );
+        return {
+          id: updated.id,
+          name: updated.name,
+          protocol: updated.protocol,
+          baseUrl: updated.baseUrl,
+          models: updated.models.map((model) => ({
+            id: model.id,
+            ...(model.name ? { name: model.name } : {}),
+          })),
+        };
+      } finally {
+        await control.close();
+      }
+    },
     async deleteProvider(configId: AgentConfigId, providerId: string, signal?: AbortSignal) {
       await validate(configId);
       const control = await openSorbetControl({ dataDirectory, signal });
@@ -96,6 +145,26 @@ export function createSorbetCredentialsHandler(
       const control = await openSorbetControl({ dataDirectory, signal });
       try {
         return [...(await control.providers.availableModels({ providerId, signal }))];
+      } finally {
+        await control.close();
+      }
+    },
+    /**
+     * Host settings live in the machine's Sorbet data directory, not on any
+     * config, so they read and patch without the per-config credential check.
+     */
+    async getHostSettings(signal?: AbortSignal) {
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        return await control.hostSettings.get({ signal });
+      } finally {
+        await control.close();
+      }
+    },
+    async updateHostSettings(patch: SorbetHostSettingsUpdate, signal?: AbortSignal) {
+      const control = await openSorbetControl({ dataDirectory, signal });
+      try {
+        return await control.hostSettings.update(patch, { signal });
       } finally {
         await control.close();
       }

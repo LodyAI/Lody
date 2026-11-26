@@ -8,15 +8,14 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 import { Effect, Layer } from 'effect';
-import { CoordinatorPorts, type CoordinatorHistory } from '../coordinator-ports';
+import {
+  CoordinatorPorts,
+  TARGET_CATCH_UP_TIMEOUT_MS,
+  type CoordinatorHistory,
+} from '../coordinator-ports';
 import type { OperationInboxLegacy } from '../inbox/legacy';
 import type { LodyOperationCoordinatorOptions } from '../operation-coordinator';
 import type { LodyOperationStore } from '../operation-store';
-
-// Reconcile passes walk active Operations serially, so this wait delays every
-// other Operation on the machine. A timeout is only uncertainty: the item arms
-// its own backoff retry and the abandoned sync keeps running underneath.
-const TARGET_CATCH_UP_TIMEOUT_MS = 8_000;
 
 /** Named upstream adapter: Session/history/materialization are not yet native dependencies. */
 export const coordinatorSessionsLayer = (
@@ -25,7 +24,6 @@ export const coordinatorSessionsLayer = (
   inbox: OperationInboxLegacy,
   active: () => boolean,
   runSignal: (effect: Effect.Effect<void>) => void,
-  controllers: Map<string, AbortController>,
   rawWork: Set<Promise<unknown>>,
   claimToken: string
 ) => {
@@ -52,20 +50,6 @@ export const coordinatorSessionsLayer = (
     claimToken,
     metadata,
     execution: (id) => options.executionService.getExecutionSnapshot(id),
-    operation: (key) =>
-      Effect.sync(() => {
-        const controller = controllers.get(key) ?? new AbortController();
-        controllers.set(key, controller);
-        return { signal: controller.signal };
-      }),
-    cancelInactive: (keys) =>
-      Effect.sync(() => {
-        for (const [key, controller] of controllers)
-          if (!keys.has(key)) {
-            controller.abort();
-            controllers.delete(key);
-          }
-      }),
     receipts: Effect.try({
       try: () => store.inbox.historyReceipts(options.workspaceId),
       catch: (cause) => cause,
@@ -97,22 +81,19 @@ export const coordinatorSessionsLayer = (
             }),
         } satisfies CoordinatorHistory;
       }),
-    confirmReadable: (id, reason) =>
+    confirmReadable: (id, reason, targetMachineId) =>
       io(() =>
         options.confirmTargetReadable
-          ? options.confirmTargetReadable(getSessionRoomId(id), reason)
+          ? options.confirmTargetReadable(getSessionRoomId(id), reason, targetMachineId)
           : options.workspaceDocument.syncRemoteDocOrThrow(getSessionRoomId(id), {
               reason,
               timeoutMs: TARGET_CATCH_UP_TIMEOUT_MS,
             })
       ),
     materialize: (operation, item, index) =>
-      io(() => {
-        const key = operation.requesterSessionId + '\0' + operation.operationId;
-        const controller = controllers.get(key);
-        if (!controller) throw new Error('Operation materialization has no resource owner');
-        if (!active() || controller.signal.aborted) return Promise.resolve();
-        return options.materializeTarget(operation, item, index, controller.signal);
+      io((signal) => {
+        if (!active() || signal.aborted) return Promise.resolve();
+        return options.materializeTarget(operation, item, index, signal);
       }),
     warn: (message, cause) =>
       Effect.sync(() =>

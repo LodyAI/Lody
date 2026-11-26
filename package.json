@@ -14,7 +14,7 @@
     "clean": "corepack pnpm -r run clean",
     "format": "corepack pnpm -r --workspace-concurrency=4 --filter \"!{**/acp-extension-*}\" run format",
     "format:check": "corepack pnpm -r --workspace-concurrency=4 --filter \"!{**/acp-extension-*}\" run format:check",
-    "typecheck": "corepack pnpm --filter lody prepare:acp-adapters && corepack pnpm -r --no-sort --filter \"!{**/acp-extension-*}\" --workspace-concurrency=4 run typecheck",
+    "typecheck": "corepack pnpm --filter lody prepare:acp-adapters && corepack pnpm -r --no-sort --filter \"!{**/acp-extension-*}\" --workspace-concurrency=2 run typecheck",
     "test": "corepack pnpm -r --filter \"!{**/acp-extension-*}\" --workspace-concurrency=1 run test",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:rest": "node packages/shared/node_modules/vitest/vitest.mjs run --config scripts/vitest-rest.config.mjs",
@@ -84,7 +84,6 @@
     "oxlint-tsgolint": "^0.22.0",
     "proxy-from-env": "^1.1.0",
     "tar": "^7.5.7",
-    "tailwindcss": "^4.3.0",
     "typescript": "^5.9.2",
     "undici": "catalog:",
     "zstd-stream": "^1.1.0"

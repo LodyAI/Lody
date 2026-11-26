@@ -1,3 +1,4 @@
+import { allowTodayCompanion } from './today-windows'
 import { installRendererUnloadConfirmation } from './renderer-unload'
 import { isAppResourceLink } from '@lody/shared/session-link'
 import { getWindowTargetPath, presentWindowTarget } from './window-target'
@@ -12,6 +13,8 @@ import {
   isAppQuitting,
   isWindowsTrayAvailable,
   setMainWindow,
+  setPendingDeepLink,
+  markCompanionWindow,
   registerProductWindow,
   unmarkWarmWindow
 } from './window-state'
@@ -59,6 +62,16 @@ type CreateMainWindowOptions = {
   icon?: string
   initialPath?: string
   auxiliary?: boolean
+  /** A single-surface companion window: its own bounds, never the primary window. */
+  companion?: {
+    width: number
+    height: number
+    minWidth: number
+    minHeight: number
+    x?: number
+    y?: number
+    center?: boolean
+  }
   hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
   /**
@@ -393,8 +406,12 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     )
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
-    ...getMainWindowConstructorOptions(),
-    ...(options.auxiliary ? { width: 1000, height: 760 } : {}),
+    ...(options.companion
+      ? options.companion
+      : {
+          ...getMainWindowConstructorOptions(),
+          ...(options.auxiliary ? { width: 1000, height: 760 } : {})
+        }),
     show: false,
     backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
     autoHideMenuBar: true,
@@ -432,6 +449,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     pendingInitialMaximize.add(window)
   }
   registerProductWindow(window, options.warm ?? false)
+  if (options.companion) markCompanionWindow(window)
   installRendererUnloadConfirmation(window)
   if (!options.auxiliary) trackMainWindowState(window)
   const initialDevbarEnabled = isDevbarRendererEnabled()
@@ -480,6 +498,19 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   })
 
   window.webContents.setWindowOpenHandler((details) => {
+    const today = allowTodayCompanion(window, details, {
+      show: false,
+      backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
+      autoHideMenuBar: true,
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
+        : {}),
+      ...(process.platform === 'win32'
+        ? { titleBarStyle: 'hidden', titleBarOverlay: getMainWindowTitleBarOverlay(resolvedTheme) }
+        : {}),
+      webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true }
+    })
+    if (today) return today
     if (isAppResourceLink(details.url)) {
       window.webContents.send('app.deepLink', details.url)
       return { action: 'deny' }
@@ -617,6 +648,20 @@ export function setMainWindowOnboardingReloadTarget(window: BrowserWindow): void
   setReloadTarget(window, resolveMainRendererTarget('/onboarding', false))
 }
 
+/**
+ * Opens an app resource link in the primary window, raising it or reopening one
+ * when only companion windows remain. A window still loading receives it from
+ * its own did-finish-load handoff.
+ */
+export function openLinkInMainWindow(url: string): void {
+  const window = openOrFocusMainWindow({ icon: productWindowIcon })
+  if (window.webContents.isLoading() || !window.webContents.getURL()) {
+    setPendingDeepLink(url)
+    return
+  }
+  window.webContents.send('app.deepLink', url)
+}
+
 export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWindow {
   const mainWindow = getMainWindow()
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -656,8 +701,9 @@ export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWind
 /** Adopt a prepared view without navigating or replacing its renderer. */
 export function adoptPreparedMainWindow(window: BrowserWindow, target: ElectronWindowTarget): void {
   unmarkWarmWindow(window)
-  setReloadTarget(
-    window,
-    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
-  )
+  adoptAuxiliaryReloadPath(window, getWindowTargetPath(target))
+}
+
+export function adoptAuxiliaryReloadPath(window: BrowserWindow, path: string): void {
+  setReloadTarget(window, resolveMainRendererTarget(path, isDevbarRendererEnabled(), true))
 }

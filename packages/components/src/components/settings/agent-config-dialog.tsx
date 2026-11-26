@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
+import type { AgentCreateLinkTarget } from '@lody/shared/session-link';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from '@/lib/toast';
 import { usePostHog } from '@/lib/posthog-context';
@@ -94,6 +95,8 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
+import type { AcpModelOptionsRefreshProgress } from '@/hooks/use-refresh-machine-acp-capabilities';
+import { formatModelOptionsProgressText } from './model-options-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
@@ -275,7 +278,7 @@ const styles = stylex.create({
   railItem: { gap: '10px', fontSize: '13px' },
   railItemNarrow: { paddingBlock: '10px', fontSize: '15px' },
   railItemDisabled: {
-    opacity: 0.45,
+    opacity: control.disabledOpacity,
     cursor: 'not-allowed',
     backgroundColor: { default: 'transparent', ':hover': 'transparent' },
   },
@@ -636,7 +639,10 @@ const styles = stylex.create({
     paddingInline: space[3],
     // `Collapsible.Panel` clips overflow, and `focus.ringWidth` collapses to 0px
     // on pointer modality while text controls still paint their ring on focus.
-    paddingBlockStart: space[1],
+    // A wider top clearance keeps the first control's 1px edge away from the clip
+    // line: a fractional measured panel height on Retina lands that edge on a
+    // subpixel boundary and the top of it is covered (issue #3017).
+    paddingBlockStart: space[2],
     paddingBottom: space[3],
   },
   sectionHint: {
@@ -1166,6 +1172,7 @@ export type AgentConfigDialogMode =
 type RefreshArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
+  onModelOptionsProgress?: (progress: AcpModelOptionsRefreshProgress) => void;
 };
 
 /** Whether a registry agent's platform binary is present on the target machine. */
@@ -1307,6 +1314,36 @@ export function listAddableProviders(t: Translate): AddableProvider[] {
     initialForm: buildPresetCreateForm(preset.id),
   }));
   return [...builtins, ...presets];
+}
+
+export function buildCreateFormFromLinkTarget(
+  target: AgentCreateLinkTarget,
+  t: Translate
+): Partial<AgentConfigFormData> | null {
+  switch (target.kind) {
+    case 'builtin': {
+      const option = BUILTIN_OPTIONS.find((item) => item.agentType === target.agentType);
+      if (!option || option.agentType === 'sorbet') return null;
+      return {
+        cliType: option.cliType,
+        agentType: option.agentType,
+        name: getOptionLabel(t, option),
+      };
+    }
+    case 'preset':
+      return PRESETS_BY_ID[target.presetId] ? buildPresetCreateForm(target.presetId) : null;
+    case 'custom':
+      return { cliType: 'custom', agentType: '' };
+    case 'registry': {
+      const option = REGISTRY_OPTIONS.find((item) => item.agentType === target.agentType);
+      if (!option) return null;
+      return {
+        cliType: option.cliType,
+        agentType: option.agentType,
+        name: option.label,
+      };
+    }
+  }
 }
 
 function resolveCredentialModeBaseUrl(
@@ -1587,6 +1624,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [probing, setProbing] = useState(false);
+  const [modelProgress, setModelProgress] = useState<AcpModelOptionsRefreshProgress | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [manuallyTested, setManuallyTested] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
@@ -2095,6 +2133,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         const response = await onRefreshCapabilities({
           machineId: machine.id,
           configId: agentConfigId,
+          onModelOptionsProgress: (progress) => {
+            if (!cancelled) setModelProgress(progress);
+          },
         });
         if (cancelled) return;
         if (response.authRequired) {
@@ -2138,12 +2179,16 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         setVerifiedBuiltinContext(null);
         setProbeError(error instanceof Error ? error.message : String(error));
       } finally {
-        if (!cancelled) setProbing(false);
+        if (!cancelled) {
+          setProbing(false);
+          setModelProgress(null);
+        }
       }
     })();
     return () => {
       cancelled = true;
       setProbing(false);
+      setModelProgress(null);
     };
   }, [
     open,
@@ -2176,6 +2221,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       const response = await onRefreshCapabilities({
         machineId: machine.id,
         configId: agentConfigId,
+        onModelOptionsProgress: setModelProgress,
       });
       if (response.authRequired) {
         setAuthRequired(true);
@@ -2204,6 +2250,7 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       setProbeError(error instanceof Error ? error.message : String(error));
     } finally {
       setProbing(false);
+      setModelProgress(null);
     }
   };
 
@@ -2790,6 +2837,9 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
               <ProbeStatus
                 isPreset={isPreset}
                 probing={probing}
+                probingText={
+                  modelProgress ? formatModelOptionsProgressText(t, modelProgress) : undefined
+                }
                 probeError={probeError}
                 ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
                 showIdleAction={!isCustom}
@@ -3569,8 +3619,10 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
         noAnimation={isNarrowLayout}
         style={isNarrowLayout ? PANEL_STYLE_NARROW : PANEL_STYLE}
       >
-        <Dialog.Title className="sr-only">{dialogTitle}</Dialog.Title>
-        <Dialog.Description className="sr-only">
+        <Dialog.Title className={stylex.props(catalog.srOnly).className}>
+          {dialogTitle}
+        </Dialog.Title>
+        <Dialog.Description className={stylex.props(catalog.srOnly).className}>
           {t(
             'settings.agent.dialog.a11yDescription',
             'Choose an agent type on the left and fill in the configuration on the right.'
@@ -3729,6 +3781,7 @@ function formatBinaryStatusText(
 function ProbeStatus({
   isPreset,
   probing,
+  probingText,
   probeError,
   ready,
   showIdleAction,
@@ -3737,6 +3790,8 @@ function ProbeStatus({
 }: {
   isPreset: boolean;
   probing: boolean;
+  /** Replaces the generic label while a refresh names the model it is reading. */
+  probingText?: string;
   probeError: string | null;
   ready: boolean;
   showIdleAction: boolean;
@@ -3755,7 +3810,7 @@ function ProbeStatus({
     return (
       <span {...stylex.props(styles.probing)}>
         <Spinner size="small" aria-hidden="true" />
-        {t('settings.agent.dialog.probing', 'Probing capabilities…')}
+        {probingText ?? t('settings.agent.dialog.probing', 'Probing…')}
       </span>
     );
   }

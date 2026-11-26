@@ -1,3 +1,6 @@
+import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
+import { corner as uiCorner, radius as uiRadius, text as uiText } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useState, type ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { fn } from 'storybook/test';
@@ -45,9 +48,19 @@ function Popover({ children }: { children: ReactNode }) {
   );
 }
 
-/** Info Bar → Auto delivery: pick the steps, then start. Merge starts off. */
+/** Info Bar → Auto delivery: merge defaults on, merge method is configurable, and multi-PR sessions let you pick PRs. */
 export const StartDialog: Story = {
-  render: () => <AutoDeliveryDialog open onOpenChange={fn()} onStart={fn()} />,
+  render: () => (
+    <AutoDeliveryDialog
+      open
+      openPullRequests={[
+        { url: 'https://github.com/lodyai/lody/pull/3210', label: 'lodyai/lody#3210' },
+        { url: 'https://gitlab.com/lodyai/docs/-/merge_requests/18', label: 'lodyai/docs!18' },
+      ]}
+      onOpenChange={fn()}
+      onStart={fn()}
+    />
+  ),
 };
 
 function Tweaks({ on }: { on: boolean }) {
@@ -83,7 +96,7 @@ const STATES: SessionAutoDelivery[] = (
   [
     { state: 'pr' },
     { state: 'ci' },
-    { state: 'fix', attempt: 2 },
+    { state: 'fix', attempt: 2, prUrl: 'https://github.com/lodyai/lody/pull/3210', prIndex: 1, prTotal: 2 },
     { state: 'conflict', attempt: 1 },
     { state: 'merge' },
     { state: 'ready' },
@@ -91,23 +104,31 @@ const STATES: SessionAutoDelivery[] = (
     { state: 'stalled', reason: 'ci_limit' },
     { state: 'stalled', reason: 'merge_blocked' },
     { state: 'stalled', reason: 'no_new_commit' },
+    { state: 'stalled', reason: 'request_blocked', blockReason: 'permission_unconfirmed' },
+    { state: 'stalled', reason: 'stopped' },
   ] as const
-).map((status) => ({ ...status, updatedAt: 0 }));
+).map((status) => ({ ...status, updatedAt: 1_700_000_000_000 }));
 
-/** The in-conversation line for every state: Turn off follows the text; a merge can be dismissed. */
+/** The in-conversation line for every state: reuses the shared automation chip and stopped nudge. */
 export const ConversationStatusLine: Story = {
   parameters: { layout: 'fullscreen' },
   render: () => (
-    <div className="w-[720px] max-w-[100vw] bg-background py-4">
+    <div {...stylex.props(themeStyles.glyph)}>
       <ConversationColumn>
-        {STATES.map((status) => (
-          <SessionAutoDeliveryNote
-            key={`${status.state}-${status.reason ?? ''}`}
-            status={status}
-            onTurnOff={fn()}
-            onDismiss={fn()}
-          />
-        ))}
+        <div {...stylex.props(themeStyles.notesStack)}>
+          {STATES.map((status) => (
+            <SessionAutoDeliveryNote
+              key={`${status.state}-${status.state === 'stalled' ? status.reason : ''}`}
+              status={status}
+              now={1_700_000_060_000}
+              options={DEFAULT_AUTO_DELIVER_OPTIONS}
+              onOptionsChange={fn()}
+              onTurnOff={fn()}
+              onDismiss={fn()}
+              onResume={fn()}
+            />
+          ))}
+        </div>
       </ConversationColumn>
     </div>
   ),
@@ -116,7 +137,7 @@ export const ConversationStatusLine: Story = {
 /** The sidebar mark: stalled delivery outranks unread, but not working or permission. */
 export const SidebarMarks: Story = {
   render: () => (
-    <div className="flex flex-col gap-2 text-sm">
+    <div {...stylex.props(themeStyles.column)}>
       {(
         [
           ['Stalled, needs you', { needsAttention: true }],
@@ -126,7 +147,7 @@ export const SidebarMarks: Story = {
           ['Waiting for permission', { isWaitingPermission: true }],
         ] as const
       ).map(([label, flags]) => (
-        <div key={label} className="flex w-64 items-center justify-between rounded-md px-2 py-1">
+        <div key={label} {...stylex.props(themeStyles.row)}>
           <span>{label}</span>
           <SessionRowStatusIndicator {...flags} />
         </div>
@@ -134,3 +155,10 @@ export const SidebarMarks: Story = {
     </div>
   ),
 };
+
+const themeStyles = stylex.create({
+  glyph: { width: '720px', maxWidth: '100vw', backgroundColor: uiColors.background, paddingBlock: 'calc(var(--spacing) * 4)' },
+  notesStack: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--spacing) * 2)' },
+  column: { display: 'flex', flexDirection: 'column', gap: 'calc(var(--spacing) * 2)', fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading },
+  row: { display: 'flex', width: 'calc(var(--spacing) * 64)', alignItems: 'center', justifyContent: 'space-between', borderRadius: uiRadius.small, cornerShape: uiCorner.shape, paddingInline: 'calc(var(--spacing) * 2)', paddingBlock: 'calc(var(--spacing) * 1)' },
+});

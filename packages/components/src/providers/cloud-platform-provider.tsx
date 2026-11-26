@@ -1,3 +1,4 @@
+import { assertGithubWorkspaceAccess } from '@/lib/github-workspace-admission';
 import i18next from 'i18next';
 import { Effect } from 'effect';
 import { makeAutomaticPairingRuntime } from '@lody/e2ee-client/automatic-pairing';
@@ -5,7 +6,6 @@ import { E2eeAutomaticPairingInbox } from '@/components/pages/e2ee-automatic-pai
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { assertLegacyWorkspaceAccess } from '@/lib/legacy-workspace-admission';
 import { e2eeAccessLoss } from '@/lib/e2ee-member-removal';
-import { E2eeTeamInboxHost } from '@/components/e2ee/email-admission-worker';
 import {
   useCallback,
   useEffect,
@@ -22,7 +22,6 @@ import { workspaceContentModeAtom } from '@/atoms/workspace-content-mode';
 import {
   getTelemetryRouteTarget,
   installWorkspaceTelemetryScope,
-  postHogPrivacy,
   suspendWorkspaceTelemetry,
 } from '@/lib/posthog-privacy';
 import {
@@ -31,7 +30,6 @@ import {
   createStore,
   type PlatformProvider,
   type MutableStore,
-  type E2eeWorkspaceRuntime,
   type E2eeRuntimeFactory,
   type PlatformE2eeWorkspaces,
   type PlatformSessionState,
@@ -122,7 +120,6 @@ export function CloudPlatformProvider({
   const atomStore = useStore();
   const telemetryLive = useRef({ session, hasAuthenticatedConvex });
   telemetryLive.current = { session, hasAuthenticatedConvex };
-  useLayoutEffect(() => postHogPrivacy.sync());
   useEffect(() => {
     const uninstall = installWorkspaceTelemetryScope(() => {
       const live = telemetryLive.current;
@@ -169,33 +166,24 @@ export function CloudPlatformProvider({
         return null;
       return JSON.stringify([identity.user.id, mode.workspaceId, target]);
     });
-    const refresh = () => postHogPrivacy.sync();
-    const unsubscribes = [
-      sessionStore.subscribe(refresh),
-      workspacesStore.subscribe(refresh),
-      atomStore.sub(userAtom, refresh),
-      atomStore.sub(workspaceContentModeAtom, refresh),
-      atomStore.sub(currentWorkspaceIdAtom, refresh),
-      atomStore.sub(currentWorkspaceSlugAtom, refresh),
-    ];
-    return () => {
-      uninstall();
-      for (const unsubscribe of unsubscribes) unsubscribe();
-    };
+    return uninstall;
   }, [atomStore, sessionStore, workspacesStore]);
   const [uninstallGitHubTokenPort] = useState(() =>
     installGitHubTokenPort(
       createCloudGitHubTokenPort((workspaceId) =>
-        assertLegacyWorkspaceAccess({
-          workspaceId,
-          platformKind: 'cloud',
-          mode: atomStore.get(workspaceContentModeAtom),
-          runtime: atomStore.get(activeWorkspaceRuntimeAtom),
-          accountId: atomStore.get(userAtom)?.id ?? null,
-          currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
-          routeSlug: atomStore.get(currentWorkspaceSlugAtom),
-          workspacesState: workspacesStore.get(),
-        })
+        assertGithubWorkspaceAccess(
+          {
+            workspaceId,
+            platformKind: 'cloud',
+            mode: atomStore.get(workspaceContentModeAtom),
+            runtime: atomStore.get(activeWorkspaceRuntimeAtom),
+            accountId: atomStore.get(userAtom)?.id ?? null,
+            currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
+            routeSlug: atomStore.get(currentWorkspaceSlugAtom),
+            workspacesState: workspacesStore.get(),
+          },
+          'github:getOperationAccessTokenByRepoNameForClient'
+        )
       )
     )
   );
@@ -402,6 +390,8 @@ export function CloudPlatformProvider({
         memberProfiles: (request) =>
           cloudClient.query(cloudOperations.e2eeWorkspaces.memberProfiles, request),
         create: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.create, request),
+        deleteWorkspace: (request) =>
+          cloudClient.action(cloudOperations.e2eeWorkspaces.deleteWorkspace, request),
         describe: (request) => cloudClient.query(cloudOperations.e2eeWorkspaces.describe, request),
         history: (request) => cloudClient.action(cloudOperations.e2eeWorkspaces.history, request),
       },
@@ -626,12 +616,7 @@ export function CloudPlatformProvider({
 
   return (
     <PlatformContext.Provider value={provider}>
-      <CloudWorkspaceBridge
-        organizationRef={organizationRef}
-        workspacesStore={workspacesStore}
-        runtime={e2eeWorkspaces.runtime}
-        accountId={session.data?.user.id}
-      />
+      <CloudWorkspaceBridge organizationRef={organizationRef} workspacesStore={workspacesStore} />
       <E2eeAutomaticPairingInbox
         key={session.data?.user.id ?? 'signed-out'}
         runtime={e2eeWorkspaces.runtime}
@@ -645,8 +630,6 @@ export function CloudPlatformProvider({
 type CloudWorkspaceBridgeProps = {
   organizationRef: RefObject<ReturnType<typeof useOrganization> | null>;
   workspacesStore: MutableStore<WorkspacesState>;
-  runtime: E2eeWorkspaceRuntime | undefined;
-  accountId: string | undefined;
 };
 
 // Standalone login has session/Convex contexts but no authenticated-query context.
@@ -659,8 +642,6 @@ function CloudWorkspaceBridge(props: CloudWorkspaceBridgeProps) {
 function AuthenticatedCloudWorkspaceBridge({
   organizationRef,
   workspacesStore,
-  runtime,
-  accountId,
 }: CloudWorkspaceBridgeProps) {
   const organization = useOrganization();
   useLayoutEffect(() => {
@@ -707,19 +688,5 @@ function AuthenticatedCloudWorkspaceBridge({
     workspacesStore,
   ]);
 
-  return accountId && runtime
-    ? organization.organizations?.map((workspace) =>
-        'contentMode' in workspace &&
-        workspace.contentMode === 'e2ee' &&
-        'role' in workspace &&
-        ['owner', 'admin'].includes(String(workspace.role)) ? (
-          <E2eeTeamInboxHost
-            key={`${accountId}:${workspace.id}`}
-            runtime={runtime}
-            workspaceId={workspace.id}
-            accountId={accountId}
-          />
-        ) : null
-      )
-    : null;
+  return null;
 }

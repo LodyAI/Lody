@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils';
 import { composeEventHandlers, useComposedRefs } from '@diceui/shared';
 import type { VirtualElement } from '@floating-ui/react';
 import { createEmptyHistoryState, registerHistory } from '@lexical/history';
@@ -22,9 +23,9 @@ import {
 } from 'lexical';
 import * as React from 'react';
 import { createPortal } from 'react-dom';
+import * as stylex from '@stylexjs/stylex';
 import { getPlatform } from '@/lib/commands/platform';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
-import { cn } from '@/lib/utils';
 import {
   $domPointToOffset,
   $ensureMentionCaretTarget,
@@ -59,6 +60,11 @@ const INPUT_NAME = 'MentionInput';
 
 /** Updates that copy the owner's value into the editor. They are not edits. */
 const SYNC_TAG = 'lody-composer-sync';
+
+const inputStyles = stylex.create({
+  container: { position: 'relative' },
+  input: { position: 'relative', zIndex: 10, backgroundColor: 'transparent' },
+});
 
 type InputElement = ComposerEditorElement;
 
@@ -220,8 +226,10 @@ function measureCaretRect(editor: LexicalEditor, element: HTMLElement, offset: n
 }
 
 /**
- * Copy the UA placeholder paint of a textarea styled like the editor. A
- * `placeholder:` utility reaches the editor directly (`tailwind/index.css`).
+ * Copy the UA placeholder paint of a textarea styled like the editor. The
+ * editor paints its placeholder as a `::before` (`style/index.css`), and
+ * WebKit reports no computed style for `::placeholder`, so the colour is
+ * probed from a real textarea and forwarded via `--composer-placeholder-color`.
  */
 function usePlaceholderPaint(
   element: InputElement | null,
@@ -357,6 +365,8 @@ interface MentionInputProps extends Omit<
   disabled?: boolean;
   required?: boolean;
   containerClassName?: string;
+  xstyle?: stylex.StyleXStyles;
+  containerXstyle?: stylex.StyleXStyles;
 }
 
 const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, forwardedRef) => {
@@ -372,6 +382,8 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     disabled,
     required,
     className,
+    xstyle,
+    containerXstyle,
     style,
     spellCheck,
     onKeyDown,
@@ -1355,8 +1367,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
   }, [editor, isPublished, publish, readSelection]);
 
   const mirrorSelection = !!context.getMentionChip;
+  const containerProps = stylex.props(inputStyles.container, containerXstyle);
+  const inputStyleProps = stylex.props(inputStyles.input, xstyle);
   return (
-    <div className={cn('relative', containerClassName)}>
+    <div className={cn(containerProps.className, containerClassName)} style={containerProps.style}>
       <div
         role="combobox"
         id={context.inputId}
@@ -1381,8 +1395,14 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         data-empty={paint.empty ? '' : undefined}
         data-system-selection={mirrorSelection ? '' : undefined}
         data-disabled={disabled ? '' : undefined}
-        className={cn('relative', 'z-10', className, 'bg-transparent')}
-        style={{ '--composer-rows': rows, ...style } as React.CSSProperties}
+        className={cn(inputStyleProps.className, className)}
+        style={
+          {
+            ...inputStyleProps.style,
+            '--composer-rows': rows,
+            ...style,
+          } as React.CSSProperties
+        }
         // Chip glyphs repaint under native spelling decorations.
         spellCheck={mirrorSelection ? false : spellCheck}
         onKeyDownCapture={composeEventHandlers(onKeyDownPrimitive, onKeyDown)}

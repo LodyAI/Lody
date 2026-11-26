@@ -1,10 +1,20 @@
 import { streamsSnapshotCodec } from '@lody/shared/streams-snapshot-codec';
 import {
-  WorkspaceStreamsConfigurationError,
   requirePlaintextWorkspaceStreamsContent,
-  type WorkspaceStreamsMode,
+  encryptedWorkspaceNamespace,
+  type WorkspaceStreamsContent,
 } from '@lody/shared/workspace-streams-content';
-import { StreamsCrdt, type CrdtAdapter, type JsonObject as Version } from '@loro-dev/streams-crdt';
+import {
+  encodeStreamsRoomAdditionalData,
+  type StreamsRoomIdentity,
+} from 'loro-repo/transport/streams';
+import {
+  type StreamsCrdt,
+  type PayloadProtectionOptions,
+  type CrdtAdapter,
+  type JsonObject as Version,
+} from '@loro-dev/streams-crdt';
+import { createStreamsCrdt } from '@lody/shared/streams-crdt-factory';
 import { StreamsClient, type Result, type StreamError } from '@loro-dev/streams-client';
 import { createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
 import { createFlockAdapter } from '@loro-dev/streams-crdt/flock';
@@ -27,6 +37,7 @@ import {
   assertOwnedDocument,
   canonical,
   hashBytes,
+  jsonObject,
   mergeRowDecision,
   migratedMetadata,
   receiptRoot,
@@ -97,16 +108,104 @@ export type MigrationTarget = {
 export async function openMigrationTarget(
   provider: LoroStreamsTokenProviderLegacy,
   workspaceId: WorkspaceId,
-  content: WorkspaceStreamsMode
+  content: WorkspaceStreamsContent,
+  protectedTarget?: { authorize(): Promise<void>; bucketId(): string | undefined }
 ): Promise<MigrationTarget> {
-  if (content?.mode === 'protected')
-    throw new WorkspaceStreamsConfigurationError('加密工作区不支持导入');
-  requirePlaintextWorkspaceStreamsContent(content);
+  if (content.mode === 'protected') {
+    if (!protectedTarget)
+      throw new Error('E2EE migration requires an approved paired CLI machine.');
+    await protectedTarget.authorize();
+  } else requirePlaintextWorkspaceStreamsContent(content);
   const baseUrl = await prepareCliStreamsGatewayBaseUrl(provider);
+  const bucketId =
+    content.mode === 'protected' ? protectedTarget?.bucketId() : LORO_STREAMS_BUCKET_ID;
+  if (!bucketId || (content.mode === 'protected' && bucketId === LORO_STREAMS_BUCKET_ID))
+    throw new Error('E2EE content bucket is unavailable');
   const lifetime = new AbortController();
   const streams = new Set<StreamsCrdt<Version>>();
-  const urlFor = (id: string) =>
-    createLoroStreamUrl({ baseUrl, bucketId: LORO_STREAMS_BUCKET_ID, streamId: id });
+  const urlFor = (id: string) => createLoroStreamUrl({ baseUrl, bucketId, streamId: id });
+  const rooms = new Map<string, StreamsRoomIdentity>([
+    [getLoroMetaStreamId(workspaceId), { kind: 'meta' }],
+  ]);
+  const documentStreamId = (entry: MigrationDocument) => {
+    const id = getLoroStreamIdForDocId(workspaceId, entry.id);
+    rooms.set(id, { kind: 'doc', docId: entry.id });
+    return id;
+  };
+  const protectionFor = (id: string): PayloadProtectionOptions | undefined => {
+    if (content.mode !== 'protected') return undefined;
+    const room: StreamsRoomIdentity = rooms.get(id) ?? { kind: 'flock', flockDocId: id };
+    const selected = content.resolve(room);
+    if (selected.mode !== 'protected') throw new Error('E2EE migration room must be protected');
+    const provider = selected.config.provider;
+    return {
+      readPolicy: 'encrypted-only',
+      writePolicy: 'encrypt',
+      provider: {
+        maxSealOverheadBytes: provider.maxSealOverheadBytes,
+        seal: (input) =>
+          provider.seal({
+            ...input,
+            additionalData: (header) =>
+              encodeStreamsRoomAdditionalData(
+                content.namespace,
+                room,
+                input.additionalData(header)
+              ),
+          }),
+        open: (input) =>
+          provider.open({
+            ...input,
+            additionalData: encodeStreamsRoomAdditionalData(
+              content.namespace,
+              room,
+              input.additionalData
+            ),
+          }),
+      },
+    };
+  };
+  const writePart = async (id: string, updates: readonly Uint8Array[]) => {
+    if (content.mode !== 'protected') return part(updates);
+    await protectedTarget?.authorize();
+    const provider = protectionFor(id)?.provider;
+    if (!provider) throw new Error('E2EE migration protection unavailable');
+    let authenticated: Uint8Array | undefined;
+    const sealed = await provider.seal({
+      plaintext: part(updates).body,
+      context: {
+        protocol: 'loro-streams-crdt-payload-protection',
+        version: 2,
+        kind: 'update_batch',
+      },
+      additionalData: (header) => {
+        if (authenticated || !header.length || header.length > 512)
+          throw new Error('Invalid protected migration header');
+        authenticated = new Uint8Array(10 + header.length);
+        authenticated.set([76, 83, 67, 69, 2, 1]);
+        new DataView(authenticated.buffer).setUint16(6, header.length, false);
+        authenticated.set(header, 10);
+        const domain = new TextEncoder().encode('loro-streams-crdt-payload-protection/v2\0');
+        const aad = new Uint8Array(domain.length + authenticated.length);
+        aad.set(domain);
+        aad.set(authenticated, domain.length);
+        return aad;
+      },
+    });
+    if (
+      !authenticated ||
+      sealed.header.length !== authenticated.length - 10 ||
+      !sealed.header.every((byte, index) => authenticated?.[10 + index] === byte) ||
+      !sealed.sealed.length ||
+      sealed.header.length + sealed.sealed.length - part(updates).body.length >
+        provider.maxSealOverheadBytes
+    )
+      throw new Error('Invalid protected migration envelope');
+    const envelope = new Uint8Array(authenticated.length + sealed.sealed.length);
+    envelope.set(authenticated);
+    envelope.set(sealed.sealed, authenticated.length);
+    return part([envelope]);
+  };
   const fetchFor =
     (signal?: AbortSignal): typeof fetch =>
     (input, init) =>
@@ -127,13 +226,20 @@ export async function openMigrationTarget(
       retry: { maxAttempts: 0 },
     });
   const make = (id: string, adapter: CrdtAdapter<Version>, signal?: AbortSignal) => {
-    const stream = new StreamsCrdt({
+    const stream = createStreamsCrdt({
       streamUrl: urlFor(id),
       adapter,
       auth: provider.createAuthCallback(),
       fetch: fetchFor(signal),
-      snapshotCodec: streamsSnapshotCodec,
-      shardUrls: getLoroStreamsShardUrls(baseUrl, provider.getShardHostSuffix()),
+      snapshotCodec:
+        content.mode === 'protected'
+          ? (content.snapshotCodec ?? streamsSnapshotCodec)
+          : streamsSnapshotCodec,
+      snapshotUpload: content.mode === 'protected' ? content.snapshotUpload : undefined,
+      e2ee: protectionFor(id),
+      payloadProtectionRequired: content.mode === 'protected',
+      webSocket: 'disabled',
+      shardUrls: getLoroStreamsShardUrls(baseUrl, provider.getShardHostSuffix()) ?? 'disabled',
     });
     streams.add(stream);
     return stream;
@@ -163,11 +269,7 @@ export async function openMigrationTarget(
   };
   const readDoc = async (entry: MigrationDocument, signal?: AbortSignal) => {
     const doc = new LoroDoc();
-    const cursor = await read(
-      getLoroStreamIdForDocId(workspaceId, entry.id),
-      createLoroDocAdapter(doc),
-      signal
-    );
+    const cursor = await read(documentStreamId(entry), createLoroDocAdapter(doc), signal);
     return { doc, exists: cursor !== null };
   };
   // Never reuse a replica after a rejected CAS: its tentative mutations must not leak.
@@ -184,13 +286,16 @@ export async function openMigrationTarget(
       );
       if (!batch?.updates.length) return;
       if (!cursor) {
-        // The initial index and its receipts are one atomic stream creation.
-        if (unwrap(await client(id, signal).create({ part: part(batch.updates) })).created) return;
+        if (
+          unwrap(await client(id, signal).create({ part: await writePart(id, batch.updates) }))
+            .created
+        )
+          return;
       } else {
         const result = unwrap(
           await client(id, signal).appendCas({
             expectedOffset: cursor.nextOffset,
-            part: part(batch.updates),
+            part: await writePart(id, batch.updates),
           })
         );
         if (result.kind === 'ok') return;
@@ -200,6 +305,25 @@ export async function openMigrationTarget(
   };
   return {
     async preflight(manifest, _reserved, signal) {
+      if (manifest.targetContentMode !== content.mode)
+        throw new Error('Migration target mode changed');
+      if (content.mode === 'protected') {
+        if (
+          !manifest.targetGenesisHash ||
+          content.namespace !== encryptedWorkspaceNamespace(manifest.targetGenesisHash)
+        )
+          throw new Error('Migration target encrypted identity changed');
+        await protectedTarget?.authorize();
+        for (const entry of manifest.documents) {
+          if (
+            entry.id.startsWith('task-') ||
+            (entry.meta.historyBackend && entry.meta.historyBackend !== 'loro')
+          )
+            throw new Error('E2EE migration does not support legacy task or Roost history');
+          protectionFor(documentStreamId(entry));
+        }
+        for (const index of manifest.flocks) protectionFor(index.id);
+      }
       if (
         !unwrap(
           await client(getLoroMetaStreamId(workspaceId), signal).bucketSupportsAppendCas({ signal })
@@ -233,23 +357,20 @@ export async function openMigrationTarget(
       doc.commit();
       // Ownership and creation are atomic, including when the successful response is lost.
       const created = unwrap(
-        await client(getLoroStreamIdForDocId(workspaceId, entry.id), signal).create({
-          part: part([doc.export({ mode: 'update' })]),
+        await client(documentStreamId(entry), signal).create({
+          part: await writePart(documentStreamId(entry), [doc.export({ mode: 'update' })]),
         })
       );
       if (!created.created)
         assertOwnedDocument((await readDoc(entry, signal)).doc, entry, manifest.migrationId);
     },
     async upload(entry, manifest, bytes, signal) {
+      if (content.mode === 'protected') await protectedTarget?.authorize();
       const remote = await readDoc(entry, signal);
       if (!remote.exists) throw new Error(`Migration reservation disappeared: ${entry.id}`);
       assertOwnedDocument(remote.doc, entry, manifest.migrationId);
       remote.doc.import(bytes);
-      const stream = make(
-        getLoroStreamIdForDocId(workspaceId, entry.id),
-        createLoroDocAdapter(remote.doc),
-        signal
-      );
+      const stream = make(documentStreamId(entry), createLoroDocAdapter(remote.doc), signal);
       try {
         const result = await stream.sync();
         if (!result.ok)
@@ -280,7 +401,6 @@ export async function openMigrationTarget(
                 'insert'
               )
                 flock.set(row.key, row.value);
-              // Same CAS as the row. Survives lost responses and later user edits/deletes.
               flock.set(receiptKey(manifest, row), hashBytes(canonical(row.value)));
             }
           },
@@ -313,6 +433,19 @@ export async function openMigrationTarget(
       );
     },
     async publish(entry, manifest, signal) {
+      const fence =
+        content.mode === 'protected'
+          ? (await readDoc(entry, signal)).doc.getMap(receiptRoot).get('importFence')
+          : undefined;
+      if (
+        content.mode === 'protected' &&
+        isSessionDocRoomId(entry.id) &&
+        (!fence ||
+          typeof fence !== 'object' ||
+          !('workspaceId' in fence) ||
+          fence.workspaceId !== workspaceId)
+      )
+        throw new Error('Missing E2EE session import fence');
       await transact(
         getLoroMetaStreamId(workspaceId),
         (meta) => {
@@ -322,6 +455,7 @@ export async function openMigrationTarget(
           const values = isSessionDocRoomId(entry.id)
             ? migratedMetadata(entry.meta, manifest)
             : { ...entry.meta, ossMigrationId: manifest.migrationId };
+          if (fence) values.importFence = jsonObject.parse(fence);
           meta.set(['e', entry.id], true);
           for (const [key, value] of Object.entries(values)) meta.set(['m', entry.id, key], value);
         },

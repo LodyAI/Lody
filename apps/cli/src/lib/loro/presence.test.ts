@@ -21,7 +21,7 @@ import {
 
 import type { Logger } from '@/utils/logger';
 import { PresenceReplica } from './presence-replica';
-import { presencePlatformLayer } from '@/platform/presence';
+import { presencePlatformLayer, resolveCliLoroStreamsWebSocketEnabled } from '@/platform/presence';
 import {
   makeLoroStreamsTokenProvider,
   makeLoroStreamsTokenWebPorts,
@@ -66,20 +66,26 @@ const controlledTransport = (autoAck = false) => {
   const arrivals = new Map<number, ReturnType<typeof Promise.withResolvers<void>>>();
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     if (init?.method !== 'POST') {
+      let open = true;
+      let endThisRead = () => {};
       return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
             sse = controller;
-            let open = true;
-            endRead = () => {
+            endThisRead = () => {
               if (open) {
                 open = false;
+                init?.signal?.removeEventListener('abort', endThisRead);
                 controller.close();
               }
             };
-            const endThisRead = endRead;
+            endRead = endThisRead;
             controller.enqueue(toEvent('bootstrap', bootstrap));
             init?.signal?.addEventListener('abort', endThisRead, { once: true });
+          },
+          cancel() {
+            open = false;
+            init?.signal?.removeEventListener('abort', endThisRead);
           },
         }),
         { headers: { 'Content-Type': 'text/event-stream', 'Stream-SSE-Data-Encoding': 'base64' } }
@@ -928,4 +934,14 @@ describe('CLI presence WebSocket opt-in composition', () => {
       }
     }
   );
+
+  it('falls back to the compiled cloud default when runtime env is unset and lets runtime env override it', () => {
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, undefined, false)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, undefined, true)).toBe(true);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, '0', true)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, 'false', true)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(undefined, '1', false)).toBe(true);
+    expect(resolveCliLoroStreamsWebSocketEnabled(false, '1', true)).toBe(false);
+    expect(resolveCliLoroStreamsWebSocketEnabled(true, '0', false)).toBe(true);
+  });
 });

@@ -873,7 +873,7 @@ for (const scenario of ['rotated-recovery', 'unfinished-join']) {
           const before = records.length
           const repaired = yield* run()
           assert.equal(repaired[0].outcome, 'Committed')
-          assert.equal(repaired[0].partialEpochKey, false)
+          assert.equal(repaired[0].partialEpochKey, undefined)
           assert.equal(records.length, before)
           assert.equal((yield* bootstrap.creationFor(workspaceId)).genesisHash, origin.genesisHash)
           const retained = database(directory, (db) => ({

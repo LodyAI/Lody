@@ -20,6 +20,7 @@ function observation(
     organizationsReady: true,
     docMetaScanErrorType: scope === 'doc_meta_scan_failed' ? 'UnknownError' : null,
     runtimeInitErrorType: null,
+    targetEncrypted: false,
   };
 }
 
@@ -76,6 +77,7 @@ export const SlowBeforeAnyWorkspace: Story = {
       organizationsReady: false,
       docMetaScanErrorType: null,
       runtimeInitErrorType: null,
+      targetEncrypted: false,
     },
   },
 };

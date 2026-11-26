@@ -6,8 +6,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStore, Provider, useSetAtom } from 'jotai';
 
 import {
+  archiveScopeAtom,
+  chatScopeAtom,
+  chatsCollapsedAtom,
+  githubWorktreesSectionCollapsedAtom,
+  localProjectCollapseStateAtom,
+  localProjectsSectionCollapseStateAtom,
+  pinSectionsCollapsedAtom,
+  pinSectionsHiddenAtom,
+  pinnedSectionCollapsedAtom,
+  repoCollapseStateAtom,
   sidebarCollapsedAtom,
+  sidebarHideEmptyProjectsAtom,
   sidebarLastWidthAtom,
+  sidebarOrganizeModeAtom,
+  sidebarShowBranchNamesAtom,
+  sidebarUpdatedBucketCollapseStateAtom,
+  sidebarUpdatedShowProjectNamesAtom,
   todayPinnedAtom,
   todayPinnedTargetAtom,
 } from '../src/atoms/sidebar-state';
@@ -370,5 +385,138 @@ describe('desktop sidebar toggle', () => {
     expect(wrapper.style.width).toBe('');
     expect(content.style.marginLeft).toBe('');
     expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
+  });
+
+  it('persists sidebar collapse and filter state without live-syncing across renderers', async () => {
+    const store = createStore();
+    const unsubs = [
+      store.sub(sidebarCollapsedAtom, () => {}),
+      store.sub(sidebarLastWidthAtom, () => {}),
+      store.sub(todayPinnedAtom, () => {}),
+      store.sub(chatScopeAtom, () => {}),
+      store.sub(archiveScopeAtom, () => {}),
+      store.sub(sidebarOrganizeModeAtom, () => {}),
+      store.sub(sidebarUpdatedShowProjectNamesAtom, () => {}),
+      store.sub(sidebarShowBranchNamesAtom, () => {}),
+      store.sub(sidebarHideEmptyProjectsAtom, () => {}),
+      store.sub(repoCollapseStateAtom, () => {}),
+      store.sub(chatsCollapsedAtom, () => {}),
+      store.sub(pinnedSectionCollapsedAtom, () => {}),
+      store.sub(pinSectionsCollapsedAtom, () => {}),
+      store.sub(pinSectionsHiddenAtom, () => {}),
+      store.sub(localProjectCollapseStateAtom, () => {}),
+      store.sub(localProjectsSectionCollapseStateAtom, () => {}),
+      store.sub(githubWorktreesSectionCollapsedAtom, () => {}),
+      store.sub(sidebarUpdatedBucketCollapseStateAtom, () => {}),
+    ];
+
+    try {
+      store.set(sidebarCollapsedAtom, false);
+      store.set(sidebarLastWidthAtom, 320);
+      store.set(todayPinnedAtom, false);
+      store.set(chatScopeAtom, 'team');
+      store.set(archiveScopeAtom, 'team');
+      store.set(sidebarOrganizeModeAtom, 'workspace');
+      store.set(sidebarUpdatedShowProjectNamesAtom, true);
+      store.set(sidebarShowBranchNamesAtom, false);
+      store.set(sidebarHideEmptyProjectsAtom, true);
+      store.set(repoCollapseStateAtom, { 'org/repo': false });
+      store.set(chatsCollapsedAtom, false);
+      store.set(pinnedSectionCollapsedAtom, false);
+      store.set(pinSectionsCollapsedAtom, { sec1: false });
+      store.set(pinSectionsHiddenAtom, { sec1: false });
+      store.set(localProjectCollapseStateAtom, { 'm1:p1': false });
+      store.set(localProjectsSectionCollapseStateAtom, { m1: false });
+      store.set(githubWorktreesSectionCollapsedAtom, false);
+      store.set(sidebarUpdatedBucketCollapseStateAtom, { all: false });
+
+      await act(async () =>
+        render(
+          <Provider store={store}>
+            <WebWorkspaceLayout>
+              <div data-content="" />
+            </WebWorkspaceLayout>
+          </Provider>
+        )
+      );
+
+      const sidebar = container!.querySelector<HTMLElement>('[data-sidebar-identity]')!;
+      expect(sidebar.parentElement!.getAttribute('aria-hidden')).toBe('false');
+
+      const peerWrites: Array<[string, unknown]> = [
+        ['lody-sidebar-collapsed', true],
+        ['lody-sidebar-last-width', 260],
+        ['lody-today-pinned', true],
+        ['lody-sidebar-chat-scope', 'my'],
+        ['lody-archive-scope', 'my'],
+        ['lody-sidebar-organize-mode', 'status'],
+        ['lody-sidebar-updated-show-project-names', false],
+        ['lody-sidebar-show-branch-names', true],
+        ['lody-sidebar-hide-empty-projects', false],
+        ['lody-sidebar-repo-collapse', { 'org/repo': true }],
+        ['lody-sidebar-chats-collapsed', true],
+        ['lody-sidebar-pinned-section-collapsed', true],
+        ['lody-sidebar-pin-sections-collapsed', { sec1: true }],
+        ['lody-sidebar-pin-sections-hidden', { sec1: true }],
+        ['lody-sidebar-local-project-collapse', { 'm1:p1': true }],
+        ['lody-sidebar-local-projects-section-collapse', { m1: true }],
+        ['lody-sidebar-github-worktrees-section-collapsed', true],
+        ['lody-sidebar-updated-bucket-collapse', { all: true }],
+      ];
+
+      await act(async () => {
+        for (const [key, value] of peerWrites) {
+          const encoded = JSON.stringify(value);
+          window.localStorage.setItem(key, encoded);
+          window.dispatchEvent(
+            new StorageEvent('storage', {
+              key,
+              newValue: encoded,
+              storageArea: window.localStorage,
+            })
+          );
+        }
+      });
+      expect(sidebar.parentElement!.getAttribute('aria-hidden')).toBe('false');
+      expect(store.get(sidebarCollapsedAtom)).toBe(false);
+      expect(store.get(sidebarLastWidthAtom)).toBe(320);
+      expect(store.get(todayPinnedAtom)).toBe(false);
+      expect(store.get(chatScopeAtom)).toBe('team');
+      expect(store.get(archiveScopeAtom)).toBe('team');
+      expect(store.get(sidebarOrganizeModeAtom)).toBe('workspace');
+      expect(store.get(sidebarUpdatedShowProjectNamesAtom)).toBe(true);
+      expect(store.get(sidebarShowBranchNamesAtom)).toBe(false);
+      expect(store.get(sidebarHideEmptyProjectsAtom)).toBe(true);
+      expect(store.get(repoCollapseStateAtom)).toEqual({ 'org/repo': false });
+      expect(store.get(chatsCollapsedAtom)).toBe(false);
+      expect(store.get(pinnedSectionCollapsedAtom)).toBe(false);
+      expect(store.get(pinSectionsCollapsedAtom)).toEqual({ sec1: false });
+      expect(store.get(pinSectionsHiddenAtom)).toEqual({ sec1: false });
+      expect(store.get(localProjectCollapseStateAtom)).toEqual({ 'm1:p1': false });
+      expect(store.get(localProjectsSectionCollapseStateAtom)).toEqual({ m1: false });
+      expect(store.get(githubWorktreesSectionCollapsedAtom)).toBe(false);
+      expect(store.get(sidebarUpdatedBucketCollapseStateAtom)).toEqual({ all: false });
+      const freshStore = createStore();
+      const freshUnsubs = [
+        freshStore.sub(sidebarCollapsedAtom, () => {}),
+        freshStore.sub(chatScopeAtom, () => {}),
+        freshStore.sub(sidebarOrganizeModeAtom, () => {}),
+        freshStore.sub(repoCollapseStateAtom, () => {}),
+        freshStore.sub(chatsCollapsedAtom, () => {}),
+        freshStore.sub(sidebarShowBranchNamesAtom, () => {}),
+      ];
+      try {
+        expect(freshStore.get(sidebarCollapsedAtom)).toBe(true);
+        expect(freshStore.get(chatScopeAtom)).toBe('my');
+        expect(freshStore.get(sidebarOrganizeModeAtom)).toBe('status');
+        expect(freshStore.get(repoCollapseStateAtom)).toEqual({ 'org/repo': true });
+        expect(freshStore.get(chatsCollapsedAtom)).toBe(true);
+        expect(freshStore.get(sidebarShowBranchNamesAtom)).toBe(true);
+      } finally {
+        for (const unsub of freshUnsubs) unsub();
+      }
+    } finally {
+      for (const unsub of unsubs) unsub();
+    }
   });
 });

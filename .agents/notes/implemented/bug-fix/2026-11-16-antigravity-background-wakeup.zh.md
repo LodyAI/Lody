@@ -7,73 +7,67 @@ Translation: current
 
 ## 摘要
 
-`agy acp` 在后台工作仍在运行时就以 `end_turn` 结束 `session/prompt`，之后不再向 stdout
-写入，于是 Lody 的空闲 GC 会杀掉仍在工作的进程。Lody 现在照常结束 turn，并在这些工作
-唤醒模型、重新安静之前合成 Core `sessionActivity`，只使用无副作用的 `session/list` 轮询。
-agy 在这些唤醒中产生的输出不会回放到 Lody：唯一能返回它的接口 `session/load` 会重启会话
-的 MCP 服务器，并在真机运行中打断了一次工具调用。
+`agy acp`（`Antigravity ACP Server`，ACP v1）在后台工作仍在运行时就会以 `end_turn` 结束
+`session/prompt`、停止向 stdout 输出，且未声明 Core `sessionActivity`。Lody 曾尝试通过
+stdout 工具通知启发式计数与 `session/list` `updatedAt` 轮询来合成 `sessionActivity`，但
+线上证实误计数会导致会话卡在 `running`（“工作中”）状态、抑制未读/完成通知，并持续每 2 秒
+轮询 `session/list` 长达 24 小时。现已彻底移除启发式合成，仅保留确定性的 Antigravity 兼容
+逻辑（`isAntigravityServer` 与 `realpath` `cwd` 协商），并仅在服务端权威声明 Core
+`sessionActivity` v1 时消费原生工作状态。
 
 ## 问题
 
-`agy acp`（`Antigravity ACP Server`，ACP v1）只要模型让出控制权就以 `end_turn`
-结束 `session/prompt`，即使它启动的后台工作仍在运行：超过异步阈值的
-`run_command`、`schedule` 定时器与 cron、`invoke_subagent` / `send_message`、
-`swarm` 以及异步 `run_workflow`。这些工作结束后，agy 在自己的会话里唤醒模型，
-但不再向 stdout 写 `session/update` 或 `session/request_permission`。agy 没有声明
-Core `sessionActivity` 扩展，所以 Lody 看到的是空闲会话，`SessionGCManager` 在空闲
-超时后杀掉了仍在工作的进程。
+`agy acp` 不声明 Core `sessionActivity`（`_lody/session/activity_update`）。当
+`run_command` 超过 `WaitMsBeforeAsync` 时，`agy` 会输出占位文本（`Tool is running as a
+background task with task id: ...`），任务完成时通过内部 `<SYSTEM_MESSAGE>` 唤醒模型，而
+不更新原 `tool_call`。基于 stdout 通知猜测待完成数量并用 `session/list` `updatedAt` 波动
+递减的启发式方案在真实会话中频繁误判：
+
+- 同 turn 内已完成的后台命令（尤其模型回复无 `agent_thought_chunk` 时）在 `end_turn` 时
+  仍被计入待完成项。
+- 多个后台任务在同一波 `updatedAt` 活动中结束只会减 1，其余项会一直锁死到 24 小时上限。
+- 把不可靠的启发式接入 `AgentClient.reportsSessionActivity()` / `getNativeWork()` 后，
+  `SessionActivePresence` 会持续广播 `running`（UI 卡在“工作中”），`SessionExecutionService`
+  会抑制完成通知并在超时后写出误报的 `nativeWorkInterrupted`，且后台每 2 秒轮询一次
+  `session/list`。
 
 ## 决策
 
-修复留在 `apps/cli/src/agent/`（`antigravity-background.ts` 与 `AgentClient`），复用
-[Session GC 尊重原生 Agent 的工作](2026-10-18-gc-respects-native-agent-work.zh.md)
-的原生工作契约：turn 在 `end_turn` 结束，由 `sessionActivity` 保持进程存活。
-
-- **`end_turn` 时的待完成项。** 根据 turn 中实时收到的工具通知，下列工具各计一项：仍处于
-  `pending` 或 `in_progress` 的工具；输出为 agy「running as a background task」占位文本的
-  工具；派出只能靠唤醒模型报告结果的工作的工具（`invoke_subagent`、`send_message`、
-  `swarm`、没有输出的 `run_workflow`）。agy 会让 `schedule` 一直保持 `in_progress`
-  直到触发，所以定时器不需要特殊处理。`IsDaemon: true` 与失败的工具不计入。不解析
-  agy 工具参数。
-- **按活动释放。** 存在待完成项时，Lody 每 2 秒查询一次 `session/list`，上报
-  `background`，`updatedAt` 变化期间上报 `running`。一段 `updatedAt` 变化之后保持
-  30 秒不变，计为完成一项。没有剩余项时上报空闲；最长 24 小时，与 Core `background`
-  上限一致。如果没有 `session/list` 或它持续失败，监视器会一直保护到上限。
-- **跨 turn。** 用户发出新消息时仍未完成的项会延续到新 turn，之前的后台工作继续受保护。
-- **`cwd`。** Lody 把工作目录的 `realpath` 作为 Antigravity ACP 的 `cwd` 协商；agy 按
-  realpath 比较编辑目标，否则符号链接工作目录下的工作区内编辑也会要求审批。
+- **移除启发式 `sessionActivity` 合成。** `AgentClient.reportsSessionActivity()` 仅在
+  agent 权威声明 Core `sessionActivity` v1 时返回 `true`。在 `agy` 未提供权威活动协议之前，
+  turn 在 `end_turn` 正常结束并发送标准完成通知，与
+  [Session GC 尊重原生 Agent 的工作](2026-10-18-gc-respects-native-agent-work.zh.md) 一致。
+  若未来 `agy` 声明了 Core `sessionActivity` v1，`AgentClient` 会直接按权威协议消费。
+- **为异步唤醒的实时流输出提供有界短 TTL 活跃脉冲。** `agy` 1.5.10+ 在 `end_turn` 后被
+  后台子代理唤醒时，会持续向已结束的 turn 推送可见 ACP `session/update`（`tool_call`、
+  `tool_call_update`、`agent_thought_chunk`、`agent_message_chunk` 等）。对于未声明
+  Core `sessionActivity` 的 agent，`MessageHandler.enqueueACPUpdate` 仅在 `finalized_turn`
+  收到**可见**更新时刷新空闲 GC（`touchSession`）并调用
+  `SessionActivePresence.noteLateActivity(sessionId)`（忽略纯元数据通知）。
+  `SessionActivePresence` 复用既有的 1 秒定时协调器维护 30 秒滑动 TTL
+  （`DEFAULT_LATE_STREAM_ACTIVITY_TTL_MS`），在静默超时、新 Turn `hold()`、停止/清理
+  （`clearLateActivity`）或 `retire()` 时自动清除；在该短期租约有效且 agent 进程存活期间，
+  `MessageHandler.getNativeWork` 也会向 `SessionGCManager` 返回 `'running'`，避免空闲 GC
+  或内存压力驱逐把正在流式执行的唤醒会话误判为 idle 并 kill 掉。从而在不引入任务计数、轮询
+  或 24 小时卡死风险的前提下，让 UI 与 MCP 状态正确识别正在执行的异步唤醒；纯静默等待后台任务期
+  仍需上游实现 Core `sessionActivity` v1。
+- **保留确定性的 Antigravity 兼容逻辑。** `antigravity-background.ts` 保留
+  `isAntigravityServer`（内置 `antigravity` 与自定义 `Antigravity ACP Server` 对齐，排除
+  旧版 `antigravity-acp`），`AgentClient` 保留 `realpath` `cwd` 协商以避免符号链接工作目录
+  触发越界审批。
 
 ## 已否决方案
 
-- **从 `session/load` 快照回放唤醒输出。** 已实现并在真实 agy 1.5.7 与
-  `gemini-4-hydrogen-medium` 上测试，回放本身可用。但每次加载都会停止并重启会话的 MCP
-  服务器：按 6 秒节奏，125 秒内 19 次加载、20 次服务器启动。把加载限制为每分钟一次、
-  且只在 `updatedAt` 静止 10 秒后进行，一次 30 秒的 MCP 工具调用仍在约 10.7 秒处被切断，
-  以 EOF 返回 `failed`，因为工具运行期间 `updatedAt` 不会变化。从外部无法用任何时间规则
-  区分「说完了」和「在等一个慢工具」。
-- **加载时传空的 `mcpServers`。** 未经验证；agy 可能在会话剩余生命周期内卸下其 MCP 服务器。
-- **直接读取 agy 磁盘上的会话记录。** 没有副作用，但格式没有文档，任何 agy 版本都可能改变。
-- **保持 `session/prompt` 挂起直到后台工作完成。** 最多锁住输入栏 30 分钟，还需要第二套
-  状态机；原生工作契约已经覆盖 turn 结束后的后台工作。
-- **按 agy 工具参数计数**（`DurationSeconds`、`CronExpression`、`MaxIterations`、swarm
-  `tasks`/`n`、`manage_*` kill）。agy 一改参数计数就会出错。
-- **`end_turn` 后发送合成 prompt 或 steer。** 根 `AGENTS.md` 禁止引导 agent 的文本。
-- **在 `SessionGCManager` 或 `MessageHandler` 中特判 Antigravity。** 这些消费者保持与
-  提供方无关。
+- **基于 stdout 工具通知 + `session/list` 轮询合成 `sessionActivity`。** 2026-11-16 实现、
+  2026-11-22 移除：缺乏服务端权威任务计数时，误报会让会话卡在“工作中”长达 24 小时。
+- **从 `session/load` 快照回放唤醒输出。** 在真实 `agy` 1.5.7 上验证过：每次 `session/load`
+  都会重启会话的 MCP 服务器，打断正在运行的工具调用。
+- **直接读取 `agy` 磁盘上的会话记录。** 属于无文档内部格式，随版本变化不可依赖。
+- **挂起 `session/prompt` 或在 `end_turn` 后发送合成 steer。** 会锁住输入栏或违反根 `AGENTS.md`。
 
 ## 验证
 
-`apps/cli/src/agent/antigravity-background.test.ts` 用真实 `AgentClient` 对接模拟的
-`session/list`，固定以下行为：turn 在 `end_turn` 结束、静默工作在空闲超时之后仍受保护、
-每个待完成项对应一次唤醒、24 小时上限、`session/list` 失败时继续保护、守护进程与失败工具
-排除、跨新消息延续、`realpath` 协商，以及从不调用 `session/load`。真机运行覆盖的是本 note
-否决的回放设计；仅按活动释放的规则尚未在真实 agy 上运行。
-
-## 局限
-
-- agy 在 `end_turn` 之后写出的输出不会出现在 Lody 中。agy 提供无副作用的读取方式后，
-  可以在不重启 MCP 的前提下回放。
-- 多个待完成项在同一段活动中唤醒 agy 时只会释放一项，会话会一直受保护，直到下一段活动或
-  24 小时上限。模型在唤醒中新启动的工作不会计入。
-- `end_turn` 后等待 agy 未转发的权限请求的工具，仍会卡住该 agy 会话，直到用户取消；
-  `realpath` 协商消除了最常见的触发原因。
+`apps/cli/src/agent/antigravity-background.test.ts` 驱动真实 `AgentClient`，固定以下契约：
+内置/自定义 `Antigravity ACP Server` 对齐并排除旧版 `antigravity-acp`；未声明 Core
+`sessionActivity` 时 `end_turn` 后绝不合成 `nativeWork` 也不轮询 `session/list` / `session/load`；
+若服务端权威声明 Core `sessionActivity` v1 则正常消费；以及 `realpath` `cwd` 协商。

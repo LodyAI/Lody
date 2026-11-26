@@ -1,3 +1,6 @@
+import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
+import { RoostHistoryError } from '../lib/roost-history-error';
+import { v5 as uuidv5 } from 'uuid';
 import {
   type CodeCollabOpenDiffManifestRequest,
   type CodeCollabOpenDiffManifestResponse,
@@ -18,19 +21,27 @@ import {
   ProjectProbeLocalMemberResultSchema,
   isLocalOnlyMemoryProvider,
   machineSupportsAccountMemoryProviders,
+  machineSupportsMemoryProviderUninstall,
   machineSupportsBugReportClientLog,
+  machineSupportsLocalProjectBranchListing,
   machineSupportsMemoryProviders,
   type BugReportClientLog,
+  type LocalProjectBranchListResult,
   type MemoryProviderRequest,
   type MemoryProviderResponse,
   type ProjectProbeLocalMemberResult,
 } from '@lody/shared';
 import {
   SorbetCredentialsResultSchema,
+  SorbetHostSettingsResultSchema,
   SorbetProvidersResultSchema,
 } from '@lody/shared/local-machine-rpc';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
-import type { PreviewControlOperation } from '@lody/shared';
+import type {
+  PreviewControlOperation,
+  SessionHistoryPublication,
+  SessionHistorySubscription,
+} from '@lody/shared';
 import { mintPreviewControlProof, mintSessionHistoryReadProof } from '@/lib/preview-control-api';
 import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import type { RemoteAutomationOperation, RemoteAutomationResult } from '@lody/shared/automations';
@@ -38,13 +49,16 @@ import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type {
   LoroStreamsMachineRpcClient,
   LocalProjectGitStateRpcResponse,
+  LocalProjectListBranchesRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
   McpToolListResultSchema,
   McpAuthenticationResultSchema,
   MCP_LOCAL_AUTHENTICATION_PROTOCOL_VERSION,
   SORBET_CREDENTIALS_PROTOCOL_VERSION,
-  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
   MACHINE_PROTOCOL_CAPABILITIES,
   E2EE_SESSION_EDIT_AND_RESEND_PROTOCOL_VERSION,
   E2EE_SESSION_FORK_PROTOCOL_VERSION,
@@ -62,6 +76,8 @@ import {
   type IosSimulatorResponse,
   machineSupportsSessionHistoryProtocol,
   SessionHistoryReadQuerySchema,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   sessionHistoryWriteIntentDigest,
   type MachineProtocolCapabilities,
   type AgentConfigId,
@@ -125,6 +141,8 @@ import {
   sessionEditAndResendFailure,
 } from '@lody/shared';
 import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
+import { adaptLocalProjectControlRequestToMachine } from '@lody/shared';
+import { unsupportedLocalProjectControlResponse } from '@/lib/local-project-rpc-file-provider';
 import {
   protectedFileWriteDeniedMessage,
   protectedPreviewControlDeniedMessage,
@@ -156,7 +174,8 @@ type LspRequest = {
 export type WorkspaceMachineRpcFacadeDeps = {
   waitForContentAdmission?: () => Promise<void>;
   requestEncryptedFeature?: (
-    request: LocalMachineRpcRequest
+    request: LocalMachineRpcRequest,
+    options?: { requestId: string }
   ) => Promise<import('@lody/shared/local-machine-rpc').LocalMachineRpcResponse>;
   getSessionToken?: () => string | null;
   /** Encrypted content: remote file work uses only `requestEncryptedFeature`, when the host has it. */
@@ -302,11 +321,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       : { ownerSessionId: options.ownerSessionId.toString() };
 
   const requireSessionHistoryCapability = async (machineId: MachineId): Promise<void> => {
-    if (
-      !machineSupportsSessionHistoryProtocol({
-        protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
-      })
-    ) {
+    await deps.waitForContentAdmission?.();
+    const machine = { protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId) };
+    if (deps.protectedContent) return requireEncryptedRoostOwner(machine);
+    if (!machineSupportsSessionHistoryProtocol(machine)) {
       throw new Error('This machine does not support Roost session history. Update the machine.');
     }
   };
@@ -318,10 +336,6 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { timeoutMs?: number }
   ): Promise<SessionHistoryReadResponse> => {
     await requireSessionHistoryCapability(machineId);
-    const plane = await resolveMachineTargetPlane(machineId);
-    if (plane === 'local') {
-      throw new Error('Local Roost history must use the local session control bridge.');
-    }
     if (deps.protectedContent) {
       if (!deps.requestEncryptedFeature) throw new Error('e2ee_feature_unavailable');
       const response = await deps.requestEncryptedFeature({
@@ -332,7 +346,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         timeoutMs: options?.timeoutMs ?? 30_000,
       });
       if (!response.ok) throw new Error(response.code ?? 'session_history_read_denied');
-      return response.result as SessionHistoryReadResponse;
+      const read = SessionHistoryReadResponseSchema.parse(response.result);
+      if (read.sessionId !== sessionId) throw new Error('e2ee_rpc_request_binding');
+      if (!read.success) throw new RoostHistoryError('read', read.error ?? '', read.retryReason);
+      return read as SessionHistoryReadResponse;
+    }
+    const plane = await resolveMachineTargetPlane(machineId);
+    if (plane === 'local') {
+      throw new Error('Local Roost history must use the local session control bridge.');
     }
     const readProof = await mintSessionHistoryReadProof(
       { workspaceId, machineId, sessionId },
@@ -350,6 +371,39 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return response;
   };
 
+  const subscribeSessionHistory = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    subscription: Extract<SessionHistorySubscription, { action: 'open' }>,
+    onPublication: (publication: SessionHistoryPublication) => void,
+    signal: AbortSignal
+  ): Promise<void> => {
+    if (deps.protectedContent) throw new Error('e2ee_history_backend_unavailable');
+    await requireSessionHistoryCapability(machineId);
+    if ((await resolveMachineTargetPlane(machineId)) !== 'cloud')
+      throw new Error('Local Roost history must use the local session control bridge.');
+    signal.throwIfAborted();
+    const readProof = await mintSessionHistoryReadProof(
+      { workspaceId, machineId, sessionId },
+      deps.getSessionToken?.() ?? null
+    );
+    signal.throwIfAborted();
+    const response = await (
+      await getMachineRpcClient(machineId)
+    ).requestSessionHistorySubscription({
+      sessionId,
+      subscription,
+      readProof,
+      onPublication,
+      signal,
+    });
+    if (signal.aborted) return;
+    if (!response || response.event !== 'closed' || response.error)
+      throw new Error(
+        response?.event === 'closed' ? response.error : 'History subscription unavailable'
+      );
+  };
+
   const requestSessionHistoryWrite = async (
     machineId: MachineId,
     args: {
@@ -360,11 +414,45 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { timeoutMs?: number }
   ): Promise<SessionHistoryWriteResponse> => {
     await requireSessionHistoryCapability(machineId);
+    if (deps.protectedContent) {
+      const { sessionId, operation, payload } = args;
+      const entry = payload.entry;
+      if (
+        !deps.requestEncryptedFeature ||
+        (operation !== 'accept_input' && operation !== 'accept_input_and_dispatch') ||
+        !entry ||
+        typeof entry !== 'object' ||
+        !('id' in entry) ||
+        typeof entry.id !== 'string' ||
+        !('e2eeIntent' in entry) ||
+        !entry.e2eeIntent
+      )
+        throw new Error('e2ee_history_write_unavailable');
+      const requestId = uuidv5(
+        JSON.stringify([workspaceId, machineId, sessionId, operation, entry.id]),
+        uuidv5.URL
+      ).replaceAll('-', '');
+      const response = await deps.requestEncryptedFeature(
+        {
+          method: 'session/history-write',
+          workspaceId,
+          machineId,
+          params: { sessionId, operation, payload: { entry: { ...entry } } },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        },
+        { requestId }
+      );
+      if (!response.ok) throw new Error(response.code ?? response.error);
+      const write = SessionHistoryWriteResponseSchema.parse(response.result);
+      if (write.sessionId !== sessionId || write.operation !== operation)
+        throw new Error('e2ee_rpc_request_binding');
+      if (!write.success) throw new RoostHistoryError('write', write.error ?? '');
+      return write as SessionHistoryWriteResponse;
+    }
     const plane = await resolveMachineTargetPlane(machineId);
     if (plane === 'local') {
       throw new Error('Local Roost history must use the local session control bridge.');
     }
-    if (deps.protectedContent) throw new Error('e2ee_history_write_unavailable');
     const requestId = crypto.randomUUID();
     const intentDigest = await sessionHistoryWriteIntentDigest(
       requestId,
@@ -1057,6 +1145,15 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         }
         if (response?.ok) return response.result as SessionSteerResponse;
       }
+      if (deps.protectedContent && !deps.requestEncryptedFeature)
+        return {
+          type: 'session/steer_response',
+          sessionId: args.sessionId,
+          userTurnId: args.userTurnId,
+          applied: false,
+          disposition: 'unsupported',
+          error: 'This machine cannot receive an encrypted steer.',
+        };
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionSteer({
@@ -1582,8 +1679,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   /**
    * One authenticated Machine RPC for every simulator command. The local plane
-   * goes straight to this machine's daemon and never touches the cloud; the
-   * remote plane signs the exact command with the preview-control proof.
+   * goes straight to this machine's daemon and never touches the cloud; encrypted
+   * remote plane uses signed feature RPC; ordinary remote control uses a preview proof.
    */
   const requestIosSimulatorControl = async ({
     machineId,
@@ -1622,6 +1719,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           'unsupported',
           'Update Lody on this machine to preview simulators.'
         );
+      }
+      assertProtectedPreviewControl();
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'ios-simulator/control',
+          params: { sessionId, requestedByUserId, command },
+          timeoutMs,
+        });
+        if (!response.ok) throw new Error(response.error);
+        const result = IosSimulatorResponseSchema.parse(response.result);
+        if (result.sessionId !== sessionId) throw new Error('Simulator Session mismatch.');
+        return result;
       }
       const responseRecipient = await createRpcSecretRecipient();
       const response = await (
@@ -1662,8 +1773,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
 
   /**
    * One authenticated Machine RPC for every simulator command. The local plane
-   * goes straight to this machine's daemon and never touches the cloud; the
-   * remote plane signs the exact command with the preview-control proof.
+   * goes straight to this machine's daemon and never touches the cloud; encrypted
+   * remote plane uses signed feature RPC; ordinary remote control uses a preview proof.
    */
   const requestAndroidEmulatorControl = async ({
     machineId,
@@ -1702,6 +1813,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           'unsupported',
           'Update Lody on this machine to preview simulators.'
         );
+      }
+      assertProtectedPreviewControl();
+      if (deps.requestEncryptedFeature) {
+        const response = await deps.requestEncryptedFeature({
+          machineId,
+          workspaceId,
+          method: 'android-emulator/control',
+          params: { sessionId, requestedByUserId, command },
+          timeoutMs,
+        });
+        if (!response.ok) throw new Error(response.error);
+        const result = AndroidEmulatorResponseSchema.parse(response.result);
+        if (result.sessionId !== sessionId) throw new Error('Simulator Session mismatch.');
+        return result;
       }
       const responseRecipient = await createRpcSecretRecipient();
       const response = await (
@@ -1856,6 +1981,155 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const projectGitStateToBranchListResult = (
+    state: import('@lody/shared').LocalProjectGitState,
+    options?: { query?: string; limit?: number; cursor?: string }
+  ): LocalProjectBranchListResult => {
+    if (!state.git) return { git: false };
+    const pinnedBranches: string[] = [];
+    for (const pinned of [state.defaultBranch, state.currentBranch]) {
+      if (pinned && !pinnedBranches.includes(pinned)) pinnedBranches.push(pinned);
+    }
+    const ordered = [
+      ...pinnedBranches,
+      ...state.branches.filter((branch) => !pinnedBranches.includes(branch)),
+    ];
+    const query = options?.query?.trim().toLowerCase() ?? '';
+    const filtered = query
+      ? ordered.filter((branch) => branch.toLowerCase().includes(query))
+      : ordered;
+    const limit = Math.min(200, Math.max(1, Math.trunc(options?.limit ?? 50)));
+    const offset =
+      options?.cursor && /^[0-9]+$/.test(options.cursor) ? Number.parseInt(options.cursor, 10) : 0;
+    const branches = filtered.slice(offset, offset + limit);
+    const nextOffset = offset + branches.length;
+    const truncated = nextOffset < filtered.length;
+    return {
+      git: true,
+      currentBranch: state.currentBranch,
+      defaultBranch: state.defaultBranch,
+      pinnedBranches,
+      branches,
+      truncated,
+      ...(truncated ? { nextCursor: String(nextOffset) } : {}),
+      totalCount: filtered.length,
+    };
+  };
+
+  const requestLocalProjectBranches = async (
+    machineId: MachineId,
+    localProjectId: LocalProjectId,
+    requestedByUserId: string,
+    options?: { query?: string; limit?: number; cursor?: string; timeoutMs?: number }
+  ): Promise<LocalProjectListBranchesRpcResponse | null> => {
+    try {
+      await waitForMachineRoute(machineId);
+      if (
+        typeof window !== 'undefined' &&
+        window.__LODY_ELECTRON__ &&
+        getIpcServices() &&
+        (deps.isLocalControlMachine?.(machineId) ||
+          targetRouter.getPlaneForMachine(machineId) === 'local')
+      ) {
+        const result = await getIpcServices()!.localProjects.listBranches(
+          workspaceId,
+          localProjectId,
+          {
+            query: options?.query,
+            limit: options?.limit,
+            cursor: options?.cursor,
+          }
+        );
+        if ('error' in result) {
+          return {
+            type: 'local-project/list-branches_response',
+            machineId,
+            workspaceId,
+            localProjectId,
+            success: false,
+            error: 'internal_error',
+            message: result.error,
+          };
+        }
+        return {
+          type: 'local-project/list-branches_response',
+          machineId,
+          workspaceId,
+          localProjectId,
+          success: true,
+          result,
+          observedAtMs: getServerNow(),
+        };
+      }
+
+      const supportsListBranches = machineSupportsLocalProjectBranchListing({
+        protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+      });
+      if (!supportsListBranches) {
+        if (deps.protectedContent) {
+          return {
+            type: 'local-project/list-branches_response',
+            machineId,
+            workspaceId,
+            localProjectId,
+            success: false,
+            error: 'unsupported_protocol',
+            message: 'Update Lody on this machine to load branches in an encrypted workspace.',
+          };
+        }
+        const legacyResponse = await (
+          await getMachineRpcClient(machineId)
+        ).requestLocalProjectGitState({
+          localProjectId,
+          requestedByUserId,
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        });
+        if (!legacyResponse) return null;
+        if (!legacyResponse.success) {
+          return {
+            type: 'local-project/list-branches_response',
+            machineId,
+            workspaceId,
+            localProjectId,
+            success: false,
+            error: legacyResponse.error,
+            message: legacyResponse.message,
+          };
+        }
+        return {
+          type: 'local-project/list-branches_response',
+          machineId,
+          workspaceId,
+          localProjectId,
+          success: true,
+          result: projectGitStateToBranchListResult(legacyResponse.state, options),
+          observedAtMs: legacyResponse.observedAtMs,
+        };
+      }
+
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestLocalProjectBranches({
+        localProjectId,
+        requestedByUserId,
+        query: options?.query,
+        limit: options?.limit,
+        cursor: options?.cursor,
+        timeoutMs: options?.timeoutMs ?? 30_000,
+      });
+    } catch (error) {
+      return {
+        type: 'local-project/list-branches_response',
+        machineId,
+        workspaceId,
+        localProjectId,
+        success: false,
+        error: 'internal_error',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   /**
    * Read-only `.gitmodules` probe of a registered local project, used by the
    * Project group editor. The local plane answers through Local Machine RPC; a
@@ -1898,6 +2172,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
   ): Promise<LocalProjectControlResponse | null> => {
     try {
       await waitForMachineRoute(request.machineId);
+      const adapted = adaptLocalProjectControlRequestToMachine(
+        { protocolCapabilities: await deps.getMachineProtocolCapabilities(request.machineId) },
+        request
+      );
+      if (!adapted) return unsupportedLocalProjectControlResponse(request.type);
+      request = adapted;
       if (
         window.__LODY_ELECTRON__ &&
         getIpcServices() &&
@@ -1951,6 +2231,11 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         !machineSupportsAccountMemoryProviders({ protocolCapabilities: capabilities ?? undefined })
       )
         return fail('Update Lody on this machine to use this memory provider.');
+      if (
+        (params.action === 'uninstall' || params.action === 'uninstallPoll') &&
+        !machineSupportsMemoryProviderUninstall({ protocolCapabilities: capabilities ?? undefined })
+      )
+        return fail('Update Lody on this machine to uninstall this memory provider.');
       const plane = targetRouter.getPlaneForMachine(machineId);
       if (plane === null) return fail('Machine RPC routing is not available.');
       if (plane === 'local') {
@@ -2179,6 +2464,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           'method' | 'params'
         >
       | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-update' }>,
+          'method' | 'params'
+        >
+      | Pick<
           Extract<LocalMachineRpcRequest, { method: 'sorbet/providers-delete' }>,
           'method' | 'params'
         >
@@ -2200,7 +2489,10 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       !machineSupportsProtocolCapability(
         { protocolCapabilities },
         capability,
-        SORBET_PROVIDERS_PROTOCOL_VERSION
+        // Editing an endpoint arrived later than the rest of the catalog.
+        request.method === 'sorbet/providers-update'
+          ? SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION
+          : SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION
       )
     ) {
       throw new Error('Sorbet custom providers are unsupported on this machine.');
@@ -2221,9 +2513,57 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     return result;
   };
 
+  /** Host-wide Sorbet defaults are machine-scoped: no configId, same owner gating. */
+  const requestLocalSorbetHostSettings = async (
+    machineId: MachineId,
+    request:
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/host-settings-get' }>,
+          'method' | 'params'
+        >
+      | Pick<
+          Extract<LocalMachineRpcRequest, { method: 'sorbet/host-settings-update' }>,
+          'method' | 'params'
+        >
+  ) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    const local = await canUseLocalMachineRpc(machineId);
+    if (!local && targetRouter.getPlaneForMachine(machineId) !== 'cloud') {
+      throw new Error('Local Machine RPC is not available.');
+    }
+    const capability = local
+      ? MACHINE_PROTOCOL_CAPABILITIES.sorbetHostSettings
+      : 'sorbetHostSettingsRemote';
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        capability,
+        SORBET_HOST_SETTINGS_PROTOCOL_VERSION
+      )
+    ) {
+      throw new Error('Sorbet Host settings are unsupported on this machine.');
+    }
+    const rpcRequest = { ...request, machineId, workspaceId, timeoutMs: 35_000 };
+    let rawResult: unknown;
+    if (local) {
+      rawResult = await sendLocalMachineRpcRequest(rpcRequest);
+    } else {
+      if (!deps.requestEncryptedFeature)
+        throw new Error('Protected Sorbet Host settings transport unavailable.');
+      const response = await deps.requestEncryptedFeature(rpcRequest);
+      if (!response.ok) throw new Error(response.error);
+      rawResult = response.result;
+    }
+    const result = SorbetHostSettingsResultSchema.parse(rawResult);
+    if (result.type !== request.method)
+      throw new Error('Unexpected Sorbet Host settings response.');
+    return result;
+  };
+
   return {
     requestLocalSorbetCredentials,
     requestLocalSorbetProviders,
+    requestLocalSorbetHostSettings,
     requestSessionAutomationControl,
     requestLocalMcpTools,
     requestLocalMcpAuthentication,
@@ -2235,6 +2575,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionEditAndResend,
     requestSessionDispatchTurn,
     requestSessionHistoryRead,
+    subscribeSessionHistory,
     requestSessionHistoryWrite,
     requestFilePreview,
     requestFileDownloadChunk,
@@ -2260,6 +2601,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestIosSimulatorControl,
     requestAndroidEmulatorControl,
     requestLocalProjectGitState,
+    requestLocalProjectBranches,
     requestProjectProbeLocalMember,
     requestLocalProjectControl,
     requestMachineBugReport,

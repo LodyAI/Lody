@@ -2,7 +2,7 @@ import { E2eeMemberJoinSurface } from './e2ee-member-join';
 import { readMemberOffer } from '@/lib/e2ee-member-offer';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCloudMutation, useCloudQuery, usePlatformCapability } from '@lody/platform/react';
+import { useCloudMutation, useCloudQueryState, usePlatformCapability } from '@lody/platform/react';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
@@ -32,9 +32,18 @@ function OrdinaryWorkspaceJoinRequestSurface({
   onHomeRequested,
 }: WorkspaceJoinRequestSurfaceProps) {
   const { t } = useTranslation();
-  const { data: session, isPending: sessionPending } = useStableSession();
+  const {
+    data: session,
+    isPending: sessionPending,
+    isRetrying: sessionRetrying,
+    isOptimistic: sessionOptimistic,
+  } = useStableSession();
   const joinRequestsAvailable = usePlatformCapability('teamSharing');
-  const preview = useCloudQuery(cloudOperations.workspaceJoinRequests.getLinkPreview, { token });
+  const {
+    data: preview,
+    error: previewError,
+    retry: retryPreview,
+  } = useCloudQueryState(cloudOperations.workspaceJoinRequests.getLinkPreview, { token });
   const submitRequest = useCloudMutation(cloudOperations.workspaceJoinRequests.submitRequest);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -43,6 +52,7 @@ function OrdinaryWorkspaceJoinRequestSurface({
   const available = preview?.status === 'available' ? preview : null;
   let state: WorkspaceJoinPageState = 'loading';
   if (!joinRequestsAvailable || preview?.status === 'unavailable') state = 'unavailable';
+  else if (previewError) state = 'error';
   else if (available && !session?.user) state = 'auth_required';
   else if (available?.viewer?.alreadyMember) state = 'already_member';
   else if (available?.viewer && !available.viewer.emailVerified) state = 'verification_required';
@@ -50,7 +60,7 @@ function OrdinaryWorkspaceJoinRequestSurface({
   else if (available?.viewer?.request?.status === 'approved') state = 'approved';
   else if (available?.viewer?.request?.status === 'rejected') state = 'rejected';
   else if (available?.viewer) state = 'form';
-  if (sessionPending) state = 'loading';
+  if (sessionPending || sessionRetrying || sessionOptimistic) state = 'loading';
   if (submitting) state = 'submitting';
   if (errorMessage) state = 'error';
 
@@ -85,6 +95,7 @@ function OrdinaryWorkspaceJoinRequestSurface({
         })();
       }}
       onOpenWorkspace={() => onWorkspaceRequested(available?.workspaceSlug ?? null)}
+      onRetry={previewError && !errorMessage ? retryPreview : undefined}
       onBackHome={onHomeRequested}
     />
   );

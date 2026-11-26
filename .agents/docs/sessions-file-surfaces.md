@@ -62,12 +62,19 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
   diff's state, with its hidden reads paused. Direct conversation-file and comment
   navigation still enters the precise diff directly. Both levels share one modal
   and the existing enclosing-session popup host.
-- All Changes compares the resolved merge-base against disk by default. Its header
-  can switch to an uncommitted scope (`HEAD` against disk, including staged,
-  unstaged and untracked non-ignored files) and names the resolved base in both
-  modes. The control is hidden when the machine does not advertise
-  `codeCollabAllChangesScope`; non-Git and unborn worktrees report an explicit
-  unavailable state
+- For worktree Sessions, All Changes compares the resolved merge-base against disk
+  by default, and its header can switch to an uncommitted scope (`HEAD` against
+  disk, including staged, unstaged and untracked non-ignored files) while naming
+  the resolved base in both modes. For non-worktree Sessions (direct local
+  checkouts, plain chats, and extra `additional`/`link` roots; classified via
+  `isWorktreeSessionMeta` on the workspace owner), change tracking — file index,
+  `diffStats`, Changes list, manifests, and All Changes diffs — defaults to
+  uncommitted-only (`HEAD` against disk in Git repos, still falling back to
+  `diff-store` outside Git or before the first commit); the diff header hides the
+  `Branch`/`Uncommitted` toggle and labels Git comparisons with `HEAD`. For
+  worktree Sessions, the control is hidden when the machine does not advertise
+  `codeCollabAllChangesScope`, and explicit `uncommitted` requests on non-Git or
+  unborn worktrees report an explicit unavailable state
   ([decision](../notes/implemented/feature/2026-10-19-all-changes-diff-scope.md)).
   Equal text does not establish that a Git file is unchanged: current-diff readers
   also compare file state against that same repository and pinned base, preserving
@@ -233,8 +240,8 @@ viewers default to inert links. [Decision and limits](../notes/implemented/bug-f
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
-  rendered Markdown must opt into native selection through
-  `data-native-selection-allow`.
+  rendered Markdown is selectable through `MarkdownRenderer`'s
+  `data-text-selectable` marker.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `packages/shared/src/code-collab.ts`.
 - Content-addressed diff transport is capability-gated by `codeCollabDiffBlobs` v1: paged manifests

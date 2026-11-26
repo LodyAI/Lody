@@ -547,6 +547,7 @@ export type CloudApi = {
       E2eeWorkspaceBatchReply<E2eeAppendRecordReply>
     >;
     create: Action<E2eeWorkspaceCreateRequest, E2eeWorkspaceCreateResult>;
+    deleteWorkspace: Action<{ workspaceId: string }, { workspaceId: string; deleted: true }>;
     describe: Query<{ workspaceId: string }, WorkspaceAdmissionDescriptor>;
     reportDeviceProfile: Mutation<
       | E2eeDeviceProfileUpdate
@@ -689,6 +690,11 @@ export type CloudApi = {
       SessionShareView
     >;
     revoke: Mutation<{ shareId: string; expectedRevision: number }, SessionShareView>;
+  };
+  analytics: {
+    getUsageSharing: Query<{ accountId?: string }, boolean>;
+    setUsageSharing: Mutation<{ enabled: boolean; accountId?: string }, null>;
+    getUsageSharingForCliToken: Query<{ cliToken: string }, boolean | null>;
   };
   activity: {
     recordMyWorkspaceDailyActiveUser: Mutation<

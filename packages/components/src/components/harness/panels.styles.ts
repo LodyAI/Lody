@@ -2,9 +2,9 @@ import * as stylex from '@stylexjs/stylex';
 import { hx } from './harness.tokens.stylex';
 
 /**
- * The four configuration panels: a group of provider records, the context meter,
- * the plugin grid, the autonomy cards, the guard chips, the review summary and
- * the small forms that grow inside them. Ported from the design source, values
+ * The four configuration panels: a group of provider records, the plugin grid,
+ * the autonomy cards, the guard chips, the review summary and the small forms
+ * that grow inside them. Ported from the design source, values
  * unchanged.
  */
 export const panelStyles = stylex.create({
@@ -37,12 +37,6 @@ export const panelStyles = stylex.create({
   plugName: { display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 560, color: hx.ink },
   plugBody: { fontSize: '12px', lineHeight: 1.45, color: hx.muted },
   plugSide: { display: 'grid', justifyItems: 'end', alignContent: 'start', gap: '6px' },
-  plugCost: {
-    fontFamily: 'var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace)',
-    fontSize: '10.5px',
-    color: hx.faint,
-    whiteSpace: 'nowrap',
-  },
 
   /** A sub-heading inside a panel: "Autonomy", "Always ask before". */
   sub: {
@@ -54,45 +48,6 @@ export const panelStyles = stylex.create({
     fontWeight: 600,
     color: hx.ink,
   },
-
-  /* ── context meter ───────────────────────────────────────────────────── */
-
-  meter: {
-    display: 'grid',
-    gap: '8px',
-    padding: '12px 14px',
-    borderRadius: '12px',
-    backgroundColor: hx.sunken,
-    boxShadow: `inset 0 0 0 1px ${hx.lineSoft}`,
-  },
-  meterHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: '12px',
-    color: hx.muted,
-  },
-  meterValue: { fontWeight: 600, color: hx.ink, fontVariantNumeric: 'tabular-nums' },
-  meterUnit: { fontStyle: 'normal', fontWeight: 400, color: hx.faint },
-  meterTrack: {
-    display: 'flex',
-    gap: '2px',
-    height: '8px',
-    padding: '1px',
-    borderRadius: '999px',
-    backgroundColor: hx.panel,
-    boxShadow: `inset 0 0 0 1px ${hx.lineSoft}, inset 0 1px 2px rgb(0 0 0 / 0.04)`,
-    overflow: 'hidden',
-  },
-  meterSeg: { height: '100%', borderRadius: '2px', flexShrink: 0 },
-  meterSegFirst: { borderRadius: '999px 2px 2px 999px' },
-  /** Each group of plugins has its colour, so the bar reads as a mix of four. */
-  toneContext: { backgroundColor: hx.c1 },
-  toneMcp: { backgroundColor: hx.c2 },
-  toneSkills: { backgroundColor: hx.c3 },
-  toneHooks: { backgroundColor: hx.c4 },
-  meterLegend: { display: 'flex', gap: '14px', fontSize: '11.5px', color: hx.muted },
-  meterLegendItem: { display: 'inline-flex', alignItems: 'center', gap: '6px' },
-  meterSwatch: { width: '7px', height: '7px', borderRadius: '2px' },
 
   /* ── autonomy ────────────────────────────────────────────────────────── */
 
@@ -161,10 +116,6 @@ export const panelStyles = stylex.create({
     transitionDuration: '0.18s',
     transitionTimingFunction: hx.ease,
   },
-  chipOn: {
-    color: hx.ink,
-    boxShadow: `${hx.highlight}, 0 0 0 1px color-mix(in srgb, ${hx.ink} 25%, transparent), 0 1px 2px rgb(0 0 0 / 0.06)`,
-  },
   chipBox: {
     width: '15px',
     height: '15px',
@@ -177,7 +128,6 @@ export const panelStyles = stylex.create({
     transitionDuration: '0.18s',
     transitionTimingFunction: hx.ease,
   },
-  chipBoxOn: { backgroundColor: hx.ink, boxShadow: 'none' },
 
   /* ── review ──────────────────────────────────────────────────────────── */
 
@@ -249,12 +199,6 @@ export const panelStyles = stylex.create({
     color: hx.faint,
   },
   checkIconDone: { color: hx.ok },
-  checksMs: {
-    marginInlineStart: 'auto',
-    fontFamily: 'var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace)',
-    fontSize: '11px',
-    color: hx.faint,
-  },
 
   /* ── the models an endpoint serves ───────────────────────────────────── */
 

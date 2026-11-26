@@ -15,10 +15,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 import {
   shouldShowPrivateSharingStatus,
   type SessionPublicShareStatus,
@@ -26,6 +26,7 @@ import {
 } from '@/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Popover } from '@lody/ui/popover';
+import { popup } from '@lody/ui/popup/popup.tokens.stylex';
 import { Separator } from '@lody/ui/separator';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -35,6 +36,79 @@ import { toast } from '@/lib/toast';
 import { Tabs } from '@lody/ui/tabs';
 import { shareSurface } from './sharing/surface';
 import { UserAvatar } from './user-avatar';
+import { themeColors } from '../style/theme-colors.stylex';
+import {
+  themeFontSize,
+  themeFontWeight,
+  themeLineHeight,
+  themeRadius,
+  themeSpace,
+} from '../style/theme-scale.stylex';
+
+const styles = stylex.create({
+  accessPopoverPadding: { [popup.panelPadding]: space[2] },
+  lockMark: {
+    margin: 'calc(var(--spacing) * -1)',
+    boxSizing: 'content-box',
+    display: 'inline-flex',
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: themeRadius.xs,
+    padding: themeSpace[1],
+    color: themeColors.sidebarForegroundMuted,
+    boxShadow: { default: null, ':focus-visible': 'none' },
+  },
+  glyph: { width: themeSpace[3.5], height: themeSpace[3.5] },
+  chevron: { width: themeSpace[3], height: themeSpace[3], opacity: 0.45 },
+  tooltipPadding: {
+    maxWidth: 'calc(var(--spacing) * 72)',
+    paddingInline: themeSpace[2.5],
+    paddingBlock: themeSpace[2],
+  },
+  tooltipTitle: { fontWeight: themeFontWeight.medium },
+  tooltipDescription: {
+    marginTop: themeSpace[0.5],
+    fontSize: themeFontSize.xs,
+    lineHeight: themeLineHeight.xs,
+    color: themeColors.mutedForeground,
+  },
+  statusPill: {
+    display: 'inline-flex',
+    height: themeSpace[7],
+    flexShrink: 0,
+    userSelect: 'none',
+    alignItems: 'center',
+    gap: themeSpace[1.5],
+    borderRadius: themeRadius.md,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': 'hsl(var(--foreground) / 0.05)',
+    },
+    paddingInline: themeSpace[2],
+    fontSize: '0.7rem',
+    fontWeight: themeFontWeight.medium,
+    lineHeight: 'normal',
+    color: {
+      default: 'hsl(var(--foreground) / 0.8)',
+      ':hover': themeColors.foreground,
+    },
+    boxShadow: { default: null, ':focus-visible': 'none' },
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  statusPillOpen: {
+    backgroundColor: 'hsl(var(--foreground) / 0.07)',
+    color: themeColors.foreground,
+  },
+});
 
 export type SessionSharingTranslator = (
   key: string,
@@ -99,12 +173,41 @@ export function getSessionSharingDescription(
 
 export function getSessionShareDialogDescription(
   t: SessionSharingTranslator,
-  _state: SessionSharingState
+  state: SessionSharingState
 ): string {
-  return t(
-    'sessions.access.confirmRead',
-    'Teammates can read this conversation and reference it in their own sessions.'
-  );
+  if (state.access === 'read') {
+    return t(
+      'sessions.access.confirmRead',
+      'Teammates can read this conversation and reference it in their own sessions.'
+    );
+  }
+  const machine = state.machineName ?? t('sessions.sharing.thisDevice', 'this device');
+  const project = state.projectName ?? t('sessions.sharing.thisProject', 'this project');
+  switch (state.privateReason) {
+    case 'project':
+      return t(
+        'sessions.sharing.confirmProject',
+        'This shares {{project}} with everyone in the workspace so they can open and continue its conversations.',
+        { project }
+      );
+    case 'machine-and-project':
+      return t(
+        'sessions.sharing.confirmMachineAndProject',
+        'This shares {{project}} and {{machine}} with everyone in the workspace. Other conversations on this device may also become visible.',
+        { machine, project }
+      );
+    case 'machine':
+      return t(
+        'sessions.sharing.confirmMachine',
+        'This shares {{machine}} with everyone in the workspace. Other conversations on this device may also become visible.',
+        { machine }
+      );
+    default:
+      return t(
+        'sessions.sharing.confirmGeneric',
+        'Everyone in this workspace will be able to open this conversation.'
+      );
+  }
 }
 
 export function SessionSharingIndicator({
@@ -131,45 +234,25 @@ export function SessionSharingIndicator({
           <span
             tabIndex={0}
             aria-label={`${label}: ${description}`}
-            className={cn(
-              '-m-1 box-content inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs p-1',
-              'text-sidebar-foreground-muted outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50',
-              className
-            )}
+            className={cn(stylex.props(styles.lockMark).className, className)}
           >
             {state.access === 'read' ? (
-              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+              <Eye {...stylex.props(styles.glyph)} aria-hidden="true" />
             ) : (
-              <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+              <LockKeyhole {...stylex.props(styles.glyph)} strokeWidth={2} aria-hidden="true" />
             )}
           </span>
         }
       />
-      <Tooltip.Content side="right" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+      <Tooltip.Content side="right" {...stylex.props(styles.tooltipPadding)}>
+        <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
+        <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
 }
 
-/** Shared chrome for status pills in the session conversation header (Private, Archived).
- *
- * The line height is `normal`, not `leading-none`. `items-center` centres the
- * label's LINE BOX, and a line box shorter than the font's own leaves the
- * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
- * is zero and the ink lands where the font intends, for whatever interface
- * font is selected.
- *
- * The outline is a foreground tint, not `border-border`: the theme border is
- * tuned for dividers and nearly vanishes as a transparent button's only edge
- * on the dark canvas. */
-export const SESSION_HEADER_STATUS_PILL_CLASS =
-  'inline-flex h-7 shrink-0 select-none items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 ' +
-  'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
-  'hover:bg-foreground/[0.05] hover:text-foreground ' +
-  'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
-  'text-foreground/80';
+export const SESSION_HEADER_STATUS_PILL_CLASS = stylex.props(styles.statusPill).className ?? '';
 
 /** Read-only status pill for archived conversations in the desktop toolbar. */
 export function SessionArchivedBadge({ className }: { className?: string }) {
@@ -190,14 +273,14 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
             aria-label={`${label}: ${description}`}
             className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
           >
-            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            <Archive {...stylex.props(styles.glyph)} aria-hidden="true" />
             <span>{label}</span>
           </span>
         }
       />
-      <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{label}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+      <Tooltip.Content side="bottom" align="end" {...stylex.props(styles.tooltipPadding)}>
+        <div {...stylex.props(styles.tooltipTitle)}>{label}</div>
+        <div {...stylex.props(styles.tooltipDescription)}>{description}</div>
       </Tooltip.Content>
     </Tooltip.Root>
   );
@@ -443,7 +526,7 @@ function SessionAccessMembers({
               <Button
                 variant="ghost"
                 size="small"
-                className="justify-start"
+                xstyle={themeStyles.layout}
                 disabled={busy || !state.setMemberReadAccess || !available.length}
               >
                 <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
@@ -646,7 +729,7 @@ export function SessionAccessControl({
                 <Button
                   variant="ghost"
                   size="small"
-                  className="justify-start"
+                  xstyle={themeStyles.layout}
                   onClick={() => act(() => state.openMachineSettings?.())}
                 >
                   <span {...stylex.props(accessPanel.actionIcon)} aria-hidden="true">
@@ -708,7 +791,7 @@ export function SessionAccessControl({
                       key={row.id}
                       variant="ghost"
                       size="small"
-                      className="justify-start"
+                      xstyle={themeStyles.layout}
                       disabled={row.disabled}
                       title={row.title}
                       onClick={() => (row.keepOpen ? void row.onSelect() : act(row.onSelect))}
@@ -764,17 +847,23 @@ export function SessionAccessControl({
             aria-label={label}
             className={cn(
               SESSION_HEADER_STATUS_PILL_CLASS,
-              'data-[popup-open]:bg-foreground/[0.07] data-[popup-open]:text-foreground',
+              open && stylex.props(styles.statusPillOpen).className,
               className
             )}
           >
-            <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+            <Icon {...stylex.props(styles.glyph)} aria-hidden="true" />
             <span>{label}</span>
-            <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
+            <ChevronDown {...stylex.props(styles.chevron)} aria-hidden="true" />
           </button>
         }
       />
-      <Popover.Content align="end" sideOffset={6} className="w-[18.5rem] gap-0 p-2">
+      <Popover.Content
+        align="end"
+        sideOffset={6}
+        gap="none"
+        width="18.5rem"
+        className={stylex.props(styles.accessPopoverPadding).className}
+      >
         <Popover.Title {...stylex.props(shareSurface.visuallyHidden)}>
           {t('sessions.sharing.panelTitle')}
         </Popover.Title>
@@ -807,7 +896,7 @@ function ShareConfirmationDialog({
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Content>
         <AlertDialog.Header>
-          <AlertDialog.Title className="line-clamp-2 break-words">{title}</AlertDialog.Title>
+          <AlertDialog.Title>{title}</AlertDialog.Title>
           <AlertDialog.Description>{description}</AlertDialog.Description>
         </AlertDialog.Header>
         <AlertDialog.Footer>
@@ -820,7 +909,7 @@ function ShareConfirmationDialog({
               onConfirm();
             }}
           >
-            {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
+            {isSharing ? <Spinner className={stylex.props(themeStyles.glyph).className} /> : null}
             {actionLabel}
           </Button>
         </AlertDialog.Footer>
@@ -916,3 +1005,19 @@ export function ProjectShareDialog({
     />
   );
 }
+
+const themeStyles = stylex.create({
+  layout: { justifyContent: 'flex-start' },
+  layout2: {
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    overflowWrap: 'break-word',
+  },
+  glyph: {
+    marginRight: 'calc(var(--spacing) * 1.5)',
+    height: 'calc(var(--spacing) * 4)',
+    width: 'calc(var(--spacing) * 4)',
+  },
+});

@@ -20,6 +20,8 @@ export type GitHubOperationTokenResult =
   | GitHubTokenErrorResult;
 
 export interface GitHubTokenPort {
+  /** Revalidate live membership even when the client reuses a cached token. */
+  assertAccess?(workspaceId: string): string;
   getRepoToken(input: {
     workspaceId: string;
     repoFullName: string;

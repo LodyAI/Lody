@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { ReactNode } from 'react';
 import { Provider } from 'jotai';
@@ -13,6 +14,15 @@ import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { machineMetaCacheAtom } from '@/atoms/doc-meta';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
+
+const authFrame = stylex.create({
+  frame: {
+    width: '560px',
+    maxWidth: 'calc(100vw - 2rem)',
+    backgroundColor: 'hsl(var(--background) / 1)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+});
 
 const workspaceId = 'settings-story-workspace' as WorkspaceId;
 const machineId = 'settings-story-machine' as MachineId;
@@ -89,25 +99,19 @@ function Hydrate({
   withMethods?: boolean;
   withRuntime?: boolean;
 }) {
-  useHydrateAtoms(
-    [
-      [machineMetaCacheAtom, { [getMachineRoomId(machineId)]: machineMeta(withMethods) }],
-      ...(withRuntime
-        ? [
-            [currentWorkspaceIdAtom, workspaceId],
-            [runtimeAtom, waitingRuntime],
-          ]
-        : []),
-    ] as never
-  );
+  useHydrateAtoms([
+    [machineMetaCacheAtom, { [getMachineRoomId(machineId)]: machineMeta(withMethods) }],
+    ...(withRuntime
+      ? [
+          [currentWorkspaceIdAtom, workspaceId],
+          [runtimeAtom, waitingRuntime],
+        ]
+      : []),
+  ] as never);
   return <>{children}</>;
 }
 
-function Fixture(props: {
-  children: ReactNode;
-  withMethods?: boolean;
-  withRuntime?: boolean;
-}) {
+function Fixture(props: { children: ReactNode; withMethods?: boolean; withRuntime?: boolean }) {
   return (
     <Provider>
       <Hydrate {...props} />
@@ -120,7 +124,7 @@ const meta = {
   component: AcpAuthenticationPanel,
   decorators: [
     (Story) => (
-      <div className="w-[560px] max-w-[calc(100vw-2rem)] bg-background p-6">
+      <div {...stylex.props(authFrame.frame)}>
         <Story />
       </div>
     ),

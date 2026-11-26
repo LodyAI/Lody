@@ -25,7 +25,12 @@ import { DIFF_BLOB_CACHE_DB } from './diff-blob-cache';
  */
 
 import { LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX } from '@lody/shared';
+import { AVATAR_CACHE_INDEX_KEY, AVATAR_IMAGE_IDB_NAME } from './avatar-cache';
 import { workspaceInfoCache } from './local-storage-cache';
+import {
+  WORKSPACE_MEMBERS_DIRECTORY_CACHE_KEY,
+  WORKSPACE_SENDER_PROFILES_CACHE_KEY,
+} from './workspace-sender-identity';
 import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
 import { EAGER_SYNC_ADMISSION_DB } from '../providers/eager-sync-admission';
 import { EAGER_SYNC_CACHE_DB } from '../providers/eager-sync-snapshot-cache';
@@ -73,13 +78,18 @@ const KNOWN_INDEXEDDB_NAMES = [
   'lody:github-pr-cache',
   'lody:github-review-comments',
   'lody:project-skills',
+  AVATAR_IMAGE_IDB_NAME,
 ];
 
 /** Only these replicas are reconstructible. Unknown databases may hold custody,
  * trust pins or unacknowledged originals, even when named lody*. Keep the same
  * policy for enumeration and explicit late callers; application registration
  * cannot protect a database when cache recovery runs before application boot. */
-const REBUILDABLE_DATABASE_PREFIXES = ['lody-loro-repo-db-', 'lody-loro-stream-cursors-'];
+const REBUILDABLE_DATABASE_PREFIXES = [
+  'lody-loro-repo-db-',
+  'lody-loro-stream-cursors-',
+  `${ROOST_HISTORY_CACHE_DB}:`,
+];
 function isRecoverableDatabase(name: string): boolean {
   return (
     name !== SESSION_INPUT_DATABASE &&
@@ -144,6 +154,9 @@ const LOCAL_STORAGE_CACHE_KEYS = [
   // `@session:` slug → sessionId map (`mention-session-source.ts`); rebuilt from
   // the live session list as soon as a composer mounts.
   'lody:session-mention-slugs',
+  WORKSPACE_MEMBERS_DIRECTORY_CACHE_KEY,
+  WORKSPACE_SENDER_PROFILES_CACHE_KEY,
+  AVATAR_CACHE_INDEX_KEY,
 ];
 
 const LOCAL_STORAGE_CACHE_KEY_PREFIXES = [

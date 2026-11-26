@@ -13,7 +13,7 @@
  * the machine speaks the control protocols, then credentials, Providers, and
  * the available model catalog from the shared Sorbet data directory.
  */
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtomValue } from 'jotai';
 import {
   createContext,
   useCallback,
@@ -26,23 +26,23 @@ import {
 } from 'react';
 import {
   machineSupportsProtocolCapability,
-  SORBET_PROVIDERS_PROTOCOL_VERSION,
+  SORBET_HOST_SETTINGS_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION,
+  SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
   type MachineViewMeta,
 } from '@lody/shared';
+import type { SorbetHostSettingsUpdate } from '@lody/shared/local-machine-rpc';
 
 import { getAgentConfigsByMachineAtomFamily } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
-import { getMachineMetaMapAtom } from '@/atoms/machines';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
-import { settingsSelectedMachineIdAtom } from '@/atoms/settings';
 import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
-import { useOptionalAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useRefreshMachineAcpCapabilities } from '@/hooks/use-refresh-machine-acp-capabilities';
-import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 
+import { useHarnessDevices } from './machines';
 import { harness, type EndpointProtocol, type HarnessState } from './store';
 
 /** Where the page's reads and writes land, once resolved. */
@@ -78,38 +78,16 @@ export type SorbetStatus =
   | 'no-runtime';
 
 /**
- * The machine this page manages: the settings-wide selection while it is
- * still in the list, else this device, else the first machine — the same rule
- * the old Lody Agent page used, so both surfaces agree on the default.
+ * The machine this page manages is the harness's own device selection
+ * (`useHarnessDevices`): the device switcher in the pane header is the one
+ * source of truth, so the Providers rows and the scoped pages never disagree
+ * about which machine they describe.
  */
-/**
- * The machines this surface can offer. Under the workspace shell that is the
- * visibility-filtered index — a teammate's unshared machine is never a target.
- * Without an authenticated Convex context (a bare mount, a test) the raw meta
- * map stands in so the surface still renders instead of throwing.
- */
-function useHarnessMachines() {
-  const authed = useOptionalAuthenticatedConvex();
-  if (!authed) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks -- one branch, picked once per mount
-    return { machines: useAtomValue(getMachineMetaMapAtom), isLoading: false };
-  }
-  // eslint-disable-next-line react-hooks/rules-of-hooks -- same: the branch is stable
-  const index = useVisibleMachineMetas();
-  return { machines: index.machines, isLoading: index.isLoading };
-}
-
 export function useHarnessMachine() {
-  const { machines, isLoading } = useHarnessMachines();
-  const localMachineId = useAtomValue(localMachineIdAtom);
-  const [selected, setSelected] = useAtom(settingsSelectedMachineIdAtom);
-  const machineId = useMemo(() => {
-    if (selected && machines.has(selected)) return selected;
-    if (localMachineId && machines.has(localMachineId)) return localMachineId;
-    return [...machines.keys()][0] ?? null;
-  }, [selected, machines, localMachineId]);
+  const { machines, activeDevice, select, isLoading } = useHarnessDevices();
+  const machineId = (activeDevice as MachineId | null) ?? null;
   const machine = machineId ? machines.get(machineId) : undefined;
-  return { machines, machine, machineId, isLoading, select: setSelected };
+  return { machines, machine, machineId, isLoading, select };
 }
 
 /**
@@ -125,8 +103,36 @@ export function supportsSorbetStores(machine: MachineViewMeta, localMachineId: M
     machineSupportsProtocolCapability(
       machine,
       local ? 'sorbetProviders' : 'sorbetProvidersRemote',
-      SORBET_PROVIDERS_PROTOCOL_VERSION
+      SORBET_PROVIDERS_CATALOG_PROTOCOL_VERSION
     ) && supports('sorbetCredentials')
+  );
+}
+
+/** Whether the machine can edit a stored endpoint in place (`sorbet/providers-update`). */
+export function supportsSorbetEndpointEdit(
+  machine: MachineViewMeta,
+  localMachineId: MachineId | null
+) {
+  return machineSupportsProtocolCapability(
+    machine,
+    machine.id === localMachineId ? 'sorbetProviders' : 'sorbetProvidersRemote',
+    SORBET_PROVIDERS_UPDATE_PROTOCOL_VERSION
+  );
+}
+
+/**
+ * Whether the machine answers `sorbet/host-settings-*`. Machine-scoped like
+ * the stores: the local daemon uses the direct capability, a remote machine
+ * the `Remote` variant over the encrypted plane.
+ */
+export function supportsSorbetHostSettings(
+  machine: MachineViewMeta,
+  localMachineId: MachineId | null
+) {
+  return machineSupportsProtocolCapability(
+    machine,
+    machine.id === localMachineId ? 'sorbetHostSettings' : 'sorbetHostSettingsRemote',
+    SORBET_HOST_SETTINGS_PROTOCOL_VERSION
   );
 }
 
@@ -142,19 +148,35 @@ export interface SorbetActions {
     protocol: EndpointProtocol;
     baseUrl: string;
   }) => Promise<string>;
+  /** Name, protocol and base URL; Sorbet keeps the endpoint's models. */
+  updateEndpoint: (
+    providerId: string,
+    endpoint: { name: string; protocol: EndpointProtocol; baseUrl: string }
+  ) => Promise<void>;
   deleteEndpoint: (providerId: string) => Promise<void>;
   /** A Provider write changes the agent's advertised methods, not just the list. */
   reprobe: () => Promise<void>;
-  refresh: () => Promise<void>;
+  /** Rediscovers models — every dynamic Provider, or just `providerId` — then re-reads. */
+  refresh: (providerId?: string) => Promise<void>;
+  /**
+   * Merges a Host-settings patch on the machine (`sorbet/host-settings-update`)
+   * and re-reads so the drawn control reflects what Sorbet kept. No `configId`:
+   * Host settings are machine-wide, not per Provider.
+   */
+  updateHostSettings: (patch: SorbetHostSettingsUpdate) => Promise<void>;
 }
 
 const unavailable = () => Promise.reject(new Error('Lody Agent is unavailable'));
+const noopUpdateHostSettings = () =>
+  Promise.reject(new Error('This machine does not support Host settings'));
 const noopActions: SorbetActions = {
   disconnect: unavailable,
   createEndpoint: unavailable,
+  updateEndpoint: unavailable,
   deleteEndpoint: unavailable,
   reprobe: unavailable,
   refresh: async () => {},
+  updateHostSettings: unavailable,
 };
 
 /**
@@ -173,6 +195,7 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
   // Bumping this after a sign-in or a mutation re-reads both lists.
   const [version, setVersion] = useState(0);
   const generation = useRef(0);
+  const hostSettingsGeneration = useRef(0);
 
   const config = useMemo(
     () => configs.filter(isSorbetConfig).sort((a, b) => a.id.localeCompare(b.id))[0],
@@ -285,8 +308,70 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
 
   const reread = useCallback(() => setVersion((value) => value + 1), []);
 
+  // Host settings are machine-scoped: the read depends on the host-settings
+  // capability, not the Sorbet Provider config, so a machine without a Sorbet
+  // config still reports them.
+  const hostSettingsCapable = !!machine && supportsSorbetHostSettings(machine, localMachineId);
+  useEffect(() => {
+    const current = ++hostSettingsGeneration.current;
+    if (!runtime || !machineId || !hostSettingsCapable) {
+      harness.applyHostSettings(null, false);
+      return;
+    }
+    void (async () => {
+      try {
+        const result = await runtime.requestLocalSorbetHostSettings(machineId, {
+          method: 'sorbet/host-settings-get',
+          params: {},
+        });
+        if (hostSettingsGeneration.current !== current) return;
+        if (result.type === 'sorbet/host-settings-get') {
+          harness.applyHostSettings(result.settings, true);
+        }
+      } catch {
+        if (hostSettingsGeneration.current !== current) return;
+        harness.applyHostSettings(null, true);
+      }
+    })();
+    return () => {
+      hostSettingsGeneration.current++;
+    };
+    // `version` re-reads host settings alongside the store lists after a write.
+  }, [runtime, machineId, hostSettingsCapable, version]);
+
   const machineIdRef = target?.machineId;
   const configIdRef = target?.configId;
+  const hostSettingsReread = reread;
+
+  // Host-settings writes need only the machine, not a Sorbet Provider config,
+  // so this lives outside `actions` (which is gated on `configIdRef`).
+  const updateHostSettings = useCallback(
+    async (patch: SorbetHostSettingsUpdate) => {
+      if (!runtime || !machineId || !hostSettingsCapable) {
+        throw new Error('This machine does not support Host settings');
+      }
+      try {
+        await runtime.requestLocalSorbetHostSettings(machineId, {
+          method: 'sorbet/host-settings-update',
+          params: { patch },
+        });
+      } finally {
+        // Re-reads both the Host settings and the store lists; an interrupted
+        // update may still have landed on the machine.
+        hostSettingsReread();
+      }
+    },
+    [runtime, machineId, hostSettingsCapable, hostSettingsReread]
+  );
+  useEffect(() => {
+    currentHostSettingsUpdate.current = updateHostSettings;
+    return () => {
+      if (currentHostSettingsUpdate.current === updateHostSettings) {
+        currentHostSettingsUpdate.current = noopUpdateHostSettings;
+      }
+    };
+  }, [updateHostSettings]);
+
   const reprobe = useCallback(async () => {
     if (!runtime || !machineIdRef || !configIdRef) return;
     const response = await refreshCapabilities({ machineId: machineIdRef, configId: configIdRef });
@@ -322,6 +407,17 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         reread();
         return result.provider.id;
       },
+      updateEndpoint: async (providerId, endpoint) => {
+        try {
+          const result = await runtime.requestLocalSorbetProviders(machineId, {
+            method: 'sorbet/providers-update',
+            params: { configId, providerId, provider: endpoint },
+          });
+          if (result.type !== 'sorbet/providers-update') throw new Error('Unexpected response');
+        } finally {
+          reread();
+        }
+      },
       deleteEndpoint: async (providerId) => {
         let deleted = false;
         try {
@@ -346,16 +442,19 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
         }
       },
       reprobe,
-      refresh: async () => {
+      refresh: async (providerId) => {
         try {
           await runtime.requestLocalSorbetProviders(machineId, {
             method: 'sorbet/providers-refresh',
-            params: { configId },
+            params: providerId ? { configId, providerId } : { configId },
           });
         } finally {
           reread();
         }
       },
+      // Kept on the interface for shape; `sorbet.updateHostSettings` calls
+      // `currentHostSettingsUpdate` directly so it works without a config.
+      updateHostSettings: (patch) => currentHostSettingsUpdate.current(patch),
     };
   }, [runtime, machineIdRef, configIdRef, reread, reprobe]);
 
@@ -372,12 +471,20 @@ export function SorbetBridge({ children }: { children: ReactNode }) {
 }
 
 const currentActions: { current: SorbetActions } = { current: noopActions };
+const currentHostSettingsUpdate: { current: (patch: SorbetHostSettingsUpdate) => Promise<void> } = {
+  current: noopUpdateHostSettings,
+};
 
 /** The resolved RPC actions; safe to call from any row's event handler. */
 export const sorbet: SorbetActions = {
   disconnect: (providerId) => currentActions.current.disconnect(providerId),
   createEndpoint: (endpoint) => currentActions.current.createEndpoint(endpoint),
+  updateEndpoint: (providerId, endpoint) =>
+    currentActions.current.updateEndpoint(providerId, endpoint),
   deleteEndpoint: (providerId) => currentActions.current.deleteEndpoint(providerId),
   reprobe: () => currentActions.current.reprobe(),
-  refresh: () => currentActions.current.refresh(),
+  refresh: (providerId) => currentActions.current.refresh(providerId),
+  // Host settings are machine-scoped; go straight to the update callback so
+  // a machine with the capability but no Sorbet config can still be written.
+  updateHostSettings: (patch) => currentHostSettingsUpdate.current(patch),
 };

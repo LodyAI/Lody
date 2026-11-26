@@ -1,25 +1,22 @@
 // @vitest-environment jsdom
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { SessionChatActionContext } from '../src/components/ai-gui/view';
+import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonly-context';
 import {
   resolveSessionFileOpenTarget,
   resolveDirectMarkdownFileOpenTarget,
 } from '../src/lib/session-file-open-target';
 import { Provider, createStore } from 'jotai';
-import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { authTokenAtom, runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom } from '../src/atoms';
-import { LocalAttachmentCard } from '../src/components/ai-gui/view';
+import { LocalAttachmentCard, WorkspaceSessionFileGroup } from '../src/components/ai-gui/view';
+import { SessionFileAttachmentPane } from '../src/components/ai-gui/session-file-attachment';
 import * as fileSaver from '../src/lib/download-file';
 
 // The card's second action exists for exactly one gap: an HTML attachment's
 // click opens the RENDERED page, so without it the uploaded source bytes have
 // no route at all. Every other previewable file downloads from inside the
-// preview dialog and must NOT grow a duplicate control.
-
-// The card's second action exists for exactly one gap: an HTML attachment's
-// click opens the RENDERED page, so without it the uploaded source bytes have
-// no route at all. Every other previewable file downloads from inside the
-// preview dialog and must NOT grow a duplicate control.
+// attachment preview and must NOT grow a duplicate control.
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,7 +124,7 @@ describe('SessionFileCard download action', () => {
     expect(view.textContent).not.toContain('expired');
   });
 
-  it('does not duplicate the control on a previewable file whose dialog downloads', async () => {
+  it('does not duplicate the control on a previewable file whose preview downloads', async () => {
     const view = await render({
       file: file({ fileName: 'README.md', mimeType: 'text/markdown' }),
     });
@@ -179,8 +176,9 @@ it('downloads a remote local attachment only after clicking its card', async () 
   const finish = Promise.withResolvers<import('@lody/shared').FileDownloadResponse>();
   let requested = false;
   let saved: Uint8Array | undefined;
-  const save = vi.spyOn(fileSaver, 'downloadBytesAsFile').mockImplementation((_name, bytes) => {
+  const save = vi.spyOn(fileSaver, 'saveBytesAsFile').mockImplementation(async (_name, bytes) => {
     saved = bytes;
+    return { saved: true };
   });
   store.set(runtimeAtom, {
     requestFileDownloadChunk: async () => {
@@ -282,7 +280,11 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
           )
         )
       );
-      await act(async () => (container.querySelector('button') as HTMLButtonElement).click());
+      const button = container.querySelector('button') as HTMLButtonElement;
+      expect(button.textContent).toBe('attachment');
+      expect(button.querySelector('[title]')).toBeNull();
+      expect(button.disabled).toBe(false);
+      await act(async () => button.click());
       expect(opened).toBe(filePath);
     } finally {
       await act(async () => root.unmount());
@@ -290,3 +292,419 @@ it.each(['/tmp/image # 中文.png', '/tmp/question?.txt', '/tmp/file:123', '/tmp
     }
   }
 );
+
+it('omits the local-only subtitle on the original computer while keeping remote unavailability and failure feedback', async () => {
+  await initI18n('zh_CN');
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    const localStore = createStore();
+    localStore.set(currentWorkspaceIdAtom, 'workspace' as never);
+    localStore.set(localProbeResultAtom, { ok: true, machineId: 'local' });
+    let openedPath: string | undefined;
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: localStore },
+          createElement(
+            SessionChatActionContext.Provider,
+            {
+              value: {
+                openLocalFile: (path: string) => {
+                  openedPath = path;
+                },
+              },
+            },
+            createElement(LocalAttachmentCard, {
+              sessionId: 'session' as never,
+              attachment: {
+                type: 'local_attachment',
+                path: '/synthetic/pasted-text.txt',
+                machineId: 'local',
+                kind: 'file',
+                fileName: 'pasted-text.txt',
+                mimeType: 'text/plain',
+                sizeBytes: 12,
+              },
+            })
+          )
+        )
+      )
+    );
+    const localButton = container.querySelector('button') as HTMLButtonElement;
+    expect(localButton.textContent).toBe('pasted-text.txt');
+    expect(localButton.textContent).not.toContain('仅在原电脑上可用');
+    expect(localButton.querySelector('[title]')).toBeNull();
+    expect(localButton.disabled).toBe(false);
+    await act(async () => localButton.click());
+    expect(openedPath).toBe('/synthetic/pasted-text.txt');
+
+    openedPath = undefined;
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: localStore },
+          createElement(
+            SessionReadonlyContext.Provider,
+            { value: { renderImage: () => null, renderFiles: () => null } },
+            createElement(
+              SessionChatActionContext.Provider,
+              {
+                value: {
+                  openLocalFile: (path: string) => {
+                    openedPath = path;
+                  },
+                },
+              },
+              createElement(LocalAttachmentCard, {
+                sessionId: 'session' as never,
+                attachment: {
+                  type: 'local_attachment',
+                  path: '/synthetic/pasted-text.txt',
+                  machineId: 'local',
+                  kind: 'file',
+                  fileName: 'pasted-text.txt',
+                  mimeType: 'text/plain',
+                  sizeBytes: 12,
+                },
+              })
+            )
+          )
+        )
+      )
+    );
+    const readonlyLocalButton = container.querySelector('button') as HTMLButtonElement;
+    expect(readonlyLocalButton.textContent).toBe('pasted-text.txt');
+    expect(readonlyLocalButton.querySelector('[title]')).toBeNull();
+    expect(readonlyLocalButton.disabled).toBe(true);
+    await act(async () => readonlyLocalButton.click());
+    expect(openedPath).toBeUndefined();
+
+    let remoteDownloadRequested = false;
+    const remoteStore = createStore();
+    remoteStore.set(currentWorkspaceIdAtom, 'workspace' as never);
+    remoteStore.set(runtimeAtom, {
+      requestFileDownloadChunk: async () => {
+        remoteDownloadRequested = true;
+        return { status: 'error', code: 'machine_offline' };
+      },
+    } as unknown as WorkspaceRuntime);
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: remoteStore },
+          createElement(
+            SessionReadonlyContext.Provider,
+            { value: { renderImage: () => null, renderFiles: () => null } },
+            createElement(LocalAttachmentCard, {
+              sessionId: 'session' as never,
+              attachment: {
+                type: 'local_attachment',
+                path: '/synthetic/pasted-text.txt',
+                machineId: 'origin-machine',
+                kind: 'file',
+                fileName: 'pasted-text.txt',
+                mimeType: 'text/plain',
+                sizeBytes: 12,
+              },
+            })
+          )
+        )
+      )
+    );
+    const readonlyRemoteButton = container.querySelector('button') as HTMLButtonElement;
+    expect(readonlyRemoteButton.disabled).toBe(true);
+    expect(readonlyRemoteButton.textContent).toContain('pasted-text.txt');
+    expect(readonlyRemoteButton.textContent).toContain('仅在原电脑上可用');
+    expect(readonlyRemoteButton.querySelector('svg')).toBeNull();
+    await act(async () => readonlyRemoteButton.click());
+    expect(remoteDownloadRequested).toBe(false);
+
+    await act(async () =>
+      root.render(
+        createElement(
+          Provider,
+          { store: remoteStore },
+          createElement(LocalAttachmentCard, {
+            sessionId: 'session' as never,
+            attachment: {
+              type: 'local_attachment',
+              path: '/synthetic/pasted-text.txt',
+              machineId: 'origin-machine',
+              kind: 'file',
+              fileName: 'pasted-text.txt',
+              mimeType: 'text/plain',
+              sizeBytes: 12,
+            },
+          })
+        )
+      )
+    );
+    const remoteButton = container.querySelector('button') as HTMLButtonElement;
+    expect(remoteButton.disabled).toBe(false);
+    expect(remoteButton.textContent).toContain('从原电脑下载');
+    expect(remoteButton.querySelector('svg')).not.toBeNull();
+    await act(async () => remoteButton.click());
+    expect(remoteDownloadRequested).toBe(true);
+    expect(remoteButton.textContent).toContain('无法下载，请确认原电脑在线且文件仍然存在。');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+describe('attachment preview routing', () => {
+  const markdown = file({ fileName: 'notes.md', mimeType: 'text/markdown' });
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const mount = async (element: ReturnType<typeof createElement>) => {
+    await initI18n('en');
+    const store = createStore();
+    store.set(currentWorkspaceIdAtom, 'workspace' as never);
+    store.set(authTokenAtom, 'token');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(createElement(Provider, { store }, element)));
+  };
+
+  beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response('# Synthetic notes\n\nbody text', { status: 206 })
+    );
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('opens a desktop attachment in the side panel instead of a dialog', async () => {
+    const opened: Array<[string, string]> = [];
+    await mount(
+      createElement(
+        SessionChatActionContext.Provider,
+        {
+          value: {
+            openFileAttachment: (target: SessionFilePayload, sessionId: string) => {
+              opened.push([target.fileName, sessionId]);
+              return true;
+            },
+          },
+        },
+        createElement(WorkspaceSessionFileGroup, {
+          files: [markdown],
+          sessionId: 'session' as never,
+        })
+      )
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="notes.md"]')?.click()
+    );
+    expect(opened).toEqual([['notes.md', 'session']]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the modal preview where the host has no side panel', async () => {
+    await mount(
+      createElement(WorkspaceSessionFileGroup, {
+        files: [markdown],
+        sessionId: 'session' as never,
+      })
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="notes.md"]')?.click()
+    );
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('notes.md');
+    expect(dialog?.textContent).toContain('Synthetic notes');
+  });
+
+  it('fills a side-panel tab with the fetched text and its file actions, without a close', async () => {
+    await mount(
+      createElement(SessionFileAttachmentPane, { file: markdown, sessionId: 'session' as never })
+    );
+    expect(container.textContent).toContain('notes.md');
+    expect(container.textContent).toContain('Synthetic notes');
+    expect(container.querySelector('button[aria-label="Download"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Close"]')).toBeNull();
+  });
+
+  it('shows the load failure with a download fallback in the side-panel tab', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async () => new Response('', { status: 404 }));
+    await mount(
+      createElement(SessionFileAttachmentPane, { file: markdown, sessionId: 'session' as never })
+    );
+    expect(container.textContent).toContain('Could not load preview');
+    expect(container.querySelectorAll('button[aria-label="Download"]').length).toBe(1);
+  });
+
+  it('opens a video attachment in the desktop right sidebar instead of triggering download', async () => {
+    const video = file({
+      fileId: 'video-1',
+      fileName: 'demo.mp4',
+      mimeType: 'video/mp4',
+      textPreview: false,
+      sizeBytes: 1024,
+    });
+    const opened: Array<[string, string]> = [];
+    await mount(
+      createElement(
+        SessionChatActionContext.Provider,
+        {
+          value: {
+            openFileAttachment: (target: SessionFilePayload, sessionId: string) => {
+              opened.push([target.fileName, sessionId]);
+              return true;
+            },
+          },
+        },
+        createElement(WorkspaceSessionFileGroup, {
+          files: [video],
+          sessionId: 'session' as never,
+        })
+      )
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="demo.mp4"]')?.click()
+    );
+    expect(opened).toEqual([['demo.mp4', 'session']]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('plays, pauses, seeks, and cleans up a video attachment in the side-panel tab', async () => {
+    const videoFile = file({
+      fileId: 'video-2',
+      fileName: 'walkthrough.webm',
+      mimeType: 'video/webm',
+      textPreview: false,
+      sizeBytes: 64,
+    });
+    const blobs = new Map<string, Blob>();
+    let seq = 0;
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      const url = `blob:attachment-video-${++seq}`;
+      blobs.set(url, blob as Blob);
+      return url;
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      blobs.delete(url);
+    });
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockImplementation(function (this: HTMLMediaElement) {
+        Object.defineProperty(this, 'paused', { configurable: true, value: false });
+        this.dispatchEvent(new Event('play'));
+        return Promise.resolve();
+      });
+    const pauseSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'pause')
+      .mockImplementation(function (this: HTMLMediaElement) {
+        Object.defineProperty(this, 'paused', { configurable: true, value: true });
+        this.dispatchEvent(new Event('pause'));
+      });
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+
+    const fetchCalls: Array<{ url: string; auth: string | null }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      fetchCalls.push({ url: String(input), auth: headers.get('Authorization') });
+      return new Response(Uint8Array.of(0x1a, 0x45, 0xdf, 0xa3), {
+        status: 200,
+        headers: { 'Content-Type': 'video/webm', 'Content-Length': '4' },
+      });
+    });
+
+    await mount(
+      createElement(SessionFileAttachmentPane, {
+        file: videoFile,
+        sessionId: 'session' as never,
+        active: true,
+      })
+    );
+
+    expect(fetchCalls).toHaveLength(1);
+    expect(fetchCalls[0]?.auth).toBe('Bearer token');
+    expect(fetchCalls[0]?.url).not.toContain('token');
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+    const videoEl = container.querySelector('video')!;
+    expect(videoEl).not.toBeNull();
+    expect(videoEl.controls).toBe(false);
+    expect(container.querySelector('button[aria-label="Download"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Copy"]')).toBeNull();
+
+    Object.defineProperty(videoEl, 'duration', { configurable: true, value: 20 });
+    await act(async () => {
+      videoEl.dispatchEvent(new Event('loadedmetadata'));
+    });
+
+    const playButton = container.querySelector<HTMLButtonElement>('button[aria-label="Play"]')!;
+    expect(playButton).not.toBeNull();
+    await act(async () => playButton.click());
+    expect(playSpy).toHaveBeenCalledTimes(1);
+
+    const pauseButton = container.querySelector<HTMLButtonElement>('button[aria-label="Pause"]')!;
+    expect(pauseButton).not.toBeNull();
+
+    const seekInput = container.querySelector<HTMLInputElement>('input[aria-label="Seek"]')!;
+    expect(seekInput.disabled).toBe(false);
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(seekInput, '7.5');
+      seekInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(videoEl.currentTime).toBe(7.5);
+    expect(container.querySelector('[data-testid="video-player-time"]')?.textContent).toBe(
+      '0:07 / 0:20'
+    );
+
+    await act(async () => pauseButton.click());
+    expect(pauseSpy).toHaveBeenCalled();
+
+    const speedTrigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Playback speed: 1×"]'
+    )!;
+    expect(speedTrigger).not.toBeNull();
+    expect(speedTrigger.textContent).toBe('1×');
+    expect(videoEl.playbackRate).toBe(1);
+    await act(async () => speedTrigger.click());
+    const speedItems = Array.from(document.querySelectorAll('[role="menuitemradio"]'));
+    expect(speedItems.map((el) => el.textContent?.trim())).toEqual([
+      '0.5×',
+      '0.75×',
+      '1×',
+      '1.25×',
+      '1.5×',
+      '2×',
+    ]);
+    const twoX = speedItems.find((el) => el.textContent?.trim() === '2×') as HTMLElement;
+    await act(async () => twoX.click());
+    expect(videoEl.playbackRate).toBe(2);
+    expect(
+      container.querySelector<HTMLButtonElement>('button[aria-label="Playback speed: 2×"]')
+        ?.textContent
+    ).toBe('2×');
+
+    Object.defineProperty(videoEl, 'error', { configurable: true, value: { code: 4 } });
+    await act(async () => {
+      videoEl.dispatchEvent(new Event('error'));
+    });
+    expect(container.textContent).toContain('Video unavailable');
+    expect(
+      container.querySelectorAll('button[aria-label="Download"]').length
+    ).toBeGreaterThanOrEqual(1);
+
+    await act(async () => root.unmount());
+    expect(revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(blobs.size).toBe(0);
+  });
+});

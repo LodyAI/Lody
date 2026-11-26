@@ -100,10 +100,28 @@ export function useAgentRoleSchemaReconciliation(): void {
             )
           )
             return;
+          const cachedCapability = machines.get(role.machineId)?.acpCapabilities?.[config.id];
+          const matchingCached =
+            cachedCapability && cachedCapability.sourceVersion === response.capability.sourceVersion
+              ? cachedCapability
+              : undefined;
+          const effectiveCapability = matchingCached
+            ? {
+                ...response.capability,
+                ...(response.capability.declaredModelControls === undefined &&
+                matchingCached.declaredModelControls
+                  ? { declaredModelControls: matchingCached.declaredModelControls }
+                  : {}),
+                ...(response.capability.observedModelConfigOptions === undefined &&
+                matchingCached.observedModelConfigOptions
+                  ? { observedModelConfigOptions: matchingCached.observedModelConfigOptions }
+                  : {}),
+              }
+            : response.capability;
           await persistReconciledAgentRole(
             runtime,
             role,
-            response.capability,
+            effectiveCapability,
             userId,
             getServerNow(),
             () => !cancelled

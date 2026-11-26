@@ -2531,6 +2531,85 @@ describe('Machine Flock freshness fallback validation', () => {
     expect(failure.message).not.toContain('private');
     expect(failure.message).not.toContain('credentials');
   });
+
+  it('reconciles borrowed Role thought_level when target model lacks effort while rejecting invalid explicit values', async () => {
+    const capability = {
+      ...createAcpCapability(),
+      provenance: 'runtime' as const,
+      models: [
+        { modelId: 'model-a', name: 'Model A' },
+        { modelId: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'Model A' },
+            { value: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+          ],
+        },
+        {
+          id: 'thought_level',
+          name: 'Thinking Level',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+          ],
+        },
+      ],
+      observedModelConfigOptions: {
+        'gemini-pro-orchestrator': [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select' as const,
+            currentValue: 'gemini-pro-orchestrator',
+            options: [
+              { value: 'model-a', name: 'Model A' },
+              { value: 'gemini-pro-orchestrator', name: 'Gemini Pro Orchestrator' },
+            ],
+          },
+        ],
+      },
+    };
+    const { manager } = readFixture(capability);
+    await expect(
+      resolve(
+        manager,
+        {
+          modelId: 'gemini-pro-orchestrator',
+          configOptionValues: { thought_level: 'medium' },
+        },
+        { agentRoleId: 'carbon-role' }
+      )
+    ).resolves.toMatchObject({
+      modelId: 'gemini-pro-orchestrator',
+    });
+    const reconciled = await resolve(
+      manager,
+      {
+        modelId: 'gemini-pro-orchestrator',
+        configOptionValues: { thought_level: 'medium' },
+      },
+      { agentRoleId: 'carbon-role' }
+    );
+    expect(reconciled.configOptionValues).toBeUndefined();
+
+    await expect(
+      resolve(manager, {
+        modelId: 'gemini-pro-orchestrator',
+        configOptionValues: { thought_level: 'medium' },
+      })
+    ).rejects.toThrow('Model gemini-pro-orchestrator does not offer a reasoning effort option.');
+  });
 });
 
 describe('Stop protocol negotiation', () => {
