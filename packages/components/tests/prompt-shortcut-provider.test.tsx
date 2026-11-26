@@ -687,7 +687,6 @@ describe('PromptShortcutSync workspace-index replica checkpoints', () => {
       grant,
     });
     try {
-      // Seed entry 1 on the fake Streams server.
       const wFlock = await writerRepo.acquireFlockDoc(streamId);
       new PromptShortcutCatalog(wFlock.flock).put(entry1);
       await wFlock.release();
@@ -718,7 +717,6 @@ describe('PromptShortcutSync workspace-index replica checkpoints', () => {
       await sync1.dispose();
       await repo1.destroy();
 
-      // Push entry 2 while client is offline.
       const wFlock2 = await writerRepo.acquireFlockDoc(streamId);
       new PromptShortcutCatalog(wFlock2.flock).put(entry2);
       await wFlock2.release();
