@@ -4181,7 +4181,7 @@ export class SessionExecutionService {
    * Returns false when the input was not interrupted, so the caller fails it as before.
    * Spec: `specs/interrupted-turn-continuation.md`.
    */
-  private async continueInterruptedTurn(
+  async continueInterruptedTurn(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
     userTurnId: string

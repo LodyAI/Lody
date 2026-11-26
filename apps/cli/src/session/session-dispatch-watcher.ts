@@ -3394,21 +3394,35 @@ export class SessionDispatchWatcher {
           awaitingStart &&
           this.deps.executionService.isInboxInputEnded?.(meta.id, entry.id)
         ) {
-          /** The ended input is never admitted again; settle the turn so a surviving processingUserMsgId cannot keep Path 3 re-selecting it. */
-          await backend.applyHistoryAction({
-            kind: 'user-status',
-            turnId: entry.id,
-            status: 'failed',
-          });
-          entry.status = 'failed';
-          canceledInput = true;
-          if (meta.processingUserMsgId === entry.id) {
-            await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(meta.id), {
-              lastHandledUserMsgId: entry.id,
-              lastFailedUserMsgId: entry.id,
-              processingUserMsgId: undefined,
+          const continued =
+            (await this.deps.executionService.continueInterruptedTurn?.(
+              meta.id,
+              sessionDoc,
+              entry.id
+            )) ?? false;
+          if (continued) {
+            entry.status = 'canceled';
+            canceledInput = true;
+            if (meta.processingUserMsgId === entry.id) {
+              meta.processingUserMsgId = undefined;
+            }
+          } else {
+            /** The ended input is never admitted again; settle the turn so a surviving processingUserMsgId cannot keep Path 3 re-selecting it. */
+            await backend.applyHistoryAction({
+              kind: 'user-status',
+              turnId: entry.id,
+              status: 'failed',
             });
-            meta.processingUserMsgId = undefined;
+            entry.status = 'failed';
+            canceledInput = true;
+            if (meta.processingUserMsgId === entry.id) {
+              await this.deps.workspaceDocument.repo.upsertDocMeta?.(getSessionRoomId(meta.id), {
+                lastHandledUserMsgId: entry.id,
+                lastFailedUserMsgId: entry.id,
+                processingUserMsgId: undefined,
+              });
+              meta.processingUserMsgId = undefined;
+            }
           }
         }
       }
