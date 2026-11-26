@@ -151,11 +151,21 @@ describe('encrypted workspace control page recovery', () => {
       value: { writeText: () => Promise.reject(new Error('denied')) },
     });
     render({ failure: { kind: 'server', code: 'bad-signature' } });
+    const code = container!.querySelector('details code');
+    expect(code?.textContent).toBe('bad-signature');
+    expect(code?.closest('details')?.open).toBe(false);
+    const paragraphs = container!.querySelectorAll('[data-failure-kind="server"] p');
+    expect(
+      [...paragraphs].find(
+        (p) => !p.closest('details') && p.textContent === 'e2ee.control.failure.server'
+      )
+    ).toBeDefined();
     await act(async () => {
       button('e2ee.control.copyDiagnostics')!.click();
       await Promise.resolve();
     });
-    expect(container!.querySelector('details')?.open).toBe(true);
+    const report = container!.querySelector('pre')?.closest('details');
+    expect(report?.open).toBe(true);
     expect(container!.textContent).toContain('lody-e2ee-workspace-diagnostics');
   });
 });

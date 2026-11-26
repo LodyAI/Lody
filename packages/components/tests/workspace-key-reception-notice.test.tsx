@@ -51,10 +51,13 @@ describe('workspace key reception notice', () => {
     });
 
   it.each([
-    ['en', 'Receiving a new encryption key…'],
-    ['zh_CN', '正在接收新的加密密钥…'],
+    [
+      'en',
+      'Receiving updated workspace keys… Existing content stays safe while this device catches up.',
+    ],
+    ['zh_CN', '正在接收最新的工作区安全钥匙… 同步完成前你的已有内容安全不受影响。'],
   ])(
-    'waits 30 seconds, stays nonblocking, and clears on installation (%s)',
+    'shows initial progress after 5 seconds and clears on installation (%s)',
     async (language, copy) => {
       await initI18n(language);
       const waiting = { workspaceId: 'A' };
@@ -62,7 +65,7 @@ describe('workspace key reception notice', () => {
       const input = container.querySelector('input')!;
       input.value = 'still editing locally';
       input.focus();
-      await advance(29_999);
+      await advance(4_999);
       expect(container.querySelector('[role="status"]')).toBeNull();
       await render(waiting); // Repeated failure in the same episode must not reset its timer.
       await advance(2);
@@ -123,11 +126,11 @@ describe('workspace key reception notice', () => {
       await advance(1);
       await expect(room.config.provider.seal(request)).rejects.toThrow('e2ee_key-update-required');
       await render(waiting);
-      await advance(29_999);
+      await advance(4_999);
       expect(container.querySelector('[role="status"]')).toBeNull();
       await advance(1);
       expect(container.querySelector('[role="status"]')?.textContent).toBe(
-        'Receiving a new encryption key…'
+        'Receiving updated workspace keys… Existing content stays safe while this device catches up.'
       );
       // Another eligible retained key can resume saves before current-key receipt.
       resumed = true;
@@ -137,7 +140,7 @@ describe('workspace key reception notice', () => {
       resumed = false;
       await expect(room.config.provider.seal(request)).rejects.toThrow('e2ee_key-update-required');
       await render(waiting);
-      await advance(30_000);
+      await advance(20_000);
       expect(container.querySelector('[role="status"]')).not.toBeNull();
       installed = true;
       await access.transition({
@@ -159,14 +162,14 @@ describe('workspace key reception notice', () => {
     await advance(40_000);
     expect(container.querySelector('[role="status"]')).toBeNull();
     await render({ workspaceId: 'B' }, 'B');
-    await advance(29_999);
+    await advance(4_999);
     expect(container.querySelector('[role="status"]')).toBeNull();
     await advance(2);
     expect(container.querySelector('[role="status"]')).not.toBeNull();
     await render(null, 'B');
     await render({ workspaceId: 'B' }, 'B');
     expect(container.querySelector('[role="status"]')).toBeNull();
-    await advance(29_999);
+    await advance(4_999);
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
 });

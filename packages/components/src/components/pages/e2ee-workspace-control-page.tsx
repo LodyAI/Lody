@@ -1,3 +1,4 @@
+import { E2eeDiagnosticCode } from '@/components/e2ee-diagnostic-code';
 import { E2eeMemberActions, type E2eeMemberManagement } from './e2ee-member-actions';
 import * as stylex from '@stylexjs/stylex';
 import { Accordion } from '@lody/ui/accordion';
@@ -511,7 +512,7 @@ function FailurePanel(props: {
   return (
     <Alert.Root tone={failureTone(props.failure.kind)} data-failure-kind={props.failure.kind}>
       <Alert.Title>{t(card.title)}</Alert.Title>
-      <Alert.Description>{t(card.body, { code: props.failure.code })}</Alert.Description>
+      <Alert.Description>{t(card.body)}</Alert.Description>
       {confirmReset && (
         <Alert.Description>{t('e2ee.control.resetProgressWarning')}</Alert.Description>
       )}
@@ -545,6 +546,7 @@ function FailurePanel(props: {
           </>
         )}
       </Alert.Actions>
+      {props.failure.kind === 'server' && <E2eeDiagnosticCode code={props.failure.code} />}
       {report !== null && (
         <details open={copied === 'shown'}>
           <summary>{t('e2ee.control.diagnostics')}</summary>

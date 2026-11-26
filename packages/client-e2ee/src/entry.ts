@@ -867,8 +867,6 @@ export function personalEntry(options: PersonalEntryOptions) {
           ready =
             status.hasCurrentKey ||
             (await runtime.refresh(id, { keyMode: 'receive' })).hasCurrentKey;
-        } catch {
-          ready = false;
         } finally {
           if (opened) await runtime.close(id, accountId, reader);
         }

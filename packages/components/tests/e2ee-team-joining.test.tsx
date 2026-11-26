@@ -103,9 +103,11 @@ describe('encrypted team joining', () => {
     [...container.querySelectorAll('button')].find((item) => item.textContent === key)!;
   it('recovers the saved original after expiry and separates membership from key readiness', async () => {
     let installed = false;
+    let unexpectedSubmission = false;
     const runtime = {
       pendingMemberJoin: async () => ({ offer, requestId: 'original' }),
       prepareMemberJoin: async () => {
+        unexpectedSubmission = true;
         throw new Error('must not replace saved request');
       },
       claimMemberJoin: async () => {
@@ -135,7 +137,7 @@ describe('encrypted team joining', () => {
       'key'
     );
     // Key delivery needs an administrator device; the joining member is told so.
-    expect(container.textContent).toContain('e2ee.team.waitingKeyAdminOnline');
+    expect(container.textContent).toContain('e2ee.team.waitingKeyGuide');
     expect(button('e2ee.team.submit')).toBeUndefined();
     // Committed but not ready: the member claims again 3 s later, not 10 s.
     expect(claims).toBe(1);
@@ -156,8 +158,9 @@ describe('encrypted team joining', () => {
     expect(claims).toBe(slow + 1);
     // After the fast window the member is told why it is still waiting, and can retry.
     expect(container.textContent).toContain('e2ee.team.waitingKeySlow');
-    await act(async () => button('e2ee.team.retry').click());
+    await act(async () => button('e2ee.team.checkKeyAgain').click());
     await settle();
+    expect(unexpectedSubmission).toBe(false);
     expect(claims).toBe(slow + 2);
     expect(container.textContent).not.toContain('e2ee.team.waitingKeySlow');
     await act(async () => vi.advanceTimersByTime(3_000));
@@ -490,7 +493,11 @@ describe('encrypted team joining', () => {
         offer={emailOffer}
         runtime={{
           pendingMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req' }),
-          prepareMemberJoin: async () => ({ offer: emailOffer, requestId: 'email-req', state: 'pending' }),
+          prepareMemberJoin: async () => ({
+            offer: emailOffer,
+            requestId: 'email-req',
+            state: 'pending',
+          }),
           claimMemberJoin: async () => ({ state: 'pending', ready: false }),
         }}
         accountId="account"

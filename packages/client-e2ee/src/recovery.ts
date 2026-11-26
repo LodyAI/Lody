@@ -89,6 +89,9 @@ const errorCodes = new Set([
   'invalid-input',
   'authentication',
   'storage',
+  'conflict',
+  'unavailable',
+  'exists',
   'missing',
   'rollback',
   'prf-unavailable',
@@ -99,26 +102,38 @@ const errorCodes = new Set([
 ]);
 function failure(error: unknown): Error {
   if (error instanceof E2eePasskeyCancelled) return new Error('e2ee_recovery_cancelled');
+  const record =
+    typeof error === 'object' && error !== null
+      ? (error as { code?: unknown; data?: { code?: unknown }; _tag?: string; reason?: string })
+      : undefined;
+  const code = record?.data?.code ?? record?.code;
   if (
     error instanceof Error &&
-    [...errorCodes].some((code) => error.message === `e2ee_recovery_${code}`)
+    [...errorCodes].some((key) => error.message === `e2ee_recovery_${key}`)
   )
     return error;
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof error.code === 'string' &&
-    errorCodes.has(error.code)
-  )
-    return new Error(`e2ee_recovery_${error.code}`);
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'locator-mismatch'
-  )
-    return new Error('e2ee_recovery_authentication');
+  if (typeof code === 'string') {
+    const key = code.replace(/^e2ee_recovery_/, '');
+    if (errorCodes.has(key)) return new Error(`e2ee_recovery_${key}`);
+    if (key === 'locator-mismatch') return new Error('e2ee_recovery_authentication');
+  }
+  if (record?._tag === 'BackendError') {
+    if (record.reason === 'conflict') return new Error('e2ee_recovery_conflict');
+    if (record.reason === 'unavailable') return new Error('e2ee_recovery_unavailable');
+  }
+  if (record?._tag === 'LocalStoreError' || record?._tag === 'KeyProtectorError')
+    return new Error('e2ee_recovery_storage');
+  if (error instanceof Error) {
+    if (/^(?:QuotaExceededError|InvalidStateError|UnknownError|NotReadableError)$/.test(error.name))
+      return new Error('e2ee_recovery_storage');
+    if (
+      /^(?:NetworkError|TimeoutError)$/.test(error.name) ||
+      /failed to fetch|fetch failed|load failed|network(?:error| request failed)|timed? ?out/i.test(
+        error.message
+      )
+    )
+      return new Error('e2ee_recovery_unavailable');
+  }
   return new Error('e2ee_recovery_failed');
 }
 /** The page's origin; non-HTTP(S) shells such as `capacitor://localhost` yield no locator. */
@@ -165,7 +180,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
       Effect.interruptible,
       Effect.timeoutOrElse({
         duration: rpcTimeout,
-        orElse: () => Effect.fail(new Error('e2ee_recovery_failed')),
+        orElse: () => Effect.fail(new Error('e2ee_recovery_unavailable')),
       }),
       Effect.interruptible
     );
@@ -418,7 +433,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
             (yield* rpc(() => options.client.query(api.e2eeRecoveryVault.hasAccountVault, {})))
               .exists
           )
-            return yield* Effect.fail({ code: 'conflict' });
+            return yield* Effect.fail({ code: 'exists' });
           const borrowed = new Set<Uint8Array>();
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
@@ -451,7 +466,7 @@ export function makeClientRecovery(options: ClientRecoveryOptions) {
               (yield* rpc(() => options.client.query(api.e2eeRecoveryVault.hasAccountVault, {})))
                 .exists
             )
-              return yield* Effect.fail({ code: 'conflict' });
+              return yield* Effect.fail({ code: 'exists' });
             const journal = yield* clientRecoveryJournal(accountId, check, options.platform);
             return yield* Effect.gen(function* () {
               const vaults = yield* RecoveryVaults;

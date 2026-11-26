@@ -1,3 +1,4 @@
+import { recoveryAvailabilityMessage } from '@/lib/e2ee-actionable-failure';
 import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -101,8 +102,10 @@ const resultBadge = (row: RestoreResult): { key: string; tone: BadgeTone } =>
         ? { key: 'e2ee.lostAll.result.notBackedUp', tone: 'neutral' }
         : { key: 'e2ee.lostAll.result.failed', tone: 'warning' };
 
-const failureKey = (code: string, method: Method) =>
-  code.includes('e2ee_recovery_missing')
+const failureKey = (code: string, method: Method) => {
+  const actionable = recoveryAvailabilityMessage(code);
+  if (actionable) return actionable;
+  return code.includes('e2ee_recovery_missing')
     ? 'e2ee.lostAll.missing'
     : code.includes('e2ee_recovery_prf-unavailable')
       ? 'e2ee.recovery.passkeyUnsupported'
@@ -113,6 +116,7 @@ const failureKey = (code: string, method: Method) =>
         : code.includes('e2ee_recovery_disabled')
           ? 'e2ee.recovery.disabled'
           : 'e2ee.lostAll.failed';
+};
 
 const MIN_PASSWORD_CHARS = 12;
 const validPasswordInput = (value: string) =>

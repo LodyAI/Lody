@@ -1,3 +1,4 @@
+import { recoveryAvailabilityMessage } from '@/lib/e2ee-actionable-failure';
 import { useAtomValue } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -1124,19 +1125,21 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
       {result?.kind === 'error' && (
         <Alert.Root tone="danger">
           <Alert.Description>
-            {result.code.includes('e2ee_recovery_disabled')
-              ? t('e2ee.recovery.disabled')
-              : result.code.includes('e2ee_recovery_prf-unavailable')
-                ? t('e2ee.recovery.passkeyUnsupported')
-                : result.code.includes('e2ee_recovery_replacing')
-                  ? t('e2ee.recovery.replacingElsewhere')
-                  : result.code.includes('e2ee_recovery_exists')
-                    ? t('e2ee.recovery.exists')
-                    : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
-                      ? result.method === 'password'
-                        ? t('e2ee.recovery.wrongPassword')
-                        : t('e2ee.recovery.wrongFile')
-                      : t('e2ee.recovery.failed')}
+            {recoveryAvailabilityMessage(result.code)
+              ? t(recoveryAvailabilityMessage(result.code)!)
+              : result.code.includes('e2ee_recovery_disabled')
+                ? t('e2ee.recovery.disabled')
+                : result.code.includes('e2ee_recovery_prf-unavailable')
+                  ? t('e2ee.recovery.passkeyUnsupported')
+                  : result.code.includes('e2ee_recovery_replacing')
+                    ? t('e2ee.recovery.replacingElsewhere')
+                    : result.code.includes('e2ee_recovery_exists')
+                      ? t('e2ee.recovery.exists')
+                      : /e2ee_recovery_(?:authentication|invalid-input)/.test(result.code)
+                        ? result.method === 'password'
+                          ? t('e2ee.recovery.wrongPassword')
+                          : t('e2ee.recovery.wrongFile')
+                        : t('e2ee.recovery.failed')}
           </Alert.Description>
         </Alert.Root>
       )}

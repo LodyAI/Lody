@@ -2,7 +2,6 @@ import { roostHistoryDatabase } from '../lib/roost-history-cache';
 import { subscribeAttachmentWorkspaceMode } from '@/lib/attachment-workspace-access';
 import { subscribeE2eeLedgerChanges } from './e2ee-runtime-notifications';
 import { onIpcEvent } from '@/lib/electron-ipc-client';
-import { useTranslation } from 'react-i18next';
 import { desktopWindowId } from '@/lib/desktop-window';
 import {
   e2eeAccessLoss,
@@ -166,7 +165,6 @@ const deferredDocMetaSubscriptionAtom = atom(undefined);
 
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
-  const { t } = useTranslation();
   const [keyUpdateWorkspace, setKeyUpdateWorkspace] = useState<string | null>(null);
   const [keyReceptionWait, setKeyReceptionWait] = useState<KeyReceptionWait | null>(null);
   // Non-terminal: the workspace stays open and unclassified while the host is re-asked.
@@ -1456,15 +1454,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         runtime?.workspaceId === effectiveWorkspaceId &&
         runtime?.workspaceSlug === workspaceSlug &&
         keyReceptionWait?.workspaceId === effectiveWorkspaceId && (
-          <div>
-            <WorkspaceKeyReceptionNotice
-              workspaceId={effectiveWorkspaceId}
-              waiting={keyReceptionWait}
-            />{' '}
-            <button type="button" onClick={() => retryKeyUpdateRef.current()}>
-              {t('e2ee.content.retryKeyUpdate')}
-            </button>
-          </div>
+          <WorkspaceKeyReceptionNotice
+            workspaceId={effectiveWorkspaceId}
+            waiting={keyReceptionWait}
+            onCheckAgain={() => retryKeyUpdateRef.current()}
+          />
         )}
       {hostIdentityWait?.workspaceId === effectiveWorkspaceId && (
         <WorkspaceHostIdentityNotice

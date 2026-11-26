@@ -49,6 +49,8 @@ retains the complete public `PersonalCloseIncomplete.owner` until actual settlem
 `awaitRetirements` lets recovery wait for retired entries without blocking unrelated
 workspaces. Applications supply their own Effect executor and reuse their existing
 authenticated cloud client.
+An approved member can check for workspace keys using the saved join request.
+A failed read or key installation surfaces its error after releasing the reader.
 
 `personalEntryPins(databaseName)` retains verified public desktop offers and routing
 progress. A ready phase never grants access; the public host rechecks approval and
@@ -73,6 +75,8 @@ Recovery files carry the signed-in site's canonical origin
 optional `serviceLocator` option. Omitted, it is the page's HTTP(S) origin, which suits the
 hosted and self-hosted Web client; the mobile wrapper passes `VITE_SITE_URL`. Without a usable
 origin every command refuses as `disabled`.
+Recovery screens receive distinct errors for service outages, local storage
+failures, concurrent backup changes and invalid recovery credentials.
 
 `makeRecoveryWorkspaces` is the shared per-workspace setup and restore engine.
 The caller passes `platform: 'web' | 'mobile'`, the passkey port, and the closed

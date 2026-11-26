@@ -633,7 +633,7 @@ describe('remote encrypted machine approval', () => {
       await act(async () => button('e2ee.remoteMachine.allow')!.click());
       expect(admitted).toBe(false);
       expect(container.querySelector('[role="alert"]')?.textContent).toBe(
-        'e2ee.remoteMachine.error'
+        'e2ee.remoteMachine.expiredOrConflict'
       );
       expect(container.textContent).toContain('e2ee.remoteMachine.status.claimedByAnotherMachine');
       expect(button('e2ee.remoteMachine.allow')).toBeUndefined();
