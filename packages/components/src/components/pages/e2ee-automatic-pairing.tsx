@@ -68,6 +68,8 @@ const clock = (seconds: number) =>
 const POLL_MS = 2000;
 /** The new device's poll for its QR join; the approving device signs within a second. */
 const QR_JOIN_POLL_MS = 800;
+/** Slower fallback for QR join when live claim subscription is active (covers mailbox delivery). */
+const QR_JOIN_FALLBACK_POLL_MS = 4_000;
 /** After 5s of syncing, guide the person to keep Lody open on the approving device. */
 const SYNC_SLOW_HINT_MS = 5_000;
 /** After 15s of syncing without key failure, surface explicit retry and cancel exits. */
@@ -371,13 +373,15 @@ export function E2eeAutomaticPairingPage({
       /* Live discovery is optional; scoped polling still verifies the same originals. */
     }
     void tick();
-    const timer = unsubscribe ? undefined : setInterval(() => void tick(), POLL_MS);
+    // Keep polling even when `subscribeAutomaticPairing` is active: post-reveal
+    // `e2eeAccountPairing` and `e2eeMailbox` updates do not mutate `e2eeAutomaticPairing`.
+    const timer = setInterval(() => void tick(), POLL_MS);
     const onOnline = () => void tick();
     window.addEventListener('online', onOnline);
     return () => {
       alive = false;
       unsubscribe?.();
-      if (timer !== undefined) clearInterval(timer);
+      clearInterval(timer);
       window.removeEventListener('online', onOnline);
     };
   }, [runtime, workspaceId, generation, canStart]);
@@ -523,12 +527,12 @@ export function E2eeAutomaticPairingPage({
       }
     }
     poll();
-    const timer = unsubscribe ? undefined : setInterval(poll, QR_JOIN_POLL_MS);
+    const timer = setInterval(poll, unsubscribe ? QR_JOIN_FALLBACK_POLL_MS : QR_JOIN_POLL_MS);
     window.addEventListener('online', poll);
     return () => {
       alive = false;
       unsubscribe?.();
-      if (timer !== undefined) clearInterval(timer);
+      clearInterval(timer);
       window.removeEventListener('online', poll);
     };
     // The join belongs to this page's runtime and workspace; callbacks read refs.
@@ -1157,12 +1161,12 @@ export function E2eeAutomaticPairingInbox({
     }
     void tick();
     // A hidden window does not poll; the subscription and the system notification
-    // still run, and showing the window again checks at once.
-    const timer = unsubscribe
-      ? undefined
-      : setInterval(() => {
-          if (document.visibilityState === 'visible') void tick();
-        }, POLL_MS);
+    // still run, and showing the window again checks at once. Keep polling while
+    // visible even with `subscribeAutomaticPairing` active because the requester's
+    // post-reveal `e2eeAccountPairing` submission does not fire `e2eeAutomaticPairing`.
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void tick();
+    }, POLL_MS);
     // Restoring a minimized window presents a waiting request at once.
     const wake = () => {
       if (document.visibilityState === 'visible') void tick();
@@ -1172,7 +1176,7 @@ export function E2eeAutomaticPairingInbox({
     return () => {
       alive = false;
       unsubscribe?.();
-      if (timer !== undefined) clearInterval(timer);
+      clearInterval(timer);
       document.removeEventListener('visibilitychange', wake);
       window.removeEventListener('online', wake);
     };

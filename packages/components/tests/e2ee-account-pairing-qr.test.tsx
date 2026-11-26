@@ -1434,4 +1434,38 @@ describe('pairing hardening', () => {
     expect(joined).toEqual(['Synthetic phone']);
     expect(unsubscribed).toBe(true);
   });
+
+  it('approver discovers a post-reveal accountPairing submission even when subscribeAutomaticPairing stays quiet', async () => {
+    const { E2eeAutomaticPairingInbox } =
+      await import('../src/components/pages/e2ee-automatic-pairing');
+    let submitted = false;
+    let unsubscribed = false;
+    const runtime = {
+      // Simulates Convex subscribeAutomaticPairing being active while the requester's
+      // post-reveal e2eeAccountPairing submission does not trigger automaticPairing again.
+      subscribeAutomaticPairing: () => () => {
+        unsubscribed = true;
+      },
+      pendingAutomaticPairing: async () => (submitted ? [review] : []),
+      approveAutomaticPairing: async () => ({ outcome: 'approved' as const }),
+      declineAutomaticPairing: async () => {},
+    } as unknown as E2eeWorkspaceRuntime;
+    await act(async () =>
+      root.render(
+        <E2eeAutomaticPairingInbox runtime={runtime}>
+          <div>host</div>
+        </E2eeAutomaticPairingInbox>
+      )
+    );
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).toBeNull();
+    // Requester submits to e2eeAccountPairing without firing subscribeAutomaticPairing.
+    submitted = true;
+    await tick(2_000);
+    await flush();
+    expect(document.querySelector('[data-testid="e2ee-approval-code"]')).not.toBeNull();
+    await act(async () => root.unmount());
+    expect(unsubscribed).toBe(true);
+    root = createRoot(container);
+  });
 });

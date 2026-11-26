@@ -115,12 +115,12 @@ function usePoll(
     } catch {
       /* Live hints are optional; the poll still reads the same verified state. */
     }
-    const timer =
-      unsubscribe === undefined
-        ? setInterval(() => {
-            if (!running) run();
-          }, ms)
-        : undefined;
+    const timer = setInterval(
+      () => {
+        if (!running) run();
+      },
+      unsubscribe === undefined ? ms : Math.max(ms, 8_000)
+    );
     const onOnline = () => {
       if (!running) run();
     };
@@ -128,7 +128,7 @@ function usePoll(
     if (immediate) run();
     return () => {
       stopped = true;
-      if (timer !== undefined) clearInterval(timer);
+      clearInterval(timer);
       window.removeEventListener('online', onOnline);
       unsubscribe?.();
     };
