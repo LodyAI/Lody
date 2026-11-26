@@ -64,7 +64,7 @@ export function admitCloudNightly({
   }
   assert.equal(context.runAttempt, '1', 'Retry requires the immutable original candidate artifact');
   if (context.eventName === 'schedule' && latestTagSha === targetSha) {
-    return { publish: false, mode, skipValidate };
+    return { publish: false };
   }
   assert.match(
     buildOffset ?? '',
@@ -153,6 +153,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     await writeFile(filename, `${JSON.stringify(candidate, null, 2)}\n`, { flag: 'wx' });
   await appendFile(
     env.GITHUB_OUTPUT,
-    `publish=${publish}\nmode=${mode}\nskip-validate=${skipValidate}\nprivate-sha=${targetSha}\noss-sha=${targetSha}\n`
+    `publish=${publish}\nmode=${mode ?? 'verified'}\nskip-validate=${skipValidate ?? false}\nprivate-sha=${targetSha}\noss-sha=${targetSha}\n`
   );
 }
