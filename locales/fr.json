@@ -6928,6 +6928,8 @@
   "settings.machines.batchUpdate.unsupported.foreground": "Démarrée avec lody start dans un terminal ; la mise à jour à distance nécessite le daemon en arrière-plan",
   "settings.machines.batchUpdate.unsupported.install": "Cette installation ne peut pas être mise à jour à distance (Windows, espace de travail chiffré ou ancienne installation npm). Exécutez sur cette machine :",
   "settings.machines.batchUpdate.unsupported.unknown": "Impossible de vérifier si cette machine peut être mise à jour à distance",
+  "settings.machines.batchUpdate.unsupported.unreachable": "Impossible de joindre cette machine via le cloud Lody. Réessayez dans un instant.",
+  "settings.machines.batchUpdate.unsupported.unreachableRetrying": "Impossible de joindre cette machine via le cloud Lody ; nouvelle tentative…",
   "settings.machines.batchUpdate.title": "Mettre à jour toutes mes machines",
   "settings.machines.batchUpdate.description": "Chaque machine est mise à jour vers la dernière version de son canal et revient automatiquement à la version précédente si la nouvelle ne démarre pas.",
   "settings.machines.batchUpdate.running": "{{count}} conversations en cours",

@@ -1255,9 +1255,11 @@ export function MachineAgentSettings({
           : {}),
       });
       const response = await responsePromise;
-      return response?.success
-        ? { lifecycle: response.lifecycle ?? null, update: response.daemonUpdate }
-        : { lifecycle: null };
+      // A daemon that fails to collect resources still reports its lifecycle.
+      if (response?.success || response?.lifecycle)
+        return { lifecycle: response.lifecycle ?? null, update: response.daemonUpdate };
+      // The read never got an answer: the dialog retries it and shows the cause.
+      throw new Error(response?.error ?? 'timeout: Machine status request timed out');
     },
     [batchUpdateMachines, runtime, workspaceId]
   );

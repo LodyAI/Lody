@@ -6937,6 +6937,8 @@
   "settings.machines.batchUpdate.unsupported.foreground": "Started with lody start in a terminal; remote update needs the background daemon",
   "settings.machines.batchUpdate.unsupported.install": "This installation cannot update remotely (Windows, an encrypted workspace, or an older npm install). Run on that machine:",
   "settings.machines.batchUpdate.unsupported.unknown": "Could not read whether this machine can update remotely",
+  "settings.machines.batchUpdate.unsupported.unreachable": "Couldn't reach this machine through Lody's cloud. Try again in a moment.",
+  "settings.machines.batchUpdate.unsupported.unreachableRetrying": "Couldn't reach this machine through Lody's cloud; retrying…",
   "settings.machines.batchUpdate.title": "Update all my machines",
   "settings.machines.batchUpdate.description": "Each machine updates to the latest release of its own channel and rolls back automatically if the new version does not start.",
   "settings.machines.batchUpdate.running": "{{count}} conversations running",
