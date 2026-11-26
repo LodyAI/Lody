@@ -583,6 +583,40 @@ describe('recovery vault settings actions', () => {
     }
   });
 
+  it('shows progress copy on the setup button while workspace recovery setup is running', async () => {
+    let settle!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      settle = resolve;
+    });
+    const view = await mount(
+      {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'notSet' })],
+        uncovered: [],
+      },
+      {
+        'e2ee.setupRecoveryForWorkspaces': () => pending,
+      }
+    );
+    try {
+      expect(view.labels).toContain('e2ee.recovery.setupAll');
+      const clickPromise = view.click('e2ee.recovery.setupAll');
+      await Promise.resolve();
+      expect(view.labels).toContain('e2ee.recovery.settingUpAll');
+      settle({
+        outcome: 'settled',
+        results: [{ workspaceId: 'a', outcome: 'Committed', recoverable: true }],
+      });
+      await clickPromise;
+      expect(view.labels).not.toContain('e2ee.recovery.settingUpAll');
+      expect(view.text).toContain('e2ee.recovery.setupAllDone');
+    } finally {
+      view.done();
+    }
+  });
+
   it('shows when this device last checked the recovery file', async () => {
     const view = await mount(
       {

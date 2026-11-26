@@ -179,3 +179,29 @@ it('replaces a partially restored identity that is revoked before its restore fi
   expect(signingKey(after)).not.toBe(revoked);
   expect(await f.pinPhase('A')).toBe('ready');
 }, 60_000);
+
+it('ingests appendRecord historyPage to skip redundant history refresh, falls back on gap, and narrows key distribution to the recovery device', async () => {
+  const f = await load();
+  await f.admitted();
+
+  f.setInlineAppendHistory('contiguous');
+  f.resetIoCounters();
+  const contiguous = await f.setupWorkspace('A');
+  expect(contiguous).toEqual([{ workspaceId: 'A', name: 'A', outcome: 'recoverable' }]);
+  const s1 = f.state();
+  expect(s1.historyReads).toBe(1);
+  expect(s1.mailboxFetches.length).toBeGreaterThan(0);
+  expect(s1.mailboxFetches.every((row) => row.kind === 'recovery')).toBe(true);
+  const recoveryDevicesA = s1.records
+    .find((row) => row.id === 'A')!
+    .devices.filter((d) => d.kind === 'recovery')
+    .map((d) => d.id);
+  expect(s1.mailboxStatuses.length).toBeGreaterThan(0);
+  expect(s1.mailboxStatuses.every((row) => recoveryDevicesA.includes(row.recipient))).toBe(true);
+
+  f.setInlineAppendHistory('gap');
+  f.resetIoCounters();
+  const gapped = await f.setupWorkspace('B');
+  expect(gapped).toEqual([{ workspaceId: 'B', name: 'B', outcome: 'recoverable' }]);
+  expect(f.state().historyReads).toBe(2);
+}, 60_000);

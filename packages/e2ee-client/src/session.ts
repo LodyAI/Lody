@@ -445,6 +445,17 @@ export const openPersonalSession = Effect.fnUntraced(function* (
         const received = yield* receiver.fetchAndInstall(null, 100);
         return { refreshRequired: received.refreshRequired ?? false };
       });
+    const distributeTo = (ctx: Context.Context<Keys>, recipients?: readonly string[]) =>
+      Effect.gen(function* () {
+        // Only this device's deliveries, as on the desktop: reconcile targets,
+        // resume pending sends, acknowledge ended tasks. Receive and repair stay
+        // with a full round; every task remains in the core distribution journal.
+        const distributor = Context.get(ctx, KeyDistributor);
+        yield* distributor.reconcileCurrentEpoch(100, null, recipients);
+        yield* distributor.resumePendingDeliveries(100, null);
+        const ended = yield* distributor.results(100, null);
+        for (const item of ended.items) yield* distributor.acknowledge(item.id);
+      });
     const keyRound = (mode: PersonalKeyRoundMode = 'full', recipients?: readonly string[]) =>
       serialRound(
         withKeys((ctx) =>
@@ -452,14 +463,7 @@ export const openPersonalSession = Effect.fnUntraced(function* (
             const view = yield* admitted(),
               epoch = view.inspectState().epoch.number;
             if (mode === 'distribute') {
-              // Only this device's deliveries, as on the desktop: reconcile targets,
-              // resume pending sends, acknowledge ended tasks. Receive and repair stay
-              // with a full round; every task remains in the core distribution journal.
-              const distributor = Context.get(ctx, KeyDistributor);
-              yield* distributor.reconcileCurrentEpoch(100, null, recipients);
-              yield* distributor.resumePendingDeliveries(100, null);
-              const ended = yield* distributor.results(100, null);
-              for (const item of ended.items) yield* distributor.acknowledge(item.id);
+              yield* distributeTo(ctx, recipients);
               return { refreshRequired: false };
             }
             if (mode === 'receive') {
@@ -1313,23 +1317,63 @@ export const openPersonalSession = Effect.fnUntraced(function* (
                     length: view.length,
                   },
                   submitOriginal: (record, registration) =>
-                    input
-                      .submitOriginal(record, registration)
-                      .pipe(Effect.tap(() => serialRound(Effect.interruptible(control.refresh())))),
-                  fetchCurrentEnvelope: (...args) =>
+                    input.submitOriginal(record, registration).pipe(
+                      Effect.tap((reply) =>
+                        serialRound(
+                          Effect.interruptible(
+                            Effect.gen(function* () {
+                              if (reply.historyPage) {
+                                const ingested = yield* Effect.result(
+                                  ingestPage(reply.historyPage)
+                                );
+                                if (Result.isSuccess(ingested)) {
+                                  const latest = yield* ledger();
+                                  const covered =
+                                    reply.outcome === 'Committed'
+                                      ? latest.head.equals(hashRecordBytes(record)) ||
+                                        reply.historyPage.recordsHex.includes(toHex(record))
+                                      : reply.historyPage.nextCursor === null &&
+                                        reply.historyPage.recordsHex.length > 0;
+                                  if (covered) return;
+                                }
+                              }
+                              yield* control.refresh();
+                            })
+                          )
+                        )
+                      ),
+                      Effect.map(({ outcome, record: submitted }) => ({
+                        outcome,
+                        record: submitted,
+                      }))
+                    ),
+                  fetchCurrentEnvelope: (recipient, ...rest) =>
                     Effect.gen(function* () {
+                      const recipientHex = toHex(recipient.toBytes());
                       // A failed independent receive/repair must not hide an already delivered R envelope.
                       yield* Effect.exit(
                         serialRound(
                           Effect.interruptible(
                             Effect.gen(function* () {
                               const latest = yield* admitted();
-                              return yield* maintenance!(latest.inspectState().epoch.number);
+                              const epoch = latest.inspectState().epoch.number;
+                              const installed = yield* Effect.result(
+                                Context.get(ctx, InstalledEpochKeys).check(epoch)
+                              );
+                              if (Result.isSuccess(installed)) {
+                                yield* distributeTo(ctx, [recipientHex]);
+                                return;
+                              }
+                              return yield* maintenance!(
+                                epoch,
+                                receiveFromStaging(ctx, latest, epoch),
+                                [recipientHex]
+                              );
                             })
                           )
                         )
                       );
-                      return yield* input.fetchCurrentEnvelope(...args);
+                      return yield* input.fetchCurrentEnvelope(recipient, ...rest);
                     }),
                 });
                 const result = yield* workflow.setup();

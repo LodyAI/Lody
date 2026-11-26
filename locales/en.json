@@ -6617,6 +6617,7 @@
   "e2ee.recovery.uncoveredTitle_other": "{{count}} encrypted workspaces cannot be recovered yet",
   "e2ee.recovery.uncoveredBody": "If you lose every authorized device, the history in these workspaces cannot be brought back.",
   "e2ee.recovery.setupAll": "Set up recovery for all workspaces",
+  "e2ee.recovery.settingUpAll": "Setting up recovery…",
   "e2ee.recovery.setupAllPasskey": "Set up all workspaces with a passkey",
   "e2ee.recovery.setupAllDone": "Recovery is set up for every workspace.",
   "e2ee.recovery.setupAllPartial": "Finished {{done}} workspaces. These are not finished yet; try them again later: {{names}}",

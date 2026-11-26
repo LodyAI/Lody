@@ -201,10 +201,12 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
   // with `LODY_E2EE_RECOVERY_VAULT=off`), which no retry changes; `failed`: anything else.
   const [planFailed, setPlanFailed] = useState<false | 'failed' | 'disabled'>(false);
   const [restoreProgress, setRestoreProgress] = useState<readonly RecoveryRestoreResult[]>([]);
+  const [settingUp, setSettingUp] = useState<RecoveryUnlockMethod | null>(null);
   const operation = useRef(0);
   const observations = useRef<AbortController | null>(null);
   useEffect(() => {
     setRestoreProgress([]);
+    setSettingUp(null);
     setResult(undefined);
     setPlan(undefined);
     setPlanFailed(false);
@@ -391,29 +393,35 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
     method: RecoveryUnlockMethod,
     options?: RecoveryUnlockOptions
   ): Promise<Result | undefined> => {
-    const settled = options
-      ? await port.setupWorkspaces(
-          unfinished.map((row) => row.id),
-          method,
-          options
-        )
-      : await port.setupWorkspaces(
-          unfinished.map((row) => row.id),
-          method
-        );
-    if (settled.outcome === 'cancelled') return undefined;
-    // Reconcile against what was asked: only a committed, verified setup is done.
-    // Pending, conflicting, unverified or missing results are listed as not finished.
-    const finished = new Set(
-      settled.results
-        .filter((row) => row.outcome === 'Committed' && row.recoverable)
-        .map((row) => row.workspaceId)
-    );
-    return {
-      kind: 'setupAll',
-      done: unfinished.filter((row) => finished.has(row.id)).length,
-      failed: unfinished.filter((row) => !finished.has(row.id)).map((row) => row.name),
-    };
+    const ticket = operation.current;
+    setSettingUp(method);
+    try {
+      const settled = options
+        ? await port.setupWorkspaces(
+            unfinished.map((row) => row.id),
+            method,
+            options
+          )
+        : await port.setupWorkspaces(
+            unfinished.map((row) => row.id),
+            method
+          );
+      if (settled.outcome === 'cancelled') return undefined;
+      // Reconcile against what was asked: only a committed, verified setup is done.
+      // Pending, conflicting, unverified or missing results are listed as not finished.
+      const finished = new Set(
+        settled.results
+          .filter((row) => row.outcome === 'Committed' && row.recoverable)
+          .map((row) => row.workspaceId)
+      );
+      return {
+        kind: 'setupAll',
+        done: unfinished.filter((row) => finished.has(row.id)).length,
+        failed: unfinished.filter((row) => !finished.has(row.id)).map((row) => row.name),
+      };
+    } finally {
+      if (operation.current === ticket) setSettingUp(null);
+    }
   };
 
   const setupAll = (method: RecoveryUnlockMethod) => {
@@ -869,7 +877,9 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 disabled={busy}
                 onClick={() => setupAll('file')}
               >
-                {t('e2ee.recovery.setupAll')}
+                {settingUp === 'file'
+                  ? t('e2ee.recovery.settingUpAll')
+                  : t('e2ee.recovery.setupAll')}
               </Button>
             )}
             {showSetupPasskey && (
@@ -878,7 +888,9 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 disabled={busy}
                 onClick={() => setupAll('passkey')}
               >
-                {t('e2ee.recovery.setupAllPasskey')}
+                {settingUp === 'passkey'
+                  ? t('e2ee.recovery.settingUpAll')
+                  : t('e2ee.recovery.setupAllPasskey')}
               </Button>
             )}
             {showSetupPassword && (
@@ -887,7 +899,9 @@ export function RecoveryVaultSection({ accountId }: { accountId?: string | null 
                 disabled={busy}
                 onClick={() => setupAll('password')}
               >
-                {t('e2ee.recovery.setupAllPassword')}
+                {settingUp === 'password'
+                  ? t('e2ee.recovery.settingUpAll')
+                  : t('e2ee.recovery.setupAllPassword')}
               </Button>
             )}
           </Alert.Actions>

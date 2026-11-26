@@ -289,11 +289,15 @@ export function makeRecoveryWorkspaces(options: RecoveryWorkspacesOptions) {
                     : {}),
                 })
               ).pipe(
-                Effect.map((reply) => ({
-                  outcome:
-                    reply.status === 'committed' ? ('Committed' as const) : ('Conflict' as const),
-                  record: record.slice(),
-                }))
+                Effect.map((reply) => {
+                  const parsed = historyPage.safeParse(reply.historyPage);
+                  return {
+                    outcome:
+                      reply.status === 'committed' ? ('Committed' as const) : ('Conflict' as const),
+                    record: record.slice(),
+                    ...(parsed.success ? { historyPage: parsed.data } : {}),
+                  };
+                })
               ),
           })
         );

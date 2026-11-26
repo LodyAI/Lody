@@ -6606,6 +6606,7 @@
   "e2ee.recovery.uncoveredTitle_other": "{{count}} 个加密工作区还不能恢复",
   "e2ee.recovery.uncoveredBody": "如果你丢失所有已授权设备，这些工作区里的历史将无法找回。",
   "e2ee.recovery.setupAll": "为全部工作区设置恢复",
+  "e2ee.recovery.settingUpAll": "正在设置恢复…",
   "e2ee.recovery.setupAllPasskey": "用 Passkey 为全部工作区设置",
   "e2ee.recovery.setupAllDone": "全部工作区都已设置恢复。",
   "e2ee.recovery.setupAllPartial": "已完成 {{done}} 个工作区；这些还没有完成，可以稍后再试：{{names}}",

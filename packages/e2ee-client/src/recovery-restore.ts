@@ -394,5 +394,14 @@ export interface PersonalHostRecoveryInput {
 /** Vault setup transports; personal signing and installed keys remain in the admitted session. */
 export type PersonalRecoverySetupInput = Pick<
   WorkspaceRecoveryInput,
-  'vault' | 'local' | 'submitOriginal' | 'fetchCurrentEnvelope'
->;
+  'vault' | 'local' | 'fetchCurrentEnvelope'
+> & {
+  readonly submitOriginal: (
+    ...args: Parameters<WorkspaceRecoveryInput['submitOriginal']>
+  ) => Effect.Effect<
+    import('@lody/e2ee-core').RecoverySubmitResult & {
+      readonly historyPage?: import('@lody/cloud-api').E2eeWorkspaceHistoryPage;
+    },
+    unknown
+  >;
+};
