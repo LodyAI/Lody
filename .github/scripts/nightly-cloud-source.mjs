@@ -51,14 +51,15 @@ export function admitCloudNightly({
     assert.equal(previous.ossSha, targetSha);
     assert.equal(previous.runId, context.runId);
     assert.equal(previous.builtAt, builtAt);
-    assert.deepEqual(previous.trigger, { repository: context.repository, sha: context.sha });
+    assert.deepEqual(previous.trigger, { repository: context.repository, sha: targetSha });
     assert.ok(
       /^[1-9]\d*$/u.test(previous.buildNumber) && Number(previous.buildNumber) <= 99_989_999
     );
     return {
       publish: true,
-      mode: previous.releaseMode ?? mode,
-      skipValidate: (previous.releaseMode ?? mode) === 'emergency',
+      mode,
+      reason: trimmedReason,
+      skipValidate,
       candidate: previous,
     };
   }
@@ -76,6 +77,7 @@ export function admitCloudNightly({
   return {
     publish: true,
     mode,
+    reason: trimmedReason,
     skipValidate,
     candidate: {
       schema: 1,
@@ -84,9 +86,7 @@ export function admitCloudNightly({
       buildNumber: String(buildNumber),
       runId: context.runId,
       builtAt,
-      releaseMode: mode,
-      ...(trimmedReason ? { releaseReason: trimmedReason } : {}),
-      trigger: { repository: context.repository, sha: context.sha },
+      trigger: { repository: context.repository, sha: targetSha },
     },
   };
 }
