@@ -163,6 +163,7 @@ import {
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
 import { readAgentStartDefaults, learnAgentStartDefaults } from '@/lib/local-storage-cache';
+import { useAgentPermissionDefault } from '@/hooks/use-agent-permission-default';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
@@ -2198,6 +2199,7 @@ function WorkspaceChatLanding({
     cliType: selectedConfig?.cliType,
     agentType: selectedConfig?.agentType,
   });
+  const permissionDefault = useAgentPermissionDefault(selectedConfig?.id);
   const dispatchConfigOptionValues = useMemo(
     () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
     [configOptionValues, resolvedConfigOptionSelectors]
@@ -4749,6 +4751,7 @@ function WorkspaceChatLanding({
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
             menuSide={isEmbedded ? 'top' : undefined}
+            permissionDefault={permissionDefault}
           />
         )}
         <SessionUsagePopover

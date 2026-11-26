@@ -7241,5 +7241,12 @@
   "e2ee.team.signedInAs": "{{email}}(으)로 로그인됨",
   "e2ee.team.wrongEmailFor": "이 초대는 {{invited}}로 전송되었습니다. 계속하려면 해당 이메일로 로그인하세요.",
   "e2ee.auto.tab.qr": "QR 스캔",
-  "e2ee.auto.tab.code": "6자리 코드 입력"
+  "e2ee.auto.tab.code": "6자리 코드 입력",
+  "chat.runConfig.permissionDefaultClear": "기본값으로 사용 안 함",
+  "chat.runConfig.permissionDefaultSet": "새 대화에 사용",
+  "chat.runConfig.permissionDefaultCleared": "새 대화는 마지막으로 선택한 권한을 사용합니다",
+  "chat.runConfig.permissionDefaultSaved": "새 대화는 이 권한으로 시작합니다",
+  "chat.runConfig.permissionDefaultFailed": "기본 권한을 저장하지 못했습니다",
+  "settings.agent.dialog.section.defaultPermission": "기본 권한",
+  "settings.agent.dialog.defaultPermissionLastUsed": "마지막으로 선택한 항목"
 }

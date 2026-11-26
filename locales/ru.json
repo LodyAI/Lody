@@ -7381,5 +7381,12 @@
   "e2ee.team.signedInAs": "Вход выполнен как {{email}}",
   "e2ee.team.wrongEmailFor": "Это приглашение отправлено на {{invited}}. Войдите с этим адресом, чтобы продолжить.",
   "e2ee.auto.tab.qr": "Сканировать QR",
-  "e2ee.auto.tab.code": "Ввести 6-значный код"
+  "e2ee.auto.tab.code": "Ввести 6-значный код",
+  "chat.runConfig.permissionDefaultClear": "Не использовать по умолчанию",
+  "chat.runConfig.permissionDefaultSet": "Использовать для новых диалогов",
+  "chat.runConfig.permissionDefaultCleared": "Новые диалоги используют последнее выбранное разрешение",
+  "chat.runConfig.permissionDefaultSaved": "Новые диалоги будут начинаться с этим разрешением",
+  "chat.runConfig.permissionDefaultFailed": "Не удалось сохранить разрешение по умолчанию",
+  "settings.agent.dialog.section.defaultPermission": "Разрешение по умолчанию",
+  "settings.agent.dialog.defaultPermissionLastUsed": "Последнее выбранное"
 }

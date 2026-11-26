@@ -273,7 +273,7 @@ export function readAgentStartDefaults(
   }
 
   return {
-    modeId: cached?.modeId ?? null,
+    modeId: provider.modeId ?? cached?.modeId ?? null,
     modelId,
     ...(Object.keys(configOptionValues).length ? { configOptionValues } : {}),
     ...(Object.keys(modelConfigOptionValues).length ? { modelConfigOptionValues } : {}),

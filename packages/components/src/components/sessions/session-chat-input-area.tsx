@@ -159,6 +159,7 @@ import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { learnAgentStartDefaults } from '@/lib/local-storage-cache';
+import { useAgentPermissionDefault } from '@/hooks/use-agent-permission-default';
 import {
   describeRunConfigSelection,
   recordRecentRunConfig,
@@ -780,6 +781,7 @@ export const SessionChatInputArea = memo(
         cancelNavigationDismissal.current = dismissComposerKeyboardAfterPaint(textareaRef.current);
       }
     }, [claimNavigationFocus, usesMobileKeyboardAction]);
+    const permissionDefault = useAgentPermissionDefault(session.agentConfigId);
     const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
     const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
     /** Readable Roles, for attributing accepted `@Role` mentions in analytics. */
@@ -2540,6 +2542,7 @@ export const SessionChatInputArea = memo(
             configOptionSelectors={configOptionSelectors}
             configOptionValues={configOptionValues}
             onConfigOptionChange={onConfigOptionChange}
+            permissionDefault={permissionDefault}
           />
         )}
       </>

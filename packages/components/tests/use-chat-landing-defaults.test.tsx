@@ -21,6 +21,10 @@ import {
   persistAgentSessionDefaults,
   readAgentStartDefaults,
 } from '../src/lib/local-storage-cache';
+import {
+  readAgentPermissionDefault,
+  writeAgentPermissionDefault,
+} from '../src/lib/agent-permission-default';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -407,5 +411,32 @@ describe('learning start defaults from a manually sent turn', () => {
     const defaults = readAgentStartDefaults({ id: agentId });
     expect(defaults?.modeId).toBe('acceptEdits');
     expect(defaults?.configOptionValues).toEqual({ _permission: 'full-access' });
+  });
+});
+
+describe('default permission for new conversations', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('starts from the Provider default instead of the permission used last', () => {
+    learnAgentStartDefaults(agentId, {
+      modeId: 'bypassPermissions',
+      configOptionValues: { _permission: 'full-access' },
+    });
+    const modeDefault = writeAgentPermissionDefault(undefined, { kind: 'modeId' }, 'default');
+    const defaults = writeAgentPermissionDefault(
+      modeDefault,
+      { kind: 'configOption', configId: '_permission' },
+      'ask'
+    );
+
+    const start = readAgentStartDefaults({ id: agentId, sessionDefaults: defaults });
+    expect(start?.modeId).toBe('default');
+    expect(start?.configOptionValues?._permission).toBe('ask');
+    expect(readAgentPermissionDefault(defaults, { kind: 'modeId' })).toBe('default');
+
+    const cleared = writeAgentPermissionDefault(defaults, { kind: 'modeId' }, null);
+    expect(readAgentStartDefaults({ id: agentId, sessionDefaults: cleared })?.modeId).toBe(
+      'bypassPermissions'
+    );
   });
 });
