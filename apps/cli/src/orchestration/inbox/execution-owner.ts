@@ -8,7 +8,17 @@ import { OperationInbox } from './service';
 export type ExecutionResource = { key: object; terminate: Effect.Effect<void, unknown> };
 export class ExecutionMembers extends Context.Service<
   ExecutionMembers,
-  { members(batch: InboxBatch): Effect.Effect<InboxMember[], unknown> }
+  {
+    members(batch: InboxBatch): Effect.Effect<InboxMember[], unknown>;
+    sources(
+      batch: InboxBatch
+    ): Effect.Effect<Array<{ sequence: number; sourceTurnId?: string }>, unknown>;
+    narrow(
+      batch: InboxBatch,
+      executionId: string,
+      drop: readonly number[]
+    ): Effect.Effect<InboxBatch | undefined, unknown>;
+  }
 >()('lody/orchestration/ExecutionMembers') {}
 
 /** One execution owns input, batch, submission and release receipts. */
@@ -96,7 +106,18 @@ export const makeExecutionOwner = Effect.fnUntraced(function* (
     get failure() {
       return failure;
     },
-    members: batch ? members.members(batch) : Effect.succeed([]),
+    members: Effect.suspend(() => (batch ? members.members(batch) : Effect.succeed([]))),
+    sources: Effect.suspend(() => (batch ? members.sources(batch) : Effect.succeed([]))),
+    narrow: (drop: readonly number[]) =>
+      releaseGate.withPermit(
+        Effect.gen(function* () {
+          if (!batch || firstFinish || phase !== 'prepared') return false;
+          const narrowed = yield* members.narrow(batch, id, drop);
+          if (!narrowed) return false;
+          batch = narrowed;
+          return true;
+        })
+      ),
     adopt: (next: InboxInput, update: () => void) =>
       inbox.adopt(input, next, id, () => {
         input = next;

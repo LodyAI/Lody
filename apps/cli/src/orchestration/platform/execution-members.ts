@@ -10,4 +10,8 @@ export const executionMembersLayer = (sql: InboxSqlite) =>
         try: () => sql.members(batch, 0, INBOX_INLINE_MEMBERS),
         catch: (cause) => cause,
       }),
+    sources: (batch) =>
+      Effect.try({ try: () => sql.memberSources(batch), catch: (cause) => cause }),
+    narrow: (batch, executionId, drop) =>
+      Effect.try({ try: () => sql.narrow(batch, executionId, drop), catch: (cause) => cause }),
   });
