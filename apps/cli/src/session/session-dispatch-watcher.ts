@@ -171,6 +171,7 @@ const sessionDocVersion = (sessionDoc: SessionDocumentHandle): string | undefine
  * (owner decision 2026-11-10). Evidence events are the primary trigger. */
 const EVIDENCE_RETRY_FIRST_MS = 1_000;
 const EVIDENCE_RETRY_MAX_MS = 5 * 60_000;
+const AUTOMATION_ADMISSION_RETRY_MAX_MS = 30_000;
 
 type WatchedSession = {
   unsubscribe: () => void;
@@ -1766,12 +1767,15 @@ export class SessionDispatchWatcher {
             dispatchSource,
             accessPromise: executionAccessPromise,
             requestPromise,
-            onExecutionDeferred: () => {
+            onExecutionDeferred: (wait) => {
               if (isActive())
                 this.forkExecutionEvidenceRetry(
                   sessionId,
                   nextUserTurn.id,
-                  sessionDocVersion(sessionDoc)
+                  sessionDocVersion(sessionDoc),
+                  wait === 'automation-admission'
+                    ? AUTOMATION_ADMISSION_RETRY_MAX_MS
+                    : EVIDENCE_RETRY_MAX_MS
                 );
             },
             onAccessAllowed: async () => {
@@ -1900,7 +1904,12 @@ export class SessionDispatchWatcher {
     });
   }
 
-  private forkExecutionEvidenceRetry(sessionId: SessionId, turnId: string, version?: string): void {
+  private forkExecutionEvidenceRetry(
+    sessionId: SessionId,
+    turnId: string,
+    version?: string,
+    maxDelayMs = EVIDENCE_RETRY_MAX_MS
+  ): void {
     this.interruptAccessRetry(sessionId);
     const previous = this.evidenceRetryAttempts.get(sessionId);
     const attempts = previous?.turnId === turnId ? Math.min(previous.attempts + 1, 16) : 0;
@@ -1909,7 +1918,7 @@ export class SessionDispatchWatcher {
       this.detachExecutionEvidence = this.deps.subscribeExecutionEvidence((roomId) =>
         this.wakeExecutionEvidence(roomId)
       );
-    const delay = Math.min(EVIDENCE_RETRY_FIRST_MS * 2 ** attempts, EVIDENCE_RETRY_MAX_MS);
+    const delay = Math.min(EVIDENCE_RETRY_FIRST_MS * 2 ** attempts, maxDelayMs);
     const program = Effect.sleep(delay).pipe(
       Effect.andThen(
         Effect.sync(() => {

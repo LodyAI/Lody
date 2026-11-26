@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Queue, Semaphore } from 'effect';
+import { Cause, Context, Effect, Fiber, Layer, Queue, Semaphore } from 'effect';
 import { OrchestrationStorageFailure } from '../storage-error';
 import {
   InboxAdmissionRejected,
@@ -49,6 +49,9 @@ type Repository = {
     cause?: string
   ): Effect.Effect<void, unknown>;
 };
+const RELAUNCH_FIRST_MS = 1_000;
+const RELAUNCH_MAX_MS = 30_000;
+
 export class InboxRepository extends Context.Service<InboxRepository, Repository>()(
   'lody/orchestration/InboxRepository'
 ) {}
@@ -249,6 +252,45 @@ export class OperationInbox extends Context.Service<
         const wake = Queue.offer(signal, undefined).pipe(Effect.asVoid);
         let busyRetryScheduled = false;
         let busyRetryAttempt = 0;
+        const relaunchHolds = new Map<
+          string,
+          { scope: string; attempt: number; timer?: Fiber.Fiber<void> }
+        >();
+        const stopTimer = (hold: { timer?: Fiber.Fiber<void> } | undefined) => {
+          const timer = hold?.timer;
+          if (hold) hold.timer = undefined;
+          return timer ? Fiber.interrupt(timer) : Effect.void;
+        };
+        const dropHold = (intentId: string) =>
+          Effect.suspend(() => {
+            const hold = relaunchHolds.get(intentId);
+            relaunchHolds.delete(intentId);
+            return stopTimer(hold);
+          });
+        const holdRelaunch = (intentId: string, scopeKey: string) =>
+          Effect.gen(function* () {
+            if (quiesced) return;
+            const previous = relaunchHolds.get(intentId);
+            yield* stopTimer(previous);
+            const hold: { scope: string; attempt: number; timer?: Fiber.Fiber<void> } = {
+              scope: scopeKey,
+              attempt: previous ? previous.attempt + 1 : 0,
+            };
+            relaunchHolds.set(intentId, hold);
+            hold.timer = yield* Effect.sleep(
+              Math.min(RELAUNCH_FIRST_MS * 2 ** hold.attempt, RELAUNCH_MAX_MS)
+            ).pipe(
+              Effect.andThen(
+                Effect.suspend(() => {
+                  if (relaunchHolds.get(intentId) !== hold) return Effect.void;
+                  hold.timer = undefined;
+                  return quiesced ? Effect.void : wake;
+                })
+              ),
+              Effect.interruptible,
+              Effect.forkIn(scope)
+            );
+          }).pipe(Effect.uninterruptible);
         const deferBusyScan = Effect.fn('OperationInbox.deferBusyScan')(
           function* () {
             if (quiesced || busyRetryScheduled) return;
@@ -305,10 +347,13 @@ export class OperationInbox extends Context.Service<
           yield* retrySettlements().pipe(Effect.catchCause(reportIndependentFailure));
           if (quiesced) return;
           const pending = yield* repo.pending(workspaceId);
+          const live = new Set(pending.map((item) => item.intentId));
+          for (const intentId of [...relaunchHolds.keys()])
+            if (!live.has(intentId)) yield* dropHold(intentId);
           for (const item of pending) {
             yield* Effect.gen(function* () {
               const key = inboxScopeKey(item.input);
-              if (running.has(key)) return;
+              if (running.has(key) || relaunchHolds.get(item.intentId)?.timer) return;
               const batch = yield* withGate(
                 item.input,
                 repo.prepare(item.input, owner, item.intentId)
@@ -321,13 +366,20 @@ export class OperationInbox extends Context.Service<
                   Effect.sync(() => running.delete(key)).pipe(
                     Effect.andThen(repo.pending(workspaceId)),
                     Effect.flatMap((items) =>
-                      items.some(
-                        (candidate) =>
-                          inboxScopeKey(candidate.input) === key &&
-                          candidate.input.inputId !== batch.inputId
+                      (items.some((candidate) => candidate.intentId === item.intentId)
+                        ? holdRelaunch(item.intentId, key)
+                        : dropHold(item.intentId)
+                      ).pipe(
+                        Effect.andThen(
+                          items.some(
+                            (candidate) =>
+                              inboxScopeKey(candidate.input) === key &&
+                              candidate.input.inputId !== batch.inputId
+                          )
+                            ? wake
+                            : Effect.void
+                        )
                       )
-                        ? wake
-                        : Effect.void
                     ),
                     Effect.catchCause(report)
                   )
@@ -467,6 +519,8 @@ export class OperationInbox extends Context.Service<
                 )
               )
             );
+            for (const hold of relaunchHolds.values())
+              if (hold.scope === inboxScopeKey(e)) yield* stopTimer(hold);
             yield* wake;
           }),
           recoverSettlements: retrySettlements,

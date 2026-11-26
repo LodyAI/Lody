@@ -2605,6 +2605,59 @@ describe('Operation Inbox execution boundary', () => {
     }
   );
 
+  it('hands a refused automation input to the dispatch retry owner instead of leaving it hot', async () => {
+    const prompts: ContentBlock[][] = [];
+    const f = inboxExecutionFixture(async (blocks) => {
+      prompts.push(blocks);
+      return { stopReason: 'end_turn' };
+    });
+    f.service.setAutomationAdmission(async () => false);
+    const inputConfig = {
+      ...f.message.acpSessionConfig,
+      _lodyAutomation: {
+        invocationId: 'invocation',
+        ruleId: 'rule',
+        ruleRevision: 1,
+        eventRef: 'event',
+        authorizationUserId: 'user-1',
+      },
+    };
+    const waits: Array<string | undefined> = [];
+    try {
+      await f.service.dispatchPreparedSessionTurn({
+        sessionId: f.message.sessionId,
+        sessionDoc: f.doc,
+        userTurnId: f.message.userTurnId,
+        invocation: {
+          sourceTurnId: f.message.userTurnId,
+          requesterUserId: 'user-1',
+          inputConfig,
+        },
+        dispatchSource: 'history',
+        accessPromise: Promise.resolve({ outcome: 'allowed' }),
+        requestPromise: Promise.resolve({
+          mode: 'continue',
+          request: { ...f.message, acpSessionConfig: inputConfig },
+        }),
+        onExecutionDeferred: async (wait) => {
+          waits.push(wait);
+        },
+        onAccessAllowed: async () => {},
+        onAccessDenied: async () => {},
+        onAccessIndeterminate: async () => {},
+      });
+      expect(prompts).toHaveLength(0);
+      expect(waits).toEqual(['automation-admission']);
+      const input = (await (await createSessionBackend(f.doc)).readHistory()).find(
+        (turn) => turn.id === f.message.userTurnId
+      );
+      expect(['handled', 'failed', 'canceled']).not.toContain(input?.status);
+      expect(f.service.getExecutionSnapshot(f.message.sessionId).hasActiveTurn).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
   it.each([true, false])(
     'checks current worktree HEAD before delivering CI evidence (match=%s)',
     async (matches) => {

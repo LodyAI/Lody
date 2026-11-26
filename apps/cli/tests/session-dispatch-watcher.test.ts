@@ -2211,6 +2211,32 @@ describe('SessionDispatchWatcher', () => {
     }
   });
 
+  it('rechecks a refused Automation input at most thirty seconds apart', async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const h = createAccessHarness({
+      canUseMachine: async () => ({ outcome: 'allowed' }),
+      dispatchPrepared: async (options) => {
+        attempts += 1;
+        await options.onExecutionDeferred?.('automation-admission');
+      },
+    });
+    try {
+      await runMaybeHandleSession(h.watcher, h.sessionId);
+      expect(attempts).toBe(1);
+      for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+        const before = attempts;
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(attempts).toBe(before);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(attempts).toBe(before + 1);
+      }
+    } finally {
+      h.watcher.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not fail or retire a pending turn when access verification is indeterminate', async () => {
     const canUseMachine = vi.fn(async () => ({
       outcome: 'indeterminate' as const,

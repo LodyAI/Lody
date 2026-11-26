@@ -507,7 +507,9 @@ export class LodyOperationCoordinator {
       (await isSessionCollaborationStopped(this.options.workspaceDocument.repo, sessionId))
     )
       return;
-    const cliType = batch.config.cliType ?? meta.cliType;
+    // Result continuations are system input, not the delegating Automation input.
+    const { _lodyAutomation: _origin, ...config } = batch.config;
+    const cliType = config.cliType ?? meta.cliType;
     if (!cliType) return;
     const requester = await this.resolveRequesterIdentity(batch.userId);
     if (!this.started) return;
@@ -522,9 +524,9 @@ export class LodyOperationCoordinator {
         userName: requester.name,
         userEmail: requester.email,
         acpSessionConfig: {
-          ...batch.config,
+          ...config,
           cliType,
-          agentType: batch.config.agentType ?? meta.agentType,
+          agentType: config.agentType ?? meta.agentType,
           // State only that results follow. Any instruction here, including telling the
           // agent to review or not to review, steers every batch (orchestration/AGENTS.md).
           prompt: 'The results returned by delegated work follow.',

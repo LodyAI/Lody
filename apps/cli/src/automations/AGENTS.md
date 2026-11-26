@@ -34,6 +34,12 @@
   auth for observations stay with resource owners.
 - Capture source evidence on the Host, freeze it with the receipt, and recheck at
   admission. Active continuations retain source demand; results cannot forge provenance.
+- `_lodyAutomation` identifies only the input an Automation queued. Delegated-result
+  continuations of that Turn are ordinary system input, so Inbox storage and launch
+  strip the origin: re-running its admission refuses every relaunch. A refused Automation input
+  in history stays dispatchable under the dispatch watcher's bounded retry owner, at
+  most 30 seconds apart because Automation conditions recover without a Session
+  document change, and is never redispatched on every Session check.
 - Session actions use normal admission/queue/Stop/permission owners. Idle maintenance
   expires on new input. Settled groups include unfinished automation and native work.
   Stop blocks continuation admission, not authorized condition reads; only explicit

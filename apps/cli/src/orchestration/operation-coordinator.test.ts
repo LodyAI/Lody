@@ -51,6 +51,7 @@ const makeHarness = async (options?: {
   busy?: boolean;
   activeTurnId?: string;
   agentConfigId?: string;
+  continuationInputConfig?: Record<string, unknown>;
   configurationSyncSucceeds?: boolean;
   configurationSync?: () => Promise<boolean>;
   beforeTurnClaim?: () => Promise<void>;
@@ -402,7 +403,11 @@ const makeHarness = async (options?: {
     frozenContinuationConfig: {
       ...(options?.author ? { sourceTurnId: options.author.turnId } : {}),
       ...(options?.agentConfigId ? { agentConfigId: options.agentConfigId } : {}),
-      inputConfig: { cliType: 'builtin', agentType: 'codex', chainDepth: 0 },
+      inputConfig: options?.continuationInputConfig ?? {
+        cliType: 'builtin',
+        agentType: 'codex',
+        chainDepth: 0,
+      },
     },
     initiatorChainDepth: 0,
     createdAt: '2026-07-19T00:00:00.000Z',
@@ -655,6 +660,45 @@ describe('LodyOperationCoordinator', () => {
         ])
       );
       expect(store.get(harness.requesterSessionId, 'review-round-1').author).toEqual(author);
+    } finally {
+      store.close();
+      await harness.coordinator.stop();
+    }
+  });
+
+  it('continues delegated results from an Automation-started Turn as ordinary system input', async () => {
+    const completed = Promise.withResolvers<void>();
+    const harness = await makeHarness({
+      afterTurnComplete: completed.resolve,
+      continuationInputConfig: {
+        cliType: 'builtin',
+        agentType: 'codex',
+        chainDepth: 0,
+        _lodyAutomation: {
+          invocationId: 'invocation-1',
+          ruleId: 'rule-1',
+          ruleRevision: 1,
+          eventRef: 'event-1',
+          authorizationUserId: 'user-1',
+          nativeSessionId: 'native-1',
+        },
+      },
+    });
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      store.finish(harness.requesterSessionId, 'review-round-1', {
+        type: 'result',
+        value: { items: [] },
+      });
+      harness.coordinator.start();
+      await completed.promise;
+      await harness.coordinator.stop();
+
+      const [message] = harness.continueSession.mock.calls[0] ?? [];
+      const { acpSessionConfig } = message as { acpSessionConfig: Record<string, unknown> };
+      expect(acpSessionConfig).not.toHaveProperty('_lodyAutomation');
+      expect(acpSessionConfig).toMatchObject({ cliType: 'builtin', agentType: 'codex' });
+      expect(queuedResults(store, harness.coordinatorOptions.workspaceId)).toEqual([]);
     } finally {
       store.close();
       await harness.coordinator.stop();
