@@ -1,8 +1,28 @@
 name: Nightly cloud clients
 on:
   schedule:
-    - cron: 0 18 * * *
-  workflow_dispatch: null
+    # 10:00 AM Beijing Time (Asia/Shanghai, UTC+8)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Release mode (verified = full E2E + validate; emergency = skip all tests and validate)
+        type: choice
+        required: true
+        default: verified
+        options:
+          - verified
+          - emergency
+      expected_sha:
+        description: Optional 40-char commit SHA on main to freeze and publish
+        type: string
+        required: false
+        default: ''
+      reason:
+        description: Audit reason (required when mode=emergency)
+        type: string
+        required: false
+        default: ''
 permissions:
   contents: read
   actions: read
@@ -20,6 +40,8 @@ jobs:
       private-sha: ${{ steps.candidate.outputs.private-sha }}
       oss-sha: ${{ steps.candidate.outputs.oss-sha }}
       publish: ${{ steps.candidate.outputs.publish }}
+      mode: ${{ steps.candidate.outputs.mode }}
+      skip-validate: ${{ steps.candidate.outputs.skip-validate }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -41,6 +63,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NIGHTLY_BUILD_NUMBER_OFFSET: ${{ vars.NIGHTLY_BUILD_NUMBER_OFFSET }}
+          NIGHTLY_RELEASE_MODE: ${{ inputs.mode || 'verified' }}
+          NIGHTLY_EXPECTED_SHA: ${{ inputs.expected_sha || '' }}
+          NIGHTLY_RELEASE_REASON: ${{ inputs.reason || '' }}
         run: |-
           mkdir -p candidate
           node .github/scripts/nightly-cloud-source.mjs candidate/candidate.json
@@ -56,6 +81,7 @@ jobs:
     needs:
       - candidate
       - validate
+      - e2e-gate
     runs-on: ubuntu-latest
     environment: cloud-nightly
     outputs:
@@ -92,10 +118,23 @@ jobs:
           STABLE_ELECTRON_VERSION_URL: ${{ vars.STABLE_ELECTRON_VERSION_URL }}
           VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL_NIGHTLY }}
         run: node apps/electron/nightly-release.mjs prepare candidate/candidate.json
-    if: needs.candidate.outputs.publish == 'true'
+    if: >-
+      !cancelled() &&
+      needs.candidate.result == 'success' &&
+      needs.candidate.outputs.publish == 'true' &&
+      ((needs.validate.result == 'success' && needs.e2e-gate.result == 'success') ||
+      (needs.validate.result == 'skipped' && needs.e2e-gate.result == 'skipped' && needs.candidate.outputs.skip-validate == 'true'))
+  e2e-gate:
+    needs: candidate
+    if: needs.candidate.outputs.publish == 'true' && needs.candidate.outputs.skip-validate != 'true'
+    uses: ./.github/workflows/release-e2e-gate.yml
+    with:
+      source-sha: ${{ needs.candidate.outputs.oss-sha }}
+      target-environment: cloud-nightly
+    secrets: inherit
   validate:
     needs: candidate
-    if: needs.candidate.outputs.publish == 'true'
+    if: needs.candidate.outputs.publish == 'true' && needs.candidate.outputs.skip-validate != 'true'
     runs-on: ubuntu-latest
     env:
       NODE_OPTIONS: --max-old-space-size=6144
@@ -150,7 +189,6 @@ jobs:
     needs:
       - candidate
       - prepare
-      - validate
     if: needs.prepare.outputs.publish == 'true'
     strategy:
       fail-fast: false
@@ -377,7 +415,6 @@ jobs:
     needs:
       - candidate
       - prepare
-      - validate
     if: needs.prepare.outputs.publish == 'true'
     runs-on: macos-15
     environment: cloud-nightly
@@ -518,7 +555,6 @@ jobs:
     needs:
       - candidate
       - prepare
-      - validate
       - publish-daemon
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
@@ -542,7 +578,6 @@ jobs:
     needs:
       - candidate
       - prepare
-      - validate
     if: needs.prepare.outputs.publish == 'true'
     uses: ./.github/workflows/publish-ios-native.yml
     secrets: inherit
@@ -554,7 +589,6 @@ jobs:
       - candidate
       - prepare
       - build
-      - validate
       - verify-daemon-installation
     runs-on: ubuntu-latest
     environment: cloud-nightly
@@ -616,7 +650,6 @@ jobs:
       - candidate
       - prepare
       - build-android
-      - validate
       - verify-daemon-installation
     runs-on: ubuntu-latest
     environment: cloud-nightly
@@ -655,7 +688,6 @@ jobs:
     needs:
       - candidate
       - prepare
-      - validate
       - verify-daemon-installation
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
@@ -768,7 +800,6 @@ jobs:
     needs:
       - candidate
       - prepare
-      - validate
     if: needs.prepare.outputs.publish == 'true'
     uses: ./.github/workflows/publish-daemon-sea.yml
     with:
@@ -814,3 +845,40 @@ jobs:
             });
 
             core.info(`Published source tagged: ${tag}`);
+  notify-feishu:
+    needs:
+      - candidate
+      - validate
+      - e2e-gate
+      - prepare
+      - build
+      - build-android
+      - publish-daemon
+      - verify-daemon-installation
+      - publish-ios
+      - publish
+      - publish-android
+      - publish-cli
+      - tag-release
+    if: always() && needs.candidate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: cloud-nightly
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.candidate.outputs.private-sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.4
+      - name: Send Feishu release notification
+        env:
+          FEISHU_ALERT_WEBHOOK_URL: ${{ secrets.FEISHU_ALERT_WEBHOOK_URL }}
+          FEISHU_ALERT_WEBHOOK_SECRET: ${{ secrets.FEISHU_ALERT_WEBHOOK_SECRET }}
+          FEISHU_NOTIFY_ON_SUCCESS: ${{ vars.FEISHU_NOTIFY_ON_SUCCESS || '' }}
+          RELEASE_CHANNEL: nightly
+          RELEASE_MODE: ${{ needs.candidate.outputs.mode || 'verified' }}
+          RELEASE_REASON: ${{ inputs.reason || '' }}
+          SOURCE_SHA: ${{ needs.candidate.outputs.oss-sha || github.sha }}
+          JOB_RESULTS_JSON: ${{ toJSON(needs) }}
+        run: node .github/scripts/feishu-alert.mjs
