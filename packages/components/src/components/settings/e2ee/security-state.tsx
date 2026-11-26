@@ -169,7 +169,7 @@ export function E2eeSettingsIcon() {
   return <E2eeSettingsGlyph attention={attention} />;
 }
 
-/** True while a link join request waits for this manager; polled every 15 s. */
+/** True while a link join request waits for this manager; woken by push hints with 15 s fallback. */
 export function useMemberJoinAttention(
   native: E2eeWorkspaceRuntime | undefined,
   workspaceId: string | null,
@@ -182,27 +182,50 @@ export function useMemberJoinAttention(
     if (!workspaceId || !accountId || !mayManage || !native?.memberJoinRequests) return undefined;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
+    let queued = false;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (active) timer = setTimeout(() => void load(), 15_000);
+    };
     const load = async () => {
+      if (!active) return;
+      if (inFlight) {
+        queued = true;
+        return;
+      }
+      inFlight = true;
+      clearTimeout(timer);
       try {
-        const requests = await native.memberJoinRequests!(workspaceId);
-        if (active)
-          setSnapshot({
-            key,
-            attention: requests.items.some(
-              (request) =>
-                request.source === 'link' && ['pending', 'admitting'].includes(request.state)
-            ),
-          });
-      } catch {
-        // An unavailable invitation queue does not hide key-update attention or pause work.
+        do {
+          queued = false;
+          try {
+            const requests = await native.memberJoinRequests!(workspaceId);
+            if (active)
+              setSnapshot({
+                key,
+                attention: requests.items.some(
+                  (request) =>
+                    request.source === 'link' && ['pending', 'admitting'].includes(request.state)
+                ),
+              });
+          } catch {
+            // An unavailable invitation queue does not hide key-update attention or pause work.
+          }
+        } while (queued && active);
       } finally {
-        if (active) timer = setTimeout(() => void load(), 15_000);
+        inFlight = false;
+        schedule();
       }
     };
+    const unsubscribe = native.subscribePendingMemberRequests?.(workspaceId, () => {
+      if (active) void load();
+    });
     void load();
     return () => {
       active = false;
       clearTimeout(timer);
+      unsubscribe?.();
     };
   }, [native, workspaceId, accountId, mayManage, key]);
   return mayManage && snapshot?.key === key && snapshot.attention;

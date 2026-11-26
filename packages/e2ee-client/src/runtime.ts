@@ -575,18 +575,23 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                 // Decided against the verified ledger: an applicant the resumed original
                 // admitted needs no second signature.
                 const command = yield* session.members.admission(requestId, mode);
+                let device: string;
                 if (command) {
                   // The session journals the signed original; a lost reply is settled from
                   // the verified ledger and never signed again.
                   const result = yield* session.execute(command);
                   yield* session.acknowledge(result);
                   if (result.outcome !== 'Committed') return { admitted: false, keyPending: true };
+                  device = toHex(command.request.signingPublicKey.toBytes());
+                } else {
+                  const material = yield* session.members.read(requestId);
+                  if (material.state !== 'committed') return { admitted: false, keyPending: true };
+                  device = toHex(
+                    decodeMemberKeyPackage(
+                      material.keyPackageHex
+                    ).request.signingPublicKey.toBytes()
+                  );
                 }
-                const material = yield* session.members.read(requestId);
-                if (material.state !== 'committed') return { admitted: false, keyPending: true };
-                const device = toHex(
-                  decodeMemberKeyPackage(material.keyPackageHex).request.signingPublicKey.toBytes()
-                );
                 if (!deliveries.has(requestId))
                   deliveries.set(requestId, { device, state: 'pending' });
                 startDelivery(id, requestId);

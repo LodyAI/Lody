@@ -507,10 +507,52 @@ export function CloudPlatformProvider({
                       changed
                     )
                   : () => {},
+              ...(baseE2eeWorkspaces.runtime.accountApproval
+                ? {
+                    // A hint only: the host still reads and verifies pending requests itself.
+                    subscribePendingMemberRequests: (workspaceId: string, changed: () => void) => {
+                      const openApproval = baseE2eeWorkspaces.runtime?.accountApproval;
+                      if (!openApproval || !workspaceId) return () => {};
+                      const owner = sessionStore.get();
+                      const accountId = owner.status === 'authenticated' ? owner.user.id : null;
+                      let disposed = false;
+                      let unsubscribe: (() => void) | undefined;
+                      void (async () => {
+                        let approvalSession:
+                          | Awaited<ReturnType<NonNullable<typeof openApproval>>>
+                          | undefined;
+                        try {
+                          approvalSession = await openApproval(workspaceId);
+                          const access = await approvalSession.access();
+                          if (disposed) return;
+                          const current = sessionStore.get();
+                          if (
+                            accountId !== null &&
+                            (current.status !== 'authenticated' || current.user.id !== accountId)
+                          )
+                            return;
+                          unsubscribe = cloudClient.subscribe(
+                            cloudOperations.e2eeMembers.pending,
+                            access,
+                            changed
+                          );
+                        } catch {
+                          /* Untrusted wakeup hint; callers keep their polling fallback. */
+                        } finally {
+                          await approvalSession?.release().catch(() => {});
+                        }
+                      })();
+                      return () => {
+                        disposed = true;
+                        unsubscribe?.();
+                      };
+                    },
+                  }
+                : {}),
             },
           }
         : baseE2eeWorkspaces,
-    [automaticPairing, baseE2eeWorkspaces, cloudClient]
+    [automaticPairing, baseE2eeWorkspaces, cloudClient, sessionStore]
   );
 
   const sessionAccess = useMemo(
