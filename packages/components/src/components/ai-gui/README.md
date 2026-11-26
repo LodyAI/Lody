@@ -319,12 +319,27 @@ anchor owns all positioning. Mobile checks the actual detail position after the
 new layout settles, including inline body padding and a group header's removed
 tail reserve. Nested file links remain file actions.
 
-`tests/conversation-scroll-engine.test.ts` covers header anchoring, later output,
-bounded collapse space and mobile reveal thresholds.
+When an expanded work group (`WorkedGroupHeader` or `ActivityGroupHeader`) scrolls
+above the top edge below the session header, `sticky-work-group.ts` resolves the
+innermost active expanded range from virtual row metadata and the scroll handle's
+item-space geometry — including after virtualization unmounts the original header
+row — and pins a matching summary control overlay below `--conversation-top-inset`.
+A worked group's span stops before non-folded prose so final answers are never
+occluded; leaving a group or meeting the next expanded group pushes the bar out
+with a `translateY` transform. Collapsing from the sticky control anchors the
+inline header at the top edge (or directly beneath an active parent sticky header
+for nested activity groups) via `preserveDisclosure` and transfers keyboard focus
+back to the collapsed inline button with `preventScroll: true`.
+
+`tests/conversation-scroll-engine.test.ts` covers header anchoring, sticky
+unmounted-header collapse, later output, bounded collapse space and mobile reveal
+thresholds. `tests/chat-virtual-rows-identity.test.ts` covers sticky work-group
+range bounds, nested handover, and collapse targets.
 `tests/engine-conversation-scroller.test.tsx` covers real click/state commits and
 keyboard focus. `tests/e2e/conversation-scroll-engine.spec.ts` exercises the actual
 command details in the `CommandDisclosureDesktop` and `CommandDisclosureMobile`
-stories. Native device touch acceptance remains separate from browser coverage.
+stories and sticky work-group headers in `StickyWorkGroupSummary`. Native device
+touch acceptance remains separate from browser coverage.
 
 ## Subagent tasks
 
