@@ -782,11 +782,9 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     });
 
     try {
-      // Guest starts with a read-only live workspace-index subscription.
       await runtime.start();
       expect([...activeJoinedSubscribers].map((r) => r.write)).toEqual([false]);
 
-      // Role upgrades to writable on the same runtime; user publishes a shortcut.
       canWrite = true;
       await runtime.save({
         value: makeShortcut({
@@ -800,10 +798,8 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       await runtime.flush();
       expect(runtime.getSnapshot().errors).toEqual({});
 
-      // After publication releases its temporary write lease, a live write subscription must remain active.
       expect([...activeJoinedSubscribers].map((r) => r.write)).toEqual([true]);
 
-      // Simulate another device pushing a new shortcut to the server index; only delivered if live subscription is active.
       const remoteEntry = projectShortcutIndex(
         makeShortcut({
           id: 'sc-peer',
@@ -932,7 +928,6 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       const initialReadRoom = [...activeJoined][0];
       expect(initialReadRoom?.write).toBe(false);
 
-      // 1) Write grant fails: original read subscription stays untouched.
       canWrite = true;
       failWriteAcquire = true;
       await runtime.save({
@@ -948,8 +943,6 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
       expect([...activeJoined]).toEqual([initialReadRoom]);
 
-      // 2) Full gateway outage covers write join() (even read join() would fail):
-      // original read subscription is NEVER closed, so when gateway recovers it still delivers updates.
       failWriteAcquire = false;
       gatewayDown = true;
       await runtime.flush();
