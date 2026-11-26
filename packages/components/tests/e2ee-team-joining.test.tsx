@@ -697,6 +697,38 @@ describe('encrypted team joining', () => {
     await settle();
     expect(row()).toBeNull();
   });
+  it('clears a recovered delivery row promptly after manual retry succeeds without waiting 10s', async () => {
+    const recoveredId = 'recovered-member-1';
+    let deliveries: {
+      requestId: string;
+      state: 'pending' | 'delivering' | 'delivered' | 'failed';
+      code?: string;
+    }[] = [{ requestId: recoveredId, state: 'failed', code: 'e2ee_key_not_sent' }];
+    await render(
+      <E2eeTeamSettings
+        workspaceId="team"
+        runtime={{
+          createMemberInvitation: async () => offer,
+          memberJoinRequests: async () => empty,
+          approveMemberJoin: async () => ({ admitted: true, keyPending: false }),
+          memberKeyDeliveries: async () => ({ items: deliveries }),
+          retryMemberKeyDelivery: async (_workspace, id) => {
+            deliveries = [{ requestId: id, state: 'delivered' }];
+            return { requestId: id, state: 'delivering' as const };
+          },
+          rejectMemberJoin: async () => ({ state: 'rejected' }),
+          revokeMemberInvitation: async () => ({ revoked: true }),
+        }}
+      />
+    );
+    const row = () => container.querySelector(`[data-key-delivery-id="${recoveredId}"]`);
+    expect(row()?.textContent).toContain('e2ee.team.keyFailed');
+    await act(async () => button('e2ee.team.keyRetry').click());
+    expect(row()?.textContent).toContain('e2ee.team.keySending');
+    await act(async () => vi.advanceTimersByTime(500));
+    await settle();
+    expect(row()).toBeNull();
+  });
   it('uses the shared member-role command and reports success only after it completes', async () => {
     let role: 'member' | 'admin' = 'member';
     const accepted = deferred<void>();

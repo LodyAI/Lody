@@ -432,6 +432,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     delete entry.code;
     const schedule = Effect.gen(function* () {
       for (let retry = 0; ; retry++) {
+        if (entry.state === 'delivered') return;
         const attempt = yield* Effect.result(attemptDelivery(id, entry.device, retry));
         const code = Result.isSuccess(attempt) ? attempt.success : 'e2ee_key_delivery_failed';
         if (code === 'delivered') {
@@ -605,6 +606,18 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
             const discovered = await run(
               withSession(id, (session) => session.pendingMemberKeyDeliveries())
             );
+            const discoveredIds = new Set(discovered.map((item) => item.requestId));
+            for (const [requestId, existing] of deliveries.entries()) {
+              if (existing.state !== 'delivered' && !discoveredIds.has(requestId)) {
+                const evidence = await run(
+                  withSession(id, (session) => session.keyDeliveryEvidence(existing.device))
+                ).catch(() => null);
+                if (evidence === 'delivered') {
+                  existing.state = 'delivered';
+                  delete existing.code;
+                }
+              }
+            }
             for (const item of discovered) {
               if (!deliveries.has(item.requestId)) {
                 deliveries.set(item.requestId, {

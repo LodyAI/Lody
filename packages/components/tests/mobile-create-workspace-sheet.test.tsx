@@ -31,8 +31,19 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/atoms/settings', () => ({
   e2eeWorkspaceCreationFeatureEnabledAtom: 'enabled',
 }));
-const account = vi.hoisted(() => ({ id: 'account-A' }));
+const account = vi.hoisted(() => ({ id: 'account-A', convexAuthenticated: true }));
 vi.mock('@/lib/e2ee-account', () => ({ useE2eeAccountId: () => account.id }));
+vi.mock('@/hooks/use-authenticated-convex', () => ({
+  useAuthenticatedConvex: () => ({
+    isAuthenticated: account.convexAuthenticated,
+    isLoading: !account.convexAuthenticated,
+    authSessionId: account.convexAuthenticated ? 'session-1' : null,
+    confirmedUnauthenticated: false,
+    isRecovering: false,
+    claimAutomaticCommand: () => true,
+    requestAuthRecovery: () => {},
+  }),
+}));
 vi.mock('@/lib/utils', () => ({
   cn: (...values: unknown[]) => values.filter(Boolean).join(' '),
 }));
@@ -134,6 +145,7 @@ let root: Root;
 beforeEach(() => {
   localStorage.clear();
   account.id = 'account-A';
+  account.convexAuthenticated = true;
   state.createPrepared.mockReset();
   state.reconcilePending.mockReset();
   state.reconcilePending.mockResolvedValue(null);
@@ -247,5 +259,28 @@ describe('mobile encrypted workspace sheet', () => {
     expect(state.reconcilePending).toHaveBeenCalledTimes(1);
     expect(state.onOpenChange).toHaveBeenCalledWith(false);
     expect(state.onCreated).toHaveBeenCalledWith('recovered', 'ws-recovered');
+  });
+
+  it('waits for Convex auth readiness before reconciling a leftover pending request', async () => {
+    account.convexAuthenticated = false;
+    savePendingE2eeWorkspace(localStorage, {
+      accountId: 'account-A',
+      requestId: 'leftover-auth',
+      name: 'Recovered',
+      slug: 'recovered',
+    });
+    state.reconcilePending.mockResolvedValue({
+      workspaceId: 'ws-recovered-auth',
+      slug: 'recovered',
+    });
+    await renderSheet();
+    expect(state.reconcilePending).not.toHaveBeenCalled();
+    expect(state.onCreated).not.toHaveBeenCalled();
+
+    account.convexAuthenticated = true;
+    await renderSheet();
+    expect(state.reconcilePending).toHaveBeenCalledTimes(1);
+    expect(state.onOpenChange).toHaveBeenCalledWith(false);
+    expect(state.onCreated).toHaveBeenCalledWith('recovered', 'ws-recovered-auth');
   });
 });

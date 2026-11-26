@@ -758,6 +758,9 @@ it('a later key round on the approving device delivers to a member its approval 
     expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).envelopes.at(-1)).toBe(
       true
     );
+    expect(((await good(opened.page, 'memberDeliveries')) as Deliveries).items).toEqual([
+      { requestId: opened.requestId, state: 'delivered' },
+    ]);
   } finally {
     await context?.close();
     await rm(directory, { recursive: true, force: true });
