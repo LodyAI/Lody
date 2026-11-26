@@ -652,6 +652,37 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       await repo.destroy();
     }
   });
+
+  it('retires the previous workspace-index room when switching between read and write modes', async () => {
+    const repo = await LoroRepo.create({});
+    const sync = new PromptShortcutSync({
+      content: { mode: 'plaintext' },
+      repo,
+      workspaceId: 'ws-mode',
+      now: () => 0,
+      grant: async (resource) => ({
+        token: 'shortcut-token',
+        expiresIn: 300,
+        gatewayBaseUrl: 'https://gateway.test',
+        streamId: getShortcutResourceStreamId(resource),
+      }),
+    });
+    const resource = { kind: 'workspace-index', workspaceId: 'ws-mode' } as const;
+    try {
+      const readLease = await sync.acquire(resource, false);
+      const writeLease = await sync.acquire(resource, true);
+      await expect(readLease.sync()).rejects.toThrow('Shortcut room closed');
+      await readLease.release();
+
+      const downgradedReadLease = await sync.acquire(resource, false);
+      await expect(writeLease.sync()).rejects.toThrow('Shortcut room closed');
+      await writeLease.release();
+      await downgradedReadLease.release();
+    } finally {
+      await sync.dispose();
+      await repo.destroy();
+    }
+  });
 });
 
 describe('encrypted Prompt Shortcuts', () => {

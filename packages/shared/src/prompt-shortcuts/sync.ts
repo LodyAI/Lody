@@ -86,6 +86,7 @@ export class PromptShortcutSync {
     string,
     { refs: number; write: boolean; opening: Promise<ShortcutSyncRoom> }
   >();
+  private retiringRooms = new Map<string, Promise<void>>();
   private disposed = false;
 
   constructor(
@@ -118,6 +119,29 @@ export class PromptShortcutSync {
     }
     if (this.disposed) throw new Error('Shortcut sync is disposed');
     const streamId = getShortcutResourceStreamId(resource);
+    if (resource.kind === 'workspace-index') {
+      const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
+      const opposite = this.rooms.get(oppositeKey);
+      if (opposite) {
+        this.rooms.delete(oppositeKey);
+        const previous = this.retiringRooms.get(streamId);
+        const retire = (async () => {
+          await previous;
+          const oldRoom = await opposite.opening.catch(() => null);
+          await oldRoom?.close();
+        })().finally(() => {
+          if (this.retiringRooms.get(streamId) === retire) {
+            this.retiringRooms.delete(streamId);
+          }
+        });
+        this.retiringRooms.set(streamId, retire);
+      }
+      const retiring = this.retiringRooms.get(streamId);
+      if (retiring) {
+        await retiring;
+        if (this.disposed) throw new Error('Shortcut sync is disposed');
+      }
+    }
     const key = `${write ? 'w' : 'r'}:${streamId}`;
     let entry = this.rooms.get(key);
     if (!entry) {
@@ -254,6 +278,17 @@ export class PromptShortcutSync {
       const shardUrls = isWorkspaceRoom
         ? (getLoroStreamsShardUrls(gatewayBaseUrl, shardHostSuffix) ?? 'disabled')
         : 'disabled';
+      const remoteCursorStore =
+        resource.kind === 'workspace-index' &&
+        'flock' in lease &&
+        typeof this.options.repo.supportsReplicaCheckpoints === 'function' &&
+        this.options.repo.supportsReplicaCheckpoints()
+          ? this.options.repo.getReplicaCheckpointStore({
+              kind: 'flock',
+              flockDocId: streamId,
+              flock: lease.flock,
+            })
+          : undefined;
       const transport = createStreamsCrdt({
         streamUrl: createLoroStreamUrl({
           baseUrl: gatewayBaseUrl,
@@ -277,8 +312,7 @@ export class PromptShortcutSync {
         adapter: write ? adapter : readonlyShortcutAdapter(adapter),
         auth: (context) => auth(context?.reason === 'unauthorized'),
         createStreamIfMissing: write,
-        // In-memory cursors deliberately replay on restart. The document is durable,
-        // but a cursor must never outlive the matching local state.
+        ...(remoteCursorStore ? { remoteCursorStore } : {}),
         beforeRemoteCursorSave: persist,
       });
       let subscription: TransportSubscription | undefined;
@@ -345,11 +379,13 @@ export class PromptShortcutSync {
     this.lifetime.dispose();
     const entries = [...this.rooms.values()];
     this.rooms.clear();
-    await Promise.all(
-      entries.map(async (entry) => {
+    const retiring = [...this.retiringRooms.values()];
+    await Promise.all([
+      ...retiring.map((task) => task.catch(() => undefined)),
+      ...entries.map(async (entry) => {
         const room = await entry.opening.catch(() => null);
         await room?.close();
-      })
-    );
+      }),
+    ]);
   }
 }
