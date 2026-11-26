@@ -810,9 +810,12 @@ describe('Inbox recovery and retained settlement', () => {
             yield* inbox.release({
               ...f.input,
               sessionId: 'B',
-              executionId: 'other',
+              executionId: 'other-session',
               outcome: 'normal',
             });
+            yield* TestClock.adjust(0);
+            expect(attempts).toHaveLength(before);
+            yield* inbox.release({ ...f.input, executionId: 'same-session', outcome: 'normal' });
             yield* TestClock.adjust(0);
             yield* Deferred.await(consumed);
             expect(attempts).toHaveLength(before + 1);

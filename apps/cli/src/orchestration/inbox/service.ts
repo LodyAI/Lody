@@ -252,7 +252,10 @@ export class OperationInbox extends Context.Service<
         const wake = Queue.offer(signal, undefined).pipe(Effect.asVoid);
         let busyRetryScheduled = false;
         let busyRetryAttempt = 0;
-        const relaunchHolds = new Map<string, { attempt: number; timer?: Fiber.Fiber<void> }>();
+        const relaunchHolds = new Map<
+          string,
+          { scope: string; attempt: number; timer?: Fiber.Fiber<void> }
+        >();
         const stopTimer = (hold: { timer?: Fiber.Fiber<void> } | undefined) => {
           const timer = hold?.timer;
           if (hold) hold.timer = undefined;
@@ -264,12 +267,13 @@ export class OperationInbox extends Context.Service<
             relaunchHolds.delete(intentId);
             return stopTimer(hold);
           });
-        const holdRelaunch = (intentId: string) =>
+        const holdRelaunch = (intentId: string, scopeKey: string) =>
           Effect.gen(function* () {
             if (quiesced) return;
             const previous = relaunchHolds.get(intentId);
             yield* stopTimer(previous);
-            const hold: { attempt: number; timer?: Fiber.Fiber<void> } = {
+            const hold: { scope: string; attempt: number; timer?: Fiber.Fiber<void> } = {
+              scope: scopeKey,
               attempt: previous ? previous.attempt + 1 : 0,
             };
             relaunchHolds.set(intentId, hold);
@@ -363,7 +367,7 @@ export class OperationInbox extends Context.Service<
                     Effect.andThen(repo.pending(workspaceId)),
                     Effect.flatMap((items) =>
                       (items.some((candidate) => candidate.intentId === item.intentId)
-                        ? holdRelaunch(item.intentId)
+                        ? holdRelaunch(item.intentId, key)
                         : dropHold(item.intentId)
                       ).pipe(
                         Effect.andThen(
@@ -515,7 +519,8 @@ export class OperationInbox extends Context.Service<
                 )
               )
             );
-            for (const hold of relaunchHolds.values()) yield* stopTimer(hold);
+            for (const hold of relaunchHolds.values())
+              if (hold.scope === inboxScopeKey(e)) yield* stopTimer(hold);
             yield* wake;
           }),
           recoverSettlements: retrySettlements,
