@@ -168,28 +168,29 @@ export function CloudPlatformProvider({
     });
     return uninstall;
   }, [atomStore, sessionStore, workspacesStore]);
-  const [uninstallGitHubTokenPort] = useState(() =>
-    installGitHubTokenPort(
-      createCloudGitHubTokenPort((workspaceId) =>
-        assertGithubWorkspaceAccess(
-          {
-            workspaceId,
-            platformKind: 'cloud',
-            mode: atomStore.get(workspaceContentModeAtom),
-            runtime: atomStore.get(activeWorkspaceRuntimeAtom),
-            accountId: atomStore.get(userAtom)?.id ?? null,
-            currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
-            routeSlug: atomStore.get(currentWorkspaceSlugAtom),
-            workspacesState: workspacesStore.get(),
-          },
-          'github:getOperationAccessTokenByRepoNameForClient'
+  useLayoutEffect(
+    () =>
+      installGitHubTokenPort(
+        createCloudGitHubTokenPort((workspaceId) =>
+          assertGithubWorkspaceAccess(
+            {
+              workspaceId,
+              platformKind: 'cloud',
+              mode: atomStore.get(workspaceContentModeAtom),
+              runtime: atomStore.get(activeWorkspaceRuntimeAtom),
+              accountId: atomStore.get(userAtom)?.id ?? null,
+              currentWorkspaceId: atomStore.get(currentWorkspaceIdAtom),
+              routeSlug: atomStore.get(currentWorkspaceSlugAtom),
+              workspacesState: workspacesStore.get(),
+            },
+            'github:getOperationAccessTokenByRepoNameForClient'
+          )
         )
-      )
-    )
+      ),
+    [atomStore, workspacesStore]
   );
   const [uninstallCloudHttpPort] = useState(() => installCloudHttpPort(CLOUD_HTTP_PORT));
 
-  useEffect(() => uninstallGitHubTokenPort, [uninstallGitHubTokenPort]);
   useEffect(() => uninstallCloudHttpPort, [uninstallCloudHttpPort]);
 
   useEffect(() => {
