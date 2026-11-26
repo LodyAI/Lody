@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { Effect, ManagedRuntime, Scope } from 'effect';
+import { TestClock } from 'effect/testing';
 import {
   decodeE2eePresenceBody,
   decodeE2eeRpcErrorBody,
@@ -12,6 +14,8 @@ import {
   E2EE_RPC_MAX_FRAME_BYTES,
   type E2eeRpcResponseBody,
 } from '../src/index';
+import { makeEncryptedRpcListener, makeEncryptedStreamsChannel } from '../src/e2ee-streams';
+import type { LoroStreamsJsonStreamClient } from '../src/rpc';
 import vector from './fixtures/e2ee-wire-v0.json';
 import {
   E2EE_FEATURE_CHUNK_BYTES,
@@ -316,5 +320,159 @@ describe('common encrypted machine response pages', () => {
       { ...first, payload: utf8('{"old":"unframed result"}') },
     ])
       expect(() => decodeFeatureResponsePage(changed)).toThrow();
+  });
+});
+
+describe('encrypted streams 503 backoff and WAN timeout', () => {
+  it('backs off exponentially on 503 without blind ensureJsonStream, re-ensures on 404, and resets on frame', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(1);
+    const runtime = ManagedRuntime.make(TestClock.layer({ warningDelay: '1 hour' }));
+    try {
+      await runtime.context();
+      let ensureCalls = 0;
+      let readCalls = 0;
+      const readJsonLive: LoroStreamsJsonStreamClient['readJsonLive'] = async (
+        _stream,
+        _state,
+        onBatch,
+        options
+      ) => {
+        readCalls++;
+        if (readCalls <= 2) {
+          throw Object.assign(new Error('503 Service Unavailable'), { status: 503 });
+        }
+        if (readCalls === 3) {
+          throw Object.assign(new Error('stream_not_found'), { status: 404 });
+        }
+        if (readCalls === 4) {
+          onBatch({ messages: [], nextOffset: '1', upToDate: true });
+          throw Object.assign(new Error('503 after frame'), { status: 503 });
+        }
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      };
+      const client = {
+        ensureJsonStream: async () => {
+          ensureCalls++;
+        },
+        readJsonLive,
+        appendJson: async () => {},
+      } as unknown as LoroStreamsJsonStreamClient;
+
+      const scope = await runtime.runPromise(Scope.make());
+      try {
+        await runtime.runPromise(
+          Scope.provide(scope)(
+            makeEncryptedRpcListener({
+              workspaceId: 'ws-1',
+              machineId: 'machine-1',
+              client,
+              receive: () => Effect.void,
+            })
+          )
+        );
+        // Initial ensure + 1st read (503) -> sleeps 1000ms (attempt 0, random=1).
+        await runtime.runPromise(TestClock.adjust(0));
+        expect(ensureCalls).toBe(1);
+        expect(readCalls).toBe(1);
+
+        // At 999ms, still sleeping; at 1000ms, 2nd read runs (503) WITHOUT calling ensureJsonStream.
+        await runtime.runPromise(TestClock.adjust(999));
+        expect(readCalls).toBe(1);
+        await runtime.runPromise(TestClock.adjust(1));
+        expect(readCalls).toBe(2);
+        expect(ensureCalls).toBe(1);
+
+        // 2nd 503 sleeps 2000ms (attempt 1); 3rd read fails with 404 -> marks needsEnsure.
+        await runtime.runPromise(TestClock.adjust(1999));
+        expect(readCalls).toBe(2);
+        await runtime.runPromise(TestClock.adjust(1));
+        expect(readCalls).toBe(3);
+        expect(ensureCalls).toBe(1);
+
+        // 404 sleeps 4000ms (attempt 2), then re-ensures and runs 4th read (receives batch -> resets attempt to 0, then 503).
+        await runtime.runPromise(TestClock.adjust(4000));
+        expect(ensureCalls).toBe(2);
+        expect(readCalls).toBe(4);
+
+        // Because 4th read received a batch, backoff reset to 1000ms (not 8000ms), and 503 does not re-ensure.
+        await runtime.runPromise(TestClock.adjust(1000));
+        expect(ensureCalls).toBe(2);
+        expect(readCalls).toBe(5);
+      } finally {
+        await runtime.runPromise(Scope.close(scope, Effect.void as never));
+      }
+    } finally {
+      randomSpy.mockRestore();
+      await runtime.dispose();
+    }
+  });
+
+  it('defaults send timeout to 2500ms so WAN responses after 800ms still succeed', async () => {
+    const runtime = ManagedRuntime.make(TestClock.layer({ warningDelay: '1 hour' }));
+    try {
+      await runtime.context();
+      let deliverBatch:
+        | ((batch: { messages: unknown[]; nextOffset: string; upToDate: boolean }) => void)
+        | undefined;
+      const readJsonLive: LoroStreamsJsonStreamClient['readJsonLive'] = async (
+        _stream,
+        _state,
+        onBatch,
+        options
+      ) => {
+        deliverBatch = onBatch;
+        await new Promise<void>((resolve) => {
+          options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      };
+      const client = {
+        ensureJsonStream: async () => {},
+        readJsonLive,
+        appendJson: async () => {},
+      } as unknown as LoroStreamsJsonStreamClient;
+
+      const scope = await runtime.runPromise(Scope.make());
+      try {
+        const channel = await runtime.runPromise(
+          Scope.provide(scope)(
+            makeEncryptedStreamsChannel<{ tag: string }, string>({
+              workspaceId: 'ws-1',
+              requesterDevice: 'aa'.repeat(32),
+              client,
+              acceptResponse: async (_prepared, _input, frame) => `ok:${frame.slice(0, 4)}`,
+            })
+          )
+        );
+        await runtime.runPromise(TestClock.adjust(0));
+        const requestId = 'ab'.repeat(16);
+        const frameHex = 'cd'.repeat(150);
+        const sendPromise = runtime.runPromise(
+          channel.send(
+            {
+              requestId,
+              requesterDevice: 'aa'.repeat(32),
+              targetMachineId: 'machine-1',
+              frameHex,
+            } as never,
+            { tag: 'wan' }
+          )
+        );
+        // Advance past old 800ms timeout to 1500ms: call must still be pending and accept the response.
+        await runtime.runPromise(TestClock.adjust(1500));
+        deliverBatch?.({
+          messages: [{ id: requestId, frame: frameHex }],
+          nextOffset: '1',
+          upToDate: true,
+        });
+        await runtime.runPromise(TestClock.adjust(0));
+        expect(await sendPromise).toBe('ok:cdcd');
+      } finally {
+        await runtime.runPromise(Scope.close(scope, Effect.void as never));
+      }
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

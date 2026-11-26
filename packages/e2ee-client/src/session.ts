@@ -968,8 +968,10 @@ export const openPersonalSession = Effect.fnUntraced(function* (
               const received = yield* Effect.result(keyRound('receive'));
               if ((yield* status()).usableEpoch === (yield* admitted()).inspectState().epoch.number)
                 return;
-              if (pass === 0) yield* serialRound(control.refresh());
-              else if (Result.isFailure(received)) return yield* Effect.fail(received.failure);
+              if (pass === 0) {
+                if (Result.isSuccess(received) && !received.success.refreshRequired) return;
+                yield* serialRound(control.refresh());
+              } else if (Result.isFailure(received)) return yield* Effect.fail(received.failure);
             }
           })
         ),

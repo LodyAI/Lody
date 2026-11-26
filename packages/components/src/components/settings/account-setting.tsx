@@ -819,10 +819,10 @@ function CloudAccountSettings({
       workspaceJoinRequestsSlot={
         encrypted &&
         encryptedTeamManagement &&
-        platform.e2eeWorkspaces?.runtime &&
-        currentUserId ? (
+        currentUserId &&
+        (platform.e2eeWorkspaces?.runtime || role === 'owner' || role === 'admin') ? (
           <E2eeTeamSettingsHost
-            runtime={platform.e2eeWorkspaces.runtime}
+            runtime={platform.e2eeWorkspaces?.runtime}
             workspaceId={activeOrganization.id}
             accountId={currentUserId}
             onOpenBilling={openAdmissionBilling}

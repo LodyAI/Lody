@@ -562,11 +562,7 @@ export function personalEntry(options: PersonalEntryOptions) {
         ...(approval.checkpoint ? { checkpoint: () => guarded(() => approval.checkpoint!()) } : {}),
         ...(approval.ingest
           ? {
-              ingest: (page: E2eeWorkspaceHistoryPage) =>
-                guarded(async () => {
-                  await approval.ingest!(page);
-                  await verifiedAccess();
-                }),
+              ingest: (page: E2eeWorkspaceHistoryPage) => guarded(() => approval.ingest!(page)),
             }
           : {}),
         ...(approval.prepareDelivery

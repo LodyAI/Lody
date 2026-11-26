@@ -4,6 +4,7 @@ import { SeatInvitePreviewSchema } from '@lody/cloud-api/seat-invite-preview';
 import {
   isTransientGatewayStatus,
   TRANSIENT_GATEWAY_RETRY_DELAYS_MS,
+  transientGatewayRetryDelayMs,
 } from '@lody/shared/transient-gateway';
 import { Cause, Effect, Exit, Result } from 'effect';
 import { z } from 'zod';
@@ -271,7 +272,9 @@ export const gatewayRequest = <A>(
       if (!isTransientGatewayError(result.failure) || attempt >= delays.length)
         return yield* Effect.fail(result.failure);
       const delay = delays[attempt];
-      yield* Effect.sleep(Number.isFinite(delay) && delay >= 0 ? delay : 0);
+      yield* Effect.sleep(
+        Number.isFinite(delay) && delay >= 0 ? transientGatewayRetryDelayMs(delay) : 0
+      );
     }
   });
 
@@ -835,7 +838,19 @@ export function makePersonalCloudNetwork(
           if (inlineMailboxStatuses.has(key)) {
             const cached = inlineMailboxStatuses.get(key)!;
             inlineMailboxStatuses.delete(key);
-            return guarded(verifyStatus(captured, cached));
+            return guarded(
+              verifyStatus(captured, cached).pipe(
+                Effect.tap((verified) =>
+                  Effect.sync(() => {
+                    if (captured.recipient === selfRecipients.get(credential)) {
+                      selfStatusCache.set(device, verified);
+                    } else {
+                      withinRoundCache.set(device, verified);
+                    }
+                  })
+                )
+              )
+            );
           }
           const cachedStatus =
             selfStatusCache.get(device, captured) ?? withinRoundCache.get(device, captured);
