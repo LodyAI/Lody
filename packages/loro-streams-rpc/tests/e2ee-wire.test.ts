@@ -372,31 +372,26 @@ describe('encrypted streams 503 backoff and WAN timeout', () => {
             })
           )
         );
-        // Initial ensure + 1st read (503) -> sleeps 1000ms (attempt 0, random=1).
         await runtime.runPromise(TestClock.adjust(0));
         expect(ensureCalls).toBe(1);
         expect(readCalls).toBe(1);
 
-        // At 999ms, still sleeping; at 1000ms, 2nd read runs (503) WITHOUT calling ensureJsonStream.
         await runtime.runPromise(TestClock.adjust(999));
         expect(readCalls).toBe(1);
         await runtime.runPromise(TestClock.adjust(1));
         expect(readCalls).toBe(2);
         expect(ensureCalls).toBe(1);
 
-        // 2nd 503 sleeps 2000ms (attempt 1); 3rd read fails with 404 -> marks needsEnsure.
         await runtime.runPromise(TestClock.adjust(1999));
         expect(readCalls).toBe(2);
         await runtime.runPromise(TestClock.adjust(1));
         expect(readCalls).toBe(3);
         expect(ensureCalls).toBe(1);
 
-        // 404 sleeps 4000ms (attempt 2), then re-ensures and runs 4th read (receives batch -> resets attempt to 0, then 503).
         await runtime.runPromise(TestClock.adjust(4000));
         expect(ensureCalls).toBe(2);
         expect(readCalls).toBe(4);
 
-        // Because 4th read received a batch, backoff reset to 1000ms (not 8000ms), and 503 does not re-ensure.
         await runtime.runPromise(TestClock.adjust(1000));
         expect(ensureCalls).toBe(2);
         expect(readCalls).toBe(5);
@@ -459,7 +454,6 @@ describe('encrypted streams 503 backoff and WAN timeout', () => {
             { tag: 'wan' }
           )
         );
-        // Advance past old 800ms timeout to 1500ms: call must still be pending and accept the response.
         await runtime.runPromise(TestClock.adjust(1500));
         deliverBatch?.({
           messages: [{ id: requestId, frame: frameHex }],

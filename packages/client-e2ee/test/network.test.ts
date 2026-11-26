@@ -1610,9 +1610,7 @@ it('populates withinRoundCache when consuming inlineMailboxStatuses after put', 
   });
   const mailbox = network.mailbox('cc'.repeat(32));
   await Effect.runPromise(mailbox.put('ee'.repeat(16), new Uint8Array(32).fill(0xab)));
-  // First status consumes inlineMailboxStatuses and writes withinRoundCache.
   const first = await Effect.runPromise(mailbox.status(target));
-  // Immediate follow-up (e.g. keyDeliveryEvidence) hits withinRoundCache without an extra RTT.
   const second = await Effect.runPromise(mailbox.status(target));
   expect(first).toEqual({ ...target, revision: 2, status: 'EnvelopeStored' });
   expect(second).toEqual(first);
