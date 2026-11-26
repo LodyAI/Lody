@@ -49,7 +49,7 @@ void test('Nightly requires an explicitly verified and already published Stable 
         ...options,
         request: async () => Response.json({ version })
       }),
-      options.minimumVersion
+      version
     )
   }
   for (const version of ['0.100.1', '0.99.999', '0.100.2-nightly.1', '00.100.2', undefined]) {

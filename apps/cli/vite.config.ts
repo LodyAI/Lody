@@ -5,7 +5,6 @@ import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
 import { validateNightlyBuildIdentity } from '../electron/nightly-candidate.mjs';
 import { validateNightlyVersion } from '../electron/nightly-version.mjs';
-import desktopPackage from '../electron/package.json';
 import { isLoroStreamsWebSocketEnabled } from '../../packages/shared/src/loro-streams-websocket';
 import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
 import { externalWasmPlugin } from './scripts/external-wasm.mjs';
@@ -39,7 +38,7 @@ function nightlyDesktopBuild() {
   const number = Number(identity.buildNumber);
   return {
     channel: 'nightly',
-    version: validateNightlyVersion(process.env.LODY_NIGHTLY_VERSION, desktopPackage.version),
+    version: validateNightlyVersion(process.env.LODY_NIGHTLY_VERSION),
     ...identity,
     nativeVersion: `${1 + Math.floor(number / 10000)}.${Math.floor(number / 100) % 100}.${number % 100}`,
   };

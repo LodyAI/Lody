@@ -67,6 +67,11 @@ runs Release Please again and selects one client component plus its required SEA
 publication/check. Other partial releases
 use the component workflow or rerun failed jobs; ambiguous state fails closed.
 
+New Nightly runs use the published Electron Stable version from
+`STABLE_ELECTRON_VERSION_URL`. They increment its minor version, reset the patch
+to zero and reserve a sequence starting at zero for that cycle. Retries reuse
+the run’s reservation even if Stable advances.
+
 ## Native iOS Nightly
 
 Nightly calls `publish-ios-native.yml` to build the pinned `apps/mobile/ios`

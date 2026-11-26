@@ -84,7 +84,6 @@ export async function reserveNightlyVersion({ store, candidate, baseVersion, api
     previous.candidate.runId === candidate.runId
   ) {
     assert.deepEqual(previous.candidate, candidate, 'Reserved Nightly candidate changed')
-    validateNightlyVersion(previous.version, baseVersion)
     return { publish: true, version: previous.version }
   }
   if (previous !== undefined) {

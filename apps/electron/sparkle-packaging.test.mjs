@@ -172,7 +172,7 @@ void test('resetting the display sequence still advances both native and fallbac
   })
   const next = resolveElectronReleaseProfile({
     environment: 'production',
-    baseVersion: '0.102.0',
+    baseVersion: '0.101.8',
     env: {
       ...nightlyEnv,
       LODY_NIGHTLY_BUILD_NUMBER: '65537',
