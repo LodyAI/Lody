@@ -50,6 +50,7 @@ const styles = stylex.create({
   choiceList: {
     margin: 0,
     paddingInlineStart: space[4],
+    listStyleType: 'disc',
     color: colors.secondaryLabel,
     fontSize: text.footnoteSize,
     lineHeight: 1.6,
@@ -89,8 +90,44 @@ export function E2eeWorkspaceCreationOption(props: {
   onSetAside?: () => void;
 }) {
   const { t } = useTranslation();
+  const hasSavedRequests = Boolean(props.requests?.length || props.archivedRequests?.length);
+  const requestsBlock = hasSavedRequests ? (
+    <div {...stylex.props(styles.requests)}>
+      <E2eeCreationRequestList
+        requests={props.requests ?? []}
+        archivedRequests={props.archivedRequests ?? []}
+        selectedRequestId={props.selectedRequestId ?? null}
+        disabled={props.disabled}
+        defaultArchiveOpen={props.defaultArchiveOpen}
+        onSelectRequest={(requestId) => props.onSelectRequest?.(requestId)}
+        onArchiveRequest={(requestId) => props.onArchiveRequest?.(requestId)}
+        onRestoreRequest={(requestId) => props.onRestoreRequest?.(requestId)}
+        onDeleteRequest={(requestId) => props.onDeleteRequest?.(requestId)}
+        deletingRequestId={props.deletingRequestId ?? null}
+      />
+      {props.onNewRequest && (
+        <Button
+          variant="ghost"
+          disabled={props.disabled || Boolean(props.deletingRequestId)}
+          onClick={props.onNewRequest}
+        >
+          {t('e2ee.create.newRequest')}
+        </Button>
+      )}
+      {props.onSetAside && (
+        <Button
+          variant="ghost"
+          disabled={props.disabled || Boolean(props.deletingRequestId)}
+          onClick={props.onSetAside}
+        >
+          {t('e2ee.create.setAside')}
+        </Button>
+      )}
+    </div>
+  ) : null;
   return (
     <section {...stylex.props(styles.section)}>
+      {props.pending && requestsBlock}
       <p id="e2ee-workspace-mode" {...stylex.props(styles.heading)}>
         {t('e2ee.create.label')}
       </p>
@@ -103,7 +140,7 @@ export function E2eeWorkspaceCreationOption(props: {
           type="button"
           role="radio"
           aria-checked={!props.selected}
-          disabled={props.disabled || props.pending}
+          disabled={props.disabled}
           onClick={() => props.onChange(false)}
           {...stylex.props(styles.choice, !props.selected && styles.choiceOn)}
         >
@@ -111,10 +148,12 @@ export function E2eeWorkspaceCreationOption(props: {
             <Cloud size={15} aria-hidden="true" />
             {t('e2ee.create.standard')}
           </span>
-          <ul {...stylex.props(styles.choiceList)}>
-            <li>{t('e2ee.create.standardPoint1')}</li>
-            <li>{t('e2ee.create.standardPoint2')}</li>
-          </ul>
+          {!props.pending && (
+            <ul {...stylex.props(styles.choiceList)}>
+              <li>{t('e2ee.create.standardPoint1')}</li>
+              <li>{t('e2ee.create.standardPoint2')}</li>
+            </ul>
+          )}
         </button>
         <button
           type="button"
@@ -131,59 +170,30 @@ export function E2eeWorkspaceCreationOption(props: {
             <Lock size={15} aria-hidden="true" />
             {t('e2ee.create.encrypted')}
           </span>
-          <ul {...stylex.props(styles.choiceList)}>
-            <li>{t('e2ee.create.encryptedPoint1')}</li>
-            <li>{t('e2ee.create.encryptedPoint2')}</li>
-            <li>{t('e2ee.create.encryptedPoint3')}</li>
-          </ul>
+          {!props.pending && (
+            <ul {...stylex.props(styles.choiceList)}>
+              <li>{t('e2ee.create.encryptedPoint1')}</li>
+              <li>{t('e2ee.create.encryptedPoint2')}</li>
+              <li>{t('e2ee.create.encryptedPoint3')}</li>
+            </ul>
+          )}
         </button>
       </div>
-      {props.selected && (
+      {props.selected && !props.pending && (
         <p role="note" {...stylex.props(styles.help, styles.warning)}>
           {t('e2ee.create.lossWarning')}
         </p>
       )}
-      <p {...stylex.props(styles.help)}>{t('e2ee.create.description')}</p>
+      {props.selected && props.supported && (
+        <p {...stylex.props(styles.help)}>{t('e2ee.create.description')}</p>
+      )}
       {!props.supported && <p {...stylex.props(styles.help)}>{t('e2ee.create.unsupported')}</p>}
       {props.pending && (
         <p role="status" {...stylex.props(styles.help)}>
           {t('e2ee.create.pending')}
         </p>
       )}
-      {Boolean(props.requests?.length || props.archivedRequests?.length) && (
-        <div {...stylex.props(styles.requests)}>
-          <E2eeCreationRequestList
-            requests={props.requests ?? []}
-            archivedRequests={props.archivedRequests ?? []}
-            selectedRequestId={props.selectedRequestId ?? null}
-            disabled={props.disabled}
-            defaultArchiveOpen={props.defaultArchiveOpen}
-            onSelectRequest={(requestId) => props.onSelectRequest?.(requestId)}
-            onArchiveRequest={(requestId) => props.onArchiveRequest?.(requestId)}
-            onRestoreRequest={(requestId) => props.onRestoreRequest?.(requestId)}
-            onDeleteRequest={(requestId) => props.onDeleteRequest?.(requestId)}
-            deletingRequestId={props.deletingRequestId ?? null}
-          />
-          {props.onNewRequest && (
-            <Button
-              variant="ghost"
-              disabled={props.disabled || Boolean(props.deletingRequestId)}
-              onClick={props.onNewRequest}
-            >
-              {t('e2ee.create.newRequest')}
-            </Button>
-          )}
-          {props.onSetAside && (
-            <Button
-              variant="ghost"
-              disabled={props.disabled || Boolean(props.deletingRequestId)}
-              onClick={props.onSetAside}
-            >
-              {t('e2ee.create.setAside')}
-            </Button>
-          )}
-        </div>
-      )}
+      {!props.pending && requestsBlock}
       {props.selected && props.paidRequired && !props.pending && (
         <p {...stylex.props(styles.help)}>{t('e2ee.create.paidUnavailable')}</p>
       )}

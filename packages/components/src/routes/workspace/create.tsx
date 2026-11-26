@@ -638,6 +638,10 @@ function CreateWorkspaceAuthed({
         err instanceof ConvexError && err.data && typeof err.data === 'object'
           ? (err.data as { code?: unknown }).code
           : undefined;
+      const refusalCode = e2eeCreationErrorCode(err);
+      const refusalReason = refusalCode
+        ? t(`e2ee.create.reason.${refusalCode}`, { defaultValue: refusalCode })
+        : undefined;
       setError(
         !useEncryption
           ? typeof code === 'string' && code in REFERRAL_ERROR_KEYS
@@ -646,7 +650,7 @@ function CreateWorkspaceAuthed({
           : isE2eeCreationNotEnabled(err)
             ? t('e2ee.create.notEnabled')
             : removed
-              ? t('e2ee.create.requestRemoved', { code: e2eeCreationErrorCode(err) })
+              ? t('e2ee.create.requestRemoved', { code: refusalReason })
               : t('e2ee.create.failed')
       );
       captureCreateFailed('create_rejected', startMs);
@@ -756,6 +760,7 @@ function CreateWorkspaceAuthed({
           (!platform.e2eeWorkspaces?.prepareCreation || (paidRequired && !currentPending)))
       }
       retryPendingCreation={Boolean(currentPending)}
+      hasExistingWorkspaces={hasExistingWorkspaces}
       paidRequired={paidRequired && !useEncryption}
       creationOptions={
         creationChoice.showOption ? (
@@ -765,7 +770,15 @@ function CreateWorkspaceAuthed({
             pending={Boolean(currentPending)}
             disabled={creating}
             paidRequired={paidRequired}
-            onChange={setEncrypted}
+            onChange={(next) => {
+              if (!next && currentPending) {
+                setPendingCreation(null);
+                setWorkspaceName('');
+                resetWorkspaceSlug();
+                setError(null);
+              }
+              setEncrypted(next);
+            }}
             requests={pendingRequests.filter((request) => request.accountId === accountId)}
             archivedRequests={archivedRequests.filter((request) => request.accountId === accountId)}
             onArchiveRequest={(requestId) => handleArchiveRequest(requestId, true)}

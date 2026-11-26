@@ -64,6 +64,7 @@ export interface CreateWorkspacePageProps {
   slugAvailable?: boolean;
   slugErrorType?: string | null;
   canResetSlug?: boolean;
+  hasExistingWorkspaces?: boolean;
   paidRequired?: boolean;
   billingInterval?: 'month' | 'year';
   /** Per-seat Plus pricing; `undefined`/`null` = not loaded, prices hidden. */
@@ -91,6 +92,7 @@ export function CreateWorkspacePage({
   slugAvailable = false,
   slugErrorType = null,
   canResetSlug = false,
+  hasExistingWorkspaces = false,
   paidRequired = false,
   billingInterval = 'year',
   pricing = null,
@@ -129,7 +131,9 @@ export function CreateWorkspacePage({
             <Card.Title {...stylex.props(surface.authTitle)}>
               {paidRequired
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
-                : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
+                : hasExistingWorkspaces
+                  ? t('organization.createNewWorkspace', 'Create New Workspace')
+                  : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
             </Card.Title>
             <Card.Description {...stylex.props(styles.description)}>
               {paidRequired
@@ -137,14 +141,17 @@ export function CreateWorkspacePage({
                     'organization.createPlusWorkspaceDescription',
                     'Your free workspace limit is full. This workspace will activate after checkout.'
                   )
-                : t(
-                    'organization.welcomeDescription',
-                    "Let's create your first workspace to get started"
-                  )}
+                : hasExistingWorkspaces
+                  ? t('organization.createNewWorkspaceDescription')
+                  : t(
+                      'organization.welcomeDescription',
+                      "Let's create your first workspace to get started"
+                    )}
             </Card.Description>
           </Card.Header>
           <Card.Content>
             <div {...stylex.props(styles.formStack)}>
+              {retryPendingCreation ? creationOptions : null}
               <div {...stylex.props(styles.fieldStack)}>
                 <UiField.Label htmlFor="workspace-name">
                   {t('organization.workspaceName')}
@@ -216,7 +223,7 @@ export function CreateWorkspacePage({
                 ) : null}
               </div>
 
-              {creationOptions}
+              {retryPendingCreation ? null : creationOptions}
 
               {paidRequired ? (
                 <div {...stylex.props(styles.fieldStack, styles.billing)}>

@@ -58,6 +58,19 @@ export type InstantQrPhase =
   | { kind: 'failed'; error: string };
 
 const INSTANT_QR_POLL_MS = 900;
+const formatCountdown = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+function useInstantQrSecondsLeft(expiresAt: number | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (expiresAt === undefined) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
+  return expiresAt === undefined ? null : Math.max(0, Math.ceil((expiresAt - now) / 1000));
+}
 
 /**
  * One fresh approver-shows offer. The person showing this code on their own device is
@@ -235,6 +248,9 @@ export function E2eeInstantQrApprove(props: {
     if (joinedDevice !== null) joinedRef.current();
   }, [joinedDevice]);
   const unavailable = phase.kind === 'joining' || phase.kind === 'joined' ? phase.unavailable : [];
+  const secondsLeft = useInstantQrSecondsLeft(
+    phase.kind === 'showing' ? phase.expiresAt : undefined
+  );
   if (!supportsInstantQr(props.runtime)) return null;
   const pairingString = phase.kind === 'showing' ? phase.pairingString : null;
   return (
@@ -266,13 +282,29 @@ export function E2eeInstantQrApprove(props: {
         </div>
         <div aria-live="polite">
           {phase.kind === 'showing' && (
-            <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
+            <>
+              <p {...stylex.props(styles.quiet)}>{t('e2ee.instantQr.help')}</p>
+              {secondsLeft !== null && secondsLeft < 60 * 60 && (
+                <p data-testid="e2ee-instant-qr-expiry" {...stylex.props(styles.quiet)}>
+                  {secondsLeft === 0
+                    ? t('e2ee.auto.expired.short')
+                    : t('e2ee.auto.expiresIn', { time: formatCountdown(secondsLeft) })}
+                </p>
+              )}
+            </>
           )}
           {phase.kind === 'joining' && (
-            <p role="status" {...stylex.props(styles.status)}>
-              <Spinner size="small" />
-              {t('e2ee.instantQr.joining', { device: phase.deviceName })}
-            </p>
+            <>
+              <p role="status" {...stylex.props(styles.status)}>
+                <Spinner size="small" />
+                {t('e2ee.instantQr.joining', { device: phase.deviceName })}
+              </p>
+              <div {...stylex.props(styles.actions)}>
+                <Button variant="ghost" size="small" onClick={refresh}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </>
           )}
           {phase.kind === 'joined' && (
             <p role="status" {...stylex.props(styles.status, styles.success)}>
@@ -343,7 +375,13 @@ export function E2eeAddDeviceCard(props: {
             </>
           ) : (
             <div {...stylex.props(styles.actions)}>
-              <Button data-testid="e2ee-add-device-show-qr" onClick={() => setShowing(true)}>
+              <Button
+                data-testid="e2ee-add-device-show-qr"
+                onClick={() => {
+                  setManual(false);
+                  setShowing(true);
+                }}
+              >
                 <QrCode size={16} aria-hidden="true" />
                 {t('e2ee.addDevice.showQr')}
               </Button>
@@ -351,7 +389,13 @@ export function E2eeAddDeviceCard(props: {
           )}
         </div>
       </Card.Root>
-      <Collapsible.Root open={manual} onOpenChange={setManual}>
+      <Collapsible.Root
+        open={manual}
+        onOpenChange={(next) => {
+          setManual(next);
+          if (next) setShowing(false);
+        }}
+      >
         <div {...stylex.props(styles.disclosure)}>
           <Collapsible.Trigger
             render={<Button variant="ghost" size="small" data-testid="e2ee-add-device-manual" />}

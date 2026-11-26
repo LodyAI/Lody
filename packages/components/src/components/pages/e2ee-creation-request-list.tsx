@@ -30,6 +30,19 @@ const styles = stylex.create({
     borderTopStyle: 'solid',
     borderTopColor: colors.separator,
   },
+  rowSelected: {
+    backgroundColor: colors.elevatedBackground,
+  },
+  selectedBadge: {
+    flexShrink: 0,
+    fontSize: text.captionSize,
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+    backgroundColor: colors.secondaryBackground,
+    borderRadius: radius.full,
+    paddingInline: space[2],
+    paddingBlock: '2px',
+  },
   rowLabel: {
     flex: 1,
     minWidth: 0,
@@ -92,35 +105,43 @@ export function E2eeCreationRequestList(props: {
         <>
           <p {...stylex.props(styles.heading)}>{t('e2ee.create.savedRequests')}</p>
           <ul {...stylex.props(styles.list)}>
-            {props.requests.map((request) => (
-              <li
-                key={request.requestId}
-                data-request-id={request.requestId}
-                {...stylex.props(styles.row)}
-              >
-                <div {...stylex.props(styles.rowSelect)}>
-                  <Button
-                    variant="ghost"
-                    size="small"
-                    aria-pressed={props.selectedRequestId === request.requestId}
-                    disabled={busy}
-                    onClick={() => props.onSelectRequest(request.requestId)}
-                  >
-                    {requestLabel(request)}
-                  </Button>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="small"
-                  aria-label={t('e2ee.create.archiveRequestLabel', { name: requestLabel(request) })}
-                  disabled={busy}
-                  onClick={() => props.onArchiveRequest(request.requestId)}
+            {props.requests.map((request) => {
+              const selected = props.selectedRequestId === request.requestId;
+              return (
+                <li
+                  key={request.requestId}
+                  data-request-id={request.requestId}
+                  {...stylex.props(styles.row, selected && styles.rowSelected)}
                 >
-                  {t('e2ee.create.archiveRequest')}
-                </Button>
-                {deleteButton(request)}
-              </li>
-            ))}
+                  <div {...stylex.props(styles.rowSelect)}>
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      aria-pressed={selected}
+                      disabled={busy}
+                      onClick={() => props.onSelectRequest(request.requestId)}
+                    >
+                      {requestLabel(request)}
+                    </Button>
+                  </div>
+                  {selected && (
+                    <span {...stylex.props(styles.selectedBadge)}>{t('e2ee.create.selected')}</span>
+                  )}
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    aria-label={t('e2ee.create.archiveRequestLabel', {
+                      name: requestLabel(request),
+                    })}
+                    disabled={busy}
+                    onClick={() => props.onArchiveRequest(request.requestId)}
+                  >
+                    {t('e2ee.create.archiveRequest')}
+                  </Button>
+                  {deleteButton(request)}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

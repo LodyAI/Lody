@@ -11,13 +11,19 @@ import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import type { E2eeMemberOffer, E2eeMemberReplies } from '@lody/cloud-api';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
+import { Spinner } from '@lody/ui/spinner';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { Check } from 'lucide-react';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useStableSession } from '@/hooks/useStableSession';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { desktopMemberJoinLink, sameMemberOffer } from '@/lib/e2ee-member-offer';
-import { attemptDesktopInviteHandoff } from '@/lib/desktop-invite-deep-link';
+import {
+  attemptDesktopInviteHandoff,
+  canAttemptDesktopInviteHandoff,
+} from '@/lib/desktop-invite-deep-link';
+
+const DESKTOP_DOWNLOAD_URL = 'https://lody.ai/download';
 
 const styles = stylex.create({
   page: {
@@ -50,6 +56,8 @@ const styles = stylex.create({
   lineDone: { backgroundColor: colors.success },
   stepText: { paddingBottom: space[3], color: colors.tertiaryLabel },
   stepTextActive: { color: colors.label },
+  muted: { margin: 0, color: colors.secondaryLabel, fontSize: text.subheadlineSize },
+  link: { color: colors.label, textDecoration: 'underline' },
 });
 
 const JOIN_STEPS = ['accept', 'approval', 'key', 'open'] as const;
@@ -370,6 +378,13 @@ function JoinSession({
   else if (request) message = 'e2ee.team.waitingApproval';
   else if (!pinMatches) message = 'e2ee.team.unavailable';
   else if (available?.matchesRecipient === false) message = 'e2ee.team.wrongEmail';
+  const canOpenDesktop = canAttemptDesktopInviteHandoff();
+  const descriptionText =
+    message === 'e2ee.team.wrongEmail' && available?.recipientEmailMasked
+      ? t('e2ee.team.wrongEmailFor', { invited: available.recipientEmailMasked })
+      : message === 'e2ee.team.desktopRequired' && !canOpenDesktop
+        ? t('e2ee.team.mobileBrowserUnsupported')
+        : t(message);
   return (
     <main data-testid="e2ee-invitation" {...stylex.props(styles.page)}>
       {watchClaim && accountId && requestId && claimActive && (
@@ -389,7 +404,7 @@ function JoinSession({
                 : t('e2ee.team.join')}
             </Card.Title>
             {message !== 'e2ee.team.waitingKey' && (
-              <Card.Description>{t(message)}</Card.Description>
+              <Card.Description>{descriptionText}</Card.Description>
             )}
           </Card.Header>
           <div {...stylex.props(styles.stack)}>
@@ -403,7 +418,20 @@ function JoinSession({
                   current={ready ? 4 : request?.state === 'committed' ? 2 : request ? 1 : 0}
                 />
               )}
-            {email && <p>{email}</p>}
+            {!accountId && !loading && !previewError && !native && !runtime && (
+              <p {...stylex.props(styles.muted)}>
+                {t('e2ee.team.desktopHint')}{' '}
+                <a
+                  href={DESKTOP_DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  {...stylex.props(styles.link)}
+                >
+                  {t('e2ee.team.downloadDesktop')}
+                </a>
+              </p>
+            )}
+            {email && <p {...stylex.props(styles.muted)}>{t('e2ee.team.signedInAs', { email })}</p>}
             {message === 'e2ee.team.waitingKey' ? (
               <Card.Root>
                 <Card.Header>
@@ -418,6 +446,7 @@ function JoinSession({
                   )}
                   <div {...stylex.props(styles.actions)}>
                     <Button disabled={checkingKey} onClick={() => wake.current?.(true)}>
+                      {checkingKey && <Spinner size="small" />}
                       {t('e2ee.team.checkKeyAgain')}
                     </Button>
                   </div>
@@ -436,10 +465,20 @@ function JoinSession({
               {!loading && accountId && !emailVerified && (
                 <Button onClick={onEmailVerificationRequested}>{t('e2ee.team.verify')}</Button>
               )}
-              {!loading && accountId && emailVerified && !native && !runtime && (
-                <Button onClick={() => attemptDesktopInviteHandoff(desktopMemberJoinLink(offer))}>
-                  {t('e2ee.team.openDesktop')}
-                </Button>
+              {!loading && accountId && emailVerified && !native && !runtime && canOpenDesktop && (
+                <>
+                  <Button onClick={() => attemptDesktopInviteHandoff(desktopMemberJoinLink(offer))}>
+                    {t('e2ee.team.openDesktop')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    render={
+                      <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer" />
+                    }
+                  >
+                    {t('e2ee.team.downloadDesktop')}
+                  </Button>
+                </>
               )}
               {!loading &&
                 accountId &&
@@ -461,13 +500,14 @@ function JoinSession({
                 )}
               {!loading && request && request.state !== 'committed' && !ready && !terminal && (
                 <Button
-                  disabled={busy}
+                  variant="secondary"
+                  disabled={checkingKey}
                   onClick={() => {
                     wake.current?.(true);
-                    void accept();
                   }}
                 >
-                  {t('e2ee.team.retry')}
+                  {checkingKey && <Spinner size="small" />}
+                  {t('e2ee.team.checkStatus')}
                 </Button>
               )}
               {!loading && ready && (

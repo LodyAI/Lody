@@ -3,6 +3,7 @@ import { expect, userEvent, within } from 'storybook/test';
 import type { E2eeAccountPairingPreview, E2eeAccountPairingRequestState } from '@lody/platform';
 import {
   E2eeAccountPairingApprove,
+  E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
 
@@ -85,4 +86,7 @@ export const ApproverShowsCode: Story = {
     );
     await expect(await canvas.findByText(CODE)).toBeVisible();
   },
+};
+export const KeyRetryBanner: Story = {
+  render: () => <E2eeAccountPairingKeyRetry onRetry={() => {}} />,
 };

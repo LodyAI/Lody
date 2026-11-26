@@ -101,6 +101,7 @@ const styles = stylex.create({
   /** The sheet's description, under the header. */
   description: {
     whiteSpace: 'pre-line',
+    textAlign: 'center',
     paddingInline: themeSpace[4],
     paddingBottom: themeSpace[3],
     color: themeColors.mutedForeground,

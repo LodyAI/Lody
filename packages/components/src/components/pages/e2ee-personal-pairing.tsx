@@ -14,12 +14,16 @@ import { LedgerQrCode, useQrCamera } from './e2ee-ledger-verification';
 import { ScanLine } from 'lucide-react';
 
 const styles = stylex.create({
+  card: { width: '100%', maxWidth: '36rem' },
   actions: { display: 'flex', flexWrap: 'wrap', gap: space[2] },
   code: { overflowWrap: 'anywhere', userSelect: 'all', fontFamily: 'monospace', margin: 0 },
   qr: { backgroundColor: '#ffffff', padding: space[2], alignSelf: 'flex-start' },
   error: { color: colors.secondaryLabel },
   video: { width: '100%', maxWidth: 320 },
+  rawDetails: { color: colors.secondaryLabel },
+  rawSummary: { cursor: 'pointer', marginBottom: space[2] },
 });
+const formatFingerprint = (value: string) => value.replace(/(.{4})(?=.)/g, '$1 ');
 type Runtime = Pick<
   E2eeWorkspaceRuntime,
   | 'resetIdentity'
@@ -340,8 +344,17 @@ function PersonalPairingSession({
         setInput('');
       }
     });
+  const resetFlow = () => {
+    setOffer(null);
+    setPreview(null);
+    setJoining(null);
+    setInput('');
+    setInputError(undefined);
+    setCustodyMessage(undefined);
+    setPhase('idle');
+  };
   return (
-    <Card.Root>
+    <Card.Root xstyle={styles.card}>
       <span
         hidden
         data-testid="e2ee-personal-pairing-state"
@@ -382,27 +395,32 @@ function PersonalPairingSession({
           </Button>
         )}
       </div>
-      {offer && (
+      {offer && !preview && (
         <>
           <p>{t('e2ee.pair.transfer')}</p>
           <div {...stylex.props(styles.qr)}>
             <LedgerQrCode payload={JSON.stringify(offer)} size={200} label={t('e2ee.pair.code')} />
           </div>
-          <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
-          <Button
-            variant="secondary"
-            disabled={phase === 'busy' || recovering}
-            onClick={() => void inspect()}
-          >
-            {t('e2ee.pair.inspect')}
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={phase === 'busy' || recovering || phase === 'published'}
-            onClick={() => void cancel(offer.pairingSessionId)}
-          >
-            {t('common.cancel')}
-          </Button>
+          <details {...stylex.props(styles.rawDetails)}>
+            <summary {...stylex.props(styles.rawSummary)}>{t('e2ee.pair.showRawCode')}</summary>
+            <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
+          </details>
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              variant="secondary"
+              disabled={phase === 'busy' || recovering}
+              onClick={() => void inspect()}
+            >
+              {t('e2ee.pair.inspect')}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={phase === 'busy' || recovering || phase === 'published'}
+              onClick={() => void cancel(offer.pairingSessionId)}
+            >
+              {t('common.cancel')}
+            </Button>
+          </div>
         </>
       )}
       {canRequest && !canEndorse && !joining && (
@@ -452,21 +470,47 @@ function PersonalPairingSession({
         <>
           <p>{t('e2ee.pair.compare')}</p>
           <p data-testid="e2ee-pair-preview-key" {...stylex.props(styles.code)}>
-            {preview.signingPublicKey}
+            {formatFingerprint(preview.signingPublicKey)}
           </p>
-          <Button
-            disabled={phase === 'busy' || phase === 'published'}
-            onClick={() => void approve()}
-          >
-            {t(phase === 'retryPublication' ? 'e2ee.pair.retryPublication' : 'e2ee.pair.approve')}
-          </Button>
+          {offer && (
+            <details {...stylex.props(styles.rawDetails)}>
+              <summary {...stylex.props(styles.rawSummary)}>{t('e2ee.pair.offerSummary')}</summary>
+              <Textarea aria-label={t('e2ee.pair.code')} value={JSON.stringify(offer)} readOnly />
+            </details>
+          )}
+          <div {...stylex.props(styles.actions)}>
+            {phase === 'published' ? (
+              <Button variant="secondary" onClick={resetFlow}>
+                {t('e2ee.pair.pairAnother')}
+              </Button>
+            ) : (
+              <>
+                <Button disabled={phase === 'busy'} onClick={() => void approve()}>
+                  {t(
+                    phase === 'retryPublication'
+                      ? 'e2ee.pair.retryPublication'
+                      : 'e2ee.pair.approve'
+                  )}
+                </Button>
+                {offer && (
+                  <Button
+                    variant="ghost"
+                    disabled={phase === 'busy' || recovering}
+                    onClick={() => void cancel(offer.pairingSessionId)}
+                  >
+                    {t('common.cancel')}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
       {joining && (
         <>
           {joining.signingPublicKey && (
             <p data-testid="e2ee-pair-joining-key" {...stylex.props(styles.code)}>
-              {joining.signingPublicKey}
+              {formatFingerprint(joining.signingPublicKey)}
             </p>
           )}
           <div {...stylex.props(styles.actions)}>
