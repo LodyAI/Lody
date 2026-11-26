@@ -22,8 +22,6 @@ import {
   type StreamsRoomIdentity,
 } from 'loro-repo/transport/streams';
 import {
-  getShortcutBodyStreamId,
-  getShortcutIndexStreamId,
   getShortcutResourceStreamId,
   getWorkspaceShortcutBodyStreamId,
   getWorkspaceShortcutIndexStreamId,
@@ -36,7 +34,7 @@ import {
   PromptShortcutRuntime,
   ShortcutSyncTransportError,
   type PromptShortcut,
-  type ShortcutResource,
+  type WorkspaceShortcutResource,
 } from '../src/prompt-shortcuts';
 
 function makeShortcut(overrides: Partial<PromptShortcut> = {}): PromptShortcut {
@@ -143,14 +141,13 @@ describe('LocalShortcutStore in-place bodyDocId lifecycle', () => {
   });
 });
 
-describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
+describe('PromptShortcutRuntime workspace writes and reads', () => {
   async function createCloudHarness(userId = 'user-1') {
     const serverRepo = await LoroRepo.create({});
     const clientRepo = await LoroRepo.create({});
     const acquired: Array<{ streamId: string; write: boolean }> = [];
     const leaseOps: Array<{ streamId: string; op: 'sync' | 'join' | 'release' }> = [];
     const existingStreams = new Set<string>();
-    const revokedLegacy: unknown[] = [];
 
     const syncStream = async (streamId: string, write: boolean, isFlock: boolean) => {
       if (!write && !existingStreams.has(streamId)) {
@@ -190,9 +187,9 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
       userId,
     });
     const runtime = new PromptShortcutRuntime(store, {
-      acquire: async (resource: ShortcutResource, write: boolean) => {
+      acquire: async (resource: WorkspaceShortcutResource, write: boolean) => {
         const streamId = getShortcutResourceStreamId(resource);
-        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        const isFlock = resource.kind === 'workspace-index';
         acquired.push({ streamId, write });
         return {
           sync: async () => {
@@ -208,9 +205,6 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
           },
         };
       },
-      revokeLegacy: async (entry) => {
-        revokedLegacy.push(entry);
-      },
       dispose: async () => {},
     });
 
@@ -222,7 +216,6 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
       acquired,
       leaseOps,
       existingStreams,
-      revokedLegacy,
       cleanup: async () => {
         await runtime.dispose();
         await clientRepo.destroy();
@@ -270,91 +263,10 @@ describe('PromptShortcutRuntime workspace writes & Phase 1 dual-read', () => {
       await h.cleanup();
     }
   });
-
-  it('dual-reads unmigrated legacy shortcuts and prefers workspace-index entries and tombstones', async () => {
-    const h = await createCloudHarness('viewer-user');
-    try {
-      await h.runtime.start();
-      // Seed legacy index + legacy body on server (with legacy visibility field).
-      const legacyDomain = {
-        workspaceId: 'ws-1',
-        ownerUserId: 'author-user',
-        visibility: 'workspace' as const,
-      };
-      const legacyIndexStream = getShortcutIndexStreamId(legacyDomain);
-      const legacyBodyStream = getShortcutBodyStreamId('legacy-body-1');
-      h.existingStreams.add(legacyIndexStream);
-      h.existingStreams.add(legacyBodyStream);
-
-      const legacyShortcut = makeShortcut({
-        id: 'sc-legacy',
-        ownerUserId: 'author-user',
-        slug: 'legacy-cmd',
-        prompt: 'Legacy body text',
-        revision: 'rev-legacy',
-      });
-      const sBody = await h.serverRepo.acquireDoc(legacyBodyStream);
-      try {
-        new PromptShortcutDocument(sBody.doc).save(legacyShortcut, []);
-      } finally {
-        await sBody.release();
-      }
-      const sIndex = await h.serverRepo.acquireFlockDoc(legacyIndexStream);
-      try {
-        sIndex.flock.set(['promptShortcut', 'sc-legacy'], {
-          kind: 'active',
-          entry: {
-            ...projectShortcutIndex(legacyShortcut, 'legacy-body-1'),
-            visibility: 'workspace',
-          },
-        });
-        sIndex.flock.commit();
-      } finally {
-        await sIndex.release();
-      }
-
-      await h.runtime.setDirectory([
-        {
-          shortcutId: 'sc-legacy',
-          bodyDocId: 'legacy-body-1',
-          ownerUserId: 'author-user',
-          visibility: 'workspace',
-          revision: 'rev-legacy',
-        },
-      ]);
-
-      expect(h.runtime.getSnapshot().entries.map((e) => e.id)).toEqual(['sc-legacy']);
-      const readLegacy = await h.runtime.read(h.runtime.getSnapshot().entries[0]!);
-      expect(readLegacy.prompt).toBe('Legacy body text');
-
-      // Once tombstoned in {workspaceId}:shortcut-index, legacy entry disappears immediately.
-      h.existingStreams.add('ws-1:shortcut-index');
-      const wsIndex = await h.serverRepo.acquireFlockDoc('ws-1:shortcut-index');
-      try {
-        new PromptShortcutCatalog(wsIndex.flock).remove('sc-legacy', 'rev-del');
-      } finally {
-        await wsIndex.release();
-      }
-      const cWsIndex = await h.clientRepo.acquireFlockDoc('ws-1:shortcut-index');
-      try {
-        const wsServer = await h.serverRepo.acquireFlockDoc('ws-1:shortcut-index');
-        try {
-          cWsIndex.flock.importFile(wsServer.flock.exportFile());
-        } finally {
-          await wsServer.release();
-        }
-      } finally {
-        await cWsIndex.release();
-      }
-      expect(h.runtime.getSnapshot().entries).toEqual([]);
-    } finally {
-      await h.cleanup();
-    }
-  });
 });
 
 describe('PromptShortcut phase-0 HTTP reduction', () => {
-  it('joins workspace-index directly without pre-syncing and pulls legacy index via one-shot sync without join', async () => {
+  it('joins workspace-index directly without pre-syncing', async () => {
     const serverRepo = await LoroRepo.create({});
     const clientRepo = await LoroRepo.create({});
     const leaseOps: Array<{ streamId: string; op: 'sync' | 'join' | 'release' }> = [];
@@ -363,30 +275,6 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       workspaceId: 'ws-opt',
       userId: 'viewer-user',
     });
-    const legacyDomain = {
-      workspaceId: 'ws-opt',
-      ownerUserId: 'author-user',
-      visibility: 'workspace' as const,
-    };
-    const legacyIndexStream = getShortcutIndexStreamId(legacyDomain);
-    const legacyShortcut = makeShortcut({
-      id: 'sc-leg-1',
-      workspaceId: 'ws-opt',
-      ownerUserId: 'author-user',
-      slug: 'leg-cmd',
-      prompt: 'Legacy text',
-      revision: 'rev-leg',
-    });
-    const sLeg = await serverRepo.acquireFlockDoc(legacyIndexStream);
-    try {
-      sLeg.flock.set(['promptShortcut', 'sc-leg-1'], {
-        kind: 'active',
-        entry: { ...projectShortcutIndex(legacyShortcut, 'leg-body-1'), visibility: 'workspace' },
-      });
-      sLeg.flock.commit();
-    } finally {
-      await sLeg.release();
-    }
 
     const syncStream = async (streamId: string, isFlock: boolean) => {
       if (!isFlock) return;
@@ -403,7 +291,7 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     const runtime = new PromptShortcutRuntime(store, {
       acquire: async (resource, _write) => {
         const streamId = getShortcutResourceStreamId(resource);
-        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        const isFlock = resource.kind === 'workspace-index';
         return {
           sync: async () => {
             leaseOps.push({ streamId, op: 'sync' });
@@ -423,157 +311,10 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
 
     try {
       await runtime.start();
-      await runtime.setDirectory([
-        {
-          shortcutId: 'sc-leg-1',
-          bodyDocId: 'leg-body-1',
-          ownerUserId: 'author-user',
-          visibility: 'workspace',
-          revision: 'rev-leg',
-        },
-      ]);
-
       const wsIndexOps = leaseOps
         .filter((x) => x.streamId === 'ws-opt:shortcut-index')
         .map((x) => x.op);
       expect(wsIndexOps).toEqual(['join']);
-
-      const legacyOps = leaseOps.filter((x) => x.streamId === legacyIndexStream).map((x) => x.op);
-      expect(legacyOps).toEqual(['sync', 'release']);
-      expect(runtime.getSnapshot().entries.map((e) => e.id)).toEqual(['sc-leg-1']);
-    } finally {
-      await runtime.dispose();
-      await clientRepo.destroy();
-      await serverRepo.destroy();
-    }
-  });
-
-  it('re-syncs legacy index when directory signature updates while an earlier sync is in flight', async () => {
-    const clientRepo = await LoroRepo.create({});
-    const serverRepo = await LoroRepo.create({});
-    const leaseOps: Array<{ streamId: string; op: 'sync' | 'join' | 'release' }> = [];
-    const store = await LocalShortcutStore.open({
-      repo: clientRepo,
-      workspaceId: 'ws-race',
-      userId: 'viewer-user',
-    });
-    const legacyDomain = {
-      workspaceId: 'ws-race',
-      ownerUserId: 'author-user',
-      visibility: 'workspace' as const,
-    };
-    const legacyIndexStream = getShortcutIndexStreamId(legacyDomain);
-    const rev1Shortcut = makeShortcut({
-      id: 'sc-race-1',
-      workspaceId: 'ws-race',
-      ownerUserId: 'author-user',
-      slug: 'race-cmd',
-      prompt: 'Prompt v1',
-      revision: 'rev-1',
-    });
-    const rev2Shortcut = makeShortcut({
-      id: 'sc-race-1',
-      workspaceId: 'ws-race',
-      ownerUserId: 'author-user',
-      slug: 'race-cmd',
-      prompt: 'Prompt v2',
-      revision: 'rev-2',
-    });
-
-    const writeServerEntry = async (shortcut: PromptShortcut, bodyDocId: string) => {
-      const sLeg = await serverRepo.acquireFlockDoc(legacyIndexStream);
-      try {
-        sLeg.flock.set(['promptShortcut', shortcut.id], {
-          kind: 'active',
-          entry: { ...projectShortcutIndex(shortcut, bodyDocId), visibility: 'workspace' },
-        });
-        sLeg.flock.commit();
-      } finally {
-        await sLeg.release();
-      }
-    };
-    await writeServerEntry(rev1Shortcut, 'body-1');
-
-    let firstSyncStartedResolve!: () => void;
-    const firstSyncStarted = new Promise<void>((r) => {
-      firstSyncStartedResolve = r;
-    });
-    let releaseFirstSync!: () => void;
-    const firstSyncGate = new Promise<void>((r) => {
-      releaseFirstSync = r;
-    });
-    let legacySyncCount = 0;
-
-    const syncStream = async (streamId: string, isFlock: boolean) => {
-      if (!isFlock) return;
-      if (streamId === legacyIndexStream) {
-        legacySyncCount++;
-        if (legacySyncCount === 1) {
-          firstSyncStartedResolve();
-          await firstSyncGate;
-        }
-      }
-      const s = await serverRepo.acquireFlockDoc(streamId);
-      const c = await clientRepo.acquireFlockDoc(streamId);
-      try {
-        c.flock.importFile(s.flock.exportFile());
-      } finally {
-        await c.release();
-        await s.release();
-      }
-    };
-
-    const runtime = new PromptShortcutRuntime(store, {
-      acquire: async (resource, _write) => {
-        const streamId = getShortcutResourceStreamId(resource);
-        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
-        return {
-          sync: async () => {
-            leaseOps.push({ streamId, op: 'sync' });
-            await syncStream(streamId, isFlock);
-          },
-          join: async () => {
-            leaseOps.push({ streamId, op: 'join' });
-            await syncStream(streamId, isFlock);
-          },
-          release: async () => {
-            leaseOps.push({ streamId, op: 'release' });
-          },
-        };
-      },
-      dispose: async () => {},
-    });
-
-    try {
-      await runtime.start();
-      const p1 = runtime.setDirectory([
-        {
-          shortcutId: 'sc-race-1',
-          bodyDocId: 'body-1',
-          ownerUserId: 'author-user',
-          visibility: 'workspace',
-          revision: 'rev-1',
-        },
-      ]);
-      await firstSyncStarted;
-
-      await writeServerEntry(rev2Shortcut, 'body-2');
-      const p2 = runtime.setDirectory([
-        {
-          shortcutId: 'sc-race-1',
-          bodyDocId: 'body-2',
-          ownerUserId: 'author-user',
-          visibility: 'workspace',
-          revision: 'rev-2',
-        },
-      ]);
-
-      releaseFirstSync();
-      await Promise.all([p1, p2]);
-
-      const legacyOps = leaseOps.filter((x) => x.streamId === legacyIndexStream).map((x) => x.op);
-      expect(legacyOps).toEqual(['sync', 'release', 'sync', 'release']);
-      expect(runtime.getSnapshot().entries.map((e) => e.revision)).toEqual(['rev-2']);
     } finally {
       await runtime.dispose();
       await clientRepo.destroy();
