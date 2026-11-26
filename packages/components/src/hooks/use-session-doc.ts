@@ -185,16 +185,12 @@ export function useSessionDoc(
 
     if (!enabled) {
       setLoadedStore(null);
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     if (!runtime) {
       setLoadedStore(null);
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     void (async () => {
@@ -522,9 +518,7 @@ export function useSessionDocSyncState(
     setHasLocalHistory(false);
 
     if (!enabled || !runtime) {
-      return () => {
-        // no-op
-      };
+      return () => {};
     }
 
     void (async () => {
