@@ -356,3 +356,39 @@ it('carries local-only attachment preparation through both native validators', (
     ).toBe(false);
   }
 });
+
+it('validates coordinator triggers requests and responses across both IPC guards', () => {
+  const scope = { machineId: 'machine-1', workspaceId: 'workspace-1', sessionId: 'coord-1' };
+  for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+    expect(
+      validate({
+        ...scope,
+        type: 'session/coordinator-triggers',
+        action: { kind: 'status' },
+      })
+    ).toBe(true);
+    expect(
+      validate({
+        ...scope,
+        type: 'session/coordinator-triggers',
+        action: {},
+      })
+    ).toBe(false);
+  }
+  for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+    expect(
+      validate({
+        type: 'session/coordinator-triggers_response',
+        sessionId: 'coord-1',
+        ok: true,
+        triggerId: 'trg_1',
+      })
+    ).toBe(true);
+    expect(
+      validate({
+        type: 'session/coordinator-triggers_response',
+        sessionId: 'coord-1',
+      })
+    ).toBe(false);
+  }
+});

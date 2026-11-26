@@ -11,6 +11,7 @@ import {
   type CoordinatorThreadDirectoryIndex,
 } from '@/components/project-mode/coordinator-thread-model';
 import { CoordinatorObservabilityHeaderButton } from '@/components/project-mode/coordinator-observability-panel';
+import { CoordinatorTriggersHeaderButton } from '@/components/project-mode/coordinator-triggers-panel';
 import { MessageQuoteAction } from '../ai-gui/message-quote-action';
 import { reportMcpDefaultsBlocked } from '../chat/mcp-defaults-recovery';
 import { usePlaintextCopy } from '@/hooks/use-plaintext-copy';
@@ -7809,19 +7810,26 @@ export const SessionChatInterface = memo(
         </div>
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
-    const coordinatorObservabilityNode =
-      coordinatorConversation || isCoordinatorSession(session) ? (
-        <CoordinatorObservabilityHeaderButton
-          coordinatorSessionId={session.id}
-          machineId={session.machineId}
-          history={sessionHistory}
-          conversationView={conversationView ?? null}
-        />
-      ) : null;
+    const isCoordinatorHeader = Boolean(coordinatorConversation || isCoordinatorSession(session));
+    const coordinatorTriggersNode = isCoordinatorHeader ? (
+      <CoordinatorTriggersHeaderButton
+        coordinatorSessionId={session.id}
+        machineId={session.machineId}
+      />
+    ) : null;
+    const coordinatorObservabilityNode = isCoordinatorHeader ? (
+      <CoordinatorObservabilityHeaderButton
+        coordinatorSessionId={session.id}
+        machineId={session.machineId}
+        history={sessionHistory}
+        conversationView={conversationView ?? null}
+      />
+    ) : null;
 
     const toolbarNode = (
       <ErrorBoundary name="SessionChatHeader" variant="inline" resetKeys={[session.id]}>
         <div {...stylex.props(styles.toolbarHeader)}>
+          {coordinatorTriggersNode}
           {coordinatorObservabilityNode}
           {headerLauncherActions}
           {headerArchivedNode}

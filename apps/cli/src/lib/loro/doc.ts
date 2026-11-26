@@ -3222,6 +3222,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
       workItems: state.workItems as SessionDocMeta['workItems'],
+      triggers: state.triggers as SessionDocMeta['triggers'],
     };
   }
 
@@ -3241,6 +3242,27 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       draft.workItems[workItemId] = next;
     });
     return next;
+  }
+
+  upsertCoordinatorTrigger(
+    triggerId: string,
+    doc: import('@lody/shared').CoordinatorTriggerDoc
+  ): void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    this.mirror.setState((draft) => {
+      draft.triggers ??= {};
+      draft.triggers[triggerId] = doc;
+    });
+  }
+
+  deleteCoordinatorTrigger(triggerId: string): void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    if (!this.mirror.getState().triggers?.[triggerId]) return;
+    this.mirror.setState((draft) => {
+      if (draft.triggers) {
+        delete draft.triggers[triggerId];
+      }
+    });
   }
 
   /** Trusted human send only; generic history writes/imports never author this outbox. */

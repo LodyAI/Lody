@@ -141,6 +141,7 @@ export function useSessionDoc(
       externalHistoryCursor: undefined,
       acpRuntimeConfig: undefined,
       workItems: {},
+      triggers: {},
     }),
     [sessionId]
   );

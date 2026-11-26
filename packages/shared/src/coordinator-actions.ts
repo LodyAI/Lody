@@ -33,6 +33,8 @@ export const COORDINATOR_CLIENT_COMMANDS = {
   githubPrMerge: 'github.pr_merge',
   githubPrReady: 'github.pr_ready',
   githubPrClose: 'github.pr_close',
+  triggerEnable: 'trigger.enable',
+  triggerGrantDelegate: 'trigger.grant_delegate',
 } as const;
 
 export type BuiltinCoordinatorClientCommand =

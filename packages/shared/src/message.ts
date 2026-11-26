@@ -1015,7 +1015,26 @@ export type LocalSessionControlRequest =
   | SessionPreviewCreateRequest
   | SessionPreviewRevokeRequest
   | SessionPreviewStatusRequest
-  | SessionCoordinatorDiagnosticsRequest;
+  | SessionCoordinatorDiagnosticsRequest
+  | SessionCoordinatorTriggersRequest;
+
+export type SessionCoordinatorTriggersRequest = {
+  type: 'session/coordinator-triggers';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
+  action: import('./coordinator-triggers').CoordinatorTriggerAction;
+};
+
+export type SessionCoordinatorTriggersResponse = {
+  type: 'session/coordinator-triggers_response';
+  sessionId: SessionId;
+  ok: boolean;
+  error?: string;
+  triggerId?: string;
+  matchedCount?: number;
+  connectors?: import('./coordinator-triggers').CoordinatorConnectorStatusSummary;
+};
 
 export type SessionCoordinatorDiagnosticsRequest = {
   type: 'session/coordinator-diagnostics';
@@ -1109,7 +1128,8 @@ export type LocalSessionControlResponse =
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
   | SessionPreviewStatusResponse
-  | SessionCoordinatorDiagnosticsResponse;
+  | SessionCoordinatorDiagnosticsResponse
+  | SessionCoordinatorTriggersResponse;
 
 export type LocalProjectFileListResult = {
   paths: string[];

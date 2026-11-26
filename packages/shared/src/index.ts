@@ -99,6 +99,7 @@ export * from './streams-transport-diagnostics';
 export * from './machine-monitor';
 export * from './machine-protocol-capabilities';
 export * from './session-coordinator';
+export * from './coordinator-triggers';
 export * from './pi-extensions';
 export * from './repo-doc-meta';
 export * from './session-input';

@@ -4,9 +4,12 @@ import { Loro, LoroDoc, LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { Mirror, schema } from 'loro-mirror';
 
 import {
+  formatCoordinatorTriggerWakePrompt,
   getLoroStreamIdForDocId,
   getSessionIdFromRoomId,
   isSessionDocRoomId,
+  normalizeCoordinatorTriggersMap,
+  parseCoordinatorTriggerWakePrompt,
   type WorkspaceId,
 } from '../src';
 import { sessionDocSchema } from '../src/session-doc-schemas';
@@ -308,6 +311,83 @@ describe('createSessionControlPlaneMirror', () => {
         updatedAt: 1_700_000_005_000,
       },
     });
+
+    controlMirror.dispose();
+    fullMirror.dispose();
+  });
+
+  it('syncs coordinator triggers projection across control-plane mirrors and round-trips wake envelopes', () => {
+    const sourceDoc = new LoroDoc();
+    const fullMirror = createSessionMirror(sourceDoc);
+    fullMirror.setState((state) => ({
+      ...state,
+      triggers: {
+        trg_gh_1: {
+          id: 'trg_gh_1',
+          pluginId: 'github',
+          title: 'GitHub · LodyAI/Lody',
+          enabled: true,
+          summary: 'LodyAI/Lody · issue.opened',
+          instruction: 'Summarize new issues concisely.',
+          policyMode: 'summarize_and_notify',
+          createdAt: 1_700_000_000_000,
+          updatedAt: 1_700_000_010_000,
+        },
+      },
+    }));
+
+    const replicaDoc = new LoroDoc();
+    replicaDoc.import(sourceDoc.export({ mode: 'snapshot' }));
+    const controlMirror = createSessionControlPlaneMirror({
+      doc: replicaDoc,
+      initialState: { session: { id: sessionId } },
+    });
+
+    const triggers = normalizeCoordinatorTriggersMap(controlMirror.getState().triggers);
+    expect(triggers.trg_gh_1).toMatchObject({
+      id: 'trg_gh_1',
+      pluginId: 'github',
+      title: 'GitHub · LodyAI/Lody',
+      enabled: true,
+      policyMode: 'summarize_and_notify',
+    });
+
+    const prompt = formatCoordinatorTriggerWakePrompt({
+      triggerId: 'trg_gh_1',
+      pluginId: 'github',
+      title: 'GitHub · LodyAI/Lody',
+      summary: 'LodyAI/Lody · issue.opened',
+      policy: { mode: 'summarize_and_notify', maxChildrenPerRun: 2 },
+      instruction: 'Summarize new issues concisely.',
+      events: [
+        {
+          dedupKey: 'github:LodyAI/Lody:issue.opened:42',
+          eventKind: 'issue.opened',
+          occurredAt: 1_700_000_020_000,
+          actor: 'alice',
+          title: 'Fix coordinator header spacing',
+          url: 'https://github.com/LodyAI/Lody/issues/42',
+          externalRefLabel: '#42',
+        },
+      ],
+    });
+    const header = parseCoordinatorTriggerWakePrompt(prompt);
+    expect(header).toMatchObject({
+      v: 1,
+      triggerId: 'trg_gh_1',
+      pluginId: 'github',
+      title: 'GitHub · LodyAI/Lody',
+      policyMode: 'summarize_and_notify',
+      eventCount: 1,
+      events: [
+        {
+          eventKind: 'issue.opened',
+          title: 'Fix coordinator header spacing',
+          label: '#42',
+        },
+      ],
+    });
+    expect(prompt).toContain('trigger.grant_delegate');
 
     controlMirror.dispose();
     fullMirror.dispose();

@@ -2831,6 +2831,14 @@ export class MessageHandler {
     }
   }
 
+  private coordinatorTriggers?: import('@/automations/connectors/service').CoordinatorTriggerService;
+
+  setCoordinatorTriggers(
+    service: import('@/automations/connectors/service').CoordinatorTriggerService | undefined
+  ): void {
+    this.coordinatorTriggers = service;
+  }
+
   readCoordinatorStoreDiagnostics(sessionId: SessionId) {
     return this.operationCoordinator.readCoordinatorStoreDiagnostics(sessionId);
   }
@@ -8072,6 +8080,7 @@ export class MessageHandler {
           manager: this.workspaceDocument,
           readInvocation: (sessionId) => this.readActiveInvocation(sessionId),
           readActiveAssistantTurnId: (sessionId) => this.store.getTurnId(sessionId),
+          ...(this.coordinatorTriggers ? { coordinatorTriggers: this.coordinatorTriggers } : {}),
           host: localSessionHost,
           wakeOperations: () => {
             void this.operationCoordinator.wake('mcp-handoff');
@@ -8128,6 +8137,7 @@ export class MessageHandler {
             );
           },
           readActiveAssistantTurnId: (sessionId) => this.store.getTurnId(sessionId),
+          ...(this.coordinatorTriggers ? { coordinatorTriggers: this.coordinatorTriggers } : {}),
           withdrawQueuedInput: async (args) => await this.withdrawQueuedInput(args),
           ...localSessionHost,
         },

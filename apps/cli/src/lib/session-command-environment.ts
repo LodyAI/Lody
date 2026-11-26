@@ -30,6 +30,7 @@ export interface SessionCommandHost {
   readActiveTurnId(sessionId: SessionId): string | undefined;
   /** The open assistant history entry owned by this daemon's active turn, if any. */
   readActiveAssistantTurnId?(sessionId: SessionId): string | undefined;
+  coordinatorTriggers?: import('@/automations/connectors/service').CoordinatorTriggerService;
   steerSession(input: {
     sessionId: SessionId;
     expectedTurnId: string;
@@ -102,6 +103,7 @@ export interface DaemonWorkspace {
   manager: LoroDocumentManager;
   readInvocation(sessionId: SessionId): SessionActiveInvocationContextResult;
   readActiveAssistantTurnId?(sessionId: SessionId): string | undefined;
+  coordinatorTriggers?: import('@/automations/connectors/service').CoordinatorTriggerService;
   readAccess?(): DaemonWorkspaceAccess;
   host?: DaemonLocalSessionHost;
   wakeOperations?(): void;
@@ -289,6 +291,9 @@ export const getDaemonWorkspace = (): DaemonWorkspace | undefined => {
           readActiveAssistantTurnId: (sessionId: SessionId) =>
             environment.host.readActiveAssistantTurnId?.(sessionId),
         }
+      : {}),
+    ...(environment.host.coordinatorTriggers
+      ? { coordinatorTriggers: environment.host.coordinatorTriggers }
       : {}),
   };
 };

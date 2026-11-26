@@ -27,6 +27,7 @@ import type {
   CoordinatorCollaborationMode,
   CoordinatorWorkItemStage,
 } from './coordinator-work-items';
+import type { ConnectorPluginId, CoordinatorTriggerPolicyMode } from './coordinator-triggers';
 
 const historyItemAnySchema = schema.Any({ defaultLoroText: false });
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -511,6 +512,29 @@ export const coordinatorWorkItemsDocSchema = schema
   .LoroMap({}, { required: false })
   .catchall(coordinatorWorkItemDocSchema);
 
+export const coordinatorTriggerDocSchema = schema.LoroMap({
+  id: schema.String(),
+  pluginId: schema.String<ConnectorPluginId>(),
+  scheduleId: schema.String({ required: false }),
+  title: schema.String(),
+  enabled: schema.Boolean(),
+  summary: schema.String({ required: false }),
+  configJson: schema.String({ required: false }),
+  instruction: schema.String(),
+  policyMode: schema.String<CoordinatorTriggerPolicyMode>(),
+  allowedRoleIds: schema.LoroList(schema.String(), undefined, { required: false }),
+  maxChildrenPerRun: schema.Number({ required: false }),
+  lastCheckAt: schema.Number({ required: false }),
+  lastTriggeredAt: schema.Number({ required: false }),
+  lastError: schema.String({ required: false }),
+  createdAt: schema.Number(),
+  updatedAt: schema.Number(),
+});
+
+export const coordinatorTriggersDocSchema = schema
+  .LoroMap({}, { required: false })
+  .catchall(coordinatorTriggerDocSchema);
+
 /**
  * Root schema for a session doc.
  *
@@ -565,4 +589,6 @@ export const sessionDocSchema = schema({
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
   /** Coordinator control-plane task-group (`WorkItem`) map; absent on ordinary sessions. */
   workItems: coordinatorWorkItemsDocSchema,
+  /** Coordinator control-plane mounted triggers & schedule policy projection; absent on ordinary sessions. */
+  triggers: coordinatorTriggersDocSchema,
 });

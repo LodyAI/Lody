@@ -17,6 +17,7 @@ import {
 } from '../src/components/project-mode/coordinator-bubble-avatar';
 import { CoordinatorProactiveCard } from '../src/components/project-mode/coordinator-action-bar';
 import { CoordinatorObservabilityHeaderButton } from '../src/components/project-mode/coordinator-observability-panel';
+import { CoordinatorTriggersHeaderButton } from '../src/components/project-mode/coordinator-triggers-panel';
 import { ProjectBoardView } from '../src/components/project-mode/project-board';
 import { initI18n } from '../src/i18n';
 import {
@@ -449,5 +450,57 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     expect(sentPrompts[0]).toContain('[workItemId=wi-prop-1]');
     expect(prefilledPrompts[0]).toContain('T1 拆分认证中间件重构');
     expect(prefilledPrompts[0]).toContain('[workItemId=wi-prop-1]');
+  });
+
+  it('opens the Coordinator Triggers & Integrations Hub with rounded brand cards and GitHub configurator', async () => {
+    await initI18n('zh_CN');
+
+    await act(async () => {
+      root!.render(
+        React.createElement(CoordinatorTriggersHeaderButton, {
+          coordinatorSessionId: 'coord-triggers-1' as never,
+          machineId: 'machine-1',
+        })
+      );
+    });
+
+    const triggerBtn = container!.querySelector<HTMLButtonElement>(
+      '[data-coordinator-triggers-button]'
+    );
+    expect(triggerBtn).not.toBeNull();
+    expect(triggerBtn!.textContent).toContain('触发器');
+
+    await act(async () => {
+      triggerBtn!.click();
+    });
+
+    const dialog = document.querySelector('[data-testid="coordinator-triggers-dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog!.textContent).toContain('协调者触发器与集成');
+
+    const scheduleCard = dialog!.querySelector<HTMLButtonElement>(
+      '[data-connector-card="schedule"]'
+    );
+    const githubCard = dialog!.querySelector<HTMLButtonElement>('[data-connector-card="github"]');
+    const linearCard = dialog!.querySelector<HTMLButtonElement>('[data-connector-card="linear"]');
+    const slackCard = dialog!.querySelector<HTMLButtonElement>('[data-connector-card="slack"]');
+    const gmailCard = dialog!.querySelector<HTMLButtonElement>('[data-connector-card="gmail"]');
+    const webhookCard = dialog!.querySelector<HTMLButtonElement>('[data-connector-card="webhook"]');
+
+    expect(scheduleCard?.disabled).toBe(false);
+    expect(githubCard?.disabled).toBe(false);
+    expect(linearCard?.disabled).toBe(true);
+    expect(slackCard?.disabled).toBe(true);
+    expect(gmailCard?.disabled).toBe(true);
+    expect(webhookCard?.disabled).toBe(true);
+    expect(linearCard?.textContent).toContain('即将推出');
+
+    await act(async () => {
+      githubCard!.click();
+    });
+
+    expect(dialog!.textContent).toContain('添加 GitHub 事件监测');
+    expect(dialog!.textContent).toContain('仅总结提醒（默认）');
+    expect(dialog!.textContent).toContain('允许自动创建子对话');
   });
 });

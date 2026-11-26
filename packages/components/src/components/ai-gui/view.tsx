@@ -9,8 +9,11 @@ import {
   formatCoordinatorAnchorId,
   isCoordinatorSession,
   normalizeSessionTurnInputConfig,
+  parseCoordinatorTriggerWakePrompt,
+  type CoordinatorTriggerWakeHeader,
   type SessionLocalAttachment,
 } from '@lody/shared';
+import { ConnectorBrandLogo } from '../project-mode/coordinator-triggers-panel';
 import { AgentRoleProposalNotice } from './agent-role-proposal-notice';
 import type { AgentRoleProposalMeta } from '@lody/shared';
 import { MessageAuthorIdentity } from './message-author-identity';
@@ -5491,6 +5494,172 @@ export function UserMessageMetadataAuthor({
   return null;
 }
 
+const triggerWakeStyles = stylex.create({
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    width: '100%',
+    paddingBlock: 10,
+    paddingInline: space[3],
+    borderRadius: radius.large,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    backgroundColor: colors.elevatedBackground,
+  },
+  topRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[2],
+    minWidth: 0,
+  },
+  leftGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    minWidth: 0,
+    flex: 1,
+  },
+  iconBox: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    borderRadius: radius.medium,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    flexShrink: 0,
+  },
+  titleText: {
+    fontSize: textScale.footnoteSize,
+    lineHeight: textScale.footnoteLeading,
+    fontWeight: 600,
+    color: colors.label,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  metaGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  badge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: 20,
+    paddingInline: 7,
+    borderRadius: radius.full,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    color: colors.secondaryLabel,
+    fontSize: 11,
+    fontWeight: 500,
+  },
+  badgeDelegate: {
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.accent} 14%)`,
+    color: colors.accent,
+  },
+  timeLabel: {
+    fontSize: 11,
+    color: colors.tertiaryLabel,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  eventsList: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  eventChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 5,
+    maxWidth: '100%',
+    paddingBlock: 3,
+    paddingInline: 8,
+    borderRadius: radius.medium,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    },
+    color: colors.label,
+    fontSize: 12,
+    cursor: 'pointer',
+  },
+  eventChipText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: 360,
+  },
+});
+
+function CoordinatorTriggerWakeBanner({
+  header,
+  timestampLabel,
+}: {
+  header: CoordinatorTriggerWakeHeader;
+  timestampLabel?: string;
+}) {
+  const { t } = useTranslation();
+  const isDelegate = header.policyMode === 'auto_delegate';
+  return (
+    <div {...stylex.props(triggerWakeStyles.card)} data-testid="coordinator-trigger-wake-banner">
+      <div {...stylex.props(triggerWakeStyles.topRow)}>
+        <div {...stylex.props(triggerWakeStyles.leftGroup)}>
+          <span {...stylex.props(triggerWakeStyles.iconBox)}>
+            <ConnectorBrandLogo pluginId={header.pluginId} size={14} />
+          </span>
+          <span {...stylex.props(triggerWakeStyles.titleText)}>{header.title}</span>
+          <span {...stylex.props(triggerWakeStyles.badge)}>
+            {t('projectMode.triggers.wakeEventCount', '{{count}} event(s)', {
+              count: header.eventCount,
+            })}
+          </span>
+        </div>
+        <div {...stylex.props(triggerWakeStyles.metaGroup)}>
+          <span
+            {...stylex.props(
+              triggerWakeStyles.badge,
+              isDelegate && triggerWakeStyles.badgeDelegate
+            )}
+          >
+            {isDelegate
+              ? t('projectMode.triggers.policy.badgeDelegate', 'Auto-delegate')
+              : t('projectMode.triggers.policy.badgeNotify', 'Notify only')}
+          </span>
+          {timestampLabel ? (
+            <span {...stylex.props(triggerWakeStyles.timeLabel)}>{timestampLabel}</span>
+          ) : null}
+        </div>
+      </div>
+      {header.events.length > 0 ? (
+        <div {...stylex.props(triggerWakeStyles.eventsList)}>
+          {header.events.map((ev, idx) => (
+            <button
+              key={`${ev.eventKind}:${idx}`}
+              type="button"
+              onClick={() => {
+                if (ev.url) void openExternalUrl(ev.url);
+              }}
+              {...stylex.props(triggerWakeStyles.eventChip)}
+            >
+              <span {...stylex.props(triggerWakeStyles.eventChipText)}>
+                {ev.label ? `${ev.label} · ${ev.title}` : ev.title}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const UserMessageRowView = ({
   message,
   sessionId,
@@ -5648,6 +5817,17 @@ const UserMessageRowView = ({
     },
     [isSavingEdit, message, onEdit]
   );
+
+  const triggerWakeHeader = useMemo(
+    () => parseCoordinatorTriggerWakePrompt(getTextContentFromMessageItems(message.items)),
+    [message.items]
+  );
+
+  if (triggerWakeHeader) {
+    return (
+      <CoordinatorTriggerWakeBanner header={triggerWakeHeader} timestampLabel={timestampLabel} />
+    );
+  }
 
   return (
     <div

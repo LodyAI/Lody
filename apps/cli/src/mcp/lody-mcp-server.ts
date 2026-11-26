@@ -55,6 +55,11 @@ import {
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
   parseGitHubPullRequestUrl,
+  COORDINATOR_CLIENT_COMMANDS,
+  CoordinatorTriggerPolicyModeSchema,
+  formatConnectorTriggerSummary,
+  GitHubTriggerEventKindSchema,
+  type CoordinatorTriggerUpsertPayload,
 } from '@lody/shared';
 import {
   resolveOrPrepareSessionAttachments,
@@ -289,6 +294,7 @@ const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
 const COORDINATOR_SEND_MESSAGE_TOOL_NAME = 'lody_coordinator_send_message';
 const COORDINATOR_SET_STATUS_TOOL_NAME = 'lody_coordinator_set_status';
 const COORDINATOR_WORK_ITEM_TOOL_NAME = 'lody_coordinator_work_item';
+const COORDINATOR_TRIGGER_TOOL_NAME = 'lody_coordinator_trigger';
 const MAX_COORDINATOR_MESSAGE_CHARS = 64 * 1024;
 const MAX_COORDINATOR_STATUS_CHARS = 240;
 
@@ -523,6 +529,91 @@ const CoordinatorWorkItemInputSchema = z
       message: 'Provide at least one of workItemId, title, mode, externalRefs, or members',
     }
   );
+
+const CoordinatorTriggerToolInputSchema = z
+  .object({
+    action: z
+      .enum(['list', 'propose', 'pause'])
+      .describe(
+        '"list" reads mounted triggers and GitHub connector status; "propose" presents an interactive confirmation card to enable or update a GitHub trigger; "pause" pauses an existing trigger.'
+      ),
+    triggerId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .optional()
+      .describe(
+        'Target trigger id (required for "pause", optional when updating an existing trigger in "propose").'
+      ),
+    title: z
+      .string()
+      .trim()
+      .min(1)
+      .max(160)
+      .optional()
+      .describe(
+        'Short human-readable trigger title in the user language (required for "propose").'
+      ),
+    repoFullName: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
+      .optional()
+      .describe('GitHub repository "owner/repo" to monitor (required for "propose").'),
+    events: z
+      .array(GitHubTriggerEventKindSchema)
+      .min(1)
+      .max(6)
+      .optional()
+      .describe(
+        'GitHub events to watch: "issue.opened", "issue.commented", "pr.opened", "pr.review_requested", "workflow_run.failed", "release.published" (required for "propose").'
+      ),
+    labels: z
+      .array(z.string().trim().min(1).max(64))
+      .max(12)
+      .optional()
+      .describe(
+        'Optional GitHub label filter (matches items carrying at least one of these labels).'
+      ),
+    excludeBots: z
+      .boolean()
+      .optional()
+      .describe('Exclude bot accounts such as dependabot or github-actions (defaults to true).'),
+    pollIntervalSec: z
+      .number()
+      .int()
+      .min(30)
+      .max(3600)
+      .optional()
+      .describe('Polling interval in seconds (defaults to 60).'),
+    instruction: z
+      .string()
+      .trim()
+      .min(1)
+      .max(8192)
+      .optional()
+      .describe(
+        'Clear instruction for what you (the coordinator) should summarize or do when matching events arrive (required for "propose").'
+      ),
+    policyMode: CoordinatorTriggerPolicyModeSchema.optional().describe(
+      'Recommended permission mode: default to "summarize_and_notify" (Notify Only) unless the user explicitly asked to automatically create child conversations ("auto_delegate").'
+    ),
+    allowedRoleIds: z
+      .array(z.string().trim().min(1).max(128))
+      .max(16)
+      .optional()
+      .describe('Optional Agent Role IDs allowed when policyMode is "auto_delegate".'),
+    markdown: z
+      .string()
+      .trim()
+      .max(MAX_COORDINATOR_MESSAGE_CHARS)
+      .optional()
+      .describe(
+        'Optional accompanying chat bubble message shown above the trigger confirmation card.'
+      ),
+  })
+  .strict();
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
 const MAX_MCP_SESSION_WAIT_TIMEOUT_SECONDS = 3_600;
@@ -6009,6 +6100,172 @@ export function buildSessionToolServer(
         }
       }
     );
+
+    registerSessionTool(
+      COORDINATOR_TRIGGER_TOOL_NAME,
+      {
+        summary:
+          'List mounted coordinator triggers, propose a GitHub monitor trigger for user confirmation, or pause a trigger.',
+        title: 'Manage coordinator triggers',
+        description:
+          'Manage standing event triggers on this coordinator conversation. Actions: "list" (inspect active triggers and GitHub connection status), "propose" (send an interactive confirmation card to enable a GitHub trigger; nothing runs until the user confirms), and "pause" (pause an existing trigger). For time-based recurring triggers, use lody_schedule propose with destination { kind: "existing_session", sessionId } targeting this coordinator. Ready to call directly without lody_help.',
+        inputSchema: CoordinatorTriggerToolInputSchema,
+        exemptFromHelp: true,
+      },
+      async (args) => {
+        try {
+          const ctx = getSessionContext();
+          const daemon = getDaemonWorkspace();
+          if (
+            !daemon ||
+            ctx.workspaceId !== daemon.workspaceId ||
+            ctx.machineId !== daemon.machineId
+          ) {
+            throw new Error(`${COORDINATOR_TRIGGER_TOOL_NAME} requires the local daemon workspace`);
+          }
+          const sessionId = ctx.sessionId as SessionId;
+          const row = await daemon.manager.repo.getDocMeta(getSessionRoomId(sessionId));
+          const meta = row?.meta as SessionMeta | undefined;
+          if (!row || !meta || isLoroRepoDocDeleted(row) || !isCoordinatorSession(meta)) {
+            throw new Error(
+              `${COORDINATOR_TRIGGER_TOOL_NAME} is only available in coordinator conversations`
+            );
+          }
+          const triggerService = daemon.coordinatorTriggers;
+          if (!triggerService) {
+            throw new Error('Coordinator trigger service unavailable on this daemon');
+          }
+
+          if (args.action === 'list') {
+            const statusRes = await triggerService.handleAction(sessionId, { kind: 'status' });
+            return jsonTextResult({
+              ok: true,
+              triggers: triggerService.listForSession(sessionId),
+              connectors: statusRes.connectors,
+            });
+          }
+
+          if (args.action === 'pause') {
+            if (!args.triggerId) {
+              throw new Error('triggerId is required for action "pause"');
+            }
+            const res = await triggerService.handleAction(sessionId, {
+              kind: 'toggle',
+              triggerId: args.triggerId,
+              enabled: false,
+            });
+            if (!res.ok) throw new Error(res.error ?? 'Failed to pause trigger');
+            return jsonTextResult({ ok: true, triggerId: args.triggerId, enabled: false });
+          }
+
+          // action === 'propose'
+          if (!args.title || !args.repoFullName || !args.events?.length || !args.instruction) {
+            throw new Error(
+              'title, repoFullName, events, and instruction are required when proposing a GitHub trigger'
+            );
+          }
+          const triggerId = args.triggerId ?? `trg_${randomUUID().slice(0, 12)}`;
+          const config = {
+            pluginId: 'github' as const,
+            repoFullName: args.repoFullName,
+            events: args.events,
+            ...(args.labels?.length ? { labels: args.labels } : {}),
+            excludeBots: args.excludeBots ?? true,
+            pollIntervalSec: args.pollIntervalSec ?? 60,
+          };
+          const recommendedMode = args.policyMode ?? 'summarize_and_notify';
+          const basePayload: CoordinatorTriggerUpsertPayload = {
+            triggerId,
+            title: args.title,
+            enabled: true,
+            config,
+            instruction: args.instruction,
+            policy: {
+              mode: 'summarize_and_notify',
+              maxChildrenPerRun: 2,
+            },
+          };
+          const delegatePayload: CoordinatorTriggerUpsertPayload = {
+            ...basePayload,
+            policy: {
+              mode: 'auto_delegate',
+              ...(args.allowedRoleIds?.length ? { allowedRoleIds: args.allowedRoleIds } : {}),
+              maxChildrenPerRun: 2,
+            },
+          };
+          const summaryLine = `${formatConnectorTriggerSummary(config)} · ${args.instruction.slice(0, 160)}`;
+          const actions =
+            recommendedMode === 'auto_delegate'
+              ? [
+                  {
+                    id: 'enable_delegate',
+                    label: '启用并允许自动创建子对话',
+                    description: '开启此 GitHub 监测触发器，并允许条件满足时自动拉起子对话处理。',
+                    tone: 'primary' as const,
+                    intent: {
+                      kind: 'client_command' as const,
+                      command: COORDINATOR_CLIENT_COMMANDS.triggerEnable,
+                      params: { payload: delegatePayload },
+                    },
+                  },
+                  {
+                    id: 'enable_notify',
+                    label: '仅作为提醒启用（不自动建子对话）',
+                    description: '开启监测但仅发送摘要提醒，每次由你确认是否派发子对话。',
+                    tone: 'default' as const,
+                    intent: {
+                      kind: 'client_command' as const,
+                      command: COORDINATOR_CLIENT_COMMANDS.triggerEnable,
+                      params: { payload: basePayload },
+                    },
+                  },
+                ]
+              : [
+                  {
+                    id: 'enable_notify',
+                    label: '启用触发器（仅总结提醒）',
+                    description: '捕获新动态后在对话中为你总结提醒，默认不自动创建子对话。',
+                    tone: 'primary' as const,
+                    intent: {
+                      kind: 'client_command' as const,
+                      command: COORDINATOR_CLIENT_COMMANDS.triggerEnable,
+                      params: { payload: basePayload },
+                    },
+                  },
+                  {
+                    id: 'enable_delegate',
+                    label: '启用并允许自动创建子对话',
+                    description: '除提醒外，允许该触发器在命中时直接创建子对话跟进处理。',
+                    tone: 'default' as const,
+                    intent: {
+                      kind: 'client_command' as const,
+                      command: COORDINATOR_CLIENT_COMMANDS.triggerEnable,
+                      params: { payload: delegatePayload },
+                    },
+                  },
+                ];
+
+          await applyCoordinatorTurnOutput({
+            kind: 'message',
+            markdown: args.markdown ?? '',
+            card: {
+              kind: 'decision',
+              title: args.title,
+              summary: summaryLine,
+              actions,
+            },
+          });
+
+          return jsonTextResult({
+            ok: true,
+            proposedTriggerId: triggerId,
+            recommendedMode,
+          });
+        } catch (error) {
+          return mcpErrorResult(error);
+        }
+      }
+    );
   }
 
   registerAgentRoleTools(
@@ -6388,6 +6645,25 @@ export function buildSessionToolServer(
     }
   );
 
+  const assertTriggerTurnDelegationAllowed = async (args: {
+    requestedCount: number;
+    requestedRoleIds: readonly string[];
+    requireRoleWhenAllowlisted?: boolean;
+  }): Promise<void> => {
+    const daemon = getDaemonWorkspace();
+    if (!daemon?.coordinatorTriggers) return;
+    const ctx = getSessionContext();
+    const sessionId = ctx.sessionId as SessionId;
+    const invocation = daemon.readInvocation(sessionId);
+    await daemon.coordinatorTriggers.assertDelegationAllowed({
+      sessionId,
+      sourceTurnId: invocation.active ? invocation.sourceTurnId : undefined,
+      requestedCount: args.requestedCount,
+      requestedRoleIds: args.requestedRoleIds,
+      requireRoleWhenAllowlisted: args.requireRoleWhenAllowlisted,
+    });
+  };
+
   registerSessionTool(
     SESSION_CREATE_TOOL_NAME,
     {
@@ -6410,6 +6686,13 @@ export function buildSessionToolServer(
         if (isBatchModeInput(input)) {
           const batch: SessionCreateManyToolInput =
             SessionCreateManyRuntimeInputSchema.parse(input);
+          const roleIds = batch.items
+            .map((item) => item.agentRoleId ?? batch.defaults?.agentRoleId)
+            .filter((id): id is string => Boolean(id));
+          await assertTriggerTurnDelegationAllowed({
+            requestedCount: batch.items.length,
+            requestedRoleIds: roleIds,
+          });
           return jsonTextResult(await startSessionCreateManyOperation(batch));
         }
         const args: SessionCreateToolInput = SessionCreateRuntimeInputSchema.parse(input);
@@ -6419,6 +6702,10 @@ export function buildSessionToolServer(
             await snapshotOperation(ctx.sessionId as SessionId, args.operationId)
           );
         }
+        await assertTriggerTurnDelegationAllowed({
+          requestedCount: 1,
+          requestedRoleIds: args.agentRoleId ? [args.agentRoleId] : [],
+        });
         if (args.operationId) {
           return jsonTextResult(await startSessionCreateOperation(args));
         }
@@ -6526,9 +6813,19 @@ export function buildSessionToolServer(
       try {
         if (isBatchModeInput(input)) {
           const batch: SessionChatManyToolInput = SessionChatManyToolInputSchema.parse(input);
+          await assertTriggerTurnDelegationAllowed({
+            requestedCount: batch.items.length,
+            requestedRoleIds: [],
+            requireRoleWhenAllowlisted: false,
+          });
           return jsonTextResult(await startSessionChatManyOperation(batch));
         }
         const args: SessionChatToolInput = SessionChatToolInputSchema.parse(input);
+        await assertTriggerTurnDelegationAllowed({
+          requestedCount: 1,
+          requestedRoleIds: [],
+          requireRoleWhenAllowlisted: false,
+        });
         if (args.operationId) {
           return jsonTextResult(await startSessionChatOperation(args));
         }

@@ -18,6 +18,7 @@ import {
   normalizeCoordinatorActionSpecs,
   normalizeCoordinatorProactiveCard,
 } from './coordinator-actions';
+import { CoordinatorTriggerActionSchema } from './coordinator-triggers';
 import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
 import { SessionHistoryContentPatchSchema } from './session-data/history-patches';
@@ -2479,6 +2480,15 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
       sessionId: SessionIdSchema,
     })
     .strict(),
+  z
+    .object({
+      type: z.literal('session/coordinator-triggers'),
+      machineId: MachineIdSchema,
+      workspaceId: WorkspaceIdSchema,
+      sessionId: SessionIdSchema,
+      action: CoordinatorTriggerActionSchema,
+    })
+    .strict(),
 ]);
 
 export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
@@ -2586,6 +2596,28 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
           })
           .strict()
       ),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('session/coordinator-triggers_response'),
+      sessionId: SessionIdSchema,
+      ok: z.boolean(),
+      error: z.string().optional(),
+      triggerId: z.string().optional(),
+      matchedCount: z.number().optional(),
+      connectors: z
+        .object({
+          github: z
+            .object({
+              status: z.enum(['builtin', 'connected', 'local_cli', 'needs_auth']),
+              source: z.enum(['managed', 'gh']).optional(),
+              suggestedRepos: z.array(z.string()),
+            })
+            .strict(),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
 ]);

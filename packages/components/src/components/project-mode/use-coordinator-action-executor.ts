@@ -1,6 +1,7 @@
 import { usePlatformCapability } from '@lody/platform/react';
 import {
   COORDINATOR_CLIENT_COMMANDS,
+  CoordinatorTriggerUpsertPayloadSchema,
   buildSessionTurnInputConfig,
   createCoordinatorReplyRef,
   extractLinkedSessionIdsFromText,
@@ -11,14 +12,18 @@ import {
   githubMergePullRequest,
   githubSetPullRequestState,
   resolveSessionPrimaryPullRequest,
+  schedulePolicyTriggerId,
   type CoordinatorActionResolution,
   type CoordinatorActionSpec,
   type CoordinatorCardKind,
   type CoordinatorReplyRef,
   type GitHubMergeMethod,
+  type MachineId,
+  type SessionCoordinatorTriggersResponse,
   type SessionId,
   type SessionMeta,
   type SessionPullRequestView,
+  type WorkspaceId,
 } from '@lody/shared';
 import { useAtomValue, useStore } from 'jotai';
 import { useCallback, useMemo } from 'react';
@@ -37,6 +42,7 @@ import {
   withGitHubOperationTokenRetry,
   withGitHubTokenRetry,
 } from '@/lib/github-token';
+import { sendLocalSessionControl } from '@/lib/electron-ipc-client';
 import { openExternalUrl } from '@/lib/native-browser';
 import { toast } from '@/lib/toast';
 import {
@@ -391,6 +397,145 @@ export function useCoordinatorActionExecutor(options: {
           throw err;
         }
       },
+
+      [COORDINATOR_CLIENT_COMMANDS.triggerEnable]: async (params, ctx) => {
+        const parsed = CoordinatorTriggerUpsertPayloadSchema.safeParse(params?.payload);
+        if (!parsed.success) {
+          toast.error(t('projectMode.triggers.saveError', 'Failed to save trigger'));
+          throw new Error('Invalid trigger proposal payload');
+        }
+        const coordinatorMeta = store.get(
+          sessionMetaAtomFamily(getSessionRoomId(ctx.coordinatorSessionId))
+        ) as SessionMeta | undefined;
+        const machineId = coordinatorMeta?.machineId;
+        if (!currentWorkspaceId || !machineId) {
+          toast.error(t('projectMode.triggers.daemonUnavailable', 'Local daemon unavailable'));
+          throw new Error('Coordinator machine unavailable');
+        }
+        const res = await sendLocalSessionControl({
+          type: 'session/coordinator-triggers',
+          machineId: machineId as MachineId,
+          workspaceId: currentWorkspaceId as WorkspaceId,
+          sessionId: ctx.coordinatorSessionId,
+          action: { kind: 'upsert', payload: parsed.data },
+        });
+        if (!res.ok) {
+          const message = res.error || 'Trigger save failed';
+          toast.error(t('projectMode.triggers.saveError', 'Failed to save trigger'), {
+            description: message,
+          });
+          throw new Error(message);
+        }
+        const reply = res.responses.find(
+          (item): item is SessionCoordinatorTriggersResponse =>
+            item.type === 'session/coordinator-triggers_response'
+        );
+        if (!reply?.ok) {
+          const message = reply?.error ?? 'Trigger save failed';
+          toast.error(t('projectMode.triggers.saveError', 'Failed to save trigger'), {
+            description: message,
+          });
+          throw new Error(message);
+        }
+        toast.success(
+          t('projectMode.triggers.enabledToast', 'Trigger “{{title}}” enabled', {
+            title: parsed.data.title,
+          })
+        );
+        return {
+          persistResolution: true,
+          summary:
+            parsed.data.policy.mode === 'auto_delegate'
+              ? t('projectMode.triggers.state.enabledDelegate', 'Enabled (auto-delegate)')
+              : t('projectMode.triggers.state.enabledNotify', 'Enabled (notify only)'),
+        };
+      },
+
+      [COORDINATOR_CLIENT_COMMANDS.triggerGrantDelegate]: async (params, ctx) => {
+        const scheduleId = readParamString(params, 'scheduleId');
+        const triggerId =
+          readParamString(params, 'triggerId') ??
+          (scheduleId ? schedulePolicyTriggerId(scheduleId) : undefined);
+        if (!triggerId) {
+          throw new Error('Missing triggerId');
+        }
+        const allowedRoleIds = Array.isArray(params?.allowedRoleIds)
+          ? params.allowedRoleIds.filter(
+              (entry): entry is string => typeof entry === 'string' && entry.trim().length > 0
+            )
+          : undefined;
+        const coordinatorMeta = store.get(
+          sessionMetaAtomFamily(getSessionRoomId(ctx.coordinatorSessionId))
+        ) as SessionMeta | undefined;
+        const machineId = coordinatorMeta?.machineId;
+        if (!currentWorkspaceId || !machineId) {
+          toast.error(t('projectMode.triggers.daemonUnavailable', 'Local daemon unavailable'));
+          throw new Error('Coordinator machine unavailable');
+        }
+        const res = await sendLocalSessionControl({
+          type: 'session/coordinator-triggers',
+          machineId: machineId as MachineId,
+          workspaceId: currentWorkspaceId as WorkspaceId,
+          sessionId: ctx.coordinatorSessionId,
+          action: {
+            kind: 'set_policy',
+            triggerId,
+            ...(scheduleId ? { scheduleId } : {}),
+            policy: {
+              mode: 'auto_delegate',
+              ...(allowedRoleIds?.length ? { allowedRoleIds } : {}),
+              maxChildrenPerRun: 2,
+            },
+          },
+        });
+        if (!res.ok) {
+          const message = res.error || 'Failed to update trigger policy';
+          toast.error(t('projectMode.triggers.saveError', 'Failed to save trigger'), {
+            description: message,
+          });
+          throw new Error(message);
+        }
+        const reply = res.responses.find(
+          (item): item is SessionCoordinatorTriggersResponse =>
+            item.type === 'session/coordinator-triggers_response'
+        );
+        if (!reply?.ok) {
+          const message = reply?.error ?? 'Failed to update trigger policy';
+          toast.error(t('projectMode.triggers.saveError', 'Failed to save trigger'), {
+            description: message,
+          });
+          throw new Error(message);
+        }
+
+        const followUpPrompt = readParamString(params, 'prompt');
+        if (followUpPrompt) {
+          const replyRef = createCoordinatorReplyRef({
+            target: {
+              kind: 'coordinator_bubble',
+              turnId: ctx.turnId,
+              bubbleId: ctx.bubbleId,
+            },
+            existingThreadRootId: ctx.activeThreadRootId ?? ctx.bubbleReplyTo?.threadRootId,
+            author: 'coordinator',
+            text: ctx.bubbleBody,
+          });
+          await onSendCoordinatorPrompt(followUpPrompt, replyRef);
+        } else {
+          toast.success(
+            t(
+              'projectMode.triggers.state.grantedDelegate',
+              'Auto-delegate enabled for this trigger'
+            )
+          );
+        }
+        return {
+          persistResolution: true,
+          summary: t(
+            'projectMode.triggers.state.grantedDelegate',
+            'Auto-delegate enabled for this trigger'
+          ),
+        };
+      },
     });
 
     if (extraCommands) {
@@ -407,8 +552,10 @@ export function useCoordinatorActionExecutor(options: {
     onOpenExternalLink,
     onOpenPr,
     onOpenTask,
+    onSendCoordinatorPrompt,
     preferredMergeMethod,
     resolvePrTarget,
+    store,
     t,
   ]);
 
