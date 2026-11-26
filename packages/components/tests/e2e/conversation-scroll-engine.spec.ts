@@ -741,3 +741,219 @@ for (const width of [375, 1280]) {
     );
   });
 }
+
+test.describe('sticky work-group summary headers', () => {
+  test.beforeAll(async ({ browser }) => {
+    test.setTimeout(90_000);
+    const warmup = await browser.newPage();
+    try {
+      await warmup.goto('/iframe.html');
+      await warmup.evaluate(async () => {
+        const modulePath = '/src/stories/ConversationViewStream.stories.tsx';
+        await import(modulePath);
+      });
+    } finally {
+      await warmup.close();
+    }
+  });
+
+  test('pins expanded live and completed work groups below the session header across virtualization, handover, exit, collapse, and keyboard focus', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1100, height: 640 });
+    await page.goto(
+      '/iframe.html?id=sessions-conversationview--sticky-work-group-summary&viewMode=story'
+    );
+    const viewport = page.locator('[data-conversation-scroll-engine]');
+    await expect(viewport).toHaveAttribute('data-window-session-stream-ready', /.+/, {
+      timeout: 20_000,
+    });
+
+    const header = page.locator('[data-testid="synthetic-session-header"]');
+    const composer = page.locator('[data-testid="synthetic-composer"]');
+    const stickyRoot = page.locator('[data-sticky-work-group-header]');
+    const stickyButton = stickyRoot.locator('[data-sticky-work-group-button]');
+
+    const scrollViewportTo = async (targetTop: number) => {
+      await viewport.evaluate((el, top) => {
+        const delta = top - el.scrollTop;
+        if (delta !== 0) el.dispatchEvent(new WheelEvent('wheel', { deltaY: delta }));
+        el.scrollTop = top;
+      }, targetTop);
+    };
+
+    const headerBottom = await header.evaluate((el) => el.getBoundingClientRect().bottom);
+    const composerTop = await composer.evaluate((el) => el.getBoundingClientRect().top);
+
+    // 1. Live in-progress ("Working") group opens expanded at the bottom and sticks below the session header.
+    await expect(stickyRoot).toBeVisible();
+    await expect(stickyRoot).toHaveAttribute('data-sticky-work-group-kind', 'worked_group_header');
+    await expect(stickyButton).toHaveText(/Working/);
+    await expect(stickyButton).toHaveAttribute('aria-expanded', 'true');
+    const liveStickyRect = await stickyRoot.evaluate((el) => el.getBoundingClientRect());
+    expect(liveStickyRect.top).toBeCloseTo(headerBottom, 0);
+    expect(liveStickyRect.bottom).toBeLessThan(composerTop);
+
+    // Clicking the sticky live header collapses it and restores the collapsed inline header at the top edge.
+    const liveHeaderId = await stickyButton.getAttribute('data-sticky-work-group-button');
+    expect(liveHeaderId).toBeTruthy();
+    await stickyButton.click();
+    await expect(stickyRoot).toHaveCount(0);
+    const collapsedLiveInline = viewport.locator(`[data-work-group-header-id="${liveHeaderId}"]`);
+    await expect(collapsedLiveInline).toBeVisible();
+    await expect(collapsedLiveInline).toHaveAttribute('aria-expanded', 'false');
+    const collapsedLiveTop = await collapsedLiveInline.evaluate(
+      (el) => el.getBoundingClientRect().top
+    );
+    expect(collapsedLiveTop).toBeGreaterThanOrEqual(headerBottom - 1);
+    expect(collapsedLiveTop).toBeLessThanOrEqual(headerBottom + 16);
+
+    // 2. Scroll to top: completed turn ("Worked for 42s") is collapsed -> no sticky bar, normal layout preserved.
+    await scrollViewportTo(0);
+    await expect(stickyRoot).toHaveCount(0);
+    const completedTurn = page.locator('[data-assistant-turn-id="sticky-completed-turn"]');
+    const workedInline = completedTurn
+      .locator('button[data-conversation-disclosure="group"]')
+      .first();
+    await expect(workedInline).toBeVisible();
+    await expect(workedInline).toHaveText(/Worked for 42s/);
+    await expect(workedInline).toHaveAttribute('aria-expanded', 'false');
+
+    // Expand completed worked group while visible in viewport -> still NOT sticky until scrolled past.
+    await workedInline.click();
+    await expect(workedInline).toHaveAttribute('aria-expanded', 'true');
+    await expect(stickyRoot).toHaveCount(0);
+
+    // Expand the first nested activity group (60+ tool/thought items -> exceeds 800px virtualization overscan).
+    const firstActivityInline = completedTurn
+      .locator('button[data-conversation-disclosure="group"]')
+      .nth(1);
+    await expect(firstActivityInline).toHaveText(/Ran 36 commands/);
+    const firstActivityId = await firstActivityInline.getAttribute('data-work-group-header-id');
+    expect(firstActivityId).toBeTruthy();
+    await firstActivityInline.click();
+    await expect(firstActivityInline).toHaveAttribute('aria-expanded', 'true');
+
+    // Scroll slightly past the outer worked-group header (still above the first activity group) -> outer sticks.
+    const workedOffsetDelta = await workedInline.evaluate(
+      (el) =>
+        el.getBoundingClientRect().top -
+        el.closest('[data-conversation-scroll-engine]')!.getBoundingClientRect().top +
+        28
+    );
+    const currentTopAfterExpand = await viewport.evaluate((el) => el.scrollTop);
+    await scrollViewportTo(currentTopAfterExpand + workedOffsetDelta);
+    await expect(stickyRoot).toHaveAttribute('data-sticky-work-group-kind', 'worked_group_header');
+    await expect(stickyButton).toHaveText(/Worked for 42s/);
+
+    // Scroll deep into the 60-item nested activity group (>1100px past its header) so virtualization unmounts the inline header.
+    const deepOffset = await viewport.evaluate((el) => el.scrollTop + 1150);
+    await scrollViewportTo(deepOffset);
+    await expect(stickyRoot).toHaveAttribute(
+      'data-sticky-work-group-kind',
+      'activity_group_header'
+    );
+    await expect(stickyButton).toHaveText(/Ran 36 commands/);
+    await expect(viewport.locator(`[data-work-group-header-id="${firstActivityId}"]`)).toHaveCount(
+      0
+    );
+
+    // 3. Click the sticky nested activity header to collapse while unmounted:
+    // inline activity header mounts cleanly BELOW the still-sticky outer "Worked for 42s" bar (zero occlusion).
+    await stickyButton.click();
+    const collapsedActivityInline = viewport.locator(
+      `[data-work-group-header-id="${firstActivityId}"]`
+    );
+    await expect(collapsedActivityInline).toBeVisible();
+    await expect(collapsedActivityInline).toHaveAttribute('aria-expanded', 'false');
+    await expect(stickyRoot).toHaveAttribute('data-sticky-work-group-kind', 'worked_group_header');
+    await expect(stickyButton).toHaveText(/Worked for 42s/);
+    const outerSurfaceBottom = await stickyRoot
+      .locator('[data-sticky-work-group-button]')
+      .evaluate((el) => el.getBoundingClientRect().bottom);
+    const nestedInlineTop = await collapsedActivityInline.evaluate(
+      (el) => el.getBoundingClientRect().top
+    );
+    expect(nestedInlineTop).toBeGreaterThanOrEqual(outerSurfaceBottom - 2);
+
+    // 4. Expand the adjacent second activity group and scroll into it -> sticky bar switches cleanly.
+    const secondActivityInline = completedTurn
+      .locator('button[data-conversation-disclosure="group"]')
+      .nth(2);
+    await expect(secondActivityInline).toHaveText(/Ran 12 commands/);
+    await secondActivityInline.click();
+    await expect(secondActivityInline).toHaveAttribute('aria-expanded', 'true');
+    const intoSecondOffset = await secondActivityInline.evaluate(
+      (el) =>
+        el.closest<HTMLElement>('[data-conversation-scroll-engine]')!.scrollTop +
+        (el.getBoundingClientRect().top -
+          el.closest<HTMLElement>('[data-conversation-scroll-engine]')!.getBoundingClientRect()
+            .top) +
+        140
+    );
+    await scrollViewportTo(intoSecondOffset);
+    await expect(stickyRoot).toHaveAttribute(
+      'data-sticky-work-group-kind',
+      'activity_group_header'
+    );
+    await expect(stickyButton).toHaveText(/Ran 12 commands/);
+
+    // 5. Scroll past the worked group into final answer prose:
+    //    - while the last work row is leaving the top edge, the sticky bar pushes up and stays above the final answer;
+    //    - once the final answer reaches the top edge, the sticky bar exits completely without occluding prose.
+    const finalAnswer = completedTurn.getByText(/STICKY-FINAL-ANSWER-1/);
+    for (let step = 0; step < 12; step += 1) {
+      if ((await finalAnswer.count()) > 0) break;
+      const nextTop = await viewport.evaluate((el) => el.scrollTop + 450);
+      await scrollViewportTo(nextTop);
+    }
+    const approachingFinalDelta = await finalAnswer.evaluate(
+      (el) =>
+        el.getBoundingClientRect().top -
+        el.closest<HTMLElement>('[data-conversation-scroll-engine]')!.getBoundingClientRect().top -
+        20
+    );
+    const beforeFinalTop = await viewport.evaluate((el) => el.scrollTop);
+    await scrollViewportTo(beforeFinalTop + approachingFinalDelta);
+    await expect(finalAnswer).toBeVisible();
+    if ((await stickyRoot.count()) > 0) {
+      const [stickyBottom, answerTop] = await Promise.all([
+        stickyButton.evaluate((el) => el.getBoundingClientRect().bottom),
+        finalAnswer.evaluate((el) => el.getBoundingClientRect().top),
+      ]);
+      expect(stickyBottom).toBeLessThanOrEqual(answerTop + 1);
+    }
+
+    const pastGroupDelta = await finalAnswer.evaluate(
+      (el) =>
+        el.getBoundingClientRect().top -
+        el.closest<HTMLElement>('[data-conversation-scroll-engine]')!.getBoundingClientRect().top +
+        8
+    );
+    const currentTopBeforeExit = await viewport.evaluate((el) => el.scrollTop);
+    await scrollViewportTo(currentTopBeforeExit + pastGroupDelta);
+    await expect(finalAnswer).toBeVisible();
+    await expect(stickyRoot).toHaveCount(0);
+
+    // 6. Keyboard & accessibility: scroll back into the outer worked group, focus sticky button, press Enter to collapse.
+    // Focus must transfer cleanly to the collapsed inline header button (not document.body), and Space re-expands it.
+    await scrollViewportTo(currentTopAfterExpand + workedOffsetDelta);
+    await expect(stickyRoot).toHaveAttribute('data-sticky-work-group-kind', 'worked_group_header');
+    const workedHeaderId = await stickyButton.getAttribute('data-sticky-work-group-button');
+    expect(workedHeaderId).toBeTruthy();
+    await stickyButton.focus();
+    await expect(stickyButton).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(stickyRoot).toHaveCount(0);
+    const restoredWorkedInline = viewport.locator(
+      `[data-work-group-header-id="${workedHeaderId}"]`
+    );
+    await expect(restoredWorkedInline).toBeVisible();
+    await expect(restoredWorkedInline).toHaveAttribute('aria-expanded', 'false');
+    await expect(restoredWorkedInline).toBeFocused();
+
+    // Pressing Space on the focused inline header re-expands it cleanly.
+    await page.keyboard.press('Space');
+    await expect(restoredWorkedInline).toHaveAttribute('aria-expanded', 'true');
+  });
+});

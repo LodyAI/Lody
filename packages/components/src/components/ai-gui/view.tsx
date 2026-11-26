@@ -132,6 +132,12 @@ import type {
 } from './conversation-list/types';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
+import {
+  collectStickyWorkGroups,
+  resolveActiveStickyWorkGroup,
+  resolveStickyCollapseTargetScreenY,
+  type StickyWorkGroupRange,
+} from './sticky-work-group';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
@@ -247,6 +253,7 @@ import {
 import { withClassName } from '@/lib/stylex';
 import { useTheme } from '@/theme-provider';
 import { conversationSurface } from './surface';
+import { conversation } from './conversation.tokens.stylex';
 import {
   isMessageActionsToggleTap,
   toggleMobileMessageActions,
@@ -600,6 +607,34 @@ const viewStyles = stylex.create({
     height: themeSpace[12],
     backgroundImage:
       'linear-gradient(to bottom in oklab, hsl(var(--background)) 0%, transparent 100%)',
+  },
+  stickyWorkGroupClip: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 'var(--conversation-top-inset, 0px)',
+    zIndex: 5,
+    overflow: 'hidden',
+  },
+  stickyWorkGroupInner: {
+    willChange: 'transform',
+  },
+  stickyWorkGroupSurface: {
+    backgroundColor: themeColors.background,
+    paddingTop: conversation.proseGap,
+    paddingBottom: themeSpace[1],
+  },
+  stickyWorkGroupFade: {
+    pointerEvents: 'none',
+    height: themeSpace[3],
+    backgroundImage:
+      'linear-gradient(to bottom in oklab, hsl(var(--background)) 0%, transparent 100%)',
+  },
+  stickyDisclosureButton: {
+    pointerEvents: 'auto',
+    width: 'fit-content',
+    maxWidth: '100%',
   },
   bottomFade: {
     pointerEvents: 'none',
@@ -3521,15 +3556,217 @@ export const SessionChatStreamView = forwardRef<
       setHasContentBelow(below > 1);
     }, [scrollViewportElement]);
 
+    // Sticky summary bar for expanded work groups ("Working" / "Worked for …" and
+    // expanded tool/thought activity groups). Computed purely from row metadata
+    // and the scroll engine's item-space geometry so headers remain pinned even
+    // after virtualization unmounts the original row.
+    const stickyWorkGroups = useMemo(() => collectStickyWorkGroups(virtualRows), [virtualRows]);
+    const stickyWorkGroupsRef = useLatestRef(stickyWorkGroups);
+    const [activeStickyGroupKey, setActiveStickyGroupKey] = useState<string | null>(null);
+    const stickyInnerRef = useRef<HTMLDivElement>(null);
+    const stickySurfaceRef = useRef<HTMLDivElement>(null);
+    const stickyPushOffsetRef = useRef(0);
+    const stickyBarHeightRef = useRef(0);
+    const rootFontSizeRef = useRef(16);
+    const [scrollbarInsetPx, setScrollbarInsetPx] = useState(0);
+    const pendingStickyCollapseFocusIdRef = useRef<string | null>(null);
+
+    const resolveTopInsetPx = useCallback((contentOffset: number) => {
+      return Math.max(0, contentOffset - rootFontSizeRef.current * 1.5);
+    }, []);
+
+    const applyStickyPushTransform = useCallback((pushOffsetPx: number) => {
+      stickyPushOffsetRef.current = pushOffsetPx;
+      const inner = stickyInnerRef.current;
+      if (!inner) return;
+      const nextTransform = pushOffsetPx === 0 ? '' : `translateY(${pushOffsetPx}px)`;
+      if (inner.style.transform !== nextTransform) {
+        inner.style.transform = nextTransform;
+      }
+    }, []);
+
+    const syncStickyWorkGroup = useCallback(() => {
+      const vlist = listRef.current;
+      const groups = stickyWorkGroupsRef.current;
+      if (!initialScrollRestored || !vlist || messageSelection !== null || groups.length === 0) {
+        applyStickyPushTransform(0);
+        setActiveStickyGroupKey(null);
+        return;
+      }
+      const next = resolveActiveStickyWorkGroup({
+        groups,
+        leadingRowCount,
+        scrollOffset: vlist.scrollOffset,
+        contentOffset: vlist.contentOffset,
+        topInsetPx: resolveTopInsetPx(vlist.contentOffset),
+        stickyBarHeight: stickyBarHeightRef.current,
+        getItemOffset: (listIndex) => vlist.getItemOffset(listIndex),
+        getItemSize: (listIndex) => vlist.getItemSize(listIndex),
+      });
+      if (!next) {
+        applyStickyPushTransform(0);
+        setActiveStickyGroupKey(null);
+        return;
+      }
+      applyStickyPushTransform(next.pushOffsetPx);
+      setActiveStickyGroupKey(next.group.rowKey);
+    }, [
+      applyStickyPushTransform,
+      initialScrollRestored,
+      leadingRowCount,
+      messageSelection,
+      resolveTopInsetPx,
+      stickyWorkGroupsRef,
+    ]);
+
+    const activeStickyEntry = useMemo(() => {
+      if (!activeStickyGroupKey || messageSelection !== null) return null;
+      const group = stickyWorkGroups.find((candidate) => candidate.rowKey === activeStickyGroupKey);
+      if (!group) return null;
+      const row = virtualRows[group.headerRowIndex];
+      if (!row || row.type !== 'assistant') return null;
+      if (row.content.kind === 'worked_group_header' && row.content.expanded) {
+        return {
+          group,
+          row,
+          headerId: `${row.item.message.id}:${row.content.segmentKey}:worked`,
+        };
+      }
+      if (row.content.kind === 'activity_group_header' && row.content.expanded) {
+        return {
+          group,
+          row,
+          headerId: `${row.item.message.id}:${row.content.block.key}`,
+        };
+      }
+      return null;
+    }, [activeStickyGroupKey, messageSelection, stickyWorkGroups, virtualRows]);
+
+    const handleStickyCollapse = useCallback(
+      (
+        group: StickyWorkGroupRange,
+        row: Extract<ChatVirtualRow, { type: 'assistant' }>,
+        headerId: string
+      ) => {
+        const activeEl = scrollRootRef.current?.ownerDocument.activeElement;
+        const shouldRestoreFocus =
+          activeEl instanceof HTMLElement &&
+          Boolean(activeEl.closest('[data-sticky-work-group-header]'));
+        const vlist = listRef.current;
+        if (vlist) {
+          const topInsetPx = resolveTopInsetPx(vlist.contentOffset);
+          const targetScreenY = resolveStickyCollapseTargetScreenY({
+            group,
+            leadingRowCount,
+            topInsetPx,
+            stickyBarHeight: stickyBarHeightRef.current,
+            getItemOffset: (listIndex) => vlist.getItemOffset(listIndex),
+          });
+          vlist.preserveDisclosure(group.rowKey, 0, targetScreenY);
+        }
+        if (shouldRestoreFocus) {
+          pendingStickyCollapseFocusIdRef.current = headerId;
+        }
+        if (row.content.kind === 'worked_group_header') {
+          handleAssistantWorkedGroupExpandedChange(
+            row.item.message.id,
+            row.content.segmentKey,
+            false
+          );
+        } else if (row.content.kind === 'activity_group_header') {
+          handleAssistantGroupExpandedChange(
+            row.item.message.id,
+            row.content.block.key,
+            false,
+            row.content.segmentKey
+          );
+        }
+      },
+      [
+        handleAssistantGroupExpandedChange,
+        handleAssistantWorkedGroupExpandedChange,
+        leadingRowCount,
+        resolveTopInsetPx,
+      ]
+    );
+
+    const flushPendingStickyCollapseFocus = useCallback(() => {
+      const pendingFocusId = pendingStickyCollapseFocusIdRef.current;
+      if (!pendingFocusId || !scrollViewportElement) return;
+      const candidates = scrollViewportElement.querySelectorAll<HTMLElement>(
+        '[data-work-group-header-id]'
+      );
+      for (const candidate of candidates) {
+        if (candidate.getAttribute('data-work-group-header-id') === pendingFocusId) {
+          pendingStickyCollapseFocusIdRef.current = null;
+          candidate.focus({ preventScroll: true });
+          return;
+        }
+      }
+    }, [scrollViewportElement]);
+
+    useLayoutEffect(() => {
+      const surfaceHeight = stickySurfaceRef.current?.offsetHeight ?? 0;
+      if (surfaceHeight > 0 && surfaceHeight !== stickyBarHeightRef.current) {
+        stickyBarHeightRef.current = surfaceHeight;
+        syncStickyWorkGroup();
+        return;
+      }
+      applyStickyPushTransform(stickyPushOffsetRef.current);
+    }, [activeStickyEntry, applyStickyPushTransform, conversationFontSize, syncStickyWorkGroup]);
+
+    useLayoutEffect(() => {
+      syncStickyWorkGroup();
+      flushPendingStickyCollapseFocus();
+    }, [
+      conversationFontSize,
+      flushPendingStickyCollapseFocus,
+      stickyWorkGroups,
+      syncStickyWorkGroup,
+    ]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         setIsScrolledFromTop(offset > 0);
         syncHasContentBelow();
         syncActiveOutlineIndex();
         reportVisibleTurnRange();
+        syncStickyWorkGroup();
+        flushPendingStickyCollapseFocus();
       },
-      [reportVisibleTurnRange, syncActiveOutlineIndex, syncHasContentBelow]
+      [
+        flushPendingStickyCollapseFocus,
+        reportVisibleTurnRange,
+        syncActiveOutlineIndex,
+        syncHasContentBelow,
+        syncStickyWorkGroup,
+      ]
     );
+
+    const syncStickyWorkGroupRef = useLatestRef(syncStickyWorkGroup);
+    useEffect(() => {
+      if (!scrollViewportElement) return undefined;
+      const syncMetrics = () => {
+        if (typeof window !== 'undefined') {
+          const parsedRoot = parseFloat(getComputedStyle(document.documentElement).fontSize);
+          if (Number.isFinite(parsedRoot) && parsedRoot > 0) {
+            rootFontSizeRef.current = parsedRoot;
+          }
+        }
+        const inset = Math.max(
+          0,
+          scrollViewportElement.offsetWidth - scrollViewportElement.clientWidth
+        );
+        setScrollbarInsetPx((current) => (current === inset ? current : inset));
+        syncStickyWorkGroupRef.current();
+      };
+      syncMetrics();
+      const observer = new ResizeObserver(syncMetrics);
+      observer.observe(scrollViewportElement);
+      const content = scrollViewportElement.firstElementChild;
+      if (content) observer.observe(content);
+      return () => observer.disconnect();
+    }, [scrollViewportElement, syncStickyWorkGroupRef]);
 
     // Content also grows or shrinks without a scroll (a streaming reply under
     // an anchored message, a resized window); re-measure on those too.
@@ -3848,6 +4085,63 @@ export const SessionChatStreamView = forwardRef<
                 hinting that the conversation continues past the top edge. */}
               {!isMobile && isScrolledFromTop ? (
                 <div {...stylex.props(viewStyles.topFade)} />
+              ) : null}
+              {activeStickyEntry ? (
+                <div
+                  data-sticky-work-group-header=""
+                  data-sticky-work-group-kind={activeStickyEntry.row.content.kind}
+                  data-sticky-work-group-key={activeStickyEntry.group.rowKey}
+                  {...stylex.props(viewStyles.stickyWorkGroupClip)}
+                  style={scrollbarInsetPx > 0 ? { right: `${scrollbarInsetPx}px` } : undefined}
+                >
+                  <div ref={stickyInnerRef} {...stylex.props(viewStyles.stickyWorkGroupInner)}>
+                    <div
+                      ref={stickySurfaceRef}
+                      {...stylex.props(viewStyles.stickyWorkGroupSurface)}
+                    >
+                      <ConversationColumn>
+                        <div {...stylex.props(viewStyles.turnShell)}>
+                          <div
+                            {...stylex.props(viewStyles.turnProse, viewStyles.turnProseMuted)}
+                            style={conversationTextFontSizeStyle(conversationFontSize)}
+                          >
+                            {activeStickyEntry.row.content.kind === 'worked_group_header' ? (
+                              <WorkedGroupHeader
+                                id={activeStickyEntry.headerId}
+                                durationMs={activeStickyEntry.row.content.durationMs}
+                                expanded
+                                isLive={activeStickyEntry.row.content.isLive}
+                                sticky
+                                onExpandedChange={() =>
+                                  handleStickyCollapse(
+                                    activeStickyEntry.group,
+                                    activeStickyEntry.row,
+                                    activeStickyEntry.headerId
+                                  )
+                                }
+                              />
+                            ) : activeStickyEntry.row.content.kind === 'activity_group_header' ? (
+                              <ActivityGroupHeader
+                                id={activeStickyEntry.headerId}
+                                summary={activeStickyEntry.row.content.block.summary}
+                                expanded
+                                sticky
+                                onExpandedChange={() =>
+                                  handleStickyCollapse(
+                                    activeStickyEntry.group,
+                                    activeStickyEntry.row,
+                                    activeStickyEntry.headerId
+                                  )
+                                }
+                              />
+                            ) : null}
+                          </div>
+                        </div>
+                      </ConversationColumn>
+                    </div>
+                    <div aria-hidden="true" {...stylex.props(viewStyles.stickyWorkGroupFade)} />
+                  </div>
+                </div>
               ) : null}
               {/* Bottom fade into the same canvas over the last 40px above the
                 info bar (desktop only): more conversation below. */}
@@ -6231,6 +6525,7 @@ function ProcessDisclosureButton({
   onExpandedChange,
   shimmer = false,
   liveMessage,
+  sticky = false,
 }: {
   id: string;
   label: string;
@@ -6240,6 +6535,8 @@ function ProcessDisclosureButton({
   shimmer?: boolean;
   /** Set while the label carries the live status: it shows the running duration. */
   liveMessage?: LiveActivityMessage;
+  /** Rendered in the pinned work-group overlay at the top of the viewport. */
+  sticky?: boolean;
 }) {
   const isMobile = useIsMobile();
   const chevronRef = useRef<HTMLSpanElement>(null);
@@ -6294,7 +6591,8 @@ function ProcessDisclosureButton({
         stylex.props(
           stylex.defaultMarker(),
           conversationSurface.disclosure,
-          isMobile && conversationSurface.mobileDisclosure
+          isMobile && conversationSurface.mobileDisclosure,
+          sticky && viewStyles.stickyDisclosureButton
         ),
         cn('group', isMobile ? ACTIVITY_PROCESS_TEXT_CLASS : undefined)
       )}
@@ -6305,7 +6603,9 @@ function ProcessDisclosureButton({
         onExpandedChange(next);
       }}
       aria-expanded={expanded}
-      data-conversation-disclosure="group"
+      data-conversation-disclosure={sticky ? undefined : 'group'}
+      data-work-group-header-id={sticky ? undefined : id}
+      data-sticky-work-group-button={sticky ? id : undefined}
     >
       {/* Label first on every layout: it starts on the prose rail, and the
           chevron (always shown on touch, hover-only on desktop) trails it. */}
@@ -6322,6 +6622,7 @@ const ActivityGroupHeader = ({
   onExpandedChange,
   shimmer,
   liveMessage,
+  sticky,
 }: {
   id: string;
   summary: AssistantActivitySummary;
@@ -6329,6 +6630,7 @@ const ActivityGroupHeader = ({
   onExpandedChange: (expanded: boolean) => void;
   shimmer?: boolean;
   liveMessage?: LiveActivityMessage;
+  sticky?: boolean;
 }) => {
   const { t } = useTranslation();
   const parts: string[] = [];
@@ -6361,6 +6663,7 @@ const ActivityGroupHeader = ({
       onExpandedChange={onExpandedChange}
       shimmer={shimmer}
       liveMessage={liveMessage}
+      sticky={sticky}
     />
   );
 };
@@ -6371,12 +6674,14 @@ const WorkedGroupHeader = ({
   expanded,
   isLive,
   onExpandedChange,
+  sticky,
 }: {
   id: string;
   durationMs: number | null;
   expanded: boolean;
   isLive: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  sticky?: boolean;
 }) => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -6406,6 +6711,7 @@ const WorkedGroupHeader = ({
       label={label}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
+      sticky={sticky}
     />
   );
 };

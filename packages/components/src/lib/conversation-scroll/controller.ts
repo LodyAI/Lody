@@ -564,17 +564,26 @@ export class ScrollController {
 
   // ---- Commands -----------------------------------------------------------
 
-  /** Hold a disclosure header in place before its body changes the layout. */
-  preserveDisclosure(rowKey: string, offsetPx: number, revealOffsetPx?: number): void {
+  /** Hold a disclosure header in place (or at `targetScreenY` for a sticky header) before its body changes the layout. */
+  preserveDisclosure(
+    rowKey: string,
+    offsetPx: number,
+    revealOffsetPx?: number,
+    targetScreenY?: number
+  ): void {
     if (this.disposed || this.hidden) return;
     const index = this.geometry.indexOfKey(rowKey);
     const row = this.rows[index];
     if (!row) return;
     this.refreshViewport();
     const rowY = this.contentTop + this.geometry.offset(index) - this.readScrollTop();
-    let screenY = rowY + offsetPx;
+    let screenY = targetScreenY ?? rowY + offsetPx;
     // Mobile only asks for a preview when none of the details would be visible.
-    if (revealOffsetPx !== undefined && rowY + revealOffsetPx >= this.viewportHeight - 0.5) {
+    if (
+      targetScreenY === undefined &&
+      revealOffsetPx !== undefined &&
+      rowY + revealOffsetPx >= this.viewportHeight - 0.5
+    ) {
       screenY -=
         rowY + revealOffsetPx - this.viewportHeight + Math.min(96, this.viewportHeight / 4);
     }

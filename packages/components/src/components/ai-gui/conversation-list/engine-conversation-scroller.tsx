@@ -376,6 +376,8 @@ export function EngineConversationScroller({
       scrollToBottom: () => controller.scrollToBottom(),
       anchorToRow: (index) => controller.anchorToRow(index),
       retargetAnchor: (index) => controller.retargetAnchor(index),
+      preserveDisclosure: (rowKey, offsetPx, targetScreenY) =>
+        controller.preserveDisclosure(rowKey, offsetPx, undefined, targetScreenY),
     };
     return () => {
       handleRef.current = null;
