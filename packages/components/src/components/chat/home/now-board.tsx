@@ -208,7 +208,7 @@ const styles = stylex.create({
     outlineStyle: 'none',
     fontFamily: 'inherit',
     fontSize: text.footnoteSize,
-    lineHeight: 1,
+    lineHeight: text.footnoteLeading,
     textAlign: 'start',
     color: colors.label,
     cursor: 'pointer',
