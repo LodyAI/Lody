@@ -5,11 +5,19 @@
  */
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { _electron as electron } from '@playwright/test';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ELECTRON_DIR = resolve(process.env.LODY_CLOUD_SMOKE_APP_DIR || 'apps/electron');
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const OSS_ROOT = resolve(SCRIPT_DIR, '../..');
+const e2eRequire = createRequire(join(OSS_ROOT, 'e2e/package.json'));
+const { _electron: electron } = e2eRequire('@playwright/test');
+
+const ELECTRON_DIR = resolve(
+  process.env.LODY_CLOUD_SMOKE_APP_DIR || join(OSS_ROOT, 'apps/electron')
+);
 const MAIN_ENTRY = join(ELECTRON_DIR, 'out/main/index.js');
 const SETTLE_MS = Number(process.env.LODY_CLOUD_SMOKE_SETTLE_MS || 6_000);
 

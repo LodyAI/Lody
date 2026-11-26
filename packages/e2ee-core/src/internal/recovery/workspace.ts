@@ -486,7 +486,10 @@ export const makeWorkspaceRecovery = Effect.fnUntraced(function* (input: Workspa
             (bundle) => vault.upload(bundle, progress.entryId),
             (bundle) => Effect.sync(() => wipeRecoveryPackage(bundle))
           );
-        const reserved = yield* vault.reserve(selected, index);
+        let reserved = yield* vault.reserve(selected, index);
+        if (!reserved.reference && reserved.outcome === 'Conflict') {
+          reserved = yield* vault.reserve(selected);
+        }
         if (!reserved.reference) return yield* vaultError('conflict');
         reference = reserved.reference;
       }

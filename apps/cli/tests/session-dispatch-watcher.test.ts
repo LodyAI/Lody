@@ -1775,6 +1775,79 @@ describe('SessionDispatchWatcher', () => {
     expect(continueSession).not.toHaveBeenCalled();
   });
 
+  it('delegates a finished Inbox input to continueInterruptedTurn before failing it', async () => {
+    const continueInterruptedTurn = vi.fn(async () => true);
+    const sessionId = 'session-continue-interrupted' as SessionId;
+    const sessionMeta = {
+      id: sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: new Date().toISOString(),
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' as const },
+      latestUserMsgId: 'turn-interrupted',
+      processingUserMsgId: 'turn-interrupted',
+    };
+    let history: SessionHistoryInput[] = [
+      createPendingUserTurn('turn-interrupted', 'interrupted input'),
+    ];
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      Object.assign(sessionMeta, patch);
+    });
+
+    const sessionDoc = withHistoryPort({
+      mirror: { subscribe: vi.fn(() => vi.fn()) },
+      getMetaState: vi.fn(async () => sessionMeta),
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+      setStatus: vi.fn(async () => {}),
+      waitForRemoteSync: vi.fn(async () => {}),
+    });
+
+    const workspaceDocument = {
+      repo: {
+        getDocMeta: vi.fn(async () => ({ meta: sessionMeta })),
+        upsertDocMeta,
+      },
+      getOrCreateSessionDoc: vi.fn(async () => withSessionData(sessionDoc)),
+    } as unknown as LoroDocumentManager;
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      executionService: {
+        getExecutionSnapshot: vi.fn(() => ({
+          hasActiveTurn: false,
+          hasBlockingPendingCreate: false,
+          hasReusableSession: false,
+        })),
+        isInboxInputCanceled: () => false,
+        isInboxInputEnded: () => true,
+        continueInterruptedTurn,
+        continueSession: vi.fn(async () => {}),
+        startSession: vi.fn(async () => {}),
+        cancelSession: vi.fn(async () => ({ success: true })),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+
+    await runMaybeHandleSession(watcher, sessionId);
+    await flushMicrotasks();
+
+    expect(continueInterruptedTurn).toHaveBeenCalledWith(
+      sessionId,
+      expect.anything(),
+      'turn-interrupted'
+    );
+    expect(history[0]?.status).not.toBe('failed');
+    expect(upsertDocMeta).not.toHaveBeenCalled();
+  });
+
   it('marks a pending turn failed when backend machine access denies it', async () => {
     const continueSession = vi.fn(async () => {});
     const startSession = vi.fn(async () => {});

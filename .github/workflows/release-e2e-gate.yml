@@ -73,6 +73,9 @@ jobs:
           VITE_CONVEX_SITE_URL: ${{ vars.LODY_AUTH_SITE_URL || vars.LODY_AUTH_URL || 'https://placeholder.convex.site' }}
           VITE_CONVEX_DEPLOY_URL: ${{ vars.LODY_AUTH_URL || 'https://placeholder.convex.cloud' }}
           VITE_SITE_URL: ${{ vars.SITE_URL || 'https://placeholder.lody.ai' }}
+          VITE_ELECTRON_UPDATE_URL: ${{ vars.ELECTRON_UPDATE_URL || 'https://placeholder.updates.lody.ai/production' }}
+          VITE_ELECTRON_UPDATE_CHANNEL: latest
+          ELECTRON_UPDATE_CHANNEL: latest
           LODY_LORO_STREAMS_WS_ENABLED: '1'
         run: corepack pnpm --dir apps/electron build
 
@@ -80,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NODE_PATH="$(pwd)/e2e/node_modules" xvfb-run -a node .github/scripts/cloud-electron-smoke.mjs
+          xvfb-run -a node .github/scripts/cloud-electron-smoke.mjs
 
       - name: Checkout self-host E2E harness (read-only deploy key)
         if: vars.SELFHOST_E2E_ENABLED == 'true'
