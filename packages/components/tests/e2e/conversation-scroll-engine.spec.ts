@@ -739,6 +739,38 @@ for (const width of [375, 1280]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(
       false
     );
+
+    // At either edge of the list, the wheel keeps scrolling the conversation.
+    const conversation = page.locator('[data-conversation-scroll-engine]');
+    await conversation.evaluate((element) => {
+      element.style.setProperty('height', '150px', 'important');
+      element.style.setProperty('flex', 'none', 'important');
+    });
+    await expect
+      .poll(() => conversation.evaluate((element) => element.scrollHeight - element.clientHeight))
+      .toBeGreaterThan(40);
+    for (const direction of [1, -1]) {
+      const start = await conversation.evaluate((element, down) => {
+        element.scrollTop = down ? 0 : element.scrollHeight;
+        return element.scrollTop;
+      }, direction > 0);
+      await region.evaluate((element, down) => {
+        element.scrollTop = down ? element.scrollHeight : 0;
+      }, direction > 0);
+      const view = (await conversation.boundingBox())!;
+      const list = (await region.boundingBox())!;
+      const top = Math.max(view.y, list.y);
+      const bottom = Math.min(view.y + view.height, list.y + list.height);
+      expect(bottom - top).toBeGreaterThan(8);
+      await page.mouse.move(list.x + list.width / 2, (top + bottom) / 2);
+      await page.mouse.wheel(0, direction * 40);
+      await expect
+        .poll(
+          async () =>
+            ((await conversation.evaluate((element) => element.scrollTop)) - start) * direction
+        )
+        .toBeGreaterThan(0);
+    }
   });
 }
 
