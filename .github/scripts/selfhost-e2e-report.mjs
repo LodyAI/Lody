@@ -64,7 +64,7 @@ export function extractPrivateFailureDetails(report) {
   return lines;
 }
 
-export function readLogTail(logPath, { maxLines = 25, maxChars = 1800 } = {}) {
+export function readLogTail(logPath, { maxLines = 40, maxChars = 3500 } = {}) {
   if (!logPath || !existsSync(logPath)) return '';
   const raw = readFileSync(logPath, 'utf8');
   // Strip ANSI escape sequences before trimming for Feishu markdown.
@@ -79,7 +79,7 @@ export function readLogTail(logPath, { maxLines = 25, maxChars = 1800 } = {}) {
   return `…${tail.slice(-(maxChars - 1))}`;
 }
 
-export function readNativeStartupLogTail(mainLogTail, { maxLines = 25, maxChars = 1800 } = {}) {
+export function readNativeStartupLogTail(mainLogTail, { maxLines = 40, maxChars = 3500 } = {}) {
   const match = /Native startup failed; see (\S+)/u.exec(mainLogTail || '');
   if (!match) return '';
   const harnessLog = match[1];

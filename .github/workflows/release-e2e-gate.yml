@@ -220,6 +220,7 @@ jobs:
             git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
             cd "${SELFHOST_DIR}"
             corepack pnpm install --frozen-lockfile --prefer-offline
+            corepack pnpm --filter acp-extension-core build
             corepack pnpm --dir lody-oss/e2e exec playwright install --with-deps chromium
             xvfb-run -a corepack pnpm verify:release -- --only cloud
           ) >"${SELFHOST_LOG}" 2>&1
@@ -316,6 +317,7 @@ jobs:
             git -C "${SELFHOST_DIR}/lody-oss" checkout --detach "${CANDIDATE_SHA}"
             cd "${SELFHOST_DIR}"
             corepack pnpm install --frozen-lockfile --prefer-offline
+            corepack pnpm --filter acp-extension-core build
             corepack pnpm verify:release -- --only e2e
           ) >"${SELFHOST_LOG}" 2>&1
           EXIT_CODE=$?
