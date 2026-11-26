@@ -17,7 +17,7 @@ import { E2eeLocalAgentApproval, localAgentRunsWorkspace } from '../e2ee-local-a
 import { useElectronCliDaemon } from '@/hooks/use-electron-cli-daemon';
 import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { bindAgentRoleTarget, snapshotAgentRole } from '@lody/shared';
-import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import { buildDraftUserHistoryEntry, ownDisplayName } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   Suspense,
@@ -3795,6 +3795,7 @@ function WorkspaceChatLanding({
       const pendingHistoryEntry = buildDraftUserHistoryEntry(
         {
           userId,
+          userName: ownDisplayName(currentUser, userId),
           inputBlocks,
           timestamp: new Date().toISOString(),
           inputConfig,

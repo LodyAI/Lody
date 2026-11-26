@@ -317,6 +317,64 @@ describe('MessageHandler session file ACP prompt blocks', () => {
       ).toEqual([{ type: 'text', text: 'Only report P0/P1.' }]);
     });
 
+    it('labels a human input only when the speaker changes', async () => {
+      const handler = createPromptHandler({ workspaceRoot: tmpDir, workspaceId });
+      const turns: Record<string, unknown> = {
+        t1: { v: 1, kind: 'human', userId: 'user-1', name: 'Owner Olivia' },
+        t2: { v: 1, kind: 'human', userId: 'member-2', name: 'Alice\nChen' },
+        t3: { v: 1, kind: 'human', userId: 'member-2', name: 'Alice Chen' },
+        t4: agentAuthor,
+        t5: { v: 1, kind: 'human', userId: 'user-1', name: 'Owner Olivia' },
+      };
+      const internals = handler as unknown as {
+        workspaceDocument: { repo: { getDocMeta: unknown }; getOrCreateSessionDoc: unknown };
+      };
+      internals.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({}));
+      internals.workspaceDocument.repo.getDocMeta = vi.fn(async () => ({ meta: {} }));
+      vi.spyOn(
+        handler as unknown as { getSessionBackend: () => Promise<unknown> },
+        'getSessionBackend'
+      ).mockResolvedValue({
+        history: {
+          readTurn: async (id: string) => ({
+            state: 'ready',
+            turn: { role: 'user', author: turns[id] },
+          }),
+        },
+      });
+      const text = async (userTurnId: string) => {
+        const [block] = await handler.buildAcpPromptBlocks({
+          workspaceId,
+          sessionId,
+          userTurnId,
+          inputBlocks: [{ type: 'text', text: 'go' }],
+        });
+        return block?.type === 'text' ? block.text : undefined;
+      };
+
+      expect(await text('t1')).toBe('go');
+      expect(await text('t2')).toBe('[Lody] This message is from Alice Chen.\n\ngo');
+      expect(await text('t2')).toBe('[Lody] This message is from Alice Chen.\n\ngo');
+      expect(await text('t3')).toBe('go');
+      expect(await text('t4')).toContain('sent by another agent');
+      expect(await text('t5')).toBe('[Lody] This message is from Owner Olivia.\n\ngo');
+      await handler.cleanup();
+    });
+
+    it('labels a first input from someone other than the machine owner', async () => {
+      expect(
+        await build(async () => ({
+          state: 'ready',
+          turn: { role: 'user', author: { v: 1, kind: 'human', userId: 'member-2' } },
+        }))
+      ).toEqual([
+        {
+          type: 'text',
+          text: '[Lody] This message is from another workspace member.\n\nOnly report P0/P1.',
+        },
+      ]);
+    });
+
     it('still delivers the input when its author cannot be read', async () => {
       expect(
         await build(async () => {

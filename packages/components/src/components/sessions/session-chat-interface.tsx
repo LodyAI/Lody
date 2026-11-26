@@ -29,6 +29,7 @@ import { getAutomationProofIssuer } from '@/lib/cloud-http-port';
 import { useSessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
+  ownDisplayName,
   type SessionAttachmentDraft,
 } from '@/lib/session-attachment-draft';
 import { useSchedules } from '@/hooks/use-schedules';
@@ -4889,6 +4890,7 @@ export const SessionChatInterface = memo(
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
               {
                 userId: derivedUserId,
+                userName: ownDisplayName(currentUser, derivedUserId),
                 inputBlocks,
                 timestamp: new Date().toISOString(),
                 inputConfig,
@@ -5074,6 +5076,7 @@ export const SessionChatInterface = memo(
               task: queueTask(inputBlocks, options?.attachments),
               project: sessionProject,
               userId: derivedUserId,
+              userName: ownDisplayName(currentUser, derivedUserId),
               userTurnId,
               acpSessionConfig: queuedInputConfig,
               attachments: options?.attachments,
@@ -6797,12 +6800,14 @@ export const SessionChatInterface = memo(
             inputConfig.inputBlocks,
             inputConfig.prompt ?? item.task
           );
+          const promotedUserId = item.paused
+            ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
+              currentUser?.id ??
+              session.userId)
+            : item.userId;
           const pendingHistoryEntry = buildDraftUserHistoryEntry({
-            userId: item.paused
-              ? ((runtime?.contentMode === 'e2ee' ? runtime.accountId : null) ??
-                currentUser?.id ??
-                session.userId)
-              : item.userId,
+            userId: promotedUserId,
+            userName: item.paused ? ownDisplayName(currentUser, promotedUserId) : item.userName,
             inputBlocks,
             timestamp: item.paused ? new Date().toISOString() : item.timestamp,
             inputConfig,

@@ -376,6 +376,7 @@ export function useSessionDoc(
       const pendingTurn = buildDraftUserHistoryEntry(
         {
           userId: entry.userId,
+          userName: entry.userName,
           inputBlocks: normalizeSessionInputBlocks(
             inputConfig?.inputBlocks,
             entry.acpSessionConfig?.prompt ?? (attachments?.length ? '' : entry.task)
