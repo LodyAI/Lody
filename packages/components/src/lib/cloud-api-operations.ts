@@ -187,6 +187,7 @@ export const cloudOperations = {
     claim: query<ConvexApi['e2eeJoinMailbox']['claim']>('e2eeJoinMailbox:claim'),
   },
   e2eeMembers: {
+    claim: query<ConvexApi['e2eeMembers']['claim']>('e2eeMembers:claim'),
     workspaces: query<ConvexApi['e2eeMembers']['workspaces']>('e2eeMembers:workspaces'),
     preview: definePublicCloudQuery<
       import('@lody/cloud-api').E2eeMemberRequests['preview'],

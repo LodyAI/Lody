@@ -838,7 +838,7 @@ describe('encrypted workspace settings entry failures', () => {
     const root = createRoot(container);
     const opened: unknown[] = [];
     const retried: unknown[] = [];
-    const render = (error: string) =>
+    const render = (error: unknown) =>
       act(async () =>
         root.render(
           <E2eeSecurityPanel
@@ -867,6 +867,15 @@ describe('encrypted workspace settings entry failures', () => {
       await render('e2ee_management_conflict');
       await act(async () => button('e2ee.failure.action.refresh')!.click());
       expect(retried).toEqual(['e2ee_management_conflict']);
+      await render({ _tag: 'PersonalHostError', code: 'unauthorized' });
+      expect(container.textContent).toContain('e2ee.security.error.manager.title');
+      expect(button('e2ee.failure.action.refresh')).toBeUndefined();
+      await render(new Error('e2ee_device_revoked'));
+      expect(container.textContent).toContain('e2ee.security.error.revoked.title');
+      expect(button('e2ee.failure.action.refresh')).toBeUndefined();
+      await render({ _tag: 'PersonalHostError', code: 'network' });
+      expect(container.textContent).toContain('e2ee.security.error.network.title');
+      expect(button('e2ee.failure.action.refresh')).toBeDefined();
       // Restarting is the person's step; the card offers no button that cannot do it.
       await render('e2ee_restart-required');
       expect(container.textContent).toContain('e2ee.security.error.restart.title');
@@ -1351,6 +1360,24 @@ describe('encrypted workspace settings', () => {
     await renderSharing();
     expect(container.textContent).toBe('');
   });
+  it('shows custody guidance on refresh failure while keeping verified management state visible', async () => {
+    let available = false;
+    const runtime = platform.e2eeWorkspaces!.runtime!;
+    platform.e2eeWorkspaces!.runtime = {
+      ...runtime,
+      refresh: async (...args) => {
+        if (!available) throw Object.assign(new Error('Device storage'), { code: 'storage' });
+        return runtime.refresh(...args);
+      },
+    };
+    await render();
+    expect(container.textContent).toContain('e2ee.security.error.storage.title');
+    expect(container.textContent).toContain('e2ee.security.complete');
+    available = true;
+    await click('e2ee.failure.action.refresh');
+    expect(container.textContent).not.toContain('e2ee.security.error.storage.title');
+  });
+
   it('waits for an explicit click, keeps retry and device rows after failure, then completes and clears the badge', async () => {
     let managementStateReads = 0;
     let refreshReads = 0;
