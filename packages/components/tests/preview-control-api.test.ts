@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PreviewControlIntent } from '@lody/shared';
+import type { PreviewControlIntent, RoostCloudHistoryTarget } from '@lody/shared';
 import { installCloudHttpPort } from '../src/lib/cloud-http-port';
 import {
   getRoostCloudHistoryReadGrant,
@@ -122,7 +122,11 @@ it('validates simulator intents locally and diagnoses an older authorization ser
 
 it('reads Roost history through the owner when the backend has no cloud read-grant route', async () => {
   uninstall = installCloudHttpPort({ authBaseUrl: 'https://auth.test', serverBaseUrl: null });
-  const target = { workspaceId: 'workspace', machineId: 'machine', sessionId: 'session' } as never;
+  const target: RoostCloudHistoryTarget = {
+    workspaceId: 'workspace' as RoostCloudHistoryTarget['workspaceId'],
+    machineId: 'machine',
+    sessionId: 'session' as RoostCloudHistoryTarget['sessionId'],
+  };
   const signal = new AbortController().signal;
   vi.stubGlobal('fetch', async (url: URL) => {
     expect(url.href).toBe('https://auth.test/api/session-history/roost-read-grant');
