@@ -223,6 +223,18 @@ this page is the full text of the rules summarised there.
   same target restores its draft. Confirmed deletion and account teardown invalidate
   stale callbacks. See [private run-config drafts](../../specs/session-run-config-drafts.md).
   Landing and new-session drafts retain their component-local selection lifetime.
+  Every accepted manual send (landing, child-tab draft or existing Session)
+  records its run config through `learnAgentStartDefaults` as that Provider's
+  device-local start values and as a Recently used entry, because a person who
+  fixes a permission inside a conversation wants the next one to start that way.
+  Scheduled saves and Role-applied Turns are not learned (a Role's values are
+  the Role's), and planning never becomes a start value: `plan_mode` and
+  `collaboration_mode` are dropped and a `plan` permission keeps the one learned
+  before it. The Provider's synced `sessionDefaults` win over learned values for
+  whatever they name; the permission menu's "Use for new conversations" row and
+  the Agent settings "Default permission" field write `sessionDefaults.modeId`
+  or the `_permission` option through `lib/agent-permission-default.ts`, and
+  never offer Plan.
   Never reintroduce a
   reducer that stores the resolved selection or an effect that reconciles it —
   two dispatches disagreeing about a runtime-omitted key plus options rebuilt

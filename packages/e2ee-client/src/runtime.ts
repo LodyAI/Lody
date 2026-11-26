@@ -28,6 +28,7 @@ import {
   accessLossError,
   fail,
   findAccessLoss,
+  PersonalAccessLoss,
   PersonalRuntimeFailure,
   verifiedAccessLoss,
 } from './errors';
@@ -431,6 +432,7 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
     delete entry.code;
     const schedule = Effect.gen(function* () {
       for (let retry = 0; ; retry++) {
+        if (entry.state === 'delivered') return;
         const attempt = yield* Effect.result(attemptDelivery(id, entry.device, retry));
         const code = Result.isSuccess(attempt) ? attempt.success : 'e2ee_key_delivery_failed';
         if (code === 'delivered') {
@@ -575,18 +577,23 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
                 // Decided against the verified ledger: an applicant the resumed original
                 // admitted needs no second signature.
                 const command = yield* session.members.admission(requestId, mode);
+                let device: string;
                 if (command) {
                   // The session journals the signed original; a lost reply is settled from
                   // the verified ledger and never signed again.
                   const result = yield* session.execute(command);
                   yield* session.acknowledge(result);
                   if (result.outcome !== 'Committed') return { admitted: false, keyPending: true };
+                  device = toHex(command.request.signingPublicKey.toBytes());
+                } else {
+                  const material = yield* session.members.read(requestId);
+                  if (material.state !== 'committed') return { admitted: false, keyPending: true };
+                  device = toHex(
+                    decodeMemberKeyPackage(
+                      material.keyPackageHex
+                    ).request.signingPublicKey.toBytes()
+                  );
                 }
-                const material = yield* session.members.read(requestId);
-                if (material.state !== 'committed') return { admitted: false, keyPending: true };
-                const device = toHex(
-                  decodeMemberKeyPackage(material.keyPackageHex).request.signingPublicKey.toBytes()
-                );
                 if (!deliveries.has(requestId))
                   deliveries.set(requestId, { device, state: 'pending' });
                 startDelivery(id, requestId);
@@ -594,12 +601,45 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
               })
             )
           ),
-        memberKeyDeliveries: async () => ({
-          items: [...deliveries.keys()].map(deliveryView),
-        }),
+        memberKeyDeliveries: async (id) => {
+          if (entry && !entry.closing && entry.readers.size) {
+            const discovered = await run(
+              withSession(id, (session) => session.pendingMemberKeyDeliveries())
+            );
+            const discoveredIds = new Set(discovered.map((item) => item.requestId));
+            for (const [requestId, existing] of deliveries.entries()) {
+              if (existing.state !== 'delivered' && !discoveredIds.has(requestId)) {
+                const evidence = await run(
+                  withSession(id, (session) => session.keyDeliveryEvidence(existing.device))
+                ).catch(() => null);
+                if (evidence === 'delivered') {
+                  existing.state = 'delivered';
+                  delete existing.code;
+                }
+              }
+            }
+            for (const item of discovered) {
+              if (!deliveries.has(item.requestId)) {
+                deliveries.set(item.requestId, {
+                  device: item.device,
+                  state: 'failed',
+                  code: item.code,
+                });
+              }
+            }
+          }
+          return { items: [...deliveries.keys()].map(deliveryView) };
+        },
         retryMemberKeyDelivery: async (id, requestId) => {
-          const entry = deliveries.get(requestId);
-          if (!entry) throw fail('invalid-input');
+          let entry = deliveries.get(requestId);
+          if (!entry) {
+            const device = await run(
+              withSession(id, (session) => session.memberDeliveryDevice(requestId))
+            ).catch(() => null);
+            if (!device) throw fail('invalid-input');
+            entry = { device, state: 'failed', code: 'e2ee_key_not_sent' };
+            deliveries.set(requestId, entry);
+          }
           if (entry.state === 'failed') startDelivery(id, requestId);
           return deliveryView(requestId);
         },
@@ -1336,7 +1376,13 @@ export const makePersonalWorkspaceRuntime = Effect.fnUntraced(function* <E>(
   const exposed = Object.assign(runtime, { accountRequester });
   requesters.set(exposed, accountRequester);
   recoveries.set(exposed, {
-    restore: (input) => checked(host.restoreRecovery(input)),
+    restore: (input) =>
+      checked(host.restoreRecovery(input)).pipe(
+        Effect.catchIf(
+          (error): error is PersonalAccessLoss => error instanceof PersonalAccessLoss,
+          (loss) => Effect.fail(accessLossError(loss.code))
+        )
+      ),
     setup: (input) => withSession(workspaceId, (session) => session.setupRecovery(input)),
   });
   return Object.freeze(exposed);

@@ -5,11 +5,11 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
 
 - This tree is the content SSOT for docs, blog, changelog, and legal pages. Edit
   these MDX files directly; the site renders them through Fumadocs MDX.
-- Docs under `content/docs/{en,zh}` use matching Fumadocs folder groups such as
-  `(sessions)/` and `(agents-and-cli)/`. Keep both locale trees and every folder's
+- Docs under `content/docs/{en,zh,zh-hant,ja,ko,es,fr,ru}` use matching Fumadocs folder groups such as
+  `(sessions)/` and `(agents-and-cli)/`. Keep all locale trees and every folder's
   `meta.json` in sync. Parenthesized group names are intentional: they provide
   physical/sidebar hierarchy without changing established docs URLs.
-- `content/docs/{en,zh}/compare/` is crawler-only SEO: real `/docs/compare/…`
+- `content/docs/{en,zh,zh-hant,ja,ko,es,fr,ru}/compare/` is crawler-only SEO: real `/docs/compare/…`
   URLs, omitted from the root and Features `meta.json` `pages` arrays so the
   folder does not appear in the docs sidebar. Do not add `compare` to those
   arrays.

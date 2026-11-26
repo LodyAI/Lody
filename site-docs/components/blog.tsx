@@ -4,9 +4,24 @@ import { SiteFooter } from '@site/components/site-footer';
 import { SiteNav } from '@site/components/site-nav';
 import browserCollections from '@site/.source/browser';
 import { formatBlogDate, type BlogEntry, type BlogLocale } from '@site/lib/blog';
+import { localizeSitePath, type SiteLocale } from '@site/src/site-pages/shared';
 import type { ReactNode } from 'react';
 
-const copy = {
+type BlogCopy = {
+  title: string;
+  dek: string;
+  more: string;
+  readTime: (minutes: number) => string;
+  emptyTitle: string;
+  emptyDescription: string;
+  back: string;
+  read: string;
+  adjacent: string;
+  older: string;
+  newer: string;
+};
+
+const copy: Record<SiteLocale, BlogCopy> = {
   en: {
     title: 'Blog',
     dek: 'Product announcements, engineering notes, and stories from the Lody team.',
@@ -19,8 +34,6 @@ const copy = {
     adjacent: 'More posts',
     older: 'Older post',
     newer: 'Newer post',
-    languageHref: '/zh/blog',
-    indexHref: '/blog',
   },
   zh: {
     title: '博客',
@@ -34,10 +47,86 @@ const copy = {
     adjacent: '更多文章',
     older: '更早的文章',
     newer: '更新的文章',
-    languageHref: '/blog',
-    indexHref: '/zh/blog',
   },
-} as const;
+  'zh-hant': {
+    title: '部落格',
+    dek: '來自 Lody 團隊的產品公告、工程筆記與故事。',
+    more: '更多文章',
+    readTime: (minutes: number) => `閱讀約 ${minutes} 分鐘`,
+    emptyTitle: '尚無文章',
+    emptyDescription: '我們正在撰寫內容，歡迎稍後再來看看。',
+    back: '返回部落格',
+    read: '閱讀',
+    adjacent: '更多文章',
+    older: '較早的文章',
+    newer: '較新的文章',
+  },
+  ja: {
+    title: 'ブログ',
+    dek: 'Lody チームからの製品アップデート、エンジニアリングノート、ストーリー。',
+    more: 'その他の記事',
+    readTime: (minutes: number) => `読了目安 ${minutes} 分`,
+    emptyTitle: '記事はまだありません',
+    emptyDescription: '現在執筆中です。また後日お越しください。',
+    back: 'ブログ一覧へ戻る',
+    read: '読む',
+    adjacent: 'その他の記事',
+    older: '前の記事',
+    newer: '次の記事',
+  },
+  ko: {
+    title: '블로그',
+    dek: 'Lody 팀의 제품 소식, 엔지니어링 노트, 그리고 이야기.',
+    more: '더 많은 글',
+    readTime: (minutes: number) => `${minutes}분 소요`,
+    emptyTitle: '아직 게시물이 없습니다',
+    emptyDescription: '콘텐츠를 준비 중입니다. 곧 다시 방문해 주세요.',
+    back: '블로그로 돌아가기',
+    read: '읽기',
+    adjacent: '더 많은 글',
+    older: '이전 글',
+    newer: '다음 글',
+  },
+  es: {
+    title: 'Blog',
+    dek: 'Anuncios de producto, notas de ingeniería e historias del equipo de Lody.',
+    more: 'Más artículos',
+    readTime: (minutes: number) => `${minutes} min de lectura`,
+    emptyTitle: 'Aún no hay publicaciones',
+    emptyDescription: 'Todavía estamos escribiendo. Vuelve pronto.',
+    back: 'Volver al blog',
+    read: 'Leer',
+    adjacent: 'Más artículos',
+    older: 'Artículo anterior',
+    newer: 'Artículo más reciente',
+  },
+  fr: {
+    title: 'Blog',
+    dek: "Annonces produit, notes d'ingénierie et récits de l'équipe Lody.",
+    more: "Plus d'articles",
+    readTime: (minutes: number) => `${minutes} min de lecture`,
+    emptyTitle: 'Aucun article pour le moment',
+    emptyDescription: 'Nous sommes encore en train de rédiger. Revenez bientôt.',
+    back: 'Retour au blog',
+    read: 'Lire',
+    adjacent: "Plus d'articles",
+    older: 'Article précédent',
+    newer: 'Article suivant',
+  },
+  ru: {
+    title: 'Блог',
+    dek: 'Анонсы продуктов, инженерные заметки и истории команды Lody.',
+    more: 'Другие публикации',
+    readTime: (minutes: number) => `${minutes} мин чтения`,
+    emptyTitle: 'Публикаций пока нет',
+    emptyDescription: 'Мы ещё готовим материалы. Загляните чуть позже.',
+    back: 'Назад к блогу',
+    read: 'Читать',
+    adjacent: 'Другие публикации',
+    older: 'Предыдущая запись',
+    newer: 'Следующая запись',
+  },
+};
 
 function isExternalLink(href: string) {
   return /^(?:[a-z]+:)?\/\//iu.test(href);
@@ -47,7 +136,10 @@ function hasText(value: string | undefined): value is string {
   return value !== undefined && value.length > 0;
 }
 
-const blogContentLoaders = {
+const blogContentLoaders: Record<
+  SiteLocale,
+  ReturnType<typeof browserCollections.blogEn.createClientLoader>
+> = {
   en: browserCollections.blogEn.createClientLoader({
     id: 'blogEn',
     component({ default: MDX }) {
@@ -56,6 +148,42 @@ const blogContentLoaders = {
   }),
   zh: browserCollections.blogZh.createClientLoader({
     id: 'blogZh',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  'zh-hant': browserCollections.blogZhHant.createClientLoader({
+    id: 'blogZhHant',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  ja: browserCollections.blogJa.createClientLoader({
+    id: 'blogJa',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  ko: browserCollections.blogKo.createClientLoader({
+    id: 'blogKo',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  es: browserCollections.blogEs.createClientLoader({
+    id: 'blogEs',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  fr: browserCollections.blogFr.createClientLoader({
+    id: 'blogFr',
+    component({ default: MDX }) {
+      return <MDX components={getMDXComponents()} />;
+    },
+  }),
+  ru: browserCollections.blogRu.createClientLoader({
+    id: 'blogRu',
     component({ default: MDX }) {
       return <MDX components={getMDXComponents()} />;
     },
@@ -212,7 +340,7 @@ export function BlogIndexPage({ entries, locale }: { entries: BlogEntry[]; local
 
   return (
     <main className="lody-blog-shell blog-shell">
-      <SiteNav locale={locale} languageHref={text.languageHref} />
+      <SiteNav locale={locale} />
       <div className="blog-container">
         <header className="blog-masthead">
           <h1 className="blog-masthead__title">{text.title}</h1>
@@ -293,15 +421,13 @@ export function BlogPostPage({
   next?: BlogEntry;
 }) {
   const text = copy[locale];
+  const indexHref = localizeSitePath('/blog', locale);
 
   return (
     <main className="lody-blog-shell blog-shell">
-      <SiteNav
-        locale={locale}
-        languageHref={locale === 'zh' ? `/blog/${entry.slug}` : `/zh/blog/${entry.slug}`}
-      />
+      <SiteNav locale={locale} />
       <article className="blog-article">
-        <SiteAnchor className="blog-back" href={text.indexHref}>
+        <SiteAnchor className="blog-back" href={indexHref}>
           <ArrowLeftIcon />
           {text.back}
         </SiteAnchor>

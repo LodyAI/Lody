@@ -1374,3 +1374,104 @@ it.each(['ios-simulator', 'android-emulator'] as const)(
     }
   }
 );
+
+describe('cross-epoch RPC original self-healing and revocation preservation', () => {
+  it('re-seals stale-epoch dispatch and feature originals on retry after epoch rotation, while rejecting revoked devices', async () => {
+    const f = encryptedRpcFixture({ teammate: true });
+    fixtures.push(f);
+    const epochKeys = new Map<number, Uint8Array>([
+      [0, copyEpochKeyBytes(f.ledger.secret)],
+      [1, new Uint8Array(32).fill(0x55)],
+    ]);
+    const makeClient = (who: 'owner' | 'phone', filename: string) =>
+      makeE2eeRpcNative({
+        workspaceId: f.workspaceId,
+        requesterDevice: Buffer.from(f.ledger[who].publicKey.toBytes()).toString('hex'),
+        originals: new E2eeRpcOriginals(join(f.directory, `${filename}.sqlite`)),
+        ledger: f.ledger.ledger,
+        signIntent: (request) =>
+          Effect.sync(() =>
+            f.ledger[who].signBytes(
+              new Uint8Array(
+                Buffer.concat([Buffer.from('lody-e2ee/exec-intent/v1\0'), request.contentDigest])
+              )
+            )
+          ),
+        binding: (resource) =>
+          makeRealtimeContentBinding({
+            genesis: f.ledger.context.genesis,
+            resource,
+            signer: f.ledger[who].signer,
+            ledger: f.ledger.ledger,
+            readEpochKey: (epoch) =>
+              Effect.sync(() =>
+                Result.getOrThrow(Bytes.epochKey(new Uint8Array(epochKeys.get(epoch)!)))
+              ),
+          }),
+      });
+
+    const sender = makeClient('owner', 'epoch-sender');
+    const receiver = makeClient('phone', 'epoch-receiver');
+    const featureInput = {
+      requestId: '99'.repeat(16),
+      request: {
+        workspaceId: f.workspaceId,
+        machineId: f.machineId,
+        method: 'machine/status' as const,
+        params: {},
+      },
+    };
+
+    try {
+      const dispatch0 = await Effect.runPromise(sender.prepareDispatch(f.machineId, f.input));
+      const opened0 = await Effect.runPromise(
+        receiver.openDispatch(f.machineId, dispatch0.frameHex)
+      );
+      expect(opened0.epoch).toBe(0);
+      const feature0 = await Effect.runPromise(sender.prepareFeature(featureInput));
+
+      f.ledger.append([7, 1, new Uint8Array(32).fill(91), new Uint8Array(72).fill(92)]);
+
+      const staleAckResult = await Effect.runPromise(
+        Effect.result(receiver.sealAck(f.machineId, opened0, f.ack))
+      );
+      expect(Result.isFailure(staleAckResult)).toBe(true);
+      expect(
+        Result.isFailure(staleAckResult) && (staleAckResult.failure as { code?: unknown }).code
+      ).toBe('epoch-mismatch');
+
+      const [dispatch1a, dispatch1b] = await Promise.all([
+        Effect.runPromise(sender.prepareDispatch(f.machineId, f.input)),
+        Effect.runPromise(sender.prepareDispatch(f.machineId, f.input)),
+      ]);
+      expect(dispatch1a.frameHex).not.toBe(dispatch0.frameHex);
+      expect(dispatch1b.frameHex).toBe(dispatch1a.frameHex);
+
+      const opened1 = await Effect.runPromise(
+        receiver.openDispatch(f.machineId, dispatch1a.frameHex)
+      );
+      expect(opened1.epoch).toBe(1);
+      const ack1 = await Effect.runPromise(receiver.sealAck(f.machineId, opened1, f.ack));
+      expect(
+        await Effect.runPromise(
+          sender.acceptResponse(f.machineId, f.input, Buffer.from(ack1).toString('hex'))
+        )
+      ).toEqual(f.ack);
+
+      const feature1 = await Effect.runPromise(sender.prepareFeature(featureInput));
+      expect(feature1.frameHex).not.toBe(feature0.frameHex);
+      const openedFeature1 = await Effect.runPromise(
+        receiver.openFeature(f.machineId, feature1.frameHex)
+      );
+      expect(openedFeature1?.epoch).toBe(1);
+
+      f.ledger.append([5, f.ledger.phone.raw]);
+      await expect(
+        Effect.runPromise(receiver.prepareDispatch(f.machineId, f.input))
+      ).rejects.toThrow('e2ee_device_revoked');
+    } finally {
+      await Effect.runPromise(sender.close());
+      await Effect.runPromise(receiver.close());
+    }
+  });
+});

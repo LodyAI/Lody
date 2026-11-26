@@ -652,6 +652,330 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       await repo.destroy();
     }
   });
+
+  it('completes concurrent read and write workspace-index acquisitions and disposal without deadlocking', async () => {
+    const repo = await LoroRepo.create({});
+    let resolveReadGrant!: () => void;
+    let resolveWriteGrant!: () => void;
+    const readGrantGate = new Promise<void>((resolve) => {
+      resolveReadGrant = resolve;
+    });
+    const writeGrantGate = new Promise<void>((resolve) => {
+      resolveWriteGrant = resolve;
+    });
+    const sync = new PromptShortcutSync({
+      content: { mode: 'plaintext' },
+      repo,
+      workspaceId: 'ws-mode',
+      now: () => 0,
+      grant: async (resource, write) => {
+        await (write ? writeGrantGate : readGrantGate);
+        return {
+          token: 'shortcut-token',
+          expiresIn: 300,
+          gatewayBaseUrl: 'https://gateway.test',
+          streamId: getShortcutResourceStreamId(resource),
+        };
+      },
+    });
+    const resource = { kind: 'workspace-index', workspaceId: 'ws-mode' } as const;
+    try {
+      const readPending = sync.acquire(resource, false);
+      const writePending = sync.acquire(resource, true);
+      resolveReadGrant();
+      resolveWriteGrant();
+      const [readLease, writeLease] = await Promise.all([readPending, writePending]);
+      await readLease.release();
+      await writeLease.release();
+    } finally {
+      await sync.dispose();
+      await repo.destroy();
+    }
+  });
+
+  it('keeps workspace-index live updates active after a read-only runtime upgrades to writable and publishes', async () => {
+    const clientRepo = await LoroRepo.create({});
+    const serverRepo = await LoroRepo.create({});
+    const store = await LocalShortcutStore.open({
+      repo: clientRepo,
+      workspaceId: 'ws-upgrade',
+      userId: 'user-1',
+    });
+    let canWrite = false;
+    const indexStreamId = getWorkspaceShortcutIndexStreamId('ws-upgrade');
+
+    type RoomState = {
+      write: boolean;
+      refs: number;
+      joined: boolean;
+      closed: boolean;
+    };
+    const rooms = new Map<string, RoomState>();
+    const activeJoinedSubscribers = new Set<RoomState>();
+
+    const syncStream = async (streamId: string, write: boolean, isFlock: boolean) => {
+      if (isFlock) {
+        const s = await serverRepo.acquireFlockDoc(streamId);
+        const c = await clientRepo.acquireFlockDoc(streamId);
+        try {
+          if (write) s.flock.importFile(c.flock.exportFile());
+          c.flock.importFile(s.flock.exportFile());
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      } else {
+        const s = await serverRepo.acquireDoc(streamId);
+        const c = await clientRepo.acquireDoc(streamId);
+        try {
+          if (write) s.doc.import(c.doc.export({ mode: 'snapshot' }));
+          c.doc.import(s.doc.export({ mode: 'snapshot' }));
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      }
+    };
+
+    const runtime = new PromptShortcutRuntime(store, {
+      canWrite: () => canWrite,
+      acquire: async (resource, write) => {
+        const streamId = getShortcutResourceStreamId(resource);
+        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        const key = `${write ? 'w' : 'r'}:${streamId}`;
+        let room = rooms.get(key);
+        if (!room) {
+          room = { write, refs: 0, joined: false, closed: false };
+          rooms.set(key, room);
+        }
+        const captured = room;
+        captured.refs++;
+        let released = false;
+        return {
+          sync: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            await syncStream(streamId, write, isFlock);
+          },
+          join: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            await syncStream(streamId, write, isFlock);
+            captured.joined = true;
+            if (resource.kind === 'workspace-index') activeJoinedSubscribers.add(captured);
+          },
+          release: async () => {
+            if (released) return;
+            released = true;
+            captured.refs--;
+            if (captured.refs === 0 && rooms.get(key) === captured) {
+              rooms.delete(key);
+              captured.closed = true;
+              captured.joined = false;
+              activeJoinedSubscribers.delete(captured);
+            }
+          },
+        };
+      },
+      dispose: async () => {
+        rooms.clear();
+        activeJoinedSubscribers.clear();
+      },
+    });
+
+    try {
+      await runtime.start();
+      expect([...activeJoinedSubscribers].map((r) => r.write)).toEqual([false]);
+
+      canWrite = true;
+      await runtime.save({
+        value: makeShortcut({
+          id: 'sc-promoted',
+          workspaceId: 'ws-upgrade',
+          slug: 'promoted',
+          revision: 'rev-1',
+        }),
+        base: null,
+      });
+      await runtime.flush();
+      expect(runtime.getSnapshot().errors).toEqual({});
+
+      expect([...activeJoinedSubscribers].map((r) => r.write)).toEqual([true]);
+
+      const remoteEntry = projectShortcutIndex(
+        makeShortcut({
+          id: 'sc-peer',
+          workspaceId: 'ws-upgrade',
+          ownerUserId: 'peer-user',
+          name: 'Peer Shortcut',
+          slug: 'peer-shortcut',
+          revision: 'rev-peer',
+        }),
+        'sc-peer'
+      );
+      const sIndex = await serverRepo.acquireFlockDoc(indexStreamId);
+      try {
+        new PromptShortcutCatalog(sIndex.flock).put(remoteEntry);
+      } finally {
+        await sIndex.release();
+      }
+      if (activeJoinedSubscribers.size > 0) {
+        await syncStream(indexStreamId, false, true);
+      }
+
+      expect(
+        runtime
+          .getSnapshot()
+          .entries.map((e) => e.id)
+          .sort()
+      ).toEqual(['sc-peer', 'sc-promoted']);
+    } finally {
+      await runtime.dispose();
+      await clientRepo.destroy();
+      await serverRepo.destroy();
+    }
+  });
+
+  it('keeps the original read-only subscription untouched if write grant or gateway join fails after role upgrade', async () => {
+    const clientRepo = await LoroRepo.create({});
+    const serverRepo = await LoroRepo.create({});
+    const store = await LocalShortcutStore.open({
+      repo: clientRepo,
+      workspaceId: 'ws-upgrade-fail',
+      userId: 'user-1',
+    });
+    let canWrite = false;
+    let failWriteAcquire = false;
+    let gatewayDown = false;
+    const indexStreamId = getWorkspaceShortcutIndexStreamId('ws-upgrade-fail');
+
+    type RoomState = { write: boolean; refs: number; closed: boolean };
+    const rooms = new Map<string, RoomState>();
+    const activeJoined = new Set<RoomState>();
+
+    const syncStream = async (streamId: string, write: boolean, isFlock: boolean) => {
+      if (isFlock) {
+        const s = await serverRepo.acquireFlockDoc(streamId);
+        const c = await clientRepo.acquireFlockDoc(streamId);
+        try {
+          if (write) s.flock.importFile(c.flock.exportFile());
+          c.flock.importFile(s.flock.exportFile());
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      } else {
+        const s = await serverRepo.acquireDoc(streamId);
+        const c = await clientRepo.acquireDoc(streamId);
+        try {
+          if (write) s.doc.import(c.doc.export({ mode: 'snapshot' }));
+          c.doc.import(s.doc.export({ mode: 'snapshot' }));
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      }
+    };
+
+    const runtime = new PromptShortcutRuntime(store, {
+      canWrite: () => canWrite,
+      acquire: async (resource, write) => {
+        const streamId = getShortcutResourceStreamId(resource);
+        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        if (resource.kind === 'workspace-index' && write && failWriteAcquire) {
+          throw new Error('write grant unavailable');
+        }
+        const key = `${write ? 'w' : 'r'}:${streamId}`;
+        let room = rooms.get(key);
+        if (!room) {
+          room = { write, refs: 0, closed: false };
+          rooms.set(key, room);
+        }
+        const captured = room;
+        captured.refs++;
+        let released = false;
+        return {
+          sync: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            await syncStream(streamId, write, isFlock);
+          },
+          join: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            if (resource.kind === 'workspace-index' && gatewayDown) {
+              throw new Error('gateway unavailable');
+            }
+            await syncStream(streamId, write, isFlock);
+            if (resource.kind === 'workspace-index') activeJoined.add(captured);
+          },
+          release: async () => {
+            if (released) return;
+            released = true;
+            captured.refs--;
+            if (captured.refs === 0 && rooms.get(key) === captured) {
+              rooms.delete(key);
+              captured.closed = true;
+              activeJoined.delete(captured);
+            }
+          },
+        };
+      },
+      dispose: async () => {
+        rooms.clear();
+        activeJoined.clear();
+      },
+    });
+
+    try {
+      await runtime.start();
+      const initialReadRoom = [...activeJoined][0];
+      expect(initialReadRoom?.write).toBe(false);
+
+      canWrite = true;
+      failWriteAcquire = true;
+      await runtime.save({
+        value: makeShortcut({
+          id: 'sc-pending',
+          workspaceId: 'ws-upgrade-fail',
+          slug: 'pending',
+          revision: 'rev-1',
+        }),
+        base: null,
+      });
+      await runtime.flush();
+      expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
+      expect([...activeJoined]).toEqual([initialReadRoom]);
+
+      failWriteAcquire = false;
+      gatewayDown = true;
+      await runtime.flush();
+      expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
+      expect(initialReadRoom.closed).toBe(false);
+      expect([...activeJoined]).toEqual([initialReadRoom]);
+
+      gatewayDown = false;
+      const peer = projectShortcutIndex(
+        makeShortcut({
+          id: 'sc-peer-after-outage',
+          workspaceId: 'ws-upgrade-fail',
+          ownerUserId: 'peer-user',
+          name: 'Peer After Outage',
+          slug: 'peer-after-outage',
+          revision: 'rev-peer',
+        }),
+        'sc-peer-after-outage'
+      );
+      const sIndex = await serverRepo.acquireFlockDoc(indexStreamId);
+      try {
+        new PromptShortcutCatalog(sIndex.flock).put(peer);
+      } finally {
+        await sIndex.release();
+      }
+      if (activeJoined.size > 0) await syncStream(indexStreamId, false, true);
+      expect(runtime.getSnapshot().entries.some((e) => e.id === 'sc-peer-after-outage')).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await clientRepo.destroy();
+      await serverRepo.destroy();
+    }
+  });
 });
 
 describe('encrypted Prompt Shortcuts', () => {

@@ -122,6 +122,17 @@ export type HeroCopy = {
   otherDownloadsHref: string;
 };
 
+const EXPERIENCE_COPY: Record<LandingLocale, { scroll: string; productDemo: string }> = {
+  en: { scroll: 'Scroll', productDemo: 'Product demo' },
+  zh: { scroll: '向下滚动', productDemo: '产品演示' },
+  'zh-hant': { scroll: '向下捲動', productDemo: '產品示範' },
+  ja: { scroll: 'スクロール', productDemo: '製品デモ' },
+  ko: { scroll: '스크롤', productDemo: '제품 데모' },
+  es: { scroll: 'Desplazar', productDemo: 'Demostración del producto' },
+  fr: { scroll: 'Défiler', productDemo: 'Démonstration produit' },
+  ru: { scroll: 'Листайте вниз', productDemo: 'Демонстрация продукта' },
+};
+
 function wheelDeltaYPx(event: WheelEvent): number {
   if (event.deltaMode === 1) return event.deltaY * 16;
   if (event.deltaMode === 2) return event.deltaY * (window.innerHeight || 800);
@@ -475,9 +486,7 @@ export function UnderwaterExperience({
           </div>
 
           <div className="underwater-hero__scroll-hint" aria-hidden="true">
-            <span className="underwater-hero__scroll-label">
-              {locale === 'zh' ? '向下滚动' : 'Scroll'}
-            </span>
+            <span className="underwater-hero__scroll-label">{EXPERIENCE_COPY[locale].scroll}</span>
             <span className="underwater-hero__scroll-icon">
               <span className="underwater-hero__scroll-chevron" />
             </span>
@@ -491,7 +500,7 @@ export function UnderwaterExperience({
               ref={stageRef}
               className="underwater-reveal"
               data-active={demosLive ? 'true' : 'false'}
-              aria-label={locale === 'zh' ? '产品演示' : 'Product demo'}
+              aria-label={EXPERIENCE_COPY[locale].productDemo}
             >
               <div className="underwater-reveal__glow" aria-hidden="true" />
               <div className="underwater-reveal__stack">

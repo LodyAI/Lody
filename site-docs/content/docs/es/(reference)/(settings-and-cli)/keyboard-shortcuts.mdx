@@ -1,0 +1,69 @@
+---
+title: "Paleta de comandos y atajos de teclado"
+description: "Usa la paleta de comandos de Lody, personaliza los atajos de la aplicación y del sistema, y abre Sesión rápida sin soltar el teclado."
+---
+
+# Paleta de comandos y atajos de teclado
+
+Lody incluye una paleta de comandos para encontrar acciones y sesiones, además de una página de configuración para
+personalizar los atajos de teclado de la aplicación y de todo el sistema.
+
+## Abrir la paleta de comandos
+
+Pulsa `Cmd+K` en macOS o `Ctrl+K` en otras plataformas. `Cmd/Ctrl+Shift+P` también la abre.
+
+La paleta:
+
+- busca comandos disponibles en la vista actual
+- encuentra sesiones por título, etiqueta de proyecto o repositorio, o nombre de rama para que puedas cambiar sin usar la barra lateral
+- muestra la combinación de teclas activa junto a cada comando
+- admite navegación con las teclas de flecha, `Enter` para ejecutar y `Escape` para cerrar
+
+Los comandos que no aplican a la pantalla actual permanecen ocultos.
+
+La entrada **Buscar** de la barra lateral abre esta misma paleta. La búsqueda de navegación de sesiones no
+busca en el texto de las conversaciones; usa la [Búsqueda en la conversación](/es/docs/session-search) para encontrar texto
+dentro de la conversación actual.
+
+## Personalizar atajos
+
+Abre **Configuración** -> **Teclado**. Haz clic en una fila de atajo y luego pulsa la nueva combinación.
+
+Puedes:
+
+- reasignar un comando
+- eliminar su asignación
+- asignar una combinación a un comando sin atajo
+- restablecer todos los atajos de la aplicación a sus valores predeterminados
+- ver y rechazar conflictos antes de guardar
+
+Los cambios en los atajos de la aplicación se guardan en el dispositivo actual y no se sincronizan con otros dispositivos.
+Algunas combinaciones reservadas por el navegador no pueden interceptarse en la aplicación web.
+
+## Cambiar de pestaña de sesión
+
+En la aplicación de escritorio, de `Cmd/Ctrl+1` a `Cmd/Ctrl+8` saltan directamente a esa pestaña de
+conversación y `Cmd/Ctrl+9` salta a la última — la misma convención que usan los navegadores para su
+barra de pestañas. `Cmd/Ctrl+Shift+,` y `Cmd/Ctrl+Shift+.` avanzan a la pestaña anterior y siguiente,
+y `Cmd/Ctrl+T` abre una nueva pestaña.
+
+## Recuperar mensajes enviados
+
+En el compositor de una conversación, pulsa `Up` cuando el compositor esté vacío para mostrar el último mensaje
+que enviaste en esa conversación. Sigue pulsando `Up` para retroceder más y `Down` para avanzar;
+pulsar `Down` más allá de tu mensaje más reciente vuelve a vaciar el compositor. Solo se recupera el texto, no
+los archivos adjuntos ni los comentarios referenciados.
+
+Al escribir, pulsar `Left`/`Right` o hacer clic en el texto regresas a la edición normal, con el texto
+recuperado como borrador. Cuando el compositor ya contiene texto, `Up` y `Down` mueven el cursor como de costumbre.
+
+## Atajos globales de escritorio
+
+La aplicación de escritorio también cuenta con atajos de todo el sistema que funcionan cuando Lody no tiene el foco. Aparecen en
+la sección **Atajos globales** y se pueden reasignar por separado.
+
+El atajo predeterminado de Sesión rápida es `Cmd/Ctrl+Shift+N`. Abre u oculta un pequeño compositor
+independiente para que puedas iniciar una sesión sin traer al frente la ventana principal de Lody.
+
+Las combinaciones globales deben incluir `Command`, `Control` o `Alt`. Si el sistema operativo u otra aplicación
+ya utiliza una combinación, Lody conserva la asignación anterior e informa del conflicto.

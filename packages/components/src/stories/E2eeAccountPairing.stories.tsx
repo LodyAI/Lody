@@ -3,6 +3,7 @@ import { expect, userEvent, within } from 'storybook/test';
 import type { E2eeAccountPairingPreview, E2eeAccountPairingRequestState } from '@lody/platform';
 import {
   E2eeAccountPairingApprove,
+  E2eeAccountPairingKeyRetry,
   E2eeAccountPairingRequest,
 } from '@/components/pages/e2ee-account-pairing';
 
@@ -79,8 +80,13 @@ export const ApproverShowsCode: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(
-      canvas.getByRole('button', { name: /Show a code on this device instead|改为在这台设备上显示配对码/ })
+      canvas.getByRole('button', {
+        name: /Show a code on this device instead|改为在这台设备上显示配对码/,
+      })
     );
     await expect(await canvas.findByText(CODE)).toBeVisible();
   },
+};
+export const KeyRetryBanner: Story = {
+  render: () => <E2eeAccountPairingKeyRetry onRetry={() => {}} />,
 };

@@ -2,7 +2,7 @@ import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
 import { replaceQueueItem } from '../lib/session-send-delivery';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
   getServerNow,
@@ -10,6 +10,7 @@ import {
   normalizeSessionTurnInputConfig,
   type MessageQueueItem,
   type MessageQueueItemInput,
+  type RoostHistorySyncState,
 } from '@lody/shared';
 import type { SessionHistory, SessionHistoryInput, SessionId, SessionMeta } from '@lody/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -62,6 +63,7 @@ export type UseSessionDocResult = {
    * must read history only through this view.
    */
   history: ConversationView | null;
+  historySync?: RoostHistorySyncState;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
     options?: {
@@ -109,6 +111,8 @@ type SessionHistoryHint = Pick<
   SessionMeta,
   'lastMessageAt' | 'latestUserMsgId' | 'lastHandledUserMsgId' | 'processingUserMsgId'
 >;
+const emptyHistorySync = () => undefined;
+const ignoreHistorySync = () => () => {};
 
 export function sessionMetaSuggestsHistory(session: SessionHistoryHint | null | undefined) {
   return Boolean(
@@ -275,6 +279,12 @@ export function useSessionDoc(
   }, [enabled, loadedStore, syncEnabled]);
 
   const history = loadedStore?.history ?? null;
+  const historyStore = enabled && loadedStore?.sessionId === sessionId ? loadedStore : null;
+  const historySync = useSyncExternalStore(
+    historyStore?.subscribeHistorySync ?? ignoreHistorySync,
+    historyStore?.getHistorySync ?? emptyHistorySync,
+    emptyHistorySync
+  );
 
   const withStore = useCallback(
     async <T>(fn: (store: SessionDocStore) => Promise<T> | T): Promise<T> => {
@@ -477,6 +487,7 @@ export function useSessionDoc(
     doc: state,
     loadError,
     history,
+    historySync,
     addHistory,
     pushMessageQueue,
     removeMessageQueueItem,

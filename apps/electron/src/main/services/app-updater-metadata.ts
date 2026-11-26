@@ -1,4 +1,5 @@
 import type { ElectronUpdaterState } from '@lody/shared/electron-ipc'
+import { SUPPORTED_LANGUAGES } from '@lody/shared/language'
 
 const MAX_RELEASE_NOTES_LENGTH = 64 * 1024
 
@@ -35,13 +36,16 @@ function readReleaseNotesByLocale(
   const locales = readObject(value)
   if (!locales) return undefined
 
-  const en = readNonEmptyString(locales.en)
-  const zhCN = readNonEmptyString(locales.zh_CN)
-  if (!en && !zhCN) return undefined
-  return {
-    ...(en ? { en } : {}),
-    ...(zhCN ? { zh_CN: zhCN } : {})
+  const result: NonNullable<ElectronUpdaterState['releaseNotesByLocale']> = {}
+  let hasAny = false
+  for (const lang of SUPPORTED_LANGUAGES) {
+    const note = readNonEmptyString(locales[lang])
+    if (note) {
+      result[lang] = note
+      hasAny = true
+    }
   }
+  return hasAny ? result : undefined
 }
 
 export function readUpdaterReleaseMetadata(

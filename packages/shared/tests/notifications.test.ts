@@ -101,7 +101,7 @@ describe('notification presentation', () => {
       pullRequestNumber: 15,
       replyPreview: 'Fixed and verified.',
     };
-    for (const language of ['en', 'zh'] as const) {
+    for (const language of ['en', 'zh', 'zh_Hant', 'ja', 'ko', 'es', 'fr', 'ru'] as const) {
       const translate = (key: keyof typeof notificationMessages.en) =>
         notificationMessages[language][key];
       for (const event of ['succeeded', 'failed', 'unknown'] as const) {

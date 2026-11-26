@@ -8,14 +8,31 @@ import { Avatar } from '@lody/ui/avatar';
 import { CachedAvatarImage } from '@/components/cached-avatar-img';
 import { Button } from '@lody/ui/button';
 import { Collapsible } from '@lody/ui/collapsible';
+import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
-import { Children, Fragment, isValidElement, useMemo, useState, type ReactNode } from 'react';
+import {
+  control,
+  duration,
+  ease,
+  radius,
+  space,
+  text as type,
+} from '@lody/ui/tokens/scales.stylex';
+import {
+  Children,
+  Fragment,
+  isValidElement,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Check,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   CircleHelp,
   LayoutDashboard,
   LifeBuoy,
@@ -44,6 +61,8 @@ import {
   type E2eeConsoleTab,
 } from '@/components/pages/e2ee-console-section';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { withClassName } from '@/lib/stylex';
+import { settingsSurface as surface } from '../settings/surface';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -85,7 +104,11 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
     margin: 0,
   },
-  count: { color: colors.tertiaryLabel, fontWeight: 400 },
+  count: {
+    color: colors.tertiaryLabel,
+    fontWeight: 400,
+    fontVariantNumeric: 'tabular-nums',
+  },
   list: {
     listStyle: 'none',
     margin: 0,
@@ -99,7 +122,8 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[3],
-    minHeight: 44,
+    minHeight: 46,
+    paddingBlock: space[1.5],
     borderBottomWidth: { default: 1, ':last-child': 0 },
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
@@ -114,17 +138,29 @@ const styles = stylex.create({
   },
   you: { color: colors.tertiaryLabel, fontWeight: 400, marginInlineStart: space[1.5] },
   memberRole: {
-    width: '5em',
+    minWidth: '6.5em',
+    flexShrink: 0,
+    textAlign: 'end',
     color: colors.secondaryLabel,
     fontSize: type.subheadlineSize,
     whiteSpace: 'nowrap',
   },
   memberDevices: {
-    minWidth: '4.5em',
+    minWidth: '5em',
+    flexShrink: 0,
     textAlign: 'end',
     color: colors.tertiaryLabel,
     fontSize: type.footnoteSize,
+    fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
+  },
+  memberActionSlot: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: control.small,
+    height: control.small,
   },
   history: {
     paddingInline: space[4],
@@ -192,6 +228,7 @@ const styles = stylex.create({
     fontSize: type.footnoteSize,
   },
   quiet: { color: colors.tertiaryLabel, fontSize: type.footnoteSize },
+  loadingRow: { display: 'flex', alignItems: 'center', gap: space[2] },
   muted: { color: colors.secondaryLabel },
   // Console frame: the same layout as a page and inside the Settings dialog.
   consolePage: {
@@ -215,14 +252,8 @@ const styles = stylex.create({
   },
   consoleFrame: {
     display: 'grid',
-    gridTemplateColumns: {
-      default: '220px minmax(0, 1fr)',
-      '@media (max-width: 720px)': 'minmax(0, 1fr)',
-    },
-    gridTemplateRows: {
-      default: 'minmax(0, 1fr)',
-      '@media (max-width: 720px)': 'auto minmax(0, 1fr)',
-    },
+    gridTemplateColumns: '220px minmax(0, 1fr)',
+    gridTemplateRows: 'minmax(0, 1fr)',
     width: '100%',
     maxWidth: 1000,
     height: '100%',
@@ -239,18 +270,18 @@ const styles = stylex.create({
   },
   nav: {
     display: 'flex',
-    flexDirection: { default: 'column', '@media (max-width: 720px)': 'row' },
-    gap: space[1],
-    padding: { default: space[3], '@media (max-width: 720px)': `${space[2]} ${space[3]}` },
+    flexDirection: 'column',
+    gap: '2px',
+    paddingBlock: space[4],
+    paddingInline: space[3],
     backgroundColor: colors.secondaryBackground,
-    overflowX: { default: 'visible', '@media (max-width: 720px)': 'auto' },
   },
   navIdentity: {
-    display: { default: 'flex', '@media (max-width: 720px)': 'none' },
+    display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    paddingInline: space[2],
-    paddingBottom: space[3],
+    paddingInline: space[3],
+    paddingBottom: space[4],
     minWidth: 0,
   },
   navName: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -260,6 +291,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     flexShrink: 0,
+    minHeight: '34px',
     paddingBlock: space[1.5],
     paddingInline: space[3],
     borderRadius: radius.medium,
@@ -270,8 +302,13 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
     whiteSpace: 'nowrap',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
   navItemActive: { backgroundColor: colors.wellBackground, fontWeight: 600 },
+  navIcon: { flexShrink: 0, color: colors.secondaryLabel },
+  navIconActive: { color: colors.label },
   navBadge: {
     marginInlineStart: 'auto',
     minWidth: 18,
@@ -291,25 +328,153 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     paddingBlock: space[4],
-    paddingInline: { default: space[6], '@media (max-width: 720px)': space[4] },
+    paddingInline: space[6],
+  },
+  mainTitleGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minWidth: 0,
   },
   mainTitle: {
     margin: 0,
     fontSize: type.titleSize,
     lineHeight: type.titleLeading,
     fontWeight: 600,
-    flexGrow: 1,
     minWidth: 0,
   },
   mainBody: {
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
-    paddingInline: { default: space[6], '@media (max-width: 720px)': space[4] },
+    paddingInline: space[6],
     paddingBottom: space[6],
     display: 'flex',
     flexDirection: 'column',
     gap: space[6],
+  },
+  mobileFrame: {
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    height: '100%',
+    minHeight: 0,
+    overflow: 'hidden',
+    backgroundColor: colors.background,
+    color: colors.label,
+    fontSize: type.bodySize,
+    lineHeight: 1.45,
+  },
+  mobileHeader: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 30,
+    display: 'grid',
+    gridTemplateColumns: '4.5rem minmax(0, 1fr) 4.5rem',
+    alignItems: 'center',
+    gap: space[2],
+    paddingTop: space[2],
+    paddingBottom: space[2],
+    paddingInline: space[3],
+  },
+  mobileHeaderModal: {
+    gridTemplateColumns: '6.5rem minmax(0, 1fr) 6.5rem',
+  },
+  mobileBackButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    justifySelf: 'start',
+    width: '36px',
+    height: '36px',
+    flexShrink: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: '9999px',
+    backgroundColor: colors.elevatedBackground,
+    color: colors.label,
+    boxShadow: shadow.card,
+    cursor: 'pointer',
+    transitionProperty: 'transform',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+    transform: { default: 'scale(1)', ':active': 'scale(0.97)' },
+  },
+  mobileHeaderTitle: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'center',
+    fontSize: '0.98rem',
+    fontWeight: 500,
+    letterSpacing: '-0.02em',
+    color: colors.label,
+  },
+  mobileHeaderActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    justifySelf: 'end',
+    gap: space[1],
+  },
+  mobileBody: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: space[4],
+    paddingTop: space[3],
+    paddingBottom: space[6],
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+  },
+  mobileMenuRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    width: '100%',
+    minHeight: '48px',
+    margin: 0,
+    paddingInline: space[4],
+    paddingBlock: space[3],
+    borderWidth: 0,
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`,
+      ':active': `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 6%)`,
+    },
+    color: colors.label,
+    fontFamily: 'inherit',
+    fontSize: type.bodySize,
+    textAlign: 'start',
+    cursor: 'pointer',
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  mobileMenuIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: '24px',
+    height: '24px',
+    color: colors.secondaryLabel,
+  },
+  mobileMenuLabel: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+    color: colors.label,
+  },
+  mobileMenuChevron: {
+    flexShrink: 0,
+    color: colors.tertiaryLabel,
   },
   hero: {
     display: 'flex',
@@ -346,6 +511,13 @@ const styles = stylex.create({
     color: '#ffffff',
   },
   checkMarkDone: { borderColor: colors.success, backgroundColor: colors.success },
+  checkText: {
+    flexGrow: 1,
+    minWidth: 0,
+    whiteSpace: 'normal',
+    textAlign: 'start',
+    fontWeight: 400,
+  },
   checkDoneText: { color: colors.secondaryLabel },
 });
 
@@ -356,6 +528,23 @@ const TAB_ICONS: Record<E2eeConsoleTab, LucideIcon> = {
   security: ShieldCheck,
   recovery: LifeBuoy,
 };
+
+function useIsNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 720px)').matches
+      : false
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia('(max-width: 720px)');
+    const update = () => setNarrow(mql.matches);
+    update();
+    mql.addEventListener?.('change', update);
+    return () => mql.removeEventListener?.('change', update);
+  }, []);
+  return narrow;
+}
 
 /** Splits host children by their `E2eeConsoleSection` tab; unmarked children stay on Overview. */
 function sectionsByTab(children: ReactNode) {
@@ -663,6 +852,7 @@ function MembersSection(props: {
 }) {
   const { t } = useTranslation();
   const { names } = props;
+  const [actionError, setActionError] = useState<string>();
   return (
     <section
       data-testid="e2ee-members"
@@ -673,6 +863,11 @@ function MembersSection(props: {
         {t('e2ee.control.members')}
         <span {...stylex.props(styles.count)}>{props.overview.members.length}</span>
       </h2>
+      {actionError && (
+        <Alert.Root tone="warning" data-testid="e2ee-member-action-error">
+          <Alert.Description>{t(actionError)}</Alert.Description>
+        </Alert.Root>
+      )}
       <ul {...stylex.props(styles.list)}>
         {props.overview.members.map((member) => {
           const profile = names.profile(member.membershipId);
@@ -706,12 +901,15 @@ function MembersSection(props: {
                 {t('e2ee.control.deviceCount', { count: member.devices.length })}
               </span>
               {props.management && (
-                <E2eeMemberActions
-                  member={member}
-                  name={name}
-                  management={props.management}
-                  onRotationSettled={props.onRotationSettled}
-                />
+                <span {...stylex.props(styles.memberActionSlot)}>
+                  <E2eeMemberActions
+                    member={member}
+                    name={name}
+                    management={props.management}
+                    onRotationSettled={props.onRotationSettled}
+                    onError={setActionError}
+                  />
+                </span>
               )}
             </li>
           );
@@ -729,6 +927,7 @@ export interface E2eeWorkspaceControlPageProps {
   /** `page` fills the window; `modal` fills the Settings dialog that hosts it. */
   presentation?: 'page' | 'modal';
   initialTab?: E2eeConsoleTab;
+  initialMobileView?: 'menu' | 'detail';
   /** This device's verified role, when the host has opened it. Display only. */
   memberRole?: 'owner' | 'admin' | 'member' | 'guest' | null;
   genesisHash?: string;
@@ -752,6 +951,10 @@ export interface E2eeWorkspaceControlPageProps {
   onBack: () => void;
   /** Present only after the owning host accepted this device's read-open. */
   onOpen?: () => void;
+  /** Disables the Open workspace button while route metadata is still settling. */
+  openDisabled?: boolean;
+  /** Additional status notices rendered inside the main scroll body. */
+  notices?: ReactNode;
   /** Present where the host can check for app updates (desktop). */
   onCheckForUpdates?: () => void;
   /** Whether this workspace can be restored from the account recovery file or passkey.
@@ -770,6 +973,14 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
   const names = useMemberNames(history, overview, props.memberProfiles, props.you);
   const [helpOpen, setHelpOpen] = useState(false);
   const [tab, setTab] = useState<E2eeConsoleTab>(props.initialTab ?? 'overview');
+  const isNarrow = useIsNarrowViewport();
+  const [mobileView, setMobileView] = useState<'menu' | 'detail'>(
+    () => props.initialMobileView ?? (props.initialTab ? 'detail' : 'menu')
+  );
+  const selectTab = (next: E2eeConsoleTab) => {
+    setTab(next);
+    if (isNarrow) setMobileView('detail');
+  };
   const sections = sectionsByTab(props.children);
   const total = history?.page.checkpoint.length ?? 0;
   const presentation = props.presentation ?? 'page';
@@ -844,7 +1055,7 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           onRepairLocal={props.onRepairLocal}
           onResetProgress={props.onResetProgress}
           onRefresh={props.onRefresh}
-          onNavigate={setTab}
+          onNavigate={selectTab}
           {...(props.onCheckForUpdates ? { onCheckForUpdates: props.onCheckForUpdates } : {})}
         />
       )}
@@ -855,8 +1066,10 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
           </Alert.Description>
         </Alert.Root>
       )}
+      {props.notices}
       {props.loading && !history && (
-        <p role="status" {...stylex.props(styles.quiet)}>
+        <p role="status" {...stylex.props(styles.quiet, styles.loadingRow)}>
+          <Spinner size="small" />
           {t('e2ee.control.loading')}
         </p>
       )}
@@ -879,6 +1092,18 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
       {!keyUpdateState && history?.view.inspectState().epoch.rotationRequired && (
         <Alert.Root tone="warning">
           <Alert.Description>{t('e2ee.members.rotationHint')}</Alert.Description>
+          {rotate && (
+            <Alert.Actions>
+              <Button
+                variant="primary"
+                size="small"
+                data-testid="e2ee-rotation-required-rotate"
+                onClick={() => void retryKeyUpdate(rotate)}
+              >
+                {t('e2ee.security.complete')}
+              </Button>
+            </Alert.Actions>
+          )}
         </Alert.Root>
       )}
     </>
@@ -1012,11 +1237,15 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
             >
               {item.done ? <Check size={12} strokeWidth={3} /> : null}
             </span>
-            <span {...stylex.props(styles.eventText, item.done && styles.checkDoneText)}>
+            <span {...stylex.props(styles.checkText, item.done && styles.checkDoneText)}>
               {t(`e2ee.console.start.${item.id}`)}
             </span>
             {!item.done && item.tab && (
-              <Button size="small" variant="secondary" onClick={() => setTab(item.tab!)}>
+              <Button
+                size="small"
+                variant={item.id === 'recovery' ? 'primary' : 'secondary'}
+                onClick={() => selectTab(item.tab!)}
+              >
                 {t(`e2ee.console.start.${item.id}Action`)}
               </Button>
             )}
@@ -1038,8 +1267,8 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               <span {...stylex.props(styles.heroTitle)}>{t('e2ee.console.status')}</span>
               <span {...stylex.props(styles.heroHelp)}>
                 {t('e2ee.console.statusCounts', {
-                  members: overview.members.length,
-                  devices: deviceCount,
+                  members: t('e2ee.control.memberCount', { count: overview.members.length }),
+                  devices: t('e2ee.control.deviceCount', { count: deviceCount }),
                 })}
               </span>
             </div>
@@ -1087,7 +1316,115 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
     ),
   };
 
-  const frame = (
+  const headerActionButtons = (
+    <>
+      <Button
+        variant="ghost"
+        size={isNarrow ? 'small' : undefined}
+        icon
+        aria-label={t('e2ee.control.refresh')}
+        title={t('e2ee.control.refresh')}
+        disabled={props.loading}
+        onClick={props.onRefresh}
+      >
+        <RefreshCw size={16} aria-hidden="true" />
+      </Button>
+      <Button
+        variant="ghost"
+        size={isNarrow ? 'small' : undefined}
+        icon
+        aria-label={t('e2ee.control.help')}
+        aria-expanded={helpOpen}
+        title={t('e2ee.control.help')}
+        onClick={() => setHelpOpen((open) => !open)}
+      >
+        <CircleHelp size={16} aria-hidden="true" />
+      </Button>
+      {presentation === 'modal' && (
+        <Button
+          variant="ghost"
+          size={isNarrow ? 'small' : undefined}
+          icon
+          aria-label={t('common.close')}
+          onClick={props.onBack}
+        >
+          <X size={16} aria-hidden="true" />
+        </Button>
+      )}
+    </>
+  );
+
+  const frame = isNarrow ? (
+    <div data-testid="e2ee-workspace-console" {...stylex.props(styles.mobileFrame)}>
+      <header
+        {...withClassName(
+          stylex.props(styles.mobileHeader, presentation === 'modal' && styles.mobileHeaderModal),
+          'mobile-home-glass'
+        )}
+      >
+        <button
+          type="button"
+          onClick={mobileView === 'detail' ? () => setMobileView('menu') : props.onBack}
+          aria-label={mobileView === 'detail' ? t('common.back') : t('e2ee.control.back')}
+          {...stylex.props(styles.mobileBackButton)}
+        >
+          <ChevronLeft size={18} aria-hidden="true" />
+        </button>
+        <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.mobileHeaderTitle)}>
+          {mobileView === 'detail'
+            ? tabLabel(tab)
+            : (props.workspaceName ?? t('e2ee.control.title'))}
+        </h1>
+        <div {...stylex.props(styles.mobileHeaderActions)}>{headerActionButtons}</div>
+      </header>
+      <main {...stylex.props(styles.mobileBody)}>
+        {statusNotices}
+        {mobileView === 'menu' ? (
+          <>
+            {props.onOpen && (
+              <Button
+                variant="primary"
+                disabled={props.loading || Boolean(props.failure) || props.openDisabled}
+                onClick={props.onOpen}
+              >
+                {t('e2ee.control.openWorkspace')}
+              </Button>
+            )}
+            <nav
+              aria-label={t('e2ee.console.navigation')}
+              data-testid="e2ee-mobile-menu"
+              {...stylex.props(surface.card)}
+            >
+              {E2EE_CONSOLE_TABS.map((id, index) => {
+                const Icon = TAB_ICONS[id];
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    data-console-tab={id}
+                    onClick={() => selectTab(id)}
+                    {...stylex.props(styles.mobileMenuRow, index > 0 && surface.lineRuled)}
+                  >
+                    <span {...stylex.props(styles.mobileMenuIcon)} aria-hidden="true">
+                      <Icon size={18} />
+                    </span>
+                    <span {...stylex.props(styles.mobileMenuLabel)}>{tabLabel(id)}</span>
+                    <ChevronRight
+                      size={16}
+                      aria-hidden="true"
+                      {...stylex.props(styles.mobileMenuChevron)}
+                    />
+                  </button>
+                );
+              })}
+            </nav>
+          </>
+        ) : (
+          panels[tab]
+        )}
+      </main>
+    </div>
+  ) : (
     <div
       data-testid="e2ee-workspace-console"
       {...stylex.props(styles.consoleFrame, presentation === 'page' && styles.consoleFramePage)}
@@ -1107,10 +1444,14 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               type="button"
               aria-current={tab === id ? 'page' : undefined}
               data-console-tab={id}
-              onClick={() => setTab(id)}
+              onClick={() => selectTab(id)}
               {...stylex.props(styles.navItem, tab === id && styles.navItemActive)}
             >
-              <Icon size={16} aria-hidden="true" />
+              <Icon
+                size={16}
+                aria-hidden="true"
+                {...stylex.props(styles.navIcon, tab === id && styles.navIconActive)}
+              />
               {tabLabel(id)}
             </button>
           );
@@ -1129,43 +1470,21 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               <ChevronLeft size={16} aria-hidden="true" />
             </Button>
           )}
-          <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.mainTitle)}>
-            {tabLabel(tab)}
-          </h1>
+          <div {...stylex.props(styles.mainTitleGroup)}>
+            <h1 data-testid="e2ee-workspace-control" {...stylex.props(styles.mainTitle)}>
+              {tabLabel(tab)}
+            </h1>
+          </div>
           {props.onOpen && (
             <Button
               variant="primary"
-              disabled={props.loading || Boolean(props.failure)}
+              disabled={props.loading || Boolean(props.failure) || props.openDisabled}
               onClick={props.onOpen}
             >
               {t('e2ee.control.openWorkspace')}
             </Button>
           )}
-          <Button
-            variant="ghost"
-            icon
-            aria-label={t('e2ee.control.refresh')}
-            title={t('e2ee.control.refresh')}
-            disabled={props.loading}
-            onClick={props.onRefresh}
-          >
-            <RefreshCw size={16} aria-hidden="true" />
-          </Button>
-          <Button
-            variant="ghost"
-            icon
-            aria-label={t('e2ee.control.help')}
-            aria-expanded={helpOpen}
-            title={t('e2ee.control.help')}
-            onClick={() => setHelpOpen((open) => !open)}
-          >
-            <CircleHelp size={16} aria-hidden="true" />
-          </Button>
-          {presentation === 'modal' && (
-            <Button variant="ghost" icon aria-label={t('common.close')} onClick={props.onBack}>
-              <X size={16} aria-hidden="true" />
-            </Button>
-          )}
+          {headerActionButtons}
         </header>
         <div {...stylex.props(styles.mainBody)}>
           {statusNotices}

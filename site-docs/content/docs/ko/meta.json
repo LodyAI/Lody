@@ -1,0 +1,11 @@
+{
+  "title": "Lody 문서",
+  "pages": [
+    "index",
+    "(getting-started)",
+    "(core-concepts)",
+    "(guides)",
+    "(reference)",
+    "(migrating)"
+  ]
+}

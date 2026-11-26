@@ -14,6 +14,7 @@
  */
 
 import { useLocation } from '@tanstack/react-router';
+import { switchSiteLocalePath } from '@site/src/site-pages/shared';
 import { useEffect, useRef, useState } from 'react';
 import {
   FIELD_FRAG,
@@ -200,8 +201,7 @@ const CONTEXT_ATTRIBUTES: WebGLContextAttributes = {
  * price ↔ download ↔ changelog navigation never recompiles WebGL.
  */
 export function isMarketingAtmospherePath(pathname: string): boolean {
-  const path = pathname.replace(/\/$/u, '') || '/';
-  const bare = path.startsWith('/zh/') ? path.slice(3) : path === '/zh' ? '/' : path;
+  const bare = switchSiteLocalePath(pathname, 'en').replace(/\/$/u, '') || '/';
   return (
     bare === '/price' ||
     bare === '/download' ||

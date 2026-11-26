@@ -7,6 +7,9 @@ import { identifyPostHogUser } from '@/lib/posthog-identity';
 import {
   clearPostHogLocalStorage,
   hasPendingUsageOptOut,
+  hasSubmittedAccountOptOut,
+  isAccountUsageSaveInFlight,
+  markAccountOptOutSubmitted,
   markUsageOptOutPending,
   rememberAccountUsageSharing,
   pendingAccountChoice,
@@ -49,31 +52,40 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
   const accountId = session.status === 'authenticated' ? session.user.id : null;
   const preference = usePlatform().cloudApi?.useOptionalAuthenticatedQuery?.(
     cloudOperations.analytics.getUsageSharing,
-    accountId ? { accountId } : 'skip'
+    accountId ? {} : 'skip'
   );
   const account = preference?.data;
   if (typeof account === 'boolean') rememberAccountUsageSharing(account);
   const [desktopReady, setDesktopReady] = useState(
     () => typeof window !== 'undefined' && !window.__LODY_ELECTRON__
   );
+  const [envDisabled, setEnvDisabled] = useState(false);
   useEffect(() => {
     if (!supported || !window.__LODY_ELECTRON__) return;
     let live = true;
     const initialChoice = readDeviceUsageChoice();
     const native = getIpcServices();
-    if (native)
-      void native.app
-        .getUsageSharingEnabled()
-        .then((enabled) => {
-          if (!live) return;
-          if (readDeviceUsageChoice() === initialChoice && enabled === false) {
-            writeDeviceUsageSharing(false);
-          }
-          setDesktopReady(true);
-        })
-        .catch(() => {
-          if (live) setDesktopReady(true);
-        });
+    if (!native) {
+      setDesktopReady(true);
+      return;
+    }
+    void Promise.all([
+      native.app.getUsageSharingEnabled(),
+      native.app.isUsageSharingDisabledByEnv().catch(() => false),
+    ])
+      .then(([enabled, disabledByEnv]) => {
+        if (!live) return;
+        if (disabledByEnv) {
+          setEnvDisabled(true);
+        }
+        if (readDeviceUsageChoice() === initialChoice && (enabled === false || disabledByEnv)) {
+          writeDeviceUsageSharing(false);
+        }
+        setDesktopReady(true);
+      })
+      .catch(() => {
+        if (live) setDesktopReady(true);
+      });
     return () => {
       live = false;
     };
@@ -90,8 +102,8 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
 
   const accountLoaded = !accountId || preference === undefined || typeof account === 'boolean';
   const allowed = accountLoaded && account !== false && pendingChoice !== false;
-  const enabled = supported && allowed && choice !== false && desktopReady;
-  setAccountUsageAllowed(supported && allowed && desktopReady);
+  const enabled = supported && allowed && choice !== false && desktopReady && !envDisabled;
+  setAccountUsageAllowed(supported && allowed && desktopReady && !envDisabled);
 
   const savePreference = useCloudMutation(cloudOperations.analytics.setUsageSharing);
   useEffect(() => {
@@ -110,14 +122,19 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
     if (desired === null) return;
     if (account === desired) {
       markUsageOptOutPending(accountId, false);
+      markAccountOptOutSubmitted(accountId, false);
       return;
     }
-    void savePreference({ enabled: desired, accountId }).catch(() => {});
+    if (isAccountUsageSaveInFlight(accountId) || hasSubmittedAccountOptOut(accountId)) {
+      return;
+    }
+    void savePreference({ enabled: desired }).catch(() => {});
   }, [account, accountId, savePreference, choice]);
 
   // Keep local client state and Electron main/CLI file synced with the unified account switch.
   useEffect(() => {
-    if (!supported || !desktopReady || !accountId || typeof account !== 'boolean') return;
+    if (!supported || !desktopReady || envDisabled || !accountId || typeof account !== 'boolean')
+      return;
     let desired: boolean | null = null;
     try {
       desired = pendingAccountChoice(accountId);
@@ -154,7 +171,7 @@ export function LodyPostHogProvider({ children }: { children: ReactNode }) {
         ?.app.setUsageSharingEnabled(true)
         .catch(() => {});
     }
-  }, [supported, desktopReady, account, accountId, choice]);
+  }, [supported, desktopReady, envDisabled, account, accountId, choice]);
 
   useEffect(() => {
     if (!enabled) {

@@ -145,6 +145,36 @@ export async function createPreparedE2eeWorkspace(
   return result;
 }
 
+/** Silently reconcile any leftover pending creation from an interrupted session.
+ * Returns the created workspace on success; clears an intent only when the server
+ * proves it holds no reservation, keeping unknown or cancelled outcomes for retry. */
+export async function reconcilePendingE2eeWorkspaces(
+  port: PlatformE2eeWorkspaces,
+  storage: Storage,
+  accountId: string,
+  isCurrent: () => boolean = () => true
+): Promise<Awaited<ReturnType<PlatformE2eeWorkspaces['create']>> | null> {
+  if (!port.prepareCreation) return null;
+  let pendingList: PendingE2eeWorkspace[];
+  try {
+    pendingList = listPendingE2eeWorkspaces(storage, accountId);
+  } catch {
+    return null;
+  }
+  for (const pending of pendingList) {
+    if (!isCurrent()) return null;
+    try {
+      return await createPreparedE2eeWorkspace(port, storage, pending);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'e2ee_creation_cancelled') return null;
+      const code = e2eeCreationErrorCode(error);
+      if (code !== undefined && UNRESERVED_REFUSALS.has(code)) continue;
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Creation stays behind both developer toggles. A saved request whose result may
  * already be committed stays visible and resumable after the toggles are turned off. */
 export function e2eeCreationChoice(input: {

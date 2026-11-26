@@ -1,0 +1,23 @@
+---
+title: "20260527"
+version: 0.54.0
+date: 2026-05-27
+description: "Explora cambios por tipo de archivo, edita y reordena mensajes en cola, renombra espacios de trabajo desde Configuración y obtén correcciones para el arranque, la navegación, el estado de las sesiones, el tema visual y el renderizado de Markdown."
+---
+
+### Novedades
+
+- La vista de Cambios ahora puede agrupar los archivos modificados por tipo, y la barra lateral de sesiones puede contar únicamente los cambios de código.
+- Los mensajes en cola ahora se pueden editar directamente y reordenar arrastrando y soltando.
+- Los espacios de trabajo ahora se pueden renombrar desde Configuración.
+
+### Correcciones y mejoras
+
+- Se corrigió la subida de imágenes en páginas de conversación de pestañas recién abiertas.
+- Se corrigió una pantalla en blanco al iniciar en navegadores antiguos como iOS Safari 16.0, donde la falta de compatibilidad con lookbehind en expresiones regulares podía interrumpir la inicialización de la aplicación; Lody ahora guía a los usuarios afectados para que actualicen su navegador.
+- Se corrigieron pantallas en blanco al iniciar en escritorio y dispositivos móviles.
+- Se corrigió la interrupción del envío de mensajes en curso durante la navegación entre páginas.
+- Se corrigió que el estado de la sesión de vista previa no se mantuviera sincronizado.
+- Se corrigió que la actividad de las pestañas secundarias no se propagara a la sesión principal, lo que hacía imprecisos la ordenación de la sesión principal y el estado de no leído.
+- Se corrigió que la aplicación no siguiera el ajuste del tema del sistema.
+- Se pulió el renderizado de Markdown: los bloques de código de una sola línea ahora se centran verticalmente, se conservan el espaciado entre bloques y la escala de encabezados, los elementos de lista tienen un espaciado visible y las líneas horizontales vuelven a mostrarse.

@@ -64,6 +64,11 @@ const ackSchema = z.object({
 });
 const attempt = <A>(body: () => A) =>
   Effect.try({ try: body, catch: () => new Error('e2ee_rpc_invalid') });
+const isEpochMismatch = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: unknown }).code === 'epoch-mismatch';
 /** One stored original per message ID and content: an edit keeps its ID, is signed again
  * and gets its own original, while a retry of the same content reuses the stored one. */
 const key = (args: Pick<E2eeDispatchInput, 'sessionId' | 'userTurnId' | 'inputConfig'>) =>
@@ -98,6 +103,7 @@ export function makeE2eeRpcClient(options: {
     originals: Object.freeze({
       read: options.originals.read.bind(options.originals),
       retain: options.originals.retain.bind(options.originals),
+      replaceSent: options.originals.replaceSent?.bind(options.originals),
       readResponse: options.originals.readResponse.bind(options.originals),
       retainResponse: options.originals.retainResponse.bind(options.originals),
       retainResponsePages: options.originals.retainResponsePages.bind(options.originals),
@@ -231,9 +237,8 @@ export function makeE2eeRpcClient(options: {
           ))
         )
           return yield* Effect.fail(new Error('e2ee_machine_not_shared'));
-        let saved = yield* options.originals.read('sent', key(args));
-        if (!saved) {
-          yield* Effect.uninterruptible(
+        const sealOriginal = (replaceFrame?: Uint8Array) =>
+          Effect.uninterruptible(
             Effect.gen(function* () {
               // A member signs only a complete composer input. Inputs that leave their
               // agent to the Session are machine-authored and signed by the host.
@@ -268,17 +273,17 @@ export function makeE2eeRpcClient(options: {
               try {
                 const binding = yield* options.binding(e2eeRpcResource(machineId));
                 const frame = yield* binding.sealRequest(body);
-                saved = yield* options.originals.retain('sent', key(args), {
-                  target: machineId,
-                  signer,
-                  frame,
-                });
+                const record = { target: machineId, signer, frame };
+                return replaceFrame && options.originals.replaceSent
+                  ? yield* options.originals.replaceSent(key(args), replaceFrame, record)
+                  : yield* options.originals.retain('sent', key(args), record);
               } finally {
                 body.fill(0);
               }
             })
           );
-        }
+        let saved = yield* options.originals.read('sent', key(args));
+        if (!saved) saved = yield* sealOriginal();
         if (!saved) return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
         if (
           saved.target !== machineId ||
@@ -286,7 +291,23 @@ export function makeE2eeRpcClient(options: {
           saved.signer !== (yield* targetSigner(machineId, true))
         )
           return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
-        const checked = yield* open(machineId, saved.frame);
+        const checked = yield* open(machineId, saved.frame).pipe(
+          Effect.catch((error) => {
+            if (!isEpochMismatch(error) || !options.originals.replaceSent)
+              return Effect.fail(error);
+            return Effect.gen(function* () {
+              yield* requireDispatchWriter();
+              saved = yield* sealOriginal(saved!.frame);
+              if (
+                saved.target !== machineId ||
+                saved.signer !== signer ||
+                saved.signer !== (yield* targetSigner(machineId, true))
+              )
+                return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
+              return yield* open(machineId, saved.frame);
+            });
+          })
+        );
         if (checked.requesterDevice !== options.requesterDevice || !equalJson(checked.args, args))
           return yield* Effect.fail(new Error('e2ee_rpc_intent_conflict'));
         return {

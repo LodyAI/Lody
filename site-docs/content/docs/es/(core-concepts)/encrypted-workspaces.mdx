@@ -1,0 +1,63 @@
+---
+title: "Espacios de trabajo con cifrado de extremo a extremo"
+description: "Guía en lenguaje sencillo sobre los espacios de trabajo con cifrado de extremo a extremo en Lody: quién puede ver el contenido, cómo invitar a compañeros de equipo y añadir dispositivos, y qué ocurre si pierdes tus dispositivos."
+---
+
+# Espacios de trabajo con cifrado de extremo a extremo
+
+En un espacio de trabajo con cifrado de extremo a extremo, las conversaciones, los archivos y la salida de los agentes **solo pueden leerse en los dispositivos que hayas autorizado**. Los servidores de Lody transmiten y almacenan los datos, pero solo ven datos que no pueden leer.
+
+<Callout type="warn">
+Si pierdes todos los dispositivos autorizados y no tienes un archivo de recuperación, el espacio de trabajo no podrá volver a abrirse nunca y Lody no podrá recuperarlo. Configura un archivo de recuperación poco después de crear el espacio de trabajo.
+</Callout>
+
+## En qué se diferencia de un espacio de trabajo estándar
+
+| | Espacio de trabajo estándar | Espacio de trabajo con cifrado de extremo a extremo |
+| --- | --- | --- |
+| Quién puede leer el contenido | Miembros con acceso y servidores de Lody | Solo dispositivos autorizados |
+| Uso de un nuevo dispositivo | Iniciar sesión | Iniciar sesión y, después, aprobarlo desde un dispositivo autorizado |
+| Aplicación web | Funciona de inmediato | Primero debe autorizarse el navegador |
+| Pérdida de todos los dispositivos | Volver a iniciar sesión | Requiere un archivo de recuperación o una clave de acceso (passkey) |
+
+## Tareas habituales
+
+<Steps>
+<Step>
+
+**Reconocer un espacio de trabajo cifrado**: aparece un candado junto a su nombre. Pasa el cursor sobre el candado para ver una explicación.
+
+</Step>
+<Step>
+
+**Invitar a un compañero de equipo**: envía una invitación en Configuración › General › Abrir consola de cifrado › Miembros e invitaciones. Una vez que un administrador la apruebe, su dispositivo recibirá la clave.
+
+</Step>
+<Step>
+
+**Abrirlo en un nuevo dispositivo**: el nuevo dispositivo envía una solicitud automáticamente. Tu equipo o teléfono autorizado muestra una ventana de aprobación; comprueba que los números coincidan en ambas pantallas y selecciona Autorizar.
+
+</Step>
+<Step>
+
+**Comparar con compañeros de equipo**: en Código de seguridad e historial, compara los códigos de seguridad para confirmar que todos ven los mismos miembros y dispositivos.
+
+</Step>
+<Step>
+
+**Configurar la recuperación**: en Recuperación, guarda un archivo de recuperación o añade una clave de acceso (passkey) para seguir pudiendo abrir el espacio de trabajo si se pierden todos los dispositivos.
+
+</Step>
+</Steps>
+
+## Más información
+
+<Cards>
+  <Card title="Cómo funciona el registro de permisos" href="/es/docs/encrypted-workspaces-ledger" description="Quién puede añadir miembros y dispositivos, y por qué el servidor no puede añadir a nadie en secreto." />
+  <Card title="Qué demuestra el código de seguridad" href="/es/docs/encrypted-workspaces-security-code" description="Cómo se calcula el código y qué significa que coincida o no coincida." />
+</Cards>
+
+## Límites conocidos
+
+- En un navegador, la seguridad depende de que el código servido por el sitio web de Lody no haya sido alterado. Si esto es importante para ti, utiliza la aplicación de escritorio o móvil.
+- Cuando no es posible comunicarse con el servidor, tus máquinas pueden seguir funcionando durante un tiempo limitado; invitar, aprobar dispositivos y reemplazar claves quedan en espera hasta que vuelvas a estar en línea.

@@ -128,6 +128,12 @@
 		B0D1A0000000000000000019 /* LodyLiveActivityWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LodyLiveActivityWidget.entitlements; sourceTree = "<group>"; };
 		B0D1A0000000000000000061 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		B0D1A0000000000000000062 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		B0D1A0000000000000000071 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		B0D1A0000000000000000072 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B0D1A0000000000000000073 /* ko */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ko; path = ko.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B0D1A0000000000000000074 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B0D1A0000000000000000075 /* fr */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = fr; path = fr.lproj/Localizable.strings; sourceTree = "<group>"; };
+		B0D1A0000000000000000076 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
 		B0D1A0000000000000000066 /* LodyLiveActivityLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyLiveActivityLocalization.swift; sourceTree = "<group>"; };
 		B0D1A00000000000000000A2 /* LodyStartupTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyStartupTheme.swift; sourceTree = "<group>"; };
 		B0D1A00000000000000000A4 /* LodyStartupThemePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LodyStartupThemePlugin.swift; sourceTree = "<group>"; };
@@ -402,6 +408,12 @@
 			knownRegions = (
 				en,
 				"zh-Hans",
+				"zh-Hant",
+				ja,
+				ko,
+				es,
+				fr,
+				ru,
 				Base,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
@@ -630,6 +642,12 @@
 			children = (
 				B0D1A0000000000000000061 /* en */,
 				B0D1A0000000000000000062 /* zh-Hans */,
+				B0D1A0000000000000000071 /* zh-Hant */,
+				B0D1A0000000000000000072 /* ja */,
+				B0D1A0000000000000000073 /* ko */,
+				B0D1A0000000000000000074 /* es */,
+				B0D1A0000000000000000075 /* fr */,
+				B0D1A0000000000000000076 /* ru */,
 			);
 			name = Localizable.strings;
 			sourceTree = "<group>";

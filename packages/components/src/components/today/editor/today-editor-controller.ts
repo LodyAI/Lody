@@ -211,8 +211,7 @@ export class TodayEditorController {
       // must not write its text selection into that transfer as a text drag source.
       this.editor.registerCommand(
         DRAGSTART_COMMAND,
-        (event) =>
-          isElement(event.target) && event.target.closest('[data-today-mention]') !== null,
+        (event) => isElement(event.target) && event.target.closest('[data-today-mention]') !== null,
         COMMAND_PRIORITY_HIGH
       ),
       this.editor.registerCommand(
@@ -1006,7 +1005,7 @@ export class TodayEditorController {
 
   private onEditorPaste(event: ClipboardEvent | InputEvent | KeyboardEvent | null): boolean {
     const active = this.active;
-    if (!active || (!event || !('clipboardData' in event)) || !event.clipboardData) return false;
+    if (!active || !event || !('clipboardData' in event) || !event.clipboardData) return false;
     const data = event.clipboardData;
     const structured = data.getData(TODAY_CLIPBOARD_MIME);
     const text = data.getData('text/plain');
@@ -1267,7 +1266,7 @@ export class TodayEditorController {
 
   /** Copy or cut inside a node: mentions become links in text, and stay mentions in Today. */
   private onEditorCopy(event: ClipboardEvent | KeyboardEvent | null, cut: boolean): boolean {
-    if (!this.active || (!event || !('clipboardData' in event)) || !event.clipboardData) return false;
+    if (!this.active || !event || !('clipboardData' in event) || !event.clipboardData) return false;
     const range = $readSelectionOffsets();
     if (!range || range.start === range.end) return false;
     const rich = sliceTodayRich($readTodayEditorRich(), range.start, range.end);

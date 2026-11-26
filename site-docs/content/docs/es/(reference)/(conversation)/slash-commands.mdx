@@ -1,0 +1,52 @@
+---
+title: "Comandos slash"
+description: "Escribe `/` en el campo de entrada del chat para encontrar comandos del agente y Prompt Shortcuts disponibles."
+---
+
+# Comandos slash
+
+Escribe `/` al comienzo del campo de entrada del chat para abrir un menú con los comandos que expone el agente actual
+y los Prompt Shortcuts disponibles en el espacio de trabajo. Entre los ejemplos de comandos del agente se incluyen `/review`, `/compact`
+y `/undo` cuando el agente conectado los admite.
+
+<SlashCommandsPreview locale="es" />
+
+Los comandos del agente son **proporcionados por el agente**, no por Lody. Cada Agent Config anuncia su propia
+lista durante la detección de capacidades, por lo que los comandos disponibles dependen del tipo de CLI (Claude Code,
+Codex, Kimi, OpenCode o cualquier entorno de ejecución del registro de ACP) y de la versión instalada en la máquina.
+Los Prompt Shortcuts se definen en el espacio de trabajo y siguen sus propias reglas de visibilidad y alcance.
+
+## Abrir el menú
+
+- Escribe `/` como el primer carácter de un nuevo turno.
+- A medida que escribes, los resultados disponibles de ambas fuentes aparecen ordenados por relevancia:
+  primero los nombres exactos, luego los prefijos, inicios de palabra, texto contenido y coincidencias más amplias.
+  Cada fila identifica su origen. Si escribes únicamente `/`, las fuentes se muestran en grupos separados.
+- Presiona `↑` / `↓` para desplazarte entre las entradas, o `Home` / `End` para saltar a la primera o última entrada.
+- Presiona `Enter` para insertar el comando resaltado, o `Tab` / `Escape` para cerrar sin insertar.
+
+Si no hay coincidencias, el menú lo indica. El texto permanece en el campo de entrada como contenido normal.
+
+## Qué hacen los comandos
+
+Dado que los comandos provienen del agente, su comportamiento está definido por la documentación de ese agente.
+Algunos ejemplos habituales expuestos por agentes populares incluyen:
+
+| Comando    | Comportamiento habitual                                            |
+| ---------- | ------------------------------------------------------------------ |
+| `/review`  | Pedir al agente que revise el diff actual o los cambios recientes  |
+| `/compact` | Resumir y compactar la conversación para liberar espacio de contexto |
+| `/undo`    | Revertir el último cambio generado por el agente                   |
+
+Consulta la documentación propia del agente para ver la lista completa y la semántica exacta.
+
+## Actualizar la lista de comandos
+
+La lista se almacena en caché por cada configuración de agente en cada máquina. Después de instalar una nueva versión de la CLI o
+cambiar el entorno de un Agent Config, actualiza la caché para que aparezcan los nuevos comandos:
+
+- Desde la interfaz web: abre **Agent Config**, elige la configuración y actualiza las opciones.
+- Desde la CLI: ejecuta `lody agent-config refresh-capabilities <idOrName>` en la máquina que utilizas.
+
+Consulta [Agent Config](/es/docs/quickstart) y [Comandos de la CLI](/es/docs/cli#agent-config-refresh-capabilities)
+para obtener más detalles.

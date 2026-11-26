@@ -13,10 +13,11 @@ import {
 } from 'fumadocs-ui/components/dialog/search';
 import { useI18n } from 'fumadocs-ui/contexts/i18n';
 import { useEffect, useMemo, useState } from 'react';
+import { SITE_LOCALE_META, type SiteLocale } from '@site/src/site-pages/shared';
 
 type SearchEntry = {
   id: string;
-  locale: 'en' | 'zh';
+  locale: SiteLocale;
   url: string;
   title: string;
   description: string;
@@ -93,11 +94,17 @@ export function DocsSearchDialog(props: SharedProps) {
     const terms = query.split(/\s+/u).filter(Boolean);
     const highlighter = createContentHighlighter(terms.join(' '));
 
+    const activeLocale: SiteLocale =
+      locale && locale in SITE_LOCALE_META ? (locale as SiteLocale) : 'en';
+    const collatorLocale = SITE_LOCALE_META[activeLocale].bcp47;
+
     return entries
-      .filter((entry) => entry.locale === locale)
+      .filter((entry) => entry.locale === activeLocale)
       .map((entry) => ({ entry, score: rankEntry(entry, terms) }))
       .filter((result): result is { entry: SearchEntry; score: number } => result.score !== null)
-      .sort((a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title, locale))
+      .sort(
+        (a, b) => b.score - a.score || a.entry.title.localeCompare(b.entry.title, collatorLocale)
+      )
       .slice(0, 12)
       .map(({ entry }) => ({
         id: entry.id,

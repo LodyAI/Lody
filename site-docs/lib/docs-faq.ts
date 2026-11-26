@@ -1,6 +1,6 @@
 /**
- * Docs FAQ lookup. Visible copy stays in the MDX `## FAQ` / `## 常见问题`
- * section; `scripts/generate-docs-faq.mjs` extracts it.
+ * Docs FAQ lookup across all supported locales. Visible copy stays in each
+ * page's localized MDX FAQ section; `scripts/generate-docs-faq.mjs` extracts it.
  */
 
 import { docsFaqByPath } from './docs-faq.generated';
@@ -10,5 +10,6 @@ export type { FaqItem } from './json-ld';
 export { faqJsonLd } from './json-ld';
 
 export function docsFaqForPath(sitePath: string): readonly FaqItem[] {
-  return docsFaqByPath[sitePath] ?? [];
+  const normalized = sitePath.length > 1 ? sitePath.replace(/\/+$/u, '') : sitePath;
+  return docsFaqByPath[normalized] ?? [];
 }

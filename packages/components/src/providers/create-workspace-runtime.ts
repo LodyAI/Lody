@@ -21,6 +21,8 @@ import {
 } from '@lody/shared';
 import type { AgentConfigId, MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
+import { preserveHeldSendTextDrafts } from '../lib/session-text-draft-cache';
+import { clearSessionImageCache } from '../lib/session-image-cache';
 import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
@@ -93,6 +95,8 @@ import {
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
   getLoroStreamsBaseUrl,
+  roostCloudHistoryBinding,
+  type RoostHistorySyncState,
   getLoroStreamsPresenceBaseUrl,
   getLoroStreamsShardUrls,
   getSessionRoomId,
@@ -218,6 +222,8 @@ import {
 } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
+import { createRoostHistoryReplica } from '@/lib/roost-history-replica';
+import { getRoostCloudHistoryReadGrant } from '@/lib/preview-control-api';
 import { requireEncryptedRoostOwner } from '../lib/encrypted-roost-history';
 import {
   createRemoteRoostSessionDataFactory,
@@ -5345,6 +5351,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     let rendererSessionDataFactory =
       protectedContent && backendKind === 'roost' ? undefined : deps.createSessionData;
     let disposeReaderObservation = () => {};
+    let historySync: RoostHistorySyncState | undefined;
+    const historySyncListeners = new Set<() => void>();
     let conversation: ReturnType<typeof createConversationSession>;
     try {
       if (!rendererSessionDataFactory && backendKind === 'roost') {
@@ -5398,6 +5406,58 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           readerWakes.clear();
         };
         const bridge: RemoteRoostSessionBridgeOptions = {
+          ...(cloudPlaneEnabled && !protectedContent
+            ? {
+                onHistorySync: (next: RoostHistorySyncState) => {
+                  historySync = next;
+                  for (const listener of historySyncListeners) listener();
+                },
+                cloudHistory: (targetSessionId: SessionId) => {
+                  let meta: Record<string, unknown> | undefined;
+                  return createRoostHistoryReplica({
+                    accountId: deps.accountId,
+                    workspaceId,
+                    machineId,
+                    sessionId: targetSessionId,
+                    replicaNamespace: eagerSyncScope,
+                    getBinding: () => roostCloudHistoryBinding(meta),
+                    observeBinding: (wake) => {
+                      const observation = repo.observeDocs(
+                        (event) => {
+                          if (event.kind === 'doc-metadata') meta = { ...meta, ...event.patch };
+                          if (
+                            event.kind === 'doc-existence-changed' &&
+                            (event.to === 'missing' || event.to === 'deleted')
+                          )
+                            meta = undefined;
+                          wake();
+                        },
+                        {
+                          query: { prefix: roomId },
+                          filter: {
+                            docIds: [roomId],
+                            kinds: ['doc-metadata', 'doc-existence-changed'],
+                            metadataFields: ['roostCloudGeneration', 'roostCloudAuthor'],
+                          },
+                        }
+                      );
+                      meta = observation.snapshot.find(
+                        (row) => row.docId === roomId && !row.deleted
+                      )?.meta;
+                      return observation.unsubscribe;
+                    },
+                    requestGrant: async (signal) => {
+                      await waitForContentAdmission(signal);
+                      return await getRoostCloudHistoryReadGrant(
+                        { workspaceId, machineId, sessionId: targetSessionId },
+                        authToken,
+                        AbortSignal.any([signal, sessionReaderAbort.signal])
+                      );
+                    },
+                  });
+                },
+              }
+            : {}),
           coherentInspection: () => machineSupportsSessionHistoryInspection(ownerMachineMeta),
           incremental: () => machineSupportsSessionHistoryIncremental(ownerMachineMeta),
           patches: () => machineSupportsSessionHistoryPatches(ownerMachineMeta),
@@ -5669,6 +5729,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           listener(syncLeaseCount > 0 || roomSub || joinAttempt ? state : 'idle');
         }),
       getState: () => mirror.getState() as SessionDocState,
+      getHistorySync: () => historySync,
+      subscribeHistorySync: (listener) => {
+        historySyncListeners.add(listener);
+        return () => historySyncListeners.delete(listener);
+      },
       setState: (updater) => {
         mirror.setState(updater as never);
       },
@@ -5684,6 +5749,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         unsubscribeImportWatch();
         disposeConversation();
         disposeReaderObservation();
+        historySyncListeners.clear();
       },
       inspectSync: async ({ uploadProbeTimeoutMs }) => {
         const binding = roomSub ? readinessBindingForDocRoom(roomSub, roomId) : null;
@@ -6381,6 +6447,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       await closeStep('pending-input', () => pendingSends.dispose());
       // Cancel and join send I/O while its cache, transport and repo still exist.
       await closeStep('send-resources', () => sendResources.dispose());
+      clearSessionImageCache();
       await closeStep('listeners', () => {
         cancelDelayedBackgroundSyncStart?.();
         cancelDelayedBackgroundSyncStart = null;
@@ -6633,6 +6700,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       jotaiStore.set(rpcDeliveredTurnsAtom, (previous) =>
         addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, turnId))
       ),
+    onDisposeHeld: preserveHeldSendTextDrafts,
     accountId: deps.accountId ?? `local:${workspaceId}`,
     workspaceId,
     ...(protectedContent ? { localIdentity: deps.e2eeLocalIdentity } : {}),

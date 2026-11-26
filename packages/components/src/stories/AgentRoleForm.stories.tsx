@@ -130,7 +130,6 @@ const meta = {
     onSubmit: () => undefined,
     onCancel: () => undefined,
     targetAgentLabels,
-
   },
   parameters: { layout: 'fullscreen' },
   decorators: [
@@ -140,7 +139,6 @@ const meta = {
         description="A Role never stores API keys or MCP selections."
         height="min(680px, 88dvh)"
       >
-
         <Story />
       </SettingsEditorDialogFrame>
     ),

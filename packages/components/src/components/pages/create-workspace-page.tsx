@@ -35,7 +35,8 @@ const layoutStyles = stylex.create({
     flexDirection: 'column',
     alignItems: 'center',
     backgroundColor: colors.background,
-    padding: space[4],
+    paddingBlock: space[3],
+    paddingInline: space[4],
   },
   content: {
     width: '100%',
@@ -56,14 +57,13 @@ export interface CreateWorkspacePageProps {
   workspaceSlug: string;
   error?: string | null;
   creating?: boolean;
-  fieldsDisabled?: boolean;
   submitDisabled?: boolean;
-  retryPendingCreation?: boolean;
   creationOptions?: ReactNode;
   slugChecking?: boolean;
   slugAvailable?: boolean;
   slugErrorType?: string | null;
   canResetSlug?: boolean;
+  hasExistingWorkspaces?: boolean;
   paidRequired?: boolean;
   billingInterval?: 'month' | 'year';
   /** Per-seat Plus pricing; `undefined`/`null` = not loaded, prices hidden. */
@@ -83,14 +83,13 @@ export function CreateWorkspacePage({
   workspaceSlug,
   error = null,
   creating = false,
-  fieldsDisabled = false,
   submitDisabled = false,
-  retryPendingCreation = false,
   creationOptions,
   slugChecking = false,
   slugAvailable = false,
   slugErrorType = null,
   canResetSlug = false,
+  hasExistingWorkspaces = false,
   paidRequired = false,
   billingInterval = 'year',
   pricing = null,
@@ -124,12 +123,14 @@ export function CreateWorkspacePage({
         <Card.Root>
           <Card.Header {...stylex.props(surface.center)}>
             <div {...stylex.props(styles.hero)}>
-              <Building2 {...stylex.props(surface.heroIcon)} />
+              <Building2 size={18} strokeWidth={1.75} aria-hidden="true" />
             </div>
             <Card.Title {...stylex.props(surface.authTitle)}>
               {paidRequired
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
-                : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
+                : hasExistingWorkspaces
+                  ? t('organization.createNewWorkspace', 'Create New Workspace')
+                  : t('organization.welcomeTitle', 'Welcome to Lody')}
             </Card.Title>
             <Card.Description {...stylex.props(styles.description)}>
               {paidRequired
@@ -137,10 +138,12 @@ export function CreateWorkspacePage({
                     'organization.createPlusWorkspaceDescription',
                     'Your free workspace limit is full. This workspace will activate after checkout.'
                   )
-                : t(
-                    'organization.welcomeDescription',
-                    "Let's create your first workspace to get started"
-                  )}
+                : hasExistingWorkspaces
+                  ? t('organization.createNewWorkspaceDescription')
+                  : t(
+                      'organization.welcomeDescription',
+                      "Let's create your first workspace to get started"
+                    )}
             </Card.Description>
           </Card.Header>
           <Card.Content>
@@ -160,7 +163,7 @@ export function CreateWorkspacePage({
                       onSubmit();
                     }
                   }}
-                  disabled={creating || fieldsDisabled}
+                  disabled={creating}
                   xstyle={error ? styles.fieldError : undefined}
                 />
                 {error ? <p {...stylex.props(surface.error)}>{error}</p> : null}
@@ -183,7 +186,7 @@ export function CreateWorkspacePage({
                         type="button"
                         {...stylex.props(styles.reset)}
                         onClick={onResetWorkspaceSlug}
-                        disabled={creating || fieldsDisabled}
+                        disabled={creating}
                       >
                         {t('organization.workspaceSlugReset')}
                       </button>
@@ -206,7 +209,7 @@ export function CreateWorkspacePage({
                   placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
                   value={workspaceSlug}
                   onChange={(event) => onWorkspaceSlugChange(event.target.value)}
-                  disabled={creating || fieldsDisabled}
+                  disabled={creating}
                   xstyle={slugErrorType ? styles.fieldError : undefined}
                 />
                 {slugErrorType ? (
@@ -293,8 +296,9 @@ export function CreateWorkspacePage({
                   creating ||
                   submitDisabled ||
                   !workspaceName.trim() ||
-                  (!retryPendingCreation &&
-                    (slugChecking || Boolean(slugErrorType) || !slugAvailable))
+                  slugChecking ||
+                  Boolean(slugErrorType) ||
+                  !slugAvailable
                 }
                 {...stylex.props(surface.fullWidth)}
               >
@@ -310,11 +314,9 @@ export function CreateWorkspacePage({
                   </span>
                 ) : (
                   <span {...stylex.props(surface.row)}>
-                    {retryPendingCreation
-                      ? t('e2ee.create.resume')
-                      : paidRequired
-                        ? t('organization.continueToCheckout', 'Continue to checkout')
-                        : t('organization.createWorkspace', 'Create Workspace')}
+                    {paidRequired
+                      ? t('organization.continueToCheckout', 'Continue to checkout')
+                      : t('organization.createWorkspace', 'Create Workspace')}
                     <ArrowRight {...stylex.props(surface.smallIcon, styles.trailingIcon)} />
                   </span>
                 )}
@@ -333,29 +335,33 @@ const styles = stylex.create({
   formStack: {
     ':is(*) > :where(:not(:last-child))': {
       'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 4)',
+      'margin-block-end': 'calc(var(--spacing) * 3)',
     },
   },
   fieldStack: {
     ':is(*) > :where(:not(:last-child))': {
       'margin-block-start': 0,
-      'margin-block-end': 'calc(var(--spacing) * 2)',
+      'margin-block-end': 'calc(var(--spacing) * 1.5)',
     },
   },
   fieldError: { borderColor: themeColors.destructive },
-  back: { marginBottom: themeSpace[3], marginLeft: 'calc(var(--spacing) * -2)' },
+  back: { marginBottom: themeSpace[2], marginLeft: 'calc(var(--spacing) * -2)' },
   hero: {
     marginInline: 'auto',
-    marginBottom: themeSpace[4],
+    marginBottom: themeSpace[2.5],
     display: 'flex',
-    height: themeSpace[12],
-    width: themeSpace[12],
+    height: themeSpace[10],
+    width: themeSpace[10],
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: themeRadius.full,
-    backgroundColor: 'hsl(var(--primary) / 0.1)',
+    borderRadius: themeRadius.lg,
+    backgroundColor: colors.secondaryBackground,
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    color: colors.label,
   },
-  description: { marginTop: themeSpace[2], whiteSpace: 'pre-line' },
+  description: { marginTop: themeSpace[1], whiteSpace: 'pre-line' },
   between: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   row: { display: 'flex', alignItems: 'center', gap: themeSpace[2] },
   reset: {

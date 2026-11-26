@@ -1,6 +1,7 @@
 /** Shared MDX FAQ extractor for generate-docs-faq and tests. */
 
-const FAQ_SECTION = /(?:^|\n)## (?:FAQ|常见问题)\s*\n/u;
+const FAQ_SECTION =
+  /(?:^|\n)## (?:FAQ|常见问题|常見問題|よくある質問|자주 묻는 질문|Preguntas frecuentes|Questions fréquentes|Часто задаваемые вопросы)\s*\n/iu;
 
 export function faqPlainText(value) {
   return value
@@ -17,7 +18,7 @@ export function faqPlainText(value) {
 }
 
 /**
- * Read `###` questions under `## FAQ` / `## 常见问题` until the next `##`.
+ * Read `###` questions under a localized FAQ `##` heading until the next `##`.
  * Pages without that heading return an empty list.
  */
 export function extractFaqFromMdx(source) {

@@ -1,0 +1,95 @@
+---
+title: "Enlace para compartir vs. transferencia en vivo"
+description: "Una captura de pantalla, transcripción, enlace para compartir o archivo es un registro. Una transferencia en vivo invita a un compañero de equipo a la misma sesión del agente de programación: conversación, diffs y worktree."
+---
+
+# Enlace para compartir vs. transferencia en vivo
+
+Es fácil confundir dos significados habituales de “compartir mi sesión”:
+
+- Un **enlace para compartir** (o una captura de pantalla, exportación en Markdown o archivo) es un **registro**. Otra persona puede leer lo que ocurrió; algunas herramientas pueden iniciar una *nueva* ejecución del agente a partir de ese contexto.
+- Una **transferencia en vivo** invita a un compañero de equipo a la **misma** sesión del agente de programación para que pueda seguir chateando, revisando diffs y trabajando en el mismo worktree.
+
+Un registro no es una invitación a la conversación en vivo, a los diffs en tiempo real ni al directorio de trabajo original.
+
+Instrucciones y reglas de acceso: [Compartir una sesión de agente de programación](/es/docs/session-handoff). Espacio de trabajo en equipo: [Funciones de equipo](/es/docs/team).
+
+<Callout title="Definición">
+Una captura de pantalla, una transcripción, un enlace para compartir o un archivo de sesión no son una transferencia en vivo. Quienes los ven no se unen a tu sesión en ejecución ni heredan el worktree original. La transferencia requiere pertenecer al espacio de trabajo, además de cumplir las reglas para compartir máquinas y proyectos de la página sobre transferencia de sesiones; no es una URL pública que cualquiera pueda abrir.
+</Callout>
+
+## Dos funciones distintas
+
+| Función | Qué puede hacer el destinatario | ¿Misma sesión en vivo? |
+| --- | --- | --- |
+| Captura de pantalla | Ver una imagen del chat | No |
+| Exportación en Markdown / transcripción | Pegar texto estático en un chat nuevo | No — empieza desde cero |
+| Enlace para compartir estilo ChatGPT | Leer una instantánea de la conversación | No |
+| Herramientas de enlace para compartir / archivo (por ejemplo, [Lore](https://lore.link/share) o [SpecStory](https://docs.specstory.com/cloud/session-sharing)) | Ver un hilo renderizado o un historial guardado, o bifurcar ese contexto en una **nueva** ejecución del agente | No — quienes lo ven no se unen a la sesión en ejecución ni al worktree original |
+| **Transferencia en vivo** | Abrir la [sesión](/es/docs/session) existente, seguir chateando, revisar los [diffs](/es/docs/diff-viewer) en tiempo real y seguir trabajando en el mismo [worktree](/es/docs/worktrees) | **Sí** |
+
+Lody sigue permitiéndote [copiar una conversación como Markdown](/es/docs/copy-md) cuando solo necesitas un registro. Copiar la URL de una sesión sin compartirla tampoco otorga acceso al equipo; el enlace sigue funcionando para el propietario.
+
+Esta página no evalúa ningún producto de enlaces para compartir. Lore y SpecStory aparecen únicamente como ejemplos de la categoría de registro/archivo ya mencionada en la página de transferencia.
+
+## Qué es realmente una transferencia en vivo
+
+En Lody, un compañero de equipo que puede abrir la sesión la continúa desde el mismo contexto:
+
+- la conversación en vivo que ya tiene el agente
+- los diffs de archivos que produjo el agente
+- el worktree y la rama de la sesión
+- la misma [configuración del agente](/es/docs/agents), para que pueda enviar el siguiente prompt
+
+Abre **esa** sesión: no una bifurcación ni un chat totalmente nuevo. Bifurcar copia el historial en una **nueva** sesión; úsalo cuando quieras una rama privada de la conversación. Consulta [Bifurcar una sesión](/es/docs/session#fork-a-session).
+
+La transferencia es una acción de espacio de trabajo en equipo. La otra persona ya debe ser miembro y la sesión solo es visible para el equipo cuando se comparte la máquina (y el proyecto local, si corresponde). Pasos y casos límite: [Compartir una sesión de agente de programación](/es/docs/session-handoff).
+
+## Cuándo usar cada opción
+
+| Objetivo | Opción recomendada |
+| --- | --- |
+| Alguien solo necesita *leer* lo que ocurrió | Captura de pantalla, transcripción, enlace para compartir o archivo |
+| Quieres un registro fuera del espacio de trabajo | Captura de pantalla, transcripción, enlace para compartir o archivo |
+| Estás iniciando una *nueva* ejecución del agente a partir de un contexto exportado | Captura de pantalla, transcripción, enlace para compartir o archivo |
+| Un compañero de equipo debe continuar la **misma** sesión del agente de programación | **Transferencia en vivo** |
+| Necesita los diffs actuales y el mismo worktree (no un prompt reconstruido) | **Transferencia en vivo** |
+| Ya es (o puede ser) miembro del [espacio de trabajo](/es/docs/team) | **Transferencia en vivo** |
+
+Para ejecutar varias sesiones aisladas en equipo —modelos combinados, worktrees separados—, consulta [Agentes de programación en paralelo](/es/docs/parallel-agents). Eso inicia más trabajo; no transfiere una sesión.
+
+## Permisos
+
+La transferencia sigue las mismas reglas que la guía del producto. Esta página no añade un modelo de permisos de enlaces públicos para compartir.
+
+| Control | Efecto |
+| --- | --- |
+| Pertenencia al espacio de trabajo | Requisito previo para que alguien pueda abrir sesiones del equipo |
+| Rol de miembro | Los propietarios y administradores gestionan quién puede invitar, editar o eliminar personas — consulta [Cambiar permisos de miembros](/es/docs/team#change-member-permissions) |
+| Compartir máquina | Las sesiones en una máquina no compartida no aparecen en las barras laterales de otros miembros. Solo el propietario del dispositivo puede compartirla. |
+| Compartir proyecto local | Para un proyecto local, los compañeros necesitan tanto el permiso del proyecto como el de la máquina |
+| URL de la sesión | El propietario siempre; los compañeros solo después de que la sesión sea visible para el equipo. Copiar la URL no es lo mismo que **Compartir con el equipo…** |
+
+Unirse a un espacio de trabajo **no** expone tu portátil. Las máquinas permanecen privadas hasta que las compartes. Compartir una sesión puede compartir su máquina y/o proyecto local con todos en el espacio de trabajo; otras conversaciones en ese dispositivo también pueden volverse visibles. Consulta [Visibilidad de máquinas del equipo](/es/docs/team#team-machine-visibility).
+
+## Preguntas frecuentes
+
+### ¿Un enlace para compartir es lo mismo que transferir una sesión de agente de programación?
+
+No. Un enlace para compartir, una captura de pantalla, una transcripción o un archivo es un **registro consultable**. Otra persona puede leerlo, y algunos flujos permiten iniciar una *nueva* ejecución del agente a partir de ese contexto. No se unen a la sesión en vivo original ni obtienen el worktree original. Una transferencia en vivo abre la sesión existente del espacio de trabajo para que un compañero de equipo la continúe.
+
+### ¿Puede un compañero de equipo continuar mi sesión de Claude Code desde un enlace para compartir?
+
+No desde una transcripción, una instantánea estilo ChatGPT ni un visor de archivos. Si la sesión se ejecuta en un espacio de trabajo de Lody, invítalo, comparte la sesión (y la máquina o el proyecto local que necesite) y luego pídele que abra **esa** sesión. Detalles: [Compartir una sesión de agente de programación](/es/docs/session-handoff).
+
+### ¿Cuál es la diferencia entre compartir una transcripción y colaborar en vivo?
+
+Compartir una transcripción es enviar un registro. Colaborar en vivo significa que un compañero de equipo está en la misma sesión: mismo chat, mismos diffs, mismo worktree. Exportar en Markdown o copiar una URL no otorga ese acceso.
+
+### ¿Qué pasa si solo quiero enviar una transcripción?
+
+Copia un mensaje o selecciona **Copiar como Markdown** en el menú de la sesión. Eso no otorga acceso en vivo. Consulta [Copiar conversaciones](/es/docs/copy-md).
+
+### ¿Por qué mi compañero de equipo no puede abrir la URL de la sesión que le envié?
+
+Copiar la URL de una sesión no comparte la sesión. Debe ser miembro del espacio de trabajo, la máquina (y el proyecto local, si corresponde) debe estar compartida, y debe buscar en **Todas las tareas** en lugar de **Mis tareas**. Las máquinas no compartidas nunca sincronizan esas conversaciones en las barras laterales de otros miembros.

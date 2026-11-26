@@ -1,0 +1,28 @@
+---
+title: "20260324"
+version: 0.41.0
+date: 2026-03-24
+description: "Ajout de l'exportation de sessions, de modèles personnalisés pour la génération de titres, de bannières d'autorisation, d'évolutions du sélecteur de machine, de correctifs mobiles et d'améliorations de stabilité."
+---
+
+### Nouvelles fonctionnalités et capacités
+
+- Ajout d'une nouvelle commande CLI `lody export` pour exporter les données de session, y compris en JSON, en Markdown, ainsi que les pièces jointes et les statistiques d'utilisation. **Nous passerons à un nouveau backend de synchronisation la semaine prochaine et les données historiques plus anciennes ne seront pas compatibles ; pensez donc à exporter à l'avance tout ce que vous souhaitez conserver**
+- Ajout de la prise en charge de modèles personnalisés pour la génération de titres sur tous les agents ACP
+- Les bannières de demande d'autorisation restent désormais épinglées au-dessus de la zone de saisie lorsqu'une session est en attente d'approbation, afin de ne pas les perdre lors du défilement
+- Le sélecteur de machine est désormais séparé du menu déroulant de configuration de l'agent, ce qui facilite le choix d'une machine indépendamment
+- Cliquer sur un chemin de fichier dans le chat ouvre désormais correctement le fichier complet
+
+### Plateforme et interface utilisateur
+
+- Les boutons de configuration de session ne sont plus écrasés ni tronqués sur les écrans étroits
+- Sur mobile, la zone inférieure du champ de saisie du chat passe désormais correctement à la ligne au lieu de tasser les boutons les uns contre les autres
+- Les graphiques d'utilisation et les cartes de statistiques sur mobile s'adaptent désormais aux petits écrans sans débordement horizontal
+
+### Correctifs et stabilité
+
+- Les erreurs ACP affichent désormais la cause sous-jacente précise
+- Correction des échecs d'authentification de l'application de bureau dans les environnements Linux autres que GNOME, notamment Sway, Hyprland et Niri, grâce à la détection automatique du backend de trousseau de clés disponible
+- Correction des échecs de création de worktree pour les dépôts distants vides
+- Correction de blocages CPU causés par un trop grand nombre d'opérations `git show` simultanées lorsqu'un grand nombre de fichiers étaient modifiés
+- Correction de la réutilisation de métadonnées d'Issues et de PR obsolètes lorsque les mentions `#` ne parvenaient pas à actualiser le cache

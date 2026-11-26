@@ -1,0 +1,16 @@
+---
+title: "20260905-0.91.1"
+version: 0.91.1
+date: 2026-09-05
+description: "新增 Claude Fable 專屬每週配額計量顯示，並修復 Codex 模型的 Max 與 Ultra 推理選項。"
+---
+
+版本 0.91.1
+
+### ✨ 新功能
+
+- Claude 用量面板現在會將 Fable 的專屬每週配額與共享每週配額、5 小時配額分開顯示（[#407](https://github.com/LodyAI/Lody/pull/407)、[Claude ACP #25](https://github.com/LodyAI/acp-extension-claude/pull/25)、[Core #3](https://github.com/LodyAI/acp-extension-core/pull/3)）。
+
+### 🐛 修復與改進
+
+- 修復 GPT-6 Astra 缺少 Max 與 Ultra 推理選項的問題。現在可用的推理等級會符合各模型的能力，Luna 不再提供不支援的 Ultra 選項（[#406](https://github.com/LodyAI/Lody/pull/406)）。

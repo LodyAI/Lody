@@ -1,0 +1,69 @@
+---
+title: "Registre des permissions"
+description: "Un aperçu détaillé du registre des permissions qui sous-tend les espaces de travail chiffrés de bout en bout de Lody : enregistrements signés, chaîne de hachage, qui peut signer quoi, comment les appareils le vérifient et ce sur quoi il repose."
+---
+
+# Registre des permissions
+
+Chaque espace de travail chiffré de bout en bout dispose d'un **registre des permissions**. Dans la console de chiffrement, il apparaît sous la forme de l'historique des modifications. Le registre détermine qui est membre, quel rôle chaque personne occupe et quels appareils peuvent recevoir des clés.
+
+## Ce que le registre consigne
+
+Le registre est une liste ordonnée d'enregistrements, chacun décrivant une modification, par exemple :
+
+- La création de l'espace de travail (le premier enregistrement, le « genesis »)
+- L'admission d'un membre, le changement de rôle, le retrait d'un membre
+- L'ajout ou la révocation d'un appareil
+- Le remplacement de la clé de l'espace de travail
+- Le transfert de propriété
+
+Il consigne des **identifiants de compte et des clés publiques d'appareils**, jamais les conversations ni les fichiers. Les noms et les avatars proviennent des profils de compte et ne figurent pas dans le registre.
+
+## Chaque enregistrement est signé
+
+Chaque enregistrement est signé par la personne qui effectue la modification, **depuis son propre appareil personnel autorisé**. La signature couvre l'opération, sa cible et l'espace de travail ; toute modification de l'un de ces éléments l'invalide.
+
+Le serveur stocke et relaie les enregistrements, mais **ne détient la clé de signature de personne** ; il ne peut donc signer pour personne ni ajouter discrètement un membre ou un appareil.
+
+## Les enregistrements forment une chaîne
+
+Chaque enregistrement contient le hachage de celui qui le précède, en remontant jusqu'au genesis.
+
+- Supprimer, insérer ou réordonner un enregistrement rompt la chaîne, et les appareils le détectent.
+- Un nouvel enregistrement ne peut être ajouté qu'à la fin actuelle de la chaîne. Si deux personnes soumettent une modification en même temps, une seule réussit ; l'autre actualise et confirme à nouveau.
+- Les modifications prennent effet dans l'ordre où elles ont été validées. Si B admet C avant que le propriétaire ne retire B, C reste membre ; si le retrait est validé en premier, l'invitation précédente de B ne fonctionne plus.
+
+## Qui peut signer quoi
+
+Pour chaque modification, les appareils vérifient les permissions du signataire **par rapport à l'état du registre juste avant cette modification**, et non par rapport à ce que le signataire pouvait faire lorsqu'il a rejoint l'espace.
+
+| Modification | Qui peut signer |
+| --- | --- |
+| Admettre un membre | Propriétaire ou administrateur |
+| Retirer un membre | Propriétaire ou administrateur |
+| Retirer un administrateur, modifier les rôles | Propriétaire uniquement |
+| Transférer la propriété | Propriétaire uniquement ; l'ancien propriétaire devient administrateur |
+| Ajouter votre propre nouvel appareil | L'un de vos appareils autorisés ; un fichier de récupération si tous sont perdus |
+| Révoquer un appareil | Son propriétaire, ou un membre disposant de la permission de gestion |
+| Remplacer la clé de l'espace de travail | Propriétaire ou administrateur |
+
+Les machines distantes et les appareils de récupération **n'ont jamais la permission de gestion** ; ils ne font que recevoir des clés et exécuter des tâches.
+
+## Comment les appareils vérifient le registre
+
+- **Les appareils existants** n'acceptent un nouvel enregistrement que s'il est chaîné au précédent, que sa signature est valide et que son signataire disposait de la permission requise à ce moment-là.
+- **Les appareils nouvellement ajoutés** ne rejouent pas toujours tout l'historique depuis le genesis. Ils peuvent accepter un instantané de « l'état actuel » signé par l'appareil d'un propriétaire ou d'un administrateur, puis vérifier chaque enregistrement ultérieur. Cela suppose de faire confiance au signataire de l'instantané.
+- **En cas d'échec**, l'appareil s'arrête au dernier enregistrement de confiance, conserve les preuves et suspend les invitations ainsi que les approbations. Il **ne répare ni n'ignore** jamais rien automatiquement. Les conversations existantes restent lisibles.
+
+## Révocation et remplacement des clés
+
+- Révoquer un appareil n'affecte que cet appareil ; révoquer votre ordinateur portable ne révoque pas pour autant le téléphone qu'il avait approuvé par le passé.
+- Retirer un membre coupe immédiatement l'accès à tous ses appareils. Ensuite, **remplacez la clé de l'espace de travail** : la nouvelle clé n'est transmise qu'aux appareils encore autorisés, de sorte qu'un ancien appareil détenant l'ancienne clé ne puisse pas déchiffrer le nouveau contenu. L'historique déjà téléchargé sur ses appareils ne peut pas être repris.
+
+## Ce sur quoi le registre repose
+
+Le registre empêche le serveur de **falsifier** une signature. Ce qu'il ne peut pas garantir à lui seul, c'est que tout le monde détienne la **même version, la plus récente**, du registre.
+
+La version actuelle suppose que le serveur fournit un registre complet, qui n'a été ni ramené en arrière ni scindé. Un serveur qui présenterait des versions différentes à différentes personnes ne pourrait toujours pas falsifier de signatures, mais il pourrait dissimuler une révocation à certaines d'entre elles.
+
+C'est à cela que sert le [code de sécurité](/fr/docs/encrypted-workspaces-security-code) : comparer les codes avec un coéquipier permet de savoir si vous détenez le même registre.

@@ -51,10 +51,14 @@ const readDataJson = async (packageRoot: string, locale: string): Promise<Emojib
 };
 
 const mergeLocaleData = async (packageRoot: string, locale: string): Promise<Buffer> => {
+  // Fold English into every non-English locale so localized pickers answer both
+  // native and English queries without N×N payload growth; fold all other
+  // bundled locales into English so an English-UI user can still search in any
+  // supported language.
+  const secondaryLocales =
+    locale === 'en' ? EMOJIBASE_BUNDLED_LOCALES.filter((other) => other !== 'en') : ['en'];
   const [own, ...rest] = await Promise.all(
-    [locale, ...EMOJIBASE_BUNDLED_LOCALES.filter((other) => other !== locale)].map((other) =>
-      readDataJson(packageRoot, other)
-    )
+    [locale, ...secondaryLocales].map((other) => readDataJson(packageRoot, other))
   );
 
   const extraTagsByHexcode = new Map<string, string[]>();

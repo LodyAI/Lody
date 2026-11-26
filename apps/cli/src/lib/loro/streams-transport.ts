@@ -15,6 +15,7 @@ import {
   getLoroStreamIdForDocId,
   getLoroStreamsShardUrls,
   isCodeCollabFileIndexFlockDocId,
+  loroStreamsWebSocketOptions,
   isCodeCollabFileIndexSignalFlockDocId,
   LORO_STREAMS_BUCKET_ID,
   type WorkspaceId,
@@ -72,6 +73,8 @@ export async function createCliStreamsTransport(args: {
   /** Protected content must name its dedicated bucket explicitly. */
   bucketId?: string;
   workspaceId: WorkspaceId;
+  /** Live reads and appends share one gateway WebSocket per workspace; HTTP stays the fallback. */
+  webSocketEnabled: boolean;
   tokenProvider: LoroStreamsTokenProviderLegacy;
   repo: LoroRepo;
   /** Owner bound to the manager's replica/account/content lifetime. */
@@ -133,6 +136,7 @@ export async function createCliStreamsTransport(args: {
               content.mode === 'protected'
                 ? (content.snapshotCodec ?? streamsSnapshotCodec)
                 : streamsSnapshotCodec,
+            ...loroStreamsWebSocketOptions(args.webSocketEnabled, gatewayBaseUrl, args.workspaceId),
             baseUrl: gatewayBaseUrl,
             shardUrls: getLoroStreamsShardUrls(gatewayBaseUrl, tokenProvider.getShardHostSuffix()),
             snapshotUpload:

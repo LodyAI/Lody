@@ -1,4 +1,8 @@
-import { writeUsageSharing, desktopUsageChoice } from '@lody/shared/node/usage-sharing'
+import {
+  writeUsageSharing,
+  desktopUsageChoice,
+  isEnvUsageSharingDisabled
+} from '@lody/shared/node/usage-sharing'
 import { ProductWindowIpcService } from '../product-window-ipc-service'
 import { assertProductWindowSender } from '../assert-sender'
 import {
@@ -737,12 +741,18 @@ export class AppIpc extends ProductWindowIpcService {
   @IpcMethod()
   async setUsageSharingEnabled(enabled: boolean) {
     if (typeof enabled !== 'boolean') throw new TypeError('Expected a boolean')
+    if (enabled && isEnvUsageSharingDisabled()) return
     writeUsageSharing(enabled)
   }
 
   @IpcMethod()
   async getUsageSharingEnabled() {
     return desktopUsageChoice()
+  }
+
+  @IpcMethod()
+  async isUsageSharingDisabledByEnv() {
+    return isEnvUsageSharingDisabled()
   }
 
   @IpcMethod()

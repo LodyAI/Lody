@@ -101,7 +101,7 @@ void test('reservations bind provenance and display version and reject source/cy
     }),
     /candidate changed/u
   )
-  await assert.rejects(reserve(store, 50, '0.102.0'), /next minor/u)
+  assert.equal((await reserve(store, 50, '0.102.0')).version, '0.102.0-nightly.0')
   await assert.rejects(reserve(store, 60, '0.100.9'), /display version must increase/u)
   await assert.rejects(
     reserveNightlyVersion({

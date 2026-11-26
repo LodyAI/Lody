@@ -1,0 +1,101 @@
+---
+title: "Sesiones"
+description: "Comprende las sesiones de Lody, incluida la configuración, bifurcación, chats laterales, selección de repositorio y modelo, listas de sesiones, pestañas, archivado, restauración y eliminación."
+---
+
+# Sesiones
+
+Una sesión es el concepto más fundamental en Lody. Inicias una nueva sesión desde el compositor de la página de inicio. Esto equivale a una conversación en Claude Code / Codex CLI.
+
+Antes de comenzar, puedes configurar la sesión mediante los menús alrededor del compositor:
+
+- repositorio y rama
+- configuración del agente
+- modelo
+- alcance de permisos
+
+Lody inicia la sesión según estas selecciones.
+
+Una sesión también puede contener múltiples pestañas: el chat principal, los chats secundarios, las vistas previas de archivos y las vistas de diferencias (diffs) pueden permanecer dentro de la misma sesión. Si quieres seguir chateando mientras lees código o dividir una tarea en varios hilos de revisión, consulta [Pestañas de sesión](/es/docs/session-tabs).
+
+Para invitar a un compañero de equipo a una sesión existente para que continúe la misma conversación, los diffs y el worktree, consulta [Compartir una sesión de agente de programación](/es/docs/session-handoff). Bifurcar, como se describe a continuación, inicia una nueva sesión para ti; no añade a nadie a la sesión original.
+
+## Bifurcar una sesión
+
+Cuando tu Agente admite la bifurcación nativa de sesiones, la última respuesta completada del Agente muestra un botón **Fork session** debajo de la respuesta. Bifurcar crea una nueva sesión con el historial de la conversación hasta esa respuesta y te permite continuar en una dirección distinta sin modificar la sesión original.
+
+Codex y Claude Code también pueden bifurcar desde una respuesta completada anterior del Agente.
+
+En una sesión respaldada por Git que anuncia compatibilidad con bifurcación de worktrees, **Fork session** ofrece dos destinos:
+
+- **Current workspace** — una nueva pestaña que comparte archivos y cambios sin confirmar con el origen
+- **New worktree** — una nueva sesión independiente a partir del último `HEAD` confirmado; los archivos sin confirmar y sin seguimiento permanecen en el origen
+
+Si no se ofrece **New worktree**, la bifurcación permanece en el espacio de trabajo actual. Side Chat siempre utiliza la ruta de directorio compartido.
+
+La bifurcación solo está disponible cuando el Agente activo informa compatibilidad nativa con ella.
+
+## Barra lateral derecha: Browser y Side Chat
+
+La barra lateral derecha permite mantener herramientas junto a la conversación principal. Abre **Browser** desde la barra de herramientas de la sesión para navegar por una página, o usa el menú `+` de la barra lateral para añadir paneles.
+
+**Side Chat** crea una bifurcación de la última respuesta elegible del Agente y la abre como un chat separado en la barra lateral derecha. Resulta útil para hacer una pregunta de seguimiento o de revisión mientras mantienes la sesión principal intacta. Puedes crear más de un Side Chat, cambiar entre ellos en la barra lateral y cerrar cualquiera con su botón `X` cuando ya no lo necesites. Side Chat está disponible cuando el Agente activo admite la bifurcación nativa de sesiones.
+
+Consulta [Vista previa de Lody](/es/docs/preview) para obtener detalles sobre las URL y el acceso a puertos remotos.
+
+## Lista de sesiones
+
+En la barra lateral izquierda, Lody muestra conversaciones de chats, worktrees de GitHub y proyectos locales.
+Puedes usar la organización predeterminada orientada a proyectos o cambiar al modo **Updated** para agrupar todo por actividad reciente: Today, This week y Older.
+
+Cada sesión incluye un título semántico generado por IA y su estado actual. Pasa el cursor sobre una sesión para ver su repositorio, rama, estado del pull request y cambios de líneas respecto a la rama base en la tarjeta de información de la sesión.
+
+<SessionListPreview locale="es" />
+
+Pasa el cursor sobre la fila de un repositorio y usa el controlador de arrastre a la derecha para reordenar los grupos de repositorios.
+
+## Acciones de sesión
+
+Haz clic derecho sobre una sesión en la barra lateral para abrir su menú contextual. Desde allí puedes cambiar el nombre, fijar, archivar, copiar la URL de la sesión o copiar el nombre de la rama actual.
+
+Las sesiones fijadas permanecen en la parte superior de su lista para que el trabajo importante o de larga duración sea fácil de encontrar. En la aplicación web, haz clic central o Cmd/Ctrl+clic en una tarea de la barra lateral para abrirla en una nueva pestaña del navegador.
+
+La barra de acciones de la conversación y los controles de información de la sesión agrupan las acciones relevantes para la tarea actual, incluidas las acciones de proyecto, rama, vista previa, pull request y cambios de código cuando están disponibles. Esto mantiene las acciones habituales de GitHub y del proyecto junto a la conversación en lugar de requerir una vista separada.
+
+## Sesión rápida en escritorio
+
+Presiona `Cmd/Ctrl+Shift+N` para abrir la ventana independiente de Sesión rápida. Este es un atajo de escritorio a nivel del sistema, por lo que funciona incluso cuando Lody no tiene el foco. Usa el compositor compacto para elegir un proyecto, un agente y un modelo, y luego inicia la sesión sin abrir primero la ventana principal.
+
+El atajo se puede cambiar en **Settings** -> **Keyboard**. Consulta [Paleta de comandos y atajos de teclado](/es/docs/keyboard-shortcuts).
+
+## Abrir el espacio de trabajo en un editor
+
+En el encabezado de la sesión de escritorio, usa **Open in** para abrir el worktree actual o el directorio del proyecto. Los lanzadores integrados incluyen editores compatibles como VS Code, Xcode y Sublime Text.
+
+En **Settings** -> **General** -> **Path launchers**, puedes elegir el lanzador predeterminado o añadir un comando de shell personalizado. Las plantillas personalizadas deben usar `{path}` como argumento para la carpeta de la sesión y se almacenan únicamente en el escritorio actual.
+
+Al abrir un proyecto que ya está abierto en el editor, se enfoca la ventana existente en lugar de abrir una nueva (por ejemplo, en Zed).
+
+## Archivar sesiones
+
+Pasa el cursor sobre una sesión en la lista (o tócala en dispositivos móviles) para mostrar el botón de archivar en la esquina inferior derecha. Haz clic en él para archivar la sesión.
+
+Las sesiones archivadas pasan a la lista de archivo y conservan su historial de conversación. La máquina propietaria puede recuperar un directorio de worktree gestionado por Lody antes de su eliminación permanente, conservando la rama local y confirmando primero los cambios pendientes no ignorados. Los archivos ignorados pueden descartarse y un script de limpieza puede modificar archivos antes de la copia de seguridad. Guarda los archivos necesarios fuera del worktree antes de archivar. Consulta [Retención y recuperación de worktrees](/es/docs/worktrees#automatic-cleanup) para conocer los plazos, los requisitos de recuperación y los límites de protección. Las sesiones que se ejecutan directamente en un directorio de proyecto local no ven eliminado ese directorio por la limpieza de worktrees gestionados.
+
+## Desarchivar sesiones
+
+En la esquina inferior derecha de la barra lateral izquierda, haz clic en el botón de la lista de archivo para abrir las sesiones archivadas. Usa la búsqueda y el ordenamiento para encontrar una sesión y luego haz clic en su botón de restaurar para devolverla a la lista activa y seguir chateando en cualquier momento.
+
+<img src="/_docs-assets/cancel-archive.png" alt="" />
+
+## Eliminar sesiones
+
+En la esquina inferior derecha de la barra lateral izquierda, haz clic en el botón de la lista de archivo para abrir las sesiones archivadas. Haz clic en el botón de eliminar junto a una sesión para borrarla de forma permanente junto con su historial de conversación. Esta acción no se puede deshacer. Cualquier worktree gestionado restante sigue siendo elegible para limpieza según la [misma regla de respaldo](/es/docs/worktrees#automatic-cleanup); la rama Git local y los commits se conservan.
+
+En el caso de sesiones sin ningún proyecto seleccionado, la eliminación también borra el directorio de trabajo de chat gestionado por Lody y todos los archivos que contiene, sin copia de seguridad ni recuperación; el archivado solo recupera directorios vacíos.
+
+<img src="/_docs-assets/delete-archive.png" alt="" />
+
+## Restauración y eliminación masivas
+
+Pasa el cursor sobre una conversación y haz clic en la casilla de verificación al principio para entrar en el modo de selección múltiple. Luego haz clic en más acciones para la selección por lotes y elige restaurar o eliminar de forma masiva desde los controles de la esquina superior derecha.

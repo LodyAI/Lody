@@ -21,6 +21,12 @@ export class ClientRpcOriginalStore extends Context.Service<
       key: string,
       record: ClientRpcOriginal
     ): Effect.Effect<ClientRpcOriginal, LocalStoreError>;
+    /** Atomically replace a stale-epoch sent original matching `expectedFrame`; concurrent callers adopt the winner. */
+    replaceSent?(
+      key: string,
+      expectedFrame: Uint8Array,
+      record: ClientRpcOriginal
+    ): Effect.Effect<ClientRpcOriginal, LocalStoreError>;
     /** Read one retained ciphertext response page. */
     readResponse(
       key: string,

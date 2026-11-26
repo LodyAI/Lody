@@ -3,7 +3,9 @@
  * app's types: the replica is display-only and must not follow app refactors.
  */
 
-export type ReplicaLocale = 'en' | 'zh';
+import type { SiteLocale } from '@site/src/site-pages/shared';
+
+export type ReplicaLocale = SiteLocale;
 export type ReplicaAgent = 'codex' | 'claude';
 export type ReplicaPrStatus = 'open' | 'merged' | 'closed' | 'draft';
 

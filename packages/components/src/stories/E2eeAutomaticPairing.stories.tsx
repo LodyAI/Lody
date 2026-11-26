@@ -2,6 +2,7 @@ import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from 'storybook/test';
 import { useMemo, type ReactNode } from 'react';
 import type { E2eeAutomaticPairingState, E2eeWorkspaceRuntime } from '@lody/platform';
 import {
@@ -239,6 +240,17 @@ export const PhoneWaitingWithBackup: Story = {
 export const DesktopOwnerLostAccess: Story = {
   args: { mode: 'waiting', form: 'desktop', access: 'owner' },
 };
+/** Expanded owner workspace deletion confirmation dialog when all devices are lost. */
+export const LostAccessDeleteConfirm: Story = {
+  args: { mode: 'waiting', form: 'desktop', access: 'owner' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByTestId('e2ee-lost-access-entry'));
+    const body = within(document.body);
+    await userEvent.click(await body.findByTestId('e2ee-lost-access-delete'));
+    await expect(await body.findByTestId('e2ee-lost-access-confirm')).toBeVisible();
+  },
+};
 /** A non-owner sees leave instead of delete. */
 export const DesktopMemberLostAccess: Story = {
   args: { mode: 'waiting', form: 'desktop', access: 'member' },
@@ -268,7 +280,13 @@ export const AddDeviceCard: Story = { args: { mode: 'addDevice', form: 'desktop'
 
 const themeStyles = stylex.create({
   copy: { minHeight: '100dvh', backgroundColor: uiColors.background, color: uiColors.label },
-  row: { display: 'flex', height: 'calc(var(--spacing) * 16)', alignItems: 'center', gap: 'calc(var(--spacing) * 6)', paddingInline: 'calc(var(--spacing) * 6)' },
+  row: {
+    display: 'flex',
+    height: 'calc(var(--spacing) * 16)',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 6)',
+    paddingInline: 'calc(var(--spacing) * 6)',
+  },
   layout: { fontWeight: 600 },
   hint: { marginTop: 'calc(var(--spacing) * 3)', color: uiColors.secondaryLabel },
 });

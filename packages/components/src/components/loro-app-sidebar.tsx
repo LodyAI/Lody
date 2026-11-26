@@ -377,7 +377,7 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { openExternalUrl } from '@/lib/native-browser';
-import { getChangelogUrl } from '@/lib/lody-urls';
+import { getChangelogUrl, getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { getCachedWorkspaceName } from '@/lib/local-storage-cache';
 import {
   languageAtom,
@@ -4343,8 +4343,7 @@ export function LoroAppSidebar({
     // "/docs" resolves to the renderer's own origin (file:// or localhost in
     // dev), so `window.open` would be silently denied by Electron's window
     // open handler without ever reaching the docs site.
-    const docsPath = language === 'zh_CN' ? '/zh/docs' : '/docs';
-    const targetUrl = new URL(docsPath, getDocsLinkOrigin()).toString();
+    const targetUrl = getSiteLocalizedUrl('/docs', language, getDocsLinkOrigin());
     void openExternalUrl(targetUrl);
   }, [closeMobileDrawer, language]);
 

@@ -1,0 +1,20 @@
+---
+title: "20260918-0.97.0"
+version: 0.97.0
+date: 2026-09-18
+description: "Ajout des mentions de session, du catalogue Projets sur l'application de bureau et du pilotage de la file d'attente, ainsi que correction du démarrage des agents sur l'application de bureau macOS signée."
+---
+
+Version 0.97.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Coller un lien de session dans l'éditeur de message le transforme en mention de session ; utilisez Cmd/Ctrl+Shift+V pour coller un lien brut.
+- Paramètres de l'application de bureau > Projets est désormais un catalogue à deux volets : GitHub / machines à gauche, et les dossiers de la source sélectionnée à droite ; cliquez sur un dossier pour le modifier.
+- Les messages en file d'attente peuvent être pilotés directement (pas uniquement le premier élément lorsque l'agent prend en charge le pilotage avec accusé de réception) ; Cmd/Ctrl+Shift+Enter inverse temporairement l'envoi en file d'attente et le pilotage pour cet envoi.
+
+### 🐛 Correctifs et améliorations
+
+- Correction de l'échec de démarrage de DeepSeek Harness et d'autres agents chargeant des modules natifs non signés sur l'application de bureau macOS signée.
+- Le menu de session sur mobile permet de partager une conversation sous forme d'image.
+- Lorsque la colonne de conversation est étroite, les actions IDE et de partage sont déplacées dans le menu ⋯.

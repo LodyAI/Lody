@@ -154,11 +154,11 @@ const action = <Reference extends FunctionReference<'action'>>(
  */
 export const cloudOperations = {
   analytics: {
-    getUsageSharing: defineCloudQuery<{ accountId: string }, boolean>(
+    getUsageSharing: defineCloudQuery<Record<string, never>, boolean>(
       'telemetry',
       'analytics:getUsageSharing'
     ),
-    setUsageSharing: defineCloudMutation<{ enabled: boolean; accountId: string }, null>(
+    setUsageSharing: defineCloudMutation<{ enabled: boolean }, null>(
       'telemetry',
       'analytics:setUsageSharing'
     ),
@@ -188,6 +188,7 @@ export const cloudOperations = {
   },
   e2eeMembers: {
     claim: query<ConvexApi['e2eeMembers']['claim']>('e2eeMembers:claim'),
+    pending: query<ConvexApi['e2eeMembers']['pending']>('e2eeMembers:pending'),
     workspaces: query<ConvexApi['e2eeMembers']['workspaces']>('e2eeMembers:workspaces'),
     preview: definePublicCloudQuery<
       import('@lody/cloud-api').E2eeMemberRequests['preview'],

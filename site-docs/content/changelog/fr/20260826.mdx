@@ -1,0 +1,22 @@
+---
+title: "20260826"
+version: 0.87.0
+date: 2026-08-26
+description: "Ajout de tailles de police personnalisées pour les conversations et des aperçus en direct pour les pièces jointes HTML, et correction de la création de session par mention d'un Rôle, des chemins de pièces jointes HTML sous Windows, de la modification des messages en file d'attente et du chargement répété des données de session et de modification de fichiers."
+---
+
+Version 0.87.0
+
+### ✨ Nouveautés
+
+- Ajout de tailles de police personnalisées pour les conversations afin d'adapter le contenu de la discussion, le Markdown et les terminaux à vos préférences de lecture.
+- Les pièces jointes HTML peuvent désormais s'ouvrir directement en aperçu en direct ; Lody demande confirmation avant de se connecter à un port distant signalé par l'agent.
+
+### 🐛 Correctifs et améliorations
+
+- Correction d'un problème pouvant faire échouer le démarrage d'une conversation via la mention d'un Rôle.
+- Amélioration de la modification des messages en file d'attente : appuyez sur Entrée ou utilisez le bouton de confirmation pour envoyer, utilisez Maj+Entrée pour insérer un saut de ligne, et évitez les envois accidentels lors de la saisie avec un IME.
+- Suppression du bouton d'autorisation redondant lorsqu'un Rôle d'agent est sélectionné, réduisant ainsi les conflits de configuration et l'encombrement de l'interface.
+- Correction des chemins de pièces jointes HTML qui ne s'ouvraient pas correctement sous Windows.
+- Correction de l'affichage de bordures en double autour de l'éditeur de messages en file d'attente.
+- Optimisation du chargement et de la mise en cache des données de session et de modifications de fichiers afin de réduire les analyses répétées et la consommation de ressources.

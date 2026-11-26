@@ -168,7 +168,8 @@ import {
   recordChatLandingProjectUse,
   resolvePreferredChatLandingAgentSelection,
 } from '@/lib/chat-landing-defaults';
-import { readAgentStartDefaults, persistAgentSessionDefaults } from '@/lib/local-storage-cache';
+import { readAgentStartDefaults, learnAgentStartDefaults } from '@/lib/local-storage-cache';
+import { useAgentPermissionDefault } from '@/hooks/use-agent-permission-default';
 import { filterAcpSessionConfigOptionValues } from '@/lib/acp-session-config-selection';
 import {
   buildRecentRunConfigItems,
@@ -2222,6 +2223,7 @@ function WorkspaceChatLanding({
     cliType: selectedConfig?.cliType,
     agentType: selectedConfig?.agentType,
   });
+  const permissionDefault = useAgentPermissionDefault(selectedConfig?.id);
   const dispatchConfigOptionValues = useMemo(
     () => filterAcpSessionConfigOptionValues(configOptionValues, resolvedConfigOptionSelectors),
     [configOptionValues, resolvedConfigOptionSelectors]
@@ -3910,7 +3912,7 @@ function WorkspaceChatLanding({
         throw new Error(`Initial session history missing entry id (sessionId=${sessionId})`);
       }
       recordChatLandingProjectUse(workspaceId, desktopProjectSelection);
-      persistAgentSessionDefaults(selectedAgent.agentId, {
+      learnAgentStartDefaults(selectedAgent.agentId, {
         modeId: modeOptions.length > 0 ? selectedModeId : null,
         modelId: modelOptions.length > 0 ? selectedModelId : null,
         configOptionValues: dispatchConfigOptionValues,
@@ -4787,6 +4789,7 @@ function WorkspaceChatLanding({
             configOptionValues={configOptionValues}
             onConfigOptionChange={handleConfigOptionChange}
             menuSide={isEmbedded ? 'top' : undefined}
+            permissionDefault={permissionDefault}
           />
         )}
         <SessionUsagePopover

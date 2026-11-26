@@ -254,6 +254,17 @@ export class PromptShortcutSync {
       const shardUrls = isWorkspaceRoom
         ? (getLoroStreamsShardUrls(gatewayBaseUrl, shardHostSuffix) ?? 'disabled')
         : 'disabled';
+      const remoteCursorStore =
+        resource.kind === 'workspace-index' &&
+        'flock' in lease &&
+        typeof this.options.repo.supportsReplicaCheckpoints === 'function' &&
+        this.options.repo.supportsReplicaCheckpoints()
+          ? this.options.repo.getReplicaCheckpointStore({
+              kind: 'flock',
+              flockDocId: streamId,
+              flock: lease.flock,
+            })
+          : undefined;
       const transport = createStreamsCrdt({
         streamUrl: createLoroStreamUrl({
           baseUrl: gatewayBaseUrl,
@@ -277,8 +288,7 @@ export class PromptShortcutSync {
         adapter: write ? adapter : readonlyShortcutAdapter(adapter),
         auth: (context) => auth(context?.reason === 'unauthorized'),
         createStreamIfMissing: write,
-        // In-memory cursors deliberately replay on restart. The document is durable,
-        // but a cursor must never outlive the matching local state.
+        ...(remoteCursorStore ? { remoteCursorStore } : {}),
         beforeRemoteCursorSave: persist,
       });
       let subscription: TransportSubscription | undefined;

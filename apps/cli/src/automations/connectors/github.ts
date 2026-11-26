@@ -127,6 +127,7 @@ export const githubConnectorPlugin: ConnectorPluginRuntime<
     };
   },
 
+  /** Newly added event streams on an edited trigger start from `now` rather than epoch 0. */
   async pollDelta(ctx, config, prevCursor, now) {
     const cursor: GitHubConnectorCursor = prevCursor
       ? {
@@ -137,7 +138,6 @@ export const githubConnectorPlugin: ConnectorPluginRuntime<
         }
       : this.seedCursor(config, now);
 
-    // Ensure newly added event types on an edited trigger start from `now` rather than epoch 0.
     for (const kind of config.events) {
       if (typeof cursor.streamSince[kind] !== 'number') {
         cursor.streamSince[kind] = now;

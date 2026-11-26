@@ -7,6 +7,7 @@ export * from './history-write-schema';
 export type * from './session-mirror';
 export type * from './session-control-plane';
 export * from './session-cancel-request';
+export * from './roost-cloud-history';
 
 export type {
   AbsolutePath,
@@ -155,8 +156,9 @@ export * from './terminal-protocol';
 export type { WebSocketMessage } from './message';
 export * from './loro-streams-routing';
 import type { WorkspaceId } from './ids';
+import type { SupportedLanguage } from './language';
 
-export type SupportedLanguage = 'en' | 'zh_CN';
+export * from './language';
 
 export type FileTreeItem = {
   path: string;

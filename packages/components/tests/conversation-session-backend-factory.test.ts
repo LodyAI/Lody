@@ -4,8 +4,19 @@ import { createRoostDirectoryRow, readSessionHistoryMetadata } from '@lody/share
 import type { SessionHistoryInput, SessionHistoryReadResponse } from '@lody/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
+import { Identity, IndexedDbStorage, Store } from '@loro-dev/roost';
+import { encodeUvarU64 } from '@loro-dev/streams-client';
+import { fromApplicationJson, LodyHistory } from '@loro-dev/roost/lody-history';
+import {
+  ROOST_HISTORY_BUCKET_ID,
+  roostCloudHistoryStreamId,
+  roostHistoryAuthorKey,
+  roostHistorySourceId,
+  RoostCloudHistoryRequestError,
+} from '@lody/shared';
+import { createRoostHistoryReplica } from '../src/lib/roost-history-replica';
 
-import type { SessionId, MachineId, WorkspaceId } from '@lody/shared';
+import type { SessionId, MachineId, RoostHistorySyncState, WorkspaceId } from '@lody/shared';
 import { createConversationSession } from '../src/lib/conversation-view/create-conversation-session';
 import {
   createLocalRoostSessionDataFactory,
@@ -26,7 +37,896 @@ import { createConversationViewFromReader } from '../src/lib/conversation-view/c
 import { resolveLocalSessionControlTimeoutMs } from '../../../apps/electron/src/main/services/local-session-control-budget';
 import type { SessionDataChange } from '@lody/shared/session-data';
 
+function streamOffset(bytes: number): string {
+  return String(bytes).padStart(20, '0');
+}
+
+function backwardHistoryPage(message: Uint8Array): Response {
+  const length = encodeUvarU64(BigInt(message.byteLength));
+  const completeFrameHeader = Uint8Array.of(1, 0);
+  const body = new Uint8Array(completeFrameHeader.length + length.length + message.byteLength);
+  body.set(completeFrameHeader);
+  body.set(length, completeFrameHeader.length);
+  body.set(message, completeFrameHeader.length + length.length);
+  return new Response(body, {
+    headers: {
+      'content-type': 'application/vnd.loro-streams.frames',
+      'stream-prev-offset': streamOffset(0),
+      'stream-end-offset': streamOffset(message.byteLength),
+      'stream-at-start': 'true',
+      'stream-at-retained-start': 'true',
+    },
+  });
+}
+
+function limitReplicaStorage(isFull: () => boolean) {
+  const put = IDBObjectStore.prototype.put;
+  return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    ...args
+  ) {
+    if (isFull() && this.transaction.db.name.startsWith('lody-roost-replica-'))
+      throw new DOMException('Replica storage quota exceeded', 'QuotaExceededError');
+    return put.apply(this, args);
+  });
+}
+
 describe('createConversationSession backend seam', () => {
+  it.each([
+    { status: 401, hint: true },
+    { status: 403, hint: true },
+    { status: 403, hint: false },
+    { status: 404, hint: true },
+    { status: 410, hint: true },
+  ])(
+    'keeps a cloud refusal terminal (HTTP $status, publication hint: $hint)',
+    async ({ status, hint }) => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const workspaceId = 'workspace' as WorkspaceId;
+      const machineId = 'machine' as MachineId;
+      const sessionId = 'session' as SessionId;
+      const doc = new LoroDoc();
+      const ownerRead = async (): Promise<never> => {
+        throw new Error('unexpected owner read');
+      };
+      let requests = 0;
+      let sync: RoostHistorySyncState | undefined;
+      const data = createRemoteRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        requestHistoryRead: ownerRead,
+        requestHistoryWrite: ownerRead,
+        onHistorySync: (next) => {
+          sync = next;
+        },
+        cloudHistory: () =>
+          createRoostHistoryReplica({
+            workspaceId,
+            machineId,
+            sessionId,
+            replicaNamespace: `refusal-${status}`,
+            getBinding: () =>
+              hint ? { generation: 'root', ownerPublicKey: 'A'.repeat(43) } : undefined,
+            observeBinding: () => () => {},
+            requestGrant: async () => {
+              requests++;
+              throw new RoostCloudHistoryRequestError(status);
+            },
+          }),
+      })({ doc, sessionId, backendKind: 'roost' });
+      const observation = data.history.observe(() => {});
+      void observation.initial.catch(() => {});
+      try {
+        await expect(observation.initialPage).rejects.toMatchObject({ status });
+        await expect(data.history.readAll()).rejects.toMatchObject({ status });
+        expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: status });
+        expect(requests).toBe(1);
+      } finally {
+        observation.unsubscribe();
+        data.dispose();
+        doc.free();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
+  it.each(['unavailable', 'requires owner authorization', 'exceeds local storage quota'] as const)(
+    'keeps a cached history private when the cloud %s and the machine denies access',
+    async (cloud) => {
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const workspaceId = 'workspace' as WorkspaceId;
+      const machineId = 'machine' as MachineId;
+      const sessionId = 'denied-owner-cache' as SessionId;
+      const binding = { generation: 'root', ownerPublicKey: 'A'.repeat(43) };
+      const storage =
+        cloud === 'exceeds local storage quota' ? limitReplicaStorage(() => true) : undefined;
+      vi.stubGlobal('fetch', async () => {
+        throw new Error('Unexpected history transport');
+      });
+      const cache = createRoostHistoryCache(
+        JSON.stringify(['local', workspaceId, machineId, sessionId])
+      );
+      const oldTurn: SessionHistoryInput = {
+        id: 'previously-authorized',
+        role: 'user',
+        timestamp: '2026-11-01T00:00:00Z',
+        items: [{ type: 'text', text: 'Previously readable history' }],
+      };
+      const doc = new LoroDoc();
+      let sync: RoostHistorySyncState | undefined;
+      const data = createRemoteRoostSessionDataFactory({
+        workspaceId,
+        machineId,
+        requestHistoryRead: async () => ({
+          type: 'session/history-read_response',
+          sessionId,
+          success: false,
+          error: 'session_history_read_denied',
+        }),
+        requestHistoryWrite: async () => {
+          throw new Error('Unexpected history write');
+        },
+        onHistorySync: (next) => {
+          sync = next;
+        },
+        cloudHistory: () =>
+          createRoostHistoryReplica({
+            workspaceId,
+            machineId,
+            sessionId,
+            replicaNamespace: 'denied-owner-cache',
+            getBinding: () => binding,
+            observeBinding: () => () => {},
+            requestGrant: async () => {
+              if (cloud === 'requires owner authorization') return { state: 'owner-required' };
+              if (cloud === 'unavailable') throw new RoostCloudHistoryRequestError(503);
+              const streamId = roostCloudHistoryStreamId(
+                workspaceId,
+                machineId,
+                sessionId,
+                binding
+              );
+              return {
+                state: 'published',
+                binding,
+                streamUrl: `https://streams.example.test/ds/${ROOST_HISTORY_BUCKET_ID}/${encodeURIComponent(streamId)}`,
+                token: 'synthetic-read-grant',
+                expiresIn: 60,
+                newerVersionPending: false,
+              };
+            },
+          }),
+      })({ doc, sessionId, backendKind: 'roost' });
+      try {
+        await cache.acceptPage(
+          {
+            rows: [createRoostDirectoryRow(0, oldTurn)],
+            startPosition: 0,
+            totalCount: 1,
+            hasMoreOlder: false,
+            cursor: null,
+          },
+          [oldTurn],
+          1
+        );
+        await expect(data.history.readLatestDirectoryPage!(40)).rejects.toMatchObject({
+          name: 'RoostHistoryError',
+        });
+        expect(sync?.source).toBe('streams');
+      } finally {
+        data.dispose();
+        cache.dispose();
+        doc.free();
+        storage?.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
+  it.each([
+    'published',
+    'published without a hint',
+    'append during metadata',
+    'earlier metadata changes',
+    'publication notice',
+    'publication without notice',
+    'grant 503',
+    'Streams reverse read 503',
+    'published grant 503',
+    'published replica exceeds local storage quota',
+    'published grant 503 then refusal',
+    'published grant 503 then Streams recovers first',
+    'published grant 503 then Streams refuses first',
+    'published grant 503 without an observer',
+    'published grant 503 with both sources unavailable',
+    'published grant 503 with a pending machine page when Streams recovers',
+    'published grant 503 with a pending machine page when Streams refuses',
+    'published grant 503 with a pending machine page when the conversation closes',
+    'published grant 503 with an older page across two source switches',
+    'published grant 503 then conversation closes',
+    'published live 503',
+    'published stream replaced while a machine page is pending',
+    'published stream replaced while a machine page is pending and the old token expired',
+    'published grant refused before a cached read',
+    'owner authorization required until the conversation is shared',
+  ])(
+    'opens Roost on the correct reader and resumes Streams with its owner offline (%s)',
+    { timeout: 30_000 },
+    async (startingState) => {
+      const appendDuringMetadata = startingState === 'append during metadata';
+      const editDuringMetadata = startingState === 'earlier metadata changes';
+      const updateDuringMetadata = appendDuringMetadata || editDuringMetadata;
+      const rotating = startingState.startsWith('published stream replaced');
+      const checkingCachedGrant = startingState === 'published grant refused before a cached read';
+      const needsOwner =
+        startingState === 'owner authorization required until the conversation is shared';
+      const liveOutage = startingState === 'published live 503' || rotating;
+      const paginating =
+        startingState === 'published grant 503 with an older page across two source switches';
+      const machinePagePending = startingState.startsWith(
+        'published grant 503 with a pending machine page'
+      );
+      const refuseDuringPage = machinePagePending && startingState.endsWith('Streams refuses');
+      const closeDuringPage = machinePagePending && startingState.endsWith('conversation closes');
+      const streamsRefusesFirst =
+        startingState === 'published grant 503 then Streams refuses first';
+      const withoutObserver = startingState === 'published grant 503 without an observer';
+      const bothUnavailable = startingState === 'published grant 503 with both sources unavailable';
+      const closing = startingState === 'published grant 503 then conversation closes';
+      const slowOwner =
+        streamsRefusesFirst ||
+        withoutObserver ||
+        bothUnavailable ||
+        closing ||
+        startingState === 'published grant 503 then Streams recovers first';
+      const quotaExhausted = startingState === 'published replica exceeds local storage quota';
+      const grantOutage = startingState.startsWith('published grant 503');
+      const cloudOutage = liveOutage || grantOutage || quotaExhausted;
+      const alreadyPublished = startingState.startsWith('published') || updateDuringMetadata;
+      const discovering = ['grant 503', 'Streams reverse read 503'].includes(startingState);
+      let cloudUnavailable = grantOutage || discovering;
+      const pendingWithoutNotice = startingState === 'publication without notice' || needsOwner;
+      let awaitingPublication = !alreadyPublished && !discovering;
+      vi.stubGlobal('indexedDB', new IDBFactory());
+      vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+      const workspaceId = 'roost-cloud-workspace' as WorkspaceId;
+      const sessionId = 'roost-cloud-session' as SessionId;
+      const machineId = 'roost-cloud-machine' as MachineId;
+      const author = Identity.fromSeed(new Uint8Array(32).fill(23));
+      const storage = await IndexedDbStorage.open('roost-cloud-source');
+      let entropy = 0;
+      const store = new Store(storage, () => true, {
+        clock: () => 1_700_000_000_000n,
+        randomBytes: () => new Uint8Array(16).fill(++entropy),
+      });
+      const stream = store.stream(roostHistorySourceId(sessionId, 'root'));
+      const writer = new LodyHistory(stream, author);
+      const turn = {
+        id: 'cloud-message',
+        role: 'user',
+        timestamp: '2026-11-01T00:00:00Z',
+        items: [{ type: 'text', text: 'Synthetic Roost history' }],
+      };
+      const reply = {
+        id: 'cloud-reply',
+        role: 'assistant',
+        userTurnId: turn.id,
+        timestamp: '2026-11-01T00:00:01Z',
+        items: [{ type: 'text', text: 'A later Roost update' }],
+      };
+      const append = async (
+        entry: typeof turn,
+        preceding?: Awaited<ReturnType<typeof writer.acceptToView>>,
+        segmentId = 'primary'
+      ) => {
+        const parent = preceding ? await stream.readTurnHeader(preceding.turnId) : undefined;
+        const parents =
+          parent?.kind === 'found' && parent.turn.sealed
+            ? [{ id: parent.turn.turnId, hash: parent.turn.sealed }]
+            : [];
+        const accepted = await writer.acceptToView({
+          viewId: sessionId,
+          expectedRevision: preceding?.revision ?? 0n,
+          expectedHead: preceding?.newHead ?? null,
+          operationId: `${entry.id}:${segmentId}`,
+          input: {
+            kind: 'message',
+            businessId: entry.id,
+            segmentId,
+            parents,
+            content: fromApplicationJson(entry),
+          },
+        });
+        await writer.finish(accepted.turnId, 1n);
+        return accepted;
+      };
+      const exportHistory = async () =>
+        stream.exportTurns(
+          (await stream.readStream()).flatMap((record) =>
+            record.kind === 'found' ? [record.turn.turnId] : []
+          )
+        );
+      let accepted = await append(turn);
+      const precedingIds = [turn.id];
+      if (updateDuringMetadata) {
+        for (let index = 1; index < 42; index++) {
+          const id = `synthetic-turn-${index}`;
+          accepted = await append({ ...turn, id }, accepted);
+          precedingIds.push(id);
+        }
+      }
+      const bytes = await exportHistory();
+      if (editDuringMetadata) {
+        const edited = { ...turn, inputConfig: { modelId: 'revised-model' } };
+        await append(edited, accepted, 'late:edit-metadata');
+      } else await append(reply, accepted);
+      const incremental = await exportHistory();
+
+      const binding = {
+        generation: 'root' as const,
+        ownerPublicKey: roostHistoryAuthorKey(author.owner()),
+      };
+      const physical = roostCloudHistoryStreamId(workspaceId, machineId, sessionId, binding);
+      const urlFor = (streamId: string) =>
+        `https://streams.invalid/ds/${ROOST_HISTORY_BUCKET_ID}/${encodeURIComponent(streamId)}`;
+      const url = urlFor(physical);
+      const nextBinding = { ...binding, generation: '0197a600-0000-7000-8000-000000000001' };
+      const nextUrl = urlFor(
+        roostCloudHistoryStreamId(workspaceId, machineId, sessionId, nextBinding)
+      );
+      const replacementTurn = { ...turn, id: 'replacement-message' };
+      let replacement = new Uint8Array();
+      if (rotating) {
+        const nextStream = store.stream(roostHistorySourceId(sessionId, nextBinding.generation));
+        const nextWriter = new LodyHistory(nextStream, author);
+        const accepted = await nextWriter.acceptToView({
+          viewId: sessionId,
+          expectedRevision: 0n,
+          expectedHead: null,
+          operationId: replacementTurn.id,
+          input: {
+            kind: 'message',
+            businessId: replacementTurn.id,
+            segmentId: 'primary',
+            parents: [],
+            content: fromApplicationJson(replacementTurn),
+          },
+        });
+        await nextWriter.finish(accepted.turnId, 1n);
+        replacement = new Uint8Array(await nextStream.exportTurns([accepted.turnId]));
+      }
+      await store.close();
+      await storage.close();
+      let oldStreamUnavailable = false;
+      let publishedReplacement = false;
+      const startOffset = streamOffset(bytes.length);
+      const tail = streamOffset(bytes.length + incremental.length);
+      const applied = Promise.withResolvers<void>();
+      const switched = Promise.withResolvers<void>();
+      const recovered = Promise.withResolvers<void>();
+      const returnedToOwner = Promise.withResolvers<void>();
+      const readingLive = Promise.withResolvers<void>();
+      const breakLive = Promise.withResolvers<void>();
+      const machineReading = Promise.withResolvers<void>();
+      let liveReadFailed = false;
+      let usedOwnerDuringOutage = false;
+      let requestsToTail = 0;
+      let headOffset = startOffset;
+      let failHead = false;
+      vi.stubGlobal('fetch', (input: string | Request, init?: RequestInit) => {
+        const read = new URL(input instanceof Request ? input.url : input);
+        const { pathname, origin } = new URL(url);
+        if (read.href.startsWith(nextUrl) && publishedReplacement) {
+          if (read.searchParams.get('direction') === 'backward')
+            return Promise.resolve(backwardHistoryPage(replacement));
+          return Promise.resolve(
+            new Response(null, {
+              status: init?.method === 'HEAD' ? 200 : 204,
+              headers: {
+                'content-type': 'application/octet-stream',
+                'stream-next-offset': streamOffset(replacement.byteLength),
+                'stream-up-to-date': 'true',
+              },
+            })
+          );
+        }
+        if (read.origin !== origin || read.pathname !== pathname)
+          throw new Error('Unexpected cloud history transport');
+        if (publishedReplacement)
+          return Promise.resolve(
+            new Response(null, {
+              status: startingState.endsWith('old token expired') ? 401 : 404,
+            })
+          );
+        if (oldStreamUnavailable) return Promise.resolve(new Response(null, { status: 503 }));
+        if ((init?.method ?? (input instanceof Request ? input.method : 'GET')) === 'HEAD') {
+          if (failHead) {
+            failHead = false;
+            return Promise.resolve(new Response(null, { status: 503 }));
+          }
+          return Promise.resolve(
+            new Response(null, {
+              headers: {
+                'content-type': 'application/octet-stream',
+                'stream-next-offset': headOffset,
+              },
+            })
+          );
+        }
+        if (read.searchParams.get('direction') === 'backward') {
+          if (startingState === 'Streams reverse read 503' && cloudUnavailable)
+            return Promise.resolve(new Response(null, { status: 503 }));
+          return Promise.resolve(backwardHistoryPage(bytes));
+        }
+        const next = (body: Uint8Array<ArrayBuffer> | null, offset: string) =>
+          new Response(body, {
+            status: body ? 200 : 204,
+            headers: {
+              'content-type': 'application/octet-stream',
+              'stream-next-offset': offset,
+              'stream-up-to-date': 'true',
+            },
+          });
+        const offset = read.searchParams.get('offset');
+        if (liveOutage && !liveReadFailed && read.searchParams.has('live')) {
+          liveReadFailed = true;
+          readingLive.resolve();
+          return breakLive.promise.then(() => new Response(null, { status: 503 }));
+        }
+        if (offset === startOffset && !read.searchParams.has('live'))
+          return Promise.resolve(
+            headOffset === tail ? next(new Uint8Array(incremental), tail) : next(null, startOffset)
+          );
+        if (offset === startOffset && !updateDuringMetadata && !discovering) {
+          requestsToTail++;
+          headOffset = tail;
+          return Promise.resolve(next(new Uint8Array(incremental), tail));
+        }
+        if (offset === tail || ((updateDuringMetadata || discovering) && offset === startOffset)) {
+          if (!read.searchParams.has('live')) return Promise.resolve(next(null, tail));
+          const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+          });
+        }
+        throw new Error(`Unexpected resumed position ${offset}`);
+      });
+      const offline = async (): Promise<never> => {
+        throw new Error('Synthetic owner is offline');
+      };
+      let replicaFull = quotaExhausted;
+      const quota = quotaExhausted ? limitReplicaStorage(() => replicaFull) : undefined;
+      let cachedBinding: typeof binding | undefined =
+        alreadyPublished && startingState !== 'published without a hint' ? binding : undefined;
+      const publicationWakes = new Set<() => void>();
+      let replica: ReturnType<typeof createRoostHistoryReplica>;
+      let sync: RoostHistorySyncState | undefined;
+      const reportedPending = Promise.withResolvers<void>();
+      const open = (
+        requestGrant: Parameters<typeof createRoostHistoryReplica>[0]['requestGrant'],
+        owner: Parameters<
+          typeof createRemoteRoostSessionDataFactory
+        >[0]['requestHistoryRead'] = offline
+      ) =>
+        createRemoteRoostSessionDataFactory({
+          workspaceId,
+          machineId,
+          onCloudHistoryRoute: (active) => {
+            if (active) {
+              if (usedOwnerDuringOutage) recovered.resolve();
+            } else if (cloudOutage) {
+              if (usedOwnerDuringOutage) returnedToOwner.resolve();
+              usedOwnerDuringOutage = true;
+            }
+          },
+          onHistorySync: (next) => {
+            sync = next;
+            if (next.phase === 'pending' || next.phase === 'owner-required')
+              reportedPending.resolve();
+            if (next.source === 'streams' && next.phase === 'ready') switched.resolve();
+            if (next.source === 'machine' && next.httpStatus === 503) machineReading.resolve();
+          },
+          cloudHistory: () =>
+            (replica = createRoostHistoryReplica({
+              workspaceId,
+              machineId,
+              sessionId,
+              replicaNamespace: startingState,
+              getBinding: () => cachedBinding,
+              observeBinding: (wake) => {
+                publicationWakes.add(wake);
+                return () => publicationWakes.delete(wake);
+              },
+              requestGrant,
+              onSyncState: (state) => {
+                if ('checkpoint' in state && JSON.parse(state.checkpoint)[2] === tail)
+                  applied.resolve();
+              },
+            })),
+          requestHistoryRead: owner,
+          requestHistoryWrite: offline,
+        })({ sessionId, doc: new LoroDoc(), backendKind: 'roost' });
+      const timedOut: Parameters<
+        typeof createRemoteRoostSessionDataFactory
+      >[0]['requestHistoryRead'] = async () => ({
+        type: 'session/history-read_response',
+        sessionId,
+        success: false,
+        error: 'Synthetic owner is offline',
+        rpcFailure: {
+          source: 'transport',
+          code: 'response_timeout',
+          requestId: 'synthetic-owner-read',
+          machineId,
+        },
+      });
+      const ownerTurn = quotaExhausted ? { ...turn, id: 'machine-message' } : turn;
+      const ownerRead: Parameters<
+        typeof createRemoteRoostSessionDataFactory
+      >[0]['requestHistoryRead'] = async (_machine, _session, query) => ({
+        type: 'session/history-read_response',
+        sessionId,
+        success: true,
+        historyCount: paginating ? 2 : 1,
+        historyRevision: 1,
+        result:
+          query.kind === 'count'
+            ? paginating
+              ? 2
+              : 1
+            : query.kind === 'readLatestPage'
+              ? {
+                  startPosition: paginating ? 1 : 0,
+                  totalCount: paginating ? 2 : 1,
+                  hasMoreOlder: paginating,
+                  cursor: paginating ? 'machine-older' : null,
+                  rows: [createRoostDirectoryRow(paginating ? 1 : 0, ownerTurn)],
+                }
+              : { state: 'ready', turn: ownerTurn },
+        pageTurns: [ownerTurn],
+      });
+      const ownerStarted = Promise.withResolvers<void>();
+      const ownerReply = Promise.withResolvers<Awaited<ReturnType<typeof ownerRead>>>();
+      const delayedRequest = slowOwner
+        ? 'count'
+        : machinePagePending || rotating
+          ? 'readLatestPage'
+          : paginating
+            ? 'readOlderPage'
+            : undefined;
+      const requestOwner: typeof ownerRead = (machine, session, query) => {
+        if (query.kind !== delayedRequest || (rotating && !oldStreamUnavailable))
+          return ownerRead(machine, session, query);
+        ownerStarted.resolve();
+        return ownerReply.promise;
+      };
+      let readGrants = 0;
+      let accessWithdrawn = false;
+      const requestGrant = async () => {
+        readGrants++;
+        if (
+          cloudUnavailable &&
+          startingState !== 'Streams reverse read 503' &&
+          (!withoutObserver || readGrants === 1)
+        )
+          throw new RoostCloudHistoryRequestError(503);
+        if (
+          accessWithdrawn ||
+          startingState === 'published grant 503 then refusal' ||
+          streamsRefusesFirst ||
+          refuseDuringPage
+        )
+          throw new RoostCloudHistoryRequestError(403);
+        if (awaitingPublication)
+          return { state: needsOwner ? 'owner-required' : 'pending' } as const;
+        return {
+          state: 'published' as const,
+          newerVersionPending: startingState === 'publication notice',
+          binding: publishedReplacement ? nextBinding : binding,
+          streamUrl: publishedReplacement ? nextUrl : url,
+          token: 'synthetic-read-grant',
+          expiresIn: 60,
+        };
+      };
+      const first = open(
+        requestGrant,
+        discovering ? timedOut : alreadyPublished && !cloudOutage ? offline : requestOwner
+      );
+      if (discovering || pendingWithoutNotice || cloudOutage || checkingCachedGrant)
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      let closed = false;
+      try {
+        if (slowOwner) {
+          const observation = withoutObserver ? undefined : first.history.observe(() => {});
+          void observation?.initial.catch(() => {});
+          const page = observation?.initialPage ?? first.history.readLatestDirectoryPage!(40);
+          void page.catch(() => {});
+          await ownerStarted.promise;
+          if (closing) {
+            first.dispose();
+            closed = true;
+            await expect(page).rejects.toMatchObject({ name: 'AbortError' });
+          } else if (bothUnavailable) {
+            ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
+            await expect(page).rejects.toMatchObject({
+              failure: { source: 'transport', code: 'response_timeout' },
+            });
+            cloudUnavailable = false;
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+          } else {
+            cloudUnavailable = false;
+            await vi.advanceTimersByTimeAsync(0);
+            if (streamsRefusesFirst) {
+              await expect(page).rejects.toMatchObject({ status: 403 });
+              expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: 403 });
+            } else {
+              await expect(page).resolves.toMatchObject({ rows: [{ turnId: turn.id }] });
+              expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+            }
+          }
+          ownerReply.resolve(await ownerRead(machineId, sessionId, { kind: 'count' }));
+          await vi.advanceTimersByTimeAsync(0);
+          expect(usedOwnerDuringOutage).toBe(false);
+          observation?.unsubscribe();
+          return;
+        }
+        const observation = first.history.observe(() => {});
+        void observation.initial.catch(() => {});
+        if (checkingCachedGrant) {
+          await observation.initialPage;
+          observation.unsubscribe();
+          await expect(first.history.readTurn(turn.id)).resolves.toMatchObject({
+            state: 'ready',
+            turn,
+          });
+          accessWithdrawn = true;
+          vi.setSystemTime(Date.now() + 56_000);
+          await expect(first.history.readTurn(turn.id)).rejects.toMatchObject({ status: 403 });
+          expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: 403 });
+          return;
+        }
+        if (rotating) {
+          await expect(observation.initialPage).resolves.toMatchObject({
+            rows: [{ turnId: turn.id }],
+          });
+          await vi.advanceTimersByTimeAsync(0);
+          await readingLive.promise;
+          oldStreamUnavailable = true;
+          breakLive.resolve();
+          await ownerStarted.promise;
+          await machineReading.promise;
+          await vi.advanceTimersByTimeAsync(0);
+          const page = first.history.readLatestDirectoryPage!(40);
+          void page.catch(() => {});
+          publishedReplacement = true;
+          await vi.advanceTimersByTimeAsync(1_000);
+          await expect(page).resolves.toMatchObject({ rows: [{ turnId: replacementTurn.id }] });
+          expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+          ownerReply.resolve(
+            await ownerRead(machineId, sessionId, { kind: 'readLatestPage', limit: 40 })
+          );
+          await vi.advanceTimersByTimeAsync(0);
+          await expect(first.history.readTurn(replacementTurn.id)).resolves.toMatchObject({
+            state: 'ready',
+            turn: replacementTurn,
+          });
+          observation.unsubscribe();
+          return;
+        }
+        if (machinePagePending || paginating) {
+          const initialPage = observation.initialPage!;
+          const oldCursor = paginating ? (await initialPage).cursor! : undefined;
+          const request = oldCursor
+            ? first.history.readOlderDirectoryPage!(oldCursor, 40)
+            : initialPage;
+          void request.catch(() => {});
+          await ownerStarted.promise;
+          expect(sync).toMatchObject({ source: 'machine', phase: 'retrying', httpStatus: 503 });
+          if (closeDuringPage) {
+            first.dispose();
+            closed = true;
+            await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+          } else {
+            cloudUnavailable = false;
+            await vi.advanceTimersByTimeAsync(1_000);
+            await recovered.promise;
+            if (refuseDuringPage) {
+              await expect(request).rejects.toMatchObject({ status: 403 });
+            } else if (oldCursor) {
+              await expect(request).rejects.toThrow('Roost history source changed');
+              failHead = true;
+              await expect(replica.prepareLatestWindow()).rejects.toMatchObject({ status: 503 });
+              await returnedToOwner.promise;
+              const latest = await first.history.readLatestDirectoryPage!(40);
+              expect(latest.cursor).toBeTruthy();
+              expect(latest.cursor).not.toBe(oldCursor);
+              await expect(first.history.readOlderDirectoryPage!(oldCursor, 40)).rejects.toThrow(
+                'Roost history source changed'
+              );
+            } else {
+              await expect(request).resolves.toMatchObject({ rows: [{ turnId: turn.id }] });
+              const retiredTurn = { ...turn, id: 'retired-machine-turn' };
+              ownerReply.resolve({
+                ...(await ownerRead(machineId, sessionId, { kind: 'readLatestPage', limit: 40 })),
+                result: {
+                  startPosition: 0,
+                  totalCount: 1,
+                  hasMoreOlder: false,
+                  cursor: null,
+                  rows: [createRoostDirectoryRow(0, retiredTurn)],
+                },
+                pageTurns: [retiredTurn],
+              });
+              await vi.advanceTimersByTimeAsync(0);
+              expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+              await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+                rows: [{ turnId: turn.id }],
+              });
+            }
+          }
+          observation.unsubscribe();
+          return;
+        }
+        if (cloudOutage) {
+          await expect(observation.initialPage).resolves.toMatchObject({
+            rows: [{ turnId: ownerTurn.id }],
+          });
+          if (liveOutage) {
+            await vi.advanceTimersByTimeAsync(0);
+            await readingLive.promise;
+            expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+            breakLive.resolve();
+            await machineReading.promise;
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+          }
+          expect(sync?.source).toBe('machine');
+          if (!quotaExhausted) expect(sync).toMatchObject({ phase: 'retrying', httpStatus: 503 });
+          replicaFull = false;
+          cloudUnavailable = false;
+          await vi.advanceTimersByTimeAsync(1_000);
+          await recovered.promise;
+          if (startingState === 'published grant 503 then refusal') {
+            await expect(first.history.readLatestDirectoryPage!(40)).rejects.toMatchObject({
+              status: 403,
+            });
+            expect(sync).toMatchObject({ source: 'streams', phase: 'refused', httpStatus: 403 });
+          } else {
+            await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+              rows: [{ turnId: turn.id }],
+            });
+            expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+          }
+          observation.unsubscribe();
+          return;
+        }
+        if (discovering) {
+          await expect(observation.initialPage).rejects.toMatchObject({
+            failure: { source: 'transport', code: 'response_timeout' },
+          });
+          expect(sync).toMatchObject({ source: 'streams', phase: 'retrying' });
+          cloudUnavailable = false;
+          await vi.advanceTimersByTimeAsync(1_000);
+          await switched.promise;
+          await expect(first.history.readLatestDirectoryPage!(40)).resolves.toMatchObject({
+            rows: [{ turnId: turn.id }],
+          });
+          return;
+        }
+        const page = await observation.initialPage;
+        if (updateDuringMetadata) {
+          expect(page.startPosition).toBe(2);
+          const readPage = LodyHistory.prototype.readActiveBranchPage;
+          let intake: Promise<void> | undefined;
+          let olderPageTotal: number | undefined;
+          const spy = vi
+            .spyOn(LodyHistory.prototype, 'readActiveBranchPage')
+            .mockImplementation(async function (this: LodyHistory, ...args) {
+              const page = await readPage.apply(this, args);
+              if (args[1]?.latest && headOffset === startOffset) {
+                headOffset = tail;
+                intake = replica.prepareLatestWindow();
+                void intake.catch(() => {});
+              }
+              if (args[1]?.before && intake) olderPageTotal ??= page.totalCount;
+              return page;
+            });
+          try {
+            const result = first.history.readMetadata!();
+            if (editDuringMetadata) {
+              await expect(result).rejects.toThrow('Roost history observation was superseded');
+            } else {
+              expect((await result).map((row) => row.id)).toEqual(precedingIds);
+              expect(olderPageTotal).toBe(precedingIds.length + 1);
+            }
+            expect(intake).toBeDefined();
+            await intake;
+            const refreshed = await first.history.readMetadata!();
+            if (editDuringMetadata) {
+              expect(refreshed.map((row) => row.id)).toEqual(precedingIds);
+              expect(refreshed[0]?.inputConfig?.modelId).toBe('revised-model');
+            } else {
+              expect(refreshed.map((row) => row.id)).toEqual([...precedingIds, reply.id]);
+            }
+          } finally {
+            spy.mockRestore();
+            observation.unsubscribe();
+          }
+          return;
+        }
+        expect(page.rows).toMatchObject([{ turnId: turn.id }]);
+        expect(await first.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
+        if (!alreadyPublished) {
+          await reportedPending.promise;
+          expect(sync).toMatchObject({
+            source: 'machine',
+            phase: needsOwner ? 'owner-required' : 'pending',
+          });
+          awaitingPublication = false;
+          if (pendingWithoutNotice) {
+            await vi.advanceTimersByTimeAsync(1_000);
+            await switched.promise;
+            await expect(first.history.readTurn(turn.id)).resolves.toMatchObject({
+              state: 'ready',
+              turn,
+            });
+            expect(sync).toMatchObject({ source: 'streams', phase: 'ready' });
+            observation.unsubscribe();
+            return;
+          }
+          cachedBinding = binding;
+          for (const wake of publicationWakes) wake();
+        }
+        await applied.promise;
+        expect(sync).toMatchObject({
+          source: 'streams',
+          phase: 'ready',
+          newerVersionPending: startingState === 'publication notice',
+        });
+        expect(requestsToTail).toBe(1);
+        expect(await first.history.readTurn(reply.id)).toMatchObject({
+          state: 'ready',
+          turn: reply,
+        });
+        const latest = await first.history.readLatestDirectoryPage!(1);
+        expect(latest.rows).toMatchObject([{ turnId: reply.id }]);
+        expect(latest.cursor).toBeTruthy();
+        const older = await first.history.readOlderDirectoryPage!(latest.cursor!, 1);
+        expect(older.checkpoint).toBe(latest.checkpoint);
+        expect(older.rows).toMatchObject([{ turnId: turn.id }]);
+        expect((await first.snapshots.capture()).history).toMatchObject([
+          { id: turn.id },
+          { id: reply.id },
+        ]);
+        observation.unsubscribe();
+      } finally {
+        if (!closed) first.dispose();
+        quota?.mockRestore();
+        if (delayedRequest)
+          ownerReply.resolve(await timedOut(machineId, sessionId, { kind: 'count' }));
+        if (discovering || pendingWithoutNotice || cloudOutage || checkingCachedGrant)
+          vi.useRealTimers();
+        if (discovering || pendingWithoutNotice || updateDuringMetadata || cloudOutage)
+          vi.unstubAllGlobals();
+      }
+      cachedBinding = binding;
+      const reopened = open(requestGrant);
+      try {
+        const page = await reopened.history.readLatestDirectoryPage?.(40);
+        expect(page?.rows).toMatchObject([{ turnId: turn.id }, { turnId: reply.id }]);
+        expect(await reopened.history.readTurn(turn.id)).toMatchObject({ state: 'ready', turn });
+      } finally {
+        reopened.dispose();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
   it.each(
     (['local', 'remote'] as const).flatMap((transport) =>
       (['current', 'legacy', 'empty'] as const).map((format) => ({ transport, format }))
@@ -421,6 +1321,18 @@ describe('createConversationSession backend seam', () => {
           expect(owner).toBe(machineId);
           return plane;
         },
+        cloudHistory: () =>
+          createRoostHistoryReplica({
+            workspaceId: 'synthetic-workspace' as WorkspaceId,
+            machineId,
+            sessionId,
+            replicaNamespace: 'local-routing-test',
+            getBinding: () => ({ generation: 'root', ownerPublicKey: 'A'.repeat(43) }),
+            observeBinding: () => () => {},
+            requestGrant: async () => {
+              throw new Error('Local history must not request a cloud grant');
+            },
+          }),
         sendControl: async (request) => {
           expect(request.machineId).toBe(machineId);
           expect(request.sessionId).toBe(sessionId);

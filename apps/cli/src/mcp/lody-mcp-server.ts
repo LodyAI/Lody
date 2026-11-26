@@ -6158,7 +6158,6 @@ export function buildSessionToolServer(
             return jsonTextResult({ ok: true, triggerId: args.triggerId, enabled: false });
           }
 
-          // action === 'propose'
           if (!args.title || !args.repoFullName || !args.events?.length || !args.instruction) {
             throw new Error(
               'title, repoFullName, events, and instruction are required when proposing a GitHub trigger'

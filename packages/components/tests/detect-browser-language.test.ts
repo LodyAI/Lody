@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectBrowserLanguage } from '../src/i18n';
+import { detectBrowserLanguage, parseStoredLanguageValue } from '../src/i18n';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -46,30 +46,69 @@ describe('detectBrowserLanguage', () => {
     expect(detectBrowserLanguage()).toBe('en');
   });
 
-  it('treats any Chinese variant as zh_CN', () => {
-    setLanguages(['zh-Hant-HK'], 'zh-Hant-HK');
-    expect(detectBrowserLanguage()).toBe('zh_CN');
+  it('distinguishes Traditional Chinese from Simplified Chinese', () => {
+    for (const tag of ['zh-Hant', 'zh-Hant-TW', 'zh-Hant-HK', 'zh-TW', 'zh-HK', 'zh-MO', 'zh_TW']) {
+      setLanguages([tag], tag);
+      expect(detectBrowserLanguage()).toBe('zh_Hant');
+    }
 
-    setLanguages(['zh'], 'zh');
-    expect(detectBrowserLanguage()).toBe('zh_CN');
+    for (const tag of ['zh', 'zh-Hans', 'zh-Hans-CN', 'zh-CN', 'zh-SG', 'zh_CN']) {
+      setLanguages([tag], tag);
+      expect(detectBrowserLanguage()).toBe('zh_CN');
+    }
   });
 
   it.each([
-    ['macOS', 'darwin', 'zh-Hans-CN'],
-    ['Windows', 'win32', 'zh-CN'],
-    ['Linux', 'linux', 'zh_CN'],
-  ])('uses the %s system language passed by Electron main', (_label, os, language) => {
-    setLanguages(['en-US'], 'en-US');
-    const electronWindow = window as GlobalWindow;
-    electronWindow.__LODY_ELECTRON__ = true;
-    electronWindow.__LODY_PLATFORM__ = {
-      os,
-      homeDir: '/home/test',
-      preferredSystemLanguages: [language, 'en-US'],
-    };
-
-    expect(detectBrowserLanguage()).toBe('zh_CN');
+    ['ja-JP', 'ja'],
+    ['ja', 'ja'],
+    ['ko-KR', 'ko'],
+    ['es-MX', 'es'],
+    ['fr-CA', 'fr'],
+    ['ru-RU', 'ru'],
+    ['en-GB', 'en'],
+    ['de-DE', null],
+  ] as const)('maps browser tag %s to %s', (tag, expected) => {
+    setLanguages([tag], tag);
+    expect(detectBrowserLanguage()).toBe(expected);
   });
+
+  it('normalizes exact supported codes and BCP-47 aliases in stored language preferences', () => {
+    expect(parseStoredLanguageValue(JSON.stringify('zh_Hant'))).toBe('zh_Hant');
+    expect(parseStoredLanguageValue('zh-Hant')).toBe('zh_Hant');
+    expect(parseStoredLanguageValue('zh-CN')).toBe('zh_CN');
+    expect(parseStoredLanguageValue(JSON.stringify('ja'))).toBe('ja');
+    expect(parseStoredLanguageValue(JSON.stringify('ko'))).toBe('ko');
+    expect(parseStoredLanguageValue(JSON.stringify('es'))).toBe('es');
+    expect(parseStoredLanguageValue(JSON.stringify('fr'))).toBe('fr');
+    expect(parseStoredLanguageValue(JSON.stringify('ru'))).toBe('ru');
+    expect(parseStoredLanguageValue('de-DE')).toBeNull();
+  });
+
+  it.each([
+    ['macOS', 'darwin', 'zh-Hans-CN', 'zh_CN'],
+    ['macOS Traditional', 'darwin', 'zh-Hant-TW', 'zh_Hant'],
+    ['Windows', 'win32', 'zh-CN', 'zh_CN'],
+    ['Linux', 'linux', 'zh_CN', 'zh_CN'],
+    ['Japanese', 'darwin', 'ja-JP', 'ja'],
+    ['Korean', 'win32', 'ko-KR', 'ko'],
+    ['Spanish', 'linux', 'es-ES', 'es'],
+    ['French', 'darwin', 'fr-FR', 'fr'],
+    ['Russian', 'linux', 'ru-RU', 'ru'],
+  ] as const)(
+    'uses the %s system language passed by Electron main',
+    (_label, os, language, expected) => {
+      setLanguages(['en-US'], 'en-US');
+      const electronWindow = window as GlobalWindow;
+      electronWindow.__LODY_ELECTRON__ = true;
+      electronWindow.__LODY_PLATFORM__ = {
+        os,
+        homeDir: '/home/test',
+        preferredSystemLanguages: [language, 'en-US'],
+      };
+
+      expect(detectBrowserLanguage()).toBe(expected);
+    }
+  );
 
   it('does not fall back to Chromium locale packs when Electron system languages are absent', () => {
     setLanguages(['zh-CN'], 'zh-CN');

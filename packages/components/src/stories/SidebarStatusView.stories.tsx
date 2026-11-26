@@ -283,11 +283,36 @@ export const ExpandedLaterAndSettled: Story = {
 };
 
 const themeStyles = stylex.create({
-  row: { display: 'flex', height: '720px', width: '100%', backgroundColor: uiColors.background, color: uiColors.label },
-  copy: { fontSize: uiText.subheadlineSize, lineHeight: uiText.subheadlineLeading, fontWeight: 500, color: uiColors.label },
+  row: {
+    display: 'flex',
+    height: '720px',
+    width: '100%',
+    backgroundColor: uiColors.background,
+    color: uiColors.label,
+  },
+  copy: {
+    fontSize: uiText.subheadlineSize,
+    lineHeight: uiText.subheadlineLeading,
+    fontWeight: 500,
+    color: uiColors.label,
+  },
 });
 
 const previewStyles = stylex.create({
-  column: { display: 'flex', flex: '1 1 0%', flexDirection: 'column', gap: 'calc(var(--spacing) * 3)', padding: 'calc(var(--spacing) * 6)' },
-  hint: { maxWidth: '32rem', display: 'flex', flexDirection: 'column', rowGap: 'calc(var(--spacing) * 2)', fontSize: uiText.footnoteSize, lineHeight: uiText.footnoteLeading, color: uiColors.secondaryLabel },
+  column: {
+    display: 'flex',
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 3)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
+  hint: {
+    maxWidth: '32rem',
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: 'calc(var(--spacing) * 2)',
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: uiColors.secondaryLabel,
+  },
 });

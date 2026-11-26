@@ -229,8 +229,13 @@ function MachineConnectedResourcesContent({
             </h3>
           </div>
           {!readOnly ? (
-            <Button data-testid="settings-machine-manage-agents"
-              data-machine-id={machineId} variant="secondary" size="small" onClick={onManageAgents}>
+            <Button
+              data-testid="settings-machine-manage-agents"
+              data-machine-id={machineId}
+              variant="secondary"
+              size="small"
+              onClick={onManageAgents}
+            >
               {t('settings.machines.manageAgents', 'Manage in Agents')}
             </Button>
           ) : null}

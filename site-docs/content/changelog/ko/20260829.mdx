@@ -1,0 +1,22 @@
+---
+title: "20260829"
+version: 0.88.1
+date: 2026-08-29
+description: "프로젝트 범위 세션 멘션과 에이전트 선택 전 머신 필수 선택 기능을 추가하고, 하위 탭 메시지 전달, 패널 겹침, 온보딩 데이터 격리, 터미널 환경 변수 유출, 누락된 번역 문제를 수정했습니다."
+---
+
+버전 0.88.1
+
+### ✨ 새로운 기능
+
+- `@` 멘션 메뉴의 세션 검색 결과가 기본적으로 현재 프로젝트로 범위가 지정되며, 필요할 때 전체 프로젝트로 일시 전환할 수 있어 관련 세션을 더 쉽게 찾을 수 있습니다([#109](https://github.com/LodyAI/Lody/pull/109)).
+- 이제 데스크톱에서 에이전트를 선택하기 전에 머신을 먼저 선택해야 하며, 전체 흐름에서 더 명확한 안내를 제공합니다([#151](https://github.com/LodyAI/Lody/pull/151)).
+
+### 🐛 수정 및 개선
+
+- 하위 탭의 첫 번째 메시지가 유실되거나 "동기화 중(Syncing)" 상태에서 멈추거나 탭이 닫히지 않던 문제를 수정했습니다([#141](https://github.com/LodyAI/Lody/pull/141)).
+- 사이드 대화와 파일 또는 diff 미리보기 패널이 서로 겹치던 문제를 수정했습니다([#135](https://github.com/LodyAI/Lody/pull/135)).
+- 데스크톱 온보딩 투어의 데이터 격리를 강화하여 데모가 실제 워크스페이스 데이터에 실수로 접근하지 못하도록 했습니다([#136](https://github.com/LodyAI/Lody/pull/136)).
+- 프로젝트 터미널이 더 이상 Electron 시작 및 자격 증명 프록시에 사용되는 내부 환경 변수를 상속하지 않습니다([#122](https://github.com/LodyAI/Lody/pull/122)).
+- 대상 상태, 작업 저장, Windows Git 진단에 대한 영어 및 중국어 번역을 보완하고 누락되었던 에이전트 이름을 복구했습니다([#59](https://github.com/LodyAI/Lody/pull/59)).
+- 이번 릴리스에 공개 기여로 참여해 주신 [@27Aaron](https://github.com/27Aaron), [@ImSingee](https://github.com/ImSingee), [@natsustan](https://github.com/natsustan)님께 감사드립니다.

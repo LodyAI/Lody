@@ -1,0 +1,121 @@
+---
+title: "Agentes de programación en paralelo"
+description: "Ejecuta varios agentes de programación en equipo dentro de un mismo espacio de trabajo de Lody: worktrees de Git aislados, modelos combinados como Claude Code y Kimi, y visibilidad compartida de sesiones."
+---
+
+Lody es un espacio de trabajo en equipo para la **programación multiagente**: inicias varias sesiones de
+agentes de programación a la vez, cada una con su propia conversación. Cuando una sesión usa un
+[worktree](/es/docs/worktrees) —siempre en GitHub y disponible para proyectos locales—, esa sesión también
+obtiene su propio directorio de trabajo, de modo que los agentes pueden modificar archivos en paralelo sin
+colisionar.
+
+Ejecuta varias sesiones de Claude Code, o usa Claude Code junto con Codex, Kimi, Grok, DeepSeek
+u otro entorno de ejecución [ACP](/es/docs/cli-runtimes). Para que los agentes deleguen tareas,
+intercambien contexto y revisen los cambios entre sí, sigue la
+[guía de colaboración multiagente](/es/docs/agent-collaboration/).
+
+Consulta también [Configuración de agente](/es/docs/quickstart), [Funciones de equipo](/es/docs/team),
+[Compartir una sesión de agente de programación](/es/docs/session-handoff) y
+[Control de sesiones de agente](/es/docs/session-orchestration). Un enlace para compartir es un registro,
+no una continuación en vivo — consulta [Enlace para compartir vs. transferencia en vivo](/es/docs/compare/share-link-vs-live-handoff).
+
+## Worktrees aislados
+
+Cuando creas una sesión que utiliza un worktree, Lody:
+
+1. Crea una rama (por defecto `session/<shortSessionId>`)
+2. Hace checkout de ella en un worktree dedicado
+3. Ejecuta opcionalmente el script de configuración del proyecto
+4. Transmite los cambios de archivos en tiempo real a la interfaz de la sesión
+
+Los agentes de diferentes sesiones no comparten un directorio de trabajo, por lo que las ediciones sin
+confirmar permanecen en la tarea que las realizó. Revisa, descarta o abre un PR por sesión.
+
+<Callout title="Destinos de bifurcación">
+[Fork](/es/docs/session#fork-a-session) copia el historial de la conversación en una **nueva** sesión.
+**Current workspace** (y Side Chat) permanecen en el directorio de origen. Cuando se ofrece **New worktree**,
+esa bifurcación es una sesión independiente a partir del último `HEAD` confirmado — úsala cuando quieras
+aislamiento sin abandonar la conversación. Inicia una nueva sesión desde la página de inicio cuando quieras
+una tarea aislada desde cero sin historial copiado.
+</Callout>
+
+Detalles: [Worktrees](/es/docs/worktrees).
+
+## Varios agentes, un mismo espacio de trabajo
+
+Cada sesión elige su propia [configuración de agente](/es/docs/quickstart), modelo y alcance de permisos
+desde el compositor. Puedes ejecutar:
+
+- Claude Code o Codex mediante el inicio de sesión de suscripción de la máquina
+- Kimi Code, DeepSeek Harness y otras configuraciones integradas o compatibles con Claude
+- Cualquier entorno de ejecución del [Registro de ACP](/es/docs/cli-runtimes), o un comando de inicio de ACP personalizado
+
+Guarda una combinación reutilizable de máquina, configuración, modelo y permisos como un
+[Rol de agente](/es/docs/agent-roles) si inicias las mismas configuraciones con frecuencia.
+
+Cuántas sesiones pueden ejecutarse a la vez depende de la máquina anfitriona y de cuántas conversaciones
+puedas supervisar de manera efectiva — consulta [Flujo de trabajo recomendado](/es/docs/workflow).
+
+## Visibilidad del equipo
+
+El trabajo en paralelo es más sencillo cuando el equipo puede ver qué se está ejecutando ya.
+
+- En la página de inicio, el filtro de la barra lateral está configurado por defecto en **All Tasks**. Si alguien solo ve sus propias
+  sesiones, cambia de **My Tasks** a **All Tasks** (en dispositivos móviles, **Team Tasks**). Los avatares muestran quién
+  inició cada una.
+- Las máquinas permanecen **privadas por defecto**. Comparte una máquina (o usa **Share with team…** en una sesión)
+  cuando tus compañeros de equipo deban abrir esas conversaciones.
+- Para incluir a un compañero *dentro* de una sesión existente —el mismo chat, diffs y worktree—, sigue
+  [Compartir una sesión de agente de programación](/es/docs/session-handoff).
+
+Membresía, roles y compartición de máquinas: [Funciones de equipo](/es/docs/team).
+
+## Coordina desde una conversación
+
+Iniciar sesiones manualmente es suficiente para la mayor parte del trabajo en paralelo. Cuando quieras que un agente divida una tarea,
+pídele que use [Control de sesiones de agente](/es/docs/session-orchestration): crear o reutilizar conversaciones,
+comprobar su estado, enviar instrucciones de seguimiento y traer de vuelta los resultados. Esas conversaciones delegadas pueden ejecutarse
+en paralelo mientras la máquina de destino esté en línea.
+
+## Una división práctica
+
+Según el [flujo de trabajo recomendado](/es/docs/workflow):
+
+1. Divide el trabajo en funcionalidades o correcciones pequeñas.
+2. Inicia una conversación desde la página de inicio por cada elemento (normalmente un PR).
+3. Revisa los [diffs](/es/docs/diff-viewer) en vivo mientras trabaja cada agente.
+4. Para trabajos respaldados por GitHub, crea un PR desde la sesión cuando el cambio esté listo.
+5. [Archiva](/es/docs/session#archive-sessions) la sesión cuando hayas terminado el trabajo para recuperar
+   su worktree.
+
+## Preguntas frecuentes
+
+### ¿Es esta una función de equipo de Claude Code?
+
+No. Claude Code es una [configuración de agente](/es/docs/quickstart) que puedes ejecutar en Lody. El espacio de trabajo,
+los worktrees aislados y la lista de sesiones del equipo pertenecen a Lody. Puedes ejecutar varias sesiones de Claude Code, o combinar
+Claude Code con Kimi, DeepSeek, Codex u otros agentes ACP.
+
+### ¿Los agentes en paralelo sobrescriben los archivos entre sí?
+
+No cuando cada tarea tiene su propio [worktree](/es/docs/worktrees) — incluida una bifurcación con **New worktree** o una
+nueva sesión desde la página de inicio. Las bifurcaciones en **Current workspace** y los Side Chats comparten el directorio
+de la sesión de origen, por lo que pueden ver los cambios de archivos entre sí. Una bifurcación en New worktree parte del
+`HEAD` confirmado; las ediciones sin confirmar permanecen en el origen.
+
+### ¿Pueden los compañeros de equipo ver todos los agentes en ejecución?
+
+Pueden ver las sesiones en las máquinas (y proyectos locales) que se hayan compartido con el espacio de trabajo,
+cambiando el filtro de la página de inicio a **All Tasks** si está establecido en **My Tasks**. Las máquinas no compartidas
+nunca sincronizan esas conversaciones en las barras laterales de otros miembros. Consulta [Funciones de equipo](/es/docs/team).
+
+### ¿Puede un agente iniciar a los demás?
+
+Sí, mediante el [Control de sesiones de agente](/es/docs/session-orchestration). Pide a una conversación que cree
+sesiones enfocadas, intercambie mensajes con otros agentes, haga seguimiento de su trabajo y resuma los resultados.
+Esto está limitado a los datos de conversación de Lody — no es un programador general de tareas en segundo plano.
+
+### ¿Cuándo debo transferir una sesión en lugar de iniciar otro agente?
+
+Inicia otra sesión cuando quieras una **nueva** tarea aislada.
+[Transfiere la sesión](/es/docs/session-handoff) cuando un compañero de equipo deba **continuar** una sesión existente.

@@ -103,6 +103,7 @@ export function E2eeLostAccess(props: E2eeLostAccessProps) {
             workspaceId={props.workspaceId}
             {...props.recovery}
             onNoBackup={() => setStep('lost')}
+            onBack={props.onBackToWorkspaces}
           />
         ) : null}
       </div>
@@ -283,7 +284,8 @@ function RemovalConfirm({
       </div>
     );
 
-  const nameMatches = kind === 'leave' || typed === workspaceName;
+  const nameMatches =
+    kind === 'leave' || (workspaceName.trim().length > 0 && typed === workspaceName);
   return (
     <div
       data-testid="e2ee-lost-access-confirm"
@@ -426,11 +428,7 @@ export function E2eeLostAccessEntry({
         {t('e2ee.lostAccess.entry')}
       </Button>
       <Dialog.Root open={open} onOpenChange={change}>
-        <Dialog.Content
-          width={520}
-          xstyle={themeStyles.glyph}
-          data-e2ee-pairing-surface=""
-        >
+        <Dialog.Content width={520} xstyle={themeStyles.glyph} data-e2ee-pairing-surface="">
           <Dialog.Title>{t('e2ee.lostAccess.title')}</Dialog.Title>
           <E2eeLostAccess
             {...props}

@@ -9,6 +9,7 @@ import { SiteAnchor } from '@site/components/site-anchor';
  */
 
 import { scheduleAfterLoadIdle } from '@site/lib/after-first-paint';
+import type { SiteLocale } from '@site/src/site-pages/shared';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { PowerDemoId } from './landing-power-demos';
 
@@ -48,7 +49,7 @@ function ClientPowerDemo({
   ready,
 }: {
   id: PowerDemoId;
-  locale: 'en' | 'zh';
+  locale: SiteLocale;
   title: string;
   /** SSR-visible summary so crawlers still get the feature without hydrate. */
   summary?: string;
@@ -80,7 +81,7 @@ export function LandingPowerSection({
   locale,
 }: {
   copy: PowerSectionCopy;
-  locale: 'en' | 'zh';
+  locale: SiteLocale;
 }) {
   const sectionRef = useRef<HTMLElement>(null);
   const [demosReady, setDemosReady] = useState(false);

@@ -573,10 +573,36 @@ export class EpochPublisher extends Context.Service<
         };
       });
 
+      const discardUnsubmittedDraft = Effect.fnUntraced(function* (row: EpochCandidateRow) {
+        if (row.outcome !== null) return false;
+        const entry = yield* submit(submission.pending());
+        if (entry.record !== null) return false;
+        const view = yield* current();
+        const boundResult = yield* Effect.result(bindingOf(view, row));
+        if (Result.isSuccess(boundResult) && boundResult.success !== null) return false;
+        yield* replace(row, {
+          ...row,
+          blob: new Uint8Array(),
+          outcome: 'Conflict',
+          binding: null,
+          consumed: true,
+        });
+        return true;
+      });
+
       const resume = Effect.fnUntraced(function* () {
         yield* current();
         const row = yield* loadActive();
-        if (row) return yield* settle(row);
+        if (row) {
+          const settled = yield* Effect.result(settle(row));
+          if (Result.isSuccess(settled)) return settled.success;
+          const err = settled.failure;
+          const recoverableDraftFailure =
+            err instanceof EpochPublishError &&
+            (err.reason === 'context-changed' || err.reason === 'native-failed');
+          if (recoverableDraftFailure && (yield* discardUnsubmittedDraft(row))) return null;
+          return yield* err;
+        }
         return yield* recoverMissing();
       });
 
@@ -716,18 +742,30 @@ export class EpochPublisher extends Context.Service<
         const existing = yield* loadActive();
         if (existing) {
           const decoded = yield* Effect.fromResult(decodeRecord(existing.record));
-          if (
-            decoded.body.type !== 'ordinary' ||
+          const matches =
+            decoded.body.type === 'ordinary' &&
             (baseEpoch !== undefined
-              ? decoded.body.operation.type !== 'abandonEpoch' ||
-                decoded.body.operation.baseEpoch !== baseEpoch
+              ? decoded.body.operation.type === 'abandonEpoch' &&
+                decoded.body.operation.baseEpoch === baseEpoch
               : target
-                ? decoded.body.operation.type !== 'removeMemberAndPublishEpoch' ||
-                  !decoded.body.operation.membershipId.equals(target)
-                : decoded.body.operation.type !== 'publishEpoch')
-          )
-            return yield* fail('busy');
-          return yield* settle(existing);
+                ? decoded.body.operation.type === 'removeMemberAndPublishEpoch' &&
+                  decoded.body.operation.membershipId.equals(target)
+                : decoded.body.operation.type === 'publishEpoch');
+          if (!matches) {
+            if (!(yield* discardUnsubmittedDraft(existing))) return yield* fail('busy');
+          } else {
+            const staleDraft = existing.outcome === null && view.length > existing.parentCount;
+            if (!(staleDraft && (yield* discardUnsubmittedDraft(existing)))) {
+              const settled = yield* Effect.result(settle(existing));
+              if (Result.isSuccess(settled)) return settled.success;
+              const err = settled.failure;
+              const recoverableDraftFailure =
+                err instanceof EpochPublishError &&
+                (err.reason === 'context-changed' || err.reason === 'native-failed');
+              if (!(recoverableDraftFailure && (yield* discardUnsubmittedDraft(existing))))
+                return yield* err;
+            }
+          }
         }
         const pending = yield* submit(submission.pending());
         if (pending.record) {

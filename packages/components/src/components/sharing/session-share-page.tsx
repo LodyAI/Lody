@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
-import { setAppLanguage } from '@/i18n';
+import { currentSupportedLanguages, languageCodeToName, setAppLanguage } from '@/i18n';
+import { normalizeSupportedLanguage } from '@lody/shared/language';
+import { Menu } from '@lody/ui/menu';
 import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -254,28 +256,42 @@ const styles = stylex.create({
 
 function ShareLanguageToggle() {
   const { t, i18n } = useTranslation();
-  const nextLanguage = (i18n.resolvedLanguage ?? i18n.language) === 'zh_CN' ? 'en' : 'zh_CN';
+  const currentLanguage =
+    normalizeSupportedLanguage(i18n.resolvedLanguage ?? i18n.language) ?? 'en';
+  const currentName = languageCodeToName[currentLanguage] ?? currentLanguage;
   const label = t('sharing.switchLanguage', 'Switch language: {{language}}', {
-    language: nextLanguage === 'en' ? 'English' : '中文',
+    language: currentName,
   });
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      icon
-      aria-label={label}
-      title={label}
-      onClick={() => {
-        void setAppLanguage(nextLanguage);
-        try {
-          window.localStorage.setItem('lody-language', JSON.stringify(nextLanguage));
-        } catch {
-          // Restricted storage must not prevent changing this page's language.
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button type="button" variant="ghost" icon aria-label={label} title={label}>
+            <Languages {...stylex.props(styles.glyph)} aria-hidden="true" />
+          </Button>
         }
-      }}
-    >
-      <Languages {...stylex.props(styles.glyph)} aria-hidden="true" />
-    </Button>
+      />
+      <Menu.Content align="end" minWidth={160}>
+        <Menu.RadioGroup
+          value={currentLanguage}
+          onValueChange={(next) => {
+            if (!next || next === currentLanguage) return;
+            void setAppLanguage(next);
+            try {
+              window.localStorage.setItem('lody-language', JSON.stringify(next));
+            } catch {
+              // Restricted storage must not prevent changing this page's language.
+            }
+          }}
+        >
+          {currentSupportedLanguages.map((lang) => (
+            <Menu.RadioItem key={lang} value={lang} indicator="check" indicatorSide="end">
+              {languageCodeToName[lang]}
+            </Menu.RadioItem>
+          ))}
+        </Menu.RadioGroup>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 

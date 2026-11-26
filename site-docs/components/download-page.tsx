@@ -1,6 +1,7 @@
 'use client';
 
 import { SiteAnchor } from '@site/components/site-anchor';
+import { SITE_LOCALE_META, type SiteLocale } from '@site/src/site-pages/shared';
 
 import { Download, ExternalLink, Globe2, Laptop, MonitorDown, Smartphone } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -8,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
 
-type DownloadLocale = 'en' | 'zh';
+type DownloadLocale = SiteLocale;
 type PlatformKey = 'mac' | 'win' | 'linux' | 'ios' | 'android' | 'browser';
 
 type DownloadItem = {
@@ -50,7 +51,29 @@ const APP_STORE_HREF_ZH =
   'https://apps.apple.com/cn/app/lody-%E9%9A%8F%E6%97%B6%E9%9A%8F%E5%9C%B0%E8%BF%90%E8%A1%8C-code-agent/id6761373528';
 const GOOGLE_PLAY_HREF = 'https://play.google.com/store/apps/details?id=ai.lody.android';
 
-const copy = {
+type DownloadCopy = {
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  desktop: string;
+  mobile: string;
+  detected: string;
+  versionPrefix: string;
+  datePrefix: string;
+  browserName: string;
+  openApp: string;
+  appStoreHref: string;
+  platforms: {
+    mac: string;
+    win: string;
+    linux: string;
+    ios: string;
+    android: string;
+    browser: string;
+  };
+};
+
+const copy: Record<DownloadLocale, DownloadCopy> = {
   en: {
     eyebrow: 'Get the apps',
     title: 'Download Lody',
@@ -61,6 +84,9 @@ const copy = {
     detected: 'Detected platform',
     versionPrefix: 'Latest',
     datePrefix: 'Released',
+    browserName: 'Browser',
+    openApp: 'Open app',
+    appStoreHref: APP_STORE_HREF_EN,
     platforms: {
       mac: 'Universal desktop app for macOS with Apple Silicon and Intel builds.',
       win: 'Signed Windows installer for x64 machines.',
@@ -79,6 +105,9 @@ const copy = {
     detected: '检测到的平台',
     versionPrefix: '最新版本',
     datePrefix: '发布日期',
+    browserName: '浏览器',
+    openApp: '打开应用',
+    appStoreHref: APP_STORE_HREF_ZH,
     platforms: {
       mac: '适用于 macOS 的桌面应用，提供 Apple Silicon 和 Intel 构建。',
       win: '适用于 x64 Windows 机器的签名安装包。',
@@ -88,7 +117,138 @@ const copy = {
       browser: '在浏览器中打开托管版 Web 应用。',
     },
   },
-} satisfies Record<DownloadLocale, Record<string, unknown>>;
+  'zh-hant': {
+    eyebrow: '取得應用程式',
+    title: '下載 Lody',
+    subtitle: '在單一工作區管理所有程式設計 Agent，所有對話紀錄跨裝置即時同步。',
+    desktop: '桌面端',
+    mobile: '行動裝置與瀏覽器',
+    detected: '偵測到的平台',
+    versionPrefix: '最新版本',
+    datePrefix: '發佈日期',
+    browserName: '瀏覽器',
+    openApp: '開啟應用程式',
+    appStoreHref: APP_STORE_HREF_EN,
+    platforms: {
+      mac: '適用於 macOS 的桌面應用程式，提供 Apple Silicon 與 Intel 版本。',
+      win: '適用於 x64 Windows 電腦的已簽署安裝程式。',
+      linux: '適用於 AppImage 與 Debian/Ubuntu 環境的 Linux 版本。',
+      ios: '在 App Store 取得 Lody。',
+      android: '透過 Google Play 安裝，或下載已簽署的 APK。',
+      browser: '在瀏覽器中開啟託管版 Web 應用程式。',
+    },
+  },
+  ja: {
+    eyebrow: 'アプリを入手',
+    title: 'Lody をダウンロード',
+    subtitle:
+      'すべてのコーディングエージェントを一か所で管理。会話は複数デバイス間でリアルタイム同期されます。',
+    desktop: 'デスクトップ',
+    mobile: 'モバイル・ブラウザー',
+    detected: '検出されたプラットフォーム',
+    versionPrefix: '最新',
+    datePrefix: 'リリース日',
+    browserName: 'ブラウザー',
+    openApp: 'アプリを開く',
+    appStoreHref: APP_STORE_HREF_EN,
+    platforms: {
+      mac: 'Apple Silicon と Intel 向けビルドを備えた macOS 用デスクトップアプリ。',
+      win: 'x64 環境向けの署名済み Windows インストーラー。',
+      linux: 'AppImage および Debian/Ubuntu 環境向けの Linux ビルド。',
+      ios: 'App Store から Lody をインストール。',
+      android: 'Google Play からインストールするか、署名済み APK をダウンロード。',
+      browser: 'ブラウザーでホスト版 Web アプリを開く。',
+    },
+  },
+  ko: {
+    eyebrow: '앱 받기',
+    title: 'Lody 다운로드',
+    subtitle:
+      '모든 코딩 에이전트를 한곳에서 관리하세요. 대화가 여러 기기에서 실시간으로 동기화됩니다.',
+    desktop: '데스크톱',
+    mobile: '모바일 및 브라우저',
+    detected: '감지된 플랫폼',
+    versionPrefix: '최신',
+    datePrefix: '출시일',
+    browserName: '브라우저',
+    openApp: '앱 열기',
+    appStoreHref: APP_STORE_HREF_EN,
+    platforms: {
+      mac: 'Apple Silicon 및 Intel 빌드를 지원하는 macOS용 데스크톱 앱.',
+      win: 'x64 Windows PC용 서명된 설치 파일.',
+      linux: 'AppImage 및 Debian/Ubuntu 환경용 Linux 빌드.',
+      ios: 'App Store에서 Lody를 설치하세요.',
+      android: 'Google Play에서 설치하거나 서명된 APK를 다운로드하세요.',
+      browser: '브라우저에서 호스팅 웹 앱을 바로 여세요.',
+    },
+  },
+  es: {
+    eyebrow: 'Consigue las aplicaciones',
+    title: 'Descargar Lody',
+    subtitle:
+      'Gestiona todos tus agentes de programación desde un solo lugar. Las conversaciones se sincronizan entre dispositivos en tiempo real.',
+    desktop: 'Escritorio',
+    mobile: 'Móvil y navegador',
+    detected: 'Plataforma detectada',
+    versionPrefix: 'Última',
+    datePrefix: 'Publicado',
+    browserName: 'Navegador',
+    openApp: 'Abrir aplicación',
+    appStoreHref: APP_STORE_HREF_EN,
+    platforms: {
+      mac: 'Aplicación de escritorio universal para macOS con compilaciones para Apple Silicon e Intel.',
+      win: 'Instalador firmado de Windows para equipos x64.',
+      linux: 'Compilaciones de Linux para AppImage y entornos Debian/Ubuntu.',
+      ios: 'Descarga Lody en el App Store.',
+      android: 'Instala desde Google Play o descarga el APK firmado.',
+      browser: 'Abre la aplicación web alojada en tu navegador.',
+    },
+  },
+  fr: {
+    eyebrow: 'Télécharger les applications',
+    title: 'Télécharger Lody',
+    subtitle:
+      'Gérez tous vos agents de code au même endroit. Les conversations se synchronisent en temps réel sur tous vos appareils.',
+    desktop: 'Ordinateur',
+    mobile: 'Mobile et navigateur',
+    detected: 'Plateforme détectée',
+    versionPrefix: 'Dernière',
+    datePrefix: 'Publiée le',
+    browserName: 'Navigateur',
+    openApp: "Ouvrir l'application",
+    appStoreHref: APP_STORE_HREF_EN,
+    platforms: {
+      mac: 'Application de bureau universelle pour macOS avec versions Apple Silicon et Intel.',
+      win: 'Installateur Windows signé pour machines x64.',
+      linux: 'Versions Linux pour AppImage et environnements Debian/Ubuntu.',
+      ios: "Téléchargez Lody sur l'App Store.",
+      android: "Installez depuis Google Play ou téléchargez l'APK signé.",
+      browser: "Ouvrez l'application web hébergée dans votre navigateur.",
+    },
+  },
+  ru: {
+    eyebrow: 'Скачать приложения',
+    title: 'Скачать Lody',
+    subtitle:
+      'Управляйте всеми агентами разработки в одном месте. Диалоги синхронизируются между устройствами в реальном времени.',
+    desktop: 'Компьютер',
+    mobile: 'Мобильные устройства и браузер',
+    detected: 'Определённая платформа',
+    versionPrefix: 'Актуальная',
+    datePrefix: 'Выпущено',
+    browserName: 'Браузер',
+    openApp: 'Открыть приложение',
+    appStoreHref: APP_STORE_HREF_EN,
+    platforms: {
+      mac: 'Настольное приложение для macOS со сборками для Apple Silicon и Intel.',
+      win: 'Подписанный установщик Windows для систем x64.',
+      linux: 'Сборки Linux для AppImage и систем Debian/Ubuntu.',
+      ios: 'Установите Lody из App Store.',
+      android: 'Установите из Google Play или скачайте подписанный APK.',
+      browser: 'Откройте веб-приложение прямо в браузере.',
+    },
+  },
+};
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -143,9 +303,9 @@ function detectPlatform(userAgent: string): PlatformKey {
 
 function formatDate(value: string, locale: DownloadLocale) {
   try {
-    return new Date(value).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', {
+    return new Date(value).toLocaleDateString(SITE_LOCALE_META[locale].bcp47, {
       year: 'numeric',
-      month: locale === 'zh' ? 'long' : 'short',
+      month: 'short',
       day: 'numeric',
     });
   } catch {
@@ -155,7 +315,6 @@ function formatDate(value: string, locale: DownloadLocale) {
 
 export function DownloadPage({ locale }: { locale: DownloadLocale }) {
   const t = copy[locale];
-  const isZh = locale === 'zh';
   const [version, setVersion] = useState('');
   const [releaseDate, setReleaseDate] = useState('');
   const [downloads, setDownloads] = useState<Record<string, string>>({});
@@ -249,7 +408,7 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
         downloads: [
           {
             label: 'App Store',
-            href: isZh ? APP_STORE_HREF_ZH : APP_STORE_HREF_EN,
+            href: t.appStoreHref,
             action: 'open',
             target: '_blank',
           },
@@ -275,12 +434,12 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
       },
       {
         key: 'browser',
-        name: isZh ? '浏览器' : 'Browser',
+        name: t.browserName,
         description: t.platforms.browser,
         icon: Globe2,
         downloads: [
           {
-            label: isZh ? '打开应用' : 'Open app',
+            label: t.openApp,
             href: '/login',
             action: 'open',
             target: '_self',
@@ -290,14 +449,13 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
     ];
 
     return [desktop, mobile];
-  }, [androidDownloadUrl, downloads, isZh, t.platforms]);
+  }, [androidDownloadUrl, downloads, t.appStoreHref, t.browserName, t.openApp, t.platforms]);
 
   const sectionTitles = [t.desktop, t.mobile];
-  const languageHref = isZh ? '/download' : '/zh/download';
 
   return (
     <main className="download-page marketing-shell">
-      <SiteNav locale={locale} languageHref={languageHref} />
+      <SiteNav locale={locale} />
 
       <section className="download-hero">
         <div className="download-hero__glow" aria-hidden="true" />

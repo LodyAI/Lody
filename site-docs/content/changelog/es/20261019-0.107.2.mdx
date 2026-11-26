@@ -1,0 +1,17 @@
+---
+title: "20261019-0.107.2"
+version: 0.107.2
+date: 2026-10-19
+description: "Mejoras en la autorización de GitHub, la vinculación de cuentas, el manejo de imágenes de subagentes y la sincronización de recursos MCP."
+---
+
+Versión 0.107.2
+
+### 🐛 Correcciones y mejoras
+
+- Se corrige el fallo de la autorización personal de GitHub cuando las direcciones de correo electrónico de GitHub y Lody difieren, y se mejora el regreso a la configuración tras la autorización. Los usuarios existentes deberán volver a autorizar una vez en la configuración de GitHub.
+- Compatibilidad para vincular cuentas de inicio de sesión con distintas direcciones de correo electrónico, incluidas las cuentas que usan Ocultar mi correo electrónico de Apple.
+- Se corrige el problema por el cual las lecturas de imágenes de subagentes de Claude hacían crecer en exceso los datos de la sesión, provocando cargas lentas o fallos de sincronización.
+- Se mejora la recuperación de la lista de recursos MCP durante el inicio, la reconexión y tras errores de sincronización, reduciendo los recursos faltantes y los estados de sincronización que dejan de actualizarse.
+
+¡Gracias al colaborador externo demystify0137 por su contribución a esta versión!

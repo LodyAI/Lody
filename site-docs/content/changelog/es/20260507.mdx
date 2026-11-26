@@ -1,0 +1,51 @@
+---
+title: "20260507"
+version: 0.49.0
+date: 2026-05-07
+description: "Lody 0.49.0 incorpora Preview en vivo con anotaciones visuales, Codex Goals y generación de imágenes, preguntas interactivas de Claude Code, una mejor gestión de tareas en la barra lateral y flujos de trabajo más completos para PR de GitHub."
+---
+
+### Flujo de trabajo de agentes
+
+- Codex Goals ahora aparece integrado en Lody. Activa primero la función en Codex con `codex features enable goals`.
+  <img src="/_docs-assets/20260507-goal.png" alt="" />
+- El resultado de la generación de imágenes de Codex ahora regresa a la conversación activa, de modo que las imágenes generadas permanecen junto al prompt y las instrucciones de seguimiento.
+  <img src="/_docs-assets/20260507-codex-image-gen.png" alt="" />
+- Las indicaciones AskUserQuestion de Claude Code ahora se muestran como tarjetas de interacción nativas, con flujos de respuesta de opción única, opción múltiple y texto libre.
+  <img src="/_docs-assets/20260507-ask-question.png" alt="" />
+- Se añadió un ajuste preestablecido de Xiaomi MiMo para Claude Code, incluida la configuración de Token Plan.
+
+### Vista previa remota y comentarios visuales
+
+<img src="/_docs-assets/20260507-preview.png" alt="" />
+
+- Se añadió Lody Preview, una vista previa en vivo con alcance de sesión para servidores de desarrollo locales. Por ejemplo, pídele al agente: `Start the Vite dev server and use Lody Preview`.
+- Usa el panel de vista previa para cambiar entre viewports de escritorio, tablet y móvil, rotar pantallas, hacer zoom, desplazarte o abrir la página en un navegador externo cuando sea necesario.
+- Las anotaciones visuales te permiten hacer clic en un elemento de la vista previa, dejar un comentario y enviar esa retroalimentación referenciada de vuelta a la conversación.
+
+### Barra lateral y gestión de tareas
+
+- Se añadió el modo de organización Actualizado en la barra lateral, que agrupa las sesiones de Chat, GitHub Worktree y Proyecto local por antigüedad: Hoy, Esta semana y Anteriores.
+- Los menús contextuales de sesión ahora incluyen renombrar, fijar, archivar, copiar URL de sesión y copiar rama actual.
+- Las sesiones fijadas permanecen en la parte superior de la lista, lo que facilita retomar tareas prolongadas o importantes.
+- En la web, las tareas de la barra lateral ahora admiten clic central y Cmd/Ctrl + clic para abrirse en una nueva pestaña.
+
+### Conversación y entrada
+
+- El texto largo pegado ahora se contrae en un marcador de posición en línea en lugar de llenar el compositor. Haz clic en el marcador para revisar o editar el contenido pegado.
+- Las imágenes se pueden arrastrar directamente al compositor para subirlas.
+- En dispositivos móviles, mantener pulsada una vista previa de imagen abre las acciones nativas para compartir y guardar.
+- Las vistas previas de archivos ajustan automáticamente las líneas largas, lo que facilita la lectura de registros y salidas generadas densas.
+
+### GitHub y Pull Requests
+
+- Los PR en borrador se pueden marcar como listos para revisión directamente desde el panel de PR.
+- Las sesiones vinculadas a un PR se pueden archivar automáticamente cuando el PR se fusiona o se cierra.
+- Los comentarios, las acciones de revisión y las fusiones de PR pueden usar tu identidad personal de GitHub, y Configuración ahora muestra la cuenta conectada.
+
+### Correcciones y estabilidad
+
+- Se corrigió una notificación emergente de error falso después de importar correctamente un proyecto local.
+- Se corrigió un problema por el que los chats de primer turno con agentes preestablecidos a veces carecían de configuración para generar títulos.
+- Se corrigieron varios problemas de visualización en la barra lateral.
+- Se corrigieron los menús desplegables móviles que podían extenderse más allá de la pantalla.

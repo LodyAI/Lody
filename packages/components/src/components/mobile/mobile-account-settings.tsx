@@ -49,11 +49,42 @@ import {
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
-  keyGroupTrigger: { display: 'flex', width: '100%', alignItems: 'center', gap: themeSpace[3], paddingInline: themeSpace[4], paddingBlock: themeSpace[3], textAlign: 'start', fontSize: themeFontSize.sm, lineHeight: themeLineHeight.sm },
-  keyGroupBody: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 0%', gap: themeSpace[1] },
-  keyGroupTitle: { display: 'block', fontSize: themeFontSize.sm, fontWeight: themeFontWeight.medium },
-  keyGroupHelp: { display: 'block', fontSize: themeFontSize.xs, color: themeColors.mutedForeground },
-  keyGroupChevron: { width: themeSpace[4], height: themeSpace[4], flexShrink: 0, color: themeColors.mutedForeground, transitionProperty: 'transform', transitionDuration: '150ms' },
+  keyGroupTrigger: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    gap: themeSpace[3],
+    paddingInline: themeSpace[4],
+    paddingBlock: themeSpace[3],
+    textAlign: 'start',
+    fontSize: themeFontSize.sm,
+    lineHeight: themeLineHeight.sm,
+  },
+  keyGroupBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    flex: '1 1 0%',
+    gap: themeSpace[1],
+  },
+  keyGroupTitle: {
+    display: 'block',
+    fontSize: themeFontSize.sm,
+    fontWeight: themeFontWeight.medium,
+  },
+  keyGroupHelp: {
+    display: 'block',
+    fontSize: themeFontSize.xs,
+    color: themeColors.mutedForeground,
+  },
+  keyGroupChevron: {
+    width: themeSpace[4],
+    height: themeSpace[4],
+    flexShrink: 0,
+    color: themeColors.mutedForeground,
+    transitionProperty: 'transform',
+    transitionDuration: '150ms',
+  },
   keyGroupExpanded: { transform: 'rotate(180deg)' },
 
   foldColumn: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
@@ -430,10 +461,7 @@ export function MobileAccountSettings({
     const details = [display.lifetime, display.createdAt, display.lastUsed].filter(Boolean);
 
     return (
-      <div
-        key={apiKey.id}
-        {...stylex.props(styles.listStack, ruled && styles.listRowDivider)}
-      >
+      <div key={apiKey.id} {...stylex.props(styles.listStack, ruled && styles.listRowDivider)}>
         <div {...stylex.props(styles.keyBody)}>
           <div {...stylex.props(styles.keyTitleLine)}>
             <p {...stylex.props(styles.keyNote)}>{display.title}</p>
@@ -444,7 +472,9 @@ export function MobileAccountSettings({
           </div>
           {(apiKey.keyPreview || details.length > 0) && (
             <div {...stylex.props(styles.keyDetails)}>
-              {apiKey.keyPreview && <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>}
+              {apiKey.keyPreview && (
+                <span {...stylex.props(styles.keyPreview)}>{apiKey.keyPreview}</span>
+              )}
               {details.map((detail) => (
                 <span key={detail}>{detail}</span>
               ))}
@@ -460,7 +490,10 @@ export function MobileAccountSettings({
             disabled={revokingCliApiKeyId === apiKey.id}
           >
             {revokingCliApiKeyId === apiKey.id ? (
-              <Spinner diameter="calc(var(--spacing) * 3.5)" className={stylex.props(styles.pendingActionSpacing).className} />
+              <Spinner
+                diameter="calc(var(--spacing) * 3.5)"
+                className={stylex.props(styles.pendingActionSpacing).className}
+              />
             ) : (
               <Trash2 {...stylex.props(styles.buttonIcon)} />
             )}
@@ -1092,7 +1125,10 @@ export function MobileAccountSettings({
                         ) : null}
                         <ChevronDown
                           aria-hidden="true"
-                          {...stylex.props(styles.keyGroupChevron, signInCliApiKeysOpen && styles.keyGroupExpanded)}
+                          {...stylex.props(
+                            styles.keyGroupChevron,
+                            signInCliApiKeysOpen && styles.keyGroupExpanded
+                          )}
                         />
                       </Collapsible.Trigger>
                       <Collapsible.Panel>
@@ -1101,7 +1137,6 @@ export function MobileAccountSettings({
                     </Collapsible.Root>
                   ) : null}
                 </>
-
               )}
             </MobileSettingsSection>
           ) : null}

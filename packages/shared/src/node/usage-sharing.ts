@@ -7,7 +7,7 @@ function preferencePath(): string {
   return join(getLodyDataDir('cloud'), 'usage-sharing');
 }
 
-function isEnvUsageSharingDisabled(): boolean {
+export function isEnvUsageSharingDisabled(): boolean {
   const disable = process.env.LODY_DISABLE_USAGE_SHARING?.trim().toLowerCase();
   return disable === '1' || disable === 'true' || process.env.DO_NOT_TRACK?.trim() === '1';
 }

@@ -1,8 +1,9 @@
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { colors } from '@lody/ui/tokens/colors.stylex';
+import { Spinner } from '@lody/ui/spinner';
 import { space } from '@lody/ui/tokens/scales.stylex';
 
 export type KeyReceptionWait = { workspaceId: string };
@@ -17,7 +18,8 @@ const systemClock: KeyReceptionNoticeClock = {
   clearTimeout: (timer) => clearTimeout(timer),
 };
 const styles = stylex.create({
-  notice: { margin: 0, padding: space[3], color: colors.secondaryLabel, fontSize: '0.9em' },
+  notice: { padding: space[3] },
+  row: { display: 'flex', alignItems: 'center', gap: space[2] },
 });
 
 /** A stable wait object denotes one failed-save episode. No I/O or admission here. */
@@ -26,11 +28,15 @@ export function WorkspaceKeyReceptionNotice({
   waiting,
   clock = systemClock,
   onCheckAgain,
+  checking = false,
+  checkError = false,
 }: {
   workspaceId: string | null | undefined;
   waiting: KeyReceptionWait | null;
   clock?: KeyReceptionNoticeClock;
   onCheckAgain?: () => void;
+  checking?: boolean;
+  checkError?: boolean;
 }) {
   const { t } = useTranslation();
   const [visible, setVisible] = useState<{ wait: KeyReceptionWait; slow: boolean } | null>(null);
@@ -50,14 +56,32 @@ export function WorkspaceKeyReceptionNotice({
   if (!waiting || visible?.wait !== waiting || waiting.workspaceId !== workspaceId) return null;
   return (
     <div {...stylex.props(styles.notice)}>
-      <p role="status">
-        {t(visible.slow ? 'e2ee.content.receivingNewKeySlow' : 'e2ee.content.receivingNewKey')}
-      </p>
-      {visible.slow && onCheckAgain && (
-        <Button type="button" size="small" variant="secondary" onClick={onCheckAgain}>
-          {t('e2ee.content.retryHostIdentity')}
-        </Button>
-      )}
+      <Alert.Root tone={checkError ? 'warning' : 'neutral'} role="note">
+        <div {...stylex.props(styles.row)}>
+          <Spinner size="small" role="presentation" aria-hidden="true" />
+          <Alert.Description role="status">
+            {t(visible.slow ? 'e2ee.content.receivingNewKeySlow' : 'e2ee.content.receivingNewKey')}
+          </Alert.Description>
+        </div>
+        {checkError && (
+          <Alert.Description role="alert">
+            {t('e2ee.access.waitingKey.checkFailed')}
+          </Alert.Description>
+        )}
+        {visible.slow && onCheckAgain && (
+          <Alert.Actions>
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              disabled={checking}
+              onClick={onCheckAgain}
+            >
+              {t('e2ee.content.retryHostIdentity')}
+            </Button>
+          </Alert.Actions>
+        )}
+      </Alert.Root>
     </div>
   );
 }

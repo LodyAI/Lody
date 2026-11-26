@@ -1,0 +1,28 @@
+---
+title: "20260223"
+version: 0.32.3
+date: 2026-02-23
+description: "Ajout de la prise en charge de Sonnet 4.6 et gpt-5.3-code-spark, des projets locaux, d'améliorations au lancement du CLI et de correctifs de performances."
+---
+
+### Prise en charge de Sonnet 4.6 et gpt-5.3-code-spark
+
+### Prise en charge des projets locaux
+
+- Importez n'importe quel répertoire local et gardez-le synchronisé en temps réel
+
+<img src="/_docs-assets/20260223-local-project.png" width="300px" />
+
+### Amélioration du lancement et de la connexion du CLI
+
+- Simplification du démarrage du CLI pour un lancement en un clic
+- Suppression du mode Docker
+- Ajout d'un groupe de commandes `project` pour gérer les projets locaux
+  - `npx lody project add [path]` Ajouter un projet local à lody
+  - `npx lody project list` Lister les projets locaux
+  - `npx lody project delete` Supprimer interactivement un projet local
+
+### Correctifs de performances et de fiabilité
+
+- Correction des ralentissements de l'interface utilisateur lors de l'ouverture des diffs de fichiers
+- Correction de problèmes dans le flux d'authentification dans certains scénarios

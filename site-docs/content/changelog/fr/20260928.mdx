@@ -1,0 +1,41 @@
+---
+title: "20260928"
+version: 0.101.0
+date: 2026-09-28
+description: "Une nouvelle interface utilisateur et une nouvelle expérience Lody Preview, les tâches planifiées, les comptes Codex multiples, les détails d'activité des sous-agents, ainsi que des améliorations pour les réponses en streaming, l'aperçu d'images et les conversations."
+---
+
+Version 0.101.0
+
+### ✨ Nouvelles fonctionnalités
+
+- Une nouvelle interface repense la barre latérale, les paramètres, le panneau des PR, les détails des appels d'outils et les menus du compositeur, avec des thèmes clair et sombre et des interactions homogènes.
+- Les tâches planifiées prennent en charge les exécutions ponctuelles ou récurrentes, le choix de la machine et de l'Agent, ainsi que l'historique des exécutions. Les Agents peuvent également vous proposer des planifications à confirmer et créer.
+- Codex prend en charge plusieurs comptes indépendants, ainsi que des points de terminaison et des clés API personnalisés.
+- Les nouveaux détails d'activité des sous-agents affichent le statut des tâches, l'historique d'exécution et les résultats fournis par les Agents pris en charge.
+- Les Rôles d'agent disposent désormais d'un champ de description pour préciser leur objectif et leurs responsabilités.
+- Les Agents peuvent consulter les Rôles d'agent, les machines et les projets de l'espace de travail afin de trouver la configuration et le lieu d'exécution adaptés.
+- Le nouveau Lody Preview prend en charge les aperçus locaux et les aperçus distants à la demande, avec un statut de connexion et des conseils de récupération plus clairs.
+- Les projets locaux peuvent associer des conversations à des PR et utiliser les identifiants GitHub de la machine pour récupérer les informations des PR.
+- Affichez des images dans le Markdown, y compris les images locales et les images distantes chargées à la demande.
+- Consultez la consommation de jetons pour chaque tour.
+- Ouvrez l'arborescence des conversations associées depuis la barre d'informations de la conversation.
+- Pi peut analyser et sélectionner des extensions locales et importer l'historique des conversations. Grok permet de dupliquer (fork) des conversations entières ou à partir de tours précédents.
+- Nouvelles options pour les conversations en pleine largeur, les ligatures de police et le rendu mathématique en ligne.
+- Recadrez votre avatar et choisissez une icône d'application sur macOS tout en conservant votre sélection.
+
+### 🐛 Correctifs et améliorations
+
+- L'amélioration du rendu des réponses en streaming affiche le Markdown progressivement, avec moins de scintillement et moins d'animations répétées.
+- Défilement plus fluide dans les longues conversations et lors du basculement d'une conversation à l'autre, avec moins de sauts de contenu et de vues blanches.
+- États plus clairs pour le téléversement des pièces jointes et les messages en attente, avec de meilleures tentatives de réessai et une meilleure reprise après interruption. Un texte collé trop volumineux peut automatiquement être converti en pièce jointe texte.
+- La modification et le renvoi d'un message prennent désormais en charge la même sélection de mentions que le compositeur.
+- Correction d'un problème où les conversations importées utilisaient une mauvaise configuration d'Agent lors de la reprise ou du fork, et rétablissement des options de raisonnement étendu pour GPT-6 Sol et Luna.
+- Amélioration de la sélection des identifiants GitHub et des associations de PR après le renommage ou le transfert d'un dépôt. Le statut CI reflète désormais les derniers résultats des vérifications.
+- Correction de la perte des modifications non enregistrées de l'éditeur après actualisation, des interactions indésirables entre l'archivage et la fermeture d'onglets, ainsi que des réparations répétées de l'historique.
+- Amélioration du statut des groupes dans la barre latérale, des indicateurs d'envoi en attente et des badges du Dock macOS. Correction des menus de pièces jointes sur mobile, de l'état des groupes repliés et de la navigation des diffs vers les fichiers sources.
+- La connexion aux Agents affiche désormais la progression du téléchargement du runtime et prend en charge l'annulation. Amélioration des instructions lors de la première connexion à une machine et des messages d'échec d'initialisation.
+
+### 🙏 Merci à nos contributeurs de la communauté
+
+Merci à Lampese, Innei, Astro-Han, Dante-dan, ladydd, tommy0103, Pleasurecruise, timonwong et yusixian pour leurs contributions à cette version !

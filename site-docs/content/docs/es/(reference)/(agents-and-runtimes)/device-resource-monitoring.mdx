@@ -1,0 +1,153 @@
+---
+title: "Monitoreo de recursos del dispositivo"
+description: "Monitorea el uso de CPU y memoria del dispositivo, de Lody CLI y de las sesiones ACP residentes, inspecciona los procesos de cada sesión, libera recursos de ACP y reanuda conversaciones más adelante."
+---
+
+# Monitoreo de recursos del dispositivo
+
+Lody puede mostrar el uso actual de recursos de cada dispositivo conectado y de cada sesión ACP que
+permanece residente en él. Usa esta vista para identificar un agente que esté consumiendo CPU o memoria,
+abrir su sesión o detener su proceso ACP sin eliminar la conversación.
+
+Abre **Configuración -> Dispositivos** y selecciona un dispositivo en línea. La página comienza a tomar
+muestras automáticamente; no hay un botón de actualización manual.
+
+## ¿Qué es una sesión ACP residente?
+
+Cada conversación utiliza un proceso ACP para comunicarse con su agente de programación. Ese proceso
+puede permanecer residente después de que un turno queda inactivo, lo que hace que el siguiente turno
+sea más rápido, pero sigue consumiendo algo de memoria. La tabla de sesiones ACP enumera las
+conversaciones cuyos procesos de agente están presentes actualmente en el dispositivo seleccionado.
+
+Esta es una vista de procesos, no una lista de todas las conversaciones guardadas. Una conversación cuyo
+proceso ACP ya se haya detenido permanece en Lody, pero deja de aparecer en esta tabla.
+
+## Resumen de recursos
+
+La parte superior de la página separa tres ámbitos para evitar que sus valores se sumen por error:
+
+| Ámbito           | CPU                                                                                                           | Memoria                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **CLI**          | El propio proceso de control de Lody CLI                                                                      | Memoria utilizada por el proceso de control de Lody CLI                        |
+| **Sesiones ACP** | CPU total utilizada por los árboles de procesos de sesiones ACP residentes                                    | Memoria total utilizada por los árboles de procesos de sesiones ACP residentes |
+| **Información del dispositivo** | CPU utilizada por todo el dispositivo, incluidos Lody, los agentes, el sistema operativo y otras aplicaciones | Memoria utilizada / memoria total efectiva del dispositivo                     |
+
+**La información del dispositivo no es la suma de CLI y sesiones ACP.** También incluye todos los demás
+procesos de la máquina. Por el contrario, los valores de CLI y ACP ayudan a identificar qué proporción
+del uso del dispositivo corresponde a Lody.
+
+### Porcentaje de CPU
+
+Los tres ámbitos utilizan la misma convención multinúcleo:
+
+- un núcleo lógico de CPU utilizado al máximo equivale a `100%`
+- dos núcleos lógicos utilizados al máximo equivalen a `200%`
+- en un dispositivo de 8 núcleos, el máximo práctico del dispositivo es aproximadamente `800%`
+
+Por ejemplo, una sesión ACP que utiliza 1.5 núcleos muestra `150%`. Pueden producirse pequeñas
+diferencias entre los valores del dispositivo, de la CLI, del total agregado y de cada sesión porque
+las muestras se recopilan en ventanas cortas y la contabilidad de árboles de procesos depende de la
+plataforma.
+
+### Memoria
+
+La memoria corresponde al consumo residente actual, no a la asignación acumulada. El método exacto de
+contabilidad depende del sistema operativo: Lody utiliza contabilidad de cgroup cuando está disponible y,
+en caso contrario, mide el árbol de procesos correspondiente. En macOS, el informe de huella física
+(*physical footprint*) puede diferir de los valores mostrados por herramientas que solo suman RSS.
+
+El valor del dispositivo se muestra como **usada / total efectiva**. El «total efectivo» puede ser un
+límite de memoria de contenedor o de cgroup en lugar de la RAM física instalada en el host cuando Lody
+se ejecuta en un entorno restringido. La memoria disponible, las cachés, las páginas compartidas y la
+contabilidad propia de la plataforma pueden hacer que la suma manual de las filas difiera del total del
+dispositivo.
+
+### Por qué un valor puede mostrarse como `-`
+
+El uso de CPU se calcula a partir de la variación entre dos muestras, por lo que no está disponible en
+la primera muestra tras iniciar el monitoreo o reiniciar la CLI. Una sesión también puede mostrar `-`
+para CPU, memoria o cantidad de procesos cuando el sistema operativo no puede proporcionar una
+contabilidad fiable de su árbol de procesos. Espera primero a la siguiente muestra automática; si el
+valor sigue sin estar disponible, verifica que el dispositivo esté en línea y que su versión de Lody CLI
+esté actualizada.
+
+## Tabla de sesiones ACP
+
+Cada fila identifica una conversación residente:
+
+| Columna      | Significado                                                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sesión**   | Título de la conversación, nombre del ACP y logotipo del ACP. Selecciónala para abrir la sesión y la pestaña correspondientes. Pasa el cursor sobre un título truncado para ver el título completo. |
+| **Estado**   | El estado actual de actividad o del ciclo de vida del ACP                                                                                                                                                      |
+| **Memoria**  | Memoria actual atribuida al árbol de procesos ACP de la sesión                                                                                                                                                 |
+| **CPU**      | CPU utilizada por ese árbol de procesos, donde un núcleo lógico completo equivale a `100%`                                                                                                                      |
+| **Procesos** | Cantidad de procesos atribuidos actualmente a la sesión, incluidos los procesos secundarios rastreados                                                                                                         |
+
+La tabla muestra hasta 100 sesiones residentes. Las mediciones pueden presentar un breve desfase respecto
+a la creación o finalización de un proceso, especialmente en plataformas donde Lody estima la pertenencia
+a partir del árbol de procesos.
+
+### Referencia de estados
+
+| Estado                 | Significado                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| **Inicializando**      | Lody está iniciando el proceso ACP o conectándose a él                                       |
+| **En ejecución**       | El agente está procesando activamente un turno                                               |
+| **Esperando permiso**  | El agente está en pausa hasta que se responda una solicitud de permiso                       |
+| **Finalizando**        | El agente terminó su trabajo principal y Lody está completando el procesamiento final        |
+| **Inactivo**           | El proceso ACP está residente, pero no está procesando ningún turno en este momento          |
+| **Deteniendo**         | Hay una solicitud de terminación en curso y Lody está esperando a que el proceso finalice    |
+| **Fallido**            | La sesión residente o su proceso ACP encontró un error                                       |
+
+## Liberar los recursos de una sesión ACP
+
+Selecciona el icono de detener al final de la fila de una sesión para terminar el proceso ACP de esa
+sesión. Detener un proceso inactivo se inicia sin confirmación. Si el agente está en ejecución,
+inicializando, esperando permiso o finalizando, Lody solicita confirmación porque se interrumpirá el
+turno activo.
+
+El icono de detener muestra un indicador de carga hasta que el proceso ACP haya finalizado y el monitoreo
+del dispositivo confirme que la sesión ya no está residente. Si la terminación falla, Lody informa el
+error y deja la sesión disponible para otro intento.
+
+Terminar un proceso ACP:
+
+- detiene el turno actual del agente y sus procesos secundarios rastreados
+- libera la CPU y la memoria retenidas por ese árbol de procesos residente
+- conserva el historial de la conversación, los metadatos de la sesión, la rama, el worktree y los archivos del proyecto
+- no archiva ni elimina la sesión y no recupera su espacio en disco
+
+Un comando o una escritura de archivo interrumpidos no se revierten automáticamente. Revisa los archivos
+y el diff de la sesión si terminas un agente mientras está realizando cambios activamente.
+
+## Continuar la conversación más adelante
+
+Puedes volver a una sesión terminada en cualquier momento y enviar otro mensaje. Lody vuelve a iniciar
+el proceso ACP y reanuda la conversación a partir del contexto de sesión persistido. El primer turno nuevo
+puede tardar un poco más mientras el entorno de ejecución del agente se inicia y se reconecta, pero la
+conversación y los archivos permanecen disponibles en todo momento.
+
+El estado local del proceso que no se haya guardado desaparece cuando se termina el proceso ACP. El
+contexto duradero proviene de la conversación guardada, la compatibilidad de reanudación del agente y
+los archivos en el espacio de trabajo de la sesión. Usa la terminación para liberar CPU y memoria entre
+períodos de trabajo activo; usa archivar o eliminar solo cuando también quieras cambiar la visibilidad de
+la sesión o recuperar espacio en disco. Consulta [Sesiones](/es/docs/session) para conocer el comportamiento
+de archivo, restauración y eliminación.
+
+## Informes en vivo y bajo demanda
+
+El monitoreo de recursos es intencionadamente efímero:
+
+- un dispositivo en línea informa y actualiza instantáneas de recursos cuando alguien está viendo su página de dispositivo
+- la página se actualiza automáticamente mientras permanece visible
+- las instantáneas expiran y no se conservan como una línea temporal de métricas históricas
+- cuando nadie está observando, Lody deja de solicitar muestras continuas de recursos
+
+Si un dispositivo está compartido con un espacio de trabajo, los miembros del espacio de trabajo que
+puedan acceder a ese dispositivo pueden ver su información actual de recursos. Terminar un proceso ACP
+en un dispositivo compartido afecta esa sesión para todos, así que comprueba el estado de la sesión antes
+de detener el turno activo de otro miembro. El monitor no es un inspector de líneas de comandos de
+procesos ni un sustituto de las herramientas de perfilado del sistema operativo.
+
+Cuando un dispositivo está sin conexión, Lody no puede solicitar una muestra nueva ni terminar sus procesos
+ACP. Pon la CLI en línea, vuelve a abrir **Configuración -> Dispositivos** y espera la primera muestra.

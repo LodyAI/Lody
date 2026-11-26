@@ -82,6 +82,9 @@ const historyFixture = (): SessionHistoryInput[] => [
 function createHarness(
   options: {
     active?: boolean;
+    resident?: boolean;
+    acpSessionId?: string | null;
+    pendingCreate?: Promise<unknown> | null;
     prepareError?: Error;
     persistError?: Error;
     beforeCommitFailure?: (doc: LoroDoc) => void;
@@ -139,11 +142,11 @@ function createHarness(
     cliType: 'builtin',
     agentType: 'codex',
     agentConfigId: 'agent-config-1' as AgentConfigId,
-    acpSessionId: 'acp-old',
+    ...(options.acpSessionId === null ? {} : { acpSessionId: options.acpSessionId ?? 'acp-old' }),
   } as SessionMeta;
   storedMeta = meta;
   const sessionDoc = withHistoryPort({
-    getMetaState: vi.fn(async () => meta),
+    getMetaState: vi.fn(async () => storedMeta),
     getHistory: vi.fn(realDoc.sessionData.history.readAll.bind(realDoc.sessionData.history)),
     sessionData: {
       ...realDoc.sessionData,
@@ -180,7 +183,31 @@ function createHarness(
   const runtime = {
     acpSessionId: 'acp-old',
     agentClient,
+    terminate: vi.fn(async () => {
+      events.push('terminate');
+    }),
   };
+  let residentRuntime: typeof runtime | undefined =
+    options.resident === false ? undefined : runtime;
+  const createdRuntime = {
+    acpSessionId: 'acp-fresh',
+    agentClient,
+    terminate: vi.fn(async () => {
+      events.push('terminate-created');
+    }),
+  };
+  const createSession = vi.fn(
+    async (_config: unknown, agentStart?: { resumeSessionId?: string }) => {
+      events.push(agentStart?.resumeSessionId ? 'create-resume' : 'create-fresh');
+      const created = agentStart?.resumeSessionId ? runtime : createdRuntime;
+      residentRuntime = created;
+      return created;
+    }
+  );
+  const detachSession = vi.fn((session: unknown) => {
+    events.push('detach');
+    if (residentRuntime === session) residentRuntime = undefined;
+  });
   let barrierHeld = false;
   const executionService = {
     acceptInboxHumanInput: vi.fn(
@@ -195,7 +222,7 @@ function createHarness(
       hasActiveTurn: options.active === true,
       activeTurnId: options.active ? 'assistant-2' : undefined,
       hasBlockingPendingCreate: false,
-      hasReusableSession: true,
+      hasReusableSession: Boolean(residentRuntime),
       hasRewriteBarrier: barrierHeld,
     })),
     tryAcquireSessionRewriteBarrier: vi.fn(() => {
@@ -220,6 +247,11 @@ function createHarness(
     workspaceDocument: {
       repo,
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      getAgentConfigById: vi.fn(async () => ({
+        id: 'agent-config-1',
+        cliType: 'builtin',
+        agentType: 'codex',
+      })),
       isEncryptedWorkspace: () => options.signMachineInput !== undefined,
       signMachineInput: async (
         input: Parameters<NonNullable<typeof options.signMachineInput>>[0]
@@ -233,10 +265,15 @@ function createHarness(
       }),
     } as never,
     sessionManager: {
-      getSession: vi.fn(() => runtime),
+      getSession: vi.fn(() => residentRuntime),
+      getPendingSession: vi.fn(() => options.pendingCreate ?? null),
+      createSession,
+      detachSession,
     } as never,
     executionService: executionService as never,
-    userResolver: {} as never,
+    userResolver: {
+      resolve: vi.fn(async () => ({ name: 'User', email: 'user@example.com' })),
+    } as never,
     logger: logger as never,
     workspaceId: 'workspace-1',
     machineId,
@@ -245,11 +282,15 @@ function createHarness(
 
   return withHistoryPort({
     agentClient,
+    createSession,
+    createdRuntime,
+    detachSession,
     events,
     executionService,
     // Read the real doc so an async auto-read write is observable, not a snapshot
     // captured at the last explicit history write.
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
+    getResidentRuntime: () => residentRuntime,
     logger,
     realDoc,
     sessionDoc,
@@ -740,3 +781,154 @@ it.each([false, true])(
     }
   }
 );
+
+describe('SessionEditAndResendService non-resident first-message recovery', () => {
+  const firstUserHistory = (): SessionHistoryInput[] => [
+    {
+      id: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-08-03T00:00:02.000Z',
+      role: 'user',
+      items: [
+        { type: 'image_group', images: [{ key: 'image-1', mimeType: 'image/png' }] },
+        { type: 'text', text: 'old prompt' },
+      ],
+      fileDiff: [],
+      finished: true,
+      status: 'canceled',
+      inputConfig: {
+        prompt: 'old prompt',
+        cliType: 'builtin',
+        agentType: 'codex',
+        modelId: 'model-1',
+      },
+    },
+  ];
+
+  it.each([
+    { label: 'unresumable stale acpSessionId', acpSessionId: 'codex-unmaterialized-thread' },
+    { label: 'absent acpSessionId', acpSessionId: null },
+  ])(
+    'starts a fresh ACP session without loadSession when editing the first user message ($label)',
+    async ({ acpSessionId }) => {
+      const harness = createHarness({
+        resident: false,
+        acpSessionId,
+        history: firstUserHistory(),
+      });
+
+      const result = await harness.service.editAndResend(spec);
+
+      expect(result, JSON.stringify(result)).toMatchObject({ success: true });
+      expect(harness.createSession).toHaveBeenCalledTimes(1);
+      expect(harness.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId, resume: true }),
+        { deferAcpSessionIdPersistence: true }
+      );
+      expect(harness.agentClient.prepareReplacementSession).not.toHaveBeenCalled();
+      expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+      expect(harness.agentClient.closeDetachedSession).not.toHaveBeenCalled();
+      expect(harness.readStoredMeta()).toMatchObject({
+        acpSessionId: 'acp-fresh',
+        latestUserMsgId: 'user-3',
+      });
+      expect(harness.getHistory().map((row) => row.id)).toEqual(['user-3']);
+      expect(harness.getHistory().at(-1)?.inputConfig).toMatchObject({
+        modelId: 'model-1',
+        resume: 'acp-fresh',
+      });
+      expect(harness.getResidentRuntime()).toBe(harness.createdRuntime);
+    }
+  );
+
+  it('detaches and terminates an uncommitted fresh runtime when first-message edit commit fails', async () => {
+    const harness = createHarness({
+      resident: false,
+      acpSessionId: 'codex-unmaterialized-thread',
+      history: firstUserHistory(),
+      persistError: new Error('disk unavailable'),
+    });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: false, error: { code: 'HISTORY_WRITE_FAILED' } });
+    expect(harness.detachSession).toHaveBeenCalledWith(harness.createdRuntime);
+    expect(harness.createdRuntime.terminate).toHaveBeenCalledWith(true);
+    expect(harness.getResidentRuntime()).toBeUndefined();
+    expect(harness.readStoredMeta()).toMatchObject({
+      acpSessionId: 'codex-unmaterialized-thread',
+    });
+    expect(harness.getHistory().map((row) => row.id)).toEqual(['user-2']);
+  });
+
+  it('still restores meta.acpSessionId via resumeSessionId when editing a later non-resident turn', async () => {
+    const harness = createHarness({
+      resident: false,
+      acpSessionId: 'acp-old',
+      history: historyFixture(),
+    });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result, JSON.stringify(result)).toMatchObject({ success: true });
+    expect(harness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId, resume: true }),
+      { resumeSessionId: 'acp-old', deferAcpSessionIdPersistence: true }
+    );
+    expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
+    expect(harness.agentClient.adoptPreparedSession).toHaveBeenCalledTimes(1);
+    expect(harness.readStoredMeta()).toMatchObject({
+      acpSessionId: 'acp-new',
+      latestUserMsgId: 'user-3',
+    });
+  });
+
+  it('recovers on retry after an in-flight pending create is aborted by Stop', async () => {
+    let pendingCreate: Promise<unknown> | null = Promise.resolve();
+    let createCall = 0;
+    const harness = createHarness({
+      resident: false,
+      acpSessionId: null,
+      history: firstUserHistory(),
+      pendingCreate,
+    });
+    const sessionManager = (
+      harness.service as unknown as {
+        deps: {
+          sessionManager: {
+            getPendingSession: ReturnType<typeof vi.fn>;
+            createSession: ReturnType<typeof vi.fn>;
+          };
+        };
+      }
+    ).deps.sessionManager;
+    sessionManager.getPendingSession.mockImplementation(() => pendingCreate);
+    sessionManager.createSession.mockImplementation(
+      async (_config: unknown, agentStart?: { resumeSessionId?: string }) => {
+        createCall += 1;
+        if (createCall === 1) {
+          pendingCreate = null;
+          throw new Error('session-stop');
+        }
+        expect(agentStart).toEqual({ deferAcpSessionIdPersistence: true });
+        return harness.createdRuntime;
+      }
+    );
+
+    const aborted = await harness.service.editAndResend(spec);
+    expect(aborted).toMatchObject({
+      success: false,
+      error: { code: 'ACP_SESSION_UNAVAILABLE', message: 'session-stop' },
+    });
+    expect(harness.getResidentRuntime()).toBeUndefined();
+    expect(harness.getHistory().map((row) => row.id)).toEqual(['user-2']);
+
+    const retried = await harness.service.editAndResend(spec);
+    expect(retried, JSON.stringify(retried)).toMatchObject({ success: true });
+    expect(harness.readStoredMeta()).toMatchObject({
+      acpSessionId: 'acp-fresh',
+      latestUserMsgId: 'user-3',
+    });
+    expect(harness.getHistory().map((row) => row.id)).toEqual(['user-3']);
+  });
+});

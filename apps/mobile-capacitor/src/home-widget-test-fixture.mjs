@@ -309,6 +309,8 @@ export async function createWidgetFixture({
       file = path.join(repo, 'packages/platform/src/telemetry.ts');
     } else if (specifier === '@lody/shared/bug-report-client-log') {
       file = path.join(sharedPath, 'bug-report-client-log.ts');
+    } else if (specifier === '@lody/shared/language') {
+      file = path.join(sharedPath, 'language.ts');
     } else if (specifier.startsWith('@/')) {
       file = path.join(componentsPath, specifier.slice(2) + '.ts');
       if (specifier === '@/components/error-boundary') file += 'x';

@@ -190,8 +190,9 @@ function clickQuiet(el: HTMLElement | null, action?: () => void) {
 }
 
 /** Ghost-composer typing: snappy so the feature, not keystrokes, is the point. */
-const DEMO_TYPE_MS_EN = 20;
-const DEMO_TYPE_MS_ZH = 30;
+const DEMO_TYPE_MS_LATIN = 20;
+const DEMO_TYPE_MS_CJK = 30;
+const CJK_LOCALES = new Set<LandingLocale>(['zh', 'zh-hant', 'ja', 'ko']);
 /** Long prompts type a few chars per tick so walls of text don't eat the budget. */
 function demoTypeChunk(textLength: number): number {
   if (textLength > 48) return 3;
@@ -199,7 +200,7 @@ function demoTypeChunk(textLength: number): number {
   return 1;
 }
 function demoTypeStepMs(locale: LandingLocale, textLength: number): number {
-  const base = locale === 'zh' ? DEMO_TYPE_MS_ZH : DEMO_TYPE_MS_EN;
+  const base = CJK_LOCALES.has(locale) ? DEMO_TYPE_MS_CJK : DEMO_TYPE_MS_LATIN;
   return textLength > 40 ? Math.max(14, base - 4) : base;
 }
 /** Schedule progressive text into `apply(slice)`. Returns the end timestamp (ms). */
@@ -427,7 +428,7 @@ function DesktopSession({
   ];
   const panelBody =
     activeTab === 'browser' && designDemo ? (
-      <LandingPreviewPanel state={designDemo.preview} />
+      <LandingPreviewPanel state={designDemo.preview} locale={locale} />
     ) : viewer === 'skeleton' ? (
       <ReplicaDiffSkeleton />
     ) : viewer === 'shown' ? (

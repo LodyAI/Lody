@@ -1,0 +1,116 @@
+---
+title: "工作樹"
+description: "了解 Lody 如何使用 Git worktree 隔離併發編碼 Agent 任務、同步變更並避免衝突。"
+---
+
+# 工作樹
+
+工作樹是 Lody 隔離與管理併發任務的基礎。
+
+## 什麼是工作樹？
+
+Git worktree（工作樹）是你儲存庫的一個連結工作複本。每個工作樹都有各自獨立的工作目錄與簽出的分支，但會與主儲存庫共用相同的 Git 歷史紀錄。
+
+## Lody 如何使用工作樹
+
+當你在 Lody 中建立任務時，系統會自動執行以下步驟：
+
+1. **建立新分支** - 預設名稱為 `session/<shortSessionId>`（`sessionId` 的前 8 個字元；你也可以重新命名）
+2. **設定工作樹** - 供 Agent 運作的隔離目錄（每個工作階段一個）
+3. **執行 setup 腳本** - 可選的專案層級指令，例如安裝相依套件或複製環境變數範本
+4. **同步變更** - 在 Web UI 中即可查看即時更新
+
+```
+~/.lody/repos/<repoId>/
+├── bare.git/                # Bare Git repository (shared history)
+├── cache/                   # Build cache, etc.
+└── worktrees/
+    ├── <sessionId-1>/       # Worktree for session 1
+    └── <sessionId-2>/       # Worktree for session 2
+```
+
+## 優勢
+
+### 平行執行
+
+每個任務都有自己專屬的工作樹，因此 Agent 之間絕不會互相干擾彼此的變更。
+
+### 純淨隔離
+
+- 各任務間未提交的變更不會混雜在一起
+- 輕鬆審查、核准或捨棄單一任務
+- 方便為每個任務建立獨立的 PR
+
+### 自動清理
+
+封存根工作階段後，其由 Lody 託管的工作樹便會進入可清理狀態。對話在永久刪除前仍會保留於封存清單中，而工作目錄則可能提前遭到移除。
+
+| 資源 | 封存並清理之後 | 永久刪除工作階段之後 |
+| --- | --- | --- |
+| 對話歷史紀錄 | 保留；可還原該工作階段 | 刪除；刪除工作階段後無法復原 |
+| Lody 託管的 worktree 目錄 | 由所屬機器移除 | 若仍存在，則可進行清理 |
+| 本機 Git 分支與提交紀錄 | 保留，包含備份提交 | 保留；刪除工作階段不會回收該分支 |
+| 待處理的非 ignored 變更 | 移除前會先在本機暫存並提交 | 相同的備份規則亦適用於剩餘的工作樹 |
+| 被忽略的檔案，例如 `.env`、相依套件與建置產物 | 可能隨目錄一同捨棄 | 不保證能復原 |
+| 原始本機專案目錄 | 不在託管工作樹的清理範圍內 | 不在託管工作樹的清理範圍內 |
+
+所屬機器的 daemon 只會在工作區中繼資料同步完成並釋放工作階段 runtime 後，清理其 Lody 資料目錄下的工作樹。若該機器離線或移除失敗，清理作業可能會延遲。使用中或歸屬不明的項目會保持不動；僅封存子分頁並不會移除其根工作階段共用的工作樹。如果無法解析儲存庫或備份提交失敗，系統會保留該目錄以便重試。
+
+此備份為本機 Git 提交，並非遠端推送或完整目錄備份。已設定的 cleanup 腳本會在備份前執行，因此該腳本所刪除或修改的檔案不在此保護範圍內；腳本執行失敗亦不會阻止目錄移除。封存前，請務必將所需的 ignored 檔案以及可能受腳本影響的檔案另存於工作樹之外。
+
+當你還原並繼續執行工作樹已被移除的工作階段時，Lody 會從保留的本機分支重新建立工作樹，並再次執行 setup 腳本；ignored 檔案則需另外重建。復原作業要求所屬儲存庫與分支依然存在；已移除的本機專案必須重新加入。手動刪除 Lody 儲存庫資料也會一併刪除這些本機分支與備份，因此不等同於封存或刪除工作階段。
+
+## Worktree Setup 與 Cleanup 腳本
+
+專案層級腳本能讓你以一致的方式為每個新工作階段做好準備。
+
+使用 **setup 腳本**來執行 Lody 建立工作樹之後、Agent 收到第一個 prompt 之前需要執行的指令，例如：
+
+```bash
+cp .env.example .env
+pnpm install
+```
+
+使用 **cleanup 腳本**來執行封存對話時、Lody 從磁碟移除工作樹之前需要執行的指令，例如：
+
+```bash
+rm -rf node_modules
+```
+
+### 設定腳本
+
+1. 開啟 **Settings** -> **Projects**。
+2. 選擇一個本機專案或 GitHub 儲存庫。
+3. 開啟 **Worktree setup** 與 **Worktree cleanup**。
+4. 填入專案所需的 shell 指令，離開編輯器後即可儲存。
+
+針對本機專案，Lody 會顯示該專案所在機器使用的 shell：Windows 使用 PowerShell；macOS、Linux 與 WSL 使用 Bash。針對 GitHub 儲存庫，你可以同時填寫 Bash 與 PowerShell，讓工作階段能在不同作業系統的機器上運作。
+
+腳本會在 worktree 目錄中執行。在腳本內部匯出（export）的環境變數僅在該腳本程序期間有效；如果 Agent 本身需要環境變數，請在 [Agent Config](/zh-hant/docs/quickstart) 中設定。
+
+### 可用環境變數
+
+Lody 會為 setup 與 cleanup 腳本設定下列環境變數：
+
+| 變數                         | 說明                                        |
+| ---------------------------- | ------------------------------------------- |
+| `LODY_WORKSPACE_ID`          | 目前工作區 ID                               |
+| `LODY_SESSION_ID`            | 目前對話／工作階段 ID                       |
+| `LODY_WORKTREE_PATH`         | 該工作階段 worktree 的絕對路徑              |
+| `LODY_WORKTREE_BRANCH`       | worktree 中簽出的分支                       |
+| `LODY_WORKTREE_SCRIPT_PHASE` | `setup` 或 `cleanup`                        |
+| `LODY_GITHUB_REPO`           | GitHub 儲存庫完整名稱，僅適用於 GitHub 專案 |
+| `LODY_LOCAL_PROJECT_ID`      | 本機專案 ID，僅適用於本機專案               |
+
+腳本程序啟動時也會將目前工作目錄設為 `LODY_WORKTREE_PATH`，因此指令可以使用 `pwd` 或明確指定的環境變數：
+
+```bash
+echo "$LODY_SESSION_ID"
+echo "$LODY_WORKTREE_PATH"
+pnpm install
+```
+
+## 下一步
+
+- [設定 Agent](/zh-hant/docs/quickstart) - 設定你偏好的 AI 編碼 Agent
+- [平行編碼 Agent](/zh-hant/docs/parallel-agents) - 多個工作階段、隔離的 worktree 與團隊可見性

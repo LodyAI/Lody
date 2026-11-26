@@ -18,24 +18,13 @@ import { MobileCreateWorkspaceSheet } from '@/components/mobile/mobile-create-wo
 import { AuthenticatedConvexContext } from '@/hooks/use-authenticated-convex';
 import type { LodyAuthClient } from '@/lib/auth';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import {
-  clearPendingE2eeWorkspace,
-  listPendingE2eeWorkspaces,
-  savePendingE2eeWorkspace,
-  setPendingE2eeWorkspaceArchived,
-} from '@/lib/e2ee-workspace-storage';
+import { clearPendingE2eeWorkspace, listPendingE2eeWorkspaces } from '@/lib/e2ee-workspace-storage';
 import { AuthProvider } from '@/providers/convex-provider';
 
 /* The real mobile create sheet in its encrypted-preview states. Every port is
    synthetic: no device key, network or real account is touched. */
 
 const user = { id: 'synthetic-mobile-create-user', name: 'Synthetic', email: 'a@example.com' };
-const pending = {
-  accountId: user.id,
-  requestId: 'synthetic-request',
-  name: 'Field notes',
-  slug: 'field-notes',
-};
 const local = createLocalPlatformProvider({
   session: createStaticStore({ status: 'authenticated', user }),
   workspaces: createStaticStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
@@ -117,48 +106,5 @@ export const EncryptedSelected: Story = {
   play: async () => {
     const body = within(document.body);
     await userEvent.click(await body.findByTestId('mobile-create-workspace-encrypted'));
-  },
-};
-
-/** A saved request reopens locked to its original name and handle. */
-export const ResumeSaved: Story = {
-  beforeEach: () => {
-    clearSaved();
-    savePendingE2eeWorkspace(localStorage, pending);
-  },
-};
-
-/** Continuing still could not confirm the result; the request stays saved. */
-export const ResumeFailed: Story = {
-  beforeEach: () => {
-    clearSaved();
-    savePendingE2eeWorkspace(localStorage, pending);
-  },
-  play: async () => {
-    const body = within(document.body);
-    await userEvent.click(
-      await body.findByRole('button', { name: /Continue saved creation|继续已保存的创建请求/ })
-    );
-    await body.findByRole('alert');
-  },
-};
-
-/** Two saved requests, one archived: the archive stays reachable for restore. */
-export const ArchivedRequest: Story = {
-  beforeEach: () => {
-    clearSaved();
-    const archived = {
-      ...pending,
-      requestId: 'synthetic-request-archived',
-      name: 'Staging check 2',
-      slug: 'staging-check-2',
-    };
-    savePendingE2eeWorkspace(localStorage, pending);
-    savePendingE2eeWorkspace(localStorage, archived);
-    setPendingE2eeWorkspaceArchived(localStorage, archived, true);
-  },
-  play: async () => {
-    const body = within(document.body);
-    await userEvent.click(await body.findByRole('button', { name: /Archived|已归档/ }));
   },
 };

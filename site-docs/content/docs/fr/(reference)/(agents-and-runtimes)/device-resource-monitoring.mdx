@@ -1,0 +1,145 @@
+---
+title: "Surveillance des ressources des appareils"
+description: "Surveillez l'utilisation CPU et mémoire de l'appareil, de la CLI Lody et des sessions ACP résidentes, inspectez les processus de session, libérez les ressources ACP et reprenez les conversations plus tard."
+---
+
+# Surveillance des ressources des appareils
+
+Lody peut afficher l'utilisation actuelle des ressources de chaque appareil connecté ainsi que celle de chaque session ACP qui y est
+résidente. Utilisez cette vue pour repérer un agent qui consomme du CPU ou de la mémoire, ouvrir sa session,
+ou arrêter son processus ACP sans supprimer la conversation.
+
+Ouvrez **Paramètres -> Appareils**, puis sélectionnez un appareil en ligne. La page commence l'échantillonnage automatiquement ;
+il n'y a pas de bouton d'actualisation manuelle.
+
+## Qu'est-ce qu'une session ACP résidente ?
+
+Chaque conversation utilise un processus ACP pour communiquer avec son agent de code. Ce processus peut rester
+résident une fois qu'un tour devient inactif, ce qui accélère le tour suivant mais continue de consommer un peu de
+mémoire. Le tableau des sessions ACP liste les conversations dont les processus d'agent sont actuellement présents
+sur l'appareil sélectionné.
+
+Il s'agit d'une vue des processus, et non d'une liste de toutes les conversations enregistrées. Une conversation dont le processus ACP
+est déjà arrêté reste dans Lody, mais n'apparaît plus dans ce tableau.
+
+## Résumé des ressources
+
+Le haut de la page distingue trois périmètres afin que leurs valeurs ne soient pas additionnées par erreur :
+
+| Périmètre | CPU | Mémoire |
+| --- | --- | --- |
+| **CLI** | Le processus de contrôle de la CLI Lody lui-même | Mémoire utilisée par le processus de contrôle de la CLI Lody |
+| **Sessions ACP** | CPU total utilisé par les arborescences de processus des sessions ACP résidentes | Mémoire totale utilisée par les arborescences de processus des sessions ACP résidentes |
+| **Infos de l'appareil** | CPU utilisé par l'ensemble de l'appareil, y compris Lody, les agents, le système d'exploitation et les autres applications | Mémoire utilisée / mémoire totale effective de l'appareil |
+
+**Les infos de l'appareil ne représentent pas la somme de la CLI et des sessions ACP.** Elles incluent également tous les autres processus sur la
+machine. À l'inverse, les valeurs de la CLI et des sessions ACP permettent d'identifier la part de l'utilisation de l'appareil qui revient à Lody.
+
+### Pourcentage CPU
+
+Les trois périmètres utilisent la même convention multicœur :
+
+- un cœur logique CPU pleinement utilisé correspond à `100%`
+- deux cœurs logiques pleinement utilisés correspondent à `200%`
+- sur un appareil à 8 cœurs, le maximum pratique de l'appareil est d'environ `800%`
+
+Par exemple, une session ACP utilisant 1,5 cœur affiche `150%`. De légers écarts entre les valeurs de l'appareil,
+de la CLI, du total agrégé et par session peuvent survenir car les échantillons sont collectés sur de courtes fenêtres
+et que la comptabilisation des arborescences de processus dépend de la plateforme.
+
+### Mémoire
+
+La mémoire correspond à l'empreinte résidente actuelle, et non à l'allocation cumulée. La méthode de comptabilisation exacte
+dépend du système d'exploitation : Lody utilise la comptabilisation cgroup lorsqu'elle est disponible et mesure sinon
+l'arborescence de processus concernée. Sur macOS, la mesure de l'empreinte physique (physical footprint) peut différer des valeurs affichées par
+des outils qui se contentent d'additionner le RSS.
+
+La valeur de l'appareil est affichée sous la forme **utilisée / total effectif**. Le « total effectif » peut correspondre à une limite mémoire de conteneur ou de
+cgroup plutôt qu'à la RAM installée sur l'hôte lorsque Lody s'exécute dans un environnement
+contraint. La mémoire disponible, les caches, les pages partagées et la comptabilisation propre à la plateforme peuvent faire qu'une somme manuelle
+des lignes diffère du total de l'appareil.
+
+### Pourquoi une valeur peut être `-`
+
+L'utilisation du CPU est calculée à partir de la variation entre deux échantillons ; elle est donc indisponible lors du premier
+échantillon après le démarrage de la surveillance ou le redémarrage de la CLI. Une session peut également afficher `-` pour le CPU, la mémoire ou
+le nombre de processus lorsque le système d'exploitation ne peut pas fournir une comptabilisation fiable pour son arborescence de processus.
+Attendez d'abord le prochain échantillon automatique ; si la valeur reste indisponible, vérifiez que l'appareil
+est en ligne et que sa CLI Lody est à jour.
+
+## Tableau des sessions ACP
+
+Chaque ligne identifie une conversation résidente :
+
+| Colonne | Signification |
+| --- | --- |
+| **Session** | Titre de la conversation, nom ACP et logo ACP. Sélectionnez-la pour ouvrir la session et l'onglet correspondants. Survolez un titre tronqué pour afficher le titre complet. |
+| **Statut** | L'état actuel du cycle de vie ou d'activité ACP |
+| **Mémoire** | Mémoire actuelle attribuée à l'arborescence de processus ACP de la session |
+| **CPU** | CPU utilisé par cette arborescence de processus, où un cœur logique complet correspond à `100%` |
+| **Processus** | Nombre de processus actuellement attribués à la session, y compris les processus enfants suivis |
+
+Le tableau affiche jusqu'à 100 sessions résidentes. Les mesures peuvent présenter un léger décalage par rapport à la création ou à la fin d'un processus,
+en particulier sur les plateformes où Lody estime l'appartenance à partir de l'arborescence de processus.
+
+### Référence des statuts
+
+| Statut | Signification |
+| --- | --- |
+| **Initialisation** | Lody démarre le processus ACP ou s'y connecte |
+| **En cours d'exécution** | L'agent traite activement un tour |
+| **En attente d'autorisation** | L'agent est en pause jusqu'à ce qu'une réponse soit apportée à une demande d'autorisation |
+| **Finalisation** | L'agent a terminé son travail principal et Lody achève le traitement final |
+| **Inactif** | Le processus ACP est résident mais ne traite aucun tour actuellement |
+| **Arrêt en cours** | Une demande d'arrêt est en cours et Lody attend la fin du processus |
+| **Échec** | La session résidente ou son processus ACP a rencontré une erreur |
+
+## Libérer les ressources d'une session ACP
+
+Sélectionnez l'icône d'arrêt à la fin d'une ligne de session pour mettre fin au processus ACP de cette session. L'arrêt
+d'un processus inactif démarre sans confirmation. Si l'agent est en cours d'exécution, en cours d'initialisation, en attente
+d'autorisation ou en cours de finalisation, Lody demande une confirmation car le tour actif sera interrompu.
+
+L'icône d'arrêt affiche un indicateur de chargement jusqu'à ce que le processus ACP se soit terminé et que la surveillance de l'appareil confirme que
+la session n'est plus résidente. Si l'arrêt échoue, Lody signale l'erreur et laisse la
+session disponible pour une nouvelle tentative.
+
+Mettre fin à un processus ACP :
+
+- arrête le tour d'agent en cours ainsi que ses processus enfants suivis
+- libère le CPU et la mémoire détenus par cette arborescence de processus résidente
+- conserve l'historique de conversation, les métadonnées de la session, la branche, le worktree et les fichiers du projet
+- n'archive ni ne supprime la session et ne récupère pas son espace disque
+
+Une commande ou une écriture de fichier interrompue n'est pas annulée automatiquement. Passez en revue les fichiers et le diff de la session
+si vous arrêtez un agent alors qu'il est en train d'effectuer des modifications.
+
+## Reprendre la conversation plus tard
+
+Vous pouvez revenir sur une session arrêtée à tout moment et envoyer un autre message. Lody redémarre le processus ACP
+et reprend la conversation à partir du contexte de session enregistré. Le premier nouveau tour
+peut prendre plus de temps pendant le démarrage et la reconnexion du runtime de l'agent, mais la conversation et les fichiers restent
+disponibles tout au long du processus.
+
+L'état local au processus et non enregistré disparaît lorsque le processus ACP est arrêté. Le contexte durable provient
+de la conversation enregistrée, de la prise en charge de la reprise par l'agent et des fichiers dans l'espace de travail de la session. Utilisez
+l'arrêt pour libérer du CPU et de la mémoire entre deux périodes de travail actif ; n'utilisez l'archivage ou la suppression que
+lorsque vous souhaitez également modifier la visibilité de la session ou récupérer de l'espace disque. Consultez [Sessions](/fr/docs/session)
+pour connaître le comportement d'archivage, de restauration et de suppression.
+
+## Rapports en direct, à la demande
+
+La surveillance des ressources est volontairement éphémère :
+
+- un appareil en ligne transmet et actualise des instantanés de ressources lorsqu'une personne consulte sa page d'appareil
+- la page se met à jour automatiquement tant qu'elle reste visible
+- les instantanés expirent et ne sont pas conservés sous forme d'historique chronologique de métriques
+- lorsque personne n'observe la page, Lody cesse de demander des échantillons de ressources en continu
+
+Si un appareil est partagé avec un espace de travail, les membres de l'espace de travail ayant accès à cet appareil peuvent consulter ses
+informations de ressources actuelles. Mettre fin à un processus ACP sur un appareil partagé affecte cette session pour
+tout le monde ; vérifiez donc le statut de la session avant d'arrêter le tour actif d'un autre membre. Le moniteur n'est
+ni un inspecteur de ligne de commande des processus, ni un substitut aux outils de profilage du système d'exploitation.
+
+Lorsqu'un appareil est hors ligne, Lody ne peut ni demander un nouvel échantillon ni mettre fin à ses processus ACP. Remettez
+la CLI en ligne, rouvrez **Paramètres -> Appareils**, puis attendez le premier échantillon.

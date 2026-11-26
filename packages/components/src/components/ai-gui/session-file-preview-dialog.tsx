@@ -140,21 +140,21 @@ export function SessionFilePreviewPanel({
         </Tabs.Root>
       ) : null}
       {!video ? (
-      <Button
-        type="button"
-        variant="ghost"
-        size="small"
-        icon
-        onClick={handleCopy}
-        disabled={status.kind !== 'loaded'}
-        aria-label={t('common.copy', 'Copy')}
-      >
-        {copied ? (
-          <Check {...stylex.props(styles.glyph, styles.glyphSuccess)} />
-        ) : (
-          <Copy {...stylex.props(styles.glyph)} />
-        )}
-      </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="small"
+          icon
+          onClick={handleCopy}
+          disabled={status.kind !== 'loaded'}
+          aria-label={t('common.copy', 'Copy')}
+        >
+          {copied ? (
+            <Check {...stylex.props(styles.glyph, styles.glyphSuccess)} />
+          ) : (
+            <Copy {...stylex.props(styles.glyph)} />
+          )}
+        </Button>
       ) : null}
 
       {onDownload && (
@@ -272,12 +272,7 @@ export function SessionFilePreviewPanel({
   } else if (pane) {
     content = <pre {...stylex.props(styles.paneRaw)}>{status.text}</pre>;
   } else {
-    content = (
-      <pre {...stylex.props(styles.raw)}>
-        {status.text}
-      </pre>
-
-    );
+    content = <pre {...stylex.props(styles.raw)}>{status.text}</pre>;
   }
 
   if (pane) {

@@ -1,0 +1,148 @@
+---
+title: "Votre première session"
+description: "Exécutez une petite session Lody de bout en bout : démarrez-la, orientez l'agent, examinez le diff et décidez quoi faire du résultat."
+---
+
+# Votre première session
+
+Le guide de [démarrage rapide](/fr/docs/quickstart) vous permet d'installer et de connecter Lody. Cette page couvre ce qu'il n'aborde pas : une session complète, d'une zone de saisie vide jusqu'à un résultat que vous avez examiné. Tout ce qui est présenté ici fonctionne sur un projet local, sans GitHub et sans exécuter plusieurs agents à la fois.
+
+<Callout type="info" title="Avant de commencer">
+- Lody est installé et vous êtes connecté. Sinon, suivez d'abord le [démarrage rapide](/fr/docs/quickstart).
+- Vous avez ajouté un projet — un simple répertoire local suffit. Consultez [Projets locaux](/fr/docs/local-project).
+- Vous disposez d'une Agent Config dont la vérification **Test** a réussi sur cette machine. Consultez [Agent Config](/fr/docs/quickstart).
+</Callout>
+
+## Choisir une tâche assez petite pour une seule session
+
+Une session est une conversation avec un agent autour d'une seule tâche. Lorsque la tâche est petite, vous pouvez examiner le résultat rapidement et l'agent dispose d'assez de contexte pour la mener à bien. Voici de bons exemples pour commencer :
+
+- « Ajoutez un endpoint `/health` qui renvoie la version de l'application. »
+- « Corrigez le test qui échoue dans `src/parser.test.ts` et expliquez-en la cause. »
+- « Renommez `fetchUser` en `getUser` dans tout le paquet et mettez à jour les appels. »
+
+Évitez de demander tout un ensemble de fonctionnalités dès la première session. Quand une seule session ne suffit plus, le [flux de travail recommandé](/fr/docs/workflow) explique comment découper le travail.
+
+<Callout title="Une session, une tâche" type="idea">
+Le reste de cette documentation repose sur cette habitude. Si une session commence à faire deux choses sans rapport entre elles, arrêtez-la et démarrez une deuxième session plutôt que d'allonger la première.
+</Callout>
+
+## Déroulement d'une session
+
+<Steps>
+<Step>
+
+### 1. Démarrer depuis la zone de saisie de la page d'accueil
+
+Ouvrez Lody et utilisez la zone de saisie sur la page d'accueil. Avant d'envoyer votre message, choisissez :
+
+- le **projet** (et la branche, pour un projet Git) ;
+- l'**Agent Config** et le **modèle** ;
+- le **périmètre d'autorisations** qui vous convient.
+
+Décrivez ensuite la tâche, en précisant le fichier ou le comportement concerné ainsi que vos critères de réussite.
+
+```text
+Add a /health endpoint that returns { "status": "ok", "version": <package version> }.
+Add one test that asserts the status and version fields. Do not change other routes.
+```
+
+</Step>
+<Step>
+
+### 2. Suivre le round
+
+Lody crée la session et diffuse en direct le travail de l'agent. Un **round** correspond à un tour de l'agent et aux modifications de fichiers qu'il a produites. Pendant qu'un round est en cours, vous pouvez :
+
+- envoyer un message de suivi pour [**orienter**](/fr/docs/claude-codex-capabilities#steer-a-running-task) la tâche en cours plutôt que d'attendre qu'elle se termine ;
+- poser une question dans un [**Side Chat**](/fr/docs/session#right-sidebar-browser-and-side-chat) sans interrompre la tâche principale, lorsque l'agent prend en charge le fork natif ;
+- arrêter le tour si l'agent part dans la mauvaise direction.
+
+</Step>
+<Step>
+
+### 3. Examiner le diff
+
+À la fin du round, la réponse affiche les fichiers modifiés ainsi que le nombre de lignes ajoutées et supprimées. Cliquez sur n'importe quel fichier pour l'ouvrir dans un [onglet de diff](/fr/docs/diff-viewer), ou utilisez la barre latérale **Files** et **Changes** pour parcourir toute la conversation.
+
+</Step>
+<Step>
+
+### 4. Demander le round suivant
+
+Poursuivez dans la même session. Limitez chaque message de suivi à un seul point :
+
+```text
+The test passes, but the version is read from package.json at request time.
+Read it once in a module constant instead, and keep the response shape the same.
+```
+
+Vous pouvez répéter le cycle « suivre, examiner, relancer » autant de fois que la tâche l'exige. Si la conversation s'allonge trop ou que l'agent perd le fil, démarrez plutôt une nouvelle session avec un bref résumé.
+
+</Step>
+<Step>
+
+### 5. Décider quoi faire du résultat
+
+Lorsque la modification vous semble correcte, plusieurs options s'offrent à vous :
+
+- **Conserver la branche.** Copiez le nom de la branche actuelle depuis la session, puis testez-la ou poussez-la depuis votre propre éditeur.
+- **L'ouvrir en local.** Sur ordinateur, utilisez **Open in** pour ouvrir le worktree dans votre éditeur.
+- **Créer une pull request.** Pour une session GitHub, utilisez **Create PR** au-dessus de la conversation. Lody associe la PR à la session et synchronise le statut CI. C'est le point de départ du [flux de travail recommandé](/fr/docs/workflow).
+- **Archiver la session.** Une fois le travail terminé, archivez-la depuis la barre latérale. L'archivage libère le worktree mais conserve la branche et la conversation afin que vous puissiez la restaurer plus tard. Consultez [Archiver les sessions](/fr/docs/session#archive-sessions).
+
+</Step>
+</Steps>
+
+## Erreurs courantes lors d'une première session
+
+<Accordions>
+<Accordion title="En demander trop d'un coup">
+Les prompts longs et en plusieurs parties compliquent autant le travail de l'agent que la relecture. Découpez le travail en sessions produisant chacune une modification facile à relire. Consultez [Agents de code en parallèle](/fr/docs/parallel-agents).
+</Accordion>
+<Accordion title="Ne pas sélectionner le projet ou l'Agent Config">
+Si aucun projet n'est sélectionné ou si le mauvais projet est choisi, l'agent travaille dans le mauvais répertoire. Vérifiez le projet, la branche, l'Agent Config et le modèle dans la zone de saisie avant d'envoyer.
+</Accordion>
+<Accordion title="Ne relire qu'à la toute fin">
+Les diffs par round sont rapides à lire et faciles à commenter. Relire chaque round évite qu'une mauvaise orientation ne se propage à l'ensemble des modifications.
+</Accordion>
+<Accordion title="Ne jamais archiver">
+Les sessions terminées conservent leur worktree sur disque. Archivez-les une fois le travail fusionné ou abandonné afin que la machine récupère l'espace.
+</Accordion>
+</Accordions>
+
+## Questions fréquentes
+
+### Ai-je besoin de GitHub pour une première session ?
+
+Non. GitHub ajoute les pull requests, le statut CI et la synchronisation des commentaires de revue, mais une session sur un projet local permet déjà de discuter, modifier des fichiers, afficher les diffs et tout relire en autonomie. Consultez [Projets locaux](/fr/docs/local-project).
+
+### Qu'est-ce qu'un « round » ?
+
+Un round est un tour de l'agent accompagné des modifications de fichiers produites pendant ce tour. Lody résume chaque round avec un diff afin que vous puissiez relire au fil de l'eau plutôt que d'avoir à parcourir un unique et volumineux diff final. Consultez la [visionneuse de diffs](/fr/docs/diff-viewer).
+
+### Que faire si l'agent modifie quelque chose que je n'ai pas demandé ?
+
+Ouvrez le diff du fichier, laissez un commentaire ou envoyez un message de suivi dans la même session pour que l'agent corrige le tir. Si la modification est sans rapport avec la tâche, demandez à l'agent de l'annuler afin de garder la session ciblée.
+
+### Puis-je arrêter une session en cours ?
+
+Oui. Utilisez le bouton d'arrêt dans la zone de saisie pour annuler le tour actif. Une session arrêtée reste dans la liste et vous pouvez la poursuivre avec un nouveau message.
+
+### Où va une session archivée ?
+
+Elle est déplacée vers la liste des archives en bas à droite de la barre latérale. La conversation et la branche sont conservées, et le worktree est recréé lorsque vous restaurez la session. Consultez [Archiver les sessions](/fr/docs/session#archive-sessions).
+
+## Étapes suivantes
+
+<Cards>
+  <Card href="/fr/docs/concepts" title="Concepts et glossaire">
+    Découvrez les objets qui sous-tendent les sessions, les Agent Configs, les rôles, les runtimes et les worktrees.
+  </Card>
+  <Card href="/fr/docs/workflow" title="Flux de travail recommandé">
+    Transformez une session ponctuelle en un flux de travail reproductible, de l'idée jusqu'à la PR.
+  </Card>
+  <Card href="/fr/docs/diff-viewer" title="Visionneuse de diffs">
+    Examinez en détail les modifications par round et sur l'ensemble de la conversation.
+  </Card>
+</Cards>

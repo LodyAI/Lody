@@ -142,6 +142,172 @@
   background: hsl(var(--landing-border, 214 32% 91%));
 }
 
+/* 8-language dropdown switcher (native <details>, seamless nav aesthetic). */
+.site-nav__lang {
+  position: relative;
+}
+
+.site-nav__lang-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.site-nav__lang-trigger {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2rem;
+  padding: 0 0.45rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: hsl(var(--landing-ink-muted, 215 16% 38%));
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.site-nav__lang-trigger:hover,
+.site-nav__lang[open] .site-nav__lang-trigger {
+  color: hsl(var(--landing-ink, 0 0% 10%));
+  background: hsl(var(--landing-ink, 0 0% 10%) / 0.06);
+}
+
+.site-nav__lang-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  opacity: 0.82;
+}
+
+.site-nav__lang-chevron {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.7;
+  transition: transform 0.18s ease;
+}
+
+.site-nav__lang[open] .site-nav__lang-chevron {
+  transform: rotate(180deg);
+}
+
+.site-nav__lang-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 10.5rem;
+  padding: 0.35rem;
+  border: 1px solid hsl(var(--landing-border, 214 32% 91%) / 0.55);
+  border-radius: 12px;
+  background: hsl(var(--landing-surface-1, 0 0% 100%) / 0.96);
+  box-shadow: 0 14px 36px hsl(210 40% 6% / 0.24);
+  -webkit-backdrop-filter: saturate(1.3) blur(16px);
+  backdrop-filter: saturate(1.3) blur(16px);
+}
+
+.site-nav__lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  color: hsl(var(--landing-ink-muted, 215 16% 38%));
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.site-nav__lang-option:hover {
+  background: hsl(var(--landing-ink, 0 0% 10%) / 0.06);
+  color: hsl(var(--landing-ink, 0 0% 10%));
+}
+
+.site-nav__lang-option[aria-current='true'] {
+  background: hsl(var(--landing-primary, 217 91% 60%) / 0.12);
+  color: hsl(var(--landing-ink, 0 0% 10%));
+  font-weight: 600;
+}
+
+.site-nav__lang-check {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: hsl(var(--landing-primary, 217 91% 60%));
+}
+
+.site-nav__menu-langs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.site-nav__menu-langs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.site-nav__menu-langs-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: hsl(var(--landing-ink-muted, 215 16% 38%));
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.site-nav__menu-lang-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.site-nav__menu-lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 9px;
+  color: hsl(var(--landing-ink-muted, 215 16% 38%));
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.site-nav__menu-lang-option:hover,
+.site-nav__menu-lang-option:active {
+  background: hsl(var(--landing-ink, 0 0% 10%) / 0.05);
+  color: hsl(var(--landing-ink, 0 0% 10%));
+}
+
+.site-nav__menu-lang-option[aria-current='true'] {
+  background: hsl(var(--landing-primary, 217 91% 60%) / 0.12);
+  color: hsl(var(--landing-ink, 0 0% 10%));
+  font-weight: 600;
+}
+
 /* Mobile menu primitives — hidden on desktop, revealed at <= 768px. */
 .site-nav__mobile {
   display: none;
@@ -277,8 +443,9 @@
 
   .site-nav__menu-footer {
     display: flex;
-    align-items: center;
-    gap: 1.35rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
     margin-top: 0.35rem;
     padding: 0.75rem 0.9rem 0.15rem;
     border-top: 1px solid hsl(var(--landing-border, 214 32% 91%) / 0.45);
@@ -362,6 +529,10 @@ html.dark .site-nav__backdrop {
 
 @media (prefers-reduced-motion: reduce) {
   .site-nav__link,
+  .site-nav__lang-trigger,
+  .site-nav__lang-chevron,
+  .site-nav__lang-option,
+  .site-nav__menu-lang-option,
   .site-nav__toggle,
   .site-nav__menu,
   .site-nav__menu-link,

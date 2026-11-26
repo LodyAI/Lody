@@ -14,27 +14,27 @@
  * "Product replica boundary".
  */
 
+import { localeCode, type SiteLocale } from '@site/src/site-pages/shared';
 import { Bell, Coins, DollarSign, Pencil, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AnthropicIcon, OpenAIIcon } from '../landing-replica/icons';
-import type { ReplicaLocale } from '../landing-replica/types';
 import { cn } from '../landing-replica/utils';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-type PreviewProps = { locale?: ReplicaLocale };
+type PreviewProps = { locale?: SiteLocale };
 
-function formatCompact(value: number, locale: ReplicaLocale): string {
-  return new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en', {
+function formatCompact(value: number, locale: SiteLocale): string {
+  return new Intl.NumberFormat(localeCode(locale), {
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value);
 }
 
-function formatUsd(value: number, locale: ReplicaLocale): string {
-  return new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en', {
+function formatUsd(value: number, locale: SiteLocale): string {
+  return new Intl.NumberFormat(localeCode(locale), {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
@@ -83,7 +83,7 @@ type QuotaCopy = {
   codex: QuotaProviderCopy;
 };
 
-const QUOTA_COPY: Record<ReplicaLocale, QuotaCopy> = {
+const QUOTA_COPY: Record<SiteLocale, QuotaCopy> = {
   en: {
     caption:
       'Mock data illustration. Claude Code and Codex subscription quota windows for machines running the Lody CLI.',
@@ -132,6 +132,161 @@ const QUOTA_COPY: Record<ReplicaLocale, QuotaCopy> = {
       windows: [
         { label: '5h', percent: 100, reset: '5 小时后重置' },
         { label: '7d', percent: 100, reset: '5 天后重置' },
+      ],
+    },
+  },
+  'zh-hant': {
+    caption: '模擬資料示意。已執行 Lody CLI 的機器上，Claude Code 與 Codex 的訂閱額度視窗。',
+    machines: '機器',
+    myMachines: '我的機器',
+    otherMachines: '其他機器',
+    machineName: 'machine',
+    machineMeta: 'linux | v0.31.13-next.1',
+    otherMachineName: 'jimmy',
+    otherMachineMeta: 'linux | v0.31.6-next.1',
+    owner: '擁有者：Zixuan Chen',
+    claude: {
+      name: 'Claude',
+      windows: [
+        { label: '5h', percent: 90, reset: '10 小時後重設' },
+        { label: '7d', percent: 98, reset: '6 天後重設' },
+      ],
+    },
+    codex: {
+      name: 'Codex',
+      windows: [
+        { label: '5h', percent: 100, reset: '5 小時後重設' },
+        { label: '7d', percent: 100, reset: '5 天後重設' },
+      ],
+    },
+  },
+  ja: {
+    caption:
+      'モックデータの表示例です。Lody CLI を実行しているマシンでの Claude Code と Codex のサブスクリプションクォータ枠を示しています。',
+    machines: 'マシン',
+    myMachines: '自分のマシン',
+    otherMachines: '他のマシン',
+    machineName: 'machine',
+    machineMeta: 'linux | v0.31.13-next.1',
+    otherMachineName: 'jimmy',
+    otherMachineMeta: 'linux | v0.31.6-next.1',
+    owner: '所有者：Zixuan Chen',
+    claude: {
+      name: 'Claude',
+      windows: [
+        { label: '5h', percent: 90, reset: '10 時間後にリセット' },
+        { label: '7d', percent: 98, reset: '6 日後にリセット' },
+      ],
+    },
+    codex: {
+      name: 'Codex',
+      windows: [
+        { label: '5h', percent: 100, reset: '5 時間後にリセット' },
+        { label: '7d', percent: 100, reset: '5 日後にリセット' },
+      ],
+    },
+  },
+  ko: {
+    caption:
+      '모의 데이터 예시입니다. Lody CLI를 실행 중인 머신의 Claude Code 및 Codex 구독 할당량 구간을 보여줍니다.',
+    machines: '머신',
+    myMachines: '내 머신',
+    otherMachines: '다른 머신',
+    machineName: 'machine',
+    machineMeta: 'linux | v0.31.13-next.1',
+    otherMachineName: 'jimmy',
+    otherMachineMeta: 'linux | v0.31.6-next.1',
+    owner: '소유자: Zixuan Chen',
+    claude: {
+      name: 'Claude',
+      windows: [
+        { label: '5h', percent: 90, reset: '10시간 후 초기화' },
+        { label: '7d', percent: 98, reset: '6일 후 초기화' },
+      ],
+    },
+    codex: {
+      name: 'Codex',
+      windows: [
+        { label: '5h', percent: 100, reset: '5시간 후 초기화' },
+        { label: '7d', percent: 100, reset: '5일 후 초기화' },
+      ],
+    },
+  },
+  es: {
+    caption:
+      'Ilustración con datos de ejemplo. Ventanas de cuota de suscripción de Claude Code y Codex en máquinas que ejecutan Lody CLI.',
+    machines: 'Máquinas',
+    myMachines: 'Mis máquinas',
+    otherMachines: 'Otras máquinas',
+    machineName: 'machine',
+    machineMeta: 'linux | v0.31.13-next.1',
+    otherMachineName: 'jimmy',
+    otherMachineMeta: 'linux | v0.31.6-next.1',
+    owner: 'Propietario: Zixuan Chen',
+    claude: {
+      name: 'Claude',
+      windows: [
+        { label: '5h', percent: 90, reset: 'Se restablece en 10 h' },
+        { label: '7d', percent: 98, reset: 'Se restablece en 6 d' },
+      ],
+    },
+    codex: {
+      name: 'Codex',
+      windows: [
+        { label: '5h', percent: 100, reset: 'Se restablece en 5 h' },
+        { label: '7d', percent: 100, reset: 'Se restablece en 5 d' },
+      ],
+    },
+  },
+  fr: {
+    caption:
+      'Illustration avec des données factices. Fenêtres de quota d’abonnement Claude Code et Codex sur les machines exécutant Lody CLI.',
+    machines: 'Machines',
+    myMachines: 'Mes machines',
+    otherMachines: 'Autres machines',
+    machineName: 'machine',
+    machineMeta: 'linux | v0.31.13-next.1',
+    otherMachineName: 'jimmy',
+    otherMachineMeta: 'linux | v0.31.6-next.1',
+    owner: 'Propriétaire : Zixuan Chen',
+    claude: {
+      name: 'Claude',
+      windows: [
+        { label: '5h', percent: 90, reset: 'Réinitialisation dans 10 h' },
+        { label: '7d', percent: 98, reset: 'Réinitialisation dans 6 j' },
+      ],
+    },
+    codex: {
+      name: 'Codex',
+      windows: [
+        { label: '5h', percent: 100, reset: 'Réinitialisation dans 5 h' },
+        { label: '7d', percent: 100, reset: 'Réinitialisation dans 5 j' },
+      ],
+    },
+  },
+  ru: {
+    caption:
+      'Иллюстрация с демонстрационными данными. Окна квот подписок Claude Code и Codex для машин, на которых запущен Lody CLI.',
+    machines: 'Машины',
+    myMachines: 'Мои машины',
+    otherMachines: 'Другие машины',
+    machineName: 'machine',
+    machineMeta: 'linux | v0.31.13-next.1',
+    otherMachineName: 'jimmy',
+    otherMachineMeta: 'linux | v0.31.6-next.1',
+    owner: 'Владелец: Zixuan Chen',
+    claude: {
+      name: 'Claude',
+      windows: [
+        { label: '5h', percent: 90, reset: 'Сброс через 10 ч' },
+        { label: '7d', percent: 98, reset: 'Сброс через 6 дн.' },
+      ],
+    },
+    codex: {
+      name: 'Codex',
+      windows: [
+        { label: '5h', percent: 100, reset: 'Сброс через 5 ч' },
+        { label: '7d', percent: 100, reset: 'Сброс через 5 дн.' },
       ],
     },
   },
@@ -266,9 +421,10 @@ type UsageCopy = {
   tokens: string;
   cost: string;
   byModel: string;
+  otherModel: string;
 };
 
-const USAGE_COPY: Record<ReplicaLocale, UsageCopy> = {
+const USAGE_COPY: Record<SiteLocale, UsageCopy> = {
   en: {
     caption:
       'Mock data illustration. Token and cost totals in Settings → Stats, with a by-model usage chart.',
@@ -277,6 +433,7 @@ const USAGE_COPY: Record<ReplicaLocale, UsageCopy> = {
     tokens: 'Tokens',
     cost: 'Cost (USD)',
     byModel: 'By model',
+    otherModel: 'Other',
   },
   zh: {
     caption: '模拟数据示意。设置 → Stats 中的 Token 与费用统计，以及按模型的用量图表。',
@@ -285,6 +442,66 @@ const USAGE_COPY: Record<ReplicaLocale, UsageCopy> = {
     tokens: 'Token',
     cost: '费用 (USD)',
     byModel: '按模型',
+    otherModel: '其他',
+  },
+  'zh-hant': {
+    caption: '模擬資料示意。設定 → Stats 中的 Token 與費用統計，以及依模型分類的使用量圖表。',
+    workspace: 'lody',
+    rangeLabels: { day: '日', week: '週', month: '月', total: '全部' },
+    tokens: 'Token',
+    cost: '費用 (USD)',
+    byModel: '依模型',
+    otherModel: '其他',
+  },
+  ja: {
+    caption:
+      'モックデータの表示例です。設定 → Stats のトークン数とコスト合計、およびモデル別使用量グラフを示しています。',
+    workspace: 'lody',
+    rangeLabels: { day: '日', week: '週', month: '月', total: '全期間' },
+    tokens: 'トークン',
+    cost: 'コスト (USD)',
+    byModel: 'モデル別',
+    otherModel: 'その他',
+  },
+  ko: {
+    caption:
+      '모의 데이터 예시입니다. 설정 → Stats의 토큰 및 비용 합계와 모델별 사용량 차트를 보여줍니다.',
+    workspace: 'lody',
+    rangeLabels: { day: '일', week: '주', month: '월', total: '전체' },
+    tokens: '토큰',
+    cost: '비용 (USD)',
+    byModel: '모델별',
+    otherModel: '기타',
+  },
+  es: {
+    caption:
+      'Ilustración con datos de ejemplo. Totales de tokens y coste en Ajustes → Stats, con un gráfico de uso por modelo.',
+    workspace: 'lody',
+    rangeLabels: { day: 'Día', week: 'Semana', month: 'Mes', total: 'Total' },
+    tokens: 'Tokens',
+    cost: 'Coste (USD)',
+    byModel: 'Por modelo',
+    otherModel: 'Otros',
+  },
+  fr: {
+    caption:
+      'Illustration avec des données factices. Totaux de jetons et de coût dans Paramètres → Stats, avec un graphique d’utilisation par modèle.',
+    workspace: 'lody',
+    rangeLabels: { day: 'Jour', week: 'Semaine', month: 'Mois', total: 'Total' },
+    tokens: 'Jetons',
+    cost: 'Coût (USD)',
+    byModel: 'Par modèle',
+    otherModel: 'Autres',
+  },
+  ru: {
+    caption:
+      'Иллюстрация с демонстрационными данными. Суммарные токены и расходы в Настройки → Stats с графиком использования по моделям.',
+    workspace: 'lody',
+    rangeLabels: { day: 'День', week: 'Неделя', month: 'Месяц', total: 'Всего' },
+    tokens: 'Токены',
+    cost: 'Расходы (USD)',
+    byModel: 'По моделям',
+    otherModel: 'Другие',
   },
 };
 
@@ -451,7 +668,7 @@ function UsageKpiCard({
   );
 }
 
-function UsageStackedAreaChart({ locale }: { locale: ReplicaLocale }) {
+function UsageStackedAreaChart({ locale }: { locale: SiteLocale }) {
   const chart = USAGE_CHART;
   const formatAxis = (value: number) => formatCompact(value, locale);
 
@@ -536,6 +753,7 @@ export function UsagePreview({ locale = 'en' }: PreviewProps) {
   const copy = USAGE_COPY[locale];
   const modelTotals = USAGE_MODEL_TOTALS.map((model) => ({
     ...model,
+    label: model.id === 'other' ? copy.otherModel : model.label,
     formattedTotal: formatCompact(model.total, locale),
   }));
 
@@ -612,7 +830,7 @@ type NotificationCopy = {
   mobile: MobileNotificationCopy;
 };
 
-const NOTIFICATION_COPY: Record<ReplicaLocale, NotificationCopy> = {
+const NOTIFICATION_COPY: Record<SiteLocale, NotificationCopy> = {
   en: {
     browser: {
       title: 'lody.ai wants to',
@@ -647,9 +865,114 @@ const NOTIFICATION_COPY: Record<ReplicaLocale, NotificationCopy> = {
       caption: '模拟 iOS 通知横幅。该横幅由操作系统提供，并非 Lody 应用界面。',
     },
   },
+  'zh-hant': {
+    browser: {
+      title: 'lody.ai 想要',
+      prompt: '顯示通知',
+      block: '封鎖',
+      allow: '允許',
+      caption: '模擬瀏覽器通知權限提示。此對話框由瀏覽器提供，並非 Lody 應用程式介面。',
+    },
+    mobile: {
+      app: '來自 Lody',
+      title: '縮小標題字型大小',
+      body: 'Pull Request #215 已準備好供審查',
+      now: '現在',
+      caption: '模擬 iOS 通知橫幅。此橫幅由作業系統提供，並非 Lody 應用程式介面。',
+    },
+  },
+  ja: {
+    browser: {
+      title: 'lody.ai が次の許可を求めています',
+      prompt: '通知を表示',
+      block: 'ブロック',
+      allow: '許可',
+      caption:
+        'ブラウザーの通知許可ダイアログの代表例です。このダイアログはブラウザー側が提供しており、Lody アプリの一部ではありません。',
+    },
+    mobile: {
+      app: 'Lody から',
+      title: 'タイトルの文字サイズを小さくする',
+      body: 'Pull Request #215 のレビュー準備が整いました',
+      now: 'たった今',
+      caption:
+        'iOS 通知バナーの代表例です。このバナーは OS が提供しており、Lody アプリの一部ではありません。',
+    },
+  },
+  ko: {
+    browser: {
+      title: 'lody.ai에서 다음 권한을 요청합니다',
+      prompt: '알림 표시',
+      block: '차단',
+      allow: '허용',
+      caption:
+        '브라우저 알림 권한 프롬프트 예시입니다. 이 대화상자는 브라우저가 제공하며 Lody 앱의 일부가 아닙니다.',
+    },
+    mobile: {
+      app: 'Lody에서 보냄',
+      title: '제목 글꼴 크기 줄이기',
+      body: 'Pull Request #215 검토 준비 완료',
+      now: '지금',
+      caption: 'iOS 알림 배너 예시입니다. 이 배너는 운영체제가 제공하며 Lody 앱의 일부가 아닙니다.',
+    },
+  },
+  es: {
+    browser: {
+      title: 'lody.ai quiere',
+      prompt: 'Mostrar notificaciones',
+      block: 'Bloquear',
+      allow: 'Permitir',
+      caption:
+        'Aviso de permisos del navegador de ejemplo. El navegador controla este diálogo; no forma parte de la aplicación Lody.',
+    },
+    mobile: {
+      app: 'de Lody',
+      title: 'Reducir el tamaño de fuente del título',
+      body: 'El Pull Request #215 está listo para revisar',
+      now: 'ahora',
+      caption:
+        'Banner de notificación de iOS de ejemplo. El sistema operativo controla este banner; no forma parte de la aplicación Lody.',
+    },
+  },
+  fr: {
+    browser: {
+      title: 'lody.ai souhaite',
+      prompt: 'Afficher les notifications',
+      block: 'Bloquer',
+      allow: 'Autoriser',
+      caption:
+        'Exemple de demande d’autorisation du navigateur. Cette boîte de dialogue appartient au navigateur et ne fait pas partie de l’application Lody.',
+    },
+    mobile: {
+      app: 'de Lody',
+      title: 'Réduire la taille de police du titre',
+      body: 'La Pull Request #215 est prête à être relue',
+      now: 'maintenant',
+      caption:
+        'Exemple de bannière de notification iOS. Cette bannière appartient au système d’exploitation et ne fait pas partie de l’application Lody.',
+    },
+  },
+  ru: {
+    browser: {
+      title: 'lody.ai запрашивает разрешение на',
+      prompt: 'Показ уведомлений',
+      block: 'Блокировать',
+      allow: 'Разрешить',
+      caption:
+        'Пример системного запроса разрешений браузера. Это окно принадлежит браузеру и не является частью приложения Lody.',
+    },
+    mobile: {
+      app: 'от Lody',
+      title: 'Уменьшить размер шрифта заголовка',
+      body: 'Pull Request #215 готов к ревью',
+      now: 'сейчас',
+      caption:
+        'Пример баннера уведомлений iOS. Этот баннер принадлежит операционной системе и не является частью приложения Lody.',
+    },
+  },
 };
 
-function BrowserNotificationPreview({ locale }: { locale: ReplicaLocale }) {
+function BrowserNotificationPreview({ locale }: { locale: SiteLocale }) {
   const copy = NOTIFICATION_COPY[locale].browser;
   return (
     <div className="inline-block w-full max-w-sm overflow-hidden rounded-xl border border-border bg-card p-3 text-card-foreground shadow-lg">
@@ -673,7 +996,7 @@ function BrowserNotificationPreview({ locale }: { locale: ReplicaLocale }) {
   );
 }
 
-function MobileNotificationPreview({ locale }: { locale: ReplicaLocale }) {
+function MobileNotificationPreview({ locale }: { locale: SiteLocale }) {
   const copy = NOTIFICATION_COPY[locale].mobile;
   return (
     <div className="mx-auto flex w-full max-w-md items-center gap-3 rounded-[20px] border border-border/70 bg-card/95 p-3 text-card-foreground shadow-lg backdrop-blur">

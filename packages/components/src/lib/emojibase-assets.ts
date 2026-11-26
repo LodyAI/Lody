@@ -8,6 +8,8 @@
  * are expected to work offline.
  */
 
+import { normalizeSupportedLanguage, type SupportedLanguage } from '@lody/shared/language';
+
 /** Path segment under the app's base URL. The Vite plugin emits into it. */
 export const EMOJIBASE_ASSET_DIRECTORY = 'emojibase';
 
@@ -19,9 +21,29 @@ export const EMOJIBASE_ASSET_DIRECTORY = 'emojibase';
  * displayed in. Declared here rather than in the plugin so the resolver below
  * cannot ask for a file the build never wrote.
  */
-export const EMOJIBASE_BUNDLED_LOCALES = ['en', 'zh'] as const;
+export const EMOJIBASE_BUNDLED_LOCALES = [
+  'en',
+  'zh',
+  'zh-hant',
+  'ja',
+  'ko',
+  'es',
+  'fr',
+  'ru',
+] as const;
 
 export type EmojibaseLocale = (typeof EMOJIBASE_BUNDLED_LOCALES)[number];
+
+const SUPPORTED_TO_EMOJIBASE: Record<SupportedLanguage, EmojibaseLocale> = {
+  en: 'en',
+  zh_CN: 'zh',
+  zh_Hant: 'zh-hant',
+  ja: 'ja',
+  ko: 'ko',
+  es: 'es',
+  fr: 'fr',
+  ru: 'ru',
+};
 
 /**
  * The bundled dataset's base URL.
@@ -41,11 +63,9 @@ export const getBundledEmojibaseUrl = (): string | undefined => {
   if (typeof document === 'undefined' || typeof window === 'undefined') return undefined;
   // This module is also followed by Electron's Node-side config typecheck,
   // whose ambient ImportMetaEnv intentionally contains only main-process keys.
-  const base =
-    ((import.meta.env as { readonly BASE_URL?: string } | undefined)?.BASE_URL || '/').replace(
-      /\/*$/,
-      '/'
-    );
+  const base = (
+    (import.meta.env as { readonly BASE_URL?: string } | undefined)?.BASE_URL || '/'
+  ).replace(/\/*$/, '/');
   return base.startsWith('/')
     ? new URL(`${base}${EMOJIBASE_ASSET_DIRECTORY}`, window.location.origin).href
     : new URL(`${base}${EMOJIBASE_ASSET_DIRECTORY}`, document.baseURI).href;
@@ -55,10 +75,9 @@ export const getBundledEmojibaseUrl = (): string | undefined => {
  * The picker's locale for a product language tag.
  *
  * Emoji labels and category names are the picker's own copy, so they follow the
- * product language rather than the host OS. `zh_CN` and friends collapse to the
- * one Simplified Chinese dataset that is bundled.
+ * product language rather than the host OS.
  */
 export const resolveEmojibaseLocale = (language: string | undefined): EmojibaseLocale => {
-  const base = (language ?? '').toLowerCase().replace('_', '-').split('-')[0];
-  return EMOJIBASE_BUNDLED_LOCALES.find((locale) => locale === base) ?? 'en';
+  const normalized = normalizeSupportedLanguage(language);
+  return normalized ? SUPPORTED_TO_EMOJIBASE[normalized] : 'en';
 };

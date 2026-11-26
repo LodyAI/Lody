@@ -1,0 +1,115 @@
+---
+title: "Comment partager une session Claude Code avec votre équipe (un vrai passage de relais, pas un simple lien)"
+date: 2026-09-04
+author: Lody Team
+authorLink: https://lody.ai
+description: "Une capture d'écran, un export ou un lien à la Lore ne constitue pas un passage de relais. Invitez un collègue dans la même session Claude Code sur Lody afin qu'il puisse poursuivre la conversation, les diffs et le worktree."
+tag: "Guide"
+sidebar: false
+aside: false
+---
+
+Vous passez une heure dans une session Claude Code. L'agent connaît déjà le contexte du dépôt, les pistes abandonnées et dispose d'un correctif à moitié rédigé. Puis un collègue doit prendre le relais.
+
+Le réflexe habituel consiste à envoyer une capture d'écran, exporter la transcription ou coller un lien de partage à la ChatGPT. Ces méthodes permettent à quelqu'un de **lire** ce qui s'est passé. Elles ne lui permettent pas d'ouvrir la **même** session pour continuer.
+
+C'est précisément le sujet de cet article : comment partager une session Claude Code comme un véritable passage de relais, et non comme un simple souvenir.
+
+## Pourquoi un lien de partage n'est pas un passage de relais
+
+La plupart des méthodes pour « partager ma session Claude Code » ne font que publier un historique :
+
+- Une **capture d'écran** ne montre qu'un extrait de la discussion. La personne suivante ne peut ni y effectuer de recherche, ni la poursuivre, ni voir les fichiers réellement modifiés par l'agent.
+- Un **export Markdown / transcription** est un texte statique. Votre collègue peut le coller dans une nouvelle discussion en espérant que le modèle reconstruise le contexte, mais il repart de zéro.
+- Un **lien de partage à la ChatGPT** est un instantané en lecture seule. Pratique pour « regarde ça », inutile pour « à toi de jouer pour la suite ».
+- Un **lien à la [Lore](https://lore.link/share)** restitue le fil — prompts, appels d'outils, fichiers modifiés — et peut amorcer une **nouvelle** exécution d'agent. La session d'origine reste là où elle a tourné. Votre collègue ne la rejoint pas.
+
+Aucune de ces approches ne place un collègue dans la conversation en direct, sur les mêmes diffs, dans le même worktree. S'il doit réexpliquer la tâche, le passage de relais a déjà échoué.
+
+## Ce que signifie poursuivre la même session
+
+Dans Lody, un [passage de relais d'une session d'agent de code](/fr/docs/session-handoff/) signifie qu'un membre de votre espace de travail ouvre la session que vous avez déjà démarrée et la poursuit.
+
+Il récupère :
+
+- la [conversation](/fr/docs/session) en direct
+- les [diffs](/fr/docs/diff-viewer) de fichiers produits par l'agent
+- le [worktree](/fr/docs/worktrees) et la branche de la session
+- la même [configuration d'agent](/fr/docs/quickstart) — y compris Claude Code — afin de pouvoir envoyer le prompt suivant
+
+Ce n'est ni un fork, ni un nouveau fil dans le compositeur. Il ouvre **cette** session.
+
+Lody permet toujours de [copier une conversation en Markdown](/fr/docs/copy-md) lorsque vous n'avez besoin que d'une trace écrite. Copier l'URL d'une session sans la partager n'accorde pas non plus l'accès : le lien continue de fonctionner uniquement pour le propriétaire.
+
+## Comparatif des options habituelles
+
+| Approche | Ce que reçoit le collègue | Même session en direct ? |
+| --- | --- | --- |
+| Capture d'écran | Une image de la discussion | Non |
+| Export transcription / Markdown | Du texte statique à coller ailleurs | Non — il démarre une nouvelle discussion |
+| Lien de partage à la ChatGPT | Un instantané de conversation en lecture seule | Non |
+| [Lore](https://lore.link/share) | Un fil mis en forme que l'on peut consulter ou forker vers une **nouvelle** session d'agent | Non — la session d'origine reste là où elle a tourné |
+| **Lody** | La [session](/fr/docs/session) existante de l'espace de travail | **Oui** — il l'ouvre et continue |
+
+Lore assume ce qu'il est : une visionneuse, et parfois un moyen de lancer une *nouvelle* exécution à partir d'un contexte condensé. Lody répond à l'autre besoin : inviter quelqu'un dans la session existante.
+
+La comparaison complète, incluant SpecStory et le modèle de permissions, se trouve dans [Partager une session d'agent de code](/fr/docs/session-handoff/).
+
+## Comment passer le relais sur une session Claude Code dans Lody
+
+Le passage de relais s'effectue au sein d'un espace de travail d'équipe. La session doit exister dans un espace de travail Lody, et l'autre personne doit en être membre. Les étapes ci-dessous reprennent le guide produit ; consultez cette page si vous souhaitez connaître tous les cas particuliers liés aux permissions.
+
+### 1. Inviter votre collègue dans l'espace de travail
+
+1. Ouvrez **Settings** -> **Workspace** -> **General**.
+2. Dans la section **Members**, cliquez sur **Invite Member**.
+3. Saisissez son adresse e-mail et choisissez un rôle.
+4. Il peut accepter l'invitation depuis l'e-mail, ou vous pouvez copier le lien d'invitation et le lui envoyer directement.
+
+Détails : [Inviter des membres](/fr/docs/team#invite-members).
+
+### 2. Rendre la session visible pour l'équipe
+
+Les nouvelles machines restent **privées** par défaut. Une session n'est visible par l'équipe que lorsque les ressources sur lesquelles elle s'exécute sont partagées.
+
+Depuis la session :
+
+1. Ouvrez le menu `...` de la session, ou le bouton **Private** dans l'en-tête de session de l'application desktop.
+2. Choisissez **Share with team…** (le libellé peut afficher **Share device with team…** ou **Share project with team…** selon les autorisations manquantes).
+3. Confirmez. Lody partage la machine requise et, s'il s'agit d'un projet local, le projet, puis copie un lien.
+
+Seul le **propriétaire de l'appareil** peut effectuer le partage. Si l'appareil n'est pas enregistré pour l'accès en équipe, enregistrez-le d'abord. Vous pouvez également partager une machine depuis **Settings** -> **Machines** -> **Share machine** sans ouvrir de session particulière. Consultez [Visibilité des machines en équipe](/fr/docs/team#team-machine-visibility).
+
+Le partage d'une session peut partager sa machine et/ou son projet local avec tous les membres de l'espace de travail. D'autres conversations présentes sur cet appareil peuvent alors également devenir visibles. La boîte de dialogue de confirmation précise la portée exacte avant que vous ne validiez.
+
+### 3. Diriger votre collègue vers la session
+
+Une fois la session visible par l'équipe :
+
+- Envoyez-lui le lien de session copié, ou
+- Demandez-lui d'ouvrir la liste des sessions sur la page d'accueil. S'il ne voit que ses propres conversations, il lui suffit de passer le filtre de la barre latérale de **My Tasks** à **All Tasks** (sur mobile, **Team Tasks**). Les avatars indiquent qui a démarré chaque session. La liste affiche **All Tasks** par défaut.
+
+Il doit ouvrir **cette** session — ni un fork, ni un nouveau fil dans le compositeur.
+
+### 4. Votre collègue poursuit le travail
+
+Une fois dans la session, il peut lire l'intégralité de la conversation, passer en revue les diffs actuels, continuer à travailler dans le même worktree et sur la même branche, et envoyer le prompt suivant à la même configuration d'agent Claude Code (ou autre).
+
+Le fork est un autre outil : il copie l'historique dans une **nouvelle** session sur la même machine et dans le même répertoire. Utilisez le fork lorsque vous souhaitez créer une branche privée de la conversation. Utilisez le partage lorsque vous voulez qu'un collègue rejoigne la session d'origine. Consultez [Forker une session](/fr/docs/session#fork-a-session).
+
+Pour coordonner plusieurs conversations depuis un même agent, consultez [Contrôle des sessions d'agent](/fr/docs/session-orchestration).
+
+## S'il ne voit pas la session
+
+Vérifiez trois points : il a accepté l'invitation à l'espace de travail, la machine (et le projet local, le cas échéant) est partagée, et il consulte **All Tasks** plutôt que **My Tasks**. Les machines non partagées ne synchronisent jamais leurs conversations dans la barre latérale des autres membres.
+
+Rejoindre un espace de travail n'expose **pas** votre ordinateur portable. Les machines restent privées tant que vous ne les partagez pas. Les configurations d'agent peuvent être partagées séparément afin que vos collègues utilisent la même configuration CLI ; consultez [Configuration d'agent](/fr/docs/quickstart) et [Fonctionnalités d'équipe](/fr/docs/team).
+
+## Quand vous n'avez besoin que d'une trace écrite
+
+Si votre collègue a seulement besoin de lire ce qui s'est passé, copiez un message ou utilisez **Copy as Markdown** dans le menu de la session. Il s'agit d'une transcription, pas d'un passage de relais. Consultez [Copier des conversations](/fr/docs/copy-md).
+
+## Pour commencer
+
+- [Télécharger Lody](/fr/download)
+- Guide produit : [Partager une session d'agent de code](/fr/docs/session-handoff/)

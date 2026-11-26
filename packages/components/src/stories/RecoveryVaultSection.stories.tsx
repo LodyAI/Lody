@@ -1,6 +1,7 @@
 import { colors as uiColors } from '@lody/ui/tokens/colors.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from 'storybook/test';
 import { createStore, Provider } from 'jotai';
 import { developerModeEnabledAtom, e2eeRecoveryVaultEnabledAtom } from '@/atoms/settings';
 import { RecoveryVaultSection } from '@/components/settings/e2ee/recovery-vault-section';
@@ -212,6 +213,86 @@ export const RestoreInProgress: Story = {
   },
 };
 
+export const PasswordDialogOpen: Story = {
+  args: { plan: 'unreadable' },
+  render: () => {
+    const plan: RecoveryPlan = {
+      hasVault: true,
+      replacing: false,
+      methods: { hasFile: true, hasPassword: false, hasPasskey: false },
+      covered: [{ id: 'design', name: 'Design', status: { kind: 'saved' } }],
+      uncovered: [],
+    };
+    const port: RecoveryPort = {
+      ...browserPort(plan as unknown as Plan, true),
+      setPassword: async () => ({ outcome: 'updated' as const }),
+    };
+    const store = createStore();
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    return (
+      <Provider store={store}>
+        <E2eeRecoveryHostContext.Provider value={{ port }}>
+          <div {...stylex.props(themeStyles.glyph)}>
+            <RecoveryVaultSection accountId="synthetic-preview" />
+          </div>
+        </E2eeRecoveryHostContext.Provider>
+      </Provider>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole('button', {
+        name: /Set password|设置恢复密码|Set recovery password/i,
+      })
+    );
+    const body = within(document.body);
+    await expect(await body.findByTestId('e2ee-recovery-new-password')).toBeVisible();
+  },
+};
+
+export const RestoreError: Story = {
+  args: { plan: 'unreadable' },
+  render: () => {
+    const plan: RecoveryPlan = {
+      hasVault: true,
+      replacing: false,
+      methods: { hasFile: true, hasPassword: false, hasPasskey: false },
+      covered: [],
+      uncovered: [{ id: 'design', name: 'Design' }],
+    };
+    const port: RecoveryPort = {
+      ...browserPort(plan as unknown as Plan, false),
+      restore: async () => {
+        throw new Error('e2ee_recovery_wrong_file');
+      },
+    };
+    const store = createStore();
+    store.set(e2eeRecoveryVaultEnabledAtom, true);
+    return (
+      <Provider store={store}>
+        <E2eeRecoveryHostContext.Provider value={{ port }}>
+          <div {...stylex.props(themeStyles.glyph)}>
+            <RecoveryVaultSection accountId="synthetic-preview" />
+          </div>
+        </E2eeRecoveryHostContext.Provider>
+      </Provider>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole('button', { name: /Restore from file|从恢复文件恢复|Restore/i })
+    );
+    await expect(await canvas.findByRole('alert')).toBeVisible();
+  },
+};
+
 const themeStyles = stylex.create({
-  glyph: { width: '100%', maxWidth: '640px', backgroundColor: uiColors.background, padding: 'calc(var(--spacing) * 4)' },
+  glyph: {
+    width: '100%',
+    maxWidth: '640px',
+    backgroundColor: uiColors.background,
+    padding: 'calc(var(--spacing) * 4)',
+  },
 });

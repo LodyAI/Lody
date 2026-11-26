@@ -1262,7 +1262,7 @@ it('consumes inline mailbox put and epoch staging readbacks once, falls back on 
       revision: 0,
       status: 'EnvelopeStored',
     });
-    // Single-use: second read and status go back to the server.
+    // Single-use inline read goes back to the server; status populates withinRoundCache.
     expect(await Effect.runPromise(mailbox.read(id))).toEqual(frame);
     expect(await Effect.runPromise(mailbox.status(target))).toEqual({
       ...target,
@@ -1282,7 +1282,6 @@ it('consumes inline mailbox put and epoch staging readbacks once, falls back on 
       expect(calls.map((c) => c.name)).toEqual([
         'e2eeMailbox:put',
         'e2eeMailbox:read',
-        'e2eeMailbox:status',
         'e2eeMailbox:put',
         'e2eeEpochStaging:stageGroup',
         'e2eeEpochStaging:readGroup',
@@ -1594,3 +1593,26 @@ it.each([undefined, 'zz', 'ordinary', 'wrong-pin'])(
     expect(calls).toEqual(['e2eeWorkspaces:appendRecord', 'e2eeWorkspaces:history']);
   }
 );
+
+it('populates withinRoundCache when consuming inlineMailboxStatuses after put', async () => {
+  const target = { genesis: hash, epoch: 1, recipient: '77'.repeat(32) };
+  const frameHex = 'ab'.repeat(32);
+  const calls: string[] = [];
+  const { network } = fixture(async (name) => {
+    calls.push(name);
+    if (name === 'e2eeMailbox:put') {
+      return {
+        frameHex,
+        slot: { ...target, revision: 2, status: 'EnvelopeStored' as const },
+      };
+    }
+    throw new Error(`unexpected call ${name}`);
+  });
+  const mailbox = network.mailbox('cc'.repeat(32));
+  await Effect.runPromise(mailbox.put('ee'.repeat(16), new Uint8Array(32).fill(0xab)));
+  const first = await Effect.runPromise(mailbox.status(target));
+  const second = await Effect.runPromise(mailbox.status(target));
+  expect(first).toEqual({ ...target, revision: 2, status: 'EnvelopeStored' });
+  expect(second).toEqual(first);
+  expect(calls).toEqual(['e2eeMailbox:put']);
+});

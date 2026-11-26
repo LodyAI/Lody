@@ -125,6 +125,14 @@ export type RecoveryPort = {
   readonly replacement: RecoveryReplacementPort | null;
 };
 
+export type RecoveryReplacementStep = 'setup' | 'revoke';
+export type RecoveryReplacementResult = {
+  readonly outcome: RecoveryCommitOutcome;
+  /** Workspace that stopped the replacement when `outcome === 'Pending'`. */
+  readonly workspace?: string;
+  readonly step?: RecoveryReplacementStep;
+};
+
 export type RecoveryReplacementPort = {
   /** Save a new file and reserve its vault; the current one keeps working. */
   readonly begin: () => Promise<RecoveryCancelled | { readonly outcome: 'begun' }>;
@@ -132,9 +140,9 @@ export type RecoveryReplacementPort = {
    * leak (`compromised`) revokes the old file first. */
   readonly finish: (input: {
     readonly compromised: boolean;
-  }) => Promise<RecoveryCancelled | { readonly outcome: RecoveryCommitOutcome }>;
+  }) => Promise<RecoveryCancelled | RecoveryReplacementResult>;
   /** Give up an unfinished replacement. */
-  readonly abandon: () => Promise<{ readonly outcome: RecoveryCommitOutcome }>;
+  readonly abandon: () => Promise<RecoveryReplacementResult>;
 };
 
 export type RecoveryUnlockMethod = 'file' | 'passkey' | 'password';

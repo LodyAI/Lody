@@ -39,5 +39,11 @@ export const LongName: Story = {
 };
 
 const themeStyles = stylex.create({
-  row: { display: 'flex', width: '420px', alignItems: 'center', gap: 'calc(var(--spacing) * 2)', padding: 'calc(var(--spacing) * 6)' },
+  row: {
+    display: 'flex',
+    width: '420px',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    padding: 'calc(var(--spacing) * 6)',
+  },
 });

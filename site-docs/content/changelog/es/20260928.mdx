@@ -1,0 +1,41 @@
+---
+title: "20260928"
+version: 0.101.0
+date: 2026-09-28
+description: "Una nueva interfaz de usuario y experiencia de Lody Preview, tareas programadas, múltiples cuentas de Codex, detalles de actividad de subagentes y mejoras en las respuestas en streaming, vistas previas de imágenes y conversaciones."
+---
+
+Versión 0.101.0
+
+### ✨ Nuevas funciones
+
+- Un nuevo diseño de interfaz renueva la barra lateral, la configuración, el panel de PR, los detalles de llamadas a herramientas y los menús del compositor, con temas claros y oscuros e interacciones consistentes.
+- Las tareas programadas admiten ejecuciones únicas o recurrentes, selección de máquina y agente, e historial de ejecuciones. Los agentes también pueden proponer programaciones para que las confirmes y las crees.
+- Codex admite múltiples cuentas independientes, así como endpoints y claves de API personalizados.
+- Los nuevos detalles de actividad de subagentes muestran el estado de las tareas, el historial de ejecución y los resultados proporcionados por los agentes compatibles.
+- Los roles de agente ahora cuentan con un campo de descripción para explicar su propósito y responsabilidades.
+- Los agentes pueden consultar los roles de agente, las máquinas y los proyectos en el espacio de trabajo para encontrar la configuración y la ubicación de ejecución adecuadas.
+- El nuevo Lody Preview admite vistas previas locales y remotas bajo demanda, con un estado de conexión más claro e indicaciones de recuperación.
+- Los proyectos locales pueden asociar conversaciones con PR y usar las credenciales de GitHub de la máquina para obtener información de los PR.
+- Visualiza imágenes en Markdown, incluidas imágenes locales e imágenes remotas cargadas bajo demanda.
+- Consulta el uso de tokens de cada turno.
+- Abre el árbol de conversaciones relacionadas desde la barra de información de la conversación.
+- Pi puede escanear y seleccionar extensiones locales e importar el historial de conversaciones. Grok admite bifurcar conversaciones completas o desde turnos anteriores.
+- Nuevas opciones para conversaciones de ancho completo, ligaduras tipográficas y renderizado de matemáticas en línea.
+- Recorta tu avatar y elige un ícono de la aplicación en macOS conservando tu selección.
+
+### 🐛 Correcciones y mejoras
+
+- La mejora en el renderizado de respuestas en streaming muestra Markdown de forma progresiva, con menos parpadeo y menos animaciones repetidas.
+- Desplazamiento más fluido en conversaciones largas y al cambiar entre conversaciones, con menos saltos de contenido y vistas en blanco.
+- Estados más claros para la carga de archivos adjuntos y mensajes pendientes, con mejores reintentos y recuperación tras interrupciones. El texto pegado demasiado grande puede convertirse automáticamente en un archivo adjunto de texto.
+- Editar y reenviar un mensaje ahora admite la misma selección de menciones que el compositor.
+- Se corrigió que las conversaciones importadas usaran una configuración de agente incorrecta al reanudar o bifurcar, y se restauraron las opciones de razonamiento extendido para GPT-6 Sol y Luna.
+- Se mejoró la selección de credenciales de GitHub y las asociaciones de PR tras renombrar o transferir repositorios. El estado de CI ahora refleja los resultados más recientes de las comprobaciones.
+- Se corrigió la pérdida de cambios sin guardar en el editor tras actualizar, interacciones no deseadas entre archivar y cerrar pestañas, y la reparación repetida del historial.
+- Se mejoraron el estado de los grupos en la barra lateral, los indicadores de envío pendiente y las insignias del Dock de macOS. Se corrigieron los menús de archivos adjuntos en dispositivos móviles, el estado de los grupos contraídos y la navegación desde diffs hacia los archivos fuente.
+- El inicio de sesión de agentes ahora muestra el progreso de descarga del runtime y admite cancelación. Se mejoraron las indicaciones de primera conexión de máquina y los mensajes de error de inicialización.
+
+### 🙏 Agradecimientos a nuestros colaboradores de la comunidad
+
+¡Gracias a Lampese, Innei, Astro-Han, Dante-dan, ladydd, tommy0103, Pleasurecruise, timonwong y yusixian por sus contribuciones a esta versión!

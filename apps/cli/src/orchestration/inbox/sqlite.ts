@@ -252,9 +252,10 @@ export class InboxSqlite {
       return;
     const watermark = this.watermark(scope);
     if (!this.available(scope, watermark, true).length) return;
+    const { _lodyAutomation: _origin, ...continuation } = config;
     const input: InboxInput = {
       ...scope,
-      config,
+      config: continuation,
       kind: 'automatic',
       inputId: `inbox:${executionId}`,
     };

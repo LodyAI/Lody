@@ -198,6 +198,9 @@ export const makeOwnedPersonalDeviceHost = Effect.fnUntraced(function* <E>(
           call(raw.setupRecovery(...args)),
         keyDeliveryEvidence: (...args: Parameters<RawSession['keyDeliveryEvidence']>) =>
           call(raw.keyDeliveryEvidence(...args)),
+        pendingMemberKeyDeliveries: () => call(raw.pendingMemberKeyDeliveries()),
+        memberDeliveryDevice: (...args: Parameters<RawSession['memberDeliveryDevice']>) =>
+          call(raw.memberDeliveryDevice(...args)),
         keyPending: (...args: Parameters<RawSession['keyPending']>) =>
           call(raw.keyPending(...args)),
         status: () => call(raw.status()),

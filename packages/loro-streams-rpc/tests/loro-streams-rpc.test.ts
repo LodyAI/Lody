@@ -941,6 +941,102 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
+  describe('a gateway 503 while appending a request', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+    const failAppendsWith503 = (fake: ReturnType<typeof createFakeStreamClient>, count: number) => {
+      const append = fake.streamClient.appendJson;
+      let failures = 0;
+      fake.streamClient.appendJson = vi.fn(async (streamId: string, value: unknown) => {
+        if (failures < count) {
+          failures += 1;
+          throw new LoroStreamsGatewayError('append to stream failed', 503, 'cluster_not_ready');
+        }
+        return await append(streamId, value);
+      });
+    };
+
+    it('retries a machine status read so it still reaches the machine', async () => {
+      vi.useFakeTimers();
+      const fake = createFakeStreamClient();
+      failAppendsWith503(fake, 2);
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+
+      const responsePromise = client.requestMachineStatus({ timeoutMs: 5000 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(fake.appended).toHaveLength(1);
+      const request = fake.appended[0]?.value as { id: string };
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: 'machine/status',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result: { type: 'machine/status_response', machineId: 'machine-1', success: true },
+          },
+        ],
+        nextOffset: '1',
+        cursor: 'cursor-1',
+        upToDate: true,
+      });
+
+      await expect(responsePromise).resolves.toMatchObject({ success: true });
+      client.stop();
+    });
+
+    it('gives up on a status read once the outage outlasts the retries', async () => {
+      vi.useFakeTimers();
+      const fake = createFakeStreamClient();
+      failAppendsWith503(fake, Number.POSITIVE_INFINITY);
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+
+      const responsePromise = client.requestMachineStatus({ timeoutMs: 5000 });
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(responsePromise).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining('append to stream failed'),
+      });
+      expect(fake.streamClient.appendJson).toHaveBeenCalledTimes(4);
+      client.stop();
+    });
+
+    it('never repeats an upgrade request, which may already have been delivered', async () => {
+      vi.useFakeTimers();
+      const fake = createFakeStreamClient();
+      failAppendsWith503(fake, 1);
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+
+      const responsePromise = client.requestMachineUpgrade({
+        requesterUserId: 'user-1',
+        requestToken: 'signed-token',
+        requestId: 'upgrade-1',
+        targetVersion: 'latest',
+        timeoutMs: 5000,
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(responsePromise).resolves.toMatchObject({ success: false });
+      expect(fake.appended).toHaveLength(0);
+      client.stop();
+    });
+  });
+
   it('sends machine upgrade requests and resolves ack responses', async () => {
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({

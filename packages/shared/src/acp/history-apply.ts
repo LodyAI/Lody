@@ -443,8 +443,7 @@ const extractTerminalCommandFromContent = (
           },
         ];
       }
-    } catch {
-    }
+    } catch {}
   }
   return [];
 };

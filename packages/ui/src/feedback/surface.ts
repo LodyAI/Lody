@@ -169,6 +169,7 @@ export const feedbackSurface = stylex.create({
   },
   actions: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: space[2],
     marginBlockStart: space[1],

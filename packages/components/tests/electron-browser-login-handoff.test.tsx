@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import { Provider, createStore } from 'jotai';
 import { electronLoginErrorAtom, electronLoginPhaseAtom } from '../src/atoms';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { CloudPlatformProvider } from '../src/providers/cloud-platform-provider';
+import { requireGitHubTokenPort } from '../src/lib/github-token-port';
 
 // jsdom cannot navigate to a custom scheme, and `window.location.replace` is
 // unforgeable, so the one navigation primitive is replaced. Everything else in
@@ -177,6 +178,42 @@ describe('electron browser sign-in handoff', () => {
       expect(container.querySelector('input[type="email"]')).not.toBeNull();
       expect(container.querySelector('input[type="password"]')).not.toBeNull();
       expect(findButton(/Sign in with email/i)?.disabled).toBe(false);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('mounts and remounts standalone recovery login under StrictMode without GitHubTokenPort collision', async () => {
+    vi.stubEnv('VITE_LODY_PLATFORM', 'cloud');
+    window.history.replaceState({}, '', '/login?redirect=%2Frecovery&view=email');
+    const authClient = createAuthClient({});
+    const sessionValue = createSessionValue(false);
+    const client = new ConvexReactClient('https://standalone-login.convex.cloud');
+    const renderStandalone = (providerKey: string) =>
+      act(async () => {
+        root.render(
+          <StrictMode>
+            <Provider store={store}>
+              <AuthProvider authClient={authClient}>
+                <StableSessionContext.Provider value={sessionValue}>
+                  <ConvexProvider client={client}>
+                    <CloudPlatformProvider key={providerKey}>
+                      <LoginPage replaceLocation={() => undefined} isElectronRenderer={false} />
+                    </CloudPlatformProvider>
+                  </ConvexProvider>
+                </StableSessionContext.Provider>
+              </AuthProvider>
+            </Provider>
+          </StrictMode>
+        );
+      });
+
+    try {
+      await renderStandalone('initial');
+      await renderStandalone('redirect');
+      expect(container.querySelector('input[type="email"]')).not.toBeNull();
+      expect(findButton(/Sign in with email/i)?.disabled).toBe(false);
+      expect(() => requireGitHubTokenPort()).not.toThrow();
     } finally {
       await client.close();
     }

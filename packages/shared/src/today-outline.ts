@@ -1245,7 +1245,10 @@ export function createTodayPageUndo(
         if ('blockSelect' in selection) {
           return { value: { blockSelect: selection.blockSelect }, cursors: [] };
         }
-        const text = doc.getTree(TODAY_OUTLINE_TREE).getNodeByID(selection.nodeId)?.data.get('text');
+        const text = doc
+          .getTree(TODAY_OUTLINE_TREE)
+          .getNodeByID(selection.nodeId)
+          ?.data.get('text');
         const cursor = text instanceof LoroText ? text.getCursor(selection.focus) : undefined;
         return { value: { nodeId: selection.nodeId }, cursors: cursor ? [cursor] : [] };
       },

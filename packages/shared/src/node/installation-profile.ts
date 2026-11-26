@@ -38,16 +38,13 @@ const LOCAL_PROFILE: InstallationProfile = {
  * Invalid values fail before any state path or IPC endpoint is used.
  */
 export function getInstallationProfile(
-  platform: PlatformKind = resolvePlatformKind(process.env.LODY_PLATFORM),
+  platform: PlatformKind = resolvePlatformKind(process.env.LODY_PLATFORM)
 ): InstallationProfile {
   return platform === 'local' ? LOCAL_PROFILE : CLOUD_PROFILE;
 }
 
 /** Root for process-owned durable state. Callers may inject a home in tests. */
-export function getLodyDataDir(
-  platform?: PlatformKind,
-  homeDir: string = os.homedir(),
-): string {
+export function getLodyDataDir(platform?: PlatformKind, homeDir: string = os.homedir()): string {
   const override = process.env.LODY_DATA_DIR?.trim();
   if (override) return path.resolve(override);
   return path.join(homeDir, getInstallationProfile(platform).dataDirectoryName);
@@ -70,12 +67,12 @@ export class LodyDataDirUnavailableError extends Error {
 
   constructor(
     readonly dataDir: string,
-    cause: unknown,
+    cause: unknown
   ) {
     super(
       `Lody's data directory is unavailable: ${dataDir}. ` +
         'Create it, or point LODY_DATA_DIR at a writable directory, then restart the daemon.',
-      { cause },
+      { cause }
     );
     this.name = 'LodyDataDirUnavailableError';
   }

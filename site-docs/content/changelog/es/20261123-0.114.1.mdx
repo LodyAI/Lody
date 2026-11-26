@@ -1,0 +1,48 @@
+---
+title: "20261123-0.114.1"
+version: 0.114.1
+date: 2026-11-23
+description: "Memoria con EverMe, el esquema Today, organización de sesiones y mejoras en las vistas previas, los modelos y la CLI."
+---
+
+Versión 0.114.1
+
+### ✨ Nuevas funciones
+
+- EverMe ya está disponible como proveedor de memoria para toda la cuenta. Instálalo con un solo clic o configúralo manualmente.
+- El esquema experimental Today reúne notas, tareas pendientes y menciones de sesiones en una sola página. Convierte un elemento en una tarea, céntrate en una rama, amplía tu selección por etapas o edita varios elementos a la vez. En escritorio, abre Today en su propia ventana junto a tu sesión.
+- Organiza las sesiones en Focus, Later y Settled en la nueva vista Status. Pospón una sesión durante una o tres horas, o arrástrala de vuelta a Focus.
+- Agrupa las sesiones fijadas y ordénalas manualmente. Elige qué grupos mostrar en cada dispositivo o inicia una sesión directamente dentro de un grupo. La barra lateral se desplaza automáticamente al arrastrar una sesión cerca del borde.
+- Pulsa ⌘/Ctrl + 1–9 para cambiar entre las primeras nueve sesiones visibles. Despliega las listas más largas página por página.
+- Vincula o desvincula un PR de GitHub de una sesión, envía un PR vinculado a Auto delivery y consulta el estado del merge en la barra lateral.
+- Abre el directorio de trabajo de una sesión en Finder o en el Explorador de archivos desde su menú. Haz clic con la tecla modificadora sobre una URL en la terminal para abrirla en tu navegador.
+- Previsualiza archivos adjuntos en el panel lateral de la sesión y ajusta la velocidad de reproducción de vídeo.
+- Pulsa Arriba o Abajo en un compositor vacío para recuperar mensajes enviados. Personaliza los atajos para la búsqueda de modelos, el esfuerzo de razonamiento y el menú de archivos adjuntos.
+- Codex añade la opción de velocidad Ultrafast. Ahora puedes iniciar sesión en Antigravity de forma remota desde Lody.
+- En la configuración de Lody Agent, consulta y actualiza los modelos disponibles de un endpoint personalizado y define el modelo predeterminado, el esfuerzo de razonamiento y la autonomía para nuevas sesiones. También se han rediseñado los editores de Prompt y Rol de agente.
+- Deja que Lody ejecute un comando largo en segundo plano. Cuando finaliza, la sesión recibe el resultado y continúa. Los editores de sesión también pueden gestionar automatizaciones en máquinas compartidas.
+- Exporta e importa espacios de trabajo desde Settings → Data en escritorio o desde la CLI. Los miembros del espacio de trabajo de destino obtienen acceso de solo lectura al contenido importado desde otro espacio de trabajo.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió que las acciones de cita en la conversación aparecieran por encima de los cuadros de diálogo modales.
+
+- Se corrigieron los argumentos de empaquetado de producción para los instaladores estables de Windows y Linux.
+
+- El archivo ahora se abre como una única lista, para que puedas explorar sesiones anteriores sin tener que desplegar grupos.
+- El compositor respeta el tamaño de fuente de la interfaz. Los atajos de prompt también funcionan al editar un mensaje enviado.
+- Haz clic en una mención de sesión dentro de un mensaje enviado para abrir esa sesión. Los enlaces Markdown a sesiones del espacio de trabajo actual también se abren dentro de Lody.
+- Los submenús del compositor permanecen dentro de la pantalla en ventanas estrechas. El menú de menciones oculta las categorías Issue y PR en los proyectos sin un repositorio de GitHub vinculado.
+- Las ventanas en segundo plano ya no marcan las sesiones como leídas de forma inesperada. Reordenar Focus también conserva el estado de no leída de una sesión que acaba de volver de Later.
+- Las ventanas abiertas conservan sus propias vistas de la barra lateral cuando contraes un grupo o cambias un filtro en otra ventana.
+- Detener un envío conserva los mensajes en cola como borradores que puedes editar y enviar por tu cuenta. Un simple “continue” reanuda un turno interrumpido por un reinicio.
+- Se corrigió la pérdida de sesiones recién creadas tras un fallo inesperado y la ausencia de archivos en la lista de cambios del espacio de trabajo.
+- Las vistas previas permanecen abiertas cuando cambias de sesión y regresas. Se corrigieron las vistas previas de HTML local de gran tamaño y los fallos al cargar recursos del proyecto o redirecciones en las vistas previas.
+- Las búsquedas de archivos remotos se ejecutan en la máquina que aloja los archivos. Las ramas de GitHub se cargan página por página para reducir la espera en proyectos grandes.
+- Se corrigieron los menús vacíos de comandos y skills en Antigravity, así como las sesiones que seguían apareciendo en ejecución después de finalizar las tareas en segundo plano.
+- Se corrigió que todo el catálogo de modelos de Magpie fallara al cargarse cuando un modelo incluía valores personalizados de esfuerzo de razonamiento o una lista larga de tipos de entrada.
+- Las conexiones de agentes, las consultas de uso de Claude, las conexiones de escritorio y las automatizaciones utilizan el proxy configurado. También puedes continuar el inicio de sesión de escritorio en tu navegador.
+- Se corrigió que el comando lody no estuviera disponible en la terminal tras una instalación independiente. Una reinstalación explícita activa la nueva versión instalada del daemon.
+- El inicio de la aplicación de escritorio es más rápido, el daemon de la CLI consume menos memoria y las sesiones largas cargan su historial de forma más eficiente al volver a abrirlas.
+
+Agradecimientos a YangtzeSeventh, Kina, samzong, biny, Astro-Han, peanuts022, Jackey-Z y songtianlun.

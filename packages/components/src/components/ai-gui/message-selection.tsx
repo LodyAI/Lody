@@ -333,11 +333,10 @@ export function MessageSelectionRow({
   const selected = !!id && selection?.ids.has(id);
   return (
     <div
-      className={stylex.props(
-        styles.row,
-        selectable && styles.rowSelectable,
-        selected && styles.rowSelected
-      ).className}
+      className={
+        stylex.props(styles.row, selectable && styles.rowSelectable, selected && styles.rowSelected)
+          .className
+      }
       data-message-selection-id={selectable ? id : undefined}
       onPointerDownCapture={
         selectable
@@ -396,9 +395,9 @@ export function MessageSelectionRow({
               rows use. */}
           <Checkbox
             data-message-selection-checkbox=""
-            className={stylex.props(
-              isMobile ? styles.checkboxMobile : styles.checkboxDesktop
-            ).className}
+            className={
+              stylex.props(isMobile ? styles.checkboxMobile : styles.checkboxDesktop).className
+            }
             checked={selected}
             onCheckedChange={isMobile ? undefined : () => selection?.toggle(id)}
             tabIndex={isMobile ? -1 : undefined}

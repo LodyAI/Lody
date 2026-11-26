@@ -1,0 +1,75 @@
+---
+title: "20261030"
+version: 0.109.0
+date: 2026-10-30
+description: "Proyectos multirrepositorio, vistas de PR por repositorio, importación de Magpie por CLI, sugerencias de siguiente instrucción, inicio de sesión en MCP local, una página de Programaciones rediseñada, pestañas de tareas por categoría, colaboración entre Roles en distintas máquinas, compatibilidad con iPhone Duo, mensajes programados, continuación tras el restablecimiento de cuota de Claude, gestión de plugins de DeepSeek Harness, horarios de restablecimiento de uso intercambiables y descargas de archivos remotos de mayor tamaño, además de diversas correcciones y mejoras."
+---
+
+Versión 0.109.0
+
+### ✨ Nuevas funciones
+
+- Proyectos multirrepositorio: organiza varios repositorios Git, submódulos y carpetas locales en un mismo proyecto y trabaja en tareas entre repositorios dentro de la misma conversación. Añade uno en Configuración → Proyectos o haz clic derecho en un proyecto existente en la barra lateral de escritorio. (En iOS, espera a la próxima compilación móvil de TestFlight; de lo contrario, no aparecerán las conversaciones multirrepositorio).
+- Vistas de PR por repositorio: en una conversación multirrepositorio, cambia el repositorio mostrado para ver sus PR, estado de CI y acciones; los submódulos se muestran de forma jerárquica.
+- Importación de Magpie por CLI: importa la configuración del proveedor Magpie a través de la CLI para poder usarla en máquinas sin entorno de escritorio.
+- Sugerencias de siguiente instrucción: Claude Code ahora puede mostrar la sugerencia devuelta por el Agente en un compositor vacío; pulsa Tab en escritorio o toca “Aplicar” en móvil para rellenarla.
+- Inicio de sesión en MCP local: autorización en el navegador, cierre de sesión e introducción manual de credenciales; las credenciales se almacenan en el almacén de credenciales del sistema local y no se sincronizan con la configuración del espacio de trabajo.
+- Página de Programaciones rediseñada: filtros por proyecto y estado, ordenación, vistas de Configuración e Historial de ejecución, y limpieza masiva de mensajes programados finalizados.
+- Pestañas de tareas por categoría: los subagentes y las tareas en segundo plano ahora aparecen en pestañas separadas, lo que facilita seguir el progreso de la ejecución.
+- Colaboración entre Roles en distintas máquinas: al llamar a un Rol remoto desde un proyecto local, puedes usar un repositorio de GitHub vinculado al proyecto y conectado al espacio de trabajo; las conversaciones vinculadas permanecen anidadas en la lista.
+- Compatibilidad con iPhone Duo: los diseños móviles ahora se adaptan al espacio de pantalla disponible, mejorando las experiencias al plegar, desplegar y usar pantalla dividida.
+- Mensajes programados: programa mensajes, archivos adjuntos y referencias, y luego edítalos o cancélalos; si la máquina de destino está desconectada, el mensaje se envía como recuperación en cuanto la máquina vuelve a estar en línea, dentro de la ventana de validez.
+- Continuar tras el restablecimiento de cuota de Claude: con un solo clic, programa el envío de `continue` después de que se restablezca la cuota para que la tarea pueda terminar.
+- Gestión de plugins de DeepSeek Harness: gestiona plugins de proveedores mediante la CLI local conservando la configuración existente del usuario.
+- Horarios de restablecimiento de uso: alterna entre una visualización relativa de “se restablece en…” y una fecha y hora absolutas en tu zona horaria local.
+- Descargas de archivos remotos de mayor tamaño: los espacios de trabajo de pago pueden descargar archivos de hasta 100 MiB; la CLI de la máquina que aloja el archivo también debe estar actualizada.
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigió que el texto existente a veces se sobrescribiera incorrectamente al actualizarse el contenido de la conversación.
+- Se mejoraron la vinculación de PR entre repositorios y la sincronización de estado, de modo que las actualizaciones de estado ya no afecten a los enlaces de PR existentes.
+- Se corrigió el parpadeo del estado en línea de la máquina en la barra lateral durante reconexiones breves.
+- Se corrigió la desaparición de la información de uso de suscripción para algunos proveedores tras añadir una variable de entorno normal.
+- Las conversaciones de DeepSeek ahora contraen automáticamente la salida del proceso al finalizar, facilitando la lectura de la respuesta final.
+- Se mejoraron los botones de acción de la cola de mensajes en móvil, la alineación de las etiquetas de Rol en la lista de memoria y la visualización de iconos en la página de inicio de sesión de escritorio.
+- Los Agentes ahora prefieren una conversación nueva al crear conversaciones secundarias, salvo que se especifique una conversación en pestaña.
+- Se mejoró la recuperación del inicio de sesión en escritorio, evitando cierres de sesión inesperados cuando las respuestas de red son lentas al arrancar.
+- Se corrigió que la cola de mensajes a veces no continuara enviando cuando cambiaba el orden de sincronización, y que las tareas finalizadas de forma anómala siguieran apareciendo como en ejecución.
+- Crear una nueva conversación ya no espera a que se sincronicen los valores predeterminados de MCP remotos; la creación masiva de conversaciones conserva el MCP seleccionado.
+- Se corrigió que las tareas en segundo plano desaparecieran mientras se ejecutaban y que se perdiera la información del ejecutor tras completarse una tarea de Claude.
+- Kimi ahora muestra el plan completo antes de solicitar la aprobación del plan.
+- Se corrigió que las opciones de esfuerzo de razonamiento no coincidieran con las capacidades del modelo tras cambiar de modelo en Pi.
+- Se actualizó el entorno de ejecución de Codex con mejoras en la actualización de la lista de Skills, la detección de finalización de la compactación de contexto y los mensajes de error tras cambiar de proveedor.
+- Se corrigió el fallo de inicio de los proyectos multirrepositorio cuando el checkout de submódulos está incompleto, y se mejoraron la visualización de rutas de carpetas y el comportamiento de archivado y contracción de la barra lateral.
+- Se corrigió que las acciones de resolución de conflictos de PR no se abrieran en la conversación actual y que los cambios de nombre en móvil afectaran incorrectamente a otras conversaciones.
+- Se corrigió que las conexiones saludables de Nowledge Mem se reportaran erróneamente como fallidas.
+- Se mejoraron los conflictos del gesto de retroceso en los botones de gestión de máquinas en móvil, junto con la pestaña de terminal, el texto de inicio de sesión y la visualización de estado en la pantalla de inicio.
+- Cuando Claude alcanza su límite de cuota, puedes programar un mensaje `continue` para después del restablecimiento directamente desde la tarjeta de aviso; la hora programada se mantiene coherente con lo que muestra la interfaz.
+- Cuando el envío programado no está disponible, pasa el cursor por encima para ver el motivo específico.
+- Se mejoró la transición entre la interfaz y el teclado al enviar el primer mensaje en móvil; las nuevas conversaciones restauran el último proyecto utilizado.
+- La cola de mensajes móvil ahora utiliza un diseño compacto de una sola línea.
+- Se mejoró la apertura de enlaces cuando hay varias versiones de Lody instaladas, entregando los enlaces de conversación, nueva conversación e importación de proveedores a la versión en ejecución.
+- Se mejoraron la alineación, el color y el estilo del código en línea para las tarjetas de aviso del Agente y el contenido de razonamiento, reduciendo el ruido visual.
+- Los mensajes programados son más fáciles de gestionar: la hora programada aparece junto al botón de enviar, los mensajes programados se agrupan en la cola de mensajes y puedes cambiar la hora, editar el contenido o cancelarlos directamente.
+- Se mejoró el diseño de la cola de mensajes: una vista compacta de una sola línea en teléfonos y ventanas estrechas, con las acciones agrupadas en un menú “Más”; los registros de mensajes programados únicos finalizados se conservan durante siete días y luego se eliminan automáticamente.
+- Se corrigieron problemas de compatibilidad con las sugerencias de instrucciones del compositor durante la incorporación.
+- Se corrigió que un mensaje enviado inmediatamente después de detener una tarea en ejecución también se cancelara; cuando falla la detención de una tarea, ahora aparece el motivo en la conversación.
+- Cuando un Agente en la misma máquina envía un mensaje a una conversación en ejecución a través de MCP, ahora puede redirigir directamente la tarea activa.
+- Se eliminó el límite adicional de ranuras de ejecución para las tareas programadas, de modo que las tareas esperen menos unas a otras.
+- Los proyectos recién creados se seleccionan automáticamente y los grupos de proyectos se pueden editar directamente desde el selector de proyectos.
+- La preparación de submódulos de proyecto ahora reutiliza los datos locales de Git, reduciendo las descargas repetidas.
+- Se corrigió el paso de cookies en las vistas previas de aplicaciones, mejorando la previsualización de páginas que requieren inicio de sesión.
+- Se corrigieron errores en la página de inicio de sesión del navegador y el manejo de errores para enlaces de invitación no válidos.
+- Se corrigió que el menú de menciones no se desplazara en móvil y el formato incorrecto de la hora en la cola de mensajes en chino.
+- Se mejoraron el ajuste de línea y la visualización del cursor para las sugerencias de instrucciones, ocultándolas temporalmente mientras se escribe con un IME.
+- Se corrigieron los saltos en la posición de desplazamiento al leer en WebKit y se mejoró la nitidez de las imágenes compartidas.
+- Se mejoraron la detección de enlaces a archivos y la copia de rutas, reduciendo los saltos incorrectos desde rutas relativas.
+- Limpieza de directorios de trabajo dedicados para conversaciones eliminadas; archivar ahora solo elimina directorios vacíos y conserva los archivos existentes.
+- Se corrigió que retrasos breves de red hicieran que máquinas en línea se marcaran como desconectadas y se rechazaran acciones de conversación.
+- Se mejoró la recuperación cuando falla la carga de tareas programadas, conservando las ediciones locales y admitiendo el reintento manual.
+- Se corrigió que las opciones de esfuerzo de razonamiento no coincidieran con la lista de modelos para algunos modelos, y que la configuración de modelo y esfuerzo de razonamiento se aplicara en el orden incorrecto al iniciar Pi.
+- Se mejoró la compatibilidad de inicio de DeepSeek Harness, con un aviso claro de instalación cuando falta una versión compatible de Node.js.
+- Se corrigió que no se pudiera hacer clic en el botón de notificaciones situado en la región de arrastre de la ventana de escritorio.
+- Se añadió compatibilidad con atajos de teclado estilo Emacs en macOS para mover el cursor antes y después de las referencias a archivos en el compositor.
+
+¡Gracias a ktKongTong, scbizu, jijiamoer y yayoinoyume por contribuir a esta versión!

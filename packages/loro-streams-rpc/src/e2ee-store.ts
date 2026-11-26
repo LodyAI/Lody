@@ -18,6 +18,11 @@ export class E2eeRpcStore extends Context.Service<
       key: string,
       record: StoredRpcOriginal
     ): Effect.Effect<StoredRpcOriginal, Error>;
+    replaceSent?(
+      key: string,
+      expectedFrame: Uint8Array,
+      record: StoredRpcOriginal
+    ): Effect.Effect<StoredRpcOriginal, Error>;
     readResponse(key: string, sequence: number): Effect.Effect<Uint8Array | undefined, Error>;
     retainResponse(key: string, sequence: number, frame: Uint8Array): Effect.Effect<void, Error>;
     retainResponsePages(key: string, frames: readonly Uint8Array[]): Effect.Effect<void, Error>;

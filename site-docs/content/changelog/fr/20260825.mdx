@@ -1,0 +1,25 @@
+---
+title: "20260825"
+version: 0.86.2
+date: 2026-08-25
+description: "Ajout des Rôles d'agent, de la recherche floue de modèles, d'un sélecteur de pièces jointes unifié, de l'aperçu HTML, de la copie complète en Markdown, des prévisions de réinitialisation de l'utilisation Codex et des mises à jour en arrière-plan des runtimes d'agents, avec des améliorations de fiabilité sur les sessions, les tâches, l'aperçu de fichiers locaux et les plateformes prises en charge."
+---
+
+Version 0.86.2
+
+### ✨ Nouveautés
+
+- Ajout des Rôles d'agent pour enregistrer et partager les paramètres d'exécution fréquemment utilisés (agent, modèle, autorisations, etc.), puis les sélectionner ou les mentionner rapidement dans les nouvelles sessions comme dans les sessions existantes.
+- Ajout de la recherche floue dans la liste des modèles et regroupement des fichiers et des images joints dans un sélecteur unifié plus lisible.
+- Ajout d'aperçus pour les fichiers HTML autonomes et d'actions de copie intégrale pour les messages Markdown.
+- Ajout des prévisions de réinitialisation de l'utilisation Codex.
+- Ajout des mises à jour en arrière-plan pour les runtimes d'agents intégrés.
+
+### 🐛 Correctifs et améliorations
+
+- Amélioration de la fiabilité de la création de sessions, de la restauration et de la répartition des tâches, prévention de la création de branches inattendues dans les sessions locales directes et gestion automatique des conflits de noms de branches pour les nouveaux worktrees.
+- Correction de la disparition du contenu des tâches avant la confirmation d'enregistrement, et archivage automatique des sessions enfants lors de l'archivage d'une session parente.
+- Amélioration de la navigation et de l'aperçu des fichiers locaux dans Electron tout en conservant les lectures de fichiers locaux sur l'appareil.
+- Correction du décalage du contenu de la discussion lors du redimensionnement de la zone de saisie.
+- Amélioration des modèles de repli pour Claude et Grok, de la compatibilité avec les anciens caches de runtime et des libellés des graphiques d'utilisation.
+- Correction des associations d'icônes sur le bureau Linux et amélioration de la disponibilité hors ligne du sélecteur d'émojis sur le Web et sur mobile.

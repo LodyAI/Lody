@@ -1,0 +1,39 @@
+---
+title: "20260911"
+version: 0.93.3
+date: 2026-09-11
+description: "Se agregaron ventanas de escritorio independientes y la función para compartir chats e informes de uso, junto con mejoras en los controles de agentes, la recuperación de sesiones, las acciones de archivos y la colaboración entre máquinas."
+---
+
+Versión 0.93.3
+
+### ✨ Nuevas funciones
+
+- Transfiere la propiedad del espacio de trabajo de forma segura manteniendo la continuidad de las suscripciones y la facturación existentes
+- Abre sesiones y espacios de trabajo en ventanas de escritorio independientes
+- Selecciona varios mensajes del chat y expórtalos como imágenes PNG, o copia directamente las imágenes generadas en el chat
+- Menciona Roles de agente entre máquinas y visualiza los Roles que no están disponibles temporalmente
+- Visualiza las identidades de los remitentes en el chat para distinguir más fácilmente los mensajes durante la colaboración
+- Exporta el uso de tokens, las tendencias de actividad y la distribución por modelo desde la página de Uso como informes en formato vertical u horizontal
+- Copia el contexto completo como Markdown desde los menús de bifurcación de sesión, con exportaciones de conversaciones mejoradas
+- Pausa, reanuda y borra los objetivos de Codex mediante controles dedicados
+- Permite que Codex y Grok proporcionen sus propios títulos de sesión, reduciendo el trabajo duplicado y los tiempos de espera
+- Prepara los entornos de ejecución de los agentes más temprano durante la incorporación inicial y muestra los estados de espera con mayor claridad
+- Prioriza la identidad de Git del propietario de la máquina al crear proyectos locales
+
+### 🐛 Correcciones y mejoras
+
+- Se corrigieron objetivos que no podían reanudarse tras pausarse y controles que podían quedar deshabilitados
+- Se corrigieron las sesiones bifurcadas de Codex que se bloqueaban en su primer prompt y los conflictos de prompts tras una cancelación
+- Se conserva el contexto del agente cuando caducan las credenciales o cambia la identidad, reduciendo interrupciones y reinicios duplicados
+- Se mejoró la compatibilidad del modo Plan, la configuración de DeepSeek Harness y la recuperación de la caché de capacidades de ACP
+- Se mejoró la fiabilidad de las escrituras en el historial, las actualizaciones en streaming, los reintentos de acceso a máquinas y las cadenas largas de tareas asíncronas
+- Se mejoraron los enlaces a archivos locales, las acciones de apertura del sistema y el arrastrar y soltar carpetas
+- Se mejoraron las interacciones con Mermaid para que los diagramas en línea ya no capturen el desplazamiento, mientras que los diagramas en pantalla completa admiten zoom y arrastre
+- Se corrigió el estado de la sesión que no terminaba de estabilizarse al finalizar la compactación del contexto
+- Se mejoraron las relaciones entre sesiones secundarias, los controles para contraer la barra lateral y las acciones de bifurcación durante la carga
+- Se unificó el ciclo de vida de los atajos de escritorio para una gestión más fiable de las ventanas y los atajos de teclado
+- Se corrigieron las actualizaciones del agente en Windows y las confirmaciones del ciclo de vida, y se restauró el diseño móvil tras ocultar el teclado
+- Se mejoró el ritmo de sincronización móvil, la carga del estado de las máquinas y el rendimiento de la primera carga móvil en el sitio web
+- Se corrigieron errores ocasionales de permisos durante la actualización de membresías
+- Agradecimientos a los colaboradores externos @EYHN, @slashdevcorpse, @ladydd, @hqhq1025 y @nzhl por las mejoras en el arrastre de carpetas, la sincronización móvil, el informe de duración del trabajo, el comportamiento con movimiento reducido, las sesiones bifurcadas de Codex y el renderizado del terminal

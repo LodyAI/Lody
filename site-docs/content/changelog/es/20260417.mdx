@@ -1,0 +1,53 @@
+---
+title: "20260417"
+version: 0.44.0
+date: 2026-04-17
+description: "Se añadieron compatibilidad con Claude Opus 4.7, uso compartido de máquinas más seguro en equipos, autenticación no interactiva en la CLI, modo Full Access y correcciones del teclado en móviles."
+---
+
+### 🧠 Compatibilidad con Claude Opus 4.7
+
+### 👥 Colaboración en equipo más segura
+
+- Nuevos controles de visibilidad de máquinas en equipo: tus máquinas son **totalmente privadas de forma predeterminada** para otros miembros; unirte al Workspace de otra persona ya no implica preocuparte de que tu propia máquina de desarrollo quede expuesta o sea utilizada
+- Comparte explícitamente una máquina con el equipo desde Configuración; las máquinas no compartidas nunca aparecen en las listas de máquinas de otros miembros y sus conversaciones nunca llegan a las barras laterales de los demás
+- «Unirse al Workspace de alguien» y «usar tus propias máquinas» ahora están completamente desacoplados: invita a compañeros de equipo sin dudas
+
+### 🔐 Inicia sesión en cualquier máquina con un solo comando
+
+- Autenticación no interactiva en la CLI: `lody login --auth <api-key>` conecta en cualquier máquina, o usa `lody start --auth <api-key>` para iniciar sesión y arrancar en un solo paso
+- La aplicación de escritorio Electron añade un panel de ajustes de cuenta para generar y copiar una clave API de la CLI
+
+### 🆕 Modo Full Access
+
+- El nuevo modo Full Access de Lody aprueba automáticamente las solicitudes de permisos para agentes que no cuentan con un modo nativo de acceso completo (p. ej., Kimi, OpenCode)
+
+### 🤖 Más integraciones con agentes
+
+- Mejor integración con OpenCode y Kimi
+- Se corrigieron el análisis y la visualización de las notificaciones de terminal, lectura de archivos y edición de Kimi en el historial
+
+### 📱 Experiencia móvil
+
+- Se rediseñó la gestión del teclado en pantalla: el teclado ya no empuja toda la interfaz hacia arriba; solo el área de entrada flota con una transición fluida
+- Los teclados móviles muestran una tecla «Enviar» en los campos del chat que envía el mensaje
+- Se corrigió el recorte de controles inferiores en iOS Safari, así como las zonas seguras (safe-area) de las notificaciones toast y la página de invitaciones
+
+### 🚀 Rendimiento y arranque
+
+- Se eliminó la pantalla en blanco al iniciar para usuarios recurrentes; la interfaz ya no queda bloqueada por consultas de red
+- La indexación de búsqueda para conversaciones largas ahora es diferida e incremental: se acabaron los tirones cuando finaliza una conversación
+- Se añadió almacenamiento en caché del servicio de sincronización para reducir el coste de arranque en frío
+
+### 🌐 Compatibilidad con navegadores
+
+- Se amplió la compatibilidad a Safari 14+ / Chrome 80+ / Firefox 78+; los navegadores más antiguos ya no muestran una pantalla en blanco por errores de expresiones regulares o carga de ESM
+
+### 🛠️ Otras correcciones
+
+- Se corrigió el problema de contenedores Docker que reutilizaban el ID de la máquina anfitriona causando conflictos en el flujo de eventos
+- La creación de worktrees ahora reutiliza la rama seleccionada que no sea la predeterminada
+- La aplicación de escritorio abre el enlace de instalación de GitHub en el navegador externo
+- Se corrigió el error 404 de espacio de trabajo al volver a iniciar sesión en Electron
+- Se alineó el botón para mostrar/ocultar la barra lateral de sesiones con el encabezado
+- Se mejoró el contraste de los interruptores (Switch) en los distintos temas de VS Code

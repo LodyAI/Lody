@@ -61,6 +61,17 @@ function CheckMark() {
   );
 }
 
+const SUPPORTED_LABEL: Record<LandingLocale, string> = {
+  en: 'Supported',
+  zh: '支持',
+  'zh-hant': '支援',
+  ja: '対応',
+  ko: '지원',
+  es: 'Compatible',
+  fr: 'Pris en charge',
+  ru: 'Поддерживается',
+};
+
 export function LandingAgentsSection({
   copy,
   locale,
@@ -68,7 +79,7 @@ export function LandingAgentsSection({
   copy: AgentsSectionCopy;
   locale: LandingLocale;
 }) {
-  const supportedLabel = locale === 'zh' ? '支持' : 'Supported';
+  const supportedLabel = SUPPORTED_LABEL[locale];
 
   return (
     <section className="uw-agents" aria-labelledby="uw-agents-title">

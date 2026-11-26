@@ -1,0 +1,24 @@
+---
+title: "20261106"
+version: 0.110.1
+date: 2026-11-06
+description: "Aide aux commandes MCP à la demande et améliorations des diffs distants, de la sélection de machine, des citations de conversation, des sessions chiffrées et des notifications push Android."
+---
+
+Version 0.110.1
+
+### ✨ Nouvelles fonctionnalités
+
+- Lody MCP propose désormais une aide aux commandes à la demande : les agents peuvent ainsi consulter l'utilisation et les paramètres sans avoir à répéter des instructions détaillées dans la liste des outils.
+
+### 🐛 Corrections et améliorations
+
+- Amélioration du chargement des diffs de code distants avec moins de transferts répétés et un chargement à la demande pour les fichiers volumineux. L'actualisation conserve votre position de lecture et les sections dépliées.
+- Correction d'un problème où la machine distante sélectionnée changeait de manière inattendue lors de l'actualisation de l'état de connexion, et amélioration de l'affichage de l'état hors ligne.
+- Correction d'un problème où l'édition d'un projet faisait perdre la machine sélectionnée, et masquage des groupes de projets vides sur l'application de bureau.
+- Amélioration des citations de conversation : sélectionnez des passages consécutifs au sein d'une même réponse tout en conservant la mise en forme, comme les liens, les listes et le code.
+- Rétablissement du repliement pour le contenu de fin des réponses terminées.
+- Correction d'un problème où la barre latérale ne se mettait pas à jour rapidement après le renommage d'un groupe de conversations.
+- Amélioration de l'affichage des mentions dans l'éditeur de messages, avec correction des couleurs incorrectes aux limites du curseur et de l'état de mention résiduel après l'envoi.
+- Amélioration de la validation des messages en file d'attente dans les sessions chiffrées, correction du blocage injustifié de messages pendant le chargement des autorisations de partage, et clarification des messages d'appairage CLI et d'état des clés.
+- Correction d'un problème où certains paquets Android pouvaient manquer de configuration push, ce qui risquait d'empêcher la réception des notifications.

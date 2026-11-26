@@ -167,9 +167,11 @@ async function closeCliProcess(cliProcess: CliProcess): Promise<void> {
 async function withTransport<T>(
   cliProcess: CliProcess,
   run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>,
-  baseUrl = gatewayBaseUrl
+  baseUrl = gatewayBaseUrl,
+  webSocketEnabled = false
 ): Promise<T> {
   const { adapter } = await createCliStreamsTransport({
+    webSocketEnabled,
     content: { mode: 'plaintext' },
     incompleteRecoveryStore: createCliIncompleteRecoveryStore(
       cliProcess.store,
@@ -210,6 +212,37 @@ afterEach(async () => {
 });
 
 describe('CLI Streams checkpoints are bound to the replica that loaded them', () => {
+  it.each([false, true])(
+    'live rooms try the shared WS gateway only when enabled (%s) and still sync over HTTP',
+    async (webSocketEnabled) => {
+      const liveRead = Promise.withResolvers<void>();
+      const server = createStreamsServer(metaSnapshotWithA(), (url) => {
+        if (url.searchParams.has('live')) liveRead.resolve();
+        return undefined;
+      });
+      const daemon = await openCliProcess();
+      await withTransport(
+        daemon,
+        async (adapter) => {
+          const room = adapter.joinMetaRoom(daemon.repo.getMeta());
+          try {
+            await room.firstSyncedWithRemote;
+            await liveRead.promise;
+          } finally {
+            room.unsubscribe();
+          }
+        },
+        gatewayBaseUrl,
+        webSocketEnabled
+      );
+      expect(daemon.repo.getMeta().get(keyA)).toBe('A');
+      const probes = server.requests.filter((url) => url.pathname === '/ds/ws');
+      expect(probes.map((url) => url.origin)).toEqual(
+        webSocketEnabled ? [new URL(gatewayBaseUrl).origin] : []
+      );
+    }
+  );
+
   it.each([false, true])(
     'attaches cloud ephemeral rooms only when enabled (%s)',
     async (attachCloudEphemeralSinks) => {

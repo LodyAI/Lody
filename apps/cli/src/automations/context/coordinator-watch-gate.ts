@@ -93,10 +93,6 @@ function collectOwnerViewedSessionIds(
   return viewed;
 }
 
-/**
- * Reads bounded, owner-scoped `WorkItem` and member `SessionMeta` facts for a
- * coordinator session's `CodeMode` watch predicates.
- */
 export async function readCoordinatorWorkItemsSnapshot(args: {
   ledger: AutomationLedger;
   manager: LoroDocumentManager;
@@ -281,15 +277,7 @@ function extractTargetHints(payload: unknown): { workItemId?: string; sessionId?
   };
 }
 
-/**
- * Stateless physical attention gate applied when a coordinator `CodeMode` watch
- * predicate matches on `coordinator.workItems`:
- *
- * 1. Suppresses premature coordinator wakeups while the owner user is actively
- *    focused on (`session-viewing`) the watched child conversation.
- * 2. Coalesces rapid bursts within `COORDINATOR_WAKE_DEBOUNCE_MS` so back-to-back
- *    child activity settles before waking the coordinator.
- */
+/** Suppresses wakes while the owner views the child session and debounces bursts. */
 export function evaluateCoordinatorWakeGate(args: {
   result: AutomationResult;
   observedSnapshots: readonly ObservedCoordinatorWorkItem[];

@@ -1,0 +1,69 @@
+---
+title: "Registro de permisos"
+description: "Un análisis detallado del registro de permisos detrás de los espacios de trabajo cifrados de extremo a extremo de Lody: entradas firmadas, la cadena de hashes, quién puede firmar qué, cómo lo verifican los dispositivos y en qué se apoya."
+---
+
+# Registro de permisos
+
+Cada espacio de trabajo cifrado de extremo a extremo tiene un **registro de permisos**. En la consola de cifrado aparece como el historial de cambios. El registro determina quién es miembro, qué rol tiene cada persona y qué dispositivos pueden recibir claves.
+
+## Qué guarda el registro
+
+El registro es una lista ordenada de entradas, donde cada una describe un cambio; por ejemplo:
+
+- Crear el espacio de trabajo (la primera entrada, el "génesis")
+- Admitir a un miembro, cambiar un rol, eliminar a un miembro
+- Agregar o revocar un dispositivo
+- Reemplazar la clave del espacio de trabajo
+- Transferir la propiedad
+
+Guarda **identificadores de cuenta y claves públicas de dispositivos**, nunca conversaciones ni archivos. Los nombres y avatares provienen de los perfiles de cuenta y no están en el registro.
+
+## Cada entrada está firmada
+
+Cada entrada lleva la firma de la persona que realiza el cambio, **desde su propio dispositivo personal autorizado**. La firma cubre la operación, su objetivo y el espacio de trabajo; cualquier cambio la invalida.
+
+El servidor almacena y reenvía las entradas, pero **no posee la clave de firma de nadie**, por lo que no puede firmar en nombre de otra persona ni agregar silenciosamente a un miembro o un dispositivo.
+
+## Las entradas forman una cadena
+
+Cada entrada contiene el hash de la anterior, remontándose hasta el génesis.
+
+- Eliminar, insertar o reordenar cualquier entrada rompe la cadena, y los dispositivos lo detectan.
+- Solo se puede agregar una nueva entrada al final actual. Si dos personas envían un cambio a la vez, solo una tiene éxito; la otra actualiza y vuelve a confirmar.
+- Los cambios surten efecto en el orden en que se confirman. Si B admite a C antes de que el propietario elimine a B, C sigue siendo miembro; si la eliminación se confirma primero, la invitación previa de B deja de funcionar.
+
+## Quién puede firmar qué
+
+Para cada cambio, los dispositivos comprueban el permiso de quien firma **según el estado del registro justo antes de ese cambio**, no según lo que esa persona podía hacer cuando se unió.
+
+| Cambio | Quién puede firmar |
+| --- | --- |
+| Admitir a un miembro | Propietario o administrador |
+| Eliminar a un miembro | Propietario o administrador |
+| Eliminar a un administrador, cambiar roles | Solo el propietario |
+| Transferir la propiedad | Solo el propietario; el propietario anterior pasa a ser administrador |
+| Agregar tu propio dispositivo nuevo | Uno de tus dispositivos autorizados; un archivo de recuperación si se perdieron todos |
+| Revocar un dispositivo | Su propietario o un miembro con permiso de administración |
+| Reemplazar la clave del espacio de trabajo | Propietario o administrador |
+
+Las máquinas remotas y los dispositivos de recuperación **nunca tienen permiso de administración**; solo reciben claves y realizan tareas.
+
+## Cómo verifican el registro los dispositivos
+
+- **Los dispositivos existentes** solo aceptan una nueva entrada si enlaza con la anterior, su firma es válida y quien la firmó tenía permiso en ese momento.
+- **Los dispositivos recién incorporados** no siempre reproducen el historial desde el génesis. Pueden aceptar una instantánea del "estado actual" firmada por el dispositivo de un propietario o administrador y luego verificar cada entrada posterior. Eso implica confiar en quien firmó la instantánea.
+- **Cuando algo falla**, el dispositivo se detiene en la última entrada de confianza, conserva la evidencia y pausa las invitaciones y aprobaciones. **Nunca repara ni omite entradas** automáticamente. Las conversaciones existentes siguen siendo legibles.
+
+## Revocación y reemplazo de claves
+
+- Revocar un dispositivo afecta solo a ese dispositivo; revocar tu portátil no revoca también el teléfono que aprobó en su momento.
+- Eliminar a un miembro desconecta todos sus dispositivos de inmediato. Después, **reemplaza la clave del espacio de trabajo**: la nueva clave se envía solo a los dispositivos que siguen autorizados, de modo que un dispositivo antiguo que conserve la clave anterior no podrá descifrar el contenido nuevo. El historial ya descargado en sus dispositivos no se puede retirar.
+
+## En qué se apoya el registro
+
+El registro impide que el servidor **falsifique** cualquier firma. Lo que no puede garantizar por sí solo es que todos tengan el **mismo registro, el más reciente**.
+
+La versión actual asume que el servidor entrega un registro completo que no ha sido revertido ni bifurcado. Un servidor que mostrara versiones distintas a distintas personas seguiría sin poder falsificar firmas, pero podría ocultar una revocación a algunas de ellas.
+
+Para eso sirve el [código de seguridad](/es/docs/encrypted-workspaces-security-code): comparar códigos con un compañero de equipo revela si ambos tienen el mismo registro.

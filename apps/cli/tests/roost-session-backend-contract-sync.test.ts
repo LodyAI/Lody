@@ -1,15 +1,23 @@
-import { SessionHistoryChangesSchema, type SessionId } from '@lody/shared';
+import {
+  ROOST_HISTORY_BUCKET_ID,
+  roostCloudHistoryStreamId,
+  SessionHistoryChangesSchema,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import { applySessionHistoryPatches } from '@lody/shared/session-data';
 import { decodeBatch, Identity } from '@loro-dev/roost';
 import { RoostHostError, RoostNativeClient } from '@loro-dev/roost-node';
 import { NodeLodyHistory } from '@loro-dev/roost/lody-history';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { RoostCloudHistoryPublisher } from '../src/session/roost-cloud-history-publisher';
 import { readGoalProjection } from '../src/session/roost-goal-projection';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { RoostHistoryHead } from '../src/session/roost-history-head';
 import { encodeRoostContent } from '../src/session/roost-history-port';
 import { loadRoostOwnerSeedLegacy } from '../src/session/roost-writer-identity';
+import { getDefaultLogger } from '../src/utils/logger';
 import {
   coldHistoryHandlerFixture,
   nativeAssistant,
@@ -22,6 +30,84 @@ import {
 
 registerRoostNativeBackendSuite();
 describe('Production Roost history semantics (projections, patches and goals)', () => {
+  it('stops after the in-flight cloud append and resumes the remaining history', async () => {
+    const fixture = await nativeFixture();
+    const sessionId = fixture.doc.sessionId;
+    await fixture.backend.appendHistoryTurn(nativeUser('publish-on-resume'));
+    const workspaceId = 'synthetic-workspace' as WorkspaceId;
+    const machineId = 'synthetic-machine';
+    const frames = [0n, 1n, 2n].map((seq) => ({ turnId: new Uint8Array(16), seq }));
+    const received: bigint[] = [];
+    const started = Promise.withResolvers<void>();
+    const acknowledge = Promise.withResolvers<void>();
+    const published = Promise.withResolvers<SessionId>();
+    const publishedSessions: SessionId[] = [];
+    const nativeSync = RoostNativeClient.prototype.sync;
+    vi.spyOn(RoostNativeClient.prototype, 'sync').mockImplementation(function (
+      this: RoostNativeClient,
+      ...args
+    ) {
+      const sync = nativeSync.apply(this, args);
+      vi.spyOn(sync, 'ensureRemote').mockResolvedValue(undefined);
+      vi.spyOn(sync, 'upload').mockImplementation(async ({ maxSend }) => {
+        started.resolve();
+        const sent = frames.slice(received.length, received.length + Number(maxSend));
+        for (const frame of sent) {
+          await acknowledge.promise;
+          received.push(frame.seq);
+        }
+        return {
+          sent,
+          confirmed: sent,
+          turnsScanned: null,
+          tasksCreated: null,
+          waitingParents: [],
+          waitingLocal: [],
+          transportError: null,
+        };
+      });
+      return sync;
+    });
+    const createPublisher = () =>
+      new RoostCloudHistoryPublisher({
+        workspaceId,
+        machineId,
+        grant: async (id, binding) => ({
+          binding,
+          streamUrl: `https://streams.invalid/ds/${ROOST_HISTORY_BUCKET_ID}/${encodeURIComponent(
+            roostCloudHistoryStreamId(workspaceId, machineId, id, binding)
+          )}`,
+          token: 'synthetic-upload-grant',
+          expiresIn: 60,
+        }),
+        isOwned: async (id) => id === sessionId,
+        publish: async (id) => {
+          publishedSessions.push(id);
+          published.resolve(id);
+        },
+        unpublish: async () => {},
+        logger: getDefaultLogger(),
+      });
+    const first = createPublisher();
+    const resumed = createPublisher();
+    try {
+      first.enqueue(sessionId);
+      await started.promise;
+      const closing = first.close();
+      acknowledge.resolve();
+      await closing;
+      expect(received).toEqual([0n]);
+      expect(publishedSessions).toEqual([]);
+
+      resumed.enqueue(sessionId);
+      await expect(published.promise).resolves.toBe(sessionId);
+      expect(received).toEqual([0n, 1n, 2n]);
+    } finally {
+      acknowledge.resolve();
+      await Promise.all([first.close(), resumed.close()]);
+    }
+  });
+
   it('keeps retained projections isolated and refreshes peer corrections before a local patch', async () => {
     let fixture = await nativeFixture();
     const id = fixture.doc.sessionId;

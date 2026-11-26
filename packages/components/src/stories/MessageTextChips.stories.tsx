@@ -389,5 +389,10 @@ export const SentRows: Story = {
 };
 
 const themeStyles = stylex.create({
-  column: { display: 'flex', height: '100dvh', flexDirection: 'column', backgroundColor: uiColors.background },
+  column: {
+    display: 'flex',
+    height: '100dvh',
+    flexDirection: 'column',
+    backgroundColor: uiColors.background,
+  },
 });

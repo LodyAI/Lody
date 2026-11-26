@@ -1,0 +1,52 @@
+---
+title: "Skills"
+description: "Parcourez les Skills de projet et globaux à la machine dans Lody, consultez leurs instructions SKILL.md et mentionnez-les dans vos prompts avec $."
+---
+
+# Skills
+
+Lody détecte les Agent Skills dans les répertoires de Skills de projet et globaux à la machine pris en charge. Un Skill
+est un répertoire contenant un fichier `SKILL.md` avec des instructions réutilisables pour un agent de code.
+
+Dans Lody, les Skills sont en lecture seule : Lody peut les découvrir, les afficher et les référencer, mais il
+n'installe, ne modifie ni ne synchronise les fichiers de Skill.
+
+## Parcourir les Skills
+
+Sur ordinateur, ouvrez **Paramètres** -> **Projets**, sélectionnez un projet, puis passez à l'onglet **Skills**.
+
+Sur mobile, ouvrez le projet, passez à **Paramètres**, puis choisissez **Skills du projet**.
+
+La liste est regroupée par chemin source et affiche les métadonnées disponibles telles que le nom, la description, la version,
+l'auteur, la portée et l'état du lien symbolique. Ouvrez un Skill pour lire le contenu mis en forme de son `SKILL.md`.
+
+## Skills de projet et Skills globaux
+
+- Les **Skills de projet** proviennent des répertoires de Skills reconnus dans un projet local ou sur la branche
+  par défaut d'un projet GitHub.
+- Les **Skills globaux** proviennent des répertoires reconnus pour l'utilisateur système actuel sur la machine exécutant
+  l'agent, comme `~/.codex/skills` ou `~/.claude/skills`.
+
+Les Skills globaux sont propres à chaque machine. Les paramètres d'un projet GitHub affichent les Skills du dépôt, tandis qu'une conversation
+peut également proposer les Skills globaux compatibles provenant de la machine sélectionnée pour cette session.
+
+## Mentionner un Skill
+
+1. Sélectionnez un projet et une configuration d'agent pour la conversation.
+2. Saisissez `$` dans le composeur.
+3. Continuez à saisir pour filtrer par nom de Skill.
+4. Utilisez les touches fléchées et appuyez sur `Enter`, ou cliquez sur le Skill.
+
+Le composeur conserve un jeton `$skill-name` lisible. Lors de l'envoi du message, Lody développe la
+référence avec le chemin `SKILL.md` correspondant afin que l'agent sélectionné puisse le charger et le suivre.
+
+Le menu est filtré selon le fournisseur ACP actuel lorsque la prise en charge des répertoires diffère d'un agent à l'autre.
+
+## Actualisation et comportement hors ligne
+
+Lody met en cache les métadonnées des Skills sur l'appareil actuel et les actualise en arrière-plan. Si le projet
+ou la machine associée est temporairement indisponible, les résultats mis en cache précédemment peuvent rester visibles avec un
+état obsolète ou indisponible.
+
+Les liens symboliques sont pris en charge tant qu'ils restent dans les limites autorisées du projet ou du répertoire personnel de l'utilisateur. Les liens non sécurisés ou
+rompus sont ignorés.

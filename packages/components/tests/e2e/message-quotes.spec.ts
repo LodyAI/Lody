@@ -22,7 +22,9 @@ async function selectPassage(page: Page, index: number) {
   return page.evaluate(() => getSelection()!.toString());
 }
 
-test('a modal covers the quote action when the background selection is restored', async ({ page }) => {
+test('a modal covers the quote action when the background selection is restored', async ({
+  page,
+}) => {
   await openQuoteStory(page, 'modal-over-selection');
   await selectPassage(page, 11);
   const range = await page.evaluateHandle(() => getSelection()!.getRangeAt(0).cloneRange());

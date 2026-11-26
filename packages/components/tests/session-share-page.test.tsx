@@ -18,11 +18,15 @@ const language = vi.hoisted(() => ({
     language.resolvedLanguage = next;
   }),
 }));
-vi.mock('@/i18n', () => ({
-  // The reader's language switch routes through `setAppLanguage` now; the test
-  // owns the resolved language, so delegate straight to its changeLanguage.
-  setAppLanguage: (next: string) => language.changeLanguage(next),
-}));
+vi.mock('@/i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/i18n')>();
+  return {
+    ...actual,
+    // The reader's language switch routes through `setAppLanguage` now; the test
+    // owns the resolved language, so delegate straight to its changeLanguage.
+    setAppLanguage: (next: string) => language.changeLanguage(next),
+  };
+});
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: language,
@@ -275,8 +279,15 @@ describe('static share presentation', () => {
       await act(async () => byText('Copy Agent Prompt')!.click());
       expect(writeText.mock.lastCall?.[0]).toContain('Read this shared conversation:');
       await act(async () =>
-        container.querySelector<HTMLButtonElement>('[aria-label="Switch language: 中文"]')!.click()
+        container
+          .querySelector<HTMLButtonElement>('[aria-label="Switch language: English"]')!
+          .click()
       );
+      const zhOption = [
+        ...document.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]'),
+      ].find((node) => node.textContent?.includes('简体中文'));
+      expect(zhOption).toBeDefined();
+      await act(async () => zhOption!.click());
       await renderReader();
       await act(async () => byText('Copy Agent Prompt')!.click());
       const prompt = writeText.mock.lastCall?.[0];

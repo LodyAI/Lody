@@ -7,6 +7,7 @@ Rules bind callers too. [Background](../../../../.agents/docs/components-package
 - Encrypted sends refuse a host-verified machine withdrawal before any write. [Gate](../../../../.agents/notes/proposed/architecture/2026-10-28-e2ee-machine-sharing.md#sender-withdrawal-gate).
 - Retry immutable Roost input; absent receipts stay unknown. Cache/refresh keeps
   all input. Resolve owner routing per call.
+- Roost machine fallback, including after replica quota exhaustion, requires fresh owner authorization. Streams refusal ends that read route.
 
 - Markdown caches hold bounded raw ASTs per grammar; clone per use; skip streams.
 
@@ -92,7 +93,6 @@ shells supply `window.__LODY_CLIPBOARD__` (Android WebView denies the web API).
   Protected/local blobs never persist; hidden diffs cancel paging.
 - Turn diffs require the CLI-local store. Cross-render permits release
   only on settlement.
-
 
 - Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
   on the session's own machine may invoke them; explicit local absolute artifact

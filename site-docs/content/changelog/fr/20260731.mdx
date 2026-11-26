@@ -1,0 +1,25 @@
+---
+title: "20260731"
+version: 0.74.0
+date: 2026-07-31
+description: "Ajout de la bifurcation de session, d'une barre latérale droite repensée avec Browser et Side Chat, de sessions dynamiques configurables, ainsi que de la recherche et du tri dans les archives."
+---
+
+### ✨ Nouveautés
+
+- Ajout de la bifurcation de session. Utilisez le bouton Fork sous une réponse d'Agent pour créer une branche de session à partir de cette réponse ; Codex et Claude Code prennent également en charge la bifurcation depuis n'importe quel point de la session.
+- Refonte de la barre latérale droite avec ajout de Browser et Side Chat.
+- Browser peut ouvrir n'importe quelle URL pour les sessions locales. Pour les sessions distantes, il peut accéder aux ports de la machine exécutant la session. Le contrôle de Browser par un Agent n'est pas encore pris en charge.
+- Les sessions Lody créées dynamiquement peuvent désormais être configurées en cours de discussion, y compris le modèle et l'effort de raisonnement.
+- Ajout de la recherche et du tri pour les sessions archivées.
+
+### 🐛 Corrections et améliorations
+
+- Mise à jour du mode clair pour utiliser un arrière-plan blanc pur.
+- Affinage de certaines parties de l'interface mobile.
+- Correction du clavier mobile qui restait parfois ouvert après l'envoi d'un message.
+- Correction de sessions dont la synchronisation pouvait échouer en mode local-first.
+- Correction de la liste des projets dans le parcours de nouvelle session qui ne défilait pas assez loin pour afficher tous les projets.
+- Réduction de l'utilisation CPU et mémoire de la CLI.
+- Amélioration de la stabilité de l'état en ligne des machines.
+- Affinage de la recherche de sessions afin de ne rechercher que dans le contenu des messages, en excluant les appels d'outils et leurs résultats.

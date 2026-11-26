@@ -14,6 +14,7 @@ vi.mock('../src/components/pages/e2ee-ledger-verification', () => ({
     return { video: { current: null }, state: 'idle' };
   },
 }));
+const formattedKey = '55'.repeat(32).replace(/(.{4})(?=.)/g, '$1 ');
 const offer = {
   version: 1 as const,
   workspaceId: 'w',
@@ -191,7 +192,7 @@ describe('personal desktop approval', () => {
       await click('e2ee.pair.trust');
       expect(submitted).toEqual(offer);
       expect(container.querySelector('[data-testid="e2ee-pair-joining-key"]')?.textContent).toBe(
-        '55'.repeat(32)
+        formattedKey
       );
       await click('e2ee.pair.claim');
       expect(joined).toBe(false);
@@ -240,12 +241,19 @@ describe('personal desktop approval', () => {
     await click('e2ee.pair.create');
     await click('e2ee.pair.inspect');
     expect(container.querySelector('[data-testid="e2ee-pair-preview-key"]')?.textContent).toBe(
-      '55'.repeat(32)
+      formattedKey
     );
     await click('e2ee.pair.approve');
     expect(admitted).toBe(true);
     expect(container.textContent).toContain('e2ee.pair.published');
     expect(joined).toBe(false);
+    await click('e2ee.pair.pairAnother');
+    expect(
+      container
+        .querySelector('[data-testid="e2ee-personal-pairing-state"]')
+        ?.getAttribute('data-phase')
+    ).toBe('idle');
+    expect(container.textContent).toContain('e2ee.pair.create');
   });
   it('retains the offer and preview throughout a slow cancellation until the server result is confirmed', async () => {
     const cancellation = Promise.withResolvers<{ status: 'cancelled' }>();
@@ -255,11 +263,11 @@ describe('personal desktop approval', () => {
     await click('e2ee.pair.inspect');
     await click('common.cancel');
     expect(container.querySelector('textarea')!.value).toBe(JSON.stringify(offer));
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(container.querySelector('[role="alert"]')).toBeNull();
     await act(async () => cancellation.resolve({ status: 'cancelled' }));
     expect(container.querySelector('textarea')).toBeNull();
-    expect(container.textContent).not.toContain('55'.repeat(32));
+    expect(container.textContent).not.toContain(formattedKey);
     expect(container.textContent).toContain('e2ee.pair.cancelled');
   });
   it.each(['lost cancel receipt', 'admission reserved'])(
@@ -276,11 +284,11 @@ describe('personal desktop approval', () => {
       await click('common.cancel');
       expect(container.querySelector('[role="alert"]')).not.toBeNull();
       expect(container.querySelector('textarea')!.value).toBe(JSON.stringify(offer));
-      expect(container.textContent).toContain('55'.repeat(32));
+      expect(container.textContent).toContain(formattedKey);
       cancelFailure = false;
       await click('common.cancel');
       expect(container.querySelector('textarea')).toBeNull();
-      expect(container.textContent).not.toContain('55'.repeat(32));
+      expect(container.textContent).not.toContain(formattedKey);
       expect(admitted).toBe(false);
     }
   );
@@ -299,20 +307,20 @@ describe('personal desktop approval', () => {
     await render(false);
     await inputOffer();
     await click('e2ee.pair.trust');
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(container.textContent).toContain('e2ee.pair.claim');
     expect(container.querySelector('textarea')).toBeNull();
     await act(async () => root.unmount());
     root = createRoot(container);
     await render(false);
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     runtime.claimPersonalJoin = async () => {
       pending = null;
       return { ready: false, status: 'cancelled' };
     };
     await click('e2ee.pair.claim');
     expect(container.querySelector('textarea')!.value).toBe('');
-    expect(container.textContent).not.toContain('55'.repeat(32));
+    expect(container.textContent).not.toContain(formattedKey);
     const next = { ...offer, pairingSessionId: '88'.repeat(16) };
     runtime.preparePersonalJoin = async (value) => ({
       pairingSessionId: value.pairingSessionId,
@@ -322,7 +330,7 @@ describe('personal desktop approval', () => {
     await inputOffer(next);
     await click('e2ee.pair.trust');
     expect(container.querySelector('textarea')).toBeNull();
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(container.textContent).toContain('e2ee.pair.waiting');
   });
   it('a card remounted during registration shows that registration failure, never an early claim', async () => {
@@ -347,7 +355,7 @@ describe('personal desktop approval', () => {
     expect(container.textContent).not.toContain('e2ee.pair.claim');
     await act(async () => begin.reject(new Error('request_failed')));
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(container.textContent).toContain('e2ee.pair.retrySubmission');
   });
   it('retries the saved pin when preparation stopped before request creation, without inventing a key or session', async () => {
@@ -362,9 +370,9 @@ describe('personal desktop approval', () => {
     };
     await render(false);
     expect(container.querySelector('textarea')).toBeNull();
-    expect(container.textContent).not.toContain('55'.repeat(32));
+    expect(container.textContent).not.toContain(formattedKey);
     await click('e2ee.pair.retrySubmission');
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(container.textContent).toContain('e2ee.pair.waiting');
   });
   it('keeps a joining request after an unknown cancellation and a nonterminal claim', async () => {
@@ -379,11 +387,11 @@ describe('personal desktop approval', () => {
     runtime.claimPersonalJoin = async () => ({ ready: false, status: 'admitting' });
     await render(false);
     await click('common.cancel');
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(container.querySelector('textarea')).toBeNull();
     await click('e2ee.pair.claim');
     expect(container.textContent).toContain('e2ee.pair.waiting');
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
   });
   it('does not let an old workspace pending query populate the new workspace', async () => {
     const pending =
@@ -399,7 +407,7 @@ describe('personal desktop approval', () => {
         offer,
       })
     );
-    expect(container.textContent).not.toContain('55'.repeat(32));
+    expect(container.textContent).not.toContain(formattedKey);
     expect(container.querySelector('textarea')!.value).toBe('');
   });
   it('does not render a delayed preview after switching workspaces', async () => {
@@ -419,7 +427,7 @@ describe('personal desktop approval', () => {
         protection: 'os-keystore',
       })
     );
-    expect(container.textContent).not.toContain('55'.repeat(32));
+    expect(container.textContent).not.toContain(formattedKey);
     expect(container.querySelector('textarea')).toBeNull();
     expect(container.textContent).toContain('e2ee.pair.create');
   });
@@ -428,7 +436,7 @@ describe('personal desktop approval', () => {
     await render();
     await click('e2ee.pair.create');
     await click('e2ee.pair.inspect');
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(admitted).toBe(false);
     await click('e2ee.pair.approve');
     expect(admitted).toBe(true);
@@ -447,7 +455,7 @@ describe('personal desktop approval', () => {
     inspectFailure = undefined;
     await click('e2ee.pair.create');
     await click('e2ee.pair.inspect');
-    expect(container.textContent).toContain('55'.repeat(32));
+    expect(container.textContent).toContain(formattedKey);
     expect(admitted).toBe(false);
   });
   it('recovers a failed inspection on the next normal call without signing anything', async () => {

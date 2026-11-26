@@ -98,14 +98,15 @@ and the isolation of Roost reads alongside authorization and execution boundarie
 - Workspace-reading turn results finish before release within one bounded budget; timeout or shutdown cancels remaining statistics and prevents late result writes. Presentation and turn-bound image uploads may follow release with bounded owned waits. Shutdown prioritizes active release receipts; its final second bypasses stuck finalizers with failed Inbox releases and clears live execution IDs. Never force this release during normal operation.
   Every release/shutdown wait comes from `turn-budgets.ts`; keep its tested ordering and Desktop's larger quit grace. A turn frees its slot only through `freeTurnSlot`.
 
-- [Roost](README.md#roost-history-paging): gate owner/backend. No keyring/rotation/fallback,
-  removed-history revival, uncertain steer replay/retry or log/receipt pruning. Atomic edits/digests/metadata;
+- [Roost](README.md#roost-history-paging): gate owner/backend. Writers forbid keyring/rotation/fallback,
+  removed-history revival, uncertain steer replay/retry and log/receipt pruning. Atomic edits/digests/metadata;
   agent v2/renderer v3. SDK owns input/permission/branch; local causes+RPC stage/code/ID.
   Native proofs gate path reuse/goal read elision; head/watch replaces Loro cursor.
   Scan catch-up receipts outside the writer queue and yield between body pages.
   Verify retained bodies against one checkpoint. Capture limits preserve verified coverage.
   Repairs from the same applied checkpoint and retained window share bounded preparation through
   caller timeouts. Generation retirement and owner shutdown cancel pending preparation.
+  Upload replicas outside the writer queue before publishing.
 - `Session.createAgent` gates ACP spawn; failures reject JSON-RPC. Terminals: argv (shell for
   unsplit lines only), direct exit and bounded drain. Managed Codex reused-refresh retries once after process cleanup, delay and live Provider recheck; other auth errors do not.
 - Child tabs reuse parent workspace. No per-session paths in `MachineMeta`:

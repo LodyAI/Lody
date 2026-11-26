@@ -23,6 +23,8 @@ export type BatchMachineInput = {
   supportsManagedUpdates: boolean;
   /** `machine/status` capability; null while unknown or unreadable. */
   lifecycle: MachineLifecycleCapability | null;
+  /** The `machine/status` read itself failed (transport or timeout), not the capability. */
+  probeFailed?: boolean;
   runningSessionCount: number;
 };
 
@@ -35,7 +37,13 @@ export function daemonChannelOfVersion(version: string | undefined): DaemonChann
   return prerelease.startsWith('nightly') ? 'nightly' : 'next';
 }
 
-export type BatchUnsupportedReason = 'desktop' | 'foreground' | 'install' | 'unknown';
+export type BatchUnsupportedReason =
+  | 'desktop'
+  | 'foreground'
+  | 'install'
+  | 'unknown'
+  /** The status read never reached the machine; nothing is known about its install. */
+  | 'unreachable';
 
 export type BatchPlanRow = {
   machineId: string;
@@ -51,7 +59,7 @@ export type BatchPlanRow = {
 };
 
 const unsupportedReason = (machine: BatchMachineInput): BatchUnsupportedReason => {
-  if (!machine.lifecycle) return 'unknown';
+  if (!machine.lifecycle) return machine.probeFailed ? 'unreachable' : 'unknown';
   if (machine.lifecycle.launchMode === 'electron') return 'desktop';
   if (machine.lifecycle.launchMode === 'foreground') return 'foreground';
   return 'install';

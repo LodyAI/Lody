@@ -1,7 +1,18 @@
 import { useMemo, useState, type ComponentProps, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
-import { Bot, Check, ListChecks, LockKeyhole, Monitor, Plus, ShieldAlert, Zap } from 'lucide-react';
+import {
+  Bot,
+  Check,
+  ListChecks,
+  LockKeyhole,
+  Monitor,
+  Pin,
+  PinOff,
+  Plus,
+  ShieldAlert,
+  Zap,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   ACP_FAST_MODE_VALUE_ULTRAFAST,
@@ -41,6 +52,10 @@ import { MenuOptionSearchList } from '@/components/shared/menu-option-search-lis
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
+import {
+  canBePermissionDefault,
+  type PermissionDefaultSource,
+} from '@/lib/agent-permission-default';
 import {
   doesAgentRolePinPermissionMode,
   type ComposerAgentRoleItem,
@@ -1198,6 +1213,14 @@ export type DesktopPermissionModeButtonProps = {
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
   /** See `DesktopRunConfigMenuProps.menuSide`. */
   menuSide?: 'top';
+  /**
+   * The agent's synced default permission for new conversations. When given,
+   * the menu offers to make the current value that default, or to clear it.
+   */
+  permissionDefault?: {
+    value: (source: PermissionDefaultSource) => string | null;
+    onChange: (source: PermissionDefaultSource, value: string | null) => void;
+  };
 };
 
 export function DesktopPermissionModeButton({
@@ -1209,6 +1232,7 @@ export function DesktopPermissionModeButton({
   onConfigOptionChange,
   disabled = false,
   menuSide,
+  permissionDefault,
 }: DesktopPermissionModeButtonProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -1267,6 +1291,20 @@ export function DesktopPermissionModeButton({
               onSelect={() => handleSelect(opt.value)}
             />
           ))}
+          {permissionDefault && source && value && canBePermissionDefault(value) ? (
+            <>
+              <Menu.Separator />
+              {permissionDefault.value(source) === value ? (
+                <Menu.Item icon={PinOff} onClick={() => permissionDefault.onChange(source, null)}>
+                  {t('chat.runConfig.permissionDefaultClear', 'Stop using as default')}
+                </Menu.Item>
+              ) : (
+                <Menu.Item icon={Pin} onClick={() => permissionDefault.onChange(source, value)}>
+                  {t('chat.runConfig.permissionDefaultSet', 'Use for new conversations')}
+                </Menu.Item>
+              )}
+            </>
+          ) : null}
         </div>
       </Menu.Content>
     </Menu.Root>

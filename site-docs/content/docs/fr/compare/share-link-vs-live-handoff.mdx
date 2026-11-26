@@ -1,0 +1,95 @@
+---
+title: "Lien de partage vs transfert en direct"
+description: "Une capture d'écran, une transcription, un lien de partage ou une archive est un enregistrement. Un transfert en direct invite un coéquipier dans la même session d'agent de code — conversation, diffs et worktree."
+---
+
+# Lien de partage vs transfert en direct
+
+Il est facile de confondre deux sens courants de « partager ma session » :
+
+- Un **lien de partage** (ou une capture d'écran, un export Markdown ou une archive) est un **enregistrement**. Quelqu'un peut lire ce qui s'est passé ; certains outils peuvent lancer une *nouvelle* exécution d'agent à partir de ce contexte.
+- Un **transfert en direct** invite un coéquipier dans la **même** session d'agent de code afin qu'il puisse continuer à discuter, passer en revue les diffs et travailler dans le même worktree.
+
+Un enregistrement n'est pas une invitation à rejoindre la conversation en direct, les diffs en direct ou le répertoire de travail d'origine.
+
+Procédure et règles d'accès : [Partager une session d'agent de code](/fr/docs/session-handoff). Espace de travail d'équipe : [Fonctionnalités d'équipe](/fr/docs/team).
+
+<Callout title="Définition">
+Une capture d'écran, une transcription, un lien de partage ou une archive de session n'est pas un transfert en direct. Les personnes qui le consultent ne rejoignent pas votre session en cours et n'héritent pas du worktree d'origine. Le transfert nécessite d'être membre de l'espace de travail ainsi que le respect des règles de partage de machine et de projet décrites sur la page de transfert de session — ce n'est pas une URL publique que n'importe qui peut ouvrir.
+</Callout>
+
+## Deux usages distincts
+
+| Usage | Ce que le destinataire peut faire | Même session en direct ? |
+| --- | --- | --- |
+| Capture d'écran | Voir une image de la discussion | Non |
+| Export Markdown / transcription | Coller du texte statique dans une nouvelle discussion | Non — il repart de zéro |
+| Lien de partage de type ChatGPT | Lire un instantané de la conversation | Non |
+| Outils de lien de partage / d'archivage (par exemple [Lore](https://lore.link/share) ou [SpecStory](https://docs.specstory.com/cloud/session-sharing)) | Consulter un fil mis en forme ou un historique enregistré, ou forker ce contexte dans une **nouvelle** exécution d'agent | Non — les lecteurs ne rejoignent pas la session en cours ni le worktree d'origine |
+| **Transfert en direct** | Ouvrir la [session](/fr/docs/session) existante, continuer à discuter, passer en revue les [diffs](/fr/docs/diff-viewer) en direct et poursuivre le travail dans le même [worktree](/fr/docs/worktrees) | **Oui** |
+
+Lody vous permet toujours de [copier une conversation en Markdown](/fr/docs/copy-md) lorsque vous avez simplement besoin d'une trace écrite. Copier l'URL d'une session sans la partager n'accorde pas non plus d'accès à l'équipe — le lien continue de fonctionner pour le propriétaire.
+
+Cette page n'évalue aucun produit de lien de partage. Lore et SpecStory sont uniquement cités comme exemples de la catégorie d'enregistrement / d'archivage déjà mentionnée sur la page de transfert.
+
+## Ce qu'est réellement un transfert en direct
+
+Dans Lody, un coéquipier autorisé à ouvrir la session la poursuit à partir du même contexte :
+
+- la conversation en direct déjà engagée avec l'agent
+- les diffs de fichiers produits par l'agent
+- le worktree et la branche de la session
+- la même [configuration d'agent](/fr/docs/agents), afin qu'il puisse envoyer le prompt suivant
+
+Il ouvre **cette** session — ni un fork, ni une toute nouvelle discussion. Forker copie l'historique dans une **nouvelle** session ; utilisez cette option lorsque vous souhaitez une branche privée de la conversation. Voir [Forker une session](/fr/docs/session#fork-a-session).
+
+Le transfert est une action propre aux espaces de travail d'équipe. L'autre personne doit déjà être membre, et la session n'est visible par l'équipe que lorsque la machine (et le projet local, le cas échéant) est partagée. Étapes et cas particuliers : [Partager une session d'agent de code](/fr/docs/session-handoff).
+
+## Quand utiliser quelle option
+
+| Objectif | Option à privilégier |
+| --- | --- |
+| Quelqu'un a seulement besoin de *lire* ce qui s'est passé | Capture d'écran, transcription, lien de partage ou archive |
+| Vous souhaitez conserver une trace hors de l'espace de travail | Capture d'écran, transcription, lien de partage ou archive |
+| Vous amorcez une *nouvelle* exécution d'agent à partir d'un contexte exporté | Capture d'écran, transcription, lien de partage ou archive |
+| Un coéquipier doit poursuivre la **même** session d'agent de code | **Transfert en direct** |
+| Il a besoin des diffs actuels et du même worktree (pas d'un prompt reconstruit) | **Transfert en direct** |
+| Il est déjà (ou peut devenir) membre de l'[espace de travail](/fr/docs/team) | **Transfert en direct** |
+
+Pour exécuter plusieurs sessions isolées en équipe — modèles variés, worktrees distincts — consultez [Agents de code en parallèle](/fr/docs/parallel-agents). Cela lance de nouvelles tâches ; cela ne transfère pas une session existante.
+
+## Permissions
+
+Le transfert suit les mêmes règles que le guide produit. Cette page n'ajoute pas de modèle d'autorisations par lien de partage public.
+
+| Contrôle | Effet |
+| --- | --- |
+| Appartenance à l'espace de travail | Requise avant que quiconque puisse ouvrir des sessions d'équipe |
+| Rôle de membre | Les propriétaires et administrateurs gèrent qui peut inviter, modifier ou supprimer des personnes — voir [Modifier les permissions des membres](/fr/docs/team#change-member-permissions) |
+| Partage de machine | Les sessions sur une machine non partagée n'apparaissent pas dans la barre latérale des autres membres. Seul le propriétaire de l'appareil peut partager. |
+| Partage de projet local | Pour un projet local, les coéquipiers ont besoin de l'autorisation sur le projet en plus de celle sur la machine |
+| URL de session | Toujours accessible pour le propriétaire ; pour les coéquipiers uniquement une fois la session visible par l'équipe. Copier l'URL n'équivaut pas à **Partager avec l'équipe…** |
+
+Rejoindre un espace de travail **n'expose pas** votre ordinateur portable. Les machines restent privées tant que vous ne les partagez pas. Le partage d'une session peut partager sa machine et/ou son projet local avec tous les membres de l'espace de travail ; d'autres conversations présentes sur cet appareil peuvent également devenir visibles. Voir [Visibilité des machines en équipe](/fr/docs/team#team-machine-visibility).
+
+## Questions fréquentes
+
+### Un lien de partage revient-il à transférer une session d'agent de code ?
+
+Non. Un lien de partage, une capture d'écran, une transcription ou une archive est un **enregistrement consultable**. Quelqu'un peut le lire, et certains flux permettent de lancer une *nouvelle* exécution d'agent à partir de ce contexte. Il ne rejoint pas la session en direct d'origine et n'obtient pas le worktree d'origine. Un transfert en direct ouvre la session existante de l'espace de travail afin qu'un coéquipier la poursuive.
+
+### Un coéquipier peut-il poursuivre ma session Claude Code depuis un lien de partage ?
+
+Pas depuis une transcription, un instantané de type ChatGPT ou une visionneuse d'archive. Si la session s'exécute dans un espace de travail Lody, invitez-le, partagez la session (ainsi que la machine ou le projet local dont elle dépend), puis demandez-lui d'ouvrir **cette** session. Détails : [Partager une session d'agent de code](/fr/docs/session-handoff).
+
+### Quelle est la différence entre partager une transcription et collaborer en direct ?
+
+Partager une transcription consiste à envoyer un enregistrement. Collaborer en direct signifie qu'un coéquipier se trouve dans la même session : même discussion, mêmes diffs, même worktree. Exporter en Markdown ou copier une URL n'accorde pas cet accès.
+
+### Et si je veux seulement envoyer une transcription ?
+
+Copiez un message ou choisissez **Copier en Markdown** dans le menu de la session. Cela n'accorde pas d'accès en direct. Voir [Copier les conversations](/fr/docs/copy-md).
+
+### Pourquoi mon coéquipier ne peut-il pas ouvrir l'URL de session que je lui ai envoyée ?
+
+Copier l'URL d'une session ne partage pas la session. Il doit être membre de l'espace de travail, la machine (et le projet local, le cas échéant) doit être partagée, et il doit consulter **Toutes les tâches** plutôt que **Mes tâches**. Les machines non partagées ne synchronisent jamais leurs conversations dans la barre latérale des autres membres.

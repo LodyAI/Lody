@@ -141,15 +141,24 @@ export function toHighlightsTheme(
   for (const [category, scopes] of Object.entries(HIGHLIGHTS_SCOPES)) {
     const settings: ThemeSyntaxSettings = {};
     // Broad rules first, specific rules last; later equal-specificity rules win.
-    const matches = theme.tokenColors.flatMap((rule) => {
-      const selectors = (Array.isArray(rule.scope) ? rule.scope : [rule.scope ?? ''])
-        .flatMap((scope) => scope.split(','))
-        .map((scope) => scope.trim());
-      const specificity = Math.max(-1, ...selectors.flatMap((selector) =>
-        scopes.filter((scope) => !selector || scope === selector || scope.startsWith(`${selector}.`))
-          .map(() => selector.length)));
-      return specificity < 0 ? [] : [{ rule, specificity }];
-    }).sort((a, b) => a.specificity - b.specificity);
+    const matches = theme.tokenColors
+      .flatMap((rule) => {
+        const selectors = (Array.isArray(rule.scope) ? rule.scope : [rule.scope ?? ''])
+          .flatMap((scope) => scope.split(','))
+          .map((scope) => scope.trim());
+        const specificity = Math.max(
+          -1,
+          ...selectors.flatMap((selector) =>
+            scopes
+              .filter(
+                (scope) => !selector || scope === selector || scope.startsWith(`${selector}.`)
+              )
+              .map(() => selector.length)
+          )
+        );
+        return specificity < 0 ? [] : [{ rule, specificity }];
+      })
+      .sort((a, b) => a.specificity - b.specificity);
     for (const { rule } of matches) {
       if (rule.settings.foreground) settings.color = rule.settings.foreground;
       if (rule.settings.fontStyle !== undefined) {
@@ -165,7 +174,8 @@ export function toHighlightsTheme(
     appearance: theme.type === 'light' || theme.type === 'hcLight' ? 'light' : 'dark',
     style: {
       ...theme.colors,
-      'editor.foreground': readWorkbenchColor(theme, ['editor.foreground', 'foreground']) ?? '#CCCCCC',
+      'editor.foreground':
+        readWorkbenchColor(theme, ['editor.foreground', 'foreground']) ?? '#CCCCCC',
       'editor.background': readWorkbenchColor(theme, ['editor.background']) ?? '#1E1E1E',
       syntax,
     },

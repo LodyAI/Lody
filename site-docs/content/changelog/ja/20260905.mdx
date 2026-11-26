@@ -1,0 +1,30 @@
+---
+title: "20260905"
+version: 0.91.0
+date: 2026-09-05
+description: "セッションファイルのアクション、セマンティック差分、未読インジケーター、および改善されたメンション検索を追加し、エージェントモデル、Markdown、モバイル、および公開サイトを改善しました。"
+---
+
+バージョン 0.91.0
+
+### ✨ 新機能
+
+- GPT-6 Astra に対応しました。
+- セッションファイルアクションを追加し、直接プレビューできないファイルをシステムアプリで開いたり、ファイルマネージャーで表示したり、ダウンロードしたりできるようになりました（[#375](https://github.com/LodyAI/Lody/pull/375)）。
+- Markdown でセマンティック差分のコードブロックをレンダリングできるようになりました（[#373](https://github.com/LodyAI/Lody/pull/373)）。
+- セッションサイドバーとデスクトップ版の子セッションタブに未読状態が表示されるようになりました（[#332](https://github.com/LodyAI/Lody/pull/332), [#384](https://github.com/LodyAI/Lody/pull/384)）。
+- ファイル、Issue、およびPRのメンションで VS Code 風のあいまい検索（ファジーマッチング）が使用されるようになり、対象を見つけやすくなりました（[#378](https://github.com/LodyAI/Lody/pull/378)）。
+- 共有セッションの引き継ぎ、並列エージェント、およびエージェントチームに関するバイリンガルガイドを追加しました（[#387](https://github.com/LodyAI/Lody/pull/387), [#389](https://github.com/LodyAI/Lody/pull/389), [#390](https://github.com/LodyAI/Lody/pull/390), [#393](https://github.com/LodyAI/Lody/pull/393), [#394](https://github.com/LodyAI/Lody/pull/394)）。
+
+### 🐛 修正と改善
+
+- チームプレビューとローカルブラウザの接続チェックを強化し、より安全で信頼性の高いアクセスを実現しました（[#374](https://github.com/LodyAI/Lody/pull/374)）。
+- DeepSeek Harness でカスタムサービスからのモデル検出に対応し、アクティブなランタイムからモデル、推論、権限オプションを取得して表示するようになりました（[#380](https://github.com/LodyAI/Lody/pull/380), [#395](https://github.com/LodyAI/Lody/pull/395), [DeepSeek ACP #10](https://github.com/LodyAI/acp-extension-dsh/pull/10), [#11](https://github.com/LodyAI/acp-extension-dsh/pull/11)）。
+- Kimi モデルセレクターでモデルプロバイダーの表示と検索が可能になり、同名のモデルを区別しやすくなりました（[Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)）。
+- TeX の角括弧デリミタへの対応、非ASCII句読点周辺の自動リンク境界の修正、最終テキスト出力の保持、タッチ操作で閉じられる Mermaid フルスクリーンビューアーの追加により、Markdown とストリーミングメッセージの描画を改善しました（[#336](https://github.com/LodyAI/Lody/pull/336), [#370](https://github.com/LodyAI/Lody/pull/370), [#388](https://github.com/LodyAI/Lody/pull/388), [#396](https://github.com/LodyAI/Lody/pull/396)）。
+- サイドバーのサイズ変更時にチャット画面がガタつく問題を修正し、課金情報の読み込みを高速化しました（[#368](https://github.com/LodyAI/Lody/pull/368), [#371](https://github.com/LodyAI/Lody/pull/371)）。
+- ライブアクティビティの更新オーバーヘッドを削減し、モバイルのセッショングループプレビューに上限を設けることで、長いリストのスクロールを滑らかにしました（[#319](https://github.com/LodyAI/Lody/pull/319), [#323](https://github.com/LodyAI/Lody/pull/323)）。
+- App Store レビュー依頼の表示タイミングと状態管理を改善しました（[#310](https://github.com/LodyAI/Lody/pull/310)）。
+- ACP プロバイダーのアイコンおよびランタイムレジストリ情報を更新しました（[#369](https://github.com/LodyAI/Lody/pull/369)）。
+- 公開サイトのページタイトル、検索での見つけやすさ、および存在しないページの404処理を改善しました（[#379](https://github.com/LodyAI/Lody/pull/379), [#383](https://github.com/LodyAI/Lody/pull/383), [#391](https://github.com/LodyAI/Lody/pull/391)）。
+- Kimi モデルセレクターにおけるプロバイダー表示と検索を改善してくれた外部コントリビューターの [@nokizw](https://github.com/nokizw) に感謝します（[Kimi ACP #7](https://github.com/LodyAI/acp-extension-kimi/pull/7)）。

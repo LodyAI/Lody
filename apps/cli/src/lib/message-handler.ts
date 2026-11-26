@@ -9347,6 +9347,8 @@ export class MessageHandler {
       if (backend.kind !== 'roost') {
         throw new Error(`Session ${sessionId} does not use Roost history.`);
       }
+      if (query.kind === 'readLatestPage')
+        this.workspaceDocument.prioritizeRoostCloudHistory(sessionId);
       const catchupSignal = signal
         ? AbortSignal.any([signal, this.historyOwnerAbort.signal])
         : this.historyOwnerAbort.signal;

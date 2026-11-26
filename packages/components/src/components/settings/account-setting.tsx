@@ -12,6 +12,7 @@ import { useRouter } from '@tanstack/react-router';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { cloudOperations } from '@/lib/cloud-api-operations';
+import { isE2eeActionTimeoutError } from '../../providers/cloud-e2ee-workspaces';
 import {
   deleteAccountWorkspace,
   hasEncryptedContentMode,
@@ -685,7 +686,9 @@ function CloudAccountSettings({
     } catch (error) {
       console.error('Failed to delete workspace:', error);
       toast.error(t('common.error'), {
-        description: t('common.tryAgain'),
+        description: isE2eeActionTimeoutError(error)
+          ? t('e2ee.delete.timeout')
+          : t('common.tryAgain'),
       });
     }
   };
@@ -819,10 +822,10 @@ function CloudAccountSettings({
       workspaceJoinRequestsSlot={
         encrypted &&
         encryptedTeamManagement &&
-        platform.e2eeWorkspaces?.runtime &&
-        currentUserId ? (
+        currentUserId &&
+        (platform.e2eeWorkspaces?.runtime || role === 'owner' || role === 'admin') ? (
           <E2eeTeamSettingsHost
-            runtime={platform.e2eeWorkspaces.runtime}
+            runtime={platform.e2eeWorkspaces?.runtime}
             workspaceId={activeOrganization.id}
             accountId={currentUserId}
             onOpenBilling={openAdmissionBilling}

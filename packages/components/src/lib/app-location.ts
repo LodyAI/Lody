@@ -87,9 +87,7 @@ export function getAppShareOrigin(): string {
 }
 
 export function getAppShareUrl(path = getAppCurrentPathWithSearch()): string {
-  const normalizedPath = path.trim()
-    ? `/${path.trim().replace(/^\/+/, '')}`
-    : '/';
+  const normalizedPath = path.trim() ? `/${path.trim().replace(/^\/+/, '')}` : '/';
   return new URL(normalizedPath, `${getAppShareOrigin()}/`).toString();
 }
 

@@ -1,0 +1,14 @@
+---
+title: "20260901-2"
+version: 0.89.2
+date: 2026-09-01
+description: "Correction des problèmes de navigation, de restauration et de rendu des onglets de session, et réduction de la latence de saisie lors des changements rapides de session."
+---
+
+Version 0.89.2
+
+### 🐛 Corrections et améliorations
+
+- Correction du maintien des onglets de session sur la bonne conversation et de leur récupération lors de l'arrivée de données asynchrones ou de sessions enfants en attente, de changements rapides ou de restaurations de session.
+- Réduction de la latence de saisie lors du changement de session en regroupant les navigations rapides et en déplaçant le travail d'arrière-plan hors du chemin de saisie.
+- Prévention des boucles de redirection et des plantages du moteur de rendu causés par des relations parent-enfant malformées entre sessions.

@@ -29,9 +29,9 @@ describe('session failure normalization', () => {
       'upstream (a context-length or rate-limit rejection is the usual cause) and the agent ' +
       'reported it as a normal completion instead of an error. Retry your message, or start a ' +
       'new session if this conversation has grown too long.';
-    expect(
-      classifyFailureReason({ reason: 'agent_no_output', message: silentTurnMessage })
-    ).toBe('agent_crash');
+    expect(classifyFailureReason({ reason: 'agent_no_output', message: silentTurnMessage })).toBe(
+      'agent_crash'
+    );
     expect(
       describeChatFailure({ reason: 'agent_no_output', message: silentTurnMessage })
     ).toMatchObject({ reason: 'agent_crash', retryable: true });

@@ -117,9 +117,7 @@ export function computeUsageShareStats(
   const window = inRange.length > 0 ? inRange : elapsed;
   const values = window.map(pick);
   const { active, longest } = streaks(values);
-  const total = timeline
-    ? pick(timeline.totals)
-    : values.reduce((sum, value) => sum + value, 0);
+  const total = timeline ? pick(timeline.totals) : values.reduce((sum, value) => sum + value, 0);
 
   return {
     trio: 'daily',
@@ -132,9 +130,7 @@ export function computeUsageShareStats(
     litDayStartMs:
       // `total` covers the whole calendar; lighting a window would imply the
       // rest is out of scope when it is not.
-      range === 'total' || !timeline
-        ? null
-        : { fromMs: timeline.startMs, toMs: timeline.endMs },
+      range === 'total' || !timeline ? null : { fromMs: timeline.startMs, toMs: timeline.endMs },
     periodMs: timeline
       ? { fromMs: timeline.startMs, toMs: timeline.endMs }
       : {

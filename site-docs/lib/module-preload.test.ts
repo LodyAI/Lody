@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  isCriticalModulePreloadHref,
-  resolveModulePreloadDependencies,
-} from './module-preload.ts';
+import { isCriticalModulePreloadHref, resolveModulePreloadDependencies } from './module-preload.ts';
 
 const pricingRouteDeps = [
   'assets/pricing-B2h.js',

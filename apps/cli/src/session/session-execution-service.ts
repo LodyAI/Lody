@@ -589,7 +589,7 @@ export type PreparedSessionDispatchOptions = {
   dispatchSource: SessionDispatchSource;
   accessPromise: Promise<MachineAccessVerification>;
   requestPromise: Promise<PreparedSessionDispatchRequest>;
-  onExecutionDeferred?: () => void | Promise<void>;
+  onExecutionDeferred?: (wait?: 'automation-admission') => void | Promise<void>;
   onAccessAllowed: () => void | Promise<void>;
   onAccessDenied: (
     reason: MachineAccessVerification & { outcome: 'denied' }
@@ -3233,9 +3233,9 @@ export class SessionExecutionService {
             return undefined;
           })
       );
-      if (visibleOutcome === 'execution-deferred') {
-        await options.onExecutionDeferred?.();
-      }
+      if (visibleOutcome === 'execution-deferred') await options.onExecutionDeferred?.();
+      if (visibleOutcome === 'automation-admission-blocked')
+        await options.onExecutionDeferred?.('automation-admission');
       if (
         outcome === 'unknown' ||
         visibleOutcome === 'duplicate' ||
@@ -3832,11 +3832,18 @@ export class SessionExecutionService {
 
       const sessionToTerminate = options.session ?? null;
       if (options.terminateSession && !sessionToTerminate && options.pendingSession) {
-        self.terminatePendingSessionWhenReady({
-          sessionId: options.sessionId,
-          turnId: options.turnId,
-          pendingSession: options.pendingSession,
-        });
+        const abandoned =
+          self.deps.sessionManager.abandonPendingSessionCreate?.(
+            options.sessionId,
+            'turn-cancelled'
+          ) ?? false;
+        if (!abandoned) {
+          self.terminatePendingSessionWhenReady({
+            sessionId: options.sessionId,
+            turnId: options.turnId,
+            pendingSession: options.pendingSession,
+          });
+        }
       }
 
       if (options.terminateSession && sessionToTerminate) {
@@ -4179,7 +4186,7 @@ export class SessionExecutionService {
    * Returns false when the input was not interrupted, so the caller fails it as before.
    * Spec: `specs/interrupted-turn-continuation.md`.
    */
-  private async continueInterruptedTurn(
+  async continueInterruptedTurn(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
     userTurnId: string

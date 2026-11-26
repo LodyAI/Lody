@@ -45,7 +45,7 @@
   session and this exact ready/cancelled pin; it then cancels that pin (offer and genesis kept)
   and retires the entry. A credential `e2ee_device_revoked` history read retries once under
   the account login so the signed revocation still verifies. Every cloud call is bounded by
-  30 s as retryable `unavailable`; a timeout is never access loss. Only gateway 502/503/504 retry twice within that bound, using Effect sleep and account guards.
+  30 s as retryable `unavailable`; a timeout is never access loss. Only gateway 502/503/504 retry thrice inside that bound with Effect sleep and account guards.
 - Content calls snapshot the complete caller DTO before lazy account/pin I/O.
   Seal owns cleanup of its plaintext copy even if admission or the executor fails.
   Public runtime copies retain their own native-call lifetime; never wipe borrowed

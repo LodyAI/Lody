@@ -1,0 +1,72 @@
+---
+title: "Intégration GitHub"
+description: "Connectez vos dépôts GitHub à Lody pour cloner vos projets, disposer du contexte des issues et des PR, utiliser des sessions en worktree, suivre les statuts CI et synchroniser les commentaires de revue."
+---
+
+# Intégration GitHub
+
+Pour offrir des flux de travail fluides sur ordinateur comme sur mobile, Lody fait de l'intégration GitHub un élément central du produit. Une fois l'application GitHub Lody installée sur vos dépôts, Lody peut cloner vos projets depuis n'importe quel appareil, récupérer le contexte des issues et des PR et vous offrir un flux de travail plus fluide.
+
+## Configuration
+
+Ouvrez **Settings** -> **GitHub** -> **Manage** pour accéder à la page d'installation de l'application GitHub. Sélectionnez les dépôts auxquels vous souhaitez donner accès à Lody, puis revenez dans Lody. Les dépôts sélectionnés apparaissent sous **Repositories available to add to workspace**. Ajoutez ceux dont vous avez besoin à l'espace de travail actuel.
+
+Lody permet de partager un même dépôt entre plusieurs espaces de travail. Dans vos autres espaces de travail, les dépôts disposant déjà d'une installation de l'application GitHub peuvent être sélectionnés et ajoutés directement.
+
+### Vous ne trouvez pas un dépôt dans la liste des dépôts autorisés ?
+
+Si un dépôt que vous avez autorisé n'apparaît pas sous **Authorized Repositories**, il a probablement été omis lors de l'installation de l'application GitHub (par exemple si vous avez cliqué sur **Install** avant de le sélectionner, ou si le dépôt appartient à une organisation nécessitant l'approbation d'un administrateur).
+
+La solution la plus simple consiste à recommencer l'autorisation depuis le début :
+
+1. Ouvrez [github.com/settings/installations](https://github.com/settings/installations) (pour les dépôts personnels) ou la page **Settings → GitHub Apps → Lody → Configure** de votre organisation.
+2. Désinstallez l'application GitHub **Lody**.
+3. De retour dans Lody, ouvrez **Settings → GitHub → Manage** et réinstallez l'application, en sélectionnant cette fois tous les dépôts auxquels vous souhaitez que Lody accède.
+
+Une fois la réinstallation terminée, revenez sur la page Settings : les dépôts apparaissent dans la liste et peuvent être ajoutés à l'espace de travail.
+
+## Identité GitHub personnelle
+
+L'installation de l'application GitHub donne à Lody l'accès aux dépôts. L'identité personnelle est distincte et facultative : activez-la uniquement si vous souhaitez que les commentaires de PR, les actions de revue et les fusions soient effectués sous votre propre compte GitHub. Pour l'utiliser, activez **Act as you for PRs, comments, and merges** dans **Settings** -> **GitHub**, puis autorisez votre compte GitHub.
+
+Après l'autorisation, la page Settings affiche le compte GitHub connecté. Cela ne modifie pas les dépôts auxquels Lody a accès ; cet accès provient toujours de l'installation de l'application GitHub. Vous pouvez désactiver cette option ultérieurement si vous souhaitez que Lody utilise de nouveau uniquement l'identité de l'application GitHub de l'espace de travail.
+
+## Sélectionner un dépôt pour une conversation
+
+Sur la page d'accueil, utilisez le sélecteur de dépôt en haut à gauche de la zone de saisie pour choisir un dépôt ajouté à l'espace de travail. Lody liste alors les branches de ce dépôt afin que vous puissiez choisir votre point de départ.
+
+<GithubRepoPickerPreview locale="fr" />
+
+Une fois la conversation créée, Lody clone et initialise le dépôt sur la machine CLI, puis crée un nouveau [Worktree](/fr/docs/worktrees) à partir de la branche que vous avez sélectionnée. Chaque conversation s'exécute sur sa propre branche et n'affecte pas les autres conversations.
+
+## Démarrer à partir d'une issue ou d'une pull request
+
+Après avoir sélectionné un dépôt sur la page d'accueil, tapez `@` pour ouvrir le menu de mention, puis choisissez **Issues** ou **Pull Requests** pour mentionner un élément du dépôt actuel.
+
+<MentionPreview locale="fr" kind="issue" />
+
+Utilisez les flèches haut et bas pour sélectionner un élément, puis appuyez sur Entrée pour confirmer. Lody insère l'élément sélectionné dans la zone de saisie sous la forme `#<number>` et injecte son contexte dans le prompt, ce qui permet à l'agent de traiter des tâches comme `Fix #12` ou `Review the implementation in #56`.
+
+## Statut des PR et synchronisation CI
+
+Lorsqu'une session est liée à une PR GitHub, Lody affiche le numéro de la PR, son état (ouverte, fermée ou fusionnée) et le statut CI dans l'interface de la session. Les vérifications en cours, réussies ou en échec se mettent à jour dans Lody : vous n'avez donc pas besoin de revenir sans cesse sur GitHub pour vérifier si la branche est prête.
+
+Si vous continuez à travailler sur une branche qui possède déjà une PR, Lody tente également de détecter cette PR et de l'associer automatiquement à la session.
+
+## Actions sur les PR dans Lody
+
+Cliquez sur le badge de PR en haut d'une session liée pour ouvrir le panneau de PR. Depuis ce panneau, vous pouvez consulter le titre, la description, la branche, la CI, les commentaires et les revues de la PR sans quitter Lody.
+
+Les PR brouillons affichent une action **Ready for review** dans le panneau de PR. Une fois la PR prête et fusionnable, vous pouvez également la fusionner depuis Lody et supprimer la branche après la fusion si elle existe encore sur GitHub.
+
+## Commit et push pour les sessions liées à une PR
+
+Pour les sessions adossées à GitHub et liées à une PR, Lody vérifie l'espace de travail après chaque tour de l'agent. S'il reste des modifications non commitées ou des commits locaux qui n'ont pas encore été poussés, Lody peut demander à l'agent de les commiter et de les pousser sur la branche de la PR.
+
+Vous pouvez toujours déclencher **Commit & Push** manuellement depuis l'interface de la session, ou utiliser **Fix PR Comments** lorsque des commentaires de revue nécessitent une nouvelle passe.
+
+## Synchronisation des commentaires de revue
+
+Dans [Commentaires sur le diff](/fr/docs/diff-comments), les sessions liées à une PR peuvent publier les nouveaux commentaires sur les lignes directement sur GitHub en activant **Sync to GitHub**.
+
+Les commentaires de revue de PR GitHub existants sur les lignes s'affichent également dans les diffs de Lody, et les réponses envoyées depuis Lody sont publiées sur GitHub. La revue, l'inspection du code et le travail de suivi de l'agent restent ainsi centralisés au même endroit.

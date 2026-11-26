@@ -121,4 +121,61 @@ describe('external auth supervisors', () => {
     third.release();
     session.stop();
   });
+
+  it('loads lazy session atoms on start and fails explicitly when $store.atoms.session is absent', async () => {
+    authMocks.token = null as unknown as string;
+    let startedLoads = 0;
+    let resolveInitialLoad!: () => void;
+    const listeners = new Set<(value: unknown) => void>();
+    let current = {
+      data: null as null | { session: { id: string }; user: { id: string } },
+      error: null as unknown,
+      isPending: true,
+      isRefetching: false,
+      refetch: async () => {},
+    };
+    const lazyClient = {
+      $store: {
+        atoms: {
+          session: {
+            get: () => current,
+            listen: (listener: (value: unknown) => void) => {
+              listeners.add(listener);
+              if (startedLoads === 0) {
+                startedLoads += 1;
+                resolveInitialLoad = () => {
+                  current = {
+                    ...current,
+                    data: { session: { id: 's-desktop' }, user: { id: 'u-desktop' } },
+                    isPending: false,
+                  };
+                  for (const item of [...listeners]) item(current);
+                };
+              }
+              return () => listeners.delete(listener);
+            },
+          },
+        },
+      },
+      getSession: async () => ({ error: null }),
+    } as never;
+
+    const supervisor = createStableSessionSupervisor(lazyClient);
+    expect(startedLoads).toBe(0);
+    expect(supervisor.getSnapshot().isPending).toBe(true);
+
+    supervisor.start();
+    expect(startedLoads).toBe(1);
+    resolveInitialLoad();
+    expect(supervisor.getSnapshot().isPending).toBe(false);
+    expect(supervisor.getSnapshot().data).toEqual({
+      session: { id: 's-desktop' },
+      user: { id: 'u-desktop' },
+    });
+    supervisor.stop();
+
+    expect(() => createStableSessionSupervisor({} as never)).toThrow(
+      'Auth client is missing $store.atoms.session'
+    );
+  });
 });

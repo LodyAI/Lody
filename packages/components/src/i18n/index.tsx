@@ -5,23 +5,67 @@ import React, { useEffect } from 'react';
 import { Select } from '@lody/ui/select';
 import { useAtom } from 'jotai';
 import { languageAtom } from '../atoms/settings';
-import type { SupportedLanguage } from '@lody/shared';
+import {
+  bcp47ToSupportedLanguage,
+  normalizeSupportedLanguage,
+  toPushLanguage,
+  type SupportedLanguage,
+} from '@lody/shared';
 import { withPush } from '@/lib/push-notifications';
 
 import en from '../../../../locales/en.json';
 import lang_en from '../../../../locales/modules/lang/en.json';
 import lang_zhCN from '../../../../locales/modules/lang/zh_CN.json';
+import lang_zhHant from '../../../../locales/modules/lang/zh_Hant.json';
+import lang_ja from '../../../../locales/modules/lang/ja.json';
+import lang_ko from '../../../../locales/modules/lang/ko.json';
+import lang_es from '../../../../locales/modules/lang/es.json';
+import lang_fr from '../../../../locales/modules/lang/fr.json';
+import lang_ru from '../../../../locales/modules/lang/ru.json';
 
-/* `en` is the fallback language, so its bundle stays eager. `zh_CN` (~500KB)
-   loads on demand: `ensureLanguageResources` fetches it before init when the
-   detected/stored language is Chinese, and before any later language switch,
-   so `i18n.changeLanguage` always sees a real bundle — never the en fallback. */
-async function loadZhCNBundle(): Promise<Record<string, unknown>> {
-  const module = await import('../../../../locales/zh_CN.json');
-  return { ...module.default, ...notificationMessages.zh };
-}
+/* `en` is the fallback language, so its bundle stays eager. Every non-English
+   locale (~500KB each) loads on demand: `ensureLanguageResources` fetches it
+   before init when the detected/stored language is non-English, and before any
+   later language switch, so `i18n.changeLanguage` always sees a real bundle —
+   never the en fallback. */
+const DEFERRED_LOCALE_LOADERS: Record<
+  Exclude<SupportedLanguage, 'en'>,
+  () => Promise<Record<string, unknown>>
+> = {
+  zh_CN: async () => {
+    const module = await import('../../../../locales/zh_CN.json');
+    return { ...module.default, ...notificationMessages.zh };
+  },
+  zh_Hant: async () => {
+    const module = await import('../../../../locales/zh_Hant.json');
+    return { ...module.default, ...notificationMessages.zh_Hant };
+  },
+  ja: async () => {
+    const module = await import('../../../../locales/ja.json');
+    return { ...module.default, ...notificationMessages.ja };
+  },
+  ko: async () => {
+    const module = await import('../../../../locales/ko.json');
+    return { ...module.default, ...notificationMessages.ko };
+  },
+  es: async () => {
+    const module = await import('../../../../locales/es.json');
+    return { ...module.default, ...notificationMessages.es };
+  },
+  fr: async () => {
+    const module = await import('../../../../locales/fr.json');
+    return { ...module.default, ...notificationMessages.fr };
+  },
+  ru: async () => {
+    const module = await import('../../../../locales/ru.json');
+    return { ...module.default, ...notificationMessages.ru };
+  },
+};
 
-export const resources = {
+export const resources: Record<
+  SupportedLanguage,
+  { translation: Record<string, unknown>; lang: { name: string } }
+> = {
   en: {
     translation: { ...en, ...notificationMessages.en },
     lang: lang_en,
@@ -30,30 +74,55 @@ export const resources = {
     translation: {},
     lang: lang_zhCN,
   },
+  zh_Hant: {
+    translation: {},
+    lang: lang_zhHant,
+  },
+  ja: {
+    translation: {},
+    lang: lang_ja,
+  },
+  ko: {
+    translation: {},
+    lang: lang_ko,
+  },
+  es: {
+    translation: {},
+    lang: lang_es,
+  },
+  fr: {
+    translation: {},
+    lang: lang_fr,
+  },
+  ru: {
+    translation: {},
+    lang: lang_ru,
+  },
 };
 
 const loadedLanguages = new Set<string>(['en']);
 const languageLoadPromises = new Map<string, Promise<void>>();
 
 export function ensureLanguageResources(language: string): Promise<void> {
-  if (loadedLanguages.has(language)) {
+  const normalized = normalizeSupportedLanguage(language) ?? fallbackLanguage;
+  if (loadedLanguages.has(normalized)) {
     return Promise.resolve();
   }
-  let pending = languageLoadPromises.get(language);
+  let pending = languageLoadPromises.get(normalized);
   if (!pending) {
     pending = (async () => {
-      // Only zh_CN is deferred today; extend the switch when locales grow.
-      const bundle = language === 'zh_CN' ? await loadZhCNBundle() : {};
+      const loader = normalized === 'en' ? undefined : DEFERRED_LOCALE_LOADERS[normalized];
+      const bundle = loader ? await loader() : {};
       if (i18next.isInitialized) {
-        i18next.addResourceBundle(language, defaultNS, bundle, true, true);
+        i18next.addResourceBundle(normalized, defaultNS, bundle, true, true);
       } else {
-        resources[language as SupportedLanguage].translation = bundle;
+        resources[normalized].translation = bundle;
       }
-      loadedLanguages.add(language);
+      loadedLanguages.add(normalized);
     })();
-    languageLoadPromises.set(language, pending);
+    languageLoadPromises.set(normalized, pending);
     // A failed fetch must not poison the map — a retry re-issues the import.
-    pending.catch(() => languageLoadPromises.delete(language));
+    pending.catch(() => languageLoadPromises.delete(normalized));
   }
   return pending;
 }
@@ -65,10 +134,7 @@ let initializationPromise: Promise<void> | null = null;
 let latestLanguageRequest = 0;
 
 function coerceSupportedLanguage(value: unknown): SupportedLanguage | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  return currentSupportedLanguages.includes(value) ? (value as SupportedLanguage) : null;
+  return normalizeSupportedLanguage(value);
 }
 
 export function parseStoredLanguageValue(raw: string | null | undefined): SupportedLanguage | null {
@@ -95,28 +161,6 @@ export function readStoredLanguagePreference(): SupportedLanguage | null {
   } catch {
     return null;
   }
-}
-
-// Map a BCP-47 tag (e.g. `zh-CN`, `zh-Hans`, `en-US`) to a supported language.
-// BCP-47 tags are case-insensitive and structured as `<base>-<region>-...`, so
-// we lowercase the input and take the base subtag. We don't install
-// i18next-browser-languagedetector for two supported languages — a direct walk
-// over `navigator.languages` is simpler and ships no extra code. Rejected:
-// matching the full tag case-sensitively. `navigator.languages` is usually
-// canonical (`en-US`, `zh-CN`), but a strict match would silently fall through
-// to `en` for any non-canonical casing, which is a footgun.
-const BASE_SUBTAG_TO_SUPPORTED: Record<string, SupportedLanguage> = {
-  en: 'en',
-  // Any Chinese variant maps to Simplified Chinese, since that's the only
-  // Chinese locale we ship.
-  zh: 'zh_CN',
-};
-
-function bcp47ToSupportedLanguage(tag: string): SupportedLanguage | null {
-  // Electron returns BCP-47 tags, while some Linux locale configurations still
-  // surface the legacy underscore spelling. Treat both separators identically.
-  const base = tag.toLowerCase().split(/[-_]/)[0];
-  return BASE_SUBTAG_TO_SUPPORTED[base] ?? null;
 }
 
 export function detectBrowserLanguage(): SupportedLanguage | null {
@@ -250,7 +294,7 @@ export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: stri
           return;
         }
         void withPush((pushClient) => {
-          void pushClient.User.setLanguage(value === 'en' ? 'en' : 'zh');
+          void pushClient.User.setLanguage(toPushLanguage(value));
         }).catch((error: unknown) => {
           console.error('Failed to sync Push language', error);
         });

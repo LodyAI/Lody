@@ -114,6 +114,13 @@ for a fully local stack: Convex RPC, Convex HTTP Actions/auth, and CF Worker are
 separate interfaces. Do not copy server-internal HTTP addresses or secrets into
 this file. Files are parsed as data, not sourced as shell scripts.
 
+`LODY_LORO_STREAMS_WS_ENABLED=1` (or `true`, the same rule as desktop and CLI)
+builds both runtimes with the Streams WebSocket: caught-up catalog and Loro session
+reads, Machine RPC replies, presence and appends use one pooled socket per
+workspace, falling back to HTTP when it is unavailable. It is off by default and
+does not change the storage namespace. On Android every socket frame must be
+permitted exactly as its HTTP request would be.
+
 Use your local stack's public TLS endpoints and configure device trust for its
 CA; certificate verification is not bypassed. The host must be reachable from
 the selected simulator/device. A limited Worker ingress relay does not replace
@@ -188,6 +195,10 @@ with the verified account bearer, no redirects and a bounded body;
 Share hand a cache copy out through the `${applicationId}.images` FileProvider;
 Save writes to MediaStore `Pictures/Lody` without a storage permission and is
 offered on Android 10 and later.
+
+Selected conversation turns can also be exported or copied as a styled card PNG
+from the session More menu in verified plaintext workspaces (`conversationShareMessages`);
+see the [native share-image decision](../../.agents/notes/implemented/feature/2026-11-26-native-mobile-chat-share-image.md).
 
 ## Push notifications
 

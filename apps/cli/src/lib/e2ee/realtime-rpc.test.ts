@@ -446,7 +446,7 @@ effectIt.effect(
           });
           const pending = yield* Effect.forkChild(sender.send(original, f.input));
           yield* streams.waitAppend(original.requestId);
-          yield* TestClock.adjust(800);
+          yield* TestClock.adjust(2500);
           expect(yield* Fiber.join(pending)).toBeNull();
           streams.failResponses(false);
           const repeated = yield* f.sender.prepareDispatch(f.machineId, f.input);

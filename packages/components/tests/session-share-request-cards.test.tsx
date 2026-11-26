@@ -29,7 +29,13 @@ vi.mock('@lody/platform/react', async () => {
   const useCloudQueryState = (op: { name: string }) => {
     const management = op.name === 'sessionSharing:getManagement';
     const snapshot = useSyncExternalStore(management ? () => () => {} : subscribe, () =>
-      management ? null : cloud.queryError ? cloud.queryError : cloud.loaded ? cloud.status : undefined
+      management
+        ? null
+        : cloud.queryError
+          ? cloud.queryError
+          : cloud.loaded
+            ? cloud.status
+            : undefined
     );
     const retry = () => {
       for (const listener of cloud.listeners) listener();

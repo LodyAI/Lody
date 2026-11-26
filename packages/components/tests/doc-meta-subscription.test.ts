@@ -9,6 +9,7 @@ vi.mock('@/lib/auth-bootstrap', () => ({
 }));
 
 import {
+  DOC_META_SCAN_RETRY_DELAYS_MS,
   archivedSessionListAtom,
   docMetaCacheReadyAtom,
   sessionMetaCacheSettledAtomFamily,
@@ -20,7 +21,9 @@ import {
   machineMetaCacheAtom,
   sessionListAtom,
   sessionMetaCacheAtom,
+  triggerDocMetaRescanAtom,
 } from '../src/atoms/doc-meta';
+import { createWorkspaceIncompleteRecoveryStore } from '../src/providers/workspace-repo-storage';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import {
   editSessionRunConfigDraftAtom,
@@ -753,6 +756,149 @@ describe('session metadata identity projection', () => {
     } finally {
       unmount();
       vi.useRealTimers();
+    }
+  });
+
+  it('auto-retries transient initial scan failures and supports manual rescan after exhaustion', async () => {
+    vi.useFakeTimers();
+    const sessionId = 'retry-session' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    let failuresRemaining = 1;
+    let attempts = 0;
+    class FlakyScanRepoDouble extends CompatRepoDouble {
+      override async listDoc(): Promise<CompatRepoEntry[]> {
+        attempts += 1;
+        if (failuresRemaining > 0) {
+          failuresRemaining -= 1;
+          throw new Error('transient idb glitch');
+        }
+        return super.listDoc();
+      }
+    }
+    const repo = new FlakyScanRepoDouble([
+      { docId, exists: true, meta: { id: sessionId, title: 'Recovered' } },
+    ]);
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(attempts).toBe(1);
+      expect(store.get(docMetaCacheScopeAtom)?.scanFailure).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(DOC_META_SCAN_RETRY_DELAYS_MS[0]);
+      expect(attempts).toBe(2);
+      expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+      expect(store.get(sessionMetaCacheAtom)[docId]?.title).toBe('Recovered');
+
+      // Exhaust all automatic retries, then recover via explicit manual rescan trigger.
+      failuresRemaining = DOC_META_SCAN_RETRY_DELAYS_MS.length + 1;
+      attempts = 0;
+      store.set(triggerDocMetaRescanAtom);
+      await vi.advanceTimersByTimeAsync(0);
+      for (const delay of DOC_META_SCAN_RETRY_DELAYS_MS) {
+        await vi.advanceTimersByTimeAsync(delay);
+      }
+      expect(attempts).toBe(DOC_META_SCAN_RETRY_DELAYS_MS.length + 1);
+      expect(store.get(docMetaCacheScopeAtom)?.scanFailure).toEqual({ errorType: 'Error' });
+
+      failuresRemaining = 0;
+      store.set(triggerDocMetaRescanAtom);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.get(docMetaCacheReadyAtom)).toBe(true);
+      expect(store.get(docMetaCacheScopeAtom)?.scanFailure).toBeUndefined();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('reuses a single IDB connection in createWorkspaceIncompleteRecoveryStore until versionchange', async () => {
+    let openCalls = 0;
+    let closeCalls = 0;
+    const records = new Map<string, unknown>();
+    let currentDb: {
+      objectStoreNames: { contains: (name: string) => boolean };
+      createObjectStore: () => void;
+      onversionchange: (() => void) | null;
+      onclose: (() => void) | null;
+      close: () => void;
+      transaction: (_name: string, _mode: IDBTransactionMode) => unknown;
+    } | null = null;
+    const fakeIdb = {
+      open: () => {
+        openCalls += 1;
+        const req: {
+          result?: typeof currentDb;
+          onsuccess?: () => void;
+          onupgradeneeded?: () => void;
+          onerror?: () => void;
+          onblocked?: () => void;
+        } = {};
+        const db = {
+          objectStoreNames: { contains: () => true },
+          createObjectStore: () => {},
+          onversionchange: null as (() => void) | null,
+          onclose: null as (() => void) | null,
+          close: () => {
+            closeCalls += 1;
+          },
+          transaction: () => {
+            const tx: {
+              oncomplete?: () => void;
+              onabort?: () => void;
+              onerror?: () => void;
+              abort: () => void;
+              objectStore: () => {
+                get: (key: string) => { result: unknown };
+                put: (value: unknown, key: string) => { result: undefined };
+                delete: (key: string) => { result: undefined };
+              };
+            } = {
+              abort: () => {},
+              objectStore: () => ({
+                get: (key: string) => {
+                  const result = { result: records.get(key) };
+                  queueMicrotask(() => tx.oncomplete?.());
+                  return result;
+                },
+                put: (value: unknown, key: string) => {
+                  records.set(key, value);
+                  queueMicrotask(() => tx.oncomplete?.());
+                  return { result: undefined };
+                },
+                delete: (key: string) => {
+                  records.delete(key);
+                  queueMicrotask(() => tx.oncomplete?.());
+                  return { result: undefined };
+                },
+              }),
+            };
+            return tx;
+          },
+        };
+        currentDb = db;
+        req.result = db;
+        queueMicrotask(() => req.onsuccess?.());
+        return req;
+      },
+    };
+    vi.stubGlobal('indexedDB', fakeIdb);
+    try {
+      const recovery = createWorkspaceIncompleteRecoveryStore('repo-reuse');
+      await recovery.save('k1', { epoch: 1 });
+      await recovery.load('k1');
+      await recovery.delete('k1');
+      expect(openCalls).toBe(1);
+      expect(closeCalls).toBe(0);
+
+      // A versionchange event closes and clears the cached handle so the next op reopens cleanly.
+      currentDb!.onversionchange?.();
+      expect(closeCalls).toBe(1);
+      await recovery.load('k1');
+      expect(openCalls).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

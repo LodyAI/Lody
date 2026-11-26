@@ -97,7 +97,8 @@ describe('recovery vault settings', () => {
         );
       });
       for (let tick = 0; tick < 20; tick++) await act(async () => {});
-      expect(container.textContent).toContain('e2ee.recovery.replace');
+      expect(container.textContent).toContain('e2ee.recovery.check');
+      expect(container.querySelector('[data-testid="e2ee-recovery-more-file"]')).not.toBeNull();
       expect(calls.get('e2ee.recoveryReplacementPlan')).toBe(1);
     } finally {
       act(() => root.unmount());
@@ -282,7 +283,9 @@ describe('recovery vault settings actions', () => {
     const buttons = () => [...container.querySelectorAll('button')];
     return {
       get labels() {
-        return buttons().map((button) => button.textContent);
+        return buttons()
+          .map((button) => button.textContent)
+          .filter(Boolean);
       },
       get primary() {
         return buttons()
@@ -296,6 +299,29 @@ describe('recovery vault settings actions', () => {
         const button = buttons().find((b) => b.textContent === label);
         if (!button) throw new Error(`no ${label} button`);
         await act(async () => button.click());
+        await settle();
+      },
+      openMore: async (method: 'file' | 'passkey' | 'password') => {
+        const trigger = container.querySelector<HTMLButtonElement>(
+          `[data-testid="e2ee-recovery-more-${method}"]`
+        );
+        if (!trigger) throw new Error(`no overflow trigger for ${method}`);
+        await act(async () => trigger.click());
+        await settle();
+        return [...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent);
+      },
+      clickMenuItem: async (method: 'file' | 'passkey' | 'password', label: string) => {
+        const trigger = container.querySelector<HTMLButtonElement>(
+          `[data-testid="e2ee-recovery-more-${method}"]`
+        );
+        if (!trigger) throw new Error(`no overflow trigger for ${method}`);
+        await act(async () => trigger.click());
+        await settle();
+        const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          (el) => el.textContent === label
+        );
+        if (!item) throw new Error(`no ${label} menuitem`);
+        await act(async () => item.click());
         await settle();
       },
       done: () => {
@@ -463,13 +489,10 @@ describe('recovery vault settings actions', () => {
     });
     try {
       expect(view.labels).not.toContain('e2ee.recovery.create');
-      for (const label of [
-        'e2ee.recovery.check',
-        'e2ee.recovery.replace',
-        'e2ee.recovery.restore',
-        'e2ee.recovery.passkeyAdd',
-      ])
+      for (const label of ['e2ee.recovery.check', 'e2ee.recovery.passkeyAdd'])
         expect(view.labels).toContain(label);
+      const fileOverflow = await view.openMore('file');
+      expect(fileOverflow).toEqual(['e2ee.recovery.replace', 'e2ee.recovery.restore']);
       expect(view.primary).toHaveLength(1);
       for (const status of [
         'e2ee.recovery.workspace.notSet',
@@ -583,6 +606,40 @@ describe('recovery vault settings actions', () => {
     }
   });
 
+  it('shows progress copy on the setup button while workspace recovery setup is running', async () => {
+    let settle!: (value: unknown) => void;
+    const pending = new Promise((resolve) => {
+      settle = resolve;
+    });
+    const view = await mount(
+      {
+        hasVault: true,
+        replaceable: true,
+        replacing: false,
+        covered: [workspace('a', { kind: 'notSet' })],
+        uncovered: [],
+      },
+      {
+        'e2ee.setupRecoveryForWorkspaces': () => pending,
+      }
+    );
+    try {
+      expect(view.labels).toContain('e2ee.recovery.setupAll');
+      const clickPromise = view.click('e2ee.recovery.setupAll');
+      await Promise.resolve();
+      expect(view.labels).toContain('e2ee.recovery.settingUpAll');
+      settle({
+        outcome: 'settled',
+        results: [{ workspaceId: 'a', outcome: 'Committed', recoverable: true }],
+      });
+      await clickPromise;
+      expect(view.labels).not.toContain('e2ee.recovery.settingUpAll');
+      expect(view.text).toContain('e2ee.recovery.setupAllDone');
+    } finally {
+      view.done();
+    }
+  });
+
   it('shows when this device last checked the recovery file', async () => {
     const view = await mount(
       {
@@ -601,10 +658,10 @@ describe('recovery vault settings actions', () => {
       }
     );
     try {
-      expect(view.text).toContain('e2ee.recovery.fileSaved');
-      expect(view.text).not.toContain('e2ee.recovery.fileSavedChecked');
+      expect(view.text).toContain('e2ee.recovery.methodSaved');
+      expect(view.text).not.toContain('e2ee.recovery.methodVerified');
       await view.click('e2ee.recovery.check');
-      expect(view.text).toContain('e2ee.recovery.fileSavedChecked');
+      expect(view.text).toContain('e2ee.recovery.methodVerified');
     } finally {
       view.done();
     }
@@ -624,14 +681,10 @@ describe('recovery vault settings actions', () => {
     });
     try {
       expect(view.text).toContain('e2ee.recovery.planFailed');
-      for (const label of [
-        'common.retry',
-        'e2ee.recovery.check',
-        'e2ee.recovery.restore',
-        'e2ee.recovery.restorePasskey',
-        'e2ee.recovery.create',
-      ])
+      for (const label of ['common.retry', 'e2ee.recovery.check', 'e2ee.recovery.restorePasskey'])
         expect(view.labels).toContain(label);
+      const fileOverflow = await view.openMore('file');
+      expect(fileOverflow).toEqual(['e2ee.recovery.create', 'e2ee.recovery.restore']);
       expect(view.primary).toEqual(['common.retry']);
       fail = false;
       await view.click('common.retry');
@@ -816,7 +869,7 @@ describe('recovery vault settings actions', () => {
     );
     const view = await mount(undefined, {}, port);
     try {
-      await view.click('e2ee.recovery.passkeyManage');
+      await view.clickMenuItem('passkey', 'e2ee.recovery.passkeyManage');
       expect(view.text).toContain('Kept passkey');
       await view.click('e2ee.recovery.passkeyRemoveRetry');
       expect(view.text).toContain('e2ee.recovery.passkeyRemoved');
@@ -824,7 +877,7 @@ describe('recovery vault settings actions', () => {
       // The old lists may no longer be true; they are dropped until read anew.
       expect(view.text).not.toContain('Kept passkey');
       expect(view.labels).not.toContain('e2ee.recovery.passkeyRemoveRetry');
-      expect(view.labels).toContain('e2ee.recovery.passkeyManage');
+      expect(await view.openMore('passkey')).toContain('e2ee.recovery.passkeyManage');
     } finally {
       view.done();
     }
@@ -1745,6 +1798,15 @@ describe('authorized device identities', () => {
       expect(container.textContent).not.toContain('Spoof');
       await act(async () =>
         (container.querySelector('[data-testid="e2ee-device-revoke"]') as HTMLButtonElement).click()
+      );
+      expect(revoked).toEqual([]);
+      expect(document.querySelector('[data-testid="e2ee-revoke-self-warning"]')).not.toBeNull();
+      await act(async () =>
+        (
+          document.querySelector(
+            '[data-testid="e2ee-device-revoke-confirm-action"]'
+          ) as HTMLButtonElement
+        ).click()
       );
       expect(revoked).toEqual([device.key]);
       const detail = container.querySelector(

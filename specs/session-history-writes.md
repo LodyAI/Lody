@@ -184,10 +184,16 @@ container rules above apply to that backend; Roost preserves immutable sealed
 segments and projects state corrections and independent permission outcomes into
 the same logical turn. Structural replacement prepares a coherent branch and
 atomically activates it; a failed preparation never empties the visible branch.
-Cloud command clients read and write through the session's owning machine rather
-than selecting a database on the calling machine. Control metadata and
+Cloud commands use the session's owning machine. In ordinary cloud workspaces
+the session viewers read published Roost history from Streams. Control metadata and
 delivery state remain in Loro. Local history acceptance does not establish remote
 Roost synchronization.
+
+The daemon uploads retained history and committed changes from its signed active
+generation. It publishes the generation after Streams accepts the initial
+history. Viewers can then open that history while the owning machine is offline.
+An unpublished generation remains pending. Workspace mode and session permissions
+govern Streams grants. Local-only workspaces use the local owner.
 
 Roost signing identities use the existing application-data security boundary,
 independent of login credentials. Each writable execution replica creates and
@@ -249,7 +255,7 @@ preserves retained row/body identities when their positions and content remain
 unchanged. Optimization must not delay control updates or claim complete facts
 for an unread prefix.
 
-Previously synchronized history remains readable when its owner is unavailable,
+On the owner read path, previously synchronized history remains readable when its owner is unavailable,
 including reopening the conversation, searching and navigating older cached turns.
 The renderer persists a read-only projection scoped by account, workspace, machine
 and session. Owner read responses bind page content, count and a durable revision
@@ -266,7 +272,7 @@ Recovery must not automatically sweep the entire history. Reconnection refreshes
 existing owner transport. The cache never accepts or replays user commands, and
 cannot supply history this device has never synchronized.
 
-Independently negotiated history observation follows the owner's committed
+Owner transport observation follows the owner's committed
 checkpoint through the existing owner transport. Initial reads and subsequent
 observation resume from durable checkpoints, including changes committed between
 them and during disconnection; a separate Loro control hint is not the only
@@ -277,6 +283,12 @@ cached content remains readable while recovering. Unsupported owners keep the
 explicit legacy protocol path. This observation guarantee is draft intent;
 implementation and the watch contract are recorded in the
 [peer-reader repair](../.agents/notes/implemented/bug-fix/2026-10-16-roost-peer-reader-readiness.md).
+
+The Streams reader opens the latest active-branch window and uses its observed
+tail as the starting point for live updates. It advances the resumable position
+after persisting the received frames and applying them to the local replica.
+Reading older windows preserves the forward position. A new published generation
+starts an independent replica and invalidates cursors from the previous generation.
 
 ### Verification limits
 

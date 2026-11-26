@@ -24,21 +24,23 @@ it('waits for content admission before detaching a plaintext share package', asy
           firstSynced: Promise.resolve(),
           acquireSync: () => () => {},
           sessionData: {
-            history: {
-              readAll: async () => [
-                {
-                  id: 'turn',
-                  role: 'user',
-                  items: [{ type: 'text', text: 'C1 private share sentinel' }],
-                },
-              ],
+            snapshots: {
+              capture: async () => ({
+                history: [
+                  {
+                    id: 'turn',
+                    role: 'user',
+                    items: [{ type: 'text', text: 'C1 private share sentinel' }],
+                  },
+                ],
+              }),
             },
           },
         };
       },
       releaseSessionStoreRef: () => {},
     },
-    sessions: [{ id: 'root', title: 'Private title' }],
+    sessions: [{ id: 'root', title: 'Private title', historyBackend: 'roost' }],
     rootSessionId: 'root',
     token: 'test',
     signal: new AbortController().signal,

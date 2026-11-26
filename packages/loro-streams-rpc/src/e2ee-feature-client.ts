@@ -49,6 +49,11 @@ type OpenedFeature = {
 type Binding = Effect.Success<ReturnType<typeof makeRealtimeContentBinding>>;
 const attempt = <A>(body: () => A) =>
   Effect.try({ try: body, catch: () => new Error('e2ee_feature_invalid') });
+const isEpochMismatch = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: unknown }).code === 'epoch-mismatch';
 const frameSchema = z
   .string()
   .min(286)
@@ -95,6 +100,7 @@ export function makeE2eeFeatureRpcClient(options: {
     originals: Object.freeze({
       read: options.originals.read.bind(options.originals),
       retain: options.originals.retain.bind(options.originals),
+      replaceSent: options.originals.replaceSent?.bind(options.originals),
       readResponse: options.originals.readResponse.bind(options.originals),
       retainResponse: options.originals.retainResponse.bind(options.originals),
       retainResponsePages: options.originals.retainResponsePages.bind(options.originals),
@@ -304,9 +310,8 @@ export function makeE2eeFeatureRpcClient(options: {
       ))
     )
       return yield* Effect.fail(new Error('e2ee_machine_not_shared'));
-    let saved = yield* options.originals.read('sent', key(args));
-    if (!saved) {
-      yield* Effect.uninterruptible(
+    const sealOriginal = (replaceFrame?: Uint8Array) =>
+      Effect.uninterruptible(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
           const bytes = yield* attempt(() => new TextEncoder().encode(JSON.stringify(args)));
@@ -347,23 +352,33 @@ export function makeE2eeFeatureRpcClient(options: {
                 params.fill(0);
               }
             }
-            saved = yield* options.originals.retain('sent', key(args), {
-              target: machineId,
-              signer,
-              frame: packFrames(frames),
-            });
+            const record = { target: machineId, signer, frame: packFrames(frames) };
+            return replaceFrame && options.originals.replaceSent
+              ? yield* options.originals.replaceSent(key(args), replaceFrame, record)
+              : yield* options.originals.retain('sent', key(args), record);
           } finally {
             bytes.fill(0);
           }
-          return undefined;
         })
       );
-    }
+    let saved = yield* options.originals.read('sent', key(args));
+    if (!saved) saved = yield* sealOriginal();
 
     if (!saved) return yield* Effect.fail(new Error('e2ee_rpc_original_missing'));
     if (saved.target !== machineId || saved.signer !== signer)
       return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
-    const checked = yield* openFrames(machineId, unpackFrames(saved.frame));
+    const checked = yield* openFrames(machineId, unpackFrames(saved.frame)).pipe(
+      Effect.catch((error) => {
+        if (!isEpochMismatch(error) || !options.originals.replaceSent) return Effect.fail(error);
+        return Effect.gen(function* () {
+          yield* options.authorizeRequest(args);
+          saved = yield* sealOriginal(saved!.frame);
+          if (saved.target !== machineId || saved.signer !== signer)
+            return yield* Effect.fail(new Error('e2ee_rpc_target_changed'));
+          return yield* openFrames(machineId, unpackFrames(saved.frame));
+        });
+      })
+    );
     if (
       !checked ||
       checked.requesterDevice !== options.requesterDevice ||

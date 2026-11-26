@@ -1,0 +1,29 @@
+---
+title: "20260923"
+version: 0.100.0
+date: 2026-09-23
+description: "Añade compatibilidad con Opus 5.5, GPT-6-Sol, GPT-6-Luna y Dimcode, y mejora los agentes, las ventanas de escritorio, las conversaciones largas, la barra lateral y la sincronización de archivos."
+---
+
+Versión 0.100.0
+
+### ✨ Nuevas funciones
+
+- Añade compatibilidad con Opus 5.5, GPT-6-Sol y GPT-6-Luna.
+- Añade Dimcode como agente integrado que puede configurarse y usarse para crear sesiones directamente en Lody.
+
+### 🐛 Correcciones y mejoras
+
+- Actualiza los entornos de ejecución integrados de Claude Code, Codex, Grok, Kimi y Pi para mejorar la fiabilidad de los agentes y el inicio de sesiones.
+- Mejora el precalentamiento de ventanas de escritorio y la carga de contenido para reducir pantallas en blanco, páginas de error y estados de carga breves al abrir sesiones.
+- Mejora la carga en segundo plano para conversaciones largas con el fin de evitar parpadeos de contenido, mensajes descolocados y pérdida de selecciones de texto.
+- Mejora el diseño del filtro de la barra lateral y mantiene disponibles los controles de filtro cuando la lista de tareas está vacía.
+- Corrige casos en los que abrir otro archivo de un worktree local desde una sesión podía apuntar al archivo incorrecto.
+- Evita que los procesos secundarios de DeepSeek Harness abran ventanas de consola repetidamente en Windows.
+- Reintenta automáticamente los fallos de sincronización remota de Machine Flock e informa de un estado de error claro.
+- Conserva los permisos de archivo POSIX ejecutables y privados cuando Code Collab guarda archivos de texto.
+- Perfecciona el punto de entrada para compartir y la interfaz del encabezado de sesión.
+
+### 🙏 Agradecimientos a colaboradores externos
+
+- Gracias a ladydd por conservar los permisos POSIX cuando Code Collab guarda archivos.

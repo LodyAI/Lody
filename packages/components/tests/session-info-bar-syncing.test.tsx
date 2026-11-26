@@ -54,6 +54,43 @@ describe('SessionInfoBar ambient information', () => {
     container.remove();
   });
 
+  it('shows the selected Roost history source and the status of its replacement', () => {
+    act(() =>
+      root.render(
+        withTestI18n(
+          <SessionInfoBar
+            {...CONTEXT_LESS_PROPS}
+            historySync={{ source: 'machine', phase: 'pending' }}
+          />,
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'History from the target machine'
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Waiting for cloud publication'
+    );
+    act(() =>
+      root.render(
+        withTestI18n(
+          <SessionInfoBar
+            {...CONTEXT_LESS_PROPS}
+            historySync={{ source: 'streams', phase: 'ready', newerVersionPending: true }}
+          />,
+          testI18n
+        )
+      )
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'History from Lody Streams'
+    );
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      'Showing the previous version'
+    );
+  });
+
   it.each([false, true])(
     'opens zero-line changes by file count and keeps mixed text totals (compact=%s)',
     (compact) => {

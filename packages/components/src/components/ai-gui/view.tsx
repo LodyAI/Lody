@@ -9295,6 +9295,7 @@ export const WorkspaceUserImageBlock = ({
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
   const [thumbnailLoadingError, setThumbnailLoadingError] = useState<string | null>(null);
   const [isThumbnailLoading, setIsThumbnailLoading] = useState(true);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [localActiveImageKey, setLocalActiveImageKey] = useState<string | null>(null);
   const isThumbnail = variant === 'thumbnail';
   const isLargeThumbnail = isThumbnail && thumbnailSize === 'large';
@@ -9410,6 +9411,7 @@ export const WorkspaceUserImageBlock = ({
     thumbnailWidth,
     useNativeIOSShareSafeImageUrl,
     workspaceId,
+    retryNonce,
   ]);
 
   return (
@@ -9440,7 +9442,23 @@ export const WorkspaceUserImageBlock = ({
             isThumbnail ? thumbnailFrameStyle : viewStyles.imageFrameWidth
           )}
         >
-          {thumbnailLoadingError}
+          <span>{thumbnailLoadingError}</span>
+          <button
+            type="button"
+            onClick={() => setRetryNonce((nonce) => nonce + 1)}
+            style={{
+              marginTop: 4,
+              textDecoration: 'underline',
+              cursor: 'pointer',
+              background: 'none',
+              border: 'none',
+              color: 'inherit',
+              font: 'inherit',
+              padding: 0,
+            }}
+          >
+            {t('common.retry', 'Retry')}
+          </button>
         </div>
       )}
       {(cachedThumbnailUrl || (!isThumbnailLoading && !thumbnailLoadingError)) &&

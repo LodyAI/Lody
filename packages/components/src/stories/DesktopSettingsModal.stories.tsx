@@ -185,7 +185,9 @@ function PromptsCatalogFixture({
       prefetch: async () => {},
     } as unknown as PromptShortcutRuntime;
   }, [prompts]);
-  return <PromptShortcutRuntimeProvider runtime={runtime}>{children}</PromptShortcutRuntimeProvider>;
+  return (
+    <PromptShortcutRuntimeProvider runtime={runtime}>{children}</PromptShortcutRuntimeProvider>
+  );
 }
 
 // Only data/transport boundaries are synthetic. The modal, navigation, machines

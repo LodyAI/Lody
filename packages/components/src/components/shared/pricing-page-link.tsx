@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { ExternalLink } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
+import { getSiteLocalizedUrl } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
 import { withClassName } from '@/lib/stylex';
 import { sharedSurface } from './surface';
@@ -12,9 +13,11 @@ import { sharedSurface } from './surface';
  */
 export function PricingPageLink({ className }: { className?: string }) {
   const { t, i18n } = useTranslation();
-  const url = i18n.language?.startsWith('zh')
-    ? 'https://lody.ai/zh/price'
-    : 'https://lody.ai/price';
+  const url = getSiteLocalizedUrl(
+    '/price',
+    i18n.resolvedLanguage ?? i18n.language,
+    'https://lody.ai'
+  );
 
   return (
     <button

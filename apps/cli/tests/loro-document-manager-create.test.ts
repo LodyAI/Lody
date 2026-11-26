@@ -1018,6 +1018,65 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     expect(manager.getConnectedRoomCount()).toBe(0);
   });
 
+  it.each([false, true])(
+    'cleans up the local workspace independently of Roost upload drain (local metadata write: %s)',
+    async (hasLocalWrite) => {
+      const upload = Promise.withResolvers<void>();
+      const metadata = Promise.withResolvers<void>();
+      const stages: string[] = [];
+      const manager = new LoroDocumentManager({
+        repo: {
+          destroy: async () => {
+            stages.push('repo');
+          },
+        } as unknown as LoroDocumentManager['repo'],
+        workspaceId: 'cleanup-roost' as WorkspaceId,
+        userId: 'user-1',
+        metaSub: createMetaSubscription(),
+        logger: createSilentLogger(),
+        initialTransportStatus: 'connected',
+        initialMetaSyncPromise: Promise.resolve(true),
+        initialMetaSyncCompleted: true,
+      });
+      Object.assign(manager, {
+        roostCloudHistory: {
+          publisher: { close: () => upload.promise },
+          unsubscribe: () => stages.push('unsubscribe'),
+        },
+        roostCloudHistoryMetaWrite: hasLocalWrite ? metadata.promise : undefined,
+        localLoroDataPlaneServer: {
+          disposeLegacy: async () => {
+            stages.push('data plane');
+          },
+        },
+        presenceRuntime: {
+          stop: async () => {
+            stages.push('presence');
+          },
+        },
+      });
+      vi.useFakeTimers();
+      const cleanup = manager.cleanUp({ fast: true }).then(() => stages.push('complete'));
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(stages).toEqual([
+          'unsubscribe',
+          'data plane',
+          'presence',
+          ...(hasLocalWrite ? [] : ['repo', 'complete']),
+        ]);
+        metadata.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(stages).toEqual(['unsubscribe', 'data plane', 'presence', 'repo', 'complete']);
+      } finally {
+        metadata.resolve();
+        upload.resolve();
+        await cleanup;
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it('reports the presence release timeout retained inside the Effect cause', async () => {
     const manager = new LoroDocumentManager({
       repo: { destroy: async () => {} } as unknown as LoroDocumentManager['repo'],
@@ -1332,6 +1391,72 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
         cause.report.transports.find((transport) => transport.transportId === 'streams')
       ).toMatchObject({ ok: false, failures: [{ error: failure }] });
     } finally {
+      await manager.cleanUp({ fast: true });
+    }
+  });
+
+  it('reattaches Streams before a Roost append settles and then resumes its pending work', async () => {
+    process.env.LODY_LORO_AUTO_RECONNECT_INTERVAL_MS = '0';
+    const workspaceId = 'workspace-roost-reattach' as WorkspaceId;
+    const sessionId = 'unfinished-roost-session' as SessionId;
+    const removedId = 'removed-roost-session' as SessionId;
+    const upload = Promise.withResolvers<void>();
+    const resumed = Promise.withResolvers<void>();
+    const pending: { id: SessionId; removed: boolean }[] = [];
+    const manager = new LoroDocumentManager({
+      repo: {
+        destroy: async () => {},
+        addTransport: mocks.repoAddTransport,
+        removeTransport: mocks.repoRemoveTransport,
+        transportRooms: mocks.repoTransportRooms,
+      } as unknown as LoroDocumentManager['repo'],
+      workspaceId,
+      userId: 'user-1',
+      metaSub: null,
+      logger: createSilentLogger(),
+      initialTransportStatus: 'connected',
+      remoteStreamsAttached: true,
+      presenceRuntime: await createCliPresenceRuntimeLegacy(workspaceId),
+      streamsTokens: testStreamsTokens,
+      sqliteRepoStore: await createCliSqliteRepoStore(workspaceId),
+      documentRemoteCursorStore: new InMemoryRemoteCursorStore(),
+    });
+    Object.assign(manager, {
+      roostCloudHistoryMachineId: 'synthetic-machine',
+      roostCloudHistoryCloud: {},
+      roostCloudHistory: {
+        publisher: {
+          pendingWork: () =>
+            new Map([
+              [sessionId, false],
+              [removedId, true],
+            ]),
+          close: () => upload.promise,
+        },
+        pending: new Map(),
+        unsubscribe: () => {},
+        createPublisher: () => ({
+          enqueue: (id: SessionId) => pending.push({ id, removed: false }),
+          remove: (id: SessionId) => {
+            pending.push({ id, removed: true });
+            resumed.resolve();
+          },
+          close: async () => {},
+        }),
+      },
+    });
+    try {
+      await manager.detachRemoteStreamsTransport();
+      await manager.attachRemoteStreamsTransport();
+      expect(pending).toEqual([]);
+      upload.resolve();
+      await resumed.promise;
+      expect(pending).toEqual([
+        { id: sessionId, removed: false },
+        { id: removedId, removed: true },
+      ]);
+    } finally {
+      upload.resolve();
       await manager.cleanUp({ fast: true });
     }
   });

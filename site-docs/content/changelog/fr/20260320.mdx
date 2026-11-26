@@ -1,0 +1,17 @@
+---
+title: "20260320"
+version: 0.39.0
+date: 2026-03-20
+description: "Ajout des commandes slash dans le chat, des options de configuration dynamiques pour les agents, et correctifs pour la connexion sous Windows et les connexions CLI locales expirées."
+---
+
+### Nouvelles fonctionnalités et capacités
+
+- Ajout de la prise en charge des commandes slash dans le champ de saisie du chat. Tapez `/` pour parcourir et insérer les commandes exposées par l'Agent, telles que `review`, `compact` et `undo`
+<img src="/_docs-assets/slash.png" alt="" />
+- Les options de configuration de l'agent sont désormais chargées dynamiquement, avec la prise en charge de l'affichage de tous les modes et options de modèles disponibles. Après la mise à jour, actualisez les options sur la page de configuration de l'agent
+
+### Correctifs et stabilité
+
+- Correction d'un problème d'écran blanc lors de la saisie d'une adresse e-mail dans l'application de bureau Windows
+- Correction d'un problème empêchant le rétablissement des connexions expirées au serveur CLI local

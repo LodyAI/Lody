@@ -18,7 +18,8 @@ flowchart TD
   C --> V[Validate public composition]
   V --> P[Recover metadata and reserve R2 Nightly version]
   P --> D[Six native SEA targets]
-  P --> E[Native Electron builds and signing]
+  P --> CDesktop[Linux x64 compiles shared desktop bundles]
+  CDesktop --> E[Native Electron builds and signing]
   P --> A[Android build]
   D --> G[Check both installer scripts and six exact-version manifests]
   G --> NP[CLI npm nightly]
@@ -66,6 +67,11 @@ succeeded, public validation failed, and every publisher was skipped. It never
 runs Release Please again and selects one client component plus its required SEA
 publication/check. Other partial releases
 use the component workflow or rerun failed jobs; ambiguous state fails closed.
+
+New Nightly runs use the published Electron Stable version from
+`STABLE_ELECTRON_VERSION_URL`. They increment its minor version, reset the patch
+to zero and reserve a sequence starting at zero for that cycle. Retries reuse
+the run’s reservation even if Stable advances.
 
 ## Native iOS Nightly
 
@@ -121,21 +127,18 @@ iOS lock across build and upload so concurrent builds cannot reuse an unresolved
 App Store train/build number. Stable recovery rechecks App Store admission after
 the wait, immediately before upload.
 
-macOS Electron jobs explicitly use a 4096 MiB Node heap. The previous private
-`build-app.mjs` honors an existing `NODE_OPTIONS` heap, rather than overwriting it;
-Track B must preserve that behavior. `.github/scripts/observe-macos-build.sh` prints
-physical memory, `vm_stat`, swap snapshots and `/usr/bin/time -l` maximum RSS around
-the compile/package command, including the after snapshot on failure. No environment
-or credential dumps are included.
+Nightly's `compile-desktop` job runs after version reservation and compiles
+Electron `out/` and CLI `dist/` once on Linux x64. The desktop matrix waits for
+this job. Linux x64 and macOS verify and restore its immutable same-run archive,
+then stage the CLI native packages with `sync:cli` on the target runner. Windows
+and Linux arm64 compile on their own runners. The packager checks the embedded
+release profiles against the admitted SHA, version and build identity. Native
+addons, packaging, signing, notarization and Sparkle generation stay on their
+target runners.
 
-Future shared compilation can replace the `build` invocation in Nightly's `build`
-job and stable/manual `build-electron` with an artifact download after an
-`ubuntu-latest` compile job. That artifact would contain platform-neutral Electron
-`out/` plus CLI `dist/`, bound to the admitted SHA, channel, version, cloud
-configuration and build identity. Keep platform-native runtime staging, native
-addons, signing/notarization and packaging on their target runner. First verify
-these outputs contain no host-specific native closure and that packaging can
-consume them without rebuilding. This PR leaves `package-electron.mjs` unchanged.
+The Nightly desktop jobs use a 6144 MiB Node heap.
+`.github/scripts/observe-macos-build.sh` reports memory and swap snapshots and
+`/usr/bin/time -l` peak RSS around the macOS packaging command.
 
 Nightly desktop publication installs only the Electron dependency closure with
 lifecycle scripts disabled, rather than installing every workspace project. All

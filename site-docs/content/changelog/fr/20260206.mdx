@@ -1,0 +1,35 @@
+---
+title: "20260206"
+version: 0.31.0
+date: 2026-02-06
+description: "Ajout de la prise en charge de nouveaux modèles, des mentions dans les discussions, de l'intégration de l'espace de travail local et d'un flux d'authentification CLI mis à jour."
+---
+
+### Opus 4.6 et gpt-5.3-code
+
+<img src="/_docs-assets/20260206-new-model.png" style={{ maxHeight: '400px' }} />
+
+### Mentions dans les discussions
+
+- Utilisez `@` pour mentionner des fichiers avec prise en charge de la recherche floue
+- Utilisez `#` pour mentionner des Issues et PR GitHub
+
+<img src="/_docs-assets/20260206-mention.png" alt="mention" />
+
+### Intégration de l'espace de travail local
+
+- Si vous travaillez sur la même machine avec le CLI, vous pouvez désormais ouvrir votre IDE en toute fluidité directement depuis la discussion
+
+<img src="/_docs-assets/20260206-open-in.png" style={{ maxHeight: '300px' }} />
+
+### Nouveau schéma d'authentification CLI
+
+- Le CLI prend désormais en charge les requêtes de discussion pour tous les espaces de travail de l'utilisateur
+
+## Corrections
+
+- Le mode Clé API charge désormais correctement les variables d'environnement lors de la reprise des sessions
+- Correction de plusieurs problèmes liés à l'éditeur et à la saisie
+- Correction de cas limites dans l'interface des espaces de travail et des sessions
+- Correction de l'affichage des détails d'échec des discussions sur mobile pour faciliter le diagnostic
+- Amélioration de la stabilité du backend et de l'environnement d'exécution
