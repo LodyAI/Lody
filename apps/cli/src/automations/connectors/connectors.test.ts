@@ -136,7 +136,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
     const h = createTriggerHarness();
     let etagCalls = 0;
 
-    // Pre-existing historical issue before enablement — should be skipped by seedCursor
     h.responses.set('/repos/LodyAI/Lody/issues', (req) => {
       if (req.headers.get('If-None-Match') === '"etag-v2"') {
         etagCalls += 1;
@@ -216,12 +215,10 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       policyMode: 'summarize_and_notify',
     });
 
-    // Advance past pollIntervalSec (60s) -> polls delta & stages #42 only
     h.advanceBy(61_000);
     await h.service.runPass();
     expect((await coordDoc.getDocState()).mq).toHaveLength(0);
 
-    // Advance past 10s coalescing window -> flushes wake message into coordinator SessionDoc.mq
     h.advanceBy(11_000);
     await h.service.runPass();
 
@@ -244,7 +241,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       ],
     });
 
-    // Default summarize_and_notify blocks child delegation on this turn
     await expect(
       h.service.assertDelegationAllowed({
         sessionId: h.coordinatorId,
@@ -253,7 +249,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       })
     ).rejects.toThrow(/Notify-Only/i);
 
-    // Next poll hits If-None-Match '"etag-v2"' -> 304 Not Modified, zero new queue items
     h.advanceBy(65_000);
     await h.service.runPass();
     h.advanceBy(15_000);
@@ -313,7 +308,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
     const coordDoc = await h.manager.getOrCreateSessionDoc(h.coordinatorId);
     const wakeTurnId = (await coordDoc.getDocState()).mq[0]!.userTurnId;
 
-    // Disallowed or missing Role ID is rejected
     await expect(
       h.service.assertDelegationAllowed({
         sessionId: h.coordinatorId,
@@ -331,7 +325,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       })
     ).rejects.toThrow(/Role/i);
 
-    // Allowed Role ID succeeds up to maxChildrenPerRun = 2, then blocks 3rd child
     await expect(
       h.service.assertDelegationAllowed({
         sessionId: h.coordinatorId,
@@ -350,7 +343,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       })
     ).rejects.toThrow(/TRIGGER_BUDGET_EXCEEDED/i);
 
-    // Simulate a coordinator-targeted Schedule turn in history
     await coordDoc.sessionData.commands.appendTurn({
       id: 'sched-turn-1',
       role: 'user',
@@ -369,7 +361,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       },
     } as never);
 
-    // Without explicit grant, coordinator Schedule defaults to summarize_and_notify
     await expect(
       h.service.assertDelegationAllowed({
         sessionId: h.coordinatorId,
@@ -378,7 +369,6 @@ describe('CoordinatorTriggerService & GitHub connector', () => {
       })
     ).rejects.toThrow(/Notify-Only/i);
 
-    // Grant auto_delegate to sched:sched-daily -> subsequent Schedule turn can delegate
     await h.service.handleAction(h.coordinatorId, {
       kind: 'set_policy',
       triggerId: schedulePolicyTriggerId('sched-daily'),

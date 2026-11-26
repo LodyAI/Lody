@@ -22,7 +22,10 @@ const styles = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[2],
+    width: '100%',
     minWidth: 0,
+    maxWidth: '100%',
+    overflow: 'hidden',
     paddingBlock: space[1.5],
     paddingInline: space[2],
     marginBottom: space[1.5],
@@ -37,6 +40,8 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[1.5],
     minWidth: 0,
+    maxWidth: '100%',
+    overflow: 'hidden',
     flex: 1,
     padding: 0,
     borderWidth: 0,
@@ -89,7 +94,8 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[1.5],
     minWidth: 0,
-    maxWidth: '100%',
+    maxWidth: 'min(100%, 26rem)',
+    overflow: 'hidden',
     paddingBlock: 4,
     paddingInline: space[2],
     borderWidth: 0,
@@ -117,6 +123,7 @@ const styles = stylex.create({
     color: colors.label,
   },
   inlineQuoteText: {
+    flex: '0 1 auto',
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -227,7 +234,11 @@ export function CoordinatorComposerReplyBanner({
           onOpenThread ? styles.composerBannerInteractive : styles.composerBannerStatic
         )}
       >
-        <CornerDownRight size={13} {...stylex.props(styles.composerBannerIcon)} aria-hidden="true" />
+        <CornerDownRight
+          size={13}
+          {...stylex.props(styles.composerBannerIcon)}
+          aria-hidden="true"
+        />
         <span {...stylex.props(styles.composerBannerAuthor)}>{authorLabel}</span>
         {reply.previewText ? (
           <span {...stylex.props(styles.composerBannerPreview)}>{reply.previewText}</span>
@@ -270,7 +281,10 @@ export function CoordinatorInlineQuoteChip({
         event.stopPropagation();
         onOpenThread?.(replyTo.threadRootId, replyTo.previewText);
       }}
-      title={interactive ? t('projectMode.reply.openThread', 'Open thread') : undefined}
+      title={
+        replyTo.previewText ||
+        (interactive ? t('projectMode.reply.openThread', 'Open thread') : undefined)
+      }
       data-coordinator-inline-quote=""
       {...stylex.props(styles.inlineQuote, !interactive && styles.inlineQuoteStatic)}
     >

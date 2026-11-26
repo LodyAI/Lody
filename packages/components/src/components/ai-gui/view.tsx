@@ -920,7 +920,7 @@ const viewStyles = stylex.create({
   userTextFrameCapped: {
     maxWidth: {
       default: '100%',
-      '@media (min-width: 640px)': '800px',
+      '@media (min-width: 640px)': 'min(100%, 800px)',
     },
   },
   editingStack: {
@@ -8768,6 +8768,8 @@ const coordinatorBubbleStyles = stylex.create({
   },
   bubbleInnerStack: {
     display: 'flex',
+    minWidth: 0,
+    maxWidth: '100%',
     flexDirection: 'column',
     gap: space[2],
   },

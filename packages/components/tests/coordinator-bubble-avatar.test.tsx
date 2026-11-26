@@ -16,6 +16,10 @@ import {
   loadCoordinatorAvatarMoodData,
 } from '../src/components/project-mode/coordinator-bubble-avatar';
 import { CoordinatorProactiveCard } from '../src/components/project-mode/coordinator-action-bar';
+import {
+  CoordinatorComposerReplyBanner,
+  CoordinatorInlineQuoteChip,
+} from '../src/components/project-mode/coordinator-reply-ui';
 import { CoordinatorObservabilityHeaderButton } from '../src/components/project-mode/coordinator-observability-panel';
 import { CoordinatorTriggersHeaderButton } from '../src/components/project-mode/coordinator-triggers-panel';
 import { ProjectBoardView } from '../src/components/project-mode/project-board';
@@ -502,5 +506,60 @@ describe('CoordinatorBubbleAvatar and vector Lottie player', () => {
     expect(dialog!.textContent).toContain('添加 GitHub 事件监测');
     expect(dialog!.textContent).toContain('仅总结提醒（默认）');
     expect(dialog!.textContent).toContain('允许自动创建子对话');
+  });
+
+  it('caps and ellipsizes long coordinator reply quotes so user bubbles never overflow', async () => {
+    await initI18n('zh_CN');
+    const longPreview =
+      '三位交叉核对后的共识是：先让已经做好的八语内容在生产可访问，修掉现有死链和渲染问题，再从现有指南做三个明确的搜索主题扩展以验证自然流量转化漏斗。';
+    const replyRef = {
+      target: { kind: 'coordinator_bubble' as const, turnId: 'turn-1', bubbleId: 'b-1' },
+      threadRootId: 'bubble:turn-1:b-1',
+      author: 'coordinator' as const,
+      previewText: longPreview,
+    };
+
+    let openedThreadRoot: string | null = null;
+    let cleared = false;
+
+    await act(async () => {
+      root!.render(
+        React.createElement(
+          'div',
+          { style: { width: '360px' } },
+          React.createElement(CoordinatorInlineQuoteChip, {
+            replyTo: replyRef,
+            onOpenThread: (rootId) => {
+              openedThreadRoot = rootId;
+            },
+          }),
+          React.createElement(CoordinatorComposerReplyBanner, {
+            reply: replyRef,
+            onClear: () => {
+              cleared = true;
+            },
+          })
+        )
+      );
+    });
+
+    const quoteChip = container!.querySelector<HTMLButtonElement>(
+      '[data-coordinator-inline-quote]'
+    );
+    expect(quoteChip).not.toBeNull();
+    expect(quoteChip!.getAttribute('title')).toBe(longPreview);
+    expect(quoteChip!.textContent).toContain('协调者:');
+
+    await act(async () => {
+      quoteChip!.click();
+    });
+    expect(openedThreadRoot).toBe('bubble:turn-1:b-1');
+
+    const banner = container!.querySelector('[data-coordinator-reply-banner]');
+    const clearBtn = banner?.querySelectorAll('button')[1];
+    await act(async () => {
+      clearBtn?.click();
+    });
+    expect(cleared).toBe(true);
   });
 });

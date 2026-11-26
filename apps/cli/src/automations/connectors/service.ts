@@ -744,7 +744,6 @@ export class CoordinatorTriggerService {
     }
 
     if (meta.collaborationStopped) {
-      // Defer while the user has paused/stopped the coordinator conversation.
       this.connection.withImmediate(() => {
         this.connection.raw
           .prepare(`UPDATE coordinator_triggers SET coalesce_due_at = ? WHERE id = ?`)
@@ -813,7 +812,6 @@ export class CoordinatorTriggerService {
         })
       : undefined;
 
-    // Record the turn's frozen policy and clear pending batch before pushing to queue.
     this.connection.withImmediate(() => {
       this.connection.raw
         .prepare(
@@ -864,10 +862,6 @@ export class CoordinatorTriggerService {
     await this.deps.manager.repo.flush();
   }
 
-  /**
-   * Enforces per-trigger and per-schedule delegation policy when a Coordinator
-   * turn calls `lody_session_create` or `lody_session_chat`.
-   */
   async assertDelegationAllowed(args: {
     sessionId: SessionId;
     sourceTurnId: string | undefined;
@@ -898,7 +892,6 @@ export class CoordinatorTriggerService {
       policy = parsePolicy(turnPolicyRow.policy_json);
       triggerIdForPrompt = turnPolicyRow.trigger_id;
     } else {
-      // Check if this turn is a `scheduleRun` targeting this Coordinator.
       const doc = await this.deps.manager.getOrCreateSessionDoc(sessionId);
       const backend = await createSessionBackend(doc, meta);
       const read = await backend.readTurn(sourceTurnId);
