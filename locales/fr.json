@@ -7242,6 +7242,13 @@
   "e2ee.team.wrongEmailFor": "Cette invitation a été envoyée à {{invited}}. Connectez-vous avec cette adresse pour continuer.",
   "e2ee.auto.tab.qr": "Scanner le QR",
   "e2ee.auto.tab.code": "Saisir le code à 6 chiffres",
+  "chat.runConfig.permissionDefaultClear": "Ne plus utiliser par défaut",
+  "chat.runConfig.permissionDefaultSet": "Utiliser pour les nouvelles conversations",
+  "chat.runConfig.permissionDefaultCleared": "Les nouvelles conversations utilisent la dernière autorisation choisie",
+  "chat.runConfig.permissionDefaultSaved": "Les nouvelles conversations démarreront avec cette autorisation",
+  "chat.runConfig.permissionDefaultFailed": "Impossible d’enregistrer l’autorisation par défaut",
+  "settings.agent.dialog.section.defaultPermission": "Autorisation par défaut",
+  "settings.agent.dialog.defaultPermissionLastUsed": "La dernière choisie",
   "e2ee.access.waitingKey.checkFailed": "Impossible de vérifier les clés pour le moment. Vérifiez votre connexion et réessayez.",
   "e2ee.instantQr.retrying": "Connexion interrompue. Nouvelle tentative…"
 }

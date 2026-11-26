@@ -7242,6 +7242,13 @@
   "e2ee.team.wrongEmailFor": "此邀請寄送給 {{invited}}，請使用該電子郵件登入以繼續。",
   "e2ee.auto.tab.qr": "掃碼授權",
   "e2ee.auto.tab.code": "輸入 6 位驗證碼",
+  "chat.runConfig.permissionDefaultClear": "不再作為新對話預設",
+  "chat.runConfig.permissionDefaultSet": "設為新對話預設",
+  "chat.runConfig.permissionDefaultCleared": "新對話將沿用你上次選的權限",
+  "chat.runConfig.permissionDefaultSaved": "新對話將預設使用這個權限",
+  "chat.runConfig.permissionDefaultFailed": "預設權限儲存失敗",
+  "settings.agent.dialog.section.defaultPermission": "預設權限",
+  "settings.agent.dialog.defaultPermissionLastUsed": "沿用上次選擇",
   "e2ee.access.waitingKey.checkFailed": "暫時無法檢查金鑰，請檢查網路連線後重試。",
   "e2ee.instantQr.retrying": "連線中斷，正在重試…"
 }

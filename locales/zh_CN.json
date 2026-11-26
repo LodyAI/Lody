@@ -7242,6 +7242,13 @@
   "e2ee.team.wrongEmailFor": "此邀请发送给了 {{invited}}，请使用该邮箱登录以继续。",
   "e2ee.auto.tab.qr": "扫码授权",
   "e2ee.auto.tab.code": "输入 6 位验证码",
+  "chat.runConfig.permissionDefaultClear": "不再作为新对话默认",
+  "chat.runConfig.permissionDefaultSet": "设为新对话默认",
+  "chat.runConfig.permissionDefaultCleared": "新对话将沿用你上次选的权限",
+  "chat.runConfig.permissionDefaultSaved": "新对话将默认使用这个权限",
+  "chat.runConfig.permissionDefaultFailed": "默认权限保存失败",
+  "settings.agent.dialog.section.defaultPermission": "默认权限",
+  "settings.agent.dialog.defaultPermissionLastUsed": "沿用上次选择",
   "e2ee.access.waitingKey.checkFailed": "暂时无法检查密钥，请检查网络连接后重试。",
   "e2ee.instantQr.retrying": "连接中断，正在重试…"
 }

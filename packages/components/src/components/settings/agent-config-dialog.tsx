@@ -61,9 +61,11 @@ import {
   type MachineAcpCapabilitiesRefreshResponse,
   type MachineId,
   type MachineViewMeta,
+  type AgentSessionDefaults,
   type TitleGenerationConfig,
 } from '@lody/shared';
 import {
+  buildAcpSelectorOptions,
   buildAllConfigOptionSelectors,
   isConfigOptionValueValid,
   type AcpConfigOptionSelector,
@@ -108,6 +110,13 @@ import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
 import { OptionSelector } from '@/components/shared/option-selector';
+import {
+  canBePermissionDefault,
+  readAgentPermissionDefault,
+  writeAgentPermissionDefault,
+  type PermissionDefaultSource,
+} from '@/lib/agent-permission-default';
+import { permissionModeControlLabel, resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -1145,6 +1154,9 @@ export type AgentConfigFormData = {
   deepseekCustomBaseUrl?: string;
 };
 
+/** The default-permission picker's "no fixed default" entry. */
+const PERMISSION_DEFAULT_LAST_USED = '\u0000last-used';
+
 export type AgentConfigSubmitPayload = {
   magpieGatewayUrl?: string;
   codexAuth?: CodexAuthProfile;
@@ -1163,6 +1175,8 @@ export type AgentConfigSubmitPayload = {
   brandId?: AgentBrandId;
   /** Persist as a durable target-machine setup instead of publishing immediately. */
   backgroundSetup?: true;
+  /** Present only when the default permission was changed in this dialog. */
+  sessionDefaults?: AgentSessionDefaults;
 };
 
 export type AgentConfigDialogMode =
@@ -1901,6 +1915,11 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
   const deepSeekCustomBaseUrlConfiguredRef = useRef(
     isDeepSeekBuiltinForm(initialForm) && getDeepSeekEndpointMode(initialForm) === 'custom'
   );
+  // Undefined until the person changes the default permission here, so an
+  // untouched dialog never rewrites session defaults saved elsewhere.
+  const [permissionDefaultChoice, setPermissionDefaultChoice] = useState<
+    { source: PermissionDefaultSource; value: string | null } | undefined
+  >(undefined);
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
     if (activePreset) {
@@ -1929,8 +1948,18 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
       description: undefined,
       brandId: resolvedBrandId,
       ...(backgroundBuiltinSetup ? { backgroundSetup: true } : {}),
+      ...(permissionDefaultChoice && mode.kind === 'edit'
+        ? {
+            sessionDefaults: writeAgentPermissionDefault(
+              mode.config.sessionDefaults,
+              permissionDefaultChoice.source,
+              permissionDefaultChoice.value
+            ),
+          }
+        : {}),
     };
   }, [
+    permissionDefaultChoice,
     activeCredentialMode,
     activePreset,
     acpProvidesSessionTitle,
@@ -2110,6 +2139,38 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
     capabilitiesReady,
     acpProvidesSessionTitle,
     selectedTitleModelId,
+  ]);
+
+  const permissionDefaultField = useMemo(() => {
+    if (!capabilitiesReady || mode.kind !== 'edit') return null;
+    const selectorOptions = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: formData.cliType,
+      agentType: formData.agentType,
+      runtimeOverrides: formData.runtimeOverrides,
+      machine,
+    });
+    const face = resolvePermissionModeFace({
+      modeOptions: selectorOptions.modeOptions,
+      selectedModeId: null,
+      configOptionSelectors: selectorOptions.configOptionSelectors,
+    });
+    if (!face.source) return null;
+    return {
+      source: face.source,
+      label: permissionModeControlLabel(face, t),
+      options: face.options.filter((option) => canBePermissionDefault(option.value)),
+      saved: readAgentPermissionDefault(mode.config.sessionDefaults, face.source),
+    };
+  }, [
+    agentConfigId,
+    capabilitiesReady,
+    formData.agentType,
+    formData.cliType,
+    formData.runtimeOverrides,
+    machine,
+    mode,
+    t,
   ]);
 
   // Capability refresh is a real runtime probe. The dialog never starts it just
@@ -3441,6 +3502,45 @@ function SupportedAgentConfigDialog(props: AgentConfigDialogProps) {
                   />
                 </Section>
               )}
+
+            {permissionDefaultField && permissionDefaultField.options.length > 0 ? (
+              <Section
+                title={t('settings.agent.dialog.section.defaultPermission', 'Default permission')}
+                defaultOpen
+              >
+                <div {...stylex.props(styles.optionList)}>
+                  <div {...stylex.props(styles.optionRow)}>
+                    <UiField.Label>{permissionDefaultField.label}</UiField.Label>
+                    <OptionSelector
+                      options={[
+                        {
+                          value: PERMISSION_DEFAULT_LAST_USED,
+                          label: t(
+                            'settings.agent.dialog.defaultPermissionLastUsed',
+                            'Last one I picked'
+                          ),
+                        },
+                        ...permissionDefaultField.options,
+                      ]}
+                      value={
+                        (permissionDefaultChoice
+                          ? permissionDefaultChoice.value
+                          : permissionDefaultField.saved) ?? PERMISSION_DEFAULT_LAST_USED
+                      }
+                      onSelect={(option) =>
+                        setPermissionDefaultChoice({
+                          source: permissionDefaultField.source,
+                          value:
+                            option.value === PERMISSION_DEFAULT_LAST_USED ? null : option.value,
+                        })
+                      }
+                      side="bottom"
+                      avoidCollisions={false}
+                    />
+                  </div>
+                </div>
+              </Section>
+            ) : null}
 
             <Section
               title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}

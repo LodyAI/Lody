@@ -546,6 +546,15 @@ describe('machine Flock helpers', () => {
       env: {},
       sessionDefaults: 'not an object',
     });
+    flock.set(machineFlockKeys.agentConfig('claude' as AgentConfigId), {
+      id: 'claude',
+      machineId: 'machine-1',
+      name: 'Claude',
+      cliType: 'builtin',
+      agentType: 'claude',
+      env: {},
+      sessionDefaults: { modeId: 'bypassPermissions', configOptionValues: {} },
+    });
 
     const configs = getMachineFlockAgentConfigs(
       readMachineFlockRowsFromFlock(flock, { families: ['agentConfig'] })
@@ -574,6 +583,11 @@ describe('machine Flock helpers', () => {
     });
     expect(configs['other' as AgentConfigId]?.name).toBe('Other');
     expect(configs['other' as AgentConfigId]?.sessionDefaults).toBeUndefined();
+    // A mode-based agent's default permission is the only value it stores.
+    expect(configs['claude' as AgentConfigId]?.sessionDefaults).toEqual({
+      modeId: 'bypassPermissions',
+      configOptionValues: {},
+    });
   });
 
   it('round-trips arbitrary ACP provider names through scoped quota rows', () => {

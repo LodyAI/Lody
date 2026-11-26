@@ -7242,6 +7242,13 @@
   "e2ee.team.wrongEmailFor": "Esta invitación se envió a {{invited}}. Inicia sesión con ese correo para continuar.",
   "e2ee.auto.tab.qr": "Escanear QR",
   "e2ee.auto.tab.code": "Ingresar código de 6 dígitos",
+  "chat.runConfig.permissionDefaultClear": "Dejar de usar como predeterminado",
+  "chat.runConfig.permissionDefaultSet": "Usar en conversaciones nuevas",
+  "chat.runConfig.permissionDefaultCleared": "Las conversaciones nuevas usan el último permiso que elegiste",
+  "chat.runConfig.permissionDefaultSaved": "Las conversaciones nuevas empezarán con este permiso",
+  "chat.runConfig.permissionDefaultFailed": "No se pudo guardar el permiso predeterminado",
+  "settings.agent.dialog.section.defaultPermission": "Permiso predeterminado",
+  "settings.agent.dialog.defaultPermissionLastUsed": "El último que elegí",
   "e2ee.access.waitingKey.checkFailed": "No se pudieron comprobar las claves ahora mismo. Comprueba tu conexión e inténtalo de nuevo.",
   "e2ee.instantQr.retrying": "Conexión interrumpida. Reintentando…"
 }

@@ -181,6 +181,11 @@ export type TitleGenerationConfig = {
  */
 export type AgentSessionDefaults = {
   modelId?: string;
+  /**
+   * Default legacy ACP mode (permission) for new conversations, for agents
+   * whose permission is a mode rather than a `_permission` config option.
+   */
+  modeId?: string;
   configOptionValues: Record<string, AcpConfigOptionValue>;
   /** Per-model option defaults (e.g. thought_level, fast-mode), keyed by modelId then configId. */
   modelConfigOptionValues?: Record<string, Record<string, AcpConfigOptionValue>>;

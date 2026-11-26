@@ -7242,6 +7242,13 @@
   "e2ee.team.wrongEmailFor": "この招待は {{invited}} 宛てです。続行するにはそのメールアドレスでログインしてください。",
   "e2ee.auto.tab.qr": "QR をスキャン",
   "e2ee.auto.tab.code": "6 桁のコードを入力",
+  "chat.runConfig.permissionDefaultClear": "デフォルトとして使わない",
+  "chat.runConfig.permissionDefaultSet": "新しい会話で使う",
+  "chat.runConfig.permissionDefaultCleared": "新しい会話では前回選んだ権限を使います",
+  "chat.runConfig.permissionDefaultSaved": "新しい会話はこの権限で始まります",
+  "chat.runConfig.permissionDefaultFailed": "デフォルトの権限を保存できませんでした",
+  "settings.agent.dialog.section.defaultPermission": "デフォルトの権限",
+  "settings.agent.dialog.defaultPermissionLastUsed": "前回選んだもの",
   "e2ee.access.waitingKey.checkFailed": "現在キーを確認できません。接続を確認してもう一度お試しください。",
   "e2ee.instantQr.retrying": "接続が中断されました。再試行しています…"
 }
