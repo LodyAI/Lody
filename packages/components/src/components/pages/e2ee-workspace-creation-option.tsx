@@ -27,7 +27,7 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-start',
-    gap: space[1.5],
+    gap: space[1],
     paddingBlock: '10px',
     paddingInline: space[3],
     borderRadius: radius.medium,
@@ -77,21 +77,18 @@ const styles = stylex.create({
     color: colors.background,
     flexShrink: 0,
   },
-  choiceList: {
+  choiceSubtitle: {
     margin: 0,
-    paddingInlineStart: space[4],
-    listStyleType: 'disc',
     color: colors.secondaryLabel,
     fontSize: text.footnoteSize,
-    lineHeight: 1.5,
+    lineHeight: 1.4,
   },
-  warning: { color: colors.warning },
   help: {
     margin: 0,
     color: colors.secondaryLabel,
     fontSize: text.footnoteSize,
     lineHeight: 1.45,
-    marginTop: space[1.5],
+    marginTop: space[2],
   },
 });
 
@@ -138,10 +135,7 @@ export function E2eeWorkspaceCreationOption(props: {
               </span>
             )}
           </span>
-          <ul {...stylex.props(styles.choiceList)}>
-            <li>{t('e2ee.create.standardPoint1')}</li>
-            <li>{t('e2ee.create.standardPoint2')}</li>
-          </ul>
+          <p {...stylex.props(styles.choiceSubtitle)}>{t('e2ee.create.standardPoint1')}</p>
         </button>
         <button
           type="button"
@@ -169,20 +163,13 @@ export function E2eeWorkspaceCreationOption(props: {
               </span>
             )}
           </span>
-          <ul {...stylex.props(styles.choiceList)}>
-            <li>{t('e2ee.create.encryptedPoint1')}</li>
-            <li>{t('e2ee.create.encryptedPoint2')}</li>
-            <li>{t('e2ee.create.encryptedPoint3')}</li>
-          </ul>
+          <p {...stylex.props(styles.choiceSubtitle)}>{t('e2ee.create.encryptedPoint1')}</p>
         </button>
       </div>
       {props.selected && (
-        <p role="note" {...stylex.props(styles.help, styles.warning)}>
+        <p role="note" {...stylex.props(styles.help)}>
           {t('e2ee.create.lossWarning')}
         </p>
-      )}
-      {props.selected && props.supported && (
-        <p {...stylex.props(styles.help)}>{t('e2ee.create.description')}</p>
       )}
       {!props.supported && <p {...stylex.props(styles.help)}>{t('e2ee.create.unsupported')}</p>}
       {props.selected && props.paidRequired && (

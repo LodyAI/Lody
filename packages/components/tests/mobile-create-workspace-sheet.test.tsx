@@ -179,7 +179,7 @@ describe('mobile encrypted workspace sheet', () => {
     const encryptedChoice = container.querySelector<HTMLButtonElement>(
       '[data-testid="mobile-create-workspace-encrypted"]'
     )!;
-    expect(container.textContent).toContain('e2ee.create.encryptedPoint3');
+    expect(container.textContent).toContain('e2ee.create.encryptedPoint1');
     expect(container.textContent).not.toContain('e2ee.create.lossWarning');
     expect(container.textContent).not.toContain('organization.workspaceSlugError.required');
 
