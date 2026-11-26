@@ -357,6 +357,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.compile-desktop.outputs.artifact-id }}
           path: desktop-compilation
+          merge-multiple: true
       - name: Restore desktop bundles and stage native CLI dependencies
         if: steps.cached.outputs.id == '0' && (matrix.target == 'linux' || matrix.target == 'mac')
         run: |
