@@ -118,7 +118,7 @@
   "e2ee.identity.lockedTitle": "Déverrouiller la protection locale des clés",
   "e2ee.identity.lockedHelp": "Votre trousseau système ou gestionnaire de mots de passe est verrouillé ; Lody ne peut donc pas déverrouiller l'accès de cet appareil. Vos données sont en sécurité. Déverrouillez votre trousseau système (sous Linux, assurez-vous que GNOME Keyring ou KWallet est installé et déverrouillé, car le stockage non chiffré n'est pas autorisé), redémarrez Lody et réessayez. Si le trousseau système a été réinitialisé de façon permanente, archivez l'accès local de cet appareil et appairez-le à nouveau une fois la protection système prête.",
   "e2ee.identity.lostTitle": "L'identité chiffrée locale est indisponible",
-  "e2ee.identity.lostHelp": "Un fichier d'origine de l'identité est manquant, endommagé ou incohérent. Réessayez après avoir restauré l'original, ou archivez explicitement cette identité locale et appairez-en une nouvelle. Une nouvelle connexion ne permet pas de restaurer ses clés.",
+  "e2ee.identity.lostHelp": "La clé de chiffrement locale de cet appareil est manquante, endommagée ou désynchronisée. Restaurez-la depuis une sauvegarde puis réessayez, ou archivez cette identité locale et appairez-en une nouvelle. Une nouvelle connexion ne permet pas de restaurer ces clés.",
   "e2ee.identity.resetWorkspace": "Réinitialiser l'identité de cet espace de travail et appairer à nouveau",
   "e2ee.identity.resetMachine": "Réinitialiser l'identité locale de l'agent et appairer à nouveau",
   "e2ee.identity.resetAccount": "Archiver toutes les identités chiffrées de ce compte",

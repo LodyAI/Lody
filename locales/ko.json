@@ -118,7 +118,7 @@
   "e2ee.identity.lockedTitle": "로컬 키 보호 잠금 해제",
   "e2ee.identity.lockedHelp": "시스템 키체인 또는 비밀번호 관리자가 잠겨 있어 Lody가 이 기기의 접근 권한을 잠금 해제할 수 없습니다. 데이터는 안전합니다. 시스템 키체인을 잠금 해제하고(Linux의 경우 암호화되지 않은 저장소는 허용되지 않으므로 GNOME Keyring 또는 KWallet이 설치 및 잠금 해제되어 있는지 확인하세요), Lody를 재시작한 후 다시 시도하세요. 시스템 키체인이 영구적으로 초기화된 경우, 시스템 보호가 준비되면 이 기기의 로컬 접근 기록을 아카이브하고 다시 페어링하세요.",
   "e2ee.identity.lostTitle": "로컬 암호화 ID를 사용할 수 없습니다",
-  "e2ee.identity.lostHelp": "ID 원본이 누락되었거나 손상되었거나 일관되지 않습니다. 원본을 복원한 후 다시 시도하거나, 이 로컬 ID를 명시적으로 아카이브하고 새 ID를 페어링하세요. 다시 로그인해도 키는 복원되지 않습니다.",
+  "e2ee.identity.lostHelp": "이 기기의 로컬 암호화 키가 누락되었거나 손상되었거나 동기화되지 않았습니다. 백업에서 복원한 후 다시 시도하거나, 이 로컬 ID를 아카이브하고 새 ID를 페어링하세요. 다시 로그인해도 키는 복원되지 않습니다.",
   "e2ee.identity.resetWorkspace": "이 워크스페이스 ID 재설정 및 다시 페어링",
   "e2ee.identity.resetMachine": "로컬 에이전트 ID 재설정 및 다시 페어링",
   "e2ee.identity.resetAccount": "이 계정의 모든 암호화 ID 아카이브",

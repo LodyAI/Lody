@@ -10,7 +10,14 @@ import { Button } from '@lody/ui/button';
 import { Collapsible } from '@lody/ui/collapsible';
 import { Spinner } from '@lody/ui/spinner';
 import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
-import { radius, space, text as type } from '@lody/ui/tokens/scales.stylex';
+import {
+  control,
+  duration,
+  ease,
+  radius,
+  space,
+  text as type,
+} from '@lody/ui/tokens/scales.stylex';
 import { Children, Fragment, isValidElement, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -86,7 +93,11 @@ const styles = stylex.create({
     color: colors.secondaryLabel,
     margin: 0,
   },
-  count: { color: colors.tertiaryLabel, fontWeight: 400 },
+  count: {
+    color: colors.tertiaryLabel,
+    fontWeight: 400,
+    fontVariantNumeric: 'tabular-nums',
+  },
   list: {
     listStyle: 'none',
     margin: 0,
@@ -100,7 +111,8 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[3],
-    minHeight: 44,
+    minHeight: 46,
+    paddingBlock: space[1.5],
     borderBottomWidth: { default: 1, ':last-child': 0 },
     borderBottomStyle: 'solid',
     borderBottomColor: colors.separator,
@@ -115,18 +127,29 @@ const styles = stylex.create({
   },
   you: { color: colors.tertiaryLabel, fontWeight: 400, marginInlineStart: space[1.5] },
   memberRole: {
-    minWidth: '5em',
+    minWidth: '6.5em',
     flexShrink: 0,
+    textAlign: 'end',
     color: colors.secondaryLabel,
     fontSize: type.subheadlineSize,
     whiteSpace: 'nowrap',
   },
   memberDevices: {
-    minWidth: '4.5em',
+    minWidth: '5em',
+    flexShrink: 0,
     textAlign: 'end',
     color: colors.tertiaryLabel,
     fontSize: type.footnoteSize,
+    fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
+  },
+  memberActionSlot: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: control.small,
+    height: control.small,
   },
   history: {
     paddingInline: space[4],
@@ -243,9 +266,9 @@ const styles = stylex.create({
   nav: {
     display: 'flex',
     flexDirection: { default: 'column', '@media (max-width: 720px)': 'row' },
-    gap: space[1],
-    paddingTop: { default: space[3], '@media (max-width: 720px)': space[2] },
-    paddingBottom: { default: space[3], '@media (max-width: 720px)': space[2] },
+    gap: '2px',
+    paddingTop: { default: space[4], '@media (max-width: 720px)': space[2] },
+    paddingBottom: { default: space[4], '@media (max-width: 720px)': space[2] },
     paddingInlineStart: space[3],
     paddingInlineEnd: { default: space[3], '@media (max-width: 720px)': space[6] },
     backgroundColor: colors.secondaryBackground,
@@ -259,8 +282,8 @@ const styles = stylex.create({
     display: { default: 'flex', '@media (max-width: 720px)': 'none' },
     alignItems: 'center',
     gap: space[2],
-    paddingInline: space[2],
-    paddingBottom: space[3],
+    paddingInline: space[3],
+    paddingBottom: space[4],
     minWidth: 0,
   },
   navName: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -270,6 +293,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     flexShrink: 0,
+    minHeight: '34px',
     paddingBlock: space[1.5],
     paddingInline: space[3],
     borderRadius: radius.medium,
@@ -280,8 +304,13 @@ const styles = stylex.create({
     textAlign: 'start',
     cursor: 'pointer',
     whiteSpace: 'nowrap',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
   },
   navItemActive: { backgroundColor: colors.wellBackground, fontWeight: 600 },
+  navIcon: { flexShrink: 0, color: colors.secondaryLabel },
+  navIconActive: { color: colors.label },
   navBadge: {
     marginInlineStart: 'auto',
     minWidth: 18,
@@ -742,13 +771,15 @@ function MembersSection(props: {
                 {t('e2ee.control.deviceCount', { count: member.devices.length })}
               </span>
               {props.management && (
-                <E2eeMemberActions
-                  member={member}
-                  name={name}
-                  management={props.management}
-                  onRotationSettled={props.onRotationSettled}
-                  onError={setActionError}
-                />
+                <span {...stylex.props(styles.memberActionSlot)}>
+                  <E2eeMemberActions
+                    member={member}
+                    name={name}
+                    management={props.management}
+                    onRotationSettled={props.onRotationSettled}
+                    onError={setActionError}
+                  />
+                </span>
               )}
             </li>
           );
@@ -1169,7 +1200,11 @@ export function E2eeWorkspaceControlPage(props: E2eeWorkspaceControlPageProps) {
               onClick={() => setTab(id)}
               {...stylex.props(styles.navItem, tab === id && styles.navItemActive)}
             >
-              <Icon size={16} aria-hidden="true" />
+              <Icon
+                size={16}
+                aria-hidden="true"
+                {...stylex.props(styles.navIcon, tab === id && styles.navIconActive)}
+              />
               {tabLabel(id)}
             </button>
           );

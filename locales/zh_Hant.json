@@ -118,7 +118,7 @@
   "e2ee.identity.lockedTitle": "解鎖本機金鑰保護",
   "e2ee.identity.lockedHelp": "你的系統鑰匙圈或密碼管理工具已鎖定，因此 Lody 無法解鎖此裝置的存取權限，但你的資料安全無虞。請解鎖系統鑰匙圈（在 Linux 上，請確認已安裝並解鎖 GNOME Keyring 或 KWallet，系統不允許未加密的明文儲存），重新啟動 Lody 後再重試。若系統鑰匙圈已永久重設，請封存此裝置的本機存取權限，待系統保護就緒後重新配對。",
   "e2ee.identity.lostTitle": "無法使用本機加密身分",
-  "e2ee.identity.lostHelp": "身分原始檔案遺失、損壞或內容不一致。請還原原始檔案後重試，或明確封存此本機身分並配對新身分。重新登入無法還原這些金鑰。",
+  "e2ee.identity.lostHelp": "此裝置的本機加密金鑰遺失、損壞或不同步。請從備份還原後重試，或封存此本機身分並配對新身分。重新登入無法還原這些金鑰。",
   "e2ee.identity.resetWorkspace": "重設此工作區身分並重新配對",
   "e2ee.identity.resetMachine": "重設本機 Agent 身分並重新配對",
   "e2ee.identity.resetAccount": "封存此帳號的所有加密身分",

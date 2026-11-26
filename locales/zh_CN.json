@@ -118,7 +118,7 @@
   "e2ee.identity.lockedTitle": "解锁本机密钥保管",
   "e2ee.identity.lockedHelp": "系统的钥匙串或凭据服务已锁定，Lody 暂时无法读取本机授权。你的数据安全未丢失。请先解锁系统钥匙串（Linux 需安装并解锁 GNOME Keyring 或 KWallet，不支持无加密明文存储），重启 Lody 后重试。若系统钥匙串已永久重置，请先归档本机记录，待系统安全保管恢复后重新配对。",
   "e2ee.identity.lostTitle": "本机加密身份已无法使用",
-  "e2ee.identity.lostHelp": "身份原件丢失、损坏或不一致。可恢复原件后重试，或显式归档本机身份并配对全新身份。重新登录无法恢复这些密钥。",
+  "e2ee.identity.lostHelp": "此设备的本机加密密钥丢失、损坏或不同步。可从备份恢复后重试，或归档此本机身份并配对全新身份。重新登录无法恢复这些密钥。",
   "e2ee.identity.resetWorkspace": "重置本工作区身份并重新配对",
   "e2ee.identity.resetMachine": "重置本机代理身份并重新配对",
   "e2ee.identity.resetAccount": "归档本账号的所有加密工作区身份",

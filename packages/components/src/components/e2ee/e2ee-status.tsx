@@ -5,8 +5,8 @@ import { AlertTriangle, Clock, KeyRound, ShieldAlert, ShieldOff, WifiOff } from 
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
 import { Spinner } from '@lody/ui/spinner';
-import { colors } from '@lody/ui/tokens/colors.stylex';
-import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 export type E2eeAccessState =
   | 'pendingApproval'
@@ -31,35 +31,69 @@ export type E2eeRecoveryWorkspace = {
 type Action = { onAction?: () => void; pending?: boolean };
 
 const styles = stylex.create({
+  card: {
+    padding: '20px',
+  },
+  cardWarning: {
+    backgroundColor: `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.warning} 3.5%)`,
+    boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${colors.warning} 22%, transparent), ${shadow.card}`,
+  },
+  cardDanger: {
+    backgroundColor: `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.destructive} 3%)`,
+    boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${colors.destructive} 20%, transparent), ${shadow.card}`,
+  },
   content: { display: 'grid', gap: space[4], minWidth: 0, overflowWrap: 'anywhere' },
-  context: { margin: 0, color: colors.secondaryLabel, fontSize: '0.9em' },
+  context: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 500,
+  },
+  statusMeta: {
+    margin: 0,
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontVariantNumeric: 'tabular-nums',
+  },
   message: { display: 'grid', gap: space[2] },
-  titleRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  titleRow: { display: 'flex', alignItems: 'center', gap: space[3] },
   glyph: {
     display: 'inline-grid',
     placeItems: 'center',
     flexShrink: 0,
-    width: 28,
-    height: 28,
-    borderRadius: radius.medium,
+    width: 32,
+    height: 32,
+    borderRadius: radius.small,
     backgroundColor: colors.secondaryBackground,
     color: colors.secondaryLabel,
   },
-  glyphWarning: { color: colors.warning },
-  glyphDanger: { color: colors.destructive },
-  warning: { color: colors.warning },
+  glyphWarning: {
+    backgroundColor: `color-mix(in oklab, ${colors.warning} 12%, transparent)`,
+    color: colors.warning,
+  },
+  glyphDanger: {
+    backgroundColor: `color-mix(in oklab, ${colors.destructive} 10%, transparent)`,
+    color: colors.destructive,
+  },
+  warning: { color: colors.label },
   error: { color: colors.destructive },
-  actions: { display: 'flex', flexWrap: 'wrap', gap: space[3] },
+  actions: { display: 'flex', flexWrap: 'wrap', gap: space[2], paddingBlockStart: space[1] },
   list: { margin: 0, padding: 0, listStyle: 'none' },
   row: {
-    display: 'grid',
-    gap: space[1],
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: space[3],
+    rowGap: space[1],
     paddingBlock: space[3],
     borderTopWidth: 1,
     borderTopStyle: 'solid',
     borderTopColor: colors.separator,
   },
-  rowName: { margin: 0, fontWeight: 500 },
+  rowName: { margin: 0, fontWeight: 500, fontSize: text.subheadlineSize },
   announcement: {
     position: 'absolute',
     width: 1,
@@ -134,7 +168,16 @@ function StatusCard({
   const { t } = useTranslation();
   const id = useId();
   return (
-    <Card.Root role="region" aria-labelledby={`${id}-title`} data-status-tone={tone}>
+    <Card.Root
+      role="region"
+      aria-labelledby={`${id}-title`}
+      data-status-tone={tone}
+      xstyle={[
+        styles.card,
+        tone === 'warning' && styles.cardWarning,
+        tone === 'danger' && styles.cardDanger,
+      ]}
+    >
       <div {...stylex.props(styles.content)}>
         <p {...stylex.props(styles.context)}>{context}</p>
         <div role="status" aria-atomic="true" {...stylex.props(styles.message)}>
@@ -261,7 +304,7 @@ export function E2eeRecoveryStatus({
           {workspaces.map((workspace) => (
             <li key={workspace.id} {...stylex.props(styles.row)}>
               <p {...stylex.props(styles.rowName)}>{workspace.name}</p>
-              <p {...stylex.props(styles.context, workspace.state === 'failed' && styles.error)}>
+              <p {...stylex.props(styles.statusMeta, workspace.state === 'failed' && styles.error)}>
                 {workspace.state === 'verified'
                   ? t('e2ee.recovery.workspace.verified', { update: workspace.verifiedKeyUpdate })
                   : t(`e2ee.recovery.workspace.${workspace.state}`)}

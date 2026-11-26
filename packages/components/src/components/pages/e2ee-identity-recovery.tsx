@@ -1,8 +1,27 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { Button } from '@lody/ui/button';
 import { Alert } from '@lody/ui/alert';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  resetAccountButton: {
+    paddingInline: space[3],
+    color: {
+      default: `color-mix(in oklab, ${colors.destructive} 78%, ${colors.secondaryLabel})`,
+      ':hover': colors.destructive,
+      ':focus-visible': colors.destructive,
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, ${colors.destructive} 10%, transparent)`,
+      ':focus-visible': `color-mix(in oklab, ${colors.destructive} 10%, transparent)`,
+    },
+  },
+});
 
 type Runtime = Pick<E2eeWorkspaceRuntime, 'resetIdentity' | 'resetLocalAgent'>;
 
@@ -131,7 +150,11 @@ export function E2eeIdentityRecovery({
                 </Button>
               )}
               {!machine && (locked || lost) && runtime.resetIdentity && (
-                <Button variant="ghost" onClick={() => setConfirm('account')}>
+                <Button
+                  variant="ghost"
+                  xstyle={styles.resetAccountButton}
+                  onClick={() => setConfirm('account')}
+                >
                   {t('e2ee.identity.resetAccount')}
                 </Button>
               )}

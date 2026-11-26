@@ -118,7 +118,7 @@
   "e2ee.identity.lockedTitle": "Desbloquea la protección de claves local",
   "e2ee.identity.lockedHelp": "El llavero o gestor de contraseñas de tu sistema está bloqueado, por lo que Lody no puede desbloquear el acceso de este dispositivo. Tus datos están a salvo. Desbloquea el llavero del sistema (en Linux, asegúrate de que GNOME Keyring o KWallet estén instalados y desbloqueados, ya que no se permite el almacenamiento sin cifrar), reinicia Lody y vuelve a intentarlo. Si el llavero del sistema se restableció de forma permanente, archiva el acceso local de este dispositivo y vuelve a emparejarlo cuando la protección del sistema esté lista.",
   "e2ee.identity.lostTitle": "La identidad cifrada local no está disponible",
-  "e2ee.identity.lostHelp": "Falta un archivo original de la identidad, está dañado o es inconsistente. Vuelve a intentarlo después de restaurar el original, o archiva explícitamente esta identidad local y empareja una nueva. Volver a iniciar sesión no puede restaurar sus claves.",
+  "e2ee.identity.lostHelp": "La clave de cifrado local de este dispositivo falta, está dañada o desincronizada. Restáurala desde una copia de seguridad e inténtalo de nuevo, o archiva esta identidad local y empareja una nueva. Volver a iniciar sesión no puede restaurar estas claves.",
   "e2ee.identity.resetWorkspace": "Restablecer esta identidad de espacio de trabajo y volver a emparejar",
   "e2ee.identity.resetMachine": "Restablecer la identidad local del agente y volver a emparejar",
   "e2ee.identity.resetAccount": "Archivar todas las identidades cifradas de esta cuenta",

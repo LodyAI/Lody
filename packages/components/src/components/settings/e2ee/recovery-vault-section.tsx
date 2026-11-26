@@ -10,7 +10,7 @@ import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
 import { AlertDialog } from '@/ui/dialog';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { control, space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { CompactRow, CompactSection } from '../compact-layout';
@@ -78,11 +78,24 @@ const styles = stylex.create({
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
   rowActions: {
     display: 'flex',
-    gap: space[2],
+    alignItems: 'center',
+    gap: space[1.5],
     flexWrap: 'wrap',
     justifyContent: { default: 'flex-start', '@media (min-width: 640px)': 'flex-end' },
   },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  workspaceActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    flexWrap: 'wrap',
+    minHeight: control.small,
+    justifyContent: { default: 'flex-start', '@media (min-width: 640px)': 'flex-end' },
+  },
+  methodHelper: {
+    display: 'block',
+    paddingBlockEnd: space[1],
+  },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[6] },
   line: { display: 'block' },
   // Name and status share one column so the buttons wrap below them at the same left edge.
   workspace: {
@@ -588,10 +601,16 @@ export function RecoveryVaultSection({
     : result?.kind === 'restored'
       ? result.results
       : undefined;
-  const restoreButton = (method: RecoveryUnlockMethod) => (
+  const restoreButton = (method: RecoveryUnlockMethod, subordinate = false) => (
     <Button
       size="small"
-      variant={restoreLeads && method === restorePrimaryMethod ? 'primary' : 'secondary'}
+      variant={
+        restoreLeads && method === restorePrimaryMethod
+          ? 'primary'
+          : subordinate
+            ? 'ghost'
+            : 'secondary'
+      }
       disabled={busy}
       onClick={() => {
         if (method === 'password') {
@@ -661,29 +680,36 @@ export function RecoveryVaultSection({
       </div>
     );
 
+  const fileHasLeadAction = Boolean(
+    (create && (mode === 'none' || mode === 'failed')) ||
+    (saveFile && mode === 'ready' && !hasFile) ||
+    (checkFile && ((mode === 'ready' && hasFile) || mode === 'failed'))
+  );
   const fileRow = (
     <CompactRow
       key="file"
       label={t('e2ee.recovery.file')}
       helper={
-        mode === 'ready' || mode === 'replacing'
-          ? mode === 'replacing'
-            ? t('e2ee.recovery.fileReplacing')
-            : !hasFile
-              ? t('e2ee.recovery.fileNotSaved')
-              : checkedAt
-                ? t('e2ee.recovery.fileSavedChecked', {
-                    date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
-                      month: 'short',
-                      day: 'numeric',
-                    }).format(new Date(checkedAt)),
-                  })
-                : t('e2ee.recovery.fileSaved')
-          : mode === 'none'
-            ? canCreateFile || canCreatePasskey || canCreatePassword
-              ? t('e2ee.recovery.fileNone')
-              : t('e2ee.recovery.createElsewhere')
-            : t('e2ee.recovery.offlineHint')
+        <span {...stylex.props(styles.methodHelper)}>
+          {mode === 'ready' || mode === 'replacing'
+            ? mode === 'replacing'
+              ? t('e2ee.recovery.fileReplacing')
+              : !hasFile
+                ? t('e2ee.recovery.fileNotSaved')
+                : checkedAt
+                  ? t('e2ee.recovery.fileSavedChecked', {
+                      date: new Intl.DateTimeFormat(toIntlLocaleOrEn(i18n?.language), {
+                        month: 'short',
+                        day: 'numeric',
+                      }).format(new Date(checkedAt)),
+                    })
+                  : t('e2ee.recovery.fileSaved')
+            : mode === 'none'
+              ? canCreateFile || canCreatePasskey || canCreatePassword
+                ? t('e2ee.recovery.fileNone')
+                : t('e2ee.recovery.createElsewhere')
+              : t('e2ee.recovery.offlineHint')}
+        </span>
       }
       alignTop
     >
@@ -743,20 +769,16 @@ export function RecoveryVaultSection({
           </Button>
         )}
         {replacement && mode === 'ready' && (
-          <Button
-            size="small"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => setDialog('begin')}
-          >
+          <Button size="small" variant="ghost" disabled={busy} onClick={() => setDialog('begin')}>
             {t('e2ee.recovery.replace')}
           </Button>
         )}
-        {canRestore && (mode === 'failed' || hasFile) && restoreButton('file')}
+        {canRestore && (mode === 'failed' || hasFile) && restoreButton('file', fileHasLeadAction)}
       </div>
     </CompactRow>
   );
 
+  const passkeyHasLeadAction = Boolean((mode === 'none' && canCreatePasskey) || mode === 'ready');
   const passkeyRow =
     passkey &&
     ((mode === 'none' && canCreatePasskey) ||
@@ -767,7 +789,9 @@ export function RecoveryVaultSection({
         key="passkey"
         label={t('e2ee.recovery.passkey')}
         helper={
-          mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp')
+          <span {...stylex.props(styles.methodHelper)}>
+            {mode === 'none' ? t('e2ee.recovery.passkeyNoneHelp') : t('e2ee.recovery.passkeyHelp')}
+          </span>
         }
         alignTop
       >
@@ -790,7 +814,7 @@ export function RecoveryVaultSection({
           {mode === 'ready' && (
             <Button
               size="small"
-              variant="secondary"
+              variant="ghost"
               disabled={busy}
               onClick={() =>
                 triggerWithUnlock(async (unlockMethod, options) => {
@@ -811,11 +835,14 @@ export function RecoveryVaultSection({
               {t('e2ee.recovery.passkeyManage')}
             </Button>
           )}
-          {canRestore && hasPasskey !== false && restoreButton('passkey')}
+          {canRestore && hasPasskey !== false && restoreButton('passkey', passkeyHasLeadAction)}
         </div>
       </CompactRow>
     ) : null;
 
+  const passwordHasLeadAction = Boolean(
+    (mode === 'none' && canCreatePassword) || (mode === 'ready' && setPassword)
+  );
   const passwordRow =
     passwordSupported &&
     ((mode === 'none' && canCreatePassword) || mode === 'ready' || canRestorePassword) ? (
@@ -823,11 +850,13 @@ export function RecoveryVaultSection({
         key="password"
         label={t('e2ee.recovery.password')}
         helper={
-          mode === 'none'
-            ? t('e2ee.recovery.passwordNoneHelp')
-            : hasPassword
-              ? t('e2ee.recovery.passwordSavedHelp')
-              : t('e2ee.recovery.passwordUnsetHelp')
+          <span {...stylex.props(styles.methodHelper)}>
+            {mode === 'none'
+              ? t('e2ee.recovery.passwordNoneHelp')
+              : hasPassword
+                ? t('e2ee.recovery.passwordSavedHelp')
+                : t('e2ee.recovery.passwordUnsetHelp')}
+          </span>
         }
         alignTop
       >
@@ -855,7 +884,7 @@ export function RecoveryVaultSection({
           {mode === 'ready' && canRemovePassword && (
             <Button
               size="small"
-              variant="secondary"
+              variant="ghost"
               tone="destructive"
               disabled={busy}
               onClick={() => setRemovingPassword(true)}
@@ -863,7 +892,7 @@ export function RecoveryVaultSection({
               {t('e2ee.recovery.passwordRemove')}
             </Button>
           )}
-          {canRestorePassword && restoreButton('password')}
+          {canRestorePassword && restoreButton('password', passwordHasLeadAction)}
         </div>
       </CompactRow>
     ) : null;
@@ -1098,7 +1127,10 @@ export function RecoveryVaultSection({
             const badge = statusBadge[workspace.status.kind];
             return (
               <CompactRow key={workspace.id} label={workspace.name}>
-                <div data-recovery-workspace={workspace.id} {...stylex.props(styles.rowActions)}>
+                <div
+                  data-recovery-workspace={workspace.id}
+                  {...stylex.props(styles.workspaceActions)}
+                >
                   <Badge tone={badge.tone} data-recovery-status={workspace.status.kind}>
                     {t(badge.key)}
                   </Badge>

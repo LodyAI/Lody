@@ -118,7 +118,7 @@
   "e2ee.identity.lockedTitle": "Unlock local key protection",
   "e2ee.identity.lockedHelp": "Your system keychain or password manager is locked, so Lody can't unlock this device's access. Your data is safe. Unlock your system keychain (on Linux, make sure GNOME Keyring or KWallet is installed and unlocked, since unencrypted storage isn't allowed), restart Lody, and retry. If the system keychain was permanently reset, archive this device's local access and pair it again once system protection is ready.",
   "e2ee.identity.lostTitle": "Local encrypted identity is unavailable",
-  "e2ee.identity.lostHelp": "An identity original is missing, damaged or inconsistent. Retry after restoring the original, or explicitly archive this local identity and pair a new one. Signing in again cannot restore its keys.",
+  "e2ee.identity.lostHelp": "This device's local encryption key is missing, damaged, or out of sync. Restore it from a backup and try again, or archive this local identity and pair a new one. Signing in again cannot restore these keys.",
   "e2ee.identity.resetWorkspace": "Reset this workspace identity and pair again",
   "e2ee.identity.resetMachine": "Reset local agent identity and pair again",
   "e2ee.identity.resetAccount": "Archive all encrypted identities for this account",
