@@ -882,4 +882,53 @@ describe('SessionEditAndResendService non-resident first-message recovery', () =
       latestUserMsgId: 'user-3',
     });
   });
+
+  it('recovers on retry after an in-flight pending create is aborted by Stop', async () => {
+    let pendingCreate: Promise<unknown> | null = Promise.resolve();
+    let createCall = 0;
+    const harness = createHarness({
+      resident: false,
+      acpSessionId: null,
+      history: firstUserHistory(),
+      pendingCreate,
+    });
+    const sessionManager = (
+      harness.service as unknown as {
+        deps: {
+          sessionManager: {
+            getPendingSession: ReturnType<typeof vi.fn>;
+            createSession: ReturnType<typeof vi.fn>;
+          };
+        };
+      }
+    ).deps.sessionManager;
+    sessionManager.getPendingSession.mockImplementation(() => pendingCreate);
+    sessionManager.createSession.mockImplementation(
+      async (_config: unknown, agentStart?: { resumeSessionId?: string }) => {
+        createCall += 1;
+        if (createCall === 1) {
+          pendingCreate = null;
+          throw new Error('session-stop');
+        }
+        expect(agentStart).toEqual({ deferAcpSessionIdPersistence: true });
+        return harness.createdRuntime;
+      }
+    );
+
+    const aborted = await harness.service.editAndResend(spec);
+    expect(aborted).toMatchObject({
+      success: false,
+      error: { code: 'ACP_SESSION_UNAVAILABLE', message: 'session-stop' },
+    });
+    expect(harness.getResidentRuntime()).toBeUndefined();
+    expect(harness.getHistory().map((row) => row.id)).toEqual(['user-2']);
+
+    const retried = await harness.service.editAndResend(spec);
+    expect(retried, JSON.stringify(retried)).toMatchObject({ success: true });
+    expect(harness.readStoredMeta()).toMatchObject({
+      acpSessionId: 'acp-fresh',
+      latestUserMsgId: 'user-3',
+    });
+    expect(harness.getHistory().map((row) => row.id)).toEqual(['user-3']);
+  });
 });

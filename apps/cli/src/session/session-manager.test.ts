@@ -1471,6 +1471,58 @@ describe('SessionManager durable create ownership', () => {
     expect(managerTerminated).toEqual([]);
   });
 
+  it('does not let an abandoned create overwrite or remove a replacement session during createSessionInner', async () => {
+    const firstSandboxEntered = deferred<void>();
+    const firstSandboxRelease = deferred<void>();
+    const firstSandboxTerminate = vi.fn(async () => undefined);
+    let sandboxCalls = 0;
+    const manager = new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => {
+          sandboxCalls += 1;
+          const base = createNoopSessionSandbox();
+          if (sandboxCalls === 1) {
+            firstSandboxEntered.resolve();
+            await firstSandboxRelease.promise;
+            return {
+              ...base,
+              terminate: firstSandboxTerminate,
+            };
+          }
+          return base;
+        },
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const sessionId = 'abandoned-during-inner-session' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const managerTerminated: SessionId[] = [];
+    manager.on('terminated', (event: { sessionId: SessionId }) => {
+      managerTerminated.push(event.sessionId);
+    });
+
+    const abandonedCreate = manager.createSession(config);
+    await firstSandboxEntered.promise;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'session-stop')).toBe(true);
+
+    // A replacement create finishes and registers before the abandoned create
+    // unwinds out of `createSessionInner`.
+    const replacement = await createSessionInner(manager, config);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+
+    firstSandboxRelease.resolve();
+    await expect(abandonedCreate).rejects.toThrow('session-stop');
+
+    expect(firstSandboxTerminate).toHaveBeenCalledWith(true);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(managerTerminated).toEqual([]);
+  });
+
   it('does not forward an old runtime exit as the replacement runtime death', async () => {
     const manager = buildOwnershipManager();
     const sessionId = 'runtime-generation-events' as SessionId;
