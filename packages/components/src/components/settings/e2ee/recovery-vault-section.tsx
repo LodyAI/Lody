@@ -5,14 +5,13 @@ import { useTranslation } from 'react-i18next';
 import { FileKey2, KeyRound, Lock, MoreHorizontal, type LucideIcon } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { Alert } from '@lody/ui/alert';
-import { Badge, type BadgeTone } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Menu } from '@lody/ui/menu';
 import { Spinner } from '@lody/ui/spinner';
 import { AlertDialog } from '@/ui/dialog';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { control, space, text } from '@lody/ui/tokens/scales.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { e2eeRecoveryVaultFeatureEnabledAtom } from '@/atoms/settings';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { CompactRow, CompactSection } from '../compact-layout';
@@ -84,19 +83,19 @@ const styles = stylex.create({
   },
   actions: { display: 'flex', gap: space[2], flexWrap: 'wrap', alignItems: 'center' },
   methodRow: {
-    display: { default: 'flex', '@media (min-width: 640px)': 'grid' },
-    flexDirection: 'column',
-    gridTemplateColumns: { default: null, '@media (min-width: 640px)': 'minmax(0, 1fr) auto' },
-    alignItems: { default: 'stretch', '@media (min-width: 640px)': 'center' },
-    gap: { default: space[3], '@media (min-width: 640px)': space[4] },
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
     paddingInline: space[4],
     paddingBlock: space[3],
     minWidth: 0,
   },
   methodIdentity: {
     display: 'flex',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: space[3],
+    flex: '1 1 0%',
     minWidth: 0,
   },
   methodIcon: {
@@ -106,7 +105,6 @@ const styles = stylex.create({
     flexShrink: 0,
     width: '16px',
     height: '16px',
-    marginTop: '2px',
     color: colors.secondaryLabel,
   },
   methodBody: {
@@ -118,59 +116,99 @@ const styles = stylex.create({
   },
   methodHeader: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'baseline',
     flexWrap: 'wrap',
-    gap: space[2],
+    columnGap: space[1.5],
+    rowGap: '2px',
     minWidth: 0,
   },
   methodTitle: {
     margin: 0,
     fontSize: text.bodySize,
     fontWeight: 500,
-    lineHeight: 1.4,
+    lineHeight: 1.35,
     color: colors.label,
   },
+  methodMeta: {
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.tertiaryLabel,
+    whiteSpace: 'nowrap',
+  },
+  methodMetaSuccess: { color: colors.success },
+  methodMetaWarning: { color: colors.warning },
   methodHelper: {
     margin: 0,
     fontSize: text.footnoteSize,
-    lineHeight: 1.45,
+    lineHeight: 1.4,
     color: colors.secondaryLabel,
   },
   rowActions: {
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
-    gap: space[1.5],
+    gap: space[1],
     flexWrap: 'nowrap',
-    justifyContent: { default: 'flex-start', '@media (min-width: 640px)': 'flex-end' },
   },
-  workspaceActions: {
+  workspaceRow: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: space[3],
-    flexWrap: 'wrap',
-    minHeight: control.small,
-    justifyContent: { default: 'flex-start', '@media (min-width: 640px)': 'flex-end' },
-  },
-  stack: { display: 'flex', flexDirection: 'column', gap: space[6] },
-  line: { display: 'block' },
-  // Name and status share one column so the buttons wrap below them at the same left edge.
-  workspace: {
-    alignSelf: 'stretch',
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: space[3],
-    rowGap: space[2],
-  },
-  workspaceLabel: {
-    display: 'flex',
-    flexDirection: 'column',
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '16em',
+    minHeight: '48px',
+    paddingInline: space[4],
+    paddingBlock: '10px',
     minWidth: 0,
   },
+  workspaceInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flex: '1 1 0%',
+    minWidth: 0,
+  },
+  workspaceName: {
+    margin: 0,
+    fontSize: text.bodySize,
+    fontWeight: 500,
+    lineHeight: 1.35,
+    color: colors.label,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  workspaceStatus: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.secondaryLabel,
+  },
+  workspaceStatusEnd: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: '6px',
+    fontSize: text.footnoteSize,
+    lineHeight: 1.35,
+    color: colors.tertiaryLabel,
+    whiteSpace: 'nowrap',
+  },
+  workspaceStatusSuccess: { color: colors.success },
+  workspaceStatusWarning: { color: colors.warning },
+  statusDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: '9999px',
+    backgroundColor: colors.tertiaryLabel,
+  },
+  statusDotSuccess: { backgroundColor: colors.success },
+  statusDotWarning: { backgroundColor: colors.warning },
+  workspaceAction: { flexShrink: 0 },
+  stack: { display: 'flex', flexDirection: 'column', gap: space[6] },
+  line: { display: 'block' },
 });
 
 type Result =
@@ -236,7 +274,9 @@ export function useWorkspaceRecoveryReady(
   return enabled && ready?.scope === scope ? ready.value : undefined;
 }
 
-const statusBadge: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: BadgeTone }> = {
+type MethodMetaTone = 'neutral' | 'success' | 'warning';
+
+const statusMeta: Record<RecoveryWorkspaceStatus['kind'], { key: string; tone: MethodMetaTone }> = {
   verified: { key: 'e2ee.recovery.workspace.verified', tone: 'success' },
   saved: { key: 'e2ee.recovery.workspace.saved', tone: 'neutral' },
   notSet: { key: 'e2ee.recovery.workspace.notSet', tone: 'warning' },
@@ -697,7 +737,7 @@ export function RecoveryVaultSection({
     id: RecoveryUnlockMethod;
     icon: LucideIcon;
     title: string;
-    badge?: { label: string; tone: BadgeTone };
+    badge?: { label: string; tone: MethodMetaTone };
     helper: string;
     leadActions: MethodAction[];
     secondaryActions: MethodAction[];
@@ -717,7 +757,17 @@ export function RecoveryVaultSection({
           <div {...stylex.props(styles.methodBody)}>
             <div {...stylex.props(styles.methodHeader)}>
               <p {...stylex.props(styles.methodTitle)}>{title}</p>
-              {badge && <Badge tone={badge.tone}>{badge.label}</Badge>}
+              {badge && (
+                <span
+                  {...stylex.props(
+                    styles.methodMeta,
+                    badge.tone === 'success' && styles.methodMetaSuccess,
+                    badge.tone === 'warning' && styles.methodMetaWarning
+                  )}
+                >
+                  · {badge.label}
+                </span>
+              )}
             </div>
             <p {...stylex.props(styles.methodHelper)}>{helper}</p>
           </div>
@@ -1242,17 +1292,38 @@ export function RecoveryVaultSection({
       {mode === 'ready' && !!plan?.covered.length && (
         <CompactSection title={t('e2ee.recovery.workspaces')} boxed>
           {plan.covered.map((workspace) => {
-            const badge = statusBadge[workspace.status.kind];
+            const meta = statusMeta[workspace.status.kind];
+            const needsSetup =
+              workspace.status.kind === 'notSet' || workspace.status.kind === 'saved';
             return (
-              <CompactRow key={workspace.id} label={workspace.name}>
-                <div
-                  data-recovery-workspace={workspace.id}
-                  {...stylex.props(styles.workspaceActions)}
-                >
-                  <Badge tone={badge.tone} data-recovery-status={workspace.status.kind}>
-                    {t(badge.key)}
-                  </Badge>
-                  {(workspace.status.kind === 'notSet' || workspace.status.kind === 'saved') && (
+              <div
+                key={workspace.id}
+                data-recovery-workspace={workspace.id}
+                {...stylex.props(styles.workspaceRow)}
+              >
+                <div {...stylex.props(styles.workspaceInfo)}>
+                  <p {...stylex.props(styles.workspaceName)}>{workspace.name}</p>
+                  {needsSetup && (
+                    <span
+                      data-recovery-status={workspace.status.kind}
+                      {...stylex.props(
+                        styles.workspaceStatus,
+                        meta.tone === 'warning' && styles.workspaceStatusWarning
+                      )}
+                    >
+                      <span
+                        aria-hidden="true"
+                        {...stylex.props(
+                          styles.statusDot,
+                          meta.tone === 'warning' && styles.statusDotWarning
+                        )}
+                      />
+                      {t(meta.key)}
+                    </span>
+                  )}
+                </div>
+                {needsSetup ? (
+                  <div {...stylex.props(styles.workspaceAction)}>
                     <Button
                       size="small"
                       variant="secondary"
@@ -1280,9 +1351,25 @@ export function RecoveryVaultSection({
                         ? t('e2ee.recovery.setupContinue')
                         : t('e2ee.recovery.setup')}
                     </Button>
-                  )}
-                </div>
-              </CompactRow>
+                  </div>
+                ) : (
+                  <span
+                    data-recovery-status={workspace.status.kind}
+                    {...stylex.props(
+                      styles.workspaceStatusEnd,
+                      meta.tone === 'success' && styles.workspaceStatusSuccess
+                    )}
+                  >
+                    {meta.tone === 'success' && (
+                      <span
+                        aria-hidden="true"
+                        {...stylex.props(styles.statusDot, styles.statusDotSuccess)}
+                      />
+                    )}
+                    {t(meta.key)}
+                  </span>
+                )}
+              </div>
             );
           })}
         </CompactSection>
