@@ -1,8 +1,42 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import type { E2eeWorkspaceRuntime } from '@lody/platform';
 import { Button } from '@lody/ui/button';
-import { Alert } from '@lody/ui/alert';
+import { AlertDialog } from '@/ui/dialog';
+import { StatusPage, StatusPageActions, StatusPageFootnote } from '@/components/status-page';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+
+const styles = stylex.create({
+  quietLink: {
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    boxShadow: 'none',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    lineHeight: 'inherit',
+    fontWeight: 500,
+    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    textDecorationLine: 'underline',
+    textDecorationColor: `color-mix(in oklab, transparent, ${colors.secondaryLabel} 50%)`,
+    textUnderlineOffset: '3px',
+    cursor: 'pointer',
+  },
+  dialogError: {
+    margin: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 8%)`,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.destructive,
+  },
+});
 
 type Runtime = Pick<E2eeWorkspaceRuntime, 'resetIdentity' | 'resetLocalAgent'>;
 
@@ -13,12 +47,14 @@ export function E2eeIdentityRecovery({
   runtime,
   workspaceId,
   machine,
+  layout = 'pane',
   onReset,
 }: {
   error: string;
   runtime: Runtime;
   workspaceId: string;
   machine?: boolean;
+  layout?: 'pane' | 'region';
   onReset: () => void;
 }) {
   const { t } = useTranslation();
@@ -71,74 +107,122 @@ export function E2eeIdentityRecovery({
       setBusy(false);
     }
   };
+  const title = t(
+    restart
+      ? 'e2ee.identity.restartTitle'
+      : history
+        ? 'e2ee.identity.historyTitle'
+        : pin
+          ? 'e2ee.identity.pinTitle'
+          : permissions
+            ? 'e2ee.identity.permissionsTitle'
+            : locked
+              ? 'e2ee.identity.lockedTitle'
+              : 'e2ee.identity.lostTitle'
+  );
+  const description = t(
+    restart
+      ? 'e2ee.identity.restartHelp'
+      : history
+        ? 'e2ee.identity.historyHelp'
+        : pin
+          ? 'e2ee.identity.pinHelp'
+          : permissions
+            ? 'e2ee.identity.permissionsHelp'
+            : locked
+              ? 'e2ee.identity.lockedHelp'
+              : 'e2ee.identity.lostHelp'
+  );
+  const canResetAccount =
+    !restart && !machine && (locked || lost) && Boolean(runtime.resetIdentity);
+
   return (
-    <Alert.Root tone="warning">
-      <Alert.Title>
-        {t(
-          restart
-            ? 'e2ee.identity.restartTitle'
-            : history
-              ? 'e2ee.identity.historyTitle'
-              : pin
-                ? 'e2ee.identity.pinTitle'
-                : permissions
-                  ? 'e2ee.identity.permissionsTitle'
-                  : locked
-                    ? 'e2ee.identity.lockedTitle'
-                    : 'e2ee.identity.lostTitle'
-        )}
-      </Alert.Title>
-      <Alert.Description>
-        {t(
-          restart
-            ? 'e2ee.identity.restartHelp'
-            : history
-              ? 'e2ee.identity.historyHelp'
-              : pin
-                ? 'e2ee.identity.pinHelp'
-                : permissions
-                  ? 'e2ee.identity.permissionsHelp'
-                  : locked
-                    ? 'e2ee.identity.lockedHelp'
-                    : 'e2ee.identity.lostHelp'
-        )}
-      </Alert.Description>
-      {confirm && (
-        <Alert.Description>
-          {t(confirm === 'account' ? 'e2ee.identity.accountWarning' : 'e2ee.identity.resetWarning')}
-        </Alert.Description>
-      )}
-      {failure && <Alert.Description>{t('e2ee.identity.resetFailed')}</Alert.Description>}
+    <StatusPage
+      layout={layout}
+      role="alert"
+      illustration="broken"
+      title={title}
+      description={description}
+    >
       {!restart && (
-        <Alert.Actions>
-          {confirm ? (
-            <>
-              <Button disabled={busy} variant="destructive" onClick={() => void apply()}>
-                {t('e2ee.identity.confirm')}
-              </Button>
-              <Button disabled={busy} variant="ghost" onClick={() => setConfirm(null)}>
-                {t('common.cancel')}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="secondary" onClick={onReset}>
-                {t('common.tryAgain')}
-              </Button>
-              {reset && !permissions && (
-                <Button variant="secondary" onClick={() => setConfirm('workspace')}>
-                  {t(machine ? 'e2ee.identity.resetMachine' : 'e2ee.identity.resetWorkspace')}
-                </Button>
-              )}
-              {!machine && (locked || lost) && runtime.resetIdentity && (
-                <Button variant="ghost" onClick={() => setConfirm('account')}>
-                  {t('e2ee.identity.resetAccount')}
-                </Button>
-              )}
-            </>
+        <StatusPageActions>
+          <Button type="button" size="small" variant="primary" disabled={busy} onClick={onReset}>
+            {t('common.retry')}
+          </Button>
+          {reset && !permissions && (
+            <Button
+              type="button"
+              size="small"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setFailure(false);
+                setConfirm('workspace');
+              }}
+            >
+              {t(machine ? 'e2ee.identity.resetMachine' : 'e2ee.identity.resetWorkspace')}
+            </Button>
           )}
-        </Alert.Actions>
+        </StatusPageActions>
       )}
-    </Alert.Root>
+
+      {canResetAccount && (
+        <StatusPageFootnote>
+          <button
+            type="button"
+            disabled={busy}
+            {...stylex.props(styles.quietLink)}
+            onClick={() => {
+              setFailure(false);
+              setConfirm('account');
+            }}
+          >
+            {t('e2ee.identity.resetAccount')}
+          </button>
+        </StatusPageFootnote>
+      )}
+
+      <AlertDialog.Root
+        open={confirm !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setConfirm(null);
+            setFailure(false);
+          }
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t(
+                confirm === 'account'
+                  ? 'e2ee.identity.resetAccount'
+                  : machine
+                    ? 'e2ee.identity.resetMachine'
+                    : 'e2ee.identity.resetWorkspace'
+              )}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t(
+                confirm === 'account'
+                  ? 'e2ee.identity.accountWarning'
+                  : 'e2ee.identity.resetWarning'
+              )}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          {failure && (
+            <p role="alert" {...stylex.props(styles.dialogError)}>
+              {t('e2ee.identity.resetFailed')}
+            </p>
+          )}
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
+            <Button disabled={busy} variant="destructive" onClick={() => void apply()}>
+              {t('e2ee.identity.confirm')}
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </StatusPage>
   );
 }

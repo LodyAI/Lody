@@ -189,6 +189,10 @@ Share hand a cache copy out through the `${applicationId}.images` FileProvider;
 Save writes to MediaStore `Pictures/Lody` without a storage permission and is
 offered on Android 10 and later.
 
+Selected conversation turns can also be exported or copied as a styled card PNG
+from the session More menu in verified plaintext workspaces (`conversationShareMessages`);
+see the [native share-image decision](../../.agents/notes/implemented/feature/2026-11-26-native-mobile-chat-share-image.md).
+
 ## Push notifications
 
 Both native clients select their push provider from the authenticated backend's

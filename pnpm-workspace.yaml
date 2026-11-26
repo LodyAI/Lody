@@ -30,7 +30,7 @@ catalog:
   '@effect/vitest': 4.0.2
   '@loro-dev/flock-wasm': ^0.5.0
   '@loro-dev/loro-cli': 0.6.0
-  '@loro-dev/roost': 0.3.1
+  '@loro-dev/roost': 0.3.2
   '@loro-dev/streams-client': 0.16.0
   '@loro-dev/streams-crdt': 0.24.0
   '@tanstack/react-router': ^1.127.9
@@ -133,14 +133,14 @@ minimumReleaseAgeExclude:
   - effect@4.0.2
   - '@effect/vitest@4.0.2'
   - '@effect/platform-node-shared@4.0.2'
-  - '@loro-dev/roost-node@0.3.1'
-  - '@loro-dev/roost-node-darwin-arm64@0.3.1'
-  - '@loro-dev/roost-node-darwin-x64@0.3.1'
-  - '@loro-dev/roost-node-linux-arm64-gnu@0.3.1'
-  - '@loro-dev/roost-node-linux-x64-gnu@0.3.1'
-  - '@loro-dev/roost-node-win32-arm64-msvc@0.3.1'
-  - '@loro-dev/roost-node-win32-x64-msvc@0.3.1'
-  - '@loro-dev/roost@0.3.1'
+  - '@loro-dev/roost-node@0.3.2'
+  - '@loro-dev/roost-node-darwin-arm64@0.3.2'
+  - '@loro-dev/roost-node-darwin-x64@0.3.2'
+  - '@loro-dev/roost-node-linux-arm64-gnu@0.3.2'
+  - '@loro-dev/roost-node-linux-x64-gnu@0.3.2'
+  - '@loro-dev/roost-node-win32-arm64-msvc@0.3.2'
+  - '@loro-dev/roost-node-win32-x64-msvc@0.3.2'
+  - '@loro-dev/roost@0.3.2'
   - '@openai/codex@0.172.0 || 0.172.0-darwin-arm64 || 0.172.0-darwin-x64 || 0.172.0-linux-arm64 || 0.172.0-linux-x64 || 0.172.0-win32-arm64 || 0.172.0-win32-x64 || 0.169.1 || 0.169.1-darwin-arm64 || 0.169.1-darwin-x64 || 0.169.1-linux-arm64 || 0.169.1-linux-x64 || 0.169.1-win32-arm64 || 0.169.1-win32-x64'
   - '@peculiar/asn1-x509@2.10.0'
   - '@peculiar/asn1-x509-attr@2.10.0'

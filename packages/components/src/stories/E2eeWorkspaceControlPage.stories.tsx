@@ -332,3 +332,6 @@ export const LedgerAuditFailed: Story = {
 export const SecurityCodeTab: Story = {
   args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', initialTab: 'security' },
 };
+export const MobileMenu: Story = {
+  args: { ...TeamHistory.args, workspaceName: 'Cipher Lab', initialMobileView: 'menu' },
+};

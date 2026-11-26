@@ -184,7 +184,7 @@ it.each(['transient', 'account switch', '403', 'ConvexError', '560'] as const)(
       await started.promise;
       if (scenario === 'account switch') account = 'account-B';
       request.recordHex = 'bb';
-      await clock.runPromise(TestClock.adjust(210));
+      await clock.runPromise(TestClock.adjust(1200));
       if (scenario === 'transient') {
         expect(await pending).toEqual({
           result: { status: 'committed', recordHash: genesisHash },

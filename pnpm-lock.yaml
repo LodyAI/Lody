@@ -64,8 +64,8 @@ catalogs:
       specifier: 0.6.0
       version: 0.6.0
     '@loro-dev/roost':
-      specifier: 0.3.1
-      version: 0.3.1
+      specifier: 0.3.2
+      version: 0.3.2
     '@loro-dev/streams-client':
       specifier: 0.16.0
       version: 0.16.0
@@ -286,8 +286,8 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)
       '@loro-dev/roost-node':
-        specifier: 0.3.1
-        version: 0.3.1
+        specifier: 0.3.2
+        version: 0.3.2
       '@lydell/node-pty':
         specifier: 1.2.0-beta.14
         version: 1.2.0-beta.14
@@ -363,7 +363,7 @@ importers:
         version: 0.5.0
       '@loro-dev/roost':
         specifier: 'catalog:'
-        version: 0.3.1
+        version: 0.3.2(effect@4.0.2)
       '@loro-dev/streams-client':
         specifier: 'catalog:'
         version: 0.16.0(effect@4.0.2)
@@ -1455,6 +1455,12 @@ importers:
       '@loro-dev/flock-wasm':
         specifier: 'catalog:'
         version: 0.5.0
+      '@loro-dev/roost':
+        specifier: 'catalog:'
+        version: 0.3.2(effect@4.0.2)
+      '@loro-dev/streams-client':
+        specifier: 'catalog:'
+        version: 0.16.0(effect@4.0.2)
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.24.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.19.1)
@@ -4629,50 +4635,50 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@loro-dev/roost-node-darwin-arm64@0.3.1':
-    resolution: {integrity: sha512-56VdV0jX0rosflFnS81cT2UPqzQFM50KVSzGijWR7XaQjysgydwzIzThy4Rb3Cplrp2K8rrHU1Hzlik5aSlPYA==}
+  '@loro-dev/roost-node-darwin-arm64@0.3.2':
+    resolution: {integrity: sha512-r2mONy7Us2xLVN6XJL5yL5RQ1dRxqZNPCOMxizdL0k00U33OLxDb6HgDlZoYnqQhGqDJShb0pEz3cFIx5/2JlQ==}
     engines: {node: '>=22.14.0'}
     cpu: [arm64]
     os: [darwin]
 
-  '@loro-dev/roost-node-darwin-x64@0.3.1':
-    resolution: {integrity: sha512-NTxmngJp7pzetX6kCiA5zABqg0jBPz3by4oVFmljcNxxUgSz0umLgkSlHmwWDlZ/bENED2af8WfolOC2eh8itQ==}
+  '@loro-dev/roost-node-darwin-x64@0.3.2':
+    resolution: {integrity: sha512-HN3ILH/Y8fzgmknbDusM5VKyOtC9oejoePg/y+sKg/bWG2hGgZAFx2sv60BRuZ9M3IFrH+x5RZtG7NSEvvXwRQ==}
     engines: {node: '>=22.14.0'}
     cpu: [x64]
     os: [darwin]
 
-  '@loro-dev/roost-node-linux-arm64-gnu@0.3.1':
-    resolution: {integrity: sha512-jZx24omZRG1tq+9ejtFo2WP8T3rqu1+yk5762k2htbU8muaF7/jo9y6zyevYQbu5jGNfLZhjQZJxsTi9Udgv4Q==}
+  '@loro-dev/roost-node-linux-arm64-gnu@0.3.2':
+    resolution: {integrity: sha512-DPgi9ADjjUursKjNFGks4RAgdvLtcjrzYdPQ6SLtY9s7MJ6DnyaC4WWWuqdGDDl9+hr7LozEYdQaRPboHSVWFg==}
     engines: {node: '>=22.14.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@loro-dev/roost-node-linux-x64-gnu@0.3.1':
-    resolution: {integrity: sha512-hh0gentgt9zaR0/9AcANryTNi6/qHk1eetYvqY3eQY2yo+/oQ1ns3jD0linpa410XNjC1txigCP0ZvsrD+KV+A==}
+  '@loro-dev/roost-node-linux-x64-gnu@0.3.2':
+    resolution: {integrity: sha512-ncHomsQr+9pXLqzP43R2vs+yCoQLICC0tA+eQYBdYOLzTFthSkPEj1ZMqpx0KMSwDa9knjXNTwZD/pI0/0Zo8w==}
     engines: {node: '>=22.14.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@loro-dev/roost-node-win32-arm64-msvc@0.3.1':
-    resolution: {integrity: sha512-bpnC1ErGebl65t5Sf/PDEDbRJLL/j6UqNfXCJTM9c33lyNyP1ct+n+Tg+V6hIBVEi67BvucHerfDrDZFNDhEeQ==}
+  '@loro-dev/roost-node-win32-arm64-msvc@0.3.2':
+    resolution: {integrity: sha512-idm0d2EzqcX3SLXxKdZhuVKFVgd5HAiVgm8xI77sHLHTkPuxCT/43HY2k3LQLgjgCQlhE434Xih4F9OqFmXKxA==}
     engines: {node: '>=22.14.0'}
     cpu: [arm64]
     os: [win32]
 
-  '@loro-dev/roost-node-win32-x64-msvc@0.3.1':
-    resolution: {integrity: sha512-xtJDslNClyBWsDbTKmtMVM1R/fbLhAwn7yjqrjEJPnfuFpEvuWpfoy65tglS+OjJ5UVCUUICaj2ISyNIngQjRA==}
+  '@loro-dev/roost-node-win32-x64-msvc@0.3.2':
+    resolution: {integrity: sha512-V4hS0vsKPq+ll+fSDFlrvMtkQRJRfrP5nJEwidCbAfwt47PGBVhwM6j1wtRUNeKeiABz02zPO/JcQvj+IsgcMg==}
     engines: {node: '>=22.14.0'}
     cpu: [x64]
     os: [win32]
 
-  '@loro-dev/roost-node@0.3.1':
-    resolution: {integrity: sha512-usIgCSZxJFaNtVhBW9QigT0yj4KxTqpgUP7xdjNkkQOTYLrN3KgbXlTkG0cC3YRv/LUqXszc1k9psapfLrzwVw==}
+  '@loro-dev/roost-node@0.3.2':
+    resolution: {integrity: sha512-b3Ikf6+c7lSG6O4vMo6wXnQK3REL+oxoDZuU/3p3chQ/loJqdAQbqz0nhEHpyLmT1uMp1BeQ9/cCaYxrOKXxsw==}
     engines: {node: '>=22.14.0'}
 
-  '@loro-dev/roost@0.3.1':
-    resolution: {integrity: sha512-VRSTom29ER5X6UDzzd4jAZrhUtdQF+4v2YFH7nW5E4CUOEiy4BFVgzYuyNlb3YISr7UGwAQ4rKe6c1JVgr5QIQ==}
+  '@loro-dev/roost@0.3.2':
+    resolution: {integrity: sha512-uRFPkyiu0b/eyj/3gehTSqjY1RY5jivB0QUBa02Zu9VE2xivVBlNJ0QvilzuSwygtgHwW68G/lw3wQNklBNcog==}
 
   '@loro-dev/sqlite-riverrun@0.3.0':
     resolution: {integrity: sha512-UGolSlUDMfaRSGzhvwFmqC5HnM5Vs9mGEA8d6xyAB/pO9La+HPDhUCYdQ/wO2XJZVxiNVglIdT5W5iHO+FTr5Q==}
@@ -4689,10 +4695,6 @@ packages:
 
   '@loro-dev/streams-client@0.7.0':
     resolution: {integrity: sha512-O+LphfngoJe0g0QmRV2OIQKsiytZuvHoSsQeYxiRK00UYHcpqjiZw2OmcXCU4Q5reuxI5kZJz6du24iAamBVtQ==}
-    engines: {node: '>=18'}
-
-  '@loro-dev/streams-client@0.8.0':
-    resolution: {integrity: sha512-ILqMGzgIOp8xpfi5oAVdNEm+ldbM5xjdDotkfkc/MI8dziby9yPL29qGWcjeNCwnDTAyseJadgATzWI7M0Thlw==}
     engines: {node: '>=18'}
 
   '@loro-dev/streams-crdt@0.24.0':
@@ -17251,38 +17253,40 @@ snapshots:
       js-yaml: 4.1.1
       loro-crdt: 1.19.1
 
-  '@loro-dev/roost-node-darwin-arm64@0.3.1':
+  '@loro-dev/roost-node-darwin-arm64@0.3.2':
     optional: true
 
-  '@loro-dev/roost-node-darwin-x64@0.3.1':
+  '@loro-dev/roost-node-darwin-x64@0.3.2':
     optional: true
 
-  '@loro-dev/roost-node-linux-arm64-gnu@0.3.1':
+  '@loro-dev/roost-node-linux-arm64-gnu@0.3.2':
     optional: true
 
-  '@loro-dev/roost-node-linux-x64-gnu@0.3.1':
+  '@loro-dev/roost-node-linux-x64-gnu@0.3.2':
     optional: true
 
-  '@loro-dev/roost-node-win32-arm64-msvc@0.3.1':
+  '@loro-dev/roost-node-win32-arm64-msvc@0.3.2':
     optional: true
 
-  '@loro-dev/roost-node-win32-x64-msvc@0.3.1':
+  '@loro-dev/roost-node-win32-x64-msvc@0.3.2':
     optional: true
 
-  '@loro-dev/roost-node@0.3.1':
+  '@loro-dev/roost-node@0.3.2':
     optionalDependencies:
-      '@loro-dev/roost-node-darwin-arm64': 0.3.1
-      '@loro-dev/roost-node-darwin-x64': 0.3.1
-      '@loro-dev/roost-node-linux-arm64-gnu': 0.3.1
-      '@loro-dev/roost-node-linux-x64-gnu': 0.3.1
-      '@loro-dev/roost-node-win32-arm64-msvc': 0.3.1
-      '@loro-dev/roost-node-win32-x64-msvc': 0.3.1
+      '@loro-dev/roost-node-darwin-arm64': 0.3.2
+      '@loro-dev/roost-node-darwin-x64': 0.3.2
+      '@loro-dev/roost-node-linux-arm64-gnu': 0.3.2
+      '@loro-dev/roost-node-linux-x64-gnu': 0.3.2
+      '@loro-dev/roost-node-win32-arm64-msvc': 0.3.2
+      '@loro-dev/roost-node-win32-x64-msvc': 0.3.2
 
-  '@loro-dev/roost@0.3.1':
+  '@loro-dev/roost@0.3.2(effect@4.0.2)':
     dependencies:
-      '@loro-dev/streams-client': 0.8.0
+      '@loro-dev/streams-client': 0.16.0(effect@4.0.2)
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
+    transitivePeerDependencies:
+      - effect
 
   '@loro-dev/sqlite-riverrun@0.3.0(patch_hash=9e80924ae904a7643f397cefaef1e404070b0dae3bac55cd525ae97e6a975536)':
     dependencies:
@@ -17294,8 +17298,6 @@ snapshots:
       effect: 4.0.2
 
   '@loro-dev/streams-client@0.7.0': {}
-
-  '@loro-dev/streams-client@0.8.0': {}
 
   '@loro-dev/streams-crdt@0.24.0(@loro-dev/flock-wasm@0.5.0)(effect@4.0.2)(loro-crdt@1.19.1)':
     dependencies:

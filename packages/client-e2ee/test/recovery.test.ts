@@ -207,12 +207,12 @@ for (const surface of ['vault', 'workspaces'] as const) {
       const pending = clock.runPromiseExit(work);
       await started.promise;
       if (scenario === 'logout') f.logout();
-      await clock.runPromise(TestClock.adjust(210));
+      await clock.runPromise(TestClock.adjust(1200));
       const exit = await pending;
       if (code) {
         if (Exit.isSuccess(exit)) throw new Error('expected recovery to fail');
         expect(Cause.squash(exit.cause)).toMatchObject({ message: code });
-        expect(attempts).toBe(scenario === 'exhausted' ? 3 : 1);
+        expect(attempts).toBe(scenario === 'exhausted' ? 4 : 1);
         expect(fileSaved).toBe(false);
       } else {
         expect(exit).toMatchObject({
@@ -412,7 +412,7 @@ it('sets, rotates and removes the vault password wrap from a browser login, keep
       });
       const opened = clock.runPromiseExit(f.service.list({ password: first }));
       await started.promise;
-      await clock.runPromise(TestClock.adjust(60));
+      await clock.runPromise(TestClock.adjust(100));
       const exit = await opened;
       expect(Exit.isSuccess(exit) && exit.value.workspaces).toBe(0);
       expect(

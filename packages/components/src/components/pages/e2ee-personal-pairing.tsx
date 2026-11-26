@@ -429,6 +429,7 @@ function PersonalPairingSession({
       />
       {phase === 'error' && (
         <E2eeIdentityRecovery
+          layout="region"
           error={recoveryError}
           runtime={runtime}
           workspaceId={workspaceId}

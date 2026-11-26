@@ -1,4 +1,5 @@
 import type { SessionProjectRun } from './workspace-project';
+import type { RoostCloudHistoryBinding } from './roost-cloud-history';
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import type { InferInputType, InferType } from 'loro-mirror';
 import {
@@ -687,6 +688,9 @@ export type SessionMeta = SessionPullRequestRecordFields & {
   agentType: AgentType;
   /** Backend selected when this session was created. Missing means legacy Loro. */
   historyBackend?: SessionHistoryBackendKind;
+  /** The history generation and author that the owning machine published to Streams. */
+  roostCloudGeneration?: RoostCloudHistoryBinding['generation'];
+  roostCloudAuthor?: string;
   agentConfigId?: AgentConfigId;
   /**
    * Agent Role this session was created from, and the Role revision that was

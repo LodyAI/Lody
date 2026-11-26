@@ -168,26 +168,50 @@ export class SessionEditAndResendService {
     let runtime: ISession | null = null;
     let preparedSessionId: ACPSessionId | null = null;
     let oldAcpSessionId: ACPSessionId | null = null;
+    let ownsCreatedRuntime = false;
     let committed = false;
     let commitEditable = editable;
     let commitMeta = meta;
+    const discardPrepared = async (): Promise<void> => {
+      if (!runtime) return;
+      if (ownsCreatedRuntime) {
+        const created = runtime;
+        runtime = null;
+        preparedSessionId = null;
+        this.deps.sessionManager.detachSession?.(created);
+        await created.terminate?.(true).catch((error: unknown) => {
+          this.deps.logger.debug(
+            `[${spec.sessionId}] Failed to terminate uncommitted replacement ACP session: ${formatErrorMessage(error)}`
+          );
+        });
+        return;
+      }
+      if (preparedSessionId) {
+        await this.closePrepared(runtime, preparedSessionId);
+        preparedSessionId = null;
+      }
+    };
     try {
-      runtime = await this.getOrRestoreRuntime(
+      const acquired = await this.getOrRestoreRuntime(
         meta,
         spec.requestedByUserId,
         resolveSessionMcpSelection(history),
-        resolveSessionConversationConfig(history).memory
+        resolveSessionConversationConfig(history).memory,
+        { requireResume: editable.forkTurnId !== undefined }
       );
+      runtime = acquired.runtime;
+      ownsCreatedRuntime = acquired.ownsCreatedRuntime;
       const agentClient = runtime.agentClient;
-      oldAcpSessionId = runtime.acpSessionId;
-      if (!agentClient || !oldAcpSessionId) {
+      oldAcpSessionId = ownsCreatedRuntime ? null : runtime.acpSessionId;
+      if (!agentClient || (!ownsCreatedRuntime && !oldAcpSessionId)) {
+        await discardPrepared();
         return sessionEditAndResendFailure(
           spec,
           'ACP_SESSION_UNAVAILABLE',
           'The current ACP session is unavailable.'
         );
       }
-      if (meta.acpSessionId && oldAcpSessionId !== meta.acpSessionId) {
+      if (!ownsCreatedRuntime && meta.acpSessionId && oldAcpSessionId !== meta.acpSessionId) {
         return sessionEditAndResendFailure(
           spec,
           'ACP_SESSION_UNAVAILABLE',
@@ -196,8 +220,20 @@ export class SessionEditAndResendService {
       }
 
       try {
-        const prepared = await agentClient.prepareReplacementSession(editable.forkTurnId);
-        preparedSessionId = prepared.sessionId as ACPSessionId;
+        const prepared = ownsCreatedRuntime
+          ? null
+          : await agentClient.prepareReplacementSession(editable.forkTurnId);
+        preparedSessionId = (
+          ownsCreatedRuntime ? runtime.acpSessionId : prepared?.sessionId
+        ) as ACPSessionId | null;
+        if (!preparedSessionId) {
+          await discardPrepared();
+          return sessionEditAndResendFailure(
+            spec,
+            'ACP_SESSION_UNAVAILABLE',
+            'The current ACP session is unavailable.'
+          );
+        }
 
         const [freshMeta, freshHistory] = await Promise.all([
           sessionDoc.getMetaState(),
@@ -205,8 +241,7 @@ export class SessionEditAndResendService {
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
         if (!freshMeta || !freshEditable || freshEditable.forkTurnId !== editable.forkTurnId) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'STALE_USER_TURN',
@@ -219,8 +254,7 @@ export class SessionEditAndResendService {
           freshMeta.agentType !== meta.agentType ||
           freshMeta.acpSessionId !== meta.acpSessionId
         ) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'STALE_USER_TURN',
@@ -228,8 +262,7 @@ export class SessionEditAndResendService {
           );
         }
         if (freshMeta.isArchived) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'SESSION_ARCHIVED',
@@ -240,8 +273,7 @@ export class SessionEditAndResendService {
         const freshGoal = (await backend.readLatestGoal()) ?? freshLegacyMeta.latestGoal;
         const freshExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
         if (isSessionGoalActive(freshGoal)) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'ACTIVE_AUTOMATION',
@@ -257,8 +289,7 @@ export class SessionEditAndResendService {
             this.deps.executionService.getActiveUserTurnId(spec.sessionId) !==
             spec.expectedUserTurnId
           ) {
-            await this.closePrepared(runtime, preparedSessionId);
-            preparedSessionId = null;
+            await discardPrepared();
             return sessionEditAndResendFailure(
               spec,
               'ACTIVE_AUTOMATION',
@@ -276,8 +307,7 @@ export class SessionEditAndResendService {
             { pendingInput: 'preserve', prePromptSession: 'keep', pauseInbox: false }
           );
           if (!cancelled.success) {
-            await this.closePrepared(runtime, preparedSessionId);
-            preparedSessionId = null;
+            await discardPrepared();
             return sessionEditAndResendFailure(
               spec,
               'CANCEL_FAILED',
@@ -296,8 +326,7 @@ export class SessionEditAndResendService {
           preCommitMeta.agentType !== commitMeta.agentType ||
           preCommitMeta.acpSessionId !== commitMeta.acpSessionId
         ) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'STALE_USER_TURN',
@@ -307,10 +336,7 @@ export class SessionEditAndResendService {
         commitMeta = preCommitMeta;
 
         const rejectChangedSelection = async () => {
-          if (preparedSessionId && runtime) {
-            await this.closePrepared(runtime, preparedSessionId);
-            preparedSessionId = null;
-          }
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'STALE_USER_TURN',
@@ -349,8 +375,7 @@ export class SessionEditAndResendService {
           inputConfig,
         });
         if (!pending) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           return sessionEditAndResendFailure(
             spec,
             'USER_TURN_NOT_EDITABLE',
@@ -386,8 +411,7 @@ export class SessionEditAndResendService {
           fallbackGoal: (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal ?? null,
         });
         if (rollbackResult.status === 'rejected') {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+          await discardPrepared();
           if (rollbackResult.reason.code === 'active_goal') {
             return sessionEditAndResendFailure(
               spec,
@@ -456,7 +480,9 @@ export class SessionEditAndResendService {
           throw error;
         }
 
-        agentClient.adoptPreparedSession(prepared);
+        if (prepared) {
+          agentClient.adoptPreparedSession(prepared);
+        }
         runtime.acpSessionId = preparedSessionId;
         committed = true;
         await this.deps.executionService.acceptInboxHumanInput({
@@ -466,9 +492,8 @@ export class SessionEditAndResendService {
           config: inputConfig,
         });
       } catch (error) {
-        if (!committed && preparedSessionId && runtime) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
+        if (!committed) {
+          await discardPrepared();
         }
         const message = formatErrorMessage(error);
         const code = message.includes('ACTIVE_AUTOMATION')
@@ -484,6 +509,9 @@ export class SessionEditAndResendService {
         return sessionEditAndResendFailure(spec, code, message);
       }
     } catch (error) {
+      if (!committed && ownsCreatedRuntime) {
+        await discardPrepared();
+      }
       const message = formatErrorMessage(error);
       this.deps.logger.error(`[${spec.sessionId}] ACP runtime restore failed: ${message}`);
       return sessionEditAndResendFailure(spec, 'ACP_SESSION_UNAVAILABLE', message);
@@ -527,11 +555,15 @@ export class SessionEditAndResendService {
     meta: SessionMeta,
     requestedByUserId: string,
     mcpServerIds: McpServerId[],
-    memory?: MemoryBinding
-  ): Promise<ISession> {
+    memory: MemoryBinding | undefined,
+    options: { requireResume: boolean }
+  ): Promise<{ runtime: ISession; ownsCreatedRuntime: boolean }> {
     const existing = this.deps.sessionManager.getSession(meta.id);
-    if (existing) return existing;
-    if (!meta.acpSessionId || !meta.agentConfigId) {
+    if (existing) return { runtime: existing, ownsCreatedRuntime: false };
+    if (!meta.agentConfigId) {
+      throw new Error('The session agent configuration is unavailable.');
+    }
+    if (options.requireResume && !meta.acpSessionId) {
       throw new Error('The session has no resumable ACP runtime identity.');
     }
     const [agentConfig, user] = await Promise.all([
@@ -541,7 +573,12 @@ export class SessionEditAndResendService {
     if (!agentConfig) {
       throw new Error('The session agent configuration is unavailable.');
     }
-    return await this.deps.sessionManager.createSession(
+    const residentAfterResolve = this.deps.sessionManager.getSession(meta.id);
+    if (residentAfterResolve) {
+      return { runtime: residentAfterResolve, ownsCreatedRuntime: false };
+    }
+    const hadPendingCreate = Boolean(this.deps.sessionManager.getPendingSession?.(meta.id));
+    const runtime = await this.deps.sessionManager.createSession(
       {
         workspaceId: this.deps.workspaceId as never,
         requesterUserId: requestedByUserId,
@@ -568,10 +605,13 @@ export class SessionEditAndResendService {
         userEmail: user.email,
       },
       {
-        resumeSessionId: meta.acpSessionId,
+        ...(options.requireResume && meta.acpSessionId
+          ? { resumeSessionId: meta.acpSessionId }
+          : {}),
         deferAcpSessionIdPersistence: true,
       }
     );
+    return { runtime, ownsCreatedRuntime: !options.requireResume && !hadPendingCreate };
   }
 
   private async closePrepared(runtime: ISession, sessionId: ACPSessionId): Promise<void> {
