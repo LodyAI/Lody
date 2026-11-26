@@ -653,23 +653,36 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
     }
   });
 
-  it('retires the previous workspace-index room when switching between read and write modes', async () => {
+  it('retires the previous workspace-index room when switching between read and write modes, but keeps it alive if the new grant fails', async () => {
     const repo = await LoroRepo.create({});
+    let failWriteGrant = true;
     const sync = new PromptShortcutSync({
       content: { mode: 'plaintext' },
       repo,
       workspaceId: 'ws-mode',
       now: () => 0,
-      grant: async (resource) => ({
-        token: 'shortcut-token',
-        expiresIn: 300,
-        gatewayBaseUrl: 'https://gateway.test',
-        streamId: getShortcutResourceStreamId(resource),
-      }),
+      grant: async (resource, write) => {
+        if (write && failWriteGrant) {
+          throw new Error('transient write grant failure');
+        }
+        return {
+          token: 'shortcut-token',
+          expiresIn: 300,
+          gatewayBaseUrl: 'https://gateway.test',
+          streamId: getShortcutResourceStreamId(resource),
+        };
+      },
     });
     const resource = { kind: 'workspace-index', workspaceId: 'ws-mode' } as const;
     try {
       const readLease = await sync.acquire(resource, false);
+      await expect(sync.acquire(resource, true)).rejects.toThrow('transient write grant failure');
+
+      // Failed write grant must not have retired the active read room.
+      const reusedReadLease = await sync.acquire(resource, false);
+      await reusedReadLease.release();
+
+      failWriteGrant = false;
       const writeLease = await sync.acquire(resource, true);
       await expect(readLease.sync()).rejects.toThrow('Shortcut room closed');
       await readLease.release();
@@ -832,6 +845,178 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
           .entries.map((e) => e.id)
           .sort()
       ).toEqual(['sc-peer', 'sc-promoted']);
+    } finally {
+      await runtime.dispose();
+      await clientRepo.destroy();
+      await serverRepo.destroy();
+    }
+  });
+
+  it('preserves or restores live read-only updates when write-grant or join fails after role upgrade', async () => {
+    const clientRepo = await LoroRepo.create({});
+    const serverRepo = await LoroRepo.create({});
+    const store = await LocalShortcutStore.open({
+      repo: clientRepo,
+      workspaceId: 'ws-upgrade-fail',
+      userId: 'user-1',
+    });
+    let canWrite = false;
+    let failWriteAcquire = false;
+    let failWriteJoin = false;
+    const indexStreamId = getWorkspaceShortcutIndexStreamId('ws-upgrade-fail');
+
+    type RoomState = { write: boolean; refs: number; closed: boolean };
+    const rooms = new Map<string, RoomState>();
+    const activeJoined = new Set<RoomState>();
+
+    const syncStream = async (streamId: string, write: boolean, isFlock: boolean) => {
+      if (isFlock) {
+        const s = await serverRepo.acquireFlockDoc(streamId);
+        const c = await clientRepo.acquireFlockDoc(streamId);
+        try {
+          if (write) s.flock.importFile(c.flock.exportFile());
+          c.flock.importFile(s.flock.exportFile());
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      } else {
+        const s = await serverRepo.acquireDoc(streamId);
+        const c = await clientRepo.acquireDoc(streamId);
+        try {
+          if (write) s.doc.import(c.doc.export({ mode: 'snapshot' }));
+          c.doc.import(s.doc.export({ mode: 'snapshot' }));
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      }
+    };
+
+    const runtime = new PromptShortcutRuntime(store, {
+      canWrite: () => canWrite,
+      acquire: async (resource, write) => {
+        const streamId = getShortcutResourceStreamId(resource);
+        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        if (resource.kind === 'workspace-index' && write && failWriteAcquire) {
+          throw new Error('write grant unavailable');
+        }
+        if (resource.kind === 'workspace-index') {
+          const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
+          const opposite = rooms.get(oppositeKey);
+          if (opposite) {
+            rooms.delete(oppositeKey);
+            opposite.closed = true;
+            activeJoined.delete(opposite);
+          }
+        }
+        const key = `${write ? 'w' : 'r'}:${streamId}`;
+        let room = rooms.get(key);
+        if (!room) {
+          room = { write, refs: 0, closed: false };
+          rooms.set(key, room);
+        }
+        const captured = room;
+        captured.refs++;
+        let released = false;
+        return {
+          sync: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            await syncStream(streamId, write, isFlock);
+          },
+          join: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            if (resource.kind === 'workspace-index' && write && failWriteJoin) {
+              throw new Error('write join failed');
+            }
+            await syncStream(streamId, write, isFlock);
+            if (resource.kind === 'workspace-index') activeJoined.add(captured);
+          },
+          release: async () => {
+            if (released) return;
+            released = true;
+            captured.refs--;
+            if (captured.refs === 0 && rooms.get(key) === captured) {
+              rooms.delete(key);
+              captured.closed = true;
+              activeJoined.delete(captured);
+            }
+          },
+        };
+      },
+      dispose: async () => {
+        rooms.clear();
+        activeJoined.clear();
+      },
+    });
+
+    try {
+      await runtime.start();
+      const initialReadRoom = [...activeJoined][0];
+      expect(initialReadRoom?.write).toBe(false);
+
+      // 1) Write grant fails before acquiring write room: original read subscription must stay untouched.
+      canWrite = true;
+      failWriteAcquire = true;
+      await runtime.save({
+        value: makeShortcut({
+          id: 'sc-pending',
+          workspaceId: 'ws-upgrade-fail',
+          slug: 'pending',
+          revision: 'rev-1',
+        }),
+        base: null,
+      });
+      await runtime.flush();
+      expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
+      expect([...activeJoined]).toEqual([initialReadRoom]);
+
+      const peer1 = projectShortcutIndex(
+        makeShortcut({
+          id: 'sc-peer-1',
+          workspaceId: 'ws-upgrade-fail',
+          ownerUserId: 'peer-user',
+          name: 'Peer 1',
+          slug: 'peer-1',
+          revision: 'rev-peer-1',
+        }),
+        'sc-peer-1'
+      );
+      const sIndex1 = await serverRepo.acquireFlockDoc(indexStreamId);
+      try {
+        new PromptShortcutCatalog(sIndex1.flock).put(peer1);
+      } finally {
+        await sIndex1.release();
+      }
+      if (activeJoined.size > 0) await syncStream(indexStreamId, false, true);
+      expect(runtime.getSnapshot().entries.some((e) => e.id === 'sc-peer-1')).toBe(true);
+
+      // 2) Write grant succeeds (retiring old read room) but join fails: runtime restores read-only live subscription.
+      failWriteAcquire = false;
+      failWriteJoin = true;
+      await runtime.flush();
+      expect(runtime.getSnapshot().errors['sc-pending']).toBeInstanceOf(Error);
+      expect([...activeJoined].map((r) => r.write)).toEqual([false]);
+
+      const peer2 = projectShortcutIndex(
+        makeShortcut({
+          id: 'sc-peer-2',
+          workspaceId: 'ws-upgrade-fail',
+          ownerUserId: 'peer-user',
+          name: 'Peer 2',
+          slug: 'peer-2',
+          revision: 'rev-peer-2',
+        }),
+        'sc-peer-2'
+      );
+      const sIndex2 = await serverRepo.acquireFlockDoc(indexStreamId);
+      try {
+        new PromptShortcutCatalog(sIndex2.flock).put(peer2);
+      } finally {
+        await sIndex2.release();
+      }
+      if (activeJoined.size > 0) await syncStream(indexStreamId, false, true);
+      expect(runtime.getSnapshot().entries.some((e) => e.id === 'sc-peer-2')).toBe(true);
     } finally {
       await runtime.dispose();
       await clientRepo.destroy();

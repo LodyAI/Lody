@@ -119,29 +119,6 @@ export class PromptShortcutSync {
     }
     if (this.disposed) throw new Error('Shortcut sync is disposed');
     const streamId = getShortcutResourceStreamId(resource);
-    if (resource.kind === 'workspace-index') {
-      const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
-      const opposite = this.rooms.get(oppositeKey);
-      if (opposite) {
-        this.rooms.delete(oppositeKey);
-        const previous = this.retiringRooms.get(streamId);
-        const retire = (async () => {
-          await previous;
-          const oldRoom = await opposite.opening.catch(() => null);
-          await oldRoom?.close();
-        })().finally(() => {
-          if (this.retiringRooms.get(streamId) === retire) {
-            this.retiringRooms.delete(streamId);
-          }
-        });
-        this.retiringRooms.set(streamId, retire);
-      }
-      const retiring = this.retiringRooms.get(streamId);
-      if (retiring) {
-        await retiring;
-        if (this.disposed) throw new Error('Shortcut sync is disposed');
-      }
-    }
     const key = `${write ? 'w' : 'r'}:${streamId}`;
     let entry = this.rooms.get(key);
     if (!entry) {
@@ -183,6 +160,30 @@ export class PromptShortcutSync {
       },
       release,
     };
+  }
+
+  private async retireOppositeWorkspaceIndex(streamId: string, write: boolean): Promise<void> {
+    const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
+    const opposite = this.rooms.get(oppositeKey);
+    if (opposite) {
+      this.rooms.delete(oppositeKey);
+      const previous = this.retiringRooms.get(streamId);
+      const retire = (async () => {
+        await previous;
+        const oldRoom = await opposite.opening.catch(() => null);
+        await oldRoom?.close();
+      })().finally(() => {
+        if (this.retiringRooms.get(streamId) === retire) {
+          this.retiringRooms.delete(streamId);
+        }
+      });
+      this.retiringRooms.set(streamId, retire);
+    }
+    const retiring = this.retiringRooms.get(streamId);
+    if (retiring) {
+      await retiring;
+      if (this.disposed) throw new Error('Shortcut sync is disposed');
+    }
   }
 
   private async open(resource: ShortcutResource, write: boolean): Promise<ShortcutSyncRoom> {
@@ -248,6 +249,9 @@ export class PromptShortcutSync {
       }
       return grant.token;
     };
+    if (resource.kind === 'workspace-index') {
+      await this.retireOppositeWorkspaceIndex(streamId, write);
+    }
     const isBody = resource.kind === 'body' || resource.kind === 'workspace-body';
     const lease = isBody
       ? await this.options.repo.acquireDoc(streamId)
