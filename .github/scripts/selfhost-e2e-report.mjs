@@ -34,7 +34,9 @@ export function formatPublicStatusLine(report, exitCode) {
 
 export function extractPrivateFailureDetails(report) {
   if (!report || typeof report !== 'object' || !report.suites) {
-    return ['- 未生成有效的 `verify:release` `summary.json` 报告（可能是依赖安装或本地栈启动失败）'];
+    return [
+      '- 未生成有效的 `verify:release` `summary.json` 报告（可能是依赖安装或本地栈启动失败）',
+    ];
   }
   const lines = [];
   for (const [suiteName, suite] of Object.entries(report.suites)) {
@@ -62,8 +64,23 @@ export function extractPrivateFailureDetails(report) {
   return lines;
 }
 
+export function readLogTail(logPath, { maxLines = 25, maxChars = 1800 } = {}) {
+  if (!logPath || !existsSync(logPath)) return '';
+  const raw = readFileSync(logPath, 'utf8');
+  // Strip ANSI escape sequences before trimming for Feishu markdown.
+  const cleaned = raw.replace(/\u001B\[[0-9;]*[A-Za-z]/gu, '');
+  const lines = cleaned
+    .split(/\r?\n/u)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return '';
+  const tail = lines.slice(-maxLines).join('\n');
+  if (tail.length <= maxChars) return tail;
+  return `…${tail.slice(-(maxChars - 1))}`;
+}
+
 async function main() {
-  const [selfhostDir, exitCodeRaw] = process.argv.slice(2);
+  const [selfhostDir, exitCodeRaw, logPath] = process.argv.slice(2);
   const exitCode = Number(exitCodeRaw ?? 1);
   const summaryPath = selfhostDir ? findLatestVerifySummary(selfhostDir) : null;
   const report = summaryPath ? JSON.parse(readFileSync(summaryPath, 'utf8')) : null;
@@ -82,16 +99,25 @@ async function main() {
         ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
         : '';
     const sha = process.env.CANDIDATE_SHA || process.env.GITHUB_SHA || '';
+    const suiteLabel = process.env.SELFHOST_SUITE_LABEL || '';
     const details = extractPrivateFailureDetails(report);
+    const logTail = readLogTail(logPath);
+    const detailBlocks = [`**失败明细（仅内部群可见）**：\n${details.join('\n')}`];
+    if (logTail) {
+      detailBlocks.push(`**日志末尾（仅内部群可见）**：\n\`\`\`\n${logTail}\n\`\`\``);
+    }
     const payload = buildFeishuCardPayload({
-      title: '🚨 Lody 发布门禁：Self-Host E2E 失败详情',
+      title: suiteLabel
+        ? `🚨 Lody 发布门禁：Self-Host E2E 失败 (${suiteLabel})`
+        : '🚨 Lody 发布门禁：Self-Host E2E 失败详情',
       template: 'red',
       fields: [
         { label: '候选 SHA', value: sha ? `\`${sha.slice(0, 9)}\`` : 'unknown' },
         { label: '退出码', value: String(exitCode) },
+        ...(suiteLabel ? [{ label: '套件', value: `\`${suiteLabel}\`` }] : []),
         ...(runUrl ? [{ label: 'Actions Run', value: `[查看详情](${runUrl})` }] : []),
       ],
-      details: [`**失败明细（仅内部群可见）**：\n${details.join('\n')}`],
+      details: detailBlocks,
       secret,
     });
     try {

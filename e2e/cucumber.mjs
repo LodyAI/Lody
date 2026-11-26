@@ -5,9 +5,15 @@ const acceptanceRound = process.env.LODY_ACCEPTANCE_ROUND_ID?.trim();
 const artifactRoot = acceptanceRound ? `artifacts/acceptance/${acceptanceRound}` : 'artifacts';
 mkdirSync(artifactRoot, { recursive: true });
 
+const featurePaths = process.env.LODY_E2E_PATHS
+  ? process.env.LODY_E2E_PATHS.split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  : ['src/features/**/*.feature'];
+
 /** @type {import('@cucumber/cucumber').IConfiguration} */
 export default {
-  paths: ['src/features/**/*.feature'],
+  paths: featurePaths,
   import: ['src/steps/**/*.ts', 'src/support/world.ts', 'src/support/hooks.ts'],
   format: [
     'progress-bar',
