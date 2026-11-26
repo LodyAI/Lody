@@ -7,6 +7,7 @@ import {
   extractPrivateFailureDetails,
   formatPublicStatusLine,
   readLogTail,
+  readNativeStartupLogTail,
 } from './selfhost-e2e-report.mjs';
 
 await test('public status line exposes only suite statuses and never private paths or reasons', () => {
@@ -59,6 +60,13 @@ await test('readLogTail extracts ANSI-stripped trailing lines for private Feishu
     );
     const tail = readLogTail(logPath, { maxLines: 2, maxChars: 200 });
     assert.equal(tail, 'Error: spawn mkcert ENOENT\nstack line 3');
+
+    const harnessLog = join(dir, 'harness.log');
+    writeFileSync(harnessLog, 'attachment-worker exit code=1\n', 'utf8');
+    const startupTail = readNativeStartupLogTail(
+      `[local-stack] Native startup failed; see ${harnessLog}`
+    );
+    assert.equal(startupTail, 'attachment-worker exit code=1');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
