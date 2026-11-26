@@ -1372,10 +1372,12 @@ describe('RuntimeProvider warm workspace preparation', () => {
         if (!installed) {
           expect(store.get(runtimeInitializingAtom)).toBe(true);
           expect(router.state.location.pathname).toBe('/local/chat');
-          for (const delay of [1_000, 2_000, 4_000, 13_000])
+          for (const delay of [1_000, 2_000, 4_000, 13_000, 15_000])
             await act(async () => vi.advanceTimersByTimeAsync(delay));
+          // Dedicated waiting-key view replaces BootShell so the 30s Clear cache / Hard reset prompt never fires.
+          expect(container.querySelector('[data-testid="e2ee-waiting-key-view"]')).not.toBeNull();
           expect(container.querySelector('[role="status"]')).not.toBeNull();
-          expect(container.querySelector('[role="status"] + button')).not.toBeNull();
+          expect(container.textContent).not.toContain('Clear cache');
         }
         vi.useRealTimers();
         expect(store.get(runtimeAtom)).toBe(installed ? prepared : null);
@@ -1544,7 +1546,9 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(counter.fullRefreshes).toBe(10);
     expect(store.get(runtimeAtom)).toBeNull();
     expect(container.querySelector('[role="status"]')).not.toBeNull();
-    const checkAgain = container.querySelector<HTMLButtonElement>('[role="status"] + button');
+    const checkAgain = container.querySelector<HTMLButtonElement>(
+      '[data-testid="e2ee-waiting-key-check"]'
+    );
     expect(checkAgain).not.toBeNull();
     counter.installKey();
     await act(async () => checkAgain!.click());

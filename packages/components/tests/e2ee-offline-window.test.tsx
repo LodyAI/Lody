@@ -82,4 +82,13 @@ describe('encrypted workspace outage window', () => {
     expect(pill()?.getAttribute('data-e2ee-machine-window')).toBe('paused');
     expect(pill()?.textContent).toBe('e2ee.offline.machinePillPaused');
   });
+
+  it('reports less than a minute instead of rounding 0s up to 1 minute', () => {
+    const window = { executionUntilMs: HOUR + 15_000, offlineSinceMs: HOUR };
+    act(() =>
+      root.render(withTestI18n(<E2eeOfflineSummaryText window={window} now={HOUR} />, testI18n))
+    );
+    expect(container.textContent).toContain('"duration":"e2ee.offline.lessThanMinute"');
+    expect(container.textContent).not.toContain('e2ee.offline.minutes');
+  });
 });
