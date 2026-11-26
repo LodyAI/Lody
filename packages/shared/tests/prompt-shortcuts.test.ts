@@ -683,6 +683,161 @@ describe('PromptShortcut phase-0 HTTP reduction', () => {
       await repo.destroy();
     }
   });
+
+  it('keeps workspace-index live updates active after a read-only runtime upgrades to writable and publishes', async () => {
+    const clientRepo = await LoroRepo.create({});
+    const serverRepo = await LoroRepo.create({});
+    const store = await LocalShortcutStore.open({
+      repo: clientRepo,
+      workspaceId: 'ws-upgrade',
+      userId: 'user-1',
+    });
+    let canWrite = false;
+    const indexStreamId = getWorkspaceShortcutIndexStreamId('ws-upgrade');
+
+    type RoomState = {
+      write: boolean;
+      refs: number;
+      joined: boolean;
+      closed: boolean;
+    };
+    const rooms = new Map<string, RoomState>();
+    const activeJoinedSubscribers = new Set<RoomState>();
+
+    const syncStream = async (streamId: string, write: boolean, isFlock: boolean) => {
+      if (isFlock) {
+        const s = await serverRepo.acquireFlockDoc(streamId);
+        const c = await clientRepo.acquireFlockDoc(streamId);
+        try {
+          if (write) s.flock.importFile(c.flock.exportFile());
+          c.flock.importFile(s.flock.exportFile());
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      } else {
+        const s = await serverRepo.acquireDoc(streamId);
+        const c = await clientRepo.acquireDoc(streamId);
+        try {
+          if (write) s.doc.import(c.doc.export({ mode: 'snapshot' }));
+          c.doc.import(s.doc.export({ mode: 'snapshot' }));
+        } finally {
+          await c.release();
+          await s.release();
+        }
+      }
+    };
+
+    const runtime = new PromptShortcutRuntime(store, {
+      canWrite: () => canWrite,
+      acquire: async (resource, write) => {
+        const streamId = getShortcutResourceStreamId(resource);
+        const isFlock = resource.kind === 'workspace-index' || resource.kind === 'index';
+        if (resource.kind === 'workspace-index') {
+          const oppositeKey = `${write ? 'r' : 'w'}:${streamId}`;
+          const opposite = rooms.get(oppositeKey);
+          if (opposite) {
+            rooms.delete(oppositeKey);
+            opposite.closed = true;
+            opposite.joined = false;
+            activeJoinedSubscribers.delete(opposite);
+          }
+        }
+        const key = `${write ? 'w' : 'r'}:${streamId}`;
+        let room = rooms.get(key);
+        if (!room) {
+          room = { write, refs: 0, joined: false, closed: false };
+          rooms.set(key, room);
+        }
+        const captured = room;
+        captured.refs++;
+        let released = false;
+        return {
+          sync: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            await syncStream(streamId, write, isFlock);
+          },
+          join: async () => {
+            if (released || captured.closed) throw new Error('Shortcut room closed');
+            await syncStream(streamId, write, isFlock);
+            captured.joined = true;
+            if (resource.kind === 'workspace-index') activeJoinedSubscribers.add(captured);
+          },
+          release: async () => {
+            if (released) return;
+            released = true;
+            captured.refs--;
+            if (captured.refs === 0 && rooms.get(key) === captured) {
+              rooms.delete(key);
+              captured.closed = true;
+              captured.joined = false;
+              activeJoinedSubscribers.delete(captured);
+            }
+          },
+        };
+      },
+      dispose: async () => {
+        rooms.clear();
+        activeJoinedSubscribers.clear();
+      },
+    });
+
+    try {
+      // Guest starts with a read-only live workspace-index subscription.
+      await runtime.start();
+      expect([...activeJoinedSubscribers].map((r) => r.write)).toEqual([false]);
+
+      // Role upgrades to writable on the same runtime; user publishes a shortcut.
+      canWrite = true;
+      await runtime.save({
+        value: makeShortcut({
+          id: 'sc-promoted',
+          workspaceId: 'ws-upgrade',
+          slug: 'promoted',
+          revision: 'rev-1',
+        }),
+        base: null,
+      });
+      await runtime.flush();
+      expect(runtime.getSnapshot().errors).toEqual({});
+
+      // After publication releases its temporary write lease, a live write subscription must remain active.
+      expect([...activeJoinedSubscribers].map((r) => r.write)).toEqual([true]);
+
+      // Simulate another device pushing a new shortcut to the server index; only delivered if live subscription is active.
+      const remoteEntry = projectShortcutIndex(
+        makeShortcut({
+          id: 'sc-peer',
+          workspaceId: 'ws-upgrade',
+          ownerUserId: 'peer-user',
+          name: 'Peer Shortcut',
+          slug: 'peer-shortcut',
+          revision: 'rev-peer',
+        }),
+        'sc-peer'
+      );
+      const sIndex = await serverRepo.acquireFlockDoc(indexStreamId);
+      try {
+        new PromptShortcutCatalog(sIndex.flock).put(remoteEntry);
+      } finally {
+        await sIndex.release();
+      }
+      if (activeJoinedSubscribers.size > 0) {
+        await syncStream(indexStreamId, false, true);
+      }
+
+      expect(
+        runtime
+          .getSnapshot()
+          .entries.map((e) => e.id)
+          .sort()
+      ).toEqual(['sc-peer', 'sc-promoted']);
+    } finally {
+      await runtime.dispose();
+      await clientRepo.destroy();
+      await serverRepo.destroy();
+    }
+  });
 });
 
 describe('encrypted Prompt Shortcuts', () => {
