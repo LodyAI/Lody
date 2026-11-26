@@ -51,11 +51,8 @@ describe('workspace key reception notice', () => {
     });
 
   it.each([
-    [
-      'en',
-      'Receiving updated workspace keys… Existing content stays safe while this device catches up.',
-    ],
-    ['zh_CN', '正在接收最新的工作区安全钥匙… 同步完成前你的已有内容安全不受影响。'],
+    ['en', 'Waiting for keys. Open this workspace on another approved device.'],
+    ['zh_CN', '正在等待密钥。请在另一台已批准设备上打开此工作区。'],
   ])(
     'shows initial progress after 5 seconds and clears on installation (%s)',
     async (language, copy) => {
@@ -130,7 +127,7 @@ describe('workspace key reception notice', () => {
       expect(container.querySelector('[role="status"]')).toBeNull();
       await advance(1);
       expect(container.querySelector('[role="status"]')?.textContent).toBe(
-        'Receiving updated workspace keys… Existing content stays safe while this device catches up.'
+        'Waiting for keys. Open this workspace on another approved device.'
       );
       // Another eligible retained key can resume saves before current-key receipt.
       resumed = true;
