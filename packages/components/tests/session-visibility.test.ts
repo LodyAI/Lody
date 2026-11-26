@@ -3,6 +3,9 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   filterSessionsByVisibility,
   isSessionInMyScope,
+  isSessionInTaskOwnerFilter,
+  resolveTaskOwnerFilter,
+  toggleTaskOwnerSelection,
   isSessionVisibleToUser,
   isSessionEditableToUser,
   getSessionOwnerAccessReason,
@@ -359,5 +362,73 @@ describe('imported conversations', () => {
     ).toBe('visible');
     expect(isSessionEditableToUser(imported, new Set(), new Set(), 'me')).toBe(false);
     expect(isSessionEditableToUser(imported, new Set(), new Set(), 'teammate')).toBe(false);
+  });
+});
+
+describe('task owner filter', () => {
+  const sessions = [
+    { id: 'mine', userId: 'me' },
+    { id: 'alice-1', userId: 'alice' },
+    { id: 'bob-1', userId: 'bob' },
+    { id: 'carol-1', userId: 'carol' },
+  ];
+  const shown = (filter: ReturnType<typeof resolveTaskOwnerFilter>) =>
+    sessions.filter((session) => isSessionInTaskOwnerFilter(session, filter)).map((s) => s.id);
+  const members = ['me', 'alice', 'bob', 'carol'];
+
+  it('shows only my tasks in My Tasks, every task in All Tasks, and the chosen owners otherwise', () => {
+    expect(shown(resolveTaskOwnerFilter({ scope: 'my', memberIds: [] }, 'me', members))).toEqual([
+      'mine',
+    ]);
+    expect(shown(resolveTaskOwnerFilter({ scope: 'team', memberIds: [] }, 'me', members))).toEqual([
+      'mine',
+      'alice-1',
+      'bob-1',
+      'carol-1',
+    ]);
+    expect(
+      shown(resolveTaskOwnerFilter({ scope: 'team', memberIds: ['alice', 'bob'] }, 'me', members))
+    ).toEqual(['alice-1', 'bob-1']);
+  });
+
+  it('shows nothing in My Tasks before the account is known', () => {
+    expect(shown(resolveTaskOwnerFilter({ scope: 'my', memberIds: [] }, null, members))).toEqual(
+      []
+    );
+  });
+
+  it('ignores chosen people who left the workspace, falling back to every task when none remain', () => {
+    const filter = { scope: 'team' as const, memberIds: ['alice', 'departed'] };
+    expect(shown(resolveTaskOwnerFilter(filter, 'me', members))).toEqual(['alice-1']);
+    expect(
+      shown(resolveTaskOwnerFilter({ scope: 'team', memberIds: ['departed'] }, 'me', members))
+    ).toEqual(['mine', 'alice-1', 'bob-1', 'carol-1']);
+    // An unloaded member directory keeps the choice instead of flashing every task.
+    expect(shown(resolveTaskOwnerFilter(filter, 'me', []))).toEqual(['alice-1']);
+  });
+
+  it('ticks people one by one, folding back to My Tasks or All Tasks at the edges', () => {
+    const all = { scope: 'team' as const, memberIds: [] };
+    const alice = toggleTaskOwnerSelection(all, 'alice', 'me');
+    expect(alice).toEqual({ scope: 'team', memberIds: ['alice'] });
+    const aliceBob = toggleTaskOwnerSelection(alice, 'bob', 'me');
+    expect(aliceBob).toEqual({ scope: 'team', memberIds: ['alice', 'bob'] });
+    expect(toggleTaskOwnerSelection(aliceBob, 'alice', 'me')).toEqual({
+      scope: 'team',
+      memberIds: ['bob'],
+    });
+    // Unticking the last person returns to every task.
+    expect(toggleTaskOwnerSelection(alice, 'alice', 'me')).toEqual(all);
+    // Ticking only yourself is My Tasks; adding a teammate from there keeps you.
+    const my = toggleTaskOwnerSelection(all, 'me', 'me');
+    expect(my).toEqual({ scope: 'my', memberIds: [] });
+    expect(toggleTaskOwnerSelection(my, 'alice', 'me')).toEqual({
+      scope: 'team',
+      memberIds: ['me', 'alice'],
+    });
+    expect(toggleTaskOwnerSelection(my, 'me', 'me')).toEqual(all);
+    expect(
+      toggleTaskOwnerSelection({ scope: 'team', memberIds: ['me', 'alice'] }, 'alice', 'me')
+    ).toEqual({ scope: 'my', memberIds: [] });
   });
 });

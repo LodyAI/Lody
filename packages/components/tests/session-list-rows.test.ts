@@ -35,6 +35,21 @@ test('shows unavailable encrypted local-project history as a chat without adding
   expect(selectSidebarTaskSessions([chat, project], projects, true)).toEqual([chat]);
 });
 
+test('lists only the chosen owners tasks when the team view filters by people', () => {
+  const sessions = [
+    makeSession({ id: 'mine', userId: 'me' }),
+    makeSession({ id: 'alice-task', userId: 'alice' }),
+    makeSession({ id: 'bob-task', userId: 'bob' }),
+  ];
+  const rows = buildSessionListRows(sessions, {
+    scope: 'team',
+    ownerIds: new Set(['alice', 'bob']),
+    currentUserId: 'me',
+    defaultTitle: 'Untitled',
+  });
+  expect(rows.map((row) => row.sessionId)).toEqual(['alice-task', 'bob-task']);
+});
+
 function makeSession(overrides: Partial<SessionMeta> & { id: string }): SessionMeta {
   return {
     id: overrides.id as SessionId,
