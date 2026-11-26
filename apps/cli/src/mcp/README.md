@@ -411,6 +411,14 @@ completion continuations. A turn at the cap cannot start another Operation;
 the existing guard returns non-retryable `CHAIN_DEPTH_EXCEEDED` before acceptance.
 This is a depth limit, not a shared total-message or fan-out budget.
 
+From `LODY_CHAIN_DEPTH_SOFT_LIMIT` (8), `LodyOperationStore.snapshot` adds `chainBudget`
+(`hop`, `max`, `remaining`, `warning`) to every create/chat reply and later operation reads,
+computed from the frozen `initiatorChainDepth`. The warning states only the depth facts.
+The cap rejection message names the hop and maximum, and `recordChainDepthRejection`
+upserts one `agent_warning` notice (`source: delegationChainDispatchRejected`) per capped
+source Turn in the calling Session; a failed notice write never changes the error reply.
+Rationale: [bound agent message chains](../../../../.agents/notes/implemented/bug-fix/2026-10-11-bound-agent-message-chains.md).
+
 MCP initialization instructions and all four create/chat tool descriptions tell
 agents to send only task-advancing messages, omit acknowledgments and courtesy
 replies, and use automatic completion delivery instead of manually sending the

@@ -2905,6 +2905,46 @@ const freezeInvokingAuthor = async (
   invoking.identity.author = author;
 };
 
+/**
+ * The agent receives CHAIN_DEPTH_EXCEEDED; this notice is what the human sees. One row per
+ * capped Turn, so retries replace it. Best effort: a failed write never changes the reply.
+ */
+const recordChainDepthRejection = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  sourceTurnId: string
+): Promise<void> => {
+  try {
+    const backend = await createSessionBackend(
+      await manager.getOrCreateSessionDoc(session.id),
+      session
+    );
+    await backend.applyHistoryAction({
+      kind: 'upsert-turn',
+      turn: {
+        id: `chain-depth-limit:${session.id}:${sourceTurnId}`,
+        role: 'system',
+        timestamp: new Date(getServerNow()).toISOString(),
+        fileDiff: [],
+        items: [
+          {
+            type: 'system_notice',
+            name: 'agent_warning',
+            meta: {
+              source: 'delegationChainDispatchRejected',
+              message: `This turn reached the delegation chain limit of ${LODY_MAX_CHAIN_DEPTH} hops, so the agent could not create Sessions or send chats from it. A new message from you starts a fresh chain.`,
+            },
+          },
+        ],
+      },
+    });
+  } catch (error) {
+    getLogger('mcp').debug(
+      `[mcp] Chain-limit notice for ${session.id} not written: ${formatMcpErrorMessage(error)}`
+    );
+  }
+};
+
 const resolveInvokingTurnContext = async (
   session: SessionMeta,
   manager: LoroDocumentManager
@@ -2935,9 +2975,10 @@ const resolveInvokingTurnContext = async (
   }
   const chainDepth = source.inputConfig.chainDepth ?? 0;
   if (chainDepth >= LODY_MAX_CHAIN_DEPTH) {
+    await recordChainDepthRejection(manager, session, source.id);
     throw new LodyOperationStoreError(
       'CHAIN_DEPTH_EXCEEDED',
-      `Asynchronous Command rejected at chain depth ${chainDepth}; V1 maximum is ${LODY_MAX_CHAIN_DEPTH}.`,
+      `Delegation chain limit reached: this Turn is at hop ${chainDepth} of ${LODY_MAX_CHAIN_DEPTH}, so it cannot create Sessions or send chats.`,
       false
     );
   }

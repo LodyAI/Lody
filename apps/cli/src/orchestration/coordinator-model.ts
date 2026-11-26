@@ -6,7 +6,7 @@ import type {
   SessionMeta,
   StoredLodyOperation,
 } from '@lody/shared';
-import { describeChatFailure, readChatFailureNotice } from '@lody/shared';
+import { describeChatFailure, LODY_MAX_CHAIN_DEPTH, readChatFailureNotice } from '@lody/shared';
 import {
   getOperationProgressTargetKey,
   type OperationProgressStatusByTarget,
@@ -196,3 +196,26 @@ export function resolveOperationTargetMachineId(args: {
   }
   return args.requesterMeta?.machineId;
 }
+
+export const buildChainDepthLimitNotice = (
+  limited: { intentId: string; pendingResults: number },
+  timestamp: string
+): SessionHistoryInput => {
+  const count = limited.pendingResults;
+  return {
+    id: `chain-depth-limit:${limited.intentId}`,
+    role: 'system',
+    timestamp,
+    fileDiff: [],
+    items: [
+      {
+        type: 'system_notice',
+        name: 'agent_warning',
+        meta: {
+          source: 'delegationChainResultsHeld',
+          message: `The delegation chain reached its limit of ${LODY_MAX_CHAIN_DEPTH} hops, so ${count} delegated ${count === 1 ? 'result was' : 'results were'} not handed to the agent automatically. ${count === 1 ? 'It' : 'They'} will be included with your next message.`,
+        },
+      },
+    ],
+  };
+};

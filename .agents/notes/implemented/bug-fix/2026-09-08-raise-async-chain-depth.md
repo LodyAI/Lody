@@ -12,7 +12,8 @@ reached five hops, which stopped deeper delegated work before an Operation or
 target Session could start. The shared limit is now 32, and the executable
 Operation model and review automation explanation use the same value. The guard
 remains fixed and non-retryable at the boundary, so the larger budget increases
-available delegation depth without removing the recursion protection.
+available delegation depth without removing the recursion protection. The current
+limit is 16; see [bound agent message chains](2026-10-11-bound-agent-message-chains.md).
 
 ## Decision and scope
 

@@ -4903,7 +4903,13 @@ const AgentWarningNoticeBody = ({
                 'sessions.systemNotices.agentWarning.nativeWorkInterrupted',
                 'Background work was interrupted'
               )
-            : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
+            : source === 'delegationChainResultsHeld' ||
+                source === 'delegationChainDispatchRejected'
+              ? t(
+                  'sessions.systemNotices.agentWarning.delegationChainLimit',
+                  'Delegation chain limit reached'
+                )
+              : t('sessions.systemNotices.agentWarning.title', 'Agent warning');
   const guidance =
     source === 'sessionCancelFailed'
       ? t(
@@ -4925,7 +4931,17 @@ const AgentWarningNoticeBody = ({
                 'sessions.systemNotices.agentWarning.nativeWorkInterruptedGuidance',
                 'The agent stopped before its background tasks finished, so their results may be missing.'
               )
-            : undefined;
+            : source === 'delegationChainResultsHeld'
+              ? t(
+                  'sessions.systemNotices.agentWarning.delegationChainResultsHeldGuidance',
+                  'Some delegated results were not handed to the agent automatically. They will be included with your next message.'
+                )
+              : source === 'delegationChainDispatchRejected'
+                ? t(
+                    'sessions.systemNotices.agentWarning.delegationChainDispatchRejectedGuidance',
+                    'The agent could not delegate further from this turn. Send a new message to start a fresh chain.'
+                  )
+                : undefined;
   return (
     <div
       {...stylex.props(viewStyles.noticeStack, !inTurn && viewStyles.noticeStackIndented)}

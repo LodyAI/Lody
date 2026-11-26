@@ -36,6 +36,11 @@ export class CoordinatorPorts extends Context.Service<
     metadata(id: SessionId): Effect.Effect<{ meta: SessionMeta } | undefined, unknown>;
     execution(id: SessionId): { activeTurnId?: string };
     receipts: Effect.Effect<InboxBatch[], unknown>;
+    depthLimited: Effect.Effect<
+      Array<{ intentId: string; sessionId: string; pendingResults: number }>,
+      unknown
+    >;
+    acknowledgeDepthLimited(intentId: string): Effect.Effect<void, unknown>;
     wakeInbox: Effect.Effect<void, unknown>;
     active(): boolean;
     now(): number;

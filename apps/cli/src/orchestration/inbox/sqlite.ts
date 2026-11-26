@@ -1,5 +1,5 @@
 import { getLogger } from '@/utils/logger';
-import type { StoredLodyOperation } from '@lody/shared';
+import { LODY_MAX_CHAIN_DEPTH, type StoredLodyOperation } from '@lody/shared';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -922,6 +922,34 @@ export class InboxSqlite {
       completion: JSON.parse(r.completion_json),
     };
   }
+  /** Automatic continuations refused by the chain cap whose Session has not been told yet. */
+  depthLimitedIntents(workspaceId: string): Array<{
+    intentId: string;
+    sessionId: string;
+    userId: string;
+    pendingResults: number;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT i.intent_id AS intentId,i.session_id AS sessionId,i.user_id AS userId,
+          (SELECT COUNT(*) FROM inbox_results r WHERE r.workspace_id=i.workspace_id AND r.session_id=i.session_id
+            AND r.consumed=0 AND r.claim IS NULL) AS pendingResults
+        FROM inbox_intents i WHERE i.workspace_id=? AND i.state='depth_limited' ORDER BY i.rowid`
+      )
+      .all(workspaceId) as Array<{
+      intentId: string;
+      sessionId: string;
+      userId: string;
+      pendingResults: number;
+    }>;
+  }
+  acknowledgeDepthLimited(intentId: string): void {
+    this.db
+      .prepare(
+        "UPDATE inbox_intents SET state='depth_limited_reported' WHERE intent_id=? AND state='depth_limited'"
+      )
+      .run(intentId);
+  }
   pending(workspaceId: string): Array<{ intentId: string; input: InboxInput }> {
     return this.db
       .prepare(
@@ -992,7 +1020,7 @@ export class InboxSqlite {
         input,
         members.map((m) => m.chainDepth)
       );
-      if (input.kind === 'automatic' && chainDepth >= 16) {
+      if (input.kind === 'automatic' && chainDepth > LODY_MAX_CHAIN_DEPTH) {
         this.db
           .prepare("UPDATE inbox_intents SET state='depth_limited' WHERE intent_id=?")
           .run(intentId);

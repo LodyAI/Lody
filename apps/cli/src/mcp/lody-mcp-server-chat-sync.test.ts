@@ -7,6 +7,8 @@ import { LoroDoc } from 'loro-crdt';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import {
   getSessionRoomId,
+  LODY_CHAIN_DEPTH_SOFT_LIMIT,
+  LODY_MAX_CHAIN_DEPTH,
   type LodyOperationCompletion,
   type LodyOperationItemResult,
   type SessionId,
@@ -31,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   validateSessionChatTarget: vi.fn(),
   validateSessionCreateOptions: vi.fn(),
   readTurn: vi.fn(),
+  sessionDoc: vi.fn(),
 }));
 
 vi.mock('@/lib/command-runtime', async (importOriginal) => {
@@ -54,7 +57,9 @@ vi.mock('@/lib/command-runtime', async (importOriginal) => {
             synced: true,
           })),
           syncDocOrThrow: async () => undefined,
-          getOrCreateSessionDoc: vi.fn(async () => ({ getMetaState: async () => ({}) })),
+          getOrCreateSessionDoc: vi.fn(
+            async () => mocks.sessionDoc() ?? { getMetaState: async () => ({}) }
+          ),
         })
     ),
   };
@@ -580,6 +585,81 @@ describe('turn-scoped reverse chat rejection', () => {
       });
       expect(storedOperations()).toEqual([]);
       expect(delivered).toEqual([]);
+    }
+  );
+
+  it('reports the remaining chain budget to an agent dispatching past the soft limit', async () => {
+    mocks.activeInvocation.mockReturnValue({
+      ...mocks.activeInvocation(),
+      inputConfig: { chainDepth: LODY_CHAIN_DEPTH_SOFT_LIMIT },
+    });
+    const thirdSession = { ...targetSession, id: 'third-session-id' };
+    mocks.getDocMeta.mockImplementation(async (roomId: string) => {
+      const session = [requesterSession, targetSession, thirdSession].find(
+        (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
+      );
+      return session ? { meta: session } : undefined;
+    });
+    const reply = await startSessionChatManyOperation({
+      operationId: 'deep-batch',
+      items: [{ sessionId: thirdSession.id, prompt: 'Work for C' }],
+    });
+    expect(reply).toMatchObject({
+      chainBudget: {
+        hop: LODY_CHAIN_DEPTH_SOFT_LIMIT + 1,
+        max: LODY_MAX_CHAIN_DEPTH,
+        remaining: LODY_MAX_CHAIN_DEPTH - LODY_CHAIN_DEPTH_SOFT_LIMIT - 1,
+      },
+    });
+    expect(delivered).toEqual([{ sessionId: thirdSession.id, prompt: 'Work for C' }]);
+  });
+
+  it.each(['single', 'batch'] as const)(
+    'rejects a %s chat from a Turn at the chain cap and tells the human once',
+    async (kind) => {
+      mocks.activeInvocation.mockReturnValue({
+        ...mocks.activeInvocation(),
+        inputConfig: { chainDepth: LODY_MAX_CHAIN_DEPTH },
+      });
+      mocks.sessionDoc.mockReturnValue({
+        sessionId: requesterSession.id,
+        sessionData,
+        getMetaState: async () => ({ historyBackend: 'loro' }),
+      });
+      const args = { sessionId: targetSession.id, prompt: 'Go one level deeper' };
+      const dispatch = () =>
+        callAndMapMcpError(() =>
+          kind === 'single'
+            ? startSessionChatOperation({ ...args, operationId: 'capped-single' })
+            : startSessionChatManyOperation({ operationId: 'capped-batch', items: [args] })
+        );
+      for (const result of [await dispatch(), await dispatch()]) {
+        const content = result.content[0];
+        if (!content || content.type !== 'text') throw new Error('expected error');
+        const parsed = JSON.parse(content.text) as { error: { message: string } };
+        expect(parsed).toMatchObject({
+          ok: false,
+          error: { code: 'CHAIN_DEPTH_EXCEEDED', retryable: false },
+        });
+        expect(parsed.error.message).toContain(
+          `hop ${LODY_MAX_CHAIN_DEPTH} of ${LODY_MAX_CHAIN_DEPTH}`
+        );
+      }
+      expect(storedOperations()).toEqual([]);
+      expect(delivered).toEqual([]);
+      const notices = writer
+        .readStored()
+        .filter((entry) =>
+          entry.items?.some(
+            (item) =>
+              item.type === 'system_notice' &&
+              item.name === 'agent_warning' &&
+              (item.meta as { source?: string } | undefined)?.source ===
+                'delegationChainDispatchRejected'
+          )
+        );
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({ role: 'system' });
     }
   );
 

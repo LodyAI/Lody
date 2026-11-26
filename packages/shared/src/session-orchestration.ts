@@ -13,6 +13,32 @@ export const LODY_OPERATION_MAX_DEADLINE_SECONDS = 604_800;
 export const LODY_OPERATION_COMMAND_MAX_BYTES = 256 * 1024;
 export const LODY_OPERATION_COMPLETION_MAX_BYTES = 64 * 1024;
 export const LODY_MAX_CHAIN_DEPTH = 16;
+/** Dispatches from a Turn at or beyond this depth report the remaining chain budget. */
+export const LODY_CHAIN_DEPTH_SOFT_LIMIT = 8;
+
+/** Remaining causal chain budget reported to the dispatching Agent past the soft limit. */
+export type LodyChainBudget = {
+  /** Depth of the delegated target Turn this Operation starts. */
+  hop: number;
+  max: number;
+  /** Further hops the chain may take after `hop`. */
+  remaining: number;
+  warning: string;
+};
+
+export const describeLodyChainBudget = (
+  initiatorChainDepth: number
+): LodyChainBudget | undefined => {
+  if (initiatorChainDepth < LODY_CHAIN_DEPTH_SOFT_LIMIT) return undefined;
+  const hop = initiatorChainDepth + 1;
+  const remaining = Math.max(0, LODY_MAX_CHAIN_DEPTH - hop);
+  return {
+    hop,
+    max: LODY_MAX_CHAIN_DEPTH,
+    remaining,
+    warning: `This delegation chain is at hop ${hop} of ${LODY_MAX_CHAIN_DEPTH}; ${remaining} hops remain. Each delegated Turn and each result returned to a Session uses one hop, and a Turn at hop ${LODY_MAX_CHAIN_DEPTH} cannot create Sessions or send chats.`,
+  };
+};
 
 export const LodyOperationIdSchema = z
   .string()
@@ -210,6 +236,7 @@ export type LodyOperationSnapshot =
       deadlineAt: string;
       progress?: { totalItems: number; terminalItems: number };
       items: LodyOperationItemResult[];
+      chainBudget?: LodyChainBudget;
     }
   | {
       id: string;
@@ -219,6 +246,7 @@ export type LodyOperationSnapshot =
       deadlineAt: string;
       finishedAt: string;
       completion: LodyOperationCompletion;
+      chainBudget?: LodyChainBudget;
     };
 
 export type FrozenOperationContinuationConfig = {

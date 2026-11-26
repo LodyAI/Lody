@@ -19,6 +19,7 @@ import { Cause, Context, Effect, Exit, FiberMap, Layer, Scope, Semaphore } from 
 import { CoordinatorActivity } from './coordinator-activity';
 import {
   assistantOutputPreview,
+  buildChainDepthLimitNotice,
   findSteerSuccessor,
   isTerminalAssistantEntry,
   MAX_STEER_HANDOFF_HOPS,
@@ -113,6 +114,7 @@ export class CoordinatorWorkflow {
     function* (this: CoordinatorWorkflow, _reason: string): Effect.fn.Return<void, unknown> {
       if (!this.started) return;
       yield* this.projectInboxReceipts();
+      yield* this.reportDepthLimitedResults();
       const active = yield* this.operations.listActive(
         this.options.workspaceId,
         this.options.machineId
@@ -166,6 +168,34 @@ export class CoordinatorWorkflow {
               : (batch.state as 'submitted' | 'unknown' | 'settled'),
         });
         this.projectedBatches.add(key);
+      }
+    }.bind(this)
+  );
+  reportDepthLimitedResults = Effect.fnUntraced(
+    function* (this: CoordinatorWorkflow): Effect.fn.Return<void, unknown> {
+      const workflow = this;
+      for (const limited of yield* this.ports.depthLimited) {
+        yield* Effect.gen(function* () {
+          const sessionId = limited.sessionId as SessionId;
+          const meta = yield* workflow.ports.metadata(sessionId);
+          if (!meta?.meta) return;
+          const backend = yield* workflow.ports.session(sessionId);
+          if (!workflow.started) return;
+          yield* backend.applyHistoryAction({
+            kind: 'upsert-turn',
+            turn: buildChainDepthLimitNotice(limited, new Date(workflow.now()).toISOString()),
+          });
+          yield* workflow.ports.acknowledgeDepthLimited(limited.intentId);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterrupts(cause)
+              ? Effect.failCause(cause)
+              : this.ports.warn(
+                  `[inbox] Chain-cap notice for ${limited.sessionId} not written`,
+                  Cause.squash(cause)
+                )
+          )
+        );
       }
     }.bind(this)
   );
