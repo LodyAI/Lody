@@ -23,6 +23,10 @@ import {
   ScheduleControlRequestSchema,
   type ScheduleControlRequest,
   type ScheduleControlResponse,
+  LOCAL_SESSION_INBOX_DELIVER_PATH,
+  SessionInboxDeliverRequestSchema,
+  type SessionInboxDeliverRequest,
+  type SessionInboxDeliverResponse,
 } from '@lody/shared';
 import {
   AUTOMATION_CONTROL_PATH,
@@ -61,6 +65,9 @@ const PROJECT_CONTROL_TYPES: ReadonlyArray<LocalProjectControlRequestValidated['
 
 export interface LocalSessionControlConfig {
   dispatchAutomation?: (message: AutomationControlRequest) => Promise<AutomationControlResponse>;
+  dispatchSessionInboxDeliver?: (
+    message: SessionInboxDeliverRequest
+  ) => Promise<SessionInboxDeliverResponse>;
   dispatchE2eeReset?: (message: LocalE2eeResetRequest) => Promise<LocalE2eeResetResponse>;
   dispatchE2eePairing?: (
     message: LocalE2eePairingRequest
@@ -469,6 +476,31 @@ export class LocalControlHandler {
         this.config.dispatchSchedule,
         { unsupported: 'schedules_unsupported', failed: 'schedule_control_failed' }
       );
+    if (request.path === LOCAL_SESSION_INBOX_DELIVER_PATH) {
+      return (async () => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(request.rawBody);
+        } catch {
+          return handlerResponse(400, { status: 'retry', reason: 'invalid_json' });
+        }
+        const parsed = SessionInboxDeliverRequestSchema.safeParse(raw);
+        if (!parsed.success) {
+          return handlerResponse(400, { status: 'retry', reason: 'invalid_request' });
+        }
+        if (!this.config.dispatchSessionInboxDeliver) {
+          return handlerResponse(501, { status: 'retry', reason: 'session_inbox_unsupported' });
+        }
+        try {
+          return handlerResponse(200, await this.config.dispatchSessionInboxDeliver(parsed.data));
+        } catch (error) {
+          this.config.logger.debug(
+            `Local session inbox deliver failed: ${formatErrorMessage(error)}`
+          );
+          return handlerResponse(500, { status: 'retry', reason: 'session_inbox_deliver_failed' });
+        }
+      })();
+    }
     if (request.path === LOCAL_SESSION_CONTROL_PATH) {
       return handleSessionControlRequest(this.config, request.rawBody, request.requestId, {
         onResponse: request.onSessionResponse,

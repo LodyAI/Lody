@@ -8,8 +8,10 @@ import {
   formatAgentAuthorModelDisplayName,
   getAgentRoleEmoji,
   type AgentMessageAuthor,
+  type ExternalMessageAuthor,
   type SessionId,
 } from '@lody/shared';
+import { MessageSquare } from 'lucide-react';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { Popover } from '@/ui/armed-overlays';
 import { AgentIcon, AGENT_BRAND_ICONS } from '@/components/icons/agent-icon';
@@ -136,6 +138,53 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
             >
               {t('sessions.messageAuthor.source', 'Open source conversation')}
             </Button>
+          ) : null}
+        </div>
+      </Popover.Content>
+    </Popover.Root>
+  );
+});
+
+export const ExternalMessageAuthorIdentity = memo(function ExternalMessageAuthorIdentity({
+  author,
+}: {
+  author: ExternalMessageAuthor;
+}) {
+  const { t } = useTranslation();
+  const sourceName = author.label ?? author.source;
+  const originLabel = t('sessions.messageAuthor.fromExternal', 'From {{source}}', {
+    source: sourceName,
+  });
+
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        render={
+          <Button
+            variant="ghost"
+            size="small"
+            icon
+            aria-label={t(
+              'sessions.messageAuthor.externalDetails',
+              'View external source: {{source}}',
+              { source: sourceName }
+            )}
+          >
+            <span {...stylex.props(styles.icon)} aria-hidden="true">
+              <MessageSquare className={stylex.props(styles.glyph).className} strokeWidth={1.75} />
+            </span>
+          </Button>
+        }
+      />
+      <Popover.Content>
+        <div {...stylex.props(styles.details)}>
+          <strong {...stylex.props(styles.title)}>{originLabel}</strong>
+          {author.artifact ? (
+            <span {...stylex.props(styles.muted)}>
+              {t('sessions.messageAuthor.externalArtifact', 'Artifact: {{artifact}}', {
+                artifact: author.artifact,
+              })}
+            </span>
           ) : null}
         </div>
       </Popover.Content>

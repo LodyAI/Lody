@@ -21,6 +21,7 @@ import { getCachedLoginShellEnvSyncLegacy } from '@/agent/login-shell-env';
 import { mergeLoginShellEnv, withDefaultAcpPathEntries } from '@/agent/setting';
 import { LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '@/lib/git-credential-broker';
 import { clearManagedGhTokenEnv, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
+import { prepareRyugiHostsConfigSync, RYUGI_HOSTS_CONFIG_ENV } from '@/lib/ryugi-host';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { makeProcessRunnerLegacy } from '@lody/shared/node/process';
@@ -135,6 +136,12 @@ function buildTerminalEnv(sessionId: string): NodeJS.ProcessEnv {
   for (const key of TERMINAL_ENV_BLOCKLIST) {
     delete merged[key];
   }
+  try {
+    const ryugiHostsConfig = prepareRyugiHostsConfigSync(merged);
+    if (ryugiHostsConfig) {
+      merged[RYUGI_HOSTS_CONFIG_ENV] = ryugiHostsConfig;
+    }
+  } catch {}
   return merged;
 }
 

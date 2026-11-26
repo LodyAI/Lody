@@ -4259,7 +4259,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
           prior.userId !== item.userId ||
           prior.task !== item.task ||
           !isDeepStrictEqual(prior.acpSessionConfig, item.acpSessionConfig) ||
-          !isDeepStrictEqual(prior.project, item.project)
+          !isDeepStrictEqual(prior.project, item.project) ||
+          !isDeepStrictEqual(prior.author, item.author)
         )
           throw new Error('Queue operation identity conflict');
         return prev;

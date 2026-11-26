@@ -31,6 +31,7 @@ import {
   normalizeMcpServerIdSelection,
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
+  readMessageAuthor,
   resolveSessionHistoryStatus,
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
@@ -2411,6 +2412,7 @@ export class SessionDispatchWatcher {
     const automation = normalizeSessionTurnInputConfig(
       queuedItem.acpSessionConfig
     )?._lodyAutomation;
+    const queuedAuthor = readMessageAuthor(queuedItem.author);
     const pendingEntry = buildPendingUserHistoryEntry({
       userId: queuedItem.userId ?? meta.userId,
       inputBlocks,
@@ -2421,7 +2423,11 @@ export class SessionDispatchWatcher {
       ? {
           ...pendingEntry,
           id: queuedTurnId,
-          ...(automation ? { author: { v: 1 as const, kind: 'system' as const } } : {}),
+          ...(automation
+            ? { author: { v: 1 as const, kind: 'system' as const } }
+            : queuedAuthor
+              ? { author: queuedAuthor }
+              : {}),
           ...(this.deps.encryptedWorkspace ? { queuedInput: true as const } : {}),
           // The author's signed intent covers this content without the `resume` added above.
           ...(this.deps.encryptedWorkspace && queuedItem.e2eeIntent

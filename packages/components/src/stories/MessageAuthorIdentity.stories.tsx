@@ -102,6 +102,41 @@ export const DelegatedMessageRow: Story = {
   render: () => <DelegatedMessageRowDemo />,
 };
 
+const ryugiFeedbackMessage: SessionHistoryParsed = {
+  id: 'ryugi-user-turn',
+  role: 'user',
+  timestamp: '2026-10-05T12:08:00.000Z',
+  read: true,
+  author: {
+    v: 1,
+    kind: 'external',
+    source: 'ryugi',
+    label: 'Ryugi',
+    artifact: 'document/design',
+    eventType: 'ryugi-comments',
+  },
+  items: [
+    {
+      type: 'text',
+      text: 'Ryugi comment on document/design: tighten the empty-state spacing on mobile.',
+    },
+  ],
+};
+
+export const RyugiFeedbackMessageRow: Story = {
+  render: () => (
+    <div {...stylex.props(themeStyles.glyph)}>
+      <ConversationColumn>
+        <MessageRowView
+          message={ryugiFeedbackMessage}
+          sessionId={targetSessionId}
+          showSenderIdentity={false}
+        />
+      </ConversationColumn>
+    </div>
+  ),
+};
+
 const themeStyles = stylex.create({
   glyph: {
     width: '720px',
